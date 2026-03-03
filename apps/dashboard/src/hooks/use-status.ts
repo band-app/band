@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useDashboardStore, WorkspaceStatus } from "../stores/dashboard-store";
+import { useDashboardStore, WorkspaceStatus } from "@/stores/dashboard-store";
 
 function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;

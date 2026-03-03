@@ -1,4 +1,5 @@
-import { AgentInfo, AgentStatusType } from "../stores/dashboard-store";
+import { AgentInfo, AgentStatusType } from "@/stores/dashboard-store";
+import { Badge } from "@/components/ui/badge";
 
 const STATUS_CONFIG: Record<
   AgentStatusType,
@@ -7,27 +8,27 @@ const STATUS_CONFIG: Record<
   idle: {
     icon: "−",
     label: "Idle",
-    className: "text-[var(--color-idle)]",
+    className: "text-status-idle",
   },
   working: {
     icon: "●",
     label: "Working",
-    className: "text-[var(--color-working)]",
+    className: "text-status-working",
   },
   needs_input: {
     icon: "⚠",
     label: "Needs Input",
-    className: "text-[var(--color-needs-input)]",
+    className: "text-status-needs-input",
   },
   done: {
     icon: "✓",
     label: "Done",
-    className: "text-[var(--color-done)]",
+    className: "text-status-done",
   },
   error: {
     icon: "✗",
     label: "Error",
-    className: "text-[var(--color-error)]",
+    className: "text-status-error",
   },
 };
 
@@ -52,30 +53,26 @@ interface Props {
 export function AgentStatusBadge({ agent }: Props) {
   if (!agent) {
     return (
-      <span className="text-xs text-[var(--color-text-muted)]">
-        (no agent)
-      </span>
+      <span className="text-xs text-muted-foreground">(no agent)</span>
     );
   }
 
   const config = STATUS_CONFIG[agent.status];
 
   return (
-    <span className="inline-flex items-center gap-1.5 text-sm">
+    <Badge variant="secondary" className="gap-1.5 font-normal">
       <span className={config.className}>{config.icon}</span>
       <span className={config.className}>{agent.name}</span>
-      <span className="text-[var(--color-text-muted)]">{config.label}</span>
+      <span className="text-muted-foreground">{config.label}</span>
       {agent.summary && (
         <span
-          className="text-xs text-[var(--color-text-muted)] truncate max-w-[200px]"
+          className="text-muted-foreground truncate max-w-[200px]"
           title={agent.summary}
         >
           — {agent.summary}
         </span>
       )}
-      <span className="text-xs text-[var(--color-text-muted)]">
-        {timeAgo(agent.lastActivity)}
-      </span>
-    </span>
+      <span className="text-muted-foreground">{timeAgo(agent.lastActivity)}</span>
+    </Badge>
   );
 }

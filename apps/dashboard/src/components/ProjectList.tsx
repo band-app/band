@@ -1,20 +1,33 @@
 import { useState } from "react";
-import { useDashboardStore } from "../stores/dashboard-store";
-import { WorkspaceCard } from "./WorkspaceCard";
-import { NewWorkspaceForm } from "./NewWorkspaceForm";
+import { useDashboardStore } from "@/stores/dashboard-store";
+import { WorkspaceCard } from "@/components/WorkspaceCard";
+import { NewWorkspaceDialog } from "@/components/NewWorkspaceForm";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { Ellipsis, Plus, Trash2 } from "lucide-react";
 
 export function ProjectList() {
   const projects = useDashboardStore((s) => s.projects);
   const statuses = useDashboardStore((s) => s.statuses);
   const removeProject = useDashboardStore((s) => s.removeProject);
-  const [expandedForm, setExpandedForm] = useState<string | null>(null);
+  const [workspaceDialog, setWorkspaceDialog] = useState<string | null>(null);
 
   if (projects.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 text-[var(--color-text-muted)]">
+      <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
         <p className="text-lg mb-2">No projects registered</p>
         <p className="text-sm">
-          Click "+ New" to register a git repository
+          Click the + button to register a git repository
         </p>
       </div>
     );
@@ -25,40 +38,52 @@ export function ProjectList() {
       {projects.map((project) => (
         <div key={project.name}>
           <div className="flex items-center justify-between mb-2 px-1">
-            <h2 className="text-base font-semibold text-[var(--color-text)]">
-              {project.name}
-            </h2>
-            <div className="flex items-center gap-2">
-              <button
-                className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-accent)] transition-colors"
-                onClick={() =>
-                  setExpandedForm(
-                    expandedForm === project.name ? null : project.name
-                  )
-                }
-              >
-                + workspace
-              </button>
-              <button
-                className="text-xs text-[var(--color-text-muted)] hover:text-[var(--color-error)] transition-colors"
-                onClick={() => removeProject(project.name)}
-                title="Remove project"
-              >
-                ×
-              </button>
+            <h2 className="text-base font-semibold">{project.name}</h2>
+            <div className="flex items-center gap-1">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    onClick={() => setWorkspaceDialog(project.name)}
+                  >
+                    <Plus />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Add workspace</TooltipContent>
+              </Tooltip>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    className="text-muted-foreground"
+                  >
+                    <Ellipsis />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onClick={() => removeProject(project.name)}
+                  >
+                    <Trash2 />
+                    Delete project
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
 
-          {expandedForm === project.name && (
-            <NewWorkspaceForm
-              projectName={project.name}
-              onClose={() => setExpandedForm(null)}
-            />
-          )}
+          <NewWorkspaceDialog
+            projectName={project.name}
+            open={workspaceDialog === project.name}
+            onOpenChange={(open) => setWorkspaceDialog(open ? project.name : null)}
+          />
 
           <div className="flex flex-col gap-1.5">
             {project.worktrees.length === 0 ? (
-              <p className="text-sm text-[var(--color-text-muted)] px-4 py-2">
+              <p className="text-sm text-muted-foreground px-4 py-2">
                 No workspaces yet
               </p>
             ) : (
