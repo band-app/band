@@ -1,0 +1,12 @@
+{
+  "name": "band",
+  "version": "0.1.0",
+  "private": true,
+  "description": "IDE-agnostic agent orchestrator — dashboard + VS Code extension",
+  "type": "module",
+  "scripts": {
+    "dev:dashboard": "pnpm --filter @band/dashboard tauri dev",
+    "build:dashboard": "pnpm --filter @band/dashboard tauri build",
+    "build:extension": "pnpm --filter band-vscode build"
+  }
+}

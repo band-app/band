@@ -1,0 +1,41 @@
+{
+  "name": "band-vscode",
+  "displayName": "Band - Agent Workspace Manager",
+  "description": "IDE extension for Band agent orchestration",
+  "version": "0.1.0",
+  "publisher": "band",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": [
+    "workspaceContains:**/.band/config.yaml"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "band.setupWorkspace",
+        "title": "Band: Setup Workspace"
+      },
+      {
+        "command": "band.showStatus",
+        "title": "Band: Show Agent Status"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node",
+    "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^22.10.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "yaml": "^2.6.1"
+  }
+}

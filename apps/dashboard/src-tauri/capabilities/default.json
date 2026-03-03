@@ -1,0 +1,19 @@
+{
+  "identifier": "default",
+  "description": "Default permissions for Band dashboard",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "fs:default",
+    "fs:allow-read-file",
+    "fs:allow-write-file",
+    "fs:allow-exists",
+    "fs:allow-mkdir",
+    "fs:allow-read-dir",
+    "fs:allow-remove",
+    "shell:default",
+    "shell:allow-open",
+    "dialog:default",
+    "dialog:allow-open"
+  ]
+}

@@ -1,0 +1,10 @@
+node_modules/
+dist/
+band
+*.tgz
+.DS_Store
+target/
+*.vsix
+apps/dashboard/src-tauri/icons/android/
+apps/dashboard/src-tauri/icons/ios/
+apps/dashboard/src-tauri/gen/
