@@ -1,3 +1,4 @@
+use crate::commands::ide;
 use crate::git;
 use crate::state;
 
@@ -120,7 +121,7 @@ pub fn workspace_open(workspace_id: String) -> Result<(), String> {
                 }
 
                 // Position VS Code window to the right of the dashboard
-                align_vscode_window(&wt.branch);
+                ide::align_vscode_window(&wt.branch);
 
                 return Ok(());
             }
@@ -128,53 +129,4 @@ pub fn workspace_open(workspace_id: String) -> Result<(), String> {
     }
 
     Err(format!("Workspace '{}' not found", workspace_id))
-}
-
-/// Use AppleScript to position the VS Code window to fill the screen
-/// to the right of the dashboard (400px from the left edge).
-fn align_vscode_window(branch: &str) {
-    let dashboard_width = 400;
-    let script = format!(
-        r#"
-use framework "AppKit"
-
--- Get the main screen frame
-set screenFrame to (current application's NSScreen's mainScreen()'s frame()) as record
-set screenWidth to |width| of |size| of screenFrame
-set screenHeight to |height| of |size| of screenFrame
-
-set vsX to {dashboard_width}
-set vsY to 0
-set vsW to (screenWidth - {dashboard_width}) as integer
-set vsH to screenHeight as integer
-
-delay 0.5
-tell application "Visual Studio Code"
-    activate
-    set foundWindow to false
-    repeat with w in windows
-        if name of w contains "{branch}" then
-            set bounds of w to {{vsX, vsY, vsX + vsW, vsY + vsH}}
-            set foundWindow to true
-            exit repeat
-        end if
-    end repeat
-    if not foundWindow then
-        -- Fall back to the frontmost window
-        if (count of windows) > 0 then
-            set bounds of window 1 to {{vsX, vsY, vsX + vsW, vsY + vsH}}
-        end if
-    end if
-end tell
-"#,
-        dashboard_width = dashboard_width,
-        branch = branch
-    );
-
-    // Run in background — don't block the command
-    std::thread::spawn(move || {
-        let _ = std::process::Command::new("osascript")
-            .args(["-e", &script])
-            .output();
-    });
 }
