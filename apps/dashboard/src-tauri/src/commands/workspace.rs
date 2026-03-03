@@ -1,6 +1,7 @@
 use crate::commands::ide;
 use crate::git;
 use crate::state;
+use tauri::Manager;
 
 #[tauri::command]
 pub fn workspace_create(project: String, branch: String, base: Option<String>) -> Result<(), String> {
@@ -90,7 +91,7 @@ pub fn workspace_remove(project: String, branch: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn workspace_open(workspace_id: String) -> Result<(), String> {
+pub fn workspace_open(workspace_id: String, app_handle: tauri::AppHandle) -> Result<(), String> {
     // workspace_id is "project-branch"
     let app_state = state::load_state()?;
 
@@ -99,6 +100,11 @@ pub fn workspace_open(workspace_id: String) -> Result<(), String> {
         for wt in &proj.worktrees {
             let ws_id = format!("{}-{}", proj.name, wt.branch);
             if ws_id == workspace_id {
+                // Track the last opened workspace
+                if let Ok(mut last) = app_handle.state::<ide::LastWorkspace>().0.lock() {
+                    *last = Some(wt.branch.clone());
+                }
+
                 // Open VS Code at the worktree path
                 let output = std::process::Command::new("code")
                     .arg(&wt.path)

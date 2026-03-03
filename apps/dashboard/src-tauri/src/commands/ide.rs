@@ -1,6 +1,10 @@
 use crate::state;
+use std::sync::{Arc, Mutex};
 
 const DASHBOARD_WIDTH: i32 = 400;
+
+/// In-memory state tracking the last opened workspace branch name.
+pub struct LastWorkspace(pub Arc<Mutex<Option<String>>>);
 
 /// Use AppleScript + System Events to position the VS Code window
 /// to fill the screen to the right of the dashboard.
