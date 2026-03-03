@@ -81,7 +81,21 @@ pub fn project_init(path: String) -> Result<ProjectInfo, String> {
 
 #[tauri::command]
 pub fn project_list() -> Result<Vec<ProjectInfo>, String> {
-    let app_state = state::load_state()?;
+    let mut app_state = state::load_state()?;
+
+    // Prune worktrees whose paths no longer exist on disk
+    let mut changed = false;
+    for proj in &mut app_state.projects {
+        let before = proj.worktrees.len();
+        proj.worktrees.retain(|wt| std::path::Path::new(&wt.path).exists());
+        if proj.worktrees.len() != before {
+            changed = true;
+        }
+    }
+    if changed {
+        let _ = state::save_state(&app_state);
+    }
+
     Ok(app_state.projects.iter().map(ProjectInfo::from).collect())
 }
 

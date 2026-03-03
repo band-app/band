@@ -65,6 +65,7 @@ interface DashboardState {
   ) => Promise<void>;
   removeWorkspace: (project: string, branch: string) => Promise<void>;
   openWorkspace: (workspaceId: string) => Promise<void>;
+  clearError: () => void;
   updateStatus: (status: WorkspaceStatus) => void;
   removeStatus: (workspaceId: string) => void;
 }
@@ -128,6 +129,8 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
       set({ error: String(e) });
     }
   },
+
+  clearError: () => set({ error: null }),
 
   updateStatus: (status: WorkspaceStatus) => {
     set((state) => {

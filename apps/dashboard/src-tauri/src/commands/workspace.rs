@@ -72,8 +72,10 @@ pub fn workspace_remove(project: String, branch: String) -> Result<(), String> {
 
     let worktree_path = wt.path.clone();
 
-    // Remove git worktree
-    git::remove_worktree(&proj.path, &worktree_path)?;
+    // Remove git worktree (ignore errors if the path no longer exists on disk)
+    if std::path::Path::new(&worktree_path).exists() {
+        git::remove_worktree(&proj.path, &worktree_path)?;
+    }
 
     // Remove from state
     proj.worktrees.retain(|wt| wt.branch != branch);

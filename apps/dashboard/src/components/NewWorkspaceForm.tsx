@@ -1,12 +1,24 @@
 import { useState } from "react";
-import { useDashboardStore } from "../stores/dashboard-store";
+import { useDashboardStore } from "@/stores/dashboard-store";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 
 interface Props {
   projectName: string;
-  onClose: () => void;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }
 
-export function NewWorkspaceForm({ projectName, onClose }: Props) {
+export function NewWorkspaceDialog({ projectName, open, onOpenChange }: Props) {
   const [branch, setBranch] = useState("");
   const [base, setBase] = useState("");
   const createWorkspace = useDashboardStore((s) => s.createWorkspace);
@@ -15,42 +27,50 @@ export function NewWorkspaceForm({ projectName, onClose }: Props) {
     e.preventDefault();
     if (!branch.trim()) return;
     await createWorkspace(projectName, branch.trim(), base.trim() || undefined);
-    onClose();
+    setBranch("");
+    setBase("");
+    onOpenChange(false);
   };
 
   return (
-    <form
-      onSubmit={handleSubmit}
-      className="flex items-center gap-2 px-4 py-2"
-    >
-      <input
-        type="text"
-        placeholder="branch name"
-        value={branch}
-        onChange={(e) => setBranch(e.target.value)}
-        className="flex-1 px-2 py-1 text-sm bg-[var(--color-bg)] border border-[var(--color-border)] rounded text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-accent)]"
-        autoFocus
-      />
-      <input
-        type="text"
-        placeholder="base (optional)"
-        value={base}
-        onChange={(e) => setBase(e.target.value)}
-        className="w-32 px-2 py-1 text-sm bg-[var(--color-bg)] border border-[var(--color-border)] rounded text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-accent)]"
-      />
-      <button
-        type="submit"
-        className="px-3 py-1 text-sm bg-[var(--color-accent)] text-white rounded hover:opacity-90 transition-opacity"
-      >
-        Create
-      </button>
-      <button
-        type="button"
-        onClick={onClose}
-        className="px-2 py-1 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors"
-      >
-        Cancel
-      </button>
-    </form>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[425px]">
+        <form onSubmit={handleSubmit}>
+          <DialogHeader>
+            <DialogTitle>Add Workspace</DialogTitle>
+            <DialogDescription>
+              Create a new worktree branch for {projectName}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3 py-4">
+            <Label htmlFor="branch-name">Branch name</Label>
+            <Input
+              id="branch-name"
+              placeholder="feature/my-branch"
+              value={branch}
+              onChange={(e) => setBranch(e.target.value)}
+              autoFocus
+            />
+            <Label htmlFor="base-branch">Base branch (optional)</Label>
+            <Input
+              id="base-branch"
+              placeholder="main"
+              value={base}
+              onChange={(e) => setBase(e.target.value)}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => onOpenChange(false)}
+            >
+              Cancel
+            </Button>
+            <Button type="submit">Create</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
