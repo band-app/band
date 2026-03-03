@@ -12,7 +12,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Ellipsis, Trash2 } from "lucide-react";
+import { Ellipsis, GitBranch, Trash2 } from "lucide-react";
 
 interface Props {
   worktree: WorktreeInfo;
@@ -32,6 +32,7 @@ export function WorkspaceCard({ worktree, projectName, status }: Props) {
       onClick={() => openWorkspace(workspaceId)}
     >
       <div className="flex items-center gap-3 min-w-0">
+        <GitBranch className="size-3.5 text-muted-foreground shrink-0" />
         <span className="text-sm font-medium shrink-0">{worktree.branch}</span>
         <AgentStatusBadge agent={status?.agent} />
       </div>

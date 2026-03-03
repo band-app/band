@@ -14,7 +14,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Ellipsis, Plus, Trash2 } from "lucide-react";
+import { Ellipsis, FolderOpen, Plus, Trash2 } from "lucide-react";
 
 export function ProjectList() {
   const projects = useDashboardStore((s) => s.projects);
@@ -38,7 +38,10 @@ export function ProjectList() {
       {projects.map((project) => (
         <div key={project.name}>
           <div className="flex items-center justify-between mb-2 px-1">
-            <h2 className="text-base font-semibold">{project.name}</h2>
+            <div className="flex items-center gap-2">
+              <FolderOpen className="size-4 text-muted-foreground" />
+              <h2 className="text-base font-semibold">{project.name}</h2>
+            </div>
             <div className="flex items-center gap-1">
               <Tooltip>
                 <TooltipTrigger asChild>
