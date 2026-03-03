@@ -24,9 +24,9 @@ export function ProjectList() {
 
   if (projects.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-        <p className="text-lg mb-2">No projects registered</p>
-        <p className="text-sm">
+      <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+        <p className="text-sm mb-1">No projects registered</p>
+        <p className="text-xs">
           Click the + button to register a git repository
         </p>
       </div>
