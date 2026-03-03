@@ -13,8 +13,10 @@
     "windows": [
       {
         "title": "Band",
-        "width": 1200,
-        "height": 700,
+        "width": 400,
+        "height": 900,
+        "x": 0,
+        "y": 0,
         "resizable": true,
         "fullscreen": false,
         "decorations": true,

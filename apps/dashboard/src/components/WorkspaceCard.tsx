@@ -21,21 +21,15 @@ interface Props {
 }
 
 export function WorkspaceCard({ worktree, projectName, status }: Props) {
-  const selectWorkspace = useDashboardStore((s) => s.selectWorkspace);
+  const openWorkspace = useDashboardStore((s) => s.openWorkspace);
   const removeWorkspace = useDashboardStore((s) => s.removeWorkspace);
-  const selectedWorkspace = useDashboardStore((s) => s.selectedWorkspace);
 
   const workspaceId = `${projectName}-${worktree.branch}`;
-  const isSelected = selectedWorkspace?.workspaceId === workspaceId;
 
   return (
     <Card
-      className={`flex-row items-center justify-between px-4 py-2.5 gap-0 rounded-none border-0 shadow-none cursor-pointer transition-colors ${
-        isSelected
-          ? "bg-accent"
-          : "hover:bg-accent/50"
-      }`}
-      onClick={() => selectWorkspace(projectName, worktree.branch)}
+      className="flex-row items-center justify-between px-4 py-2.5 gap-0 rounded-none border-0 shadow-none cursor-pointer transition-colors hover:bg-accent/50"
+      onClick={() => openWorkspace(workspaceId)}
     >
       <div className="flex items-center gap-3 min-w-0">
         <span className="text-sm font-medium shrink-0">{worktree.branch}</span>

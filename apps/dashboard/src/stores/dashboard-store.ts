@@ -49,18 +49,11 @@ export interface WorktreeInfo {
   head?: string;
 }
 
-interface SelectedWorkspace {
-  projectName: string;
-  branch: string;
-  workspaceId: string;
-}
-
 interface DashboardState {
   projects: ProjectInfo[];
   statuses: Map<string, WorkspaceStatus>;
   loading: boolean;
   error: string | null;
-  selectedWorkspace: SelectedWorkspace | null;
 
   loadProjects: () => Promise<void>;
   addProject: (path: string) => Promise<void>;
@@ -72,7 +65,6 @@ interface DashboardState {
   ) => Promise<void>;
   removeWorkspace: (project: string, branch: string) => Promise<void>;
   openWorkspace: (workspaceId: string) => Promise<void>;
-  selectWorkspace: (projectName: string, branch: string) => void;
   clearError: () => void;
   updateStatus: (status: WorkspaceStatus) => void;
   removeStatus: (workspaceId: string) => void;
@@ -83,7 +75,6 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   statuses: new Map(),
   loading: false,
   error: null,
-  selectedWorkspace: null,
 
   loadProjects: async () => {
     set({ loading: true, error: null });
@@ -125,10 +116,6 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   removeWorkspace: async (project: string, branch: string) => {
     try {
       await invoke("workspace_remove", { project, branch });
-      const selected = get().selectedWorkspace;
-      if (selected?.projectName === project && selected?.branch === branch) {
-        set({ selectedWorkspace: null });
-      }
       await get().loadProjects();
     } catch (e) {
       set({ error: String(e) });
@@ -140,16 +127,6 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
       await invoke("workspace_open", { workspaceId });
     } catch (e) {
       set({ error: String(e) });
-    }
-  },
-
-  selectWorkspace: (projectName: string, branch: string) => {
-    const workspaceId = `${projectName}-${branch}`;
-    const current = get().selectedWorkspace;
-    if (current?.workspaceId === workspaceId) {
-      set({ selectedWorkspace: null });
-    } else {
-      set({ selectedWorkspace: { projectName, branch, workspaceId } });
     }
   },
 

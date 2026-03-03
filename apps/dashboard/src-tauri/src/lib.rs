@@ -4,6 +4,9 @@ mod state;
 
 use commands::status::WatcherState;
 use std::sync::{Arc, Mutex};
+use tauri::Manager;
+
+const DASHBOARD_WIDTH: u32 = 400;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -25,6 +28,27 @@ pub fn run() {
             commands::ide::workspace_focus,
             commands::ide::pick_folder,
         ])
+        .setup(|app| {
+            let window = app.get_webview_window("main").unwrap();
+
+            // Position dashboard at left edge, full screen height
+            if let Ok(monitor) = window.current_monitor() {
+                if let Some(monitor) = monitor {
+                    let screen_size = monitor.size();
+                    let scale_factor = monitor.scale_factor();
+                    let screen_height = (screen_size.height as f64 / scale_factor) as u32;
+
+                    let _ = window.set_position(tauri::Position::Logical(
+                        tauri::LogicalPosition::new(0.0, 0.0),
+                    ));
+                    let _ = window.set_size(tauri::Size::Logical(
+                        tauri::LogicalSize::new(DASHBOARD_WIDTH as f64, screen_height as f64),
+                    ));
+                }
+            }
+
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
