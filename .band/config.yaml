@@ -3,7 +3,7 @@ project: "band"
 
 terminals:
   - name: "claude"
-    command: "claude"
+    command: "claude-epic --dangerously-skip-permissions"
     monitor: true
 
 agent:

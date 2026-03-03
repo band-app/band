@@ -6,6 +6,11 @@ import { useStatusWatcher } from "@/hooks/use-status";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { Plus, X } from "lucide-react";
 
 export default function App() {
@@ -24,13 +29,18 @@ export default function App() {
     <div className="min-h-screen flex flex-col bg-background text-foreground">
       <header className="flex items-center justify-between px-4 py-2">
         <h1 className="text-sm font-medium text-muted-foreground">Projects</h1>
-        <Button
-          size="icon-xs"
-          variant="ghost"
-          onClick={() => setShowAddDialog(true)}
-        >
-          <Plus />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              size="icon-xs"
+              variant="ghost"
+              onClick={() => setShowAddDialog(true)}
+            >
+              <Plus />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Add project</TooltipContent>
+        </Tooltip>
       </header>
 
       <Separator />
@@ -50,7 +60,7 @@ export default function App() {
       )}
 
       <ScrollArea className="flex-1">
-        <main className="px-6 py-6">
+        <main className="px-2 py-2">
           <ProjectList />
         </main>
       </ScrollArea>
