@@ -27,24 +27,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col bg-background text-foreground">
-      <header className="flex items-center justify-between px-4 py-2">
-        <h1 className="text-sm font-medium text-muted-foreground">Projects</h1>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              size="icon-xs"
-              variant="ghost"
-              onClick={() => setShowAddDialog(true)}
-            >
-              <Plus />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Add project</TooltipContent>
-        </Tooltip>
-      </header>
-
-      <Separator />
-
       {error && (
         <div className="mx-4 mt-2 px-4 py-2 bg-destructive/10 border border-destructive/30 rounded-lg text-sm text-destructive flex items-center justify-between gap-2">
           <span className="truncate">{error}</span>
@@ -64,6 +46,23 @@ export default function App() {
           <ProjectList />
         </main>
       </ScrollArea>
+
+      <Separator />
+
+      <footer className="flex items-center justify-center px-4 py-2">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              size="icon-xs"
+              variant="ghost"
+              onClick={() => setShowAddDialog(true)}
+            >
+              <Plus />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Add project</TooltipContent>
+        </Tooltip>
+      </footer>
 
       <AddProjectDialog
         open={showAddDialog}
