@@ -11,7 +11,8 @@
     "Other"
   ],
   "activationEvents": [
-    "workspaceContains:**/.band/config.yaml"
+    "workspaceContains:**/.band/config.json",
+    "onStartupFinished"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -25,7 +26,7 @@
   "scripts": {
     "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node && npm run deploy",
     "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch",
-    "deploy": "cp dist/extension.js ~/.vscode/extensions/band.band-vscode-0.1.0/dist/extension.js",
+    "deploy": "cp dist/extension.js ~/.vscode/extensions/band.band-vscode-0.1.0/dist/extension.js && cp package.json ~/.vscode/extensions/band.band-vscode-0.1.0/package.json",
     "package": "vsce package"
   },
   "devDependencies": {
@@ -33,8 +34,5 @@
     "@types/vscode": "^1.109.0",
     "esbuild": "^0.24.0",
     "typescript": "^5.7.0"
-  },
-  "dependencies": {
-    "yaml": "^2.6.1"
   }
 }

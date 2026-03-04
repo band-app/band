@@ -35,6 +35,8 @@ impl Default for AppState {
 pub struct Settings {
     #[serde(rename = "worktreesDir", skip_serializing_if = "Option::is_none")]
     pub worktrees_dir: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub defaults: Option<serde_json::Value>,
 }
 
 pub fn band_home() -> PathBuf {

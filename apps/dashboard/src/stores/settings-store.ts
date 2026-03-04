@@ -15,8 +15,25 @@ async function invoke<T>(
   return tauriInvoke<T>(cmd, args);
 }
 
+export interface BandConfig {
+  layout?: {
+    orientation: "horizontal" | "vertical";
+    groups: {
+      size: number;
+      browser?: { url: string; pinned?: boolean };
+    }[];
+  };
+  terminals?: {
+    name: string;
+    command: string;
+    split?: "horizontal" | "vertical";
+    agentType?: "claude-code";
+  }[];
+}
+
 export interface Settings {
   worktreesDir: string | null;
+  defaults?: BandConfig;
 }
 
 interface SettingsState {
@@ -30,7 +47,7 @@ interface SettingsState {
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({
-  settings: { worktreesDir: null },
+  settings: { worktreesDir: null, defaults: undefined },
   loading: false,
   error: null,
 

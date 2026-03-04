@@ -1,9 +1,0 @@
-project: "band"
-
-terminals:
-  - name: "claude"
-    command: "claude-epic --dangerously-skip-permissions"
-    agentType: "claude-code"
-  - name: "shell"
-    command: ""
-    split: "vertical"

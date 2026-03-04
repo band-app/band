@@ -76,10 +76,6 @@ importers:
         version: 6.4.1(@types/node@22.19.13)(jiti@2.6.1)(lightningcss@1.31.1)(yaml@2.8.2)
 
   extensions/vscode:
-    dependencies:
-      yaml:
-        specifier: ^2.6.1
-        version: 2.8.2
     devDependencies:
       '@types/node':
         specifier: ^22.10.0
@@ -3646,7 +3642,8 @@ snapshots:
 
   yallist@3.1.1: {}
 
-  yaml@2.8.2: {}
+  yaml@2.8.2:
+    optional: true
 
   zustand@5.0.11(@types/react@19.2.14)(react@19.2.4)(use-sync-external-store@1.6.0(react@19.2.4)):
     optionalDependencies:
