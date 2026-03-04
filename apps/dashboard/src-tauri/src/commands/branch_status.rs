@@ -79,12 +79,22 @@ fn get_git_status(worktree_path: &str) -> GitStatus {
         .unwrap_or(false);
 
     if !has_upstream {
+        // Count commits on this branch not on any remote-tracking branch
+        let commit_count = git::git_cmd()
+            .args(["rev-list", "--count", "HEAD", "--not", "--remotes"])
+            .current_dir(worktree_path)
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse::<u32>().ok())
+            .unwrap_or(0);
+
         return GitStatus {
             dirty,
             conflict,
-            ahead: 0,
+            ahead: commit_count,
             behind: 0,
-            sync_state: "untracked".to_string(),
+            sync_state: if commit_count > 0 { "ahead".to_string() } else { "synced".to_string() },
         };
     }
 

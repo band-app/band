@@ -24,8 +24,6 @@ export function GitStatusIndicator({ git }: Props) {
     parts.push({ text: `\u2193${git.behind}`, color: "text-yellow-400", tooltip: `${git.behind} commit${git.behind > 1 ? "s" : ""} behind` });
   } else if (git.sync_state === "diverged") {
     parts.push({ text: `\u2191${git.ahead}\u2193${git.behind}`, color: "text-orange-400", tooltip: `Diverged: ${git.ahead} ahead, ${git.behind} behind` });
-  } else if (git.sync_state === "untracked") {
-    parts.push({ text: "\u2298", color: "text-muted-foreground", tooltip: "No upstream branch" });
   }
 
   if (parts.length === 0) return null;

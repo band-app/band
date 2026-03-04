@@ -50,10 +50,11 @@ export function WorkspaceCard({ worktree, projectName, defaultBranch, status, br
       <div className="flex items-center gap-3 min-w-0 overflow-hidden">
         <GitBranch className={`size-3 shrink-0 ${isActive ? "text-primary" : "text-muted-foreground"}`} />
         <span className={`text-xs truncate ${isActive ? "font-semibold text-foreground" : "font-medium"}`} style={isActive ? undefined : { color: "oklch(0.7 0 0)" }}>{worktree.branch}</span>
-        {branchStatus && <GitStatusIndicator git={branchStatus.git} />}
-        {branchStatus && <CIStatusIndicator ci={branchStatus.ci} />}
         <AgentStatusBadge agent={status?.agent} />
       </div>
+      <div className="flex items-center gap-2 shrink-0">
+        {branchStatus && <GitStatusIndicator git={branchStatus.git} />}
+        {branchStatus && <CIStatusIndicator ci={branchStatus.ci} />}
       <DropdownMenu>
         <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
           <Button
@@ -90,6 +91,7 @@ export function WorkspaceCard({ worktree, projectName, defaultBranch, status, br
           )}
         </DropdownMenuContent>
       </DropdownMenu>
+      </div>
     </div>
   );
 }

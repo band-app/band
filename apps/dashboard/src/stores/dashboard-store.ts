@@ -45,7 +45,7 @@ export interface WorktreeInfo {
   head?: string;
 }
 
-export type GitSyncState = "synced" | "ahead" | "behind" | "diverged" | "untracked";
+export type GitSyncState = "synced" | "ahead" | "behind" | "diverged";
 
 export interface GitStatus {
   dirty: boolean;

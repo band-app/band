@@ -4,31 +4,45 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { CircleCheck, CircleAlert, Loader } from "lucide-react";
 
 interface Props {
   ci: CIStatus;
 }
 
-const config: Record<string, { color: string; animate?: boolean; label: string }> = {
-  pending: { color: "bg-yellow-400", label: "CI pending" },
-  running: { color: "bg-yellow-400", animate: true, label: "CI running" },
-  success: { color: "bg-green-400", label: "CI passed" },
-  failure: { color: "bg-red-400", label: "CI failed" },
-  cancelled: { color: "bg-gray-400", label: "CI cancelled" },
-};
-
 export function CIStatusIndicator({ ci }: Props) {
-  const cfg = config[ci.state];
-  if (!cfg) return null;
+  if (ci.state === "success") {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <CircleCheck className="size-3 shrink-0 text-green-400" />
+        </TooltipTrigger>
+        <TooltipContent>CI passed</TooltipContent>
+      </Tooltip>
+    );
+  }
 
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span
-          className={`inline-block size-2 rounded-full shrink-0 ${cfg.color} ${cfg.animate ? "animate-pulse" : ""}`}
-        />
-      </TooltipTrigger>
-      <TooltipContent>{cfg.label}</TooltipContent>
-    </Tooltip>
-  );
+  if (ci.state === "failure") {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <CircleAlert className="size-3 shrink-0 text-red-400" />
+        </TooltipTrigger>
+        <TooltipContent>CI failed</TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  if (ci.state === "running" || ci.state === "pending") {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Loader className="size-3 shrink-0 text-yellow-400 animate-spin" />
+        </TooltipTrigger>
+        <TooltipContent>{ci.state === "running" ? "CI running" : "CI pending"}</TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  return null;
 }
