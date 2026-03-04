@@ -58,9 +58,9 @@ pub fn run() {
 
             // Poll the frontmost VS Code window to track active workspace
             // (handles projects without the Band VS Code extension)
-            commands::ide::start_focus_polling();
+            commands::ide::start_focus_polling(app.handle().clone());
 
-            // Re-align the last workspace's VS Code window when dashboard gains focus
+            // Raise the active workspace's VS Code window when dashboard gains focus
             window.on_window_event(move |event| {
                 if let tauri::WindowEvent::Focused(true) = event {
                     // Read active workspace from marker file
@@ -77,7 +77,7 @@ pub fn run() {
                                     for wt in &proj.worktrees {
                                         let id = format!("{}-{}", proj.name, wt.branch);
                                         if id == marker.workspace_id {
-                                            commands::ide::align_vscode_window(&wt.branch);
+                                            commands::ide::raise_vscode_window(&wt.branch);
                                             return;
                                         }
                                     }
