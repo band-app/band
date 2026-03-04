@@ -1,5 +1,7 @@
-import { useEffect } from "react";
-import { useDashboardStore, WorkspaceStatus, GitStatus, CIStatus } from "@/stores/dashboard-store";
+import { useEffect, useRef } from "react";
+import { useDashboardStore, WorkspaceStatus, AgentStatusType, GitStatus, CIStatus } from "@/stores/dashboard-store";
+import { useSettingsStore } from "@/stores/settings-store";
+import { playSound, type SoundId } from "@/lib/sounds";
 
 function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -14,6 +16,7 @@ interface StatusEvent {
 export function useStatusWatcher() {
   const updateStatus = useDashboardStore((s) => s.updateStatus);
   const removeStatus = useDashboardStore((s) => s.removeStatus);
+  const previousStatuses = useRef<Map<string, AgentStatusType>>(new Map());
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -29,8 +32,30 @@ export function useStatusWatcher() {
       const unlisten = await listen<StatusEvent>("agent-status", (event) => {
         const payload = event.payload;
         if (payload.kind === "update" && payload.status) {
+          const wsId = payload.status.workspaceId;
+          const newAgentStatus = payload.status.agent?.status;
+          const prevAgentStatus = previousStatuses.current.get(wsId);
+
+          if (newAgentStatus) {
+            previousStatuses.current.set(wsId, newAgentStatus);
+          } else {
+            previousStatuses.current.delete(wsId);
+          }
+
+          if (
+            prevAgentStatus === "working" &&
+            newAgentStatus === "needs_attention"
+          ) {
+            const notifications =
+              useSettingsStore.getState().settings.notifications;
+            if (notifications?.soundOnNeedsAttention) {
+              playSound((notifications.sound ?? "chime") as SoundId);
+            }
+          }
+
           updateStatus(payload.status);
         } else if (payload.kind === "remove" && payload.workspaceId) {
+          previousStatuses.current.delete(payload.workspaceId);
           removeStatus(payload.workspaceId);
         }
       });

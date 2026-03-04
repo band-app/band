@@ -38,10 +38,16 @@ export interface CodingAgentConfig {
   command?: string;
 }
 
+export interface NotificationSettings {
+  soundOnNeedsAttention?: boolean;
+  sound?: string;
+}
+
 export interface Settings {
   worktreesDir: string | null;
   defaults?: BandConfig;
   codingAgent?: CodingAgentConfig;
+  notifications?: NotificationSettings;
 }
 
 interface SettingsState {
