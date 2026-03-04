@@ -12,7 +12,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Ellipsis, GitBranch, Trash2 } from "lucide-react";
+import { Clipboard, Ellipsis, FolderOpen, GitBranch, Trash2 } from "lucide-react";
 
 interface Props {
   worktree: WorktreeInfo;
@@ -49,6 +49,20 @@ export function WorkspaceCard({ worktree, projectName, status }: Props) {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+          <DropdownMenuItem
+            onClick={() => navigator.clipboard.writeText(worktree.path)}
+          >
+            <Clipboard />
+            Copy path
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={() => {
+              import("@tauri-apps/api/core").then(({ invoke }) => invoke("reveal_in_finder", { path: worktree.path }));
+            }}
+          >
+            <FolderOpen />
+            Open in Finder
+          </DropdownMenuItem>
           <DropdownMenuItem
             variant="destructive"
             onClick={() => removeWorkspace(projectName, worktree.branch)}

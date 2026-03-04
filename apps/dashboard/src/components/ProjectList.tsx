@@ -14,7 +14,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Ellipsis, FolderOpen, Plus, Trash2 } from "lucide-react";
+import { Clipboard, Ellipsis, FolderOpen, Plus, Trash2 } from "lucide-react";
 
 export function ProjectList() {
   const projects = useDashboardStore((s) => s.projects);
@@ -66,6 +66,20 @@ export function ProjectList() {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    onClick={() => navigator.clipboard.writeText(project.path)}
+                  >
+                    <Clipboard />
+                    Copy path
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      import("@tauri-apps/api/core").then(({ invoke }) => invoke("reveal_in_finder", { path: project.path }));
+                    }}
+                  >
+                    <FolderOpen />
+                    Open in Finder
+                  </DropdownMenuItem>
                   <DropdownMenuItem
                     variant="destructive"
                     onClick={() => removeProject(project.name)}

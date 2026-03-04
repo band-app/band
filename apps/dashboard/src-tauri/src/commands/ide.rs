@@ -687,3 +687,12 @@ return POSIX path of theFolder"#,
         Ok(None) // User cancelled
     }
 }
+
+#[tauri::command]
+pub fn reveal_in_finder(path: String) -> Result<(), String> {
+    std::process::Command::new("open")
+        .arg(&path)
+        .output()
+        .map_err(|e| format!("Failed to open Finder: {}", e))?;
+    Ok(())
+}

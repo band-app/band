@@ -29,6 +29,7 @@ pub fn run() {
             commands::ide::get_active_workspace,
             commands::ide::detect_active_workspace,
             commands::ide::pick_folder,
+            commands::ide::reveal_in_finder,
             commands::hooks::hooks_check,
             commands::hooks::hooks_install,
             commands::settings::settings_get,
