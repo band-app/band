@@ -23,7 +23,6 @@ pub struct WorkspaceStatus {
     #[serde(rename = "worktreePath")]
     pub worktree_path: String,
     pub ide: String,
-    pub pid: Option<u32>,
     pub agent: Option<AgentInfo>,
 }
 

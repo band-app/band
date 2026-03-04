@@ -12,26 +12,24 @@ pub fn workspace_create(project: String, branch: String, base: Option<String>) -
         .find(|p| p.name == project)
         .ok_or_else(|| format!("Project '{}' not found", project))?;
 
-    // Check if worktree for this branch already exists
+    // Already tracked in state — nothing to do
     if proj.worktrees.iter().any(|wt| wt.branch == branch) {
-        return Err(format!(
-            "Worktree for branch '{}' already exists in project '{}'",
-            branch, project
-        ));
+        return Ok(());
     }
 
-    let band_home = state::band_home();
-    let target_path = band_home
-        .join("worktrees")
+    let target_path = state::worktrees_dir()
         .join(&project)
         .join(&branch);
     let target_path_str = target_path.to_string_lossy().to_string();
 
-    let base_branch = base
-        .as_deref()
-        .unwrap_or(&proj.default_branch);
+    // Only create the git worktree if it doesn't already exist on disk
+    if !target_path.exists() {
+        let base_branch = base
+            .as_deref()
+            .unwrap_or(&proj.default_branch);
 
-    git::create_worktree(&proj.path, &branch, &target_path_str, Some(base_branch))?;
+        git::create_worktree(&proj.path, &branch, &target_path_str, Some(base_branch))?;
+    }
 
     proj.worktrees.push(state::WorktreeState {
         branch: branch.clone(),
@@ -72,6 +70,9 @@ pub fn workspace_remove(project: String, branch: String) -> Result<(), String> {
         .ok_or_else(|| format!("Worktree '{}' not found", branch))?;
 
     let worktree_path = wt.path.clone();
+
+    // Close VS Code window and kill any processes running inside the worktree
+    ide::close_workspace(&worktree_path);
 
     // Remove git worktree (ignore errors if the path no longer exists on disk)
     if std::path::Path::new(&worktree_path).exists() {

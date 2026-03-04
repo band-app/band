@@ -29,6 +29,10 @@ pub fn run() {
             commands::ide::get_active_workspace,
             commands::ide::detect_active_workspace,
             commands::ide::pick_folder,
+            commands::hooks::hooks_check,
+            commands::hooks::hooks_install,
+            commands::settings::settings_get,
+            commands::settings::settings_update,
         ])
         .setup(|app| {
             let window = app.get_webview_window("main").unwrap();
@@ -39,6 +43,19 @@ pub fn run() {
                 None => "Band".to_string(),
             };
             let _ = window.set_title(&title);
+
+            // Set window background to black so the transparent title bar appears black
+            #[cfg(target_os = "macos")]
+            {
+                use cocoa::appkit::NSWindow;
+                use cocoa::appkit::NSColor;
+                use cocoa::base::{id, nil};
+                let ns_window = window.ns_window().unwrap() as id;
+                unsafe {
+                    let color = NSColor::colorWithSRGBRed_green_blue_alpha_(nil, 0.0, 0.0, 0.0, 1.0);
+                    ns_window.setBackgroundColor_(color);
+                }
+            }
 
             // Position dashboard at left edge, full screen height
             if let Ok(monitor) = window.current_monitor() {
@@ -58,9 +75,9 @@ pub fn run() {
 
             // Poll the frontmost VS Code window to track active workspace
             // (handles projects without the Band VS Code extension)
-            commands::ide::start_focus_polling();
+            commands::ide::start_focus_polling(app.handle().clone());
 
-            // Re-align the last workspace's VS Code window when dashboard gains focus
+            // Raise the active workspace's VS Code window when dashboard gains focus
             window.on_window_event(move |event| {
                 if let tauri::WindowEvent::Focused(true) = event {
                     // Read active workspace from marker file
@@ -77,7 +94,7 @@ pub fn run() {
                                     for wt in &proj.worktrees {
                                         let id = format!("{}-{}", proj.name, wt.branch);
                                         if id == marker.workspace_id {
-                                            commands::ide::align_vscode_window(&wt.branch);
+                                            commands::ide::raise_vscode_window(&wt.branch);
                                             return;
                                         }
                                     }

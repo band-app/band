@@ -31,6 +31,12 @@ impl Default for AppState {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct Settings {
+    #[serde(rename = "worktreesDir", skip_serializing_if = "Option::is_none")]
+    pub worktrees_dir: Option<String>,
+}
+
 pub fn band_home() -> PathBuf {
     dirs::home_dir()
         .expect("Could not find home directory")
@@ -69,4 +75,35 @@ pub fn save_state(state: &AppState) -> Result<(), String> {
     let data =
         serde_json::to_string_pretty(state).map_err(|e| format!("Failed to serialize: {}", e))?;
     fs::write(&path, data).map_err(|e| format!("Failed to write state: {}", e))
+}
+
+pub fn settings_file() -> PathBuf {
+    band_home().join("settings.json")
+}
+
+pub fn load_settings() -> Result<Settings, String> {
+    ensure_dirs()?;
+    let path = settings_file();
+    if !path.exists() {
+        return Ok(Settings::default());
+    }
+    let data =
+        fs::read_to_string(&path).map_err(|e| format!("Failed to read settings: {}", e))?;
+    serde_json::from_str(&data).map_err(|e| format!("Failed to parse settings: {}", e))
+}
+
+pub fn save_settings(settings: &Settings) -> Result<(), String> {
+    ensure_dirs()?;
+    let path = settings_file();
+    let data = serde_json::to_string_pretty(settings)
+        .map_err(|e| format!("Failed to serialize settings: {}", e))?;
+    fs::write(&path, data).map_err(|e| format!("Failed to write settings: {}", e))
+}
+
+pub fn worktrees_dir() -> PathBuf {
+    load_settings()
+        .ok()
+        .and_then(|s| s.worktrees_dir)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| band_home().join("worktrees"))
 }
