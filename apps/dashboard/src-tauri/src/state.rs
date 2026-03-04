@@ -37,6 +37,8 @@ pub struct Settings {
     pub worktrees_dir: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub defaults: Option<serde_json::Value>,
+    #[serde(rename = "codingAgent", skip_serializing_if = "Option::is_none")]
+    pub coding_agent: Option<serde_json::Value>,
 }
 
 pub fn band_home() -> PathBuf {

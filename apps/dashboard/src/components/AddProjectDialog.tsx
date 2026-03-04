@@ -63,7 +63,7 @@ export function AddProjectDialog({ open, onOpenChange }: Props) {
               <Button
                 type="button"
                 variant="outline"
-                size="icon"
+                size="icon-xs"
                 onClick={handleBrowse}
               >
                 <FolderOpen />
