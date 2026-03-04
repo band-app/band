@@ -144,8 +144,8 @@ pub fn create_worktree(
     target_path: &str,
     base_branch: Option<&str>,
 ) -> Result<(), String> {
+    // Try creating a new branch with -b
     let mut args = vec!["worktree", "add"];
-
     if let Some(base) = base_branch {
         args.extend_from_slice(&["-b", branch, target_path, base]);
     } else {
@@ -154,6 +154,17 @@ pub fn create_worktree(
 
     let output = git_cmd()
         .args(&args)
+        .current_dir(repo_path)
+        .output()
+        .map_err(|e| format!("Failed to create worktree: {}", e))?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    // Branch may already exist — retry without -b to check out the existing branch
+    let output = git_cmd()
+        .args(["worktree", "add", target_path, branch])
         .current_dir(repo_path)
         .output()
         .map_err(|e| format!("Failed to create worktree: {}", e))?;

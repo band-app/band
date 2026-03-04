@@ -35,7 +35,6 @@ export class StatusReporter {
       branch: branch || "",
       worktreePath: "",
       ide: "vscode",
-      pid: process.pid,
       agent: this.agentType
         ? {
             name: this.agentType,

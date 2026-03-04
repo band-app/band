@@ -237,6 +237,69 @@ fn get_descendant_cwds(parent_pid: i32) -> Vec<PathBuf> {
     cwds
 }
 
+// --- Process cleanup ---
+
+const SIGTERM: i32 = 15;
+
+extern "C" {
+    fn kill(pid: i32, sig: i32) -> i32;
+}
+
+/// Close all processes associated with a worktree.
+/// 1. Close the VS Code window gracefully via AppleScript.
+/// 2. SIGTERM any remaining processes whose CWD is inside the worktree.
+pub fn close_workspace(worktree_path: &str) {
+    let wt_path = PathBuf::from(worktree_path);
+
+    // Close the VS Code window matching this worktree's folder name
+    if let Some(folder) = wt_path.file_name().and_then(|n| n.to_str()) {
+        let script = format!(
+            r#"tell application "System Events"
+    if exists (first process whose bundle identifier is "com.microsoft.VSCode") then
+        tell (first process whose bundle identifier is "com.microsoft.VSCode")
+            repeat with w in windows
+                if title of w contains "{folder}" then
+                    click (first button of w whose subrole is "AXCloseButton")
+                    exit repeat
+                end if
+            end repeat
+        end tell
+    end if
+end tell"#,
+            folder = folder
+        );
+        let _ = std::process::Command::new("osascript")
+            .args(["-e", &script])
+            .output();
+    }
+
+    // Kill remaining processes whose CWD is inside the worktree (dev servers, agents, etc.)
+    let my_pid = std::process::id() as i32;
+    let mut ancestors = std::collections::HashSet::new();
+    let mut pid = my_pid;
+    ancestors.insert(pid);
+    while let Some(ppid) = get_ppid(pid) {
+        if ppid <= 1 || ancestors.contains(&ppid) {
+            break;
+        }
+        ancestors.insert(ppid);
+        pid = ppid;
+    }
+
+    for pid in get_all_pids() {
+        if pid <= 1 || ancestors.contains(&pid) {
+            continue;
+        }
+        if let Some(cwd) = get_process_cwd(pid) {
+            if cwd == wt_path || cwd.starts_with(&wt_path) {
+                unsafe {
+                    kill(pid, SIGTERM);
+                }
+            }
+        }
+    }
+}
+
 // --- Workspace matching ---
 
 fn match_cwds_to_workspace(cwds: &[PathBuf]) -> Option<String> {
