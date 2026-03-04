@@ -45,6 +45,28 @@ export interface WorktreeInfo {
   head?: string;
 }
 
+export type GitSyncState = "synced" | "ahead" | "behind" | "diverged" | "untracked";
+
+export interface GitStatus {
+  dirty: boolean;
+  conflict: boolean;
+  ahead: number;
+  behind: number;
+  sync_state: GitSyncState;
+}
+
+export type CIState = "none" | "pending" | "running" | "success" | "failure" | "cancelled";
+
+export interface CIStatus {
+  state: CIState;
+  url?: string;
+}
+
+export interface WorkspaceBranchStatus {
+  git: GitStatus;
+  ci: CIStatus;
+}
+
 interface DashboardState {
   projects: ProjectInfo[];
   statuses: Map<string, WorkspaceStatus>;
@@ -66,11 +88,14 @@ interface DashboardState {
   updateStatus: (status: WorkspaceStatus) => void;
   removeStatus: (workspaceId: string) => void;
   setActiveWorkspace: (workspaceId: string | null) => void;
+  branchStatuses: Map<string, WorkspaceBranchStatus>;
+  updateBranchStatuses: (statuses: Record<string, WorkspaceBranchStatus>) => void;
 }
 
 export const useDashboardStore = create<DashboardState>((set, get) => ({
   projects: [],
   statuses: new Map(),
+  branchStatuses: new Map(),
   activeWorkspaceId: null,
   loading: false,
   error: null,
@@ -162,5 +187,9 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
     console.log("[dashboard] setActiveWorkspace:", workspaceId, "(current:", get().activeWorkspaceId + ")");
     if (get().activeWorkspaceId === workspaceId) return;
     set({ activeWorkspaceId: workspaceId });
+  },
+
+  updateBranchStatuses: (statuses: Record<string, WorkspaceBranchStatus>) => {
+    set({ branchStatuses: new Map(Object.entries(statuses)) });
   },
 }));

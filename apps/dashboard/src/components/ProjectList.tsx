@@ -19,6 +19,7 @@ import { Clipboard, Ellipsis, FolderOpen, ListMinus, Plus } from "lucide-react";
 export function ProjectList() {
   const projects = useDashboardStore((s) => s.projects);
   const statuses = useDashboardStore((s) => s.statuses);
+  const branchStatuses = useDashboardStore((s) => s.branchStatuses);
   const removeProject = useDashboardStore((s) => s.removeProject);
   const openWorkspace = useDashboardStore((s) => s.openWorkspace);
   const [workspaceDialog, setWorkspaceDialog] = useState<string | null>(null);
@@ -164,6 +165,7 @@ export function ProjectList() {
                     projectName={project.name}
                     defaultBranch={project.defaultBranch}
                     status={statuses.get(wsId)}
+                    branchStatus={branchStatuses.get(wsId)}
                     isFocused={currentIndex === focusedIndex}
                   />
                 );

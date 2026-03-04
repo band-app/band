@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::process::Command;
 
-fn git_cmd() -> Command {
+pub fn git_cmd() -> Command {
     let mut cmd = Command::new("git");
     // Ensure git is found via Homebrew on macOS
     if let Ok(path) = std::env::var("PATH") {

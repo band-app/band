@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useDashboardStore, WorkspaceStatus } from "@/stores/dashboard-store";
+import { useDashboardStore, WorkspaceStatus, WorkspaceBranchStatus } from "@/stores/dashboard-store";
 
 function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -76,4 +76,36 @@ export function useActiveWorkspaceWatcher() {
 
     return () => cleanup?.();
   }, [setActiveWorkspace]);
+}
+
+interface BranchStatusEvent {
+  statuses: Record<string, WorkspaceBranchStatus>;
+}
+
+export function useBranchStatusWatcher() {
+  const updateBranchStatuses = useDashboardStore((s) => s.updateBranchStatuses);
+
+  useEffect(() => {
+    if (!isTauri()) return;
+
+    let cleanup: (() => void) | undefined;
+
+    (async () => {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const { listen } = await import("@tauri-apps/api/event");
+
+      invoke("branch_status_watch_start").catch(console.error);
+
+      const unlisten = await listen<BranchStatusEvent>("branch-status", (event) => {
+        updateBranchStatuses(event.payload.statuses);
+      });
+
+      cleanup = () => {
+        unlisten();
+        invoke("branch_status_watch_stop").catch(console.error);
+      };
+    })();
+
+    return () => cleanup?.();
+  }, [updateBranchStatuses]);
 }

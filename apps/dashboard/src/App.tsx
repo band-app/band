@@ -4,7 +4,7 @@ import { AddProjectDialog } from "@/components/AddProjectDialog";
 import { SettingsPage } from "@/components/SettingsPage";
 import { useDashboardStore } from "@/stores/dashboard-store";
 import { useSettingsStore } from "@/stores/settings-store";
-import { useStatusWatcher, useActiveWorkspaceWatcher } from "@/hooks/use-status";
+import { useStatusWatcher, useActiveWorkspaceWatcher, useBranchStatusWatcher } from "@/hooks/use-status";
 import { useHooksSetup } from "@/hooks/use-hooks-setup";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
@@ -27,6 +27,7 @@ export default function App() {
 
   useStatusWatcher();
   useActiveWorkspaceWatcher();
+  useBranchStatusWatcher();
 
   useEffect(() => {
     loadProjects();
