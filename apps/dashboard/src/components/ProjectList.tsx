@@ -24,6 +24,7 @@ export function ProjectList() {
   const [workspaceDialog, setWorkspaceDialog] = useState<string | null>(null);
   const [focusedIndex, setFocusedIndex] = useState(-1);
   const containerRef = useRef<HTMLDivElement>(null);
+  const activeWorkspaceId = useDashboardStore((s) => s.activeWorkspaceId);
 
   const allWorkspaceIds = useMemo(
     () =>
@@ -34,8 +35,13 @@ export function ProjectList() {
   );
 
   useEffect(() => {
-    setFocusedIndex(-1);
-  }, [projects]);
+    if (activeWorkspaceId) {
+      const idx = allWorkspaceIds.indexOf(activeWorkspaceId);
+      setFocusedIndex(idx);
+    } else {
+      setFocusedIndex(-1);
+    }
+  }, [activeWorkspaceId, allWorkspaceIds]);
 
   useEffect(() => {
     containerRef.current?.focus();
