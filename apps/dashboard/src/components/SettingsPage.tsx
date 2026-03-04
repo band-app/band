@@ -20,8 +20,13 @@ import {
   ChevronLeft,
   ChevronRight,
   FolderOpen,
-  X,
+  Save,
 } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 const AGENT_TYPES: { value: CodingAgentType; label: string }[] = [
   { value: "claude-code", label: "Claude Code" },
@@ -171,12 +176,26 @@ export function SettingsPage({ onClose }: Props) {
           >
             <ChevronLeft />
           </Button>
-          <h2 className="text-base font-semibold">
+          <h2 className="text-base font-semibold flex-1">
             {section === "general" && "General"}
             {section === "coding-agent" && "Coding Agent"}
             {section === "defaults" && "Workspace Settings"}
           </h2>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                onClick={handleSave}
+                disabled={section === "defaults" && !!defaultsError}
+              >
+                <Save />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Save</TooltipContent>
+          </Tooltip>
         </div>
+        <Separator className="mb-3" />
 
         {section === "general" && (
           <div className="space-y-4 px-1">
@@ -203,9 +222,6 @@ export function SettingsPage({ onClose }: Props) {
                 default location.
               </p>
             </div>
-            <Button onClick={handleSave} size="sm">
-              Save
-            </Button>
           </div>
         )}
 
@@ -266,9 +282,6 @@ export function SettingsPage({ onClose }: Props) {
                 </p>
               </div>
             )}
-            <Button onClick={handleSave} size="sm">
-              Save
-            </Button>
           </div>
         )}
 
@@ -312,13 +325,6 @@ export function SettingsPage({ onClose }: Props) {
                 to disable.
               </p>
             </div>
-            <Button
-              onClick={handleSave}
-              size="sm"
-              disabled={!!defaultsError}
-            >
-              Save
-            </Button>
           </div>
         )}
       </div>
@@ -327,11 +333,11 @@ export function SettingsPage({ onClose }: Props) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-2 px-1">
-        <h2 className="text-base font-semibold">Settings</h2>
+      <div className="flex items-center gap-1 mb-2 px-1">
         <Button variant="ghost" size="icon-xs" onClick={onClose}>
-          <X />
+          <ChevronLeft />
         </Button>
+        <h2 className="text-base font-semibold">Settings</h2>
       </div>
       <div className="flex flex-col gap-px">
         <SettingsRow
