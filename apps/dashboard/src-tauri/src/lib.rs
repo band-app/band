@@ -40,6 +40,19 @@ pub fn run() {
             };
             let _ = window.set_title(&title);
 
+            // Set window background to black so the transparent title bar appears black
+            #[cfg(target_os = "macos")]
+            {
+                use cocoa::appkit::NSWindow;
+                use cocoa::appkit::NSColor;
+                use cocoa::base::{id, nil};
+                let ns_window = window.ns_window().unwrap() as id;
+                unsafe {
+                    let color = NSColor::colorWithSRGBRed_green_blue_alpha_(nil, 0.0, 0.0, 0.0, 1.0);
+                    ns_window.setBackgroundColor_(color);
+                }
+            }
+
             // Position dashboard at left edge, full screen height
             if let Ok(monitor) = window.current_monitor() {
                 if let Some(monitor) = monitor {
