@@ -52,6 +52,15 @@ extern "C" {
     ) -> i32;
 }
 
+// --- Objective-C runtime for NSWindow manipulation ---
+
+#[link(name = "objc", kind = "dylib")]
+extern "C" {
+    fn objc_getClass(name: *const i8) -> *const c_void;
+    fn objc_msgSend();
+    fn sel_registerName(name: *const i8) -> *const c_void;
+}
+
 // --- CoreFoundation string helpers ---
 
 unsafe fn cfstr(s: &str) -> *const c_void {
@@ -237,6 +246,69 @@ fn get_descendant_cwds(parent_pid: i32) -> Vec<PathBuf> {
     cwds
 }
 
+// --- Process cleanup ---
+
+const SIGTERM: i32 = 15;
+
+extern "C" {
+    fn kill(pid: i32, sig: i32) -> i32;
+}
+
+/// Close all processes associated with a worktree.
+/// 1. Close the VS Code window gracefully via AppleScript.
+/// 2. SIGTERM any remaining processes whose CWD is inside the worktree.
+pub fn close_workspace(worktree_path: &str) {
+    let wt_path = PathBuf::from(worktree_path);
+
+    // Close the VS Code window matching this worktree's folder name
+    if let Some(folder) = wt_path.file_name().and_then(|n| n.to_str()) {
+        let script = format!(
+            r#"tell application "System Events"
+    if exists (first process whose bundle identifier is "com.microsoft.VSCode") then
+        tell (first process whose bundle identifier is "com.microsoft.VSCode")
+            repeat with w in windows
+                if title of w contains "{folder}" then
+                    click (first button of w whose subrole is "AXCloseButton")
+                    exit repeat
+                end if
+            end repeat
+        end tell
+    end if
+end tell"#,
+            folder = folder
+        );
+        let _ = std::process::Command::new("osascript")
+            .args(["-e", &script])
+            .output();
+    }
+
+    // Kill remaining processes whose CWD is inside the worktree (dev servers, agents, etc.)
+    let my_pid = std::process::id() as i32;
+    let mut ancestors = std::collections::HashSet::new();
+    let mut pid = my_pid;
+    ancestors.insert(pid);
+    while let Some(ppid) = get_ppid(pid) {
+        if ppid <= 1 || ancestors.contains(&ppid) {
+            break;
+        }
+        ancestors.insert(ppid);
+        pid = ppid;
+    }
+
+    for pid in get_all_pids() {
+        if pid <= 1 || ancestors.contains(&pid) {
+            continue;
+        }
+        if let Some(cwd) = get_process_cwd(pid) {
+            if cwd == wt_path || cwd.starts_with(&wt_path) {
+                unsafe {
+                    kill(pid, SIGTERM);
+                }
+            }
+        }
+    }
+}
+
 // --- Workspace matching ---
 
 fn match_cwds_to_workspace(cwds: &[PathBuf]) -> Option<String> {
@@ -358,11 +430,63 @@ fn clear_needs_attention(workspace_id: &str) {
     }
 }
 
+/// Bring all dashboard windows to front without activating the app.
+/// Uses NSWindow's orderFrontRegardless to raise without stealing focus.
+/// Must be called on the main thread.
+unsafe fn raise_dashboard_windows() {
+    // Use transmute to cast objc_msgSend to the correct function signatures.
+    // This is required on ARM64 where variadic and non-variadic calling conventions differ.
+    type MsgSend = unsafe extern "C" fn(*const c_void, *const c_void) -> *const c_void;
+    type MsgSendIdx = unsafe extern "C" fn(*const c_void, *const c_void, usize) -> *const c_void;
+    type MsgSendCount = unsafe extern "C" fn(*const c_void, *const c_void) -> usize;
+
+    let msg: MsgSend = std::mem::transmute(objc_msgSend as unsafe extern "C" fn());
+    let msg_idx: MsgSendIdx = std::mem::transmute(objc_msgSend as unsafe extern "C" fn());
+    let msg_count: MsgSendCount = std::mem::transmute(objc_msgSend as unsafe extern "C" fn());
+
+    let cls = objc_getClass(b"NSApplication\0".as_ptr() as *const i8);
+    if cls.is_null() {
+        return;
+    }
+
+    let app = msg(
+        cls,
+        sel_registerName(b"sharedApplication\0".as_ptr() as *const i8),
+    );
+    if app.is_null() {
+        return;
+    }
+
+    let windows = msg(
+        app,
+        sel_registerName(b"windows\0".as_ptr() as *const i8),
+    );
+    if windows.is_null() {
+        return;
+    }
+
+    let count = msg_count(
+        windows,
+        sel_registerName(b"count\0".as_ptr() as *const i8),
+    );
+    let obj_at = sel_registerName(b"objectAtIndex:\0".as_ptr() as *const i8);
+    let raise = sel_registerName(b"orderFrontRegardless\0".as_ptr() as *const i8);
+
+    for i in 0..count {
+        let win = msg_idx(windows, obj_at, i);
+        if !win.is_null() {
+            msg(win, raise);
+        }
+    }
+}
+
 /// Start a background thread that polls the frontmost window
 /// and updates active.json when the focused workspace changes.
-pub fn start_focus_polling() {
-    std::thread::spawn(|| {
+/// When a managed workspace is focused, also brings the dashboard to front.
+pub fn start_focus_polling(app_handle: tauri::AppHandle) {
+    std::thread::spawn(move || {
         let mut last_active: Option<String> = None;
+        let mut dashboard_raised = false;
         loop {
             std::thread::sleep(Duration::from_millis(500));
 
@@ -373,8 +497,44 @@ pub fn start_focus_polling() {
                     last_active = Some(ws_id.clone());
                     write_active_marker(&ws_id);
                 }
+                // Bring dashboard to front when a managed workspace gains focus
+                if !dashboard_raised {
+                    let _ = app_handle.run_on_main_thread(|| unsafe {
+                        raise_dashboard_windows();
+                    });
+                    dashboard_raised = true;
+                }
+            } else {
+                dashboard_raised = false;
             }
         }
+    });
+}
+
+/// Raise the VS Code window matching the branch to front without activating VS Code.
+/// Uses AXRaise via AppleScript so VS Code doesn't steal focus from the dashboard.
+pub fn raise_vscode_window(branch: &str) {
+    let branch = branch.to_string();
+    std::thread::spawn(move || {
+        let script = format!(
+            r#"tell application "System Events"
+    if exists (first process whose bundle identifier is "com.microsoft.VSCode") then
+        tell (first process whose bundle identifier is "com.microsoft.VSCode")
+            repeat with w in windows
+                if title of w contains "{branch}" then
+                    perform action "AXRaise" of w
+                    exit repeat
+                end if
+            end repeat
+        end tell
+    end if
+end tell"#,
+            branch = branch
+        );
+
+        let _ = std::process::Command::new("osascript")
+            .args(["-e", &script])
+            .output();
     });
 }
 

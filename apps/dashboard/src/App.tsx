@@ -29,7 +29,9 @@ export default function App() {
   }, [loadProjects]);
 
   return (
-    <div className="min-h-screen flex flex-col bg-background text-foreground">
+    <div className="min-h-screen flex flex-col bg-background text-foreground p-0">
+      <Separator />
+
       {error && (
         <div className="mx-4 mt-2 px-4 py-2 bg-destructive/10 border border-destructive/30 rounded-lg text-sm text-destructive flex items-center justify-between gap-2">
           <span className="truncate">{error}</span>
@@ -61,7 +63,7 @@ export default function App() {
       )}
 
       <ScrollArea className="flex-1">
-        <main className="px-2 py-2">
+        <main className="px-2 py-4">
           <ProjectList />
         </main>
       </ScrollArea>

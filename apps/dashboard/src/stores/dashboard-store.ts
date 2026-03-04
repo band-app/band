@@ -29,7 +29,6 @@ export interface WorkspaceStatus {
   branch: string;
   worktreePath: string;
   ide: string;
-  pid?: number;
   agent?: AgentInfo;
 }
 
@@ -114,11 +113,22 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   },
 
   removeWorkspace: async (project: string, branch: string) => {
+    // Optimistically remove from UI immediately so it doesn't feel blocked
+    const previousProjects = get().projects;
+    set({
+      projects: previousProjects.map((p) =>
+        p.name === project
+          ? { ...p, worktrees: p.worktrees.filter((wt) => wt.branch !== branch) }
+          : p,
+      ),
+    });
+
     try {
       await invoke("workspace_remove", { project, branch });
       await get().loadProjects();
     } catch (e) {
-      set({ error: String(e) });
+      // Restore previous state on failure
+      set({ projects: previousProjects, error: String(e) });
     }
   },
 
