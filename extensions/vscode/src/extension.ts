@@ -20,7 +20,7 @@ export async function activate(context: vscode.ExtensionContext) {
   if (workspaceFolders && workspaceFolders.length > 0) {
     const config = await loadConfig(workspaceFolders[0].uri.fsPath);
     if (config) {
-      log.appendLine(`Config loaded for workspace: ${config.workspaceId}`);
+      log.appendLine("Config loaded, setting up workspace...");
       await setupWorkspace(config);
       vscode.window.showInformationMessage("Band workspace setup complete");
     } else {

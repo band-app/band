@@ -1,7 +1,7 @@
 #!/bin/bash
 # Band hook for Claude Code — reports agent status changes
 # This script is called by Claude Code lifecycle hooks.
-# It derives workspace identity from git and writes status to ~/.band/status/
+# It looks up workspace identity from ~/.band/state.json and writes status to ~/.band/status/
 
 set -euo pipefail
 
@@ -10,28 +10,47 @@ if [ -z "$HOOK_EVENT" ]; then
   exit 0
 fi
 
-# Must be in a git repo
-if ! git rev-parse --is-inside-work-tree &>/dev/null; then
+STATE_FILE="$HOME/.band/state.json"
+CURRENT_DIR=$(pwd -P)
+
+# Look up project and branch from state.json (single source of truth)
+MATCH=""
+if [ -f "$STATE_FILE" ]; then
+  MATCH=$(python3 - "$STATE_FILE" "$CURRENT_DIR" <<'PYEOF'
+import json, sys, os
+try:
+    state = json.load(open(sys.argv[1]))
+    cwd = os.path.realpath(sys.argv[2]).rstrip("/")
+    for proj in state.get("projects", []):
+        for wt in proj.get("worktrees", []):
+            wt_path = wt["path"].rstrip("/")
+            if cwd == wt_path or cwd.startswith(wt_path + "/"):
+                print(proj["name"])
+                print(wt["branch"])
+                print(wt["path"])
+                sys.exit(0)
+except Exception:
+    pass
+sys.exit(1)
+PYEOF
+  ) || true
+fi
+
+if [ -z "$MATCH" ]; then
   exit 0
 fi
 
-# Derive project name from the main worktree folder
-MAIN_WORKTREE=$(git worktree list --porcelain | head -1 | sed 's/^worktree //')
-if [ -z "$MAIN_WORKTREE" ]; then
-  exit 0
-fi
-PROJECT=$(basename "$MAIN_WORKTREE")
+PROJECT=$(echo "$MATCH" | sed -n '1p')
+BRANCH=$(echo "$MATCH" | sed -n '2p')
+WORKTREE_PATH=$(echo "$MATCH" | sed -n '3p')
 
-# Branch = workspace ID component
-BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)
-if [ -z "$BRANCH" ]; then
+if [ -z "$PROJECT" ] || [ -z "$BRANCH" ]; then
   exit 0
 fi
 
 WORKSPACE_ID="${PROJECT}-${BRANCH}"
 STATUS_DIR="$HOME/.band/status"
 STATUS_FILE="$STATUS_DIR/${WORKSPACE_ID}.json"
-WORKTREE_PATH=$(pwd)
 
 # Map hook event to agent status
 case "$HOOK_EVENT" in
