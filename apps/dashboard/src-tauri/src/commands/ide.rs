@@ -330,6 +330,34 @@ fn detect_frontmost_workspace() -> Option<String> {
     None
 }
 
+/// If the workspace status file has agent.status == "needs_attention",
+/// update it to "waiting" (the user is now looking at it).
+fn clear_needs_attention(workspace_id: &str) {
+    let status_file = state::status_dir().join(format!("{}.json", workspace_id));
+    let data = match std::fs::read_to_string(&status_file) {
+        Ok(d) => d,
+        Err(_) => return,
+    };
+    let mut status: serde_json::Value = match serde_json::from_str(&data) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+    let needs_clear = status
+        .get("agent")
+        .and_then(|a| a.get("status"))
+        .and_then(|s| s.as_str())
+        == Some("needs_attention");
+
+    if needs_clear {
+        if let Some(agent) = status.get_mut("agent") {
+            agent["status"] = serde_json::json!("waiting");
+            if let Ok(updated) = serde_json::to_string_pretty(&status) {
+                let _ = std::fs::write(&status_file, updated);
+            }
+        }
+    }
+}
+
 /// Start a background thread that polls the frontmost window
 /// and updates active.json when the focused workspace changes.
 pub fn start_focus_polling() {
@@ -340,6 +368,8 @@ pub fn start_focus_polling() {
 
             if let Some(ws_id) = detect_frontmost_workspace() {
                 if last_active.as_deref() != Some(ws_id.as_str()) {
+                    // Workspace gained focus — clear needs_attention if set
+                    clear_needs_attention(&ws_id);
                     last_active = Some(ws_id.clone());
                     write_active_marker(&ws_id);
                 }

@@ -3,6 +3,7 @@ import { ProjectList } from "@/components/ProjectList";
 import { AddProjectDialog } from "@/components/AddProjectDialog";
 import { useDashboardStore } from "@/stores/dashboard-store";
 import { useStatusWatcher, useActiveWorkspaceWatcher } from "@/hooks/use-status";
+import { useHooksSetup } from "@/hooks/use-hooks-setup";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
@@ -18,6 +19,7 @@ export default function App() {
   const error = useDashboardStore((s) => s.error);
   const clearError = useDashboardStore((s) => s.clearError);
   const [showAddDialog, setShowAddDialog] = useState(false);
+  const { state: hooksState, install: installHooks } = useHooksSetup();
 
   useStatusWatcher();
   useActiveWorkspaceWatcher();
@@ -38,6 +40,22 @@ export default function App() {
             onClick={clearError}
           >
             <X />
+          </Button>
+        </div>
+      )}
+
+      {hooksState.status === "needs_install" && (
+        <div className="mx-4 mt-2 px-4 py-2 bg-blue-500/10 border border-blue-500/30 rounded-lg text-sm flex items-center justify-between gap-2">
+          <span className="text-blue-200">
+            Install Claude Code hooks for agent status detection
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0 text-xs"
+            onClick={installHooks}
+          >
+            Install
           </Button>
         </div>
       )}

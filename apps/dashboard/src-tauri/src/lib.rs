@@ -29,6 +29,8 @@ pub fn run() {
             commands::ide::get_active_workspace,
             commands::ide::detect_active_workspace,
             commands::ide::pick_folder,
+            commands::hooks::hooks_check,
+            commands::hooks::hooks_install,
         ])
         .setup(|app| {
             let window = app.get_webview_window("main").unwrap();

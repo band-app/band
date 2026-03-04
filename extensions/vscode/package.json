@@ -19,10 +19,6 @@
       {
         "command": "band.setupWorkspace",
         "title": "Band: Setup Workspace"
-      },
-      {
-        "command": "band.showStatus",
-        "title": "Band: Show Agent Status"
       }
     ]
   },

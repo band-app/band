@@ -1,18 +1,14 @@
 import * as vscode from "vscode";
 import { BandConfig, LayoutConfig, TerminalConfig, BrowserConfig } from "./config";
-import { AgentMonitor } from "./agent-monitor";
 
 export interface SetupResult {
   terminals: vscode.Terminal[];
-  monitor?: AgentMonitor;
 }
 
 export async function setupWorkspace(
   config: BandConfig
 ): Promise<SetupResult> {
   const terminals: vscode.Terminal[] = [];
-  let monitor: AgentMonitor | undefined;
-  let agentTerminal: vscode.Terminal | undefined;
 
   // Set editor layout if config has layout
   if (config.layout) {
@@ -27,10 +23,6 @@ export async function setupWorkspace(
       const existing = existingTerminals.find((t) => t.name === termConfig.name);
       if (existing) {
         terminals.push(existing);
-        if (termConfig.agentType) {
-          monitor = new AgentMonitor(termConfig.agentType);
-          agentTerminal = existing;
-        }
         continue;
       }
 
@@ -47,45 +39,10 @@ export async function setupWorkspace(
       }
       terminal.show(false);
       terminals.push(terminal);
-
-      if (termConfig.agentType) {
-        monitor = new AgentMonitor(termConfig.agentType);
-        agentTerminal = terminal;
-      }
     }
   }
 
-  // Use shell integration to monitor agent terminal output when available
-  if (monitor && agentTerminal) {
-    setupTerminalMonitoring(agentTerminal, monitor);
-  }
-
-  return { terminals, monitor };
-}
-
-function setupTerminalMonitoring(
-  terminal: vscode.Terminal,
-  monitor: AgentMonitor
-): void {
-  // Listen for shell execution events on the agent terminal
-  const startDisposable = vscode.window.onDidStartTerminalShellExecution(
-    async (e) => {
-      if (e.terminal !== terminal) return;
-      // Read output stream from the execution
-      for await (const data of e.execution.read()) {
-        monitor.processOutput(data);
-      }
-    }
-  );
-
-  // Detect when the terminal closes
-  const closeDisposable = vscode.window.onDidCloseTerminal((t) => {
-    if (t === terminal) {
-      monitor.processExit();
-      startDisposable.dispose();
-      closeDisposable.dispose();
-    }
-  });
+  return { terminals };
 }
 
 async function setupEditorLayout(layout: LayoutConfig) {
