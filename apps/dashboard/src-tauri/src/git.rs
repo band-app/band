@@ -19,6 +19,24 @@ pub fn is_git_repo(path: &str) -> bool {
         .unwrap_or(false)
 }
 
+pub fn get_current_branch() -> Option<String> {
+    let output = git_cmd()
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if branch.is_empty() {
+        None
+    } else {
+        Some(branch)
+    }
+}
+
 pub fn get_repo_name(path: &str) -> String {
     Path::new(path)
         .file_name()

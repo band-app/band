@@ -49,6 +49,9 @@ export function NewWorkspaceDialog({ projectName, open, onOpenChange }: Props) {
               placeholder="feature/my-branch"
               value={branch}
               onChange={(e) => setBranch(e.target.value)}
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
               autoFocus
             />
             <Label htmlFor="base-branch">Base branch (optional)</Label>
@@ -57,6 +60,9 @@ export function NewWorkspaceDialog({ projectName, open, onOpenChange }: Props) {
               placeholder="main"
               value={base}
               onChange={(e) => setBase(e.target.value)}
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
             />
           </div>
           <DialogFooter>

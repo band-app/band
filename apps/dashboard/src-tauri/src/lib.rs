@@ -33,6 +33,13 @@ pub fn run() {
         .setup(|app| {
             let window = app.get_webview_window("main").unwrap();
 
+            // Set window title with git branch if available
+            let title = match git::get_current_branch() {
+                Some(branch) => format!("Band - {}", branch),
+                None => "Band".to_string(),
+            };
+            let _ = window.set_title(&title);
+
             // Position dashboard at left edge, full screen height
             if let Ok(monitor) = window.current_monitor() {
                 if let Some(monitor) = monitor {
