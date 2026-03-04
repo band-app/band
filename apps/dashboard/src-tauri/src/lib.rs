@@ -2,7 +2,6 @@ mod commands;
 mod git;
 mod state;
 
-use commands::ide::LastWorkspace;
 use commands::status::WatcherState;
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
@@ -11,14 +10,11 @@ const DASHBOARD_WIDTH: u32 = 400;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let last_workspace = LastWorkspace(Arc::new(Mutex::new(None)));
-
     tauri::Builder::default()
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(WatcherState(Arc::new(Mutex::new(None))))
-        .manage(last_workspace)
         .invoke_handler(tauri::generate_handler![
             commands::project::project_init,
             commands::project::project_list,
@@ -30,6 +26,8 @@ pub fn run() {
             commands::status::status_watch_start,
             commands::status::status_watch_stop,
             commands::ide::workspace_focus,
+            commands::ide::get_active_workspace,
+            commands::ide::detect_active_workspace,
             commands::ide::pick_folder,
         ])
         .setup(|app| {
@@ -51,13 +49,33 @@ pub fn run() {
                 }
             }
 
+            // Poll the frontmost VS Code window to track active workspace
+            // (handles projects without the Band VS Code extension)
+            commands::ide::start_focus_polling();
+
             // Re-align the last workspace's VS Code window when dashboard gains focus
-            let last_ws = app.state::<LastWorkspace>().0.clone();
             window.on_window_event(move |event| {
                 if let tauri::WindowEvent::Focused(true) = event {
-                    if let Ok(guard) = last_ws.lock() {
-                        if let Some(branch) = guard.as_ref() {
-                            commands::ide::align_vscode_window(branch);
+                    // Read active workspace from marker file
+                    let active_file = state::status_dir().join("active.json");
+                    if let Ok(data) = std::fs::read_to_string(&active_file) {
+                        #[derive(serde::Deserialize)]
+                        struct ActiveMarker {
+                            #[serde(rename = "workspaceId")]
+                            workspace_id: String,
+                        }
+                        if let Ok(marker) = serde_json::from_str::<ActiveMarker>(&data) {
+                            if let Ok(app_state) = state::load_state() {
+                                for proj in &app_state.projects {
+                                    for wt in &proj.worktrees {
+                                        let id = format!("{}-{}", proj.name, wt.branch);
+                                        if id == marker.workspace_id {
+                                            commands::ide::align_vscode_window(&wt.branch);
+                                            return;
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }

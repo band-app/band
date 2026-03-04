@@ -1,7 +1,6 @@
 use crate::commands::ide;
 use crate::git;
 use crate::state;
-use tauri::Manager;
 
 #[tauri::command]
 pub fn workspace_create(project: String, branch: String, base: Option<String>) -> Result<(), String> {
@@ -91,7 +90,7 @@ pub fn workspace_remove(project: String, branch: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn workspace_open(workspace_id: String, app_handle: tauri::AppHandle) -> Result<(), String> {
+pub fn workspace_open(workspace_id: String) -> Result<(), String> {
     // workspace_id is "project-branch"
     let app_state = state::load_state()?;
 
@@ -100,34 +99,36 @@ pub fn workspace_open(workspace_id: String, app_handle: tauri::AppHandle) -> Res
         for wt in &proj.worktrees {
             let ws_id = format!("{}-{}", proj.name, wt.branch);
             if ws_id == workspace_id {
-                // Track the last opened workspace
-                if let Ok(mut last) = app_handle.state::<ide::LastWorkspace>().0.lock() {
-                    *last = Some(wt.branch.clone());
-                }
+                // Track the active workspace
+                ide::write_active_marker(&ws_id);
 
-                // Open VS Code at the worktree path
-                let output = std::process::Command::new("code")
-                    .arg(&wt.path)
-                    .env(
-                        "PATH",
-                        format!(
-                            "/opt/homebrew/bin:/usr/local/bin:{}",
-                            std::env::var("PATH").unwrap_or_default()
-                        ),
-                    )
-                    .output()
-                    .map_err(|e| format!("Failed to launch VS Code: {}", e))?;
+                // Launch VS Code and align window in a background thread
+                // so we don't block the IPC channel / webview rendering.
+                let path = wt.path.clone();
+                let branch = wt.branch.clone();
+                std::thread::spawn(move || {
+                    let output = std::process::Command::new("code")
+                        .arg(&path)
+                        .env(
+                            "PATH",
+                            format!(
+                                "/opt/homebrew/bin:/usr/local/bin:{}",
+                                std::env::var("PATH").unwrap_or_default()
+                            ),
+                        )
+                        .output();
 
-                if !output.status.success() {
-                    // Fallback: try `open -a "Visual Studio Code" {path}`
-                    std::process::Command::new("open")
-                        .args(["-a", "Visual Studio Code", &wt.path])
-                        .output()
-                        .map_err(|e| format!("Failed to open VS Code: {}", e))?;
-                }
+                    if let Ok(output) = output {
+                        if !output.status.success() {
+                            let _ = std::process::Command::new("open")
+                                .args(["-a", "Visual Studio Code", &path])
+                                .output();
+                        }
+                    }
 
-                // Position VS Code window to the right of the dashboard
-                ide::align_vscode_window(&wt.branch);
+                    // Position VS Code window to the right of the dashboard
+                    ide::align_vscode_window(&branch);
+                });
 
                 return Ok(());
             }

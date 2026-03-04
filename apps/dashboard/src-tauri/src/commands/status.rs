@@ -56,6 +56,26 @@ pub fn status_watch_start(app: AppHandle) -> Result<(), String> {
                     for path in &event.paths {
                         if let Some(ext) = path.extension() {
                             if ext == "json" {
+                                // Emit active workspace changes as a separate event
+                                if path.file_stem().map_or(false, |s| s == "active") {
+                                    if let Ok(data) = fs::read_to_string(path) {
+                                        #[derive(serde::Deserialize)]
+                                        struct ActiveMarker {
+                                            #[serde(rename = "workspaceId")]
+                                            workspace_id: String,
+                                        }
+                                        if let Ok(marker) =
+                                            serde_json::from_str::<ActiveMarker>(&data)
+                                        {
+                                            let _ = app_handle.emit(
+                                                "active-workspace",
+                                                marker.workspace_id,
+                                            );
+                                        }
+                                    }
+                                    continue;
+                                }
+
                                 if let Ok(data) = fs::read_to_string(path) {
                                     if let Ok(status) =
                                         serde_json::from_str::<WorkspaceStatus>(&data)

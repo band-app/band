@@ -36,10 +36,7 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-status-working: oklch(0.795 0.184 86.047);
-  --color-status-needs-input: oklch(0.714 0.203 305.504);
-  --color-status-done: oklch(0.723 0.219 149.579);
-  --color-status-error: oklch(0.637 0.237 25.331);
-  --color-status-idle: oklch(0.556 0 0);
+  --color-status-needs-attention: oklch(0.637 0.237 25.331);
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);

@@ -1,15 +1,9 @@
-workspaceId: "band-init"
 project: "band"
 
 terminals:
   - name: "claude"
     command: "claude-epic --dangerously-skip-permissions"
-    monitor: true
-
-agent:
-  name: "claude-code"
-  patterns:
-    working: "\\b(Thinking|Reading|Writing|Searching|Analyzing)\\b"
-    needs_input: "\\b(Y/n|yes/no|approve|deny|permission)\\b"
-    error: "\\b(Error|Failed|error:)\\b"
-    done: "\\b(Done|Completed|finished)\\b"
+    agentType: "claude-code"
+  - name: "shell"
+    command: ""
+    split: "vertical"

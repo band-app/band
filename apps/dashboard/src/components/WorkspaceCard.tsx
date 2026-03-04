@@ -23,17 +23,19 @@ interface Props {
 export function WorkspaceCard({ worktree, projectName, status }: Props) {
   const openWorkspace = useDashboardStore((s) => s.openWorkspace);
   const removeWorkspace = useDashboardStore((s) => s.removeWorkspace);
+  const activeWorkspaceId = useDashboardStore((s) => s.activeWorkspaceId);
 
   const workspaceId = `${projectName}-${worktree.branch}`;
+  const isActive = activeWorkspaceId === workspaceId;
 
   return (
     <Card
-      className="flex-row items-center justify-between px-4 py-2.5 gap-0 rounded-none border-0 shadow-none cursor-pointer transition-colors hover:bg-accent/50"
+      className={`flex-row items-center justify-between px-4 py-2.5 gap-0 rounded-none border-0 shadow-none cursor-pointer transition-colors hover:bg-accent/50 ${isActive ? "bg-accent/50 border-l-2 border-l-primary" : ""}`}
       onClick={() => openWorkspace(workspaceId)}
     >
       <div className="flex items-center gap-3 min-w-0">
-        <GitBranch className="size-3.5 text-muted-foreground shrink-0" />
-        <span className="text-sm font-medium shrink-0">{worktree.branch}</span>
+        <GitBranch className={`size-3.5 shrink-0 ${isActive ? "text-primary" : "text-muted-foreground"}`} />
+        <span className={`text-sm shrink-0 ${isActive ? "font-semibold text-foreground" : "font-medium text-muted-foreground"}`}>{worktree.branch}</span>
         <AgentStatusBadge agent={status?.agent} />
       </div>
       <DropdownMenu>

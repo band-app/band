@@ -4,7 +4,10 @@ function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
-async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+async function invoke<T>(
+  cmd: string,
+  args?: Record<string, unknown>,
+): Promise<T> {
   if (!isTauri()) {
     throw new Error("Not running inside Tauri");
   }
@@ -12,18 +15,12 @@ async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T
   return tauriInvoke<T>(cmd, args);
 }
 
-export type AgentStatusType =
-  | "idle"
-  | "working"
-  | "needs_input"
-  | "error"
-  | "done";
+export type AgentStatusType = "working" | "needs_attention" | "waiting";
 
 export interface AgentInfo {
   name: string;
   status: AgentStatusType;
   lastActivity: string;
-  summary?: string;
 }
 
 export interface WorkspaceStatus {
@@ -52,6 +49,7 @@ export interface WorktreeInfo {
 interface DashboardState {
   projects: ProjectInfo[];
   statuses: Map<string, WorkspaceStatus>;
+  activeWorkspaceId: string | null;
   loading: boolean;
   error: string | null;
 
@@ -61,18 +59,20 @@ interface DashboardState {
   createWorkspace: (
     project: string,
     branch: string,
-    base?: string
+    base?: string,
   ) => Promise<void>;
   removeWorkspace: (project: string, branch: string) => Promise<void>;
-  openWorkspace: (workspaceId: string) => Promise<void>;
+  openWorkspace: (workspaceId: string) => void;
   clearError: () => void;
   updateStatus: (status: WorkspaceStatus) => void;
   removeStatus: (workspaceId: string) => void;
+  setActiveWorkspace: (workspaceId: string | null) => void;
 }
 
 export const useDashboardStore = create<DashboardState>((set, get) => ({
   projects: [],
   statuses: new Map(),
+  activeWorkspaceId: null,
   loading: false,
   error: null,
 
@@ -122,12 +122,12 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
     }
   },
 
-  openWorkspace: async (workspaceId: string) => {
-    try {
-      await invoke("workspace_open", { workspaceId });
-    } catch (e) {
+  openWorkspace: (workspaceId: string) => {
+    console.log("[dashboard] openWorkspace:", workspaceId);
+    set({ activeWorkspaceId: workspaceId });
+    invoke("workspace_open", { workspaceId }).catch((e) => {
       set({ error: String(e) });
-    }
+    });
   },
 
   clearError: () => set({ error: null }),
@@ -146,5 +146,11 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
       statuses.delete(workspaceId);
       return { statuses };
     });
+  },
+
+  setActiveWorkspace: (workspaceId: string | null) => {
+    console.log("[dashboard] setActiveWorkspace:", workspaceId, "(current:", get().activeWorkspaceId + ")");
+    if (get().activeWorkspaceId === workspaceId) return;
+    set({ activeWorkspaceId: workspaceId });
   },
 }));

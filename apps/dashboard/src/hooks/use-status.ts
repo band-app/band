@@ -44,3 +44,36 @@ export function useStatusWatcher() {
     return () => cleanup?.();
   }, [updateStatus, removeStatus]);
 }
+
+export function useActiveWorkspaceWatcher() {
+  const setActiveWorkspace = useDashboardStore((s) => s.setActiveWorkspace);
+
+  useEffect(() => {
+    if (!isTauri()) return;
+
+    let cleanup: (() => void) | undefined;
+
+    (async () => {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const { listen } = await import("@tauri-apps/api/event");
+
+      // Read current value on startup
+      try {
+        const wsId = await invoke<string | null>("get_active_workspace");
+        setActiveWorkspace(wsId);
+      } catch {
+        // ignore
+      }
+
+      // Listen for file watcher events on active.json
+      const unlisten = await listen<string>("active-workspace", (event) => {
+        console.log("[dashboard] active-workspace event from Rust:", event.payload);
+        setActiveWorkspace(event.payload);
+      });
+
+      cleanup = unlisten;
+    })();
+
+    return () => cleanup?.();
+  }, [setActiveWorkspace]);
+}

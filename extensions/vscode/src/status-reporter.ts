@@ -2,20 +2,26 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { AgentState } from "./agent-monitor";
-import { BandConfig } from "./config";
+import { AgentType, BandConfig } from "./config";
 
 export class StatusReporter {
   private statusDir: string;
   private statusFile: string;
   private config: BandConfig;
+  private agentType?: AgentType;
 
-  constructor(config: BandConfig) {
+  constructor(config: BandConfig, agentType?: AgentType) {
     this.config = config;
+    this.agentType = agentType;
     this.statusDir = path.join(os.homedir(), ".band", "status");
     this.statusFile = path.join(
       this.statusDir,
       `${config.workspaceId}.json`
     );
+  }
+
+  getWorkspaceId(): string {
+    return this.config.workspaceId;
   }
 
   async init(): Promise<void> {
@@ -30,12 +36,11 @@ export class StatusReporter {
       worktreePath: "",
       ide: "vscode",
       pid: process.pid,
-      agent: this.config.agent
+      agent: this.agentType
         ? {
-            name: this.config.agent.name,
+            name: this.agentType,
             status: state.status,
             lastActivity: state.lastActivity.toISOString(),
-            summary: state.summary,
           }
         : undefined,
     };
@@ -43,6 +48,14 @@ export class StatusReporter {
     await fs.promises.writeFile(
       this.statusFile,
       JSON.stringify(status, null, 2)
+    );
+  }
+
+  async reportFocused(): Promise<void> {
+    const activeFile = path.join(this.statusDir, "active.json");
+    await fs.promises.writeFile(
+      activeFile,
+      JSON.stringify({ workspaceId: this.config.workspaceId })
     );
   }
 

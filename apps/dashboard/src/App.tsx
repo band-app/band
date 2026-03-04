@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { ProjectList } from "@/components/ProjectList";
 import { AddProjectDialog } from "@/components/AddProjectDialog";
 import { useDashboardStore } from "@/stores/dashboard-store";
-import { useStatusWatcher } from "@/hooks/use-status";
+import { useStatusWatcher, useActiveWorkspaceWatcher } from "@/hooks/use-status";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,7 @@ export default function App() {
   const [showAddDialog, setShowAddDialog] = useState(false);
 
   useStatusWatcher();
+  useActiveWorkspaceWatcher();
 
   useEffect(() => {
     loadProjects();
