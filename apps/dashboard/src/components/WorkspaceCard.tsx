@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { AgentStatusBadge } from "@/components/AgentStatusBadge";
 import {
   useDashboardStore,
@@ -18,9 +19,17 @@ interface Props {
   worktree: WorktreeInfo;
   projectName: string;
   status?: WorkspaceStatus;
+  isFocused?: boolean;
 }
 
-export function WorkspaceCard({ worktree, projectName, status }: Props) {
+export function WorkspaceCard({ worktree, projectName, status, isFocused }: Props) {
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (isFocused) {
+      cardRef.current?.scrollIntoView({ block: "nearest" });
+    }
+  }, [isFocused]);
   const openWorkspace = useDashboardStore((s) => s.openWorkspace);
   const removeWorkspace = useDashboardStore((s) => s.removeWorkspace);
   const activeWorkspaceId = useDashboardStore((s) => s.activeWorkspaceId);
@@ -30,7 +39,8 @@ export function WorkspaceCard({ worktree, projectName, status }: Props) {
 
   return (
     <Card
-      className={`flex-row items-center justify-between px-4 py-2.5 gap-0 rounded-none border-0 shadow-none cursor-pointer transition-colors hover:bg-accent/50 ${isActive ? "bg-accent/50 border-l-2 border-l-primary" : ""}`}
+      ref={cardRef}
+      className={`flex-row items-center justify-between px-4 py-2.5 gap-0 rounded-none border-0 shadow-none cursor-pointer transition-colors hover:bg-accent/50 ${isActive ? "bg-accent/50 border-l-2 border-l-primary" : ""} ${isFocused ? "ring-2 ring-ring" : ""}`}
       onClick={() => openWorkspace(workspaceId)}
     >
       <div className="flex items-center gap-3 min-w-0">

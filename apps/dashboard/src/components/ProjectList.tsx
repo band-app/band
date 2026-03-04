@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useDashboardStore } from "@/stores/dashboard-store";
 import { WorkspaceCard } from "@/components/WorkspaceCard";
 import { NewWorkspaceDialog } from "@/components/NewWorkspaceForm";
@@ -20,7 +20,44 @@ export function ProjectList() {
   const projects = useDashboardStore((s) => s.projects);
   const statuses = useDashboardStore((s) => s.statuses);
   const removeProject = useDashboardStore((s) => s.removeProject);
+  const openWorkspace = useDashboardStore((s) => s.openWorkspace);
   const [workspaceDialog, setWorkspaceDialog] = useState<string | null>(null);
+  const [focusedIndex, setFocusedIndex] = useState(-1);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const allWorkspaceIds = useMemo(
+    () =>
+      projects.flatMap((project) =>
+        project.worktrees.map((wt) => `${project.name}-${wt.branch}`)
+      ),
+    [projects]
+  );
+
+  useEffect(() => {
+    setFocusedIndex(-1);
+  }, [projects]);
+
+  useEffect(() => {
+    containerRef.current?.focus();
+  }, []);
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (allWorkspaceIds.length === 0) return;
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setFocusedIndex((prev) =>
+        prev < allWorkspaceIds.length - 1 ? prev + 1 : prev
+      );
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setFocusedIndex((prev) => (prev > 0 ? prev - 1 : prev));
+    } else if (e.key === "Enter") {
+      if (focusedIndex >= 0 && focusedIndex < allWorkspaceIds.length) {
+        openWorkspace(allWorkspaceIds[focusedIndex]);
+      }
+    }
+  }
 
   if (projects.length === 0) {
     return (
@@ -33,8 +70,15 @@ export function ProjectList() {
     );
   }
 
+  let workspaceIndex = 0;
+
   return (
-    <div className="flex flex-col gap-6">
+    <div
+      ref={containerRef}
+      tabIndex={0}
+      onKeyDown={handleKeyDown}
+      className="flex flex-col gap-6 outline-none"
+    >
       {projects.map((project) => (
         <div key={project.name}>
           <div className="flex items-center justify-between mb-2 px-1">
@@ -106,12 +150,14 @@ export function ProjectList() {
             ) : (
               project.worktrees.map((wt) => {
                 const wsId = `${project.name}-${wt.branch}`;
+                const currentIndex = workspaceIndex++;
                 return (
                   <WorkspaceCard
                     key={wt.branch}
                     worktree={wt}
                     projectName={project.name}
                     status={statuses.get(wsId)}
+                    isFocused={currentIndex === focusedIndex}
                   />
                 );
               })

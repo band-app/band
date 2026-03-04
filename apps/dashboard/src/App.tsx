@@ -67,7 +67,15 @@ export default function App() {
         </div>
       )}
 
-      <ScrollArea className="flex-1">
+      <ScrollArea
+        className="flex-1"
+        onClick={(e) => {
+          const target = e.target as HTMLElement;
+          if (target.closest("button, a, input, select, textarea")) return;
+          const list = (e.currentTarget as HTMLElement).querySelector<HTMLElement>('[tabindex="0"]');
+          list?.focus();
+        }}
+      >
         <main className="px-2 py-4">
           {view === "dashboard" ? <ProjectList /> : <SettingsPage onClose={() => setView("dashboard")} />}
         </main>
