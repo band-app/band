@@ -45,7 +45,7 @@
 
 :root {
   --radius: 0.625rem;
-  --background: oklch(0.145 0 0);
+  --background: #181818;
   --foreground: oklch(0.922 0 0);
   --card: oklch(0.17 0 0);
   --card-foreground: oklch(0.922 0 0);
@@ -84,6 +84,10 @@ button,
 [data-slot="dropdown-menu-trigger"],
 [data-slot="dialog-trigger"] {
   cursor: pointer;
+}
+
+[data-slot="scroll-area-viewport"] > div {
+  display: block !important;
 }
 
 body {

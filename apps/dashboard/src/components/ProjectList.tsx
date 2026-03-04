@@ -14,7 +14,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Clipboard, Ellipsis, FolderOpen, Plus, Trash2 } from "lucide-react";
+import { Clipboard, Ellipsis, FolderOpen, ListMinus, Plus } from "lucide-react";
 
 export function ProjectList() {
   const projects = useDashboardStore((s) => s.projects);
@@ -83,14 +83,15 @@ export function ProjectList() {
       ref={containerRef}
       tabIndex={0}
       onKeyDown={handleKeyDown}
-      className="flex flex-col gap-6 outline-none"
+      className="flex flex-col gap-2 outline-none min-w-0"
     >
-      {projects.map((project) => (
-        <div key={project.name}>
-          <div className="flex items-center justify-between mb-2 px-1">
-            <div className="flex items-center gap-2">
-              <FolderOpen className="size-4 text-muted-foreground" />
-              <h2 className="text-base font-semibold">{project.name}</h2>
+      {projects.map((project, index) => (
+        <div key={project.name} className="min-w-0">
+          {index > 0 && <hr className="border-border mb-2" />}
+          <div className="flex items-center justify-between mb-1 px-1">
+            <div className="flex items-center gap-2 min-w-0">
+              <FolderOpen className="size-3.5 shrink-0 text-muted-foreground" />
+              <h2 className="text-sm font-semibold text-foreground truncate">{project.name}</h2>
             </div>
             <div className="flex items-center gap-1">
               <Tooltip>
@@ -131,11 +132,10 @@ export function ProjectList() {
                     Open in Finder
                   </DropdownMenuItem>
                   <DropdownMenuItem
-                    variant="destructive"
                     onClick={() => removeProject(project.name)}
                   >
-                    <Trash2 />
-                    Delete project
+                    <ListMinus />
+                    Remove from list
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -148,7 +148,7 @@ export function ProjectList() {
             onOpenChange={(open) => setWorkspaceDialog(open ? project.name : null)}
           />
 
-          <div className="flex flex-col gap-1.5">
+          <div className="flex flex-col gap-0.5 overflow-hidden">
             {project.worktrees.length === 0 ? (
               <p className="text-sm text-muted-foreground px-4 py-2">
                 No workspaces yet
@@ -162,6 +162,7 @@ export function ProjectList() {
                     key={wt.branch}
                     worktree={wt}
                     projectName={project.name}
+                    defaultBranch={project.defaultBranch}
                     status={statuses.get(wsId)}
                     isFocused={currentIndex === focusedIndex}
                   />

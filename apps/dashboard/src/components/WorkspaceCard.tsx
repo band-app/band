@@ -5,7 +5,6 @@ import {
   WorktreeInfo,
   WorkspaceStatus,
 } from "@/stores/dashboard-store";
-import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -18,11 +17,12 @@ import { Clipboard, Ellipsis, FolderOpen, GitBranch, Trash2 } from "lucide-react
 interface Props {
   worktree: WorktreeInfo;
   projectName: string;
+  defaultBranch: string;
   status?: WorkspaceStatus;
   isFocused?: boolean;
 }
 
-export function WorkspaceCard({ worktree, projectName, status, isFocused }: Props) {
+export function WorkspaceCard({ worktree, projectName, defaultBranch, status, isFocused }: Props) {
   const cardRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -38,14 +38,14 @@ export function WorkspaceCard({ worktree, projectName, status, isFocused }: Prop
   const isActive = activeWorkspaceId === workspaceId;
 
   return (
-    <Card
+    <div
       ref={cardRef}
-      className={`flex-row items-center justify-between px-4 py-2.5 gap-0 rounded-none border-0 shadow-none cursor-pointer transition-colors hover:bg-accent/50 ${isActive ? "bg-accent/50 border-l-2 border-l-primary" : ""} ${isFocused ? "ring-2 ring-ring" : ""}`}
+      className={`flex flex-row items-center justify-between px-3 py-1.5 min-w-0 overflow-hidden cursor-pointer transition-colors hover:bg-accent/50 ${isActive ? "bg-accent/50 border-l-2 border-l-primary" : ""} ${isFocused ? "ring-2 ring-inset ring-ring" : ""}`}
       onClick={() => openWorkspace(workspaceId)}
     >
-      <div className="flex items-center gap-3 min-w-0">
-        <GitBranch className={`size-3.5 shrink-0 ${isActive ? "text-primary" : "text-muted-foreground"}`} />
-        <span className={`text-sm shrink-0 ${isActive ? "font-semibold text-foreground" : "font-medium text-muted-foreground"}`}>{worktree.branch}</span>
+      <div className="flex items-center gap-3 min-w-0 overflow-hidden">
+        <GitBranch className={`size-3 shrink-0 ${isActive ? "text-primary" : "text-muted-foreground"}`} />
+        <span className={`text-xs truncate ${isActive ? "font-semibold text-foreground" : "font-medium"}`} style={isActive ? undefined : { color: "oklch(0.7 0 0)" }}>{worktree.branch}</span>
         <AgentStatusBadge agent={status?.agent} />
       </div>
       <DropdownMenu>
@@ -73,15 +73,17 @@ export function WorkspaceCard({ worktree, projectName, status, isFocused }: Prop
             <FolderOpen />
             Open in Finder
           </DropdownMenuItem>
-          <DropdownMenuItem
-            variant="destructive"
-            onClick={() => removeWorkspace(projectName, worktree.branch)}
-          >
-            <Trash2 />
-            Delete workspace
-          </DropdownMenuItem>
+          {worktree.branch !== defaultBranch && (
+            <DropdownMenuItem
+              variant="destructive"
+              onClick={() => removeWorkspace(projectName, worktree.branch)}
+            >
+              <Trash2 />
+              Delete workspace
+            </DropdownMenuItem>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
-    </Card>
+    </div>
   );
 }

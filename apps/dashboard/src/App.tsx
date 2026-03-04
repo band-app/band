@@ -34,7 +34,7 @@ export default function App() {
   }, [loadProjects, loadSettings]);
 
   return (
-    <div className="min-h-screen flex flex-col bg-background text-foreground p-0">
+    <div className="h-screen w-screen overflow-hidden flex flex-col bg-background text-foreground p-0">
       <Separator />
 
       {error && (
@@ -76,7 +76,7 @@ export default function App() {
           list?.focus();
         }}
       >
-        <main className="px-2 py-4">
+        <main className="px-2 py-4 overflow-hidden">
           {view === "dashboard" ? <ProjectList /> : <SettingsPage onClose={() => setView("dashboard")} />}
         </main>
       </ScrollArea>
