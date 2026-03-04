@@ -31,9 +31,17 @@ export interface BandConfig {
   }[];
 }
 
+export type CodingAgentType = "claude-code";
+
+export interface CodingAgentConfig {
+  type: CodingAgentType;
+  command?: string;
+}
+
 export interface Settings {
   worktreesDir: string | null;
   defaults?: BandConfig;
+  codingAgent?: CodingAgentConfig;
 }
 
 interface SettingsState {
