@@ -92,14 +92,31 @@ pub fn project_init(path: String) -> Result<ProjectInfo, String> {
 pub fn project_list() -> Result<Vec<ProjectInfo>, String> {
     let mut app_state = state::load_state()?;
 
-    // Prune worktrees whose paths no longer exist on disk
+    // Refresh worktree info from git for each project
     let mut changed = false;
     for proj in &mut app_state.projects {
-        let before = proj.worktrees.len();
-        proj.worktrees
-            .retain(|wt| std::path::Path::new(&wt.path).exists());
-        if proj.worktrees.len() != before {
-            changed = true;
+        if let Ok(git_worktrees) = git::list_worktrees(&proj.path) {
+            let fresh: Vec<state::WorktreeState> = git_worktrees
+                .iter()
+                .filter(|wt| !wt.is_bare)
+                .map(|wt| state::WorktreeState {
+                    branch: wt.branch.clone(),
+                    path: wt.path.clone(),
+                    head: Some(wt.head.clone()),
+                })
+                .collect();
+            if proj.worktrees != fresh {
+                proj.worktrees = fresh;
+                changed = true;
+            }
+        } else {
+            // Git failed — fall back to pruning stale paths from state.json
+            let before = proj.worktrees.len();
+            proj.worktrees
+                .retain(|wt| std::path::Path::new(&wt.path).exists());
+            if proj.worktrees.len() != before {
+                changed = true;
+            }
         }
     }
     if changed {

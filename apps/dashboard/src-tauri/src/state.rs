@@ -12,7 +12,7 @@ pub struct ProjectState {
     pub worktrees: Vec<WorktreeState>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WorktreeState {
     pub branch: String,
     pub path: String,
