@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useCallback, useEffect, useState } from "react";
 import { useDashboardStore } from "@/stores/dashboard-store";
 
 export function useTunnel() {
@@ -12,7 +12,9 @@ export function useTunnel() {
       .then(setWebServerRunning)
       .catch(() => {});
     invoke<string | null>("tunnel_status")
-      .then((url) => { if (url) setTunnelUrl(url); })
+      .then((url) => {
+        if (url) setTunnelUrl(url);
+      })
       .catch(() => {});
   }, []);
 

@@ -1,5 +1,5 @@
-import { AgentInfo } from "@/stores/dashboard-store";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import type { AgentInfo } from "@/stores/dashboard-store";
 
 interface Props {
   agent?: AgentInfo;
@@ -10,13 +10,9 @@ export function AgentStatusBadge({ agent }: Props) {
     return null;
   }
 
-  const color =
-    agent.status === "working"
-      ? "bg-status-working"
-      : "bg-status-needs-attention";
+  const color = agent.status === "working" ? "bg-status-working" : "bg-status-needs-attention";
 
-  const tooltip =
-    agent.status === "working" ? "Agent running..." : "Agent done";
+  const tooltip = agent.status === "working" ? "Agent running..." : "Agent done";
 
   return (
     <Tooltip>

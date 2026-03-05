@@ -1,9 +1,4 @@
-export type AgentStatusType =
-  | "idle"
-  | "working"
-  | "needs_input"
-  | "error"
-  | "done";
+export type AgentStatusType = "idle" | "working" | "needs_input" | "error" | "done";
 
 export interface AgentInfo {
   name: string;

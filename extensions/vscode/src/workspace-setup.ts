@@ -1,13 +1,11 @@
 import * as vscode from "vscode";
-import { BandConfig, LayoutConfig, TerminalConfig, BrowserConfig } from "./config";
+import type { BandConfig, LayoutConfig } from "./config";
 
 export interface SetupResult {
   terminals: vscode.Terminal[];
 }
 
-export async function setupWorkspace(
-  config: BandConfig
-): Promise<SetupResult> {
+export async function setupWorkspace(config: BandConfig): Promise<SetupResult> {
   const terminals: vscode.Terminal[] = [];
 
   // Set editor layout if config has layout
@@ -68,16 +66,10 @@ async function setupEditorLayout(layout: LayoutConfig) {
   }
 }
 
-async function openBrowser(
-  url: string,
-  viewColumn: number,
-  pinned?: boolean
-) {
-  await vscode.commands.executeCommand(
-    "simpleBrowser.api.open",
-    vscode.Uri.parse(url),
-    { viewColumn: viewColumn }
-  );
+async function openBrowser(url: string, viewColumn: number, pinned?: boolean) {
+  await vscode.commands.executeCommand("simpleBrowser.api.open", vscode.Uri.parse(url), {
+    viewColumn: viewColumn,
+  });
   if (pinned) {
     await vscode.commands.executeCommand("workbench.action.pinEditor");
   }

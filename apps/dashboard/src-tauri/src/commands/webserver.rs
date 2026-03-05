@@ -14,9 +14,8 @@ const DEFAULT_WEB_SERVER_PORT: u16 = 3456;
 
 fn resolve_web_dir() -> Result<std::path::PathBuf, String> {
     // 1. Dev: CARGO_MANIFEST_DIR (compile-time)
-    let compile_time = option_env!("CARGO_MANIFEST_DIR").map(|d| {
-        std::path::Path::new(d).join("../../web")
-    });
+    let compile_time =
+        option_env!("CARGO_MANIFEST_DIR").map(|d| std::path::Path::new(d).join("../../web"));
     if let Some(ref p) = compile_time {
         if p.join("dist/server/server.js").exists() {
             return Ok(p.clone());
@@ -34,10 +33,7 @@ fn resolve_web_dir() -> Result<std::path::PathBuf, String> {
         }
     }
 
-    Err(
-        "Web server bundle not found. Run `pnpm -F @band/web build` first."
-            .to_string(),
-    )
+    Err("Web server bundle not found. Run `pnpm -F @band/web build` first.".to_string())
 }
 
 fn get_configured_port() -> u16 {
@@ -85,13 +81,14 @@ impl ManagedProcess {
     pub fn is_running(&self) -> bool {
         let mut guard = self.0.lock().unwrap();
         match *guard {
-            Some(ref mut child) => match child.try_wait() {
-                Ok(None) => true,
-                _ => {
+            Some(ref mut child) => {
+                if let Ok(None) = child.try_wait() {
+                    true
+                } else {
                     *guard = None;
                     false
                 }
-            },
+            }
             None => false,
         }
     }
@@ -147,7 +144,7 @@ pub fn webserver_start(state: State<'_, WebServerState>) -> Result<(), String> {
 
     let child = cmd
         .spawn()
-        .map_err(|e| format!("Failed to start web server: {}", e))?;
+        .map_err(|e| format!("Failed to start web server: {e}"))?;
 
     state.0.set(child);
     Ok(())
@@ -167,7 +164,7 @@ pub fn webserver_status(state: State<'_, WebServerState>) -> Result<bool, String
 #[tauri::command]
 pub async fn webserver_wait_ready() -> Result<(), String> {
     let port = get_configured_port();
-    let addr = format!("127.0.0.1:{}", port);
+    let addr = format!("127.0.0.1:{port}");
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
 
     loop {
@@ -176,8 +173,7 @@ pub async fn webserver_wait_ready() -> Result<(), String> {
         }
         if tokio::time::Instant::now() >= deadline {
             return Err(format!(
-                "Web server did not become ready on port {} within 10 seconds",
-                port
+                "Web server did not become ready on port {port} within 10 seconds"
             ));
         }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -193,7 +189,7 @@ pub fn tunnel_check() -> Result<bool, String> {
     let output = Command::new("which")
         .arg("cloudflared")
         .output()
-        .map_err(|e| format!("Failed to check cloudflared: {}", e))?;
+        .map_err(|e| format!("Failed to check cloudflared: {e}"))?;
     Ok(output.status.success())
 }
 
@@ -203,10 +199,10 @@ pub async fn tunnel_install() -> Result<(), String> {
         .args(["install", "cloudflared"])
         .output()
         .await
-        .map_err(|e| format!("Failed to run brew: {}", e))?;
+        .map_err(|e| format!("Failed to run brew: {e}"))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("brew install cloudflared failed: {}", stderr));
+        return Err(format!("brew install cloudflared failed: {stderr}"));
     }
     Ok(())
 }
@@ -225,14 +221,14 @@ pub fn tunnel_start(app: AppHandle, state: State<'_, TunnelState>) -> Result<(),
 
     let port = get_configured_port();
     let mut cmd = Command::new("cloudflared");
-    cmd.args(["tunnel", "--url", &format!("http://127.0.0.1:{}", port)])
+    cmd.args(["tunnel", "--url", &format!("http://127.0.0.1:{port}")])
         .stderr(Stdio::piped())
         .stdout(Stdio::null());
     set_process_group(&mut cmd);
 
     let mut child = cmd
         .spawn()
-        .map_err(|e| format!("Failed to start cloudflared: {}", e))?;
+        .map_err(|e| format!("Failed to start cloudflared: {e}"))?;
 
     let stderr = child.stderr.take().unwrap();
     guard.process.set(child);
@@ -245,13 +241,12 @@ pub fn tunnel_start(app: AppHandle, state: State<'_, TunnelState>) -> Result<(),
     std::thread::spawn(move || {
         let reader = BufReader::new(stderr);
         let mut found = false;
-        for line in reader.lines().flatten() {
+        for line in reader.lines().map_while(Result::ok) {
             if !found {
                 if let Some(start) = line.find("https://") {
                     let rest = &line[start..];
                     if rest.contains(".trycloudflare.com") {
-                        let url: String =
-                            rest.chars().take_while(|c| !c.is_whitespace()).collect();
+                        let url: String = rest.chars().take_while(|c| !c.is_whitespace()).collect();
                         if let Ok(mut guard) = tunnel_state.lock() {
                             guard.url = Some(url.clone());
                         }
@@ -267,7 +262,10 @@ pub fn tunnel_start(app: AppHandle, state: State<'_, TunnelState>) -> Result<(),
                 guard.process.kill();
                 guard.url = None;
             }
-            let _ = app_handle.emit("tunnel-error", "cloudflared exited without creating a tunnel");
+            let _ = app_handle.emit(
+                "tunnel-error",
+                "cloudflared exited without creating a tunnel",
+            );
         }
     });
 

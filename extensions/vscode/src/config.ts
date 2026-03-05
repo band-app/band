@@ -1,6 +1,6 @@
-import * as fs from "fs";
-import * as path from "path";
-import * as os from "os";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 
 export interface BrowserConfig {
   url: string;
@@ -35,9 +35,7 @@ export function getConfigPath(workspacePath: string): string {
   return path.join(workspacePath, ".band", "config.json");
 }
 
-export async function loadConfig(
-  workspacePath: string
-): Promise<BandConfig | null> {
+export async function loadConfig(workspacePath: string): Promise<BandConfig | null> {
   const configPath = getConfigPath(workspacePath);
 
   try {
@@ -60,7 +58,7 @@ export async function loadUserDefaults(): Promise<BandConfig | null> {
     const content = await fs.promises.readFile(settingsPath, "utf-8");
     const settings = JSON.parse(content);
 
-    if (settings && settings.defaults) {
+    if (settings?.defaults) {
       return settings.defaults as BandConfig;
     }
 

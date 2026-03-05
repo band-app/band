@@ -1,22 +1,22 @@
+import { Globe, Plus, Settings, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { ProjectList } from "@/components/ProjectList";
 import { AddProjectDialog } from "@/components/AddProjectDialog";
-import { TunnelDialog } from "@/components/TunnelDialog";
+import { ProjectList } from "@/components/ProjectList";
 import { SettingsPage } from "@/components/SettingsPage";
-import { useDashboardStore } from "@/stores/dashboard-store";
-import { useSettingsStore } from "@/stores/settings-store";
-import { useStatusWatcher, useActiveWorkspaceWatcher, useBranchStatusWatcher } from "@/hooks/use-status";
-import { useHooksSetup } from "@/hooks/use-hooks-setup";
-import { useTunnel } from "@/hooks/use-tunnel";
+import { TunnelDialog } from "@/components/TunnelDialog";
+import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { useHooksSetup } from "@/hooks/use-hooks-setup";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { Globe, Plus, Settings, X } from "lucide-react";
+  useActiveWorkspaceWatcher,
+  useBranchStatusWatcher,
+  useStatusWatcher,
+} from "@/hooks/use-status";
+import { useTunnel } from "@/hooks/use-tunnel";
+import { useDashboardStore } from "@/stores/dashboard-store";
+import { useSettingsStore } from "@/stores/settings-store";
 
 export default function App() {
   const loadProjects = useDashboardStore((s) => s.loadProjects);
@@ -26,7 +26,15 @@ export default function App() {
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [view, setView] = useState<"dashboard" | "settings">("dashboard");
   const { state: hooksState, install: installHooks } = useHooksSetup();
-  const { webServerRunning, tunnelUrl, setTunnelUrl, showDialog: showTunnelDialog, setShowDialog: setShowTunnelDialog, openDialog, handleStopped } = useTunnel();
+  const {
+    webServerRunning,
+    tunnelUrl,
+    setTunnelUrl,
+    showDialog: showTunnelDialog,
+    setShowDialog: setShowTunnelDialog,
+    openDialog,
+    handleStopped,
+  } = useTunnel();
 
   useStatusWatcher();
   useActiveWorkspaceWatcher();
@@ -60,12 +68,7 @@ export default function App() {
           <span className="text-blue-200">
             Install Claude Code hooks for agent status detection
           </span>
-          <Button
-            variant="outline"
-            size="sm"
-            className="shrink-0 text-xs"
-            onClick={installHooks}
-          >
+          <Button variant="outline" size="sm" className="shrink-0 text-xs" onClick={installHooks}>
             Install
           </Button>
         </div>
@@ -76,12 +79,18 @@ export default function App() {
         onClick={(e) => {
           const target = e.target as HTMLElement;
           if (target.closest("button, a, input, select, textarea")) return;
-          const list = (e.currentTarget as HTMLElement).querySelector<HTMLElement>('[tabindex="0"]');
+          const list = (e.currentTarget as HTMLElement).querySelector<HTMLElement>(
+            '[tabindex="0"]',
+          );
           list?.focus();
         }}
       >
         <main className="px-2 py-4 overflow-hidden">
-          {view === "dashboard" ? <ProjectList /> : <SettingsPage onClose={() => setView("dashboard")} />}
+          {view === "dashboard" ? (
+            <ProjectList />
+          ) : (
+            <SettingsPage onClose={() => setView("dashboard")} />
+          )}
         </main>
       </ScrollArea>
 
@@ -94,9 +103,7 @@ export default function App() {
               <Button
                 size="icon-xs"
                 variant="ghost"
-                onClick={() =>
-                  setView(view === "settings" ? "dashboard" : "settings")
-                }
+                onClick={() => setView(view === "settings" ? "dashboard" : "settings")}
               >
                 <Settings />
               </Button>
@@ -121,11 +128,7 @@ export default function App() {
         </div>
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button
-              size="icon-xs"
-              variant="ghost"
-              onClick={() => setShowAddDialog(true)}
-            >
+            <Button size="icon-xs" variant="ghost" onClick={() => setShowAddDialog(true)}>
               <Plus />
             </Button>
           </TooltipTrigger>
@@ -133,10 +136,7 @@ export default function App() {
         </Tooltip>
       </footer>
 
-      <AddProjectDialog
-        open={showAddDialog}
-        onOpenChange={setShowAddDialog}
-      />
+      <AddProjectDialog open={showAddDialog} onOpenChange={setShowAddDialog} />
 
       <TunnelDialog
         open={showTunnelDialog}

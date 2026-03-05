@@ -1,22 +1,19 @@
-export type {
-	SessionStartEvent,
-	TextDeltaEvent,
-	ToolUseEvent,
-	ToolResultEvent,
-	SessionResultEvent,
-	ErrorEvent,
-	AgentEvent,
-} from "./events.js";
-
-export type { CodingAgent, CodingAgentFeatures } from "./types.js";
-
 export {
-	codingAgentConfigSchema,
-	type CodingAgentConfig,
-	type ClaudeCodeConfig,
-	type CursorCliConfig,
-	type OpenAICodexConfig,
-	type GeminiCliConfig,
+  type ClaudeCodeConfig,
+  type CodingAgentConfig,
+  type CursorCliConfig,
+  codingAgentConfigSchema,
+  type GeminiCliConfig,
+  type OpenAICodexConfig,
 } from "./config.js";
-
+export type {
+  AgentEvent,
+  ErrorEvent,
+  SessionResultEvent,
+  SessionStartEvent,
+  TextDeltaEvent,
+  ToolResultEvent,
+  ToolUseEvent,
+} from "./events.js";
 export { createCodingAgent } from "./factory.js";
+export type { CodingAgent, CodingAgentFeatures } from "./types.js";
