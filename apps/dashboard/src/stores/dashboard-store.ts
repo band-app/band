@@ -54,7 +54,7 @@ export interface GitStatus {
   sync_state: GitSyncState;
 }
 
-export type CIState = "none" | "pending" | "running" | "success" | "failure" | "cancelled";
+export type CIState = "none" | "pending" | "running" | "success" | "failure" | "cancelled" | "merged";
 
 export interface CIStatus {
   state: CIState;

@@ -19,7 +19,7 @@ pub struct GitStatus {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CIStatus {
-    /// "none" | "pending" | "running" | "success" | "failure" | "cancelled"
+    /// "none" | "pending" | "running" | "success" | "failure" | "cancelled" | "merged"
     pub state: String,
     pub url: Option<String>,
 }
@@ -247,10 +247,31 @@ fn get_ci_status(worktree_path: &str, branch: &str) -> CIStatus {
         ("cancelled", first_url)
     };
 
-    CIStatus {
+    let ci = CIStatus {
         state: state.to_string(),
         url,
+    };
+
+    // Check if the branch has a merged PR — if so, override CI state
+    if let Ok(pr_output) = gh_cmd()
+        .args(["pr", "view", branch, "--json", "state,url"])
+        .current_dir(worktree_path)
+        .output()
+    {
+        if pr_output.status.success() {
+            let pr_text = String::from_utf8_lossy(&pr_output.stdout);
+            if let Ok(pr) = serde_json::from_str::<serde_json::Value>(&pr_text) {
+                if pr["state"].as_str() == Some("MERGED") {
+                    return CIStatus {
+                        state: "merged".to_string(),
+                        url: pr["url"].as_str().map(std::string::ToString::to_string),
+                    };
+                }
+            }
+        }
     }
+
+    ci
 }
 
 #[tauri::command]
