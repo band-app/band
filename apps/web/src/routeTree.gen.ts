@@ -14,6 +14,8 @@ import { Route as ChatWorkspaceIdRouteImport } from './routes/chat.$workspaceId'
 import { Route as ApiProjectsRouteImport } from './routes/api/projects'
 import { Route as ApiChatRouteImport } from './routes/api/chat'
 import { Route as ApiStatusStreamRouteImport } from './routes/api/status.stream'
+import { Route as ApiSessionsWorkspaceIdRouteImport } from './routes/api/sessions.$workspaceId'
+import { Route as ApiSessionsWorkspaceIdSessionIdMessagesRouteImport } from './routes/api/sessions.$workspaceId.$sessionId.messages'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -40,20 +42,35 @@ const ApiStatusStreamRoute = ApiStatusStreamRouteImport.update({
   path: '/api/status/stream',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiSessionsWorkspaceIdRoute = ApiSessionsWorkspaceIdRouteImport.update({
+  id: '/api/sessions/$workspaceId',
+  path: '/api/sessions/$workspaceId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiSessionsWorkspaceIdSessionIdMessagesRoute =
+  ApiSessionsWorkspaceIdSessionIdMessagesRouteImport.update({
+    id: '/$sessionId/messages',
+    path: '/$sessionId/messages',
+    getParentRoute: () => ApiSessionsWorkspaceIdRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/api/chat': typeof ApiChatRoute
   '/api/projects': typeof ApiProjectsRoute
   '/chat/$workspaceId': typeof ChatWorkspaceIdRoute
+  '/api/sessions/$workspaceId': typeof ApiSessionsWorkspaceIdRouteWithChildren
   '/api/status/stream': typeof ApiStatusStreamRoute
+  '/api/sessions/$workspaceId/$sessionId/messages': typeof ApiSessionsWorkspaceIdSessionIdMessagesRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/api/chat': typeof ApiChatRoute
   '/api/projects': typeof ApiProjectsRoute
   '/chat/$workspaceId': typeof ChatWorkspaceIdRoute
+  '/api/sessions/$workspaceId': typeof ApiSessionsWorkspaceIdRouteWithChildren
   '/api/status/stream': typeof ApiStatusStreamRoute
+  '/api/sessions/$workspaceId/$sessionId/messages': typeof ApiSessionsWorkspaceIdSessionIdMessagesRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -61,7 +78,9 @@ export interface FileRoutesById {
   '/api/chat': typeof ApiChatRoute
   '/api/projects': typeof ApiProjectsRoute
   '/chat/$workspaceId': typeof ChatWorkspaceIdRoute
+  '/api/sessions/$workspaceId': typeof ApiSessionsWorkspaceIdRouteWithChildren
   '/api/status/stream': typeof ApiStatusStreamRoute
+  '/api/sessions/$workspaceId/$sessionId/messages': typeof ApiSessionsWorkspaceIdSessionIdMessagesRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -70,21 +89,27 @@ export interface FileRouteTypes {
     | '/api/chat'
     | '/api/projects'
     | '/chat/$workspaceId'
+    | '/api/sessions/$workspaceId'
     | '/api/status/stream'
+    | '/api/sessions/$workspaceId/$sessionId/messages'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/api/chat'
     | '/api/projects'
     | '/chat/$workspaceId'
+    | '/api/sessions/$workspaceId'
     | '/api/status/stream'
+    | '/api/sessions/$workspaceId/$sessionId/messages'
   id:
     | '__root__'
     | '/'
     | '/api/chat'
     | '/api/projects'
     | '/chat/$workspaceId'
+    | '/api/sessions/$workspaceId'
     | '/api/status/stream'
+    | '/api/sessions/$workspaceId/$sessionId/messages'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -92,6 +117,7 @@ export interface RootRouteChildren {
   ApiChatRoute: typeof ApiChatRoute
   ApiProjectsRoute: typeof ApiProjectsRoute
   ChatWorkspaceIdRoute: typeof ChatWorkspaceIdRoute
+  ApiSessionsWorkspaceIdRoute: typeof ApiSessionsWorkspaceIdRouteWithChildren
   ApiStatusStreamRoute: typeof ApiStatusStreamRoute
 }
 
@@ -132,14 +158,44 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiStatusStreamRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/sessions/$workspaceId': {
+      id: '/api/sessions/$workspaceId'
+      path: '/api/sessions/$workspaceId'
+      fullPath: '/api/sessions/$workspaceId'
+      preLoaderRoute: typeof ApiSessionsWorkspaceIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/sessions/$workspaceId/$sessionId/messages': {
+      id: '/api/sessions/$workspaceId/$sessionId/messages'
+      path: '/$sessionId/messages'
+      fullPath: '/api/sessions/$workspaceId/$sessionId/messages'
+      preLoaderRoute: typeof ApiSessionsWorkspaceIdSessionIdMessagesRouteImport
+      parentRoute: typeof ApiSessionsWorkspaceIdRoute
+    }
   }
 }
+
+interface ApiSessionsWorkspaceIdRouteChildren {
+  ApiSessionsWorkspaceIdSessionIdMessagesRoute: typeof ApiSessionsWorkspaceIdSessionIdMessagesRoute
+}
+
+const ApiSessionsWorkspaceIdRouteChildren: ApiSessionsWorkspaceIdRouteChildren =
+  {
+    ApiSessionsWorkspaceIdSessionIdMessagesRoute:
+      ApiSessionsWorkspaceIdSessionIdMessagesRoute,
+  }
+
+const ApiSessionsWorkspaceIdRouteWithChildren =
+  ApiSessionsWorkspaceIdRoute._addFileChildren(
+    ApiSessionsWorkspaceIdRouteChildren,
+  )
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ApiChatRoute: ApiChatRoute,
   ApiProjectsRoute: ApiProjectsRoute,
   ChatWorkspaceIdRoute: ChatWorkspaceIdRoute,
+  ApiSessionsWorkspaceIdRoute: ApiSessionsWorkspaceIdRouteWithChildren,
   ApiStatusStreamRoute: ApiStatusStreamRoute,
 }
 export const routeTree = rootRouteImport

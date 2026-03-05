@@ -16,4 +16,9 @@ export type {
   ToolUseEvent,
 } from "./events.js";
 export { createCodingAgent } from "./factory.js";
-export type { CodingAgent, CodingAgentFeatures } from "./types.js";
+export type {
+  CodingAgent,
+  CodingAgentFeatures,
+  SessionListItem,
+  SessionMessageItem,
+} from "./types.js";

@@ -1,8 +1,9 @@
-import { query } from "@anthropic-ai/claude-agent-sdk";
+import type { SDKSessionInfo, SessionMessage } from "@anthropic-ai/claude-agent-sdk";
+import { getSessionMessages, listSessions, query } from "@anthropic-ai/claude-agent-sdk";
 import { createLogger } from "@band/logger";
 import type { ClaudeCodeConfig } from "../config.js";
 import type { AgentEvent } from "../events.js";
-import type { CodingAgent } from "../types.js";
+import type { CodingAgent, SessionListItem, SessionMessageItem } from "../types.js";
 
 const log = createLogger("coding-agent:claude-code");
 
@@ -10,6 +11,7 @@ export class ClaudeCodeAdapter implements CodingAgent {
   readonly name = "Claude Code";
   readonly supportedFeatures = {
     costTracking: true,
+    sessionListing: true,
   } as const;
 
   private readonly workspaceDir: string;
@@ -83,6 +85,82 @@ export class ClaudeCodeAdapter implements CodingAgent {
       conversation.close();
     }
   }
+
+  async listSessions(dir: string): Promise<SessionListItem[]> {
+    log.info({ dir }, "listSessions");
+    const sessions = await listSessions({ dir, limit: 50 });
+    return sessions.filter((s) => s.cwd === dir).map(mapSessionInfo);
+  }
+
+  async getSessionMessages(
+    sessionId: string,
+    dir: string,
+    options?: { limit?: number; offset?: number },
+  ): Promise<SessionMessageItem[]> {
+    log.info({ sessionId, dir, ...options }, "getSessionMessages");
+    const messages = await getSessionMessages(sessionId, {
+      dir,
+      limit: options?.limit,
+      offset: options?.offset,
+    });
+    return messages.map(mapSessionMessage);
+  }
+}
+
+function mapSessionInfo(info: SDKSessionInfo): SessionListItem {
+  return {
+    sessionId: info.sessionId,
+    summary: info.customTitle ?? info.summary ?? info.firstPrompt ?? "Untitled session",
+    lastModified: info.lastModified,
+    firstPrompt: info.firstPrompt,
+    gitBranch: info.gitBranch,
+  };
+}
+
+function mapSessionMessage(msg: SessionMessage): SessionMessageItem {
+  const content: SessionMessageItem["content"] = [];
+  const raw = msg.message as {
+    content?: Array<{
+      type: string;
+      text?: string;
+      id?: string;
+      name?: string;
+      input?: unknown;
+      tool_use_id?: string;
+      content?: unknown;
+      is_error?: boolean;
+    }>;
+  } | null;
+
+  if (raw?.content && Array.isArray(raw.content)) {
+    for (const block of raw.content) {
+      if (block.type === "text" && block.text) {
+        content.push({ type: "text", text: block.text });
+      } else if (block.type === "tool_use") {
+        content.push({
+          type: "tool_use",
+          toolCallId: block.id ?? "",
+          toolName: block.name ?? "unknown",
+          input: block.input ?? {},
+        });
+      } else if (block.type === "tool_result" && block.tool_use_id) {
+        const output =
+          typeof block.content === "string" ? block.content : JSON.stringify(block.content ?? "");
+        content.push({
+          type: "tool_result",
+          toolCallId: block.tool_use_id,
+          output,
+          isError: block.is_error ?? false,
+        });
+      }
+    }
+  }
+
+  return {
+    role: msg.type,
+    id: msg.uuid,
+    content,
+  };
 }
 
 interface ProcessedState {

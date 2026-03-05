@@ -11,6 +11,7 @@ export class GeminiCliAdapter implements CodingAgent {
   readonly name = "Gemini CLI";
   readonly supportedFeatures = {
     costTracking: false,
+    sessionListing: false,
   } as const;
 
   private readonly workspaceDir: string;

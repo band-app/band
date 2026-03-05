@@ -9,6 +9,7 @@ export class OpenAICodexAdapter implements CodingAgent {
   readonly name = "OpenAI Codex";
   readonly supportedFeatures = {
     costTracking: true,
+    sessionListing: false,
   } as const;
 
   private readonly workspaceDir: string;

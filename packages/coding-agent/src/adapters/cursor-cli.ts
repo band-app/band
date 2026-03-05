@@ -52,6 +52,7 @@ export class CursorCliAdapter implements CodingAgent {
   readonly name = "Cursor CLI";
   readonly supportedFeatures = {
     costTracking: false,
+    sessionListing: false,
   } as const;
 
   private readonly maxTurns: number;
