@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import { ProjectList } from "@/components/ProjectList";
 import { AddProjectDialog } from "@/components/AddProjectDialog";
+import { TunnelDialog } from "@/components/TunnelDialog";
 import { SettingsPage } from "@/components/SettingsPage";
 import { useDashboardStore } from "@/stores/dashboard-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useStatusWatcher, useActiveWorkspaceWatcher, useBranchStatusWatcher } from "@/hooks/use-status";
 import { useHooksSetup } from "@/hooks/use-hooks-setup";
+import { useTunnel } from "@/hooks/use-tunnel";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
@@ -14,7 +16,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Plus, Settings, X } from "lucide-react";
+import { Globe, Plus, Settings, X } from "lucide-react";
 
 export default function App() {
   const loadProjects = useDashboardStore((s) => s.loadProjects);
@@ -24,6 +26,7 @@ export default function App() {
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [view, setView] = useState<"dashboard" | "settings">("dashboard");
   const { state: hooksState, install: installHooks } = useHooksSetup();
+  const { webServerRunning, tunnelUrl, setTunnelUrl, showDialog: showTunnelDialog, setShowDialog: setShowTunnelDialog, openDialog, handleStopped } = useTunnel();
 
   useStatusWatcher();
   useActiveWorkspaceWatcher();
@@ -85,20 +88,37 @@ export default function App() {
       <Separator />
 
       <footer className="flex items-center justify-between px-4 py-2">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              size="icon-xs"
-              variant="ghost"
-              onClick={() =>
-                setView(view === "settings" ? "dashboard" : "settings")
-              }
-            >
-              <Settings />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Settings</TooltipContent>
-        </Tooltip>
+        <div className="flex items-center gap-1">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                onClick={() =>
+                  setView(view === "settings" ? "dashboard" : "settings")
+                }
+              >
+                <Settings />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Settings</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                className={webServerRunning ? "text-green-500" : ""}
+                onClick={openDialog}
+              >
+                <Globe />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {webServerRunning ? "Mobile access" : "Start web server"}
+            </TooltipContent>
+          </Tooltip>
+        </div>
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -116,6 +136,14 @@ export default function App() {
       <AddProjectDialog
         open={showAddDialog}
         onOpenChange={setShowAddDialog}
+      />
+
+      <TunnelDialog
+        open={showTunnelDialog}
+        onOpenChange={setShowTunnelDialog}
+        onStopped={handleStopped}
+        initialUrl={tunnelUrl}
+        onTunnelUrl={setTunnelUrl}
       />
     </div>
   );

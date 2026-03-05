@@ -4,6 +4,7 @@ mod state;
 
 use commands::branch_status::BranchStatusPollerState;
 use commands::status::WatcherState;
+use commands::webserver::{ManagedProcess, TunnelInner, TunnelState, WebServerState};
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
 
@@ -17,6 +18,11 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(WatcherState(Arc::new(Mutex::new(None))))
         .manage(BranchStatusPollerState(Arc::new(Mutex::new(None))))
+        .manage(WebServerState(ManagedProcess::new()))
+        .manage(TunnelState(Arc::new(Mutex::new(TunnelInner {
+            process: ManagedProcess::new(),
+            url: None,
+        }))))
         .invoke_handler(tauri::generate_handler![
             commands::project::project_init,
             commands::project::project_list,
@@ -38,6 +44,15 @@ pub fn run() {
             commands::settings::settings_update,
             commands::branch_status::branch_status_watch_start,
             commands::branch_status::branch_status_watch_stop,
+            commands::webserver::webserver_start,
+            commands::webserver::webserver_stop,
+            commands::webserver::webserver_status,
+            commands::webserver::webserver_wait_ready,
+            commands::webserver::tunnel_check,
+            commands::webserver::tunnel_install,
+            commands::webserver::tunnel_start,
+            commands::webserver::tunnel_stop,
+            commands::webserver::tunnel_status,
         ])
         .setup(|app| {
             let window = app.get_webview_window("main").unwrap();
@@ -82,8 +97,22 @@ pub fn run() {
             // (handles projects without the Band VS Code extension)
             commands::ide::start_focus_polling(app.handle().clone());
 
-            // Raise the active workspace's VS Code window when dashboard gains focus
+            // Kill web server and tunnel on app exit
+            let web_proc = app.state::<WebServerState>().inner().0.clone();
+            let tunnel_arc = app.state::<TunnelState>().inner().0.clone();
             window.on_window_event(move |event| {
+                if let tauri::WindowEvent::CloseRequested { .. } = event {
+                    if let Ok(mut tguard) = tunnel_arc.lock() {
+                        tguard.process.kill();
+                        tguard.url = None;
+                    }
+                    web_proc.kill();
+                }
+            });
+
+            // Raise the active workspace's VS Code window when dashboard gains focus
+            let window_ref = app.get_webview_window("main").unwrap();
+            window_ref.on_window_event(move |event| {
                 if let tauri::WindowEvent::Focused(true) = event {
                     // Read active workspace from marker file
                     let active_file = state::status_dir().join("active.json");

@@ -51,6 +51,8 @@ pub struct Settings {
     pub defaults: Option<serde_json::Value>,
     #[serde(rename = "codingAgent", skip_serializing_if = "Option::is_none")]
     pub coding_agent: Option<serde_json::Value>,
+    #[serde(rename = "webServerPort", skip_serializing_if = "Option::is_none")]
+    pub web_server_port: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notifications: Option<NotificationSettings>,
 }

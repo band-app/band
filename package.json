@@ -6,7 +6,9 @@
   "type": "module",
   "scripts": {
     "dev:dashboard": "pnpm --filter @band/dashboard tauri:dev",
+    "dev:web": "pnpm --filter @band/web dev",
     "build:dashboard": "pnpm --filter @band/dashboard tauri build",
+    "build:web": "pnpm --filter @band/web build",
     "build:extension": "pnpm --filter band-vscode build"
   }
 }

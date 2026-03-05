@@ -52,7 +52,7 @@ const DEFAULT_DEFAULTS = {
   ],
 };
 
-type Section = "menu" | "general" | "coding-agent" | "defaults" | "notifications";
+type Section = "menu" | "general" | "coding-agent" | "defaults" | "notifications" | "web-server";
 
 interface Props {
   onClose: () => void;
@@ -96,6 +96,9 @@ export function SettingsPage({ onClose }: Props) {
   const [agentCommand, setAgentCommand] = useState(
     settings.codingAgent?.command ?? "",
   );
+  const [webServerPort, setWebServerPort] = useState(
+    settings.webServerPort?.toString() ?? "",
+  );
   const [soundOnNeedsAttention, setSoundOnNeedsAttention] = useState(
     settings.notifications?.soundOnNeedsAttention ?? false,
   );
@@ -114,13 +117,14 @@ export function SettingsPage({ onClose }: Props) {
     );
     setAgentType(settings.codingAgent?.type ?? "");
     setAgentCommand(settings.codingAgent?.command ?? "");
+    setWebServerPort(settings.webServerPort?.toString() ?? "");
     setSoundOnNeedsAttention(
       settings.notifications?.soundOnNeedsAttention ?? false,
     );
     setSelectedSound(
       (settings.notifications?.sound as SoundId) ?? "chime",
     );
-  }, [settings.worktreesDir, settings.defaults, settings.codingAgent, settings.notifications]);
+  }, [settings.worktreesDir, settings.defaults, settings.codingAgent, settings.webServerPort, settings.notifications]);
 
   const handleBrowse = async () => {
     try {
@@ -168,10 +172,17 @@ export function SettingsPage({ onClose }: Props) {
         codingAgent.command = agentCommand.trim();
       }
     }
+    let parsedPort: number | undefined = undefined;
+    if (webServerPort.trim()) {
+      const n = parseInt(webServerPort.trim(), 10);
+      if (isNaN(n) || n <= 0 || n >= 65536) return;
+      parsedPort = n;
+    }
     await updateSettings({
       worktreesDir: worktreesDir.trim() || null,
       defaults,
       codingAgent,
+      webServerPort: parsedPort,
       notifications: { soundOnNeedsAttention, sound: selectedSound },
     });
   };
@@ -179,6 +190,7 @@ export function SettingsPage({ onClose }: Props) {
   const worktreesDirPreview = worktreesDir || "Default";
   const agentPreview = agentType ? AGENT_LABEL[agentType] : "None";
   const defaultsPreview = defaultsJson.trim() ? "Configured" : "None";
+  const portPreview = webServerPort || "3456";
   const notificationsPreview = soundOnNeedsAttention
     ? SOUNDS.find((s) => s.id === selectedSound)?.label ?? "On"
     : "Off";
@@ -199,6 +211,7 @@ export function SettingsPage({ onClose }: Props) {
             {section === "coding-agent" && "Coding Agent"}
             {section === "defaults" && "Workspace Settings"}
             {section === "notifications" && "Notifications"}
+            {section === "web-server" && "Web Server"}
           </h2>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -405,6 +418,30 @@ export function SettingsPage({ onClose }: Props) {
             )}
           </div>
         )}
+
+        {section === "web-server" && (
+          <div className="space-y-4 px-1">
+            <div className="space-y-2">
+              <Label htmlFor="web-server-port">Port</Label>
+              <Input
+                id="web-server-port"
+                type="number"
+                placeholder="3456 (default)"
+                value={webServerPort}
+                onChange={(e) => setWebServerPort(e.target.value)}
+                min={1}
+                max={65535}
+              />
+              <p className="text-xs text-muted-foreground">
+                Port the web server listens on for mobile access. Leave empty
+                for the default (3456). Requires restart.
+              </p>
+            </div>
+            <Button onClick={handleSave} size="sm">
+              Save
+            </Button>
+          </div>
+        )}
       </div>
     );
   }
@@ -440,6 +477,12 @@ export function SettingsPage({ onClose }: Props) {
           label="Notifications"
           value={notificationsPreview}
           onClick={() => setSection("notifications")}
+        />
+        <Separator />
+        <SettingsRow
+          label="Web Server"
+          value={portPreview}
+          onClick={() => setSection("web-server")}
         />
       </div>
     </div>
