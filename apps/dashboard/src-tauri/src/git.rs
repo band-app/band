@@ -5,7 +5,7 @@ pub fn git_cmd() -> Command {
     let mut cmd = Command::new("git");
     // Ensure git is found via Homebrew on macOS
     if let Ok(path) = std::env::var("PATH") {
-        cmd.env("PATH", format!("/opt/homebrew/bin:/usr/local/bin:{}", path));
+        cmd.env("PATH", format!("/opt/homebrew/bin:/usr/local/bin:{path}"));
     }
     cmd
 }
@@ -38,10 +38,10 @@ pub fn get_current_branch() -> Option<String> {
 }
 
 pub fn get_repo_name(path: &str) -> String {
-    Path::new(path)
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| "unknown".to_string())
+    Path::new(path).file_name().map_or_else(
+        || "unknown".to_string(),
+        |n| n.to_string_lossy().to_string(),
+    )
 }
 
 pub fn get_default_branch(path: &str) -> Result<String, String> {
@@ -50,7 +50,7 @@ pub fn get_default_branch(path: &str) -> Result<String, String> {
         .args(["symbolic-ref", "refs/remotes/origin/HEAD"])
         .current_dir(path)
         .output()
-        .map_err(|e| format!("Failed to run git: {}", e))?;
+        .map_err(|e| format!("Failed to run git: {e}"))?;
 
     if output.status.success() {
         let refname = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -65,7 +65,7 @@ pub fn get_default_branch(path: &str) -> Result<String, String> {
             .args(["rev-parse", "--verify", branch])
             .current_dir(path)
             .output()
-            .map_err(|e| format!("Failed to run git: {}", e))?;
+            .map_err(|e| format!("Failed to run git: {e}"))?;
         if output.status.success() {
             return Ok(branch.to_string());
         }
@@ -86,7 +86,7 @@ pub fn list_worktrees(repo_path: &str) -> Result<Vec<WorktreeInfo>, String> {
         .args(["worktree", "list", "--porcelain"])
         .current_dir(repo_path)
         .output()
-        .map_err(|e| format!("Failed to list worktrees: {}", e))?;
+        .map_err(|e| format!("Failed to list worktrees: {e}"))?;
 
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).to_string());
@@ -156,7 +156,7 @@ pub fn create_worktree(
         .args(&args)
         .current_dir(repo_path)
         .output()
-        .map_err(|e| format!("Failed to create worktree: {}", e))?;
+        .map_err(|e| format!("Failed to create worktree: {e}"))?;
 
     if output.status.success() {
         return Ok(());
@@ -167,7 +167,7 @@ pub fn create_worktree(
         .args(["worktree", "add", target_path, branch])
         .current_dir(repo_path)
         .output()
-        .map_err(|e| format!("Failed to create worktree: {}", e))?;
+        .map_err(|e| format!("Failed to create worktree: {e}"))?;
 
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).to_string());
@@ -181,7 +181,7 @@ pub fn remove_worktree(repo_path: &str, worktree_path: &str) -> Result<(), Strin
         .args(["worktree", "remove", "--force", worktree_path])
         .current_dir(repo_path)
         .output()
-        .map_err(|e| format!("Failed to remove worktree: {}", e))?;
+        .map_err(|e| format!("Failed to remove worktree: {e}"))?;
 
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).to_string());

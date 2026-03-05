@@ -41,7 +41,7 @@ pub struct BranchStatusPollerState(pub Arc<Mutex<Option<Arc<AtomicBool>>>>);
 fn gh_cmd() -> Command {
     let mut cmd = Command::new("gh");
     if let Ok(path) = std::env::var("PATH") {
-        cmd.env("PATH", format!("/opt/homebrew/bin:/usr/local/bin:{}", path));
+        cmd.env("PATH", format!("/opt/homebrew/bin:/usr/local/bin:{path}"));
     }
     cmd
 }
@@ -87,7 +87,12 @@ fn get_git_status(worktree_path: &str) -> GitStatus {
             .output()
             .ok()
             .filter(|o| o.status.success())
-            .and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse::<u32>().ok())
+            .and_then(|o| {
+                String::from_utf8_lossy(&o.stdout)
+                    .trim()
+                    .parse::<u32>()
+                    .ok()
+            })
             .unwrap_or(0);
 
         return GitStatus {
@@ -95,7 +100,11 @@ fn get_git_status(worktree_path: &str) -> GitStatus {
             conflict,
             ahead: commit_count,
             behind: 0,
-            sync_state: if commit_count > 0 { "ahead".to_string() } else { "synced".to_string() },
+            sync_state: if commit_count > 0 {
+                "ahead".to_string()
+            } else {
+                "synced".to_string()
+            },
         };
     }
 
@@ -108,7 +117,7 @@ fn get_git_status(worktree_path: &str) -> GitStatus {
     let (ahead, behind) = match rev_list {
         Ok(output) if output.status.success() => {
             let text = String::from_utf8_lossy(&output.stdout);
-            let parts: Vec<&str> = text.trim().split_whitespace().collect();
+            let parts: Vec<&str> = text.split_whitespace().collect();
             if parts.len() == 2 {
                 let a = parts[0].parse::<u32>().unwrap_or(0);
                 let b = parts[1].parse::<u32>().unwrap_or(0);
@@ -142,7 +151,7 @@ fn get_ci_status(worktree_path: &str, branch: &str) -> CIStatus {
         url: None,
     };
 
-    let output = match gh_cmd()
+    let Ok(output) = gh_cmd()
         .args([
             "run",
             "list",
@@ -155,9 +164,8 @@ fn get_ci_status(worktree_path: &str, branch: &str) -> CIStatus {
         ])
         .current_dir(worktree_path)
         .output()
-    {
-        Ok(o) => o,
-        Err(_) => return none,
+    else {
+        return none;
     };
 
     if !output.status.success() {
@@ -165,24 +173,21 @@ fn get_ci_status(worktree_path: &str, branch: &str) -> CIStatus {
     }
 
     let text = String::from_utf8_lossy(&output.stdout);
-    let runs: Vec<serde_json::Value> = match serde_json::from_str(&text) {
-        Ok(v) => v,
-        Err(_) => return none,
+    let Ok(runs) = serde_json::from_str::<Vec<serde_json::Value>>(&text) else {
+        return none;
     };
 
-    let run = match runs.first() {
-        Some(r) => r,
-        None => return none,
+    let Some(run) = runs.first() else {
+        return none;
     };
 
     let status = run["status"].as_str().unwrap_or("");
     let conclusion = run["conclusion"].as_str().unwrap_or("");
-    let url = run["url"].as_str().map(|s| s.to_string());
+    let url = run["url"].as_str().map(std::string::ToString::to_string);
 
     let state = match status {
         "completed" => match conclusion {
             "success" => "success",
-            "failure" | "timed_out" => "failure",
             "cancelled" | "skipped" => "cancelled",
             _ => "failure",
         },
@@ -222,17 +227,14 @@ pub fn branch_status_watch_start(app: AppHandle) -> Result<(), String> {
                 break;
             }
 
-            let app_state = match state::load_state() {
-                Ok(s) => s,
-                Err(_) => {
-                    std::thread::sleep(std::time::Duration::from_secs(5));
-                    tick_count += 1;
-                    continue;
-                }
+            let Ok(app_state) = state::load_state() else {
+                std::thread::sleep(std::time::Duration::from_secs(5));
+                tick_count += 1;
+                continue;
             };
 
             // CI poll every 30s (6 ticks of 5s), git fetch at same cadence
-            let do_ci = tick_count % 6 == 0;
+            let do_ci = tick_count.is_multiple_of(6);
 
             // Parallel git fetch at CI cadence — per unique project path
             if do_ci {

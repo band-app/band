@@ -1,25 +1,19 @@
-import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { Loader2 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
+import { useCallback, useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
-  DialogHeader,
-  DialogTitle,
   DialogDescription,
   DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Loader2 } from "lucide-react";
 
-type TunnelStep =
-  | "checking"
-  | "not_installed"
-  | "installing"
-  | "connecting"
-  | "ready"
-  | "error";
+type TunnelStep = "checking" | "not_installed" | "installing" | "connecting" | "ready" | "error";
 
 interface Props {
   open: boolean;
@@ -142,8 +136,8 @@ export function TunnelDialog({ open, onOpenChange, onStopped, initialUrl, onTunn
           </DialogTitle>
           {step === "not_installed" && (
             <DialogDescription>
-              cloudflared is needed to create a secure tunnel so you can access
-              the dashboard from your phone.
+              cloudflared is needed to create a secure tunnel so you can access the dashboard from
+              your phone.
             </DialogDescription>
           )}
         </DialogHeader>
@@ -152,9 +146,7 @@ export function TunnelDialog({ open, onOpenChange, onStopped, initialUrl, onTunn
           {step === "checking" && (
             <>
               <Loader2 className="size-8 animate-spin text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">
-                Checking cloudflared...
-              </p>
+              <p className="text-sm text-muted-foreground">Checking cloudflared...</p>
             </>
           )}
 
@@ -165,18 +157,14 @@ export function TunnelDialog({ open, onOpenChange, onStopped, initialUrl, onTunn
           {step === "installing" && (
             <>
               <Loader2 className="size-8 animate-spin text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">
-                Installing cloudflared...
-              </p>
+              <p className="text-sm text-muted-foreground">Installing cloudflared...</p>
             </>
           )}
 
           {step === "connecting" && (
             <>
               <Loader2 className="size-8 animate-spin text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">
-                Creating tunnel...
-              </p>
+              <p className="text-sm text-muted-foreground">Creating tunnel...</p>
             </>
           )}
 

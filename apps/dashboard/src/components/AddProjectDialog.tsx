@@ -1,17 +1,17 @@
+import { FolderOpen } from "lucide-react";
 import { useState } from "react";
-import { useDashboardStore } from "@/stores/dashboard-store";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
-  DialogHeader,
-  DialogTitle,
   DialogDescription,
   DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { FolderOpen } from "lucide-react";
+import { useDashboardStore } from "@/stores/dashboard-store";
 
 interface Props {
   open: boolean;
@@ -46,9 +46,7 @@ export function AddProjectDialog({ open, onOpenChange }: Props) {
         <form onSubmit={handleSubmit}>
           <DialogHeader>
             <DialogTitle>Register Project</DialogTitle>
-            <DialogDescription>
-              Add a git repository to manage its workspaces.
-            </DialogDescription>
+            <DialogDescription>Add a git repository to manage its workspaces.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-3 py-4">
             <Label htmlFor="project-path">Repository path</Label>
@@ -60,22 +58,13 @@ export function AddProjectDialog({ open, onOpenChange }: Props) {
                 onChange={(e) => setPath(e.target.value)}
                 autoFocus
               />
-              <Button
-                type="button"
-                variant="outline"
-                size="icon-xs"
-                onClick={handleBrowse}
-              >
+              <Button type="button" variant="outline" size="icon-xs" onClick={handleBrowse}>
                 <FolderOpen />
               </Button>
             </div>
           </div>
           <DialogFooter>
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => onOpenChange(false)}
-            >
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
             <Button type="submit">Add Project</Button>

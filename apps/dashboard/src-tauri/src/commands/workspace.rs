@@ -3,30 +3,30 @@ use crate::git;
 use crate::state;
 
 #[tauri::command]
-pub fn workspace_create(project: String, branch: String, base: Option<String>) -> Result<(), String> {
+pub fn workspace_create(
+    project: String,
+    branch: String,
+    base: Option<String>,
+) -> Result<(), String> {
     let mut app_state = state::load_state()?;
 
     let proj = app_state
         .projects
         .iter_mut()
         .find(|p| p.name == project)
-        .ok_or_else(|| format!("Project '{}' not found", project))?;
+        .ok_or_else(|| format!("Project '{project}' not found"))?;
 
     // Already tracked in state — nothing to do
     if proj.worktrees.iter().any(|wt| wt.branch == branch) {
         return Ok(());
     }
 
-    let target_path = state::worktrees_dir()
-        .join(&project)
-        .join(&branch);
+    let target_path = state::worktrees_dir().join(&project).join(&branch);
     let target_path_str = target_path.to_string_lossy().to_string();
 
     // Only create the git worktree if it doesn't already exist on disk
     if !target_path.exists() {
-        let base_branch = base
-            .as_deref()
-            .unwrap_or(&proj.default_branch);
+        let base_branch = base.as_deref().unwrap_or(&proj.default_branch);
 
         git::create_worktree(&proj.path, &branch, &target_path_str, Some(base_branch))?;
     }
@@ -48,7 +48,7 @@ pub fn workspace_list(project: String) -> Result<Vec<state::WorktreeState>, Stri
         .projects
         .iter()
         .find(|p| p.name == project)
-        .ok_or_else(|| format!("Project '{}' not found", project))?;
+        .ok_or_else(|| format!("Project '{project}' not found"))?;
 
     Ok(proj.worktrees.clone())
 }
@@ -61,13 +61,13 @@ pub fn workspace_remove(project: String, branch: String) -> Result<(), String> {
         .projects
         .iter_mut()
         .find(|p| p.name == project)
-        .ok_or_else(|| format!("Project '{}' not found", project))?;
+        .ok_or_else(|| format!("Project '{project}' not found"))?;
 
     let wt = proj
         .worktrees
         .iter()
         .find(|wt| wt.branch == branch)
-        .ok_or_else(|| format!("Worktree '{}' not found", branch))?;
+        .ok_or_else(|| format!("Worktree '{branch}' not found"))?;
 
     let worktree_path = wt.path.clone();
     let project_path = proj.path.clone();
@@ -77,7 +77,7 @@ pub fn workspace_remove(project: String, branch: String) -> Result<(), String> {
     state::save_state(&app_state)?;
 
     // Clean up status file
-    let status_file = state::status_dir().join(format!("{}-{}.json", project, branch));
+    let status_file = state::status_dir().join(format!("{project}-{branch}.json"));
     let _ = std::fs::remove_file(status_file);
 
     // Do heavy cleanup (close IDE, remove worktree from disk) in a background thread
@@ -138,5 +138,5 @@ pub fn workspace_open(workspace_id: String) -> Result<(), String> {
         }
     }
 
-    Err(format!("Workspace '{}' not found", workspace_id))
+    Err(format!("Workspace '{workspace_id}' not found"))
 }

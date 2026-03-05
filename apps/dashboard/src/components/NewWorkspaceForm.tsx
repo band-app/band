@@ -1,16 +1,16 @@
 import { useState } from "react";
-import { useDashboardStore } from "@/stores/dashboard-store";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
-  DialogHeader,
-  DialogTitle,
   DialogDescription,
   DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useDashboardStore } from "@/stores/dashboard-store";
 
 interface Props {
   projectName: string;
@@ -38,9 +38,7 @@ export function NewWorkspaceDialog({ projectName, open, onOpenChange }: Props) {
         <form onSubmit={handleSubmit}>
           <DialogHeader>
             <DialogTitle>Add Workspace</DialogTitle>
-            <DialogDescription>
-              Create a new worktree branch for {projectName}.
-            </DialogDescription>
+            <DialogDescription>Create a new worktree branch for {projectName}.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-3 py-4">
             <Label htmlFor="branch-name">Branch name</Label>
@@ -66,11 +64,7 @@ export function NewWorkspaceDialog({ projectName, open, onOpenChange }: Props) {
             />
           </div>
           <DialogFooter>
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => onOpenChange(false)}
-            >
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
             <Button type="submit">Create</Button>

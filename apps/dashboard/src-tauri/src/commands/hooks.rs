@@ -32,8 +32,8 @@ pub fn hooks_check() -> Result<HooksStatus, String> {
     let settings_path = claude_settings_path();
     let settings: serde_json::Value = if settings_path.exists() {
         let data = fs::read_to_string(&settings_path)
-            .map_err(|e| format!("Failed to read settings: {}", e))?;
-        serde_json::from_str(&data).map_err(|e| format!("Failed to parse settings: {}", e))?
+            .map_err(|e| format!("Failed to read settings: {e}"))?;
+        serde_json::from_str(&data).map_err(|e| format!("Failed to parse settings: {e}"))?
     } else {
         serde_json::json!({})
     };
@@ -48,13 +48,10 @@ pub fn hooks_check() -> Result<HooksStatus, String> {
         for (_event, matcher_list) in hooks_obj {
             if let Some(matchers) = matcher_list.as_array() {
                 for matcher_entry in matchers {
-                    if let Some(hook_arr) = matcher_entry.get("hooks").and_then(|h| h.as_array())
-                    {
+                    if let Some(hook_arr) = matcher_entry.get("hooks").and_then(|h| h.as_array()) {
                         for hook in hook_arr {
-                            let command = hook
-                                .get("command")
-                                .and_then(|c| c.as_str())
-                                .unwrap_or("");
+                            let command =
+                                hook.get("command").and_then(|c| c.as_str()).unwrap_or("");
                             if is_band_hook(command) {
                                 installed = true;
                             } else {
@@ -87,26 +84,24 @@ const BAND_HOOK_EVENTS: &[&str] = &[
 pub fn hooks_install() -> Result<(), String> {
     // Create hooks dir and write notify.sh
     let hooks_dir = hooks_dir();
-    fs::create_dir_all(&hooks_dir)
-        .map_err(|e| format!("Failed to create hooks dir: {}", e))?;
+    fs::create_dir_all(&hooks_dir).map_err(|e| format!("Failed to create hooks dir: {e}"))?;
 
     let script_path = hooks_dir.join("notify.sh");
     fs::write(&script_path, NOTIFY_SCRIPT)
-        .map_err(|e| format!("Failed to write notify.sh: {}", e))?;
+        .map_err(|e| format!("Failed to write notify.sh: {e}"))?;
 
     fs::set_permissions(&script_path, fs::Permissions::from_mode(0o755))
-        .map_err(|e| format!("Failed to chmod notify.sh: {}", e))?;
+        .map_err(|e| format!("Failed to chmod notify.sh: {e}"))?;
 
     // Read existing Claude settings
     let settings_path = claude_settings_path();
     let claude_dir = settings_path.parent().unwrap();
-    fs::create_dir_all(claude_dir)
-        .map_err(|e| format!("Failed to create ~/.claude: {}", e))?;
+    fs::create_dir_all(claude_dir).map_err(|e| format!("Failed to create ~/.claude: {e}"))?;
 
     let mut settings: serde_json::Value = if settings_path.exists() {
         let data = fs::read_to_string(&settings_path)
-            .map_err(|e| format!("Failed to read settings: {}", e))?;
-        serde_json::from_str(&data).map_err(|e| format!("Failed to parse settings: {}", e))?
+            .map_err(|e| format!("Failed to read settings: {e}"))?;
+        serde_json::from_str(&data).map_err(|e| format!("Failed to parse settings: {e}"))?
     } else {
         serde_json::json!({})
     };
@@ -122,9 +117,7 @@ pub fn hooks_install() -> Result<(), String> {
     // Format: { "EventName": [{ "hooks": [{ "type": "command", "command": "..." }] }] }
     // matcher is a regex string; omit it to match all occurrences
     for &event in BAND_HOOK_EVENTS {
-        let matcher_list = hooks
-            .entry(event)
-            .or_insert_with(|| serde_json::json!([]));
+        let matcher_list = hooks.entry(event).or_insert_with(|| serde_json::json!([]));
 
         if let Some(arr) = matcher_list.as_array_mut() {
             // Remove matcher entries that contain Band hooks
@@ -151,10 +144,9 @@ pub fn hooks_install() -> Result<(), String> {
     }
 
     let output = serde_json::to_string_pretty(&settings)
-        .map_err(|e| format!("Failed to serialize settings: {}", e))?;
+        .map_err(|e| format!("Failed to serialize settings: {e}"))?;
 
-    fs::write(&settings_path, output)
-        .map_err(|e| format!("Failed to write settings: {}", e))?;
+    fs::write(&settings_path, output).map_err(|e| format!("Failed to write settings: {e}"))?;
 
     Ok(())
 }
