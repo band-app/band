@@ -373,7 +373,7 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
       ref={containerRef}
       tabIndex={-1}
       onKeyDown={handleKeyDown}
-      className="flex flex-col gap-2 outline-none min-w-0"
+      className="flex flex-col gap-1 outline-none min-w-0"
     >
       <DndContext
         sensors={sensors}
@@ -384,7 +384,7 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
         <SortableContext items={allProjectNames} strategy={verticalListSortingStrategy}>
           {visibleGroups.map((group, groupIndex) => (
             <div key={group.labelId ?? "__unlabeled"}>
-              {groupIndex > 0 && <hr className="border-border my-2" />}
+              {groupIndex > 0 && <hr className="border-border my-1" />}
               {labels.length > 0 && !labelFilter && (
                 group.label ? (
                   <DroppableLabelHeader labelId={group.labelId!} label={group.label} />
@@ -394,7 +394,7 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
               )}
               {group.projects.map((project, index) => (
                 <div key={project.name}>
-                  {index > 0 && <hr className="border-border mb-2" />}
+                  {index > 0 && <hr className="border-border mb-1" />}
                   <SortableProject
                     project={project}
                     statuses={statuses}
