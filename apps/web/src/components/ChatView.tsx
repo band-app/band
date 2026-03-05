@@ -1,5 +1,5 @@
 import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport, getToolName, isToolUIPart } from "ai";
+import { DefaultChatTransport, isToolUIPart } from "ai";
 import { Bot, Loader2 } from "lucide-react";
 import { useCallback, useMemo, useRef } from "react";
 import {
@@ -8,10 +8,11 @@ import {
   ConversationEmptyState,
   ConversationScrollButton,
 } from "./ai-elements/conversation";
+import { groupMessageParts } from "./ai-elements/group-parts";
 import { Message, MessageContent, MessageResponse } from "./ai-elements/message";
 import type { PromptInputMessage } from "./ai-elements/prompt-input";
 import { PromptInput, PromptInputSubmit, PromptInputTextarea } from "./ai-elements/prompt-input";
-import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from "./ai-elements/tool";
+import { ToolCallGroup } from "./ai-elements/tool-call-group";
 
 function ThinkingIndicator() {
   return (
@@ -90,42 +91,24 @@ export function ChatView({ workspaceId, workspaceName }: ChatViewProps) {
             return (
               <Message key={message.id} from={message.role}>
                 <MessageContent>
-                  {message.parts.map((part) => {
-                    if (part.type === "text" && part.text.trim()) {
-                      return (
-                        <MessageResponse
-                          key={`${message.id}-${part.type}-${part.text.slice(0, 32)}`}
-                        >
-                          {part.text}
-                        </MessageResponse>
-                      );
+                  {groupMessageParts(message.parts).map((segment) => {
+                    if (segment.type === "text") {
+                      const { part, partIndex } = segment;
+                      if (part.type === "text" && part.text.trim()) {
+                        return (
+                          <MessageResponse key={`${message.id}-text-${partIndex}`}>
+                            {part.text}
+                          </MessageResponse>
+                        );
+                      }
+                      return null;
                     }
-                    if (isToolUIPart(part)) {
-                      const toolName = getToolName(part);
-                      const headerProps =
-                        part.type === "dynamic-tool"
-                          ? {
-                              type: part.type,
-                              state: part.state,
-                              toolName,
-                              title: toolName,
-                            }
-                          : {
-                              type: part.type,
-                              state: part.state,
-                              title: toolName,
-                            };
-                      return (
-                        <Tool key={part.toolCallId}>
-                          <ToolHeader {...headerProps} />
-                          <ToolContent>
-                            <ToolInput input={part.input} />
-                            <ToolOutput output={part.output} errorText={part.errorText} />
-                          </ToolContent>
-                        </Tool>
-                      );
-                    }
-                    return null;
+                    return (
+                      <ToolCallGroup
+                        key={`${message.id}-tools-${segment.startIndex}`}
+                        segment={segment}
+                      />
+                    );
                   })}
                   {showThinking && <ThinkingIndicator />}
                 </MessageContent>
