@@ -33,11 +33,18 @@ pub fn workspace_create(
 
     proj.worktrees.push(state::WorktreeState {
         branch: branch.clone(),
-        path: target_path_str,
+        path: target_path_str.clone(),
         head: None,
     });
 
     state::save_state(&app_state)?;
+
+    // Run setup script if configured
+    let config = state::load_project_config(&target_path_str);
+    if let Some(setup) = &config.setup {
+        state::run_script(setup, &target_path_str)?;
+    }
+
     Ok(())
 }
 
@@ -82,6 +89,12 @@ pub fn workspace_remove(project: String, branch: String) -> Result<(), String> {
 
     // Do heavy cleanup (close IDE, remove worktree from disk) in a background thread
     std::thread::spawn(move || {
+        // Run teardown script if configured
+        let config = state::load_project_config(&worktree_path);
+        if let Some(teardown) = &config.teardown {
+            let _ = state::run_script(teardown, &worktree_path);
+        }
+
         ide::close_workspace(&worktree_path);
 
         if std::path::Path::new(&worktree_path).exists() {
