@@ -12,6 +12,35 @@ const DEFAULT_WEB_SERVER_PORT: u16 = 3456;
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// Resolve the user's full PATH by asking their login shell.
+/// macOS GUI apps get a minimal PATH that doesn't include version managers
+/// (nvm, fnm, volta) or Homebrew, so we need the shell's PATH.
+fn resolve_shell_path() -> String {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    let fallback = std::env::var("PATH").unwrap_or_default();
+
+    Command::new(&shell)
+        .args(["-l", "-c", "echo $PATH"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .ok()
+        .and_then(|o| {
+            if o.status.success() {
+                String::from_utf8(o.stdout)
+                    .ok()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| {
+            format!("/opt/homebrew/bin:/usr/local/bin:{fallback}")
+        })
+}
+// ---------------------------------------------------------------------------
+
 fn resolve_web_dir() -> Result<std::path::PathBuf, String> {
     // 1. Dev: CARGO_MANIFEST_DIR (compile-time)
     let compile_time =
@@ -157,15 +186,20 @@ pub fn webserver_start(
     let mut cmd = Command::new("node");
     cmd.arg(&start_script)
         .current_dir(&web_dir)
+        .env("PATH", resolve_shell_path())
         .env("PORT", port.to_string())
         .env("BAND_TOKEN_SECRET", &secret)
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     set_process_group(&mut cmd);
 
-    let child = cmd
-        .spawn()
-        .map_err(|e| format!("Failed to start web server: {e}"))?;
+    let child = cmd.spawn().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            "Node.js is required but not installed. Install it from https://nodejs.org".to_string()
+        } else {
+            format!("Failed to start web server: {e}")
+        }
+    })?;
 
     state.0.set(child);
     Ok(())
@@ -254,6 +288,7 @@ pub async fn webserver_get_token(
 pub fn tunnel_check() -> Result<bool, String> {
     let output = Command::new("which")
         .arg("cloudflared")
+        .env("PATH", resolve_shell_path())
         .output()
         .map_err(|e| format!("Failed to check cloudflared: {e}"))?;
     Ok(output.status.success())
@@ -261,8 +296,10 @@ pub fn tunnel_check() -> Result<bool, String> {
 
 #[tauri::command]
 pub async fn tunnel_install() -> Result<(), String> {
+    let path = resolve_shell_path();
     let output = tokio::process::Command::new("brew")
         .args(["install", "cloudflared"])
+        .env("PATH", path)
         .output()
         .await
         .map_err(|e| format!("Failed to run brew: {e}"))?;
@@ -293,6 +330,7 @@ pub fn tunnel_start(
     let port = get_configured_port();
     let mut cmd = Command::new("cloudflared");
     cmd.args(["tunnel", "--url", &format!("http://127.0.0.1:{port}")])
+        .env("PATH", resolve_shell_path())
         .stderr(Stdio::piped())
         .stdout(Stdio::null());
     set_process_group(&mut cmd);
