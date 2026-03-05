@@ -76,6 +76,7 @@ interface DashboardState {
   loadProjects: () => Promise<void>;
   addProject: (path: string) => Promise<void>;
   removeProject: (name: string) => Promise<void>;
+  reorderProjects: (projectNames: string[]) => Promise<void>;
   createWorkspace: (project: string, branch: string, base?: string) => Promise<void>;
   removeWorkspace: (project: string, branch: string) => Promise<void>;
   openWorkspace: (workspaceId: string) => void;
@@ -122,6 +123,20 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
       await get().loadProjects();
     } catch (e) {
       set({ error: String(e) });
+    }
+  },
+
+  reorderProjects: async (projectNames: string[]) => {
+    const previousProjects = get().projects;
+    const reordered = [...previousProjects].sort(
+      (a, b) => projectNames.indexOf(a.name) - projectNames.indexOf(b.name),
+    );
+    set({ projects: reordered });
+
+    try {
+      await invoke("project_reorder", { names: projectNames });
+    } catch (e) {
+      set({ projects: previousProjects, error: String(e) });
     }
   },
 

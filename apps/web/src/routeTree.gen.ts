@@ -15,6 +15,7 @@ import { Route as ApiProjectsRouteImport } from './routes/api/projects'
 import { Route as ApiChatRouteImport } from './routes/api/chat'
 import { Route as ApiStatusStreamRouteImport } from './routes/api/status.stream'
 import { Route as ApiSessionsWorkspaceIdRouteImport } from './routes/api/sessions.$workspaceId'
+import { Route as ApiProjectsReorderRouteImport } from './routes/api/projects.reorder'
 import { Route as ApiSessionsWorkspaceIdSessionIdMessagesRouteImport } from './routes/api/sessions.$workspaceId.$sessionId.messages'
 
 const IndexRoute = IndexRouteImport.update({
@@ -47,6 +48,11 @@ const ApiSessionsWorkspaceIdRoute = ApiSessionsWorkspaceIdRouteImport.update({
   path: '/api/sessions/$workspaceId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiProjectsReorderRoute = ApiProjectsReorderRouteImport.update({
+  id: '/reorder',
+  path: '/reorder',
+  getParentRoute: () => ApiProjectsRoute,
+} as any)
 const ApiSessionsWorkspaceIdSessionIdMessagesRoute =
   ApiSessionsWorkspaceIdSessionIdMessagesRouteImport.update({
     id: '/$sessionId/messages',
@@ -57,8 +63,9 @@ const ApiSessionsWorkspaceIdSessionIdMessagesRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/api/chat': typeof ApiChatRoute
-  '/api/projects': typeof ApiProjectsRoute
+  '/api/projects': typeof ApiProjectsRouteWithChildren
   '/chat/$workspaceId': typeof ChatWorkspaceIdRoute
+  '/api/projects/reorder': typeof ApiProjectsReorderRoute
   '/api/sessions/$workspaceId': typeof ApiSessionsWorkspaceIdRouteWithChildren
   '/api/status/stream': typeof ApiStatusStreamRoute
   '/api/sessions/$workspaceId/$sessionId/messages': typeof ApiSessionsWorkspaceIdSessionIdMessagesRoute
@@ -66,8 +73,9 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/api/chat': typeof ApiChatRoute
-  '/api/projects': typeof ApiProjectsRoute
+  '/api/projects': typeof ApiProjectsRouteWithChildren
   '/chat/$workspaceId': typeof ChatWorkspaceIdRoute
+  '/api/projects/reorder': typeof ApiProjectsReorderRoute
   '/api/sessions/$workspaceId': typeof ApiSessionsWorkspaceIdRouteWithChildren
   '/api/status/stream': typeof ApiStatusStreamRoute
   '/api/sessions/$workspaceId/$sessionId/messages': typeof ApiSessionsWorkspaceIdSessionIdMessagesRoute
@@ -76,8 +84,9 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/api/chat': typeof ApiChatRoute
-  '/api/projects': typeof ApiProjectsRoute
+  '/api/projects': typeof ApiProjectsRouteWithChildren
   '/chat/$workspaceId': typeof ChatWorkspaceIdRoute
+  '/api/projects/reorder': typeof ApiProjectsReorderRoute
   '/api/sessions/$workspaceId': typeof ApiSessionsWorkspaceIdRouteWithChildren
   '/api/status/stream': typeof ApiStatusStreamRoute
   '/api/sessions/$workspaceId/$sessionId/messages': typeof ApiSessionsWorkspaceIdSessionIdMessagesRoute
@@ -89,6 +98,7 @@ export interface FileRouteTypes {
     | '/api/chat'
     | '/api/projects'
     | '/chat/$workspaceId'
+    | '/api/projects/reorder'
     | '/api/sessions/$workspaceId'
     | '/api/status/stream'
     | '/api/sessions/$workspaceId/$sessionId/messages'
@@ -98,6 +108,7 @@ export interface FileRouteTypes {
     | '/api/chat'
     | '/api/projects'
     | '/chat/$workspaceId'
+    | '/api/projects/reorder'
     | '/api/sessions/$workspaceId'
     | '/api/status/stream'
     | '/api/sessions/$workspaceId/$sessionId/messages'
@@ -107,6 +118,7 @@ export interface FileRouteTypes {
     | '/api/chat'
     | '/api/projects'
     | '/chat/$workspaceId'
+    | '/api/projects/reorder'
     | '/api/sessions/$workspaceId'
     | '/api/status/stream'
     | '/api/sessions/$workspaceId/$sessionId/messages'
@@ -115,7 +127,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ApiChatRoute: typeof ApiChatRoute
-  ApiProjectsRoute: typeof ApiProjectsRoute
+  ApiProjectsRoute: typeof ApiProjectsRouteWithChildren
   ChatWorkspaceIdRoute: typeof ChatWorkspaceIdRoute
   ApiSessionsWorkspaceIdRoute: typeof ApiSessionsWorkspaceIdRouteWithChildren
   ApiStatusStreamRoute: typeof ApiStatusStreamRoute
@@ -165,6 +177,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiSessionsWorkspaceIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/projects/reorder': {
+      id: '/api/projects/reorder'
+      path: '/reorder'
+      fullPath: '/api/projects/reorder'
+      preLoaderRoute: typeof ApiProjectsReorderRouteImport
+      parentRoute: typeof ApiProjectsRoute
+    }
     '/api/sessions/$workspaceId/$sessionId/messages': {
       id: '/api/sessions/$workspaceId/$sessionId/messages'
       path: '/$sessionId/messages'
@@ -174,6 +193,18 @@ declare module '@tanstack/react-router' {
     }
   }
 }
+
+interface ApiProjectsRouteChildren {
+  ApiProjectsReorderRoute: typeof ApiProjectsReorderRoute
+}
+
+const ApiProjectsRouteChildren: ApiProjectsRouteChildren = {
+  ApiProjectsReorderRoute: ApiProjectsReorderRoute,
+}
+
+const ApiProjectsRouteWithChildren = ApiProjectsRoute._addFileChildren(
+  ApiProjectsRouteChildren,
+)
 
 interface ApiSessionsWorkspaceIdRouteChildren {
   ApiSessionsWorkspaceIdSessionIdMessagesRoute: typeof ApiSessionsWorkspaceIdSessionIdMessagesRoute
@@ -193,7 +224,7 @@ const ApiSessionsWorkspaceIdRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ApiChatRoute: ApiChatRoute,
-  ApiProjectsRoute: ApiProjectsRoute,
+  ApiProjectsRoute: ApiProjectsRouteWithChildren,
   ChatWorkspaceIdRoute: ChatWorkspaceIdRoute,
   ApiSessionsWorkspaceIdRoute: ApiSessionsWorkspaceIdRouteWithChildren,
   ApiStatusStreamRoute: ApiStatusStreamRoute,

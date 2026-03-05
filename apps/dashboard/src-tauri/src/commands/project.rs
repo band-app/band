@@ -110,6 +110,21 @@ pub fn project_list() -> Result<Vec<ProjectInfo>, String> {
 }
 
 #[tauri::command]
+pub fn project_reorder(names: Vec<String>) -> Result<(), String> {
+    let mut app_state = state::load_state()?;
+
+    app_state.projects.sort_by_key(|p| {
+        names
+            .iter()
+            .position(|n| n == &p.name)
+            .unwrap_or(usize::MAX)
+    });
+
+    state::save_state(&app_state)?;
+    Ok(())
+}
+
+#[tauri::command]
 pub fn project_remove(name: String) -> Result<(), String> {
     let mut app_state = state::load_state()?;
     let initial_len = app_state.projects.len();

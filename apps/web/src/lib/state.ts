@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, readFile, readFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFile, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -72,6 +72,11 @@ export function loadState(): AppState {
   } catch {
     return { projects: [] };
   }
+}
+
+export function saveState(state: AppState): void {
+  ensureDirs();
+  writeFileSync(stateFile(), JSON.stringify(state, null, 2), "utf-8");
 }
 
 export function loadSettings(): Settings {
