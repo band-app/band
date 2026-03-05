@@ -50,7 +50,7 @@ if [ -z "$PROJECT" ] || [ -z "$BRANCH" ]; then
   exit 0
 fi
 
-WORKSPACE_ID="${PROJECT}-${BRANCH}"
+WORKSPACE_ID="${PROJECT}-${BRANCH//\//-}"
 STATUS_DIR="$HOME/.band/status"
 STATUS_FILE="$STATUS_DIR/${WORKSPACE_ID}.json"
 
