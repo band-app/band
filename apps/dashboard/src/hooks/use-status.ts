@@ -1,7 +1,13 @@
 import { useEffect, useRef } from "react";
-import { useDashboardStore, WorkspaceStatus, AgentStatusType, GitStatus, CIStatus } from "@/stores/dashboard-store";
-import { useSettingsStore } from "@/stores/settings-store";
 import { playSound, type SoundId } from "@/lib/sounds";
+import {
+  type AgentStatusType,
+  type CIStatus,
+  type GitStatus,
+  useDashboardStore,
+  type WorkspaceStatus,
+} from "@/stores/dashboard-store";
+import { useSettingsStore } from "@/stores/settings-store";
 
 function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -42,12 +48,8 @@ export function useStatusWatcher() {
             previousStatuses.current.delete(wsId);
           }
 
-          if (
-            prevAgentStatus === "working" &&
-            newAgentStatus === "needs_attention"
-          ) {
-            const notifications =
-              useSettingsStore.getState().settings.notifications;
+          if (prevAgentStatus === "working" && newAgentStatus === "needs_attention") {
+            const notifications = useSettingsStore.getState().settings.notifications;
             if (notifications?.soundOnNeedsAttention) {
               playSound((notifications.sound ?? "chime") as SoundId);
             }

@@ -1,5 +1,3 @@
-export { cn } from "./utils";
-
 // Components
 export * from "./components/accordion";
 export * from "./components/badge";
@@ -20,3 +18,4 @@ export * from "./components/separator";
 export * from "./components/spinner";
 export * from "./components/textarea";
 export * from "./components/tooltip";
+export { cn } from "./utils";

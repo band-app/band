@@ -1,9 +1,6 @@
+import { ChevronDown, ChevronLeft, ChevronRight, FolderOpen, Save } from "lucide-react";
 import { useEffect, useState } from "react";
-import {
-  useSettingsStore,
-  type CodingAgentConfig,
-  type CodingAgentType,
-} from "@/stores/settings-store";
+import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -12,23 +9,16 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
-import {
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  FolderOpen,
-  Save,
-} from "lucide-react";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { playSound, SOUNDS, type SoundId } from "@/lib/sounds";
+import {
+  type CodingAgentConfig,
+  type CodingAgentType,
+  useSettingsStore,
+} from "@/stores/settings-store";
 
 const AGENT_TYPES: { value: CodingAgentType; label: string }[] = [
   { value: "claude-code", label: "Claude Code" },
@@ -41,10 +31,7 @@ const AGENT_LABEL: Record<string, string> = {
 const DEFAULT_DEFAULTS = {
   layout: {
     orientation: "horizontal" as const,
-    groups: [
-      { size: 0.6 },
-      { size: 0.4, browser: { url: "http://localhost:3000" } },
-    ],
+    groups: [{ size: 0.6 }, { size: 0.4, browser: { url: "http://localhost:3000" } }],
   },
   terminals: [
     { name: "claude", command: "claude", agentType: "claude-code" as const },
@@ -85,20 +72,14 @@ function SettingsRow({
 export function SettingsPage({ onClose }: Props) {
   const { settings, loadSettings, updateSettings } = useSettingsStore();
   const [section, setSection] = useState<Section>("menu");
-  const [worktreesDir, setWorktreesDir] = useState(
-    settings.worktreesDir ?? "",
-  );
+  const [worktreesDir, setWorktreesDir] = useState(settings.worktreesDir ?? "");
   const [defaultsJson, setDefaultsJson] = useState("");
   const [defaultsError, setDefaultsError] = useState<string | null>(null);
   const [agentType, setAgentType] = useState<CodingAgentType | "">(
     settings.codingAgent?.type ?? "",
   );
-  const [agentCommand, setAgentCommand] = useState(
-    settings.codingAgent?.command ?? "",
-  );
-  const [webServerPort, setWebServerPort] = useState(
-    settings.webServerPort?.toString() ?? "",
-  );
+  const [agentCommand, setAgentCommand] = useState(settings.codingAgent?.command ?? "");
+  const [webServerPort, setWebServerPort] = useState(settings.webServerPort?.toString() ?? "");
   const [soundOnNeedsAttention, setSoundOnNeedsAttention] = useState(
     settings.notifications?.soundOnNeedsAttention ?? false,
   );
@@ -112,19 +93,19 @@ export function SettingsPage({ onClose }: Props) {
 
   useEffect(() => {
     setWorktreesDir(settings.worktreesDir ?? "");
-    setDefaultsJson(
-      settings.defaults ? JSON.stringify(settings.defaults, null, 2) : "",
-    );
+    setDefaultsJson(settings.defaults ? JSON.stringify(settings.defaults, null, 2) : "");
     setAgentType(settings.codingAgent?.type ?? "");
     setAgentCommand(settings.codingAgent?.command ?? "");
     setWebServerPort(settings.webServerPort?.toString() ?? "");
-    setSoundOnNeedsAttention(
-      settings.notifications?.soundOnNeedsAttention ?? false,
-    );
-    setSelectedSound(
-      (settings.notifications?.sound as SoundId) ?? "chime",
-    );
-  }, [settings.worktreesDir, settings.defaults, settings.codingAgent, settings.webServerPort, settings.notifications]);
+    setSoundOnNeedsAttention(settings.notifications?.soundOnNeedsAttention ?? false);
+    setSelectedSound((settings.notifications?.sound as SoundId) ?? "chime");
+  }, [
+    settings.worktreesDir,
+    settings.defaults,
+    settings.codingAgent,
+    settings.webServerPort,
+    settings.notifications,
+  ]);
 
   const handleBrowse = async () => {
     try {
@@ -157,7 +138,7 @@ export function SettingsPage({ onClose }: Props) {
   };
 
   const handleSave = async () => {
-    let defaults = undefined;
+    let defaults: Record<string, unknown> | undefined;
     if (defaultsJson.trim()) {
       try {
         defaults = JSON.parse(defaultsJson);
@@ -165,17 +146,17 @@ export function SettingsPage({ onClose }: Props) {
         return;
       }
     }
-    let codingAgent: CodingAgentConfig | undefined = undefined;
+    let codingAgent: CodingAgentConfig | undefined;
     if (agentType) {
       codingAgent = { type: agentType };
       if (agentCommand.trim()) {
         codingAgent.command = agentCommand.trim();
       }
     }
-    let parsedPort: number | undefined = undefined;
+    let parsedPort: number | undefined;
     if (webServerPort.trim()) {
       const n = parseInt(webServerPort.trim(), 10);
-      if (isNaN(n) || n <= 0 || n >= 65536) return;
+      if (Number.isNaN(n) || n <= 0 || n >= 65536) return;
       parsedPort = n;
     }
     await updateSettings({
@@ -192,18 +173,14 @@ export function SettingsPage({ onClose }: Props) {
   const defaultsPreview = defaultsJson.trim() ? "Configured" : "None";
   const portPreview = webServerPort || "3456";
   const notificationsPreview = soundOnNeedsAttention
-    ? SOUNDS.find((s) => s.id === selectedSound)?.label ?? "On"
+    ? (SOUNDS.find((s) => s.id === selectedSound)?.label ?? "On")
     : "Off";
 
   if (section !== "menu") {
     return (
       <div>
         <div className="flex items-center gap-1 mb-3 px-1">
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            onClick={() => setSection("menu")}
-          >
+          <Button variant="ghost" size="icon-xs" onClick={() => setSection("menu")}>
             <ChevronLeft />
           </Button>
           <h2 className="text-base font-semibold flex-1">
@@ -240,18 +217,12 @@ export function SettingsPage({ onClose }: Props) {
                   value={worktreesDir}
                   onChange={(e) => setWorktreesDir(e.target.value)}
                 />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon-xs"
-                  onClick={handleBrowse}
-                >
+                <Button type="button" variant="outline" size="icon-xs" onClick={handleBrowse}>
                   <FolderOpen />
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
-                Directory where new worktrees are created. Leave empty for the
-                default location.
+                Directory where new worktrees are created. Leave empty for the default location.
               </p>
             </div>
           </div>
@@ -272,16 +243,15 @@ export function SettingsPage({ onClose }: Props) {
                     <ChevronDown className="size-3 opacity-50" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-[--radix-dropdown-menu-trigger-width]">
+                <DropdownMenuContent
+                  align="start"
+                  className="w-[--radix-dropdown-menu-trigger-width]"
+                >
                   <DropdownMenuRadioGroup
                     value={agentType}
-                    onValueChange={(v) =>
-                      setAgentType(v as CodingAgentType | "")
-                    }
+                    onValueChange={(v) => setAgentType(v as CodingAgentType | "")}
                   >
-                    <DropdownMenuRadioItem value="">
-                      None
-                    </DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="">None</DropdownMenuRadioItem>
                     {AGENT_TYPES.map((t) => (
                       <DropdownMenuRadioItem key={t.value} value={t.value}>
                         {t.label}
@@ -297,10 +267,7 @@ export function SettingsPage({ onClose }: Props) {
             {agentType && (
               <div className="space-y-2">
                 <Label htmlFor="agent-command">
-                  Command{" "}
-                  <span className="text-muted-foreground font-normal">
-                    (optional)
-                  </span>
+                  Command <span className="text-muted-foreground font-normal">(optional)</span>
                 </Label>
                 <Input
                   id="agent-command"
@@ -309,8 +276,8 @@ export function SettingsPage({ onClose }: Props) {
                   onChange={(e) => setAgentCommand(e.target.value)}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Custom command with arguments to run the agent. Leave empty to
-                  use the default command for the selected agent type.
+                  Custom command with arguments to run the agent. Leave empty to use the default
+                  command for the selected agent type.
                 </p>
               </div>
             )}
@@ -321,9 +288,7 @@ export function SettingsPage({ onClose }: Props) {
           <div className="space-y-4 px-1">
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <Label htmlFor="defaults-json">
-                  Default layout &amp; terminals
-                </Label>
+                <Label htmlFor="defaults-json">Default layout &amp; terminals</Label>
                 {!defaultsJson.trim() && (
                   <Button
                     type="button"
@@ -347,14 +312,11 @@ export function SettingsPage({ onClose }: Props) {
                 autoComplete="off"
                 spellCheck={false}
               />
-              {defaultsError && (
-                <p className="text-xs text-destructive">{defaultsError}</p>
-              )}
+              {defaultsError && <p className="text-xs text-destructive">{defaultsError}</p>}
               <p className="text-xs text-muted-foreground">
-                Default VS Code layout and terminal configuration applied to
-                Band worktrees that don't have a project-level{" "}
-                <code className="text-xs">.band/config.json</code>. Leave empty
-                to disable.
+                Default VS Code layout and terminal configuration applied to Band worktrees that
+                don't have a project-level <code className="text-xs">.band/config.json</code>. Leave
+                empty to disable.
               </p>
             </div>
           </div>
@@ -394,7 +356,10 @@ export function SettingsPage({ onClose }: Props) {
                       <ChevronDown className="size-3 opacity-50" />
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="w-[--radix-dropdown-menu-trigger-width]">
+                  <DropdownMenuContent
+                    align="start"
+                    className="w-[--radix-dropdown-menu-trigger-width]"
+                  >
                     <DropdownMenuRadioGroup
                       value={selectedSound}
                       onValueChange={(v) => {
@@ -411,8 +376,7 @@ export function SettingsPage({ onClose }: Props) {
                   </DropdownMenuContent>
                 </DropdownMenu>
                 <p className="text-xs text-muted-foreground">
-                  Choose a sound to play when an agent transitions from working
-                  to needs attention.
+                  Choose a sound to play when an agent transitions from working to needs attention.
                 </p>
               </div>
             )}
@@ -433,8 +397,8 @@ export function SettingsPage({ onClose }: Props) {
                 max={65535}
               />
               <p className="text-xs text-muted-foreground">
-                Port the web server listens on for mobile access. Leave empty
-                for the default (3456). Requires restart.
+                Port the web server listens on for mobile access. Leave empty for the default
+                (3456). Requires restart.
               </p>
             </div>
             <Button onClick={handleSave} size="sm">

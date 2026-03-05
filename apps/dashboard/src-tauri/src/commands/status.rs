@@ -43,8 +43,7 @@ pub struct WatcherState(pub Arc<Mutex<Option<StatusWatcher>>>);
 #[tauri::command]
 pub fn status_watch_start(app: AppHandle) -> Result<(), String> {
     let status_dir = state::status_dir();
-    fs::create_dir_all(&status_dir)
-        .map_err(|e| format!("Failed to create status dir: {}", e))?;
+    fs::create_dir_all(&status_dir).map_err(|e| format!("Failed to create status dir: {e}"))?;
 
     let app_handle = app.clone();
 
@@ -56,7 +55,7 @@ pub fn status_watch_start(app: AppHandle) -> Result<(), String> {
                         if let Some(ext) = path.extension() {
                             if ext == "json" {
                                 // Emit active workspace changes as a separate event
-                                if path.file_stem().map_or(false, |s| s == "active") {
+                                if path.file_stem().is_some_and(|s| s == "active") {
                                     if let Ok(data) = fs::read_to_string(path) {
                                         #[derive(serde::Deserialize)]
                                         struct ActiveMarker {
@@ -66,10 +65,8 @@ pub fn status_watch_start(app: AppHandle) -> Result<(), String> {
                                         if let Ok(marker) =
                                             serde_json::from_str::<ActiveMarker>(&data)
                                         {
-                                            let _ = app_handle.emit(
-                                                "active-workspace",
-                                                marker.workspace_id,
-                                            );
+                                            let _ = app_handle
+                                                .emit("active-workspace", marker.workspace_id);
                                         }
                                     }
                                     continue;
@@ -112,16 +109,16 @@ pub fn status_watch_start(app: AppHandle) -> Result<(), String> {
             }
         }
     })
-    .map_err(|e| format!("Failed to create watcher: {}", e))?;
+    .map_err(|e| format!("Failed to create watcher: {e}"))?;
 
     watcher
         .watch(&status_dir, RecursiveMode::NonRecursive)
-        .map_err(|e| format!("Failed to watch status dir: {}", e))?;
+        .map_err(|e| format!("Failed to watch status dir: {e}"))?;
 
     // Also emit current status files on start
     if let Ok(entries) = fs::read_dir(&status_dir) {
         for entry in entries.flatten() {
-            if entry.path().extension().map_or(false, |e| e == "json") {
+            if entry.path().extension().is_some_and(|e| e == "json") {
                 if let Ok(data) = fs::read_to_string(entry.path()) {
                     if let Ok(status) = serde_json::from_str::<WorkspaceStatus>(&data) {
                         let _ = app.emit(
@@ -141,9 +138,7 @@ pub fn status_watch_start(app: AppHandle) -> Result<(), String> {
     // Store watcher so it doesn't get dropped
     let watcher_state = app.state::<WatcherState>();
     let mut guard = watcher_state.0.lock().unwrap();
-    *guard = Some(StatusWatcher {
-        _watcher: watcher,
-    });
+    *guard = Some(StatusWatcher { _watcher: watcher });
 
     Ok(())
 }
