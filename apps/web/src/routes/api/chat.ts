@@ -1,25 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { createUIMessageStream, createUIMessageStreamResponse } from "ai";
 import { getOrCreateAgent } from "../../lib/agent-pool";
-import { loadState } from "../../lib/state";
 import { writeAgentStream } from "../../lib/stream-writer";
-
-function resolveWorkspace(workspaceId: string) {
-  const state = loadState();
-
-  for (const project of state.projects) {
-    const prefix = `${project.name}-`;
-    if (workspaceId.startsWith(prefix)) {
-      const branch = workspaceId.slice(prefix.length);
-      for (const wt of project.worktrees) {
-        if (wt.branch === branch) {
-          return { project, worktree: wt };
-        }
-      }
-    }
-  }
-  return null;
-}
+import { resolveWorkspace } from "../../lib/workspace";
 
 export const Route = createFileRoute("/api/chat")({
   server: {
