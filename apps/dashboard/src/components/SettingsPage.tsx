@@ -45,7 +45,7 @@ const DEFAULT_DEFAULTS = {
   ],
 };
 
-type Section = "menu" | "general" | "coding-agent" | "defaults";
+type Section = "menu" | "general" | "coding-agent" | "defaults" | "web-server";
 
 interface Props {
   onClose: () => void;
@@ -89,6 +89,9 @@ export function SettingsPage({ onClose }: Props) {
   const [agentCommand, setAgentCommand] = useState(
     settings.codingAgent?.command ?? "",
   );
+  const [webServerPort, setWebServerPort] = useState(
+    settings.webServerPort?.toString() ?? "",
+  );
 
   useEffect(() => {
     loadSettings();
@@ -101,7 +104,8 @@ export function SettingsPage({ onClose }: Props) {
     );
     setAgentType(settings.codingAgent?.type ?? "");
     setAgentCommand(settings.codingAgent?.command ?? "");
-  }, [settings.worktreesDir, settings.defaults, settings.codingAgent]);
+    setWebServerPort(settings.webServerPort?.toString() ?? "");
+  }, [settings.worktreesDir, settings.defaults, settings.codingAgent, settings.webServerPort]);
 
   const handleBrowse = async () => {
     try {
@@ -149,16 +153,24 @@ export function SettingsPage({ onClose }: Props) {
         codingAgent.command = agentCommand.trim();
       }
     }
+    let parsedPort: number | undefined = undefined;
+    if (webServerPort.trim()) {
+      const n = parseInt(webServerPort.trim(), 10);
+      if (isNaN(n) || n <= 0 || n >= 65536) return;
+      parsedPort = n;
+    }
     await updateSettings({
       worktreesDir: worktreesDir.trim() || null,
       defaults,
       codingAgent,
+      webServerPort: parsedPort,
     });
   };
 
   const worktreesDirPreview = worktreesDir || "Default";
   const agentPreview = agentType ? AGENT_LABEL[agentType] : "None";
   const defaultsPreview = defaultsJson.trim() ? "Configured" : "None";
+  const portPreview = webServerPort || "3456";
 
   if (section !== "menu") {
     return (
@@ -175,6 +187,7 @@ export function SettingsPage({ onClose }: Props) {
             {section === "general" && "General"}
             {section === "coding-agent" && "Coding Agent"}
             {section === "defaults" && "Workspace Settings"}
+            {section === "web-server" && "Web Server"}
           </h2>
         </div>
 
@@ -321,6 +334,30 @@ export function SettingsPage({ onClose }: Props) {
             </Button>
           </div>
         )}
+
+        {section === "web-server" && (
+          <div className="space-y-4 px-1">
+            <div className="space-y-2">
+              <Label htmlFor="web-server-port">Port</Label>
+              <Input
+                id="web-server-port"
+                type="number"
+                placeholder="3456 (default)"
+                value={webServerPort}
+                onChange={(e) => setWebServerPort(e.target.value)}
+                min={1}
+                max={65535}
+              />
+              <p className="text-xs text-muted-foreground">
+                Port the web server listens on for mobile access. Leave empty
+                for the default (3456). Requires restart.
+              </p>
+            </div>
+            <Button onClick={handleSave} size="sm">
+              Save
+            </Button>
+          </div>
+        )}
       </div>
     );
   }
@@ -350,6 +387,12 @@ export function SettingsPage({ onClose }: Props) {
           label="Workspace Settings"
           value={defaultsPreview}
           onClick={() => setSection("defaults")}
+        />
+        <Separator />
+        <SettingsRow
+          label="Web Server"
+          value={portPreview}
+          onClick={() => setSection("web-server")}
         />
       </div>
     </div>

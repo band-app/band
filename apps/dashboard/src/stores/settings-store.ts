@@ -42,6 +42,7 @@ export interface Settings {
   worktreesDir: string | null;
   defaults?: BandConfig;
   codingAgent?: CodingAgentConfig;
+  webServerPort?: number;
 }
 
 interface SettingsState {

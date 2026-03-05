@@ -88,6 +88,7 @@ version = "0.1.0"
 dependencies = [
  "cocoa",
  "dirs",
+ "libc",
  "notify",
  "serde",
  "serde_json",
@@ -96,6 +97,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-fs",
  "tauri-plugin-shell",
+ "tokio",
 ]
 
 [[package]]
@@ -3859,6 +3861,7 @@ dependencies = [
  "libc",
  "mio",
  "pin-project-lite",
+ "signal-hook-registry",
  "socket2",
  "windows-sys 0.61.2",
 ]
