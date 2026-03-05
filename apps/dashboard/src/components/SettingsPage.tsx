@@ -1,6 +1,7 @@
-import { ChevronDown, ChevronLeft, ChevronRight, FolderOpen, Save } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, FolderOpen, Plus, Save, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { ColorPicker } from "@/components/ui/color-picker";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,6 +18,7 @@ import { playSound, SOUNDS, type SoundId } from "@/lib/sounds";
 import {
   type CodingAgentConfig,
   type CodingAgentType,
+  type LabelDefinition,
   useSettingsStore,
 } from "@/stores/settings-store";
 
@@ -39,7 +41,7 @@ const DEFAULT_DEFAULTS = {
   ],
 };
 
-type Section = "menu" | "general" | "coding-agent" | "defaults" | "notifications" | "web-server";
+type Section = "menu" | "general" | "coding-agent" | "defaults" | "notifications" | "web-server" | "labels";
 
 interface Props {
   onClose: () => void;
@@ -86,6 +88,8 @@ export function SettingsPage({ onClose }: Props) {
   const [selectedSound, setSelectedSound] = useState<SoundId>(
     (settings.notifications?.sound as SoundId) ?? "chime",
   );
+  const [labels, setLabels] = useState<LabelDefinition[]>(settings.labels ?? []);
+
 
   useEffect(() => {
     loadSettings();
@@ -99,12 +103,14 @@ export function SettingsPage({ onClose }: Props) {
     setWebServerPort(settings.webServerPort?.toString() ?? "");
     setSoundOnNeedsAttention(settings.notifications?.soundOnNeedsAttention ?? false);
     setSelectedSound((settings.notifications?.sound as SoundId) ?? "chime");
+    setLabels(settings.labels ?? []);
   }, [
     settings.worktreesDir,
     settings.defaults,
     settings.codingAgent,
     settings.webServerPort,
     settings.notifications,
+    settings.labels,
   ]);
 
   const handleBrowse = async () => {
@@ -165,6 +171,7 @@ export function SettingsPage({ onClose }: Props) {
       codingAgent,
       webServerPort: parsedPort,
       notifications: { soundOnNeedsAttention, sound: selectedSound },
+      labels: labels.length > 0 ? labels : undefined,
     });
   };
 
@@ -172,6 +179,7 @@ export function SettingsPage({ onClose }: Props) {
   const agentPreview = agentType ? AGENT_LABEL[agentType] : "None";
   const defaultsPreview = defaultsJson.trim() ? "Configured" : "None";
   const portPreview = webServerPort || "3456";
+  const labelsPreview = labels.length > 0 ? `${labels.length} label${labels.length === 1 ? "" : "s"}` : "None";
   const notificationsPreview = soundOnNeedsAttention
     ? (SOUNDS.find((s) => s.id === selectedSound)?.label ?? "On")
     : "Off";
@@ -185,6 +193,7 @@ export function SettingsPage({ onClose }: Props) {
           </Button>
           <h2 className="text-base font-semibold flex-1">
             {section === "general" && "General"}
+            {section === "labels" && "Labels"}
             {section === "coding-agent" && "Coding Agent"}
             {section === "defaults" && "Workspace Settings"}
             {section === "notifications" && "Notifications"}
@@ -225,6 +234,54 @@ export function SettingsPage({ onClose }: Props) {
                 Directory where new worktrees are created. Leave empty for the default location.
               </p>
             </div>
+          </div>
+        )}
+
+        {section === "labels" && (
+          <div className="space-y-3 px-1">
+            {labels.map((lbl) => (
+              <div key={lbl.id} className="flex items-center gap-2">
+                <ColorPicker
+                  value={lbl.color}
+                  onChange={(color) =>
+                    setLabels((prev) =>
+                      prev.map((l) => (l.id === lbl.id ? { ...l, color } : l)),
+                    )
+                  }
+                  showHex={false}
+                  className="w-auto h-7 px-1.5 shrink-0"
+                />
+                <Input
+                  value={lbl.name}
+                  onChange={(e) =>
+                    setLabels((prev) =>
+                      prev.map((l) => (l.id === lbl.id ? { ...l, name: e.target.value } : l)),
+                    )
+                  }
+                  className="flex-1 h-7 text-xs"
+                />
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  className="text-destructive hover:text-destructive shrink-0"
+                  onClick={() => setLabels((prev) => prev.filter((l) => l.id !== lbl.id))}
+                >
+                  <Trash2 className="size-3" />
+                </Button>
+              </div>
+            ))}
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full text-xs"
+              onClick={() => {
+                const id = `lbl_${Date.now()}`;
+                setLabels((prev) => [...prev, { id, name: "New label", color: "#3b82f6" }]);
+              }}
+            >
+              <Plus className="size-3 mr-1" />
+              Add label
+            </Button>
           </div>
         )}
 
@@ -423,6 +480,12 @@ export function SettingsPage({ onClose }: Props) {
           label="General"
           value={worktreesDirPreview}
           onClick={() => setSection("general")}
+        />
+        <Separator />
+        <SettingsRow
+          label="Labels"
+          value={labelsPreview}
+          onClick={() => setSection("labels")}
         />
         <Separator />
         <SettingsRow

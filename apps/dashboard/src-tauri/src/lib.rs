@@ -29,6 +29,7 @@ pub fn run() {
             commands::project::project_list,
             commands::project::project_remove,
             commands::project::project_reorder,
+            commands::project::project_update_label,
             commands::workspace::workspace_create,
             commands::workspace::workspace_list,
             commands::workspace::workspace_remove,

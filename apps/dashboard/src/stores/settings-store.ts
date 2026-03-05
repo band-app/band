@@ -40,12 +40,19 @@ export interface NotificationSettings {
   sound?: string;
 }
 
+export interface LabelDefinition {
+  id: string;
+  name: string;
+  color: string;
+}
+
 export interface Settings {
   worktreesDir: string | null;
   defaults?: BandConfig;
   codingAgent?: CodingAgentConfig;
   webServerPort?: number;
   notifications?: NotificationSettings;
+  labels?: LabelDefinition[];
 }
 
 interface SettingsState {

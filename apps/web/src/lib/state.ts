@@ -7,6 +7,7 @@ export interface ProjectState {
   path: string;
   defaultBranch: string;
   worktrees: WorktreeState[];
+  label?: string;
 }
 
 export interface WorktreeState {
@@ -35,6 +36,12 @@ export interface WorkspaceStatus {
   agent?: AgentInfo;
 }
 
+export interface LabelDefinition {
+  id: string;
+  name: string;
+  color: string;
+}
+
 export interface Settings {
   worktreesDir?: string;
   defaults?: unknown;
@@ -42,6 +49,7 @@ export interface Settings {
     type: string;
     command?: string;
   };
+  labels?: LabelDefinition[];
 }
 
 export function bandHome(): string {

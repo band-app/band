@@ -1,10 +1,16 @@
-import { Globe, Plus, Settings, X } from "lucide-react";
+import { Check, Globe, Plus, Settings, Tag, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { AddProjectDialog } from "@/components/AddProjectDialog";
 import { ProjectList } from "@/components/ProjectList";
 import { SettingsPage } from "@/components/SettingsPage";
 import { TunnelDialog } from "@/components/TunnelDialog";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -23,8 +29,10 @@ export default function App() {
   const error = useDashboardStore((s) => s.error);
   const clearError = useDashboardStore((s) => s.clearError);
   const loadSettings = useSettingsStore((s) => s.loadSettings);
+  const labels = useSettingsStore((s) => s.settings.labels) ?? [];
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [view, setView] = useState<"dashboard" | "settings">("dashboard");
+  const [labelFilter, setLabelFilter] = useState<string | null>(null);
   const { state: hooksState, install: installHooks } = useHooksSetup();
   const {
     webServerRunning,
@@ -74,29 +82,7 @@ export default function App() {
         </div>
       )}
 
-      <ScrollArea
-        className="flex-1"
-        onClick={(e) => {
-          const target = e.target as HTMLElement;
-          if (target.closest("button, a, input, select, textarea")) return;
-          const list = (e.currentTarget as HTMLElement).querySelector<HTMLElement>(
-            '[tabindex="0"]',
-          );
-          list?.focus();
-        }}
-      >
-        <main className="px-2 py-4 overflow-hidden">
-          {view === "dashboard" ? (
-            <ProjectList />
-          ) : (
-            <SettingsPage onClose={() => setView("dashboard")} />
-          )}
-        </main>
-      </ScrollArea>
-
-      <Separator />
-
-      <footer className="flex items-center justify-between px-4 py-2">
+      <div className="flex items-center justify-between px-4 py-2">
         <div className="flex items-center gap-1">
           <Tooltip>
             <TooltipTrigger asChild>
@@ -105,7 +91,7 @@ export default function App() {
                 variant="ghost"
                 onClick={() => setView(view === "settings" ? "dashboard" : "settings")}
               >
-                <Settings />
+                <Settings className="size-4" />
               </Button>
             </TooltipTrigger>
             <TooltipContent>Settings</TooltipContent>
@@ -118,23 +104,87 @@ export default function App() {
                 className={webServerRunning ? "text-green-500" : ""}
                 onClick={openDialog}
               >
-                <Globe />
+                <Globe className="size-4" />
               </Button>
             </TooltipTrigger>
             <TooltipContent>
               {webServerRunning ? "Mobile access" : "Start web server"}
             </TooltipContent>
           </Tooltip>
+          {labels.length > 0 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className={`text-sm h-8 px-2 gap-1.5 ${labelFilter ? "bg-accent text-accent-foreground" : ""}`}
+                >
+                  {labelFilter ? (
+                    <>
+                      <span
+                        className="size-2.5 rounded-full shrink-0"
+                        style={{ backgroundColor: labels.find((l) => l.id === labelFilter)?.color }}
+                      />
+                      {labels.find((l) => l.id === labelFilter)?.name}
+                    </>
+                  ) : (
+                    <>
+                      <Tag className="size-4" />
+                      All
+                    </>
+                  )}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                <DropdownMenuItem onClick={() => setLabelFilter(null)}>
+                  <span className="flex-1">All</span>
+                  {!labelFilter && <Check className="size-3 ml-2" />}
+                </DropdownMenuItem>
+                {labels.map((lbl) => (
+                  <DropdownMenuItem key={lbl.id} onClick={() => setLabelFilter(lbl.id)}>
+                    <span
+                      className="size-2.5 rounded-full shrink-0 mr-2"
+                      style={{ backgroundColor: lbl.color }}
+                    />
+                    <span className="flex-1">{lbl.name}</span>
+                    {labelFilter === lbl.id && <Check className="size-3 ml-2" />}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
         <Tooltip>
           <TooltipTrigger asChild>
             <Button size="icon-xs" variant="ghost" onClick={() => setShowAddDialog(true)}>
-              <Plus />
+              <Plus className="size-4" />
             </Button>
           </TooltipTrigger>
           <TooltipContent>Add project</TooltipContent>
         </Tooltip>
-      </footer>
+      </div>
+
+      <Separator />
+
+      <ScrollArea
+        className="flex-1"
+        onClick={(e) => {
+          const target = e.target as HTMLElement;
+          if (target.closest("button, a, input, select, textarea")) return;
+          const list = (e.currentTarget as HTMLElement).querySelector<HTMLElement>(
+            '[tabindex="0"]',
+          );
+          list?.focus();
+        }}
+      >
+        <main className="px-2 py-2 overflow-hidden">
+          {view === "dashboard" ? (
+            <ProjectList labelFilter={labelFilter} />
+          ) : (
+            <SettingsPage onClose={() => setView("dashboard")} />
+          )}
+        </main>
+      </ScrollArea>
 
       <AddProjectDialog open={showAddDialog} onOpenChange={setShowAddDialog} />
 

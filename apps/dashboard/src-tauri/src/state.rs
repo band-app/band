@@ -10,6 +10,8 @@ pub struct ProjectState {
     #[serde(rename = "defaultBranch")]
     pub default_branch: String,
     pub worktrees: Vec<WorktreeState>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -36,6 +38,13 @@ pub struct NotificationSettings {
     pub sound: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LabelDefinition {
+    pub id: String,
+    pub name: String,
+    pub color: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Settings {
     #[serde(rename = "worktreesDir", skip_serializing_if = "Option::is_none")]
@@ -48,6 +57,8 @@ pub struct Settings {
     pub web_server_port: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notifications: Option<NotificationSettings>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub labels: Option<Vec<LabelDefinition>>,
 }
 
 pub fn band_home() -> PathBuf {

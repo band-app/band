@@ -16,6 +16,7 @@ import { Route as ApiChatRouteImport } from './routes/api/chat'
 import { Route as ApiStatusStreamRouteImport } from './routes/api/status.stream'
 import { Route as ApiSessionsWorkspaceIdRouteImport } from './routes/api/sessions.$workspaceId'
 import { Route as ApiProjectsReorderRouteImport } from './routes/api/projects.reorder'
+import { Route as ApiProjectsLabelRouteImport } from './routes/api/projects.label'
 import { Route as ApiSessionsWorkspaceIdSessionIdMessagesRouteImport } from './routes/api/sessions.$workspaceId.$sessionId.messages'
 
 const IndexRoute = IndexRouteImport.update({
@@ -53,6 +54,11 @@ const ApiProjectsReorderRoute = ApiProjectsReorderRouteImport.update({
   path: '/reorder',
   getParentRoute: () => ApiProjectsRoute,
 } as any)
+const ApiProjectsLabelRoute = ApiProjectsLabelRouteImport.update({
+  id: '/label',
+  path: '/label',
+  getParentRoute: () => ApiProjectsRoute,
+} as any)
 const ApiSessionsWorkspaceIdSessionIdMessagesRoute =
   ApiSessionsWorkspaceIdSessionIdMessagesRouteImport.update({
     id: '/$sessionId/messages',
@@ -65,6 +71,7 @@ export interface FileRoutesByFullPath {
   '/api/chat': typeof ApiChatRoute
   '/api/projects': typeof ApiProjectsRouteWithChildren
   '/chat/$workspaceId': typeof ChatWorkspaceIdRoute
+  '/api/projects/label': typeof ApiProjectsLabelRoute
   '/api/projects/reorder': typeof ApiProjectsReorderRoute
   '/api/sessions/$workspaceId': typeof ApiSessionsWorkspaceIdRouteWithChildren
   '/api/status/stream': typeof ApiStatusStreamRoute
@@ -75,6 +82,7 @@ export interface FileRoutesByTo {
   '/api/chat': typeof ApiChatRoute
   '/api/projects': typeof ApiProjectsRouteWithChildren
   '/chat/$workspaceId': typeof ChatWorkspaceIdRoute
+  '/api/projects/label': typeof ApiProjectsLabelRoute
   '/api/projects/reorder': typeof ApiProjectsReorderRoute
   '/api/sessions/$workspaceId': typeof ApiSessionsWorkspaceIdRouteWithChildren
   '/api/status/stream': typeof ApiStatusStreamRoute
@@ -86,6 +94,7 @@ export interface FileRoutesById {
   '/api/chat': typeof ApiChatRoute
   '/api/projects': typeof ApiProjectsRouteWithChildren
   '/chat/$workspaceId': typeof ChatWorkspaceIdRoute
+  '/api/projects/label': typeof ApiProjectsLabelRoute
   '/api/projects/reorder': typeof ApiProjectsReorderRoute
   '/api/sessions/$workspaceId': typeof ApiSessionsWorkspaceIdRouteWithChildren
   '/api/status/stream': typeof ApiStatusStreamRoute
@@ -98,6 +107,7 @@ export interface FileRouteTypes {
     | '/api/chat'
     | '/api/projects'
     | '/chat/$workspaceId'
+    | '/api/projects/label'
     | '/api/projects/reorder'
     | '/api/sessions/$workspaceId'
     | '/api/status/stream'
@@ -108,6 +118,7 @@ export interface FileRouteTypes {
     | '/api/chat'
     | '/api/projects'
     | '/chat/$workspaceId'
+    | '/api/projects/label'
     | '/api/projects/reorder'
     | '/api/sessions/$workspaceId'
     | '/api/status/stream'
@@ -118,6 +129,7 @@ export interface FileRouteTypes {
     | '/api/chat'
     | '/api/projects'
     | '/chat/$workspaceId'
+    | '/api/projects/label'
     | '/api/projects/reorder'
     | '/api/sessions/$workspaceId'
     | '/api/status/stream'
@@ -184,6 +196,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiProjectsReorderRouteImport
       parentRoute: typeof ApiProjectsRoute
     }
+    '/api/projects/label': {
+      id: '/api/projects/label'
+      path: '/label'
+      fullPath: '/api/projects/label'
+      preLoaderRoute: typeof ApiProjectsLabelRouteImport
+      parentRoute: typeof ApiProjectsRoute
+    }
     '/api/sessions/$workspaceId/$sessionId/messages': {
       id: '/api/sessions/$workspaceId/$sessionId/messages'
       path: '/$sessionId/messages'
@@ -195,10 +214,12 @@ declare module '@tanstack/react-router' {
 }
 
 interface ApiProjectsRouteChildren {
+  ApiProjectsLabelRoute: typeof ApiProjectsLabelRoute
   ApiProjectsReorderRoute: typeof ApiProjectsReorderRoute
 }
 
 const ApiProjectsRouteChildren: ApiProjectsRouteChildren = {
+  ApiProjectsLabelRoute: ApiProjectsLabelRoute,
   ApiProjectsReorderRoute: ApiProjectsReorderRoute,
 }
 

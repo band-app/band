@@ -1,12 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { listWorktrees } from "../../lib/git";
-import { loadCurrentStatuses, loadState } from "../../lib/state";
+import { loadCurrentStatuses, loadSettings, loadState } from "../../lib/state";
 
 export const Route = createFileRoute("/api/projects")({
   server: {
     handlers: {
       GET: async () => {
         const state = loadState();
+        const settings = loadSettings();
         const statuses = loadCurrentStatuses();
         const statusMap = new Map(statuses.map((s) => [s.workspaceId, s]));
 
@@ -30,6 +31,7 @@ export const Route = createFileRoute("/api/projects")({
               name: project.name,
               path: project.path,
               defaultBranch: project.defaultBranch,
+              label: project.label,
               worktrees: worktrees.map((wt) => {
                 const workspaceId = `${project.name}-${wt.branch}`;
                 const status = statusMap.get(workspaceId);
@@ -43,7 +45,7 @@ export const Route = createFileRoute("/api/projects")({
           }),
         );
 
-        return Response.json({ projects });
+        return Response.json({ projects, labels: settings.labels ?? [] });
       },
     },
   },

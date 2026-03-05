@@ -34,6 +34,7 @@ export interface ProjectInfo {
   path: string;
   defaultBranch: string;
   worktrees: WorktreeInfo[];
+  label?: string;
 }
 
 export interface WorktreeInfo {
@@ -86,6 +87,7 @@ interface DashboardState {
   setActiveWorkspace: (workspaceId: string | null) => void;
   branchStatuses: Map<string, WorkspaceBranchStatus>;
   runScript: (path: string, scriptType: string) => Promise<void>;
+  updateProjectLabel: (project: string, label: string | null) => Promise<void>;
   updateGitStatus: (workspaceId: string, git: GitStatus) => void;
   updateCIStatus: (workspaceId: string, ci: CIStatus) => void;
 }
@@ -209,6 +211,15 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   runScript: async (path: string, scriptType: string) => {
     try {
       await invoke("workspace_run_script", { path, scriptType });
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  updateProjectLabel: async (project: string, label: string | null) => {
+    try {
+      await invoke("project_update_label", { name: project, label });
+      await get().loadProjects();
     } catch (e) {
       set({ error: String(e) });
     }

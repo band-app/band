@@ -9,6 +9,7 @@ pub struct ProjectInfo {
     #[serde(rename = "defaultBranch")]
     pub default_branch: String,
     pub worktrees: Vec<WorktreeInfo>,
+    pub label: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -28,6 +29,7 @@ impl From<&ProjectState> for ProjectInfo {
             name: ps.name.clone(),
             path: ps.path.clone(),
             default_branch: ps.default_branch.clone(),
+            label: ps.label.clone(),
             worktrees: ps
                 .worktrees
                 .iter()
@@ -79,6 +81,7 @@ pub fn project_init(path: String) -> Result<ProjectInfo, String> {
         path: path.clone(),
         default_branch,
         worktrees,
+        label: None,
     };
 
     app_state.projects.push(project);
@@ -137,6 +140,19 @@ pub fn project_reorder(names: Vec<String>) -> Result<(), String> {
             .unwrap_or(usize::MAX)
     });
 
+    state::save_state(&app_state)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn project_update_label(name: String, label: Option<String>) -> Result<(), String> {
+    let mut app_state = state::load_state()?;
+    let project = app_state
+        .projects
+        .iter_mut()
+        .find(|p| p.name == name)
+        .ok_or_else(|| format!("Project '{name}' not found"))?;
+    project.label = label;
     state::save_state(&app_state)?;
     Ok(())
 }

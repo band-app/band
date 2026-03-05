@@ -1,14 +1,17 @@
 import {
   DndContext,
+  DragOverlay,
   closestCenter,
   PointerSensor,
   useSensor,
   useSensors,
+  useDroppable,
   type DragEndEvent,
+  type DragStartEvent,
 } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Clipboard, Ellipsis, FolderOpen, ListMinus, Plus } from "lucide-react";
+import { Check, Clipboard, Ellipsis, FolderOpen, ListMinus, Plus, Tag } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { NewWorkspaceDialog } from "@/components/NewWorkspaceForm";
 import { Button } from "@/components/ui/button";
@@ -16,6 +19,10 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuPortal,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -26,12 +33,15 @@ import {
   type WorkspaceStatus,
   type WorkspaceBranchStatus,
 } from "@/stores/dashboard-store";
+import { useSettingsStore, type LabelDefinition } from "@/stores/settings-store";
 
 interface SortableProjectProps {
   project: ProjectInfo;
   statuses: Map<string, WorkspaceStatus>;
   branchStatuses: Map<string, WorkspaceBranchStatus>;
   removeProject: (name: string) => void;
+  updateProjectLabel: (name: string, label: string | null) => void;
+  labels: LabelDefinition[];
   workspaceDialog: string | null;
   setWorkspaceDialog: (name: string | null) => void;
   focusedIndex: number;
@@ -43,6 +53,8 @@ function SortableProject({
   statuses,
   branchStatuses,
   removeProject,
+  updateProjectLabel,
+  labels,
   workspaceDialog,
   setWorkspaceDialog,
   focusedIndex,
@@ -91,6 +103,35 @@ function SortableProject({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              {labels.length > 0 && (
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>
+                    <Tag className="size-4 mr-2" />
+                    Set label
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuPortal>
+                    <DropdownMenuSubContent>
+                      <DropdownMenuItem onClick={() => updateProjectLabel(project.name, null)}>
+                        <span className="flex-1">None</span>
+                        {!project.label && <Check className="size-3 ml-2" />}
+                      </DropdownMenuItem>
+                      {labels.map((lbl) => (
+                        <DropdownMenuItem
+                          key={lbl.id}
+                          onClick={() => updateProjectLabel(project.name, lbl.id)}
+                        >
+                          <span
+                            className="size-2.5 rounded-full shrink-0 mr-2"
+                            style={{ backgroundColor: lbl.color }}
+                          />
+                          <span className="flex-1">{lbl.name}</span>
+                          {project.label === lbl.id && <Check className="size-3 ml-2" />}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuSubContent>
+                  </DropdownMenuPortal>
+                </DropdownMenuSub>
+              )}
               <DropdownMenuItem onClick={() => navigator.clipboard.writeText(project.path)}>
                 <Clipboard />
                 Copy path
@@ -145,27 +186,106 @@ function SortableProject({
   );
 }
 
-export function ProjectList() {
+function DroppableLabelHeader({ labelId, label }: { labelId: string; label: LabelDefinition }) {
+  const { setNodeRef, isOver } = useDroppable({ id: `group:${labelId}` });
+  return (
+    <div
+      ref={setNodeRef}
+      className={`flex items-center gap-2 px-2 py-1.5 mb-1 rounded-md transition-colors ${isOver ? "bg-primary/20 ring-1 ring-primary/40" : "bg-accent"}`}
+    >
+      <span
+        className="size-2.5 rounded-full shrink-0"
+        style={{ backgroundColor: label.color }}
+      />
+      <span className="text-sm font-semibold text-foreground/80">{label.name}</span>
+    </div>
+  );
+}
+
+function DroppableUnlabeledHeader() {
+  const { setNodeRef, isOver } = useDroppable({ id: "group:__unlabeled" });
+  return (
+    <div
+      ref={setNodeRef}
+      className={`flex items-center gap-2 px-2 py-1.5 mb-1 rounded-md transition-colors ${isOver ? "bg-primary/20 ring-1 ring-primary/40" : "bg-accent"}`}
+    >
+      <span className="text-sm font-semibold text-foreground/80">Unlabeled</span>
+    </div>
+  );
+}
+
+interface ProjectListProps {
+  labelFilter: string | null;
+}
+
+export function ProjectList({ labelFilter }: ProjectListProps) {
   const projects = useDashboardStore((s) => s.projects);
   const statuses = useDashboardStore((s) => s.statuses);
   const branchStatuses = useDashboardStore((s) => s.branchStatuses);
   const removeProject = useDashboardStore((s) => s.removeProject);
   const reorderProjects = useDashboardStore((s) => s.reorderProjects);
   const openWorkspace = useDashboardStore((s) => s.openWorkspace);
+  const updateProjectLabel = useDashboardStore((s) => s.updateProjectLabel);
+  const labels = useSettingsStore((s) => s.settings.labels) ?? [];
   const [workspaceDialog, setWorkspaceDialog] = useState<string | null>(null);
   const [focusedIndex, setFocusedIndex] = useState(-1);
+  const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const activeWorkspaceId = useDashboardStore((s) => s.activeWorkspaceId);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
-  const projectNames = useMemo(() => projects.map((p) => p.name), [projects]);
+  // Group projects by label, labels in definition order, unlabeled at bottom
+  const groups = useMemo(() => {
+    if (labels.length === 0) return [{ labelId: null as string | null, label: null as LabelDefinition | null, projects }];
+
+    const byLabel = new Map<string | null, ProjectInfo[]>();
+    for (const p of projects) {
+      const key = p.label ?? null;
+      if (!byLabel.has(key)) byLabel.set(key, []);
+      byLabel.get(key)!.push(p);
+    }
+
+    const result: { labelId: string | null; label: LabelDefinition | null; projects: ProjectInfo[] }[] = [];
+    for (const lbl of labels) {
+      const grouped = byLabel.get(lbl.id);
+      if (grouped) {
+        result.push({ labelId: lbl.id, label: lbl, projects: grouped });
+      }
+    }
+    const unlabeled = byLabel.get(null);
+    if (unlabeled) {
+      result.push({ labelId: null, label: null, projects: unlabeled });
+    }
+    return result;
+  }, [projects, labels]);
+
+  // When labelFilter is set, only show that label's group
+  const visibleGroups = useMemo(() => {
+    if (!labelFilter) return groups;
+    return groups.filter((g) => g.labelId === labelFilter);
+  }, [groups, labelFilter]);
 
   const allWorkspaceIds = useMemo(
     () =>
-      projects.flatMap((project) => project.worktrees.map((wt) => `${project.name}-${wt.branch}`)),
-    [projects],
+      visibleGroups.flatMap((g) =>
+        g.projects.flatMap((p) => p.worktrees.map((wt) => `${p.name}-${wt.branch}`)),
+      ),
+    [visibleGroups],
   );
+
+  // Map from project name to workspace index start
+  const workspaceIndexMap = useMemo(() => {
+    const map = new Map<string, number>();
+    let index = 0;
+    for (const group of visibleGroups) {
+      for (const project of group.projects) {
+        map.set(project.name, index);
+        index += project.worktrees.length;
+      }
+    }
+    return map;
+  }, [visibleGroups]);
 
   useEffect(() => {
     if (activeWorkspaceId) {
@@ -196,14 +316,47 @@ export function ProjectList() {
     }
   }
 
+  // All project names in visual order for the single SortableContext
+  const allProjectNames = useMemo(
+    () => visibleGroups.flatMap((g) => g.projects.map((p) => p.name)),
+    [visibleGroups],
+  );
+
+  function handleDragStart(event: DragStartEvent) {
+    setActiveDragId(event.active.id as string);
+  }
+
   function handleDragEnd(event: DragEndEvent) {
+    setActiveDragId(null);
     const { active, over } = event;
     if (!over || active.id === over.id) return;
 
-    const oldIndex = projectNames.indexOf(active.id as string);
-    const newIndex = projectNames.indexOf(over.id as string);
-    const newOrder = arrayMove(projectNames, oldIndex, newIndex);
-    reorderProjects(newOrder);
+    const activeId = active.id as string;
+    const overId = over.id as string;
+
+    // Dropped on a label header
+    if (overId.startsWith("group:")) {
+      const targetLabelId = overId === "group:__unlabeled" ? null : overId.slice("group:".length);
+      updateProjectLabel(activeId, targetLabelId);
+      return;
+    }
+
+    // Dropped on another project — find which groups they belong to
+    const activeGroup = groups.find((g) => g.projects.some((p) => p.name === activeId));
+    const overGroup = groups.find((g) => g.projects.some((p) => p.name === overId));
+
+    if (!activeGroup || !overGroup) return;
+
+    if (activeGroup.labelId === overGroup.labelId) {
+      // Same group — reorder
+      const allNames = projects.map((p) => p.name);
+      const oldIndex = allNames.indexOf(activeId);
+      const newIndex = allNames.indexOf(overId);
+      reorderProjects(arrayMove(allNames, oldIndex, newIndex));
+    } else {
+      // Different group — change label to target group's label
+      updateProjectLabel(activeId, overGroup.labelId);
+    }
   }
 
   if (projects.length === 0) {
@@ -215,14 +368,6 @@ export function ProjectList() {
     );
   }
 
-  // Pre-compute workspace index offsets for each project
-  const workspaceIndexStarts: number[] = [];
-  let runningIndex = 0;
-  for (const project of projects) {
-    workspaceIndexStarts.push(runningIndex);
-    runningIndex += project.worktrees.length;
-  }
-
   return (
     <div
       ref={containerRef}
@@ -230,24 +375,51 @@ export function ProjectList() {
       onKeyDown={handleKeyDown}
       className="flex flex-col gap-2 outline-none min-w-0"
     >
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-        <SortableContext items={projectNames} strategy={verticalListSortingStrategy}>
-          {projects.map((project, index) => (
-            <div key={project.name}>
-              {index > 0 && <hr className="border-border mb-2" />}
-              <SortableProject
-                project={project}
-                statuses={statuses}
-                branchStatuses={branchStatuses}
-                removeProject={removeProject}
-                workspaceDialog={workspaceDialog}
-                setWorkspaceDialog={setWorkspaceDialog}
-                focusedIndex={focusedIndex}
-                workspaceIndexStart={workspaceIndexStarts[index]}
-              />
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+      >
+        <SortableContext items={allProjectNames} strategy={verticalListSortingStrategy}>
+          {visibleGroups.map((group, groupIndex) => (
+            <div key={group.labelId ?? "__unlabeled"}>
+              {groupIndex > 0 && <hr className="border-border my-2" />}
+              {labels.length > 0 && !labelFilter && (
+                group.label ? (
+                  <DroppableLabelHeader labelId={group.labelId!} label={group.label} />
+                ) : (
+                  <DroppableUnlabeledHeader />
+                )
+              )}
+              {group.projects.map((project, index) => (
+                <div key={project.name}>
+                  {index > 0 && <hr className="border-border mb-2" />}
+                  <SortableProject
+                    project={project}
+                    statuses={statuses}
+                    branchStatuses={branchStatuses}
+                    removeProject={removeProject}
+                    updateProjectLabel={updateProjectLabel}
+                    labels={labels}
+                    workspaceDialog={workspaceDialog}
+                    setWorkspaceDialog={setWorkspaceDialog}
+                    focusedIndex={focusedIndex}
+                    workspaceIndexStart={workspaceIndexMap.get(project.name) ?? 0}
+                  />
+                </div>
+              ))}
             </div>
           ))}
         </SortableContext>
+        <DragOverlay>
+          {activeDragId ? (
+            <div className="flex items-center gap-2 px-1 py-1 bg-background rounded shadow-lg border">
+              <FolderOpen className="size-3.5 shrink-0 text-muted-foreground" />
+              <span className="text-sm font-semibold text-foreground">{activeDragId}</span>
+            </div>
+          ) : null}
+        </DragOverlay>
       </DndContext>
     </div>
   );
