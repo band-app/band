@@ -10,12 +10,24 @@ interface Props {
   ci: CIStatus;
 }
 
+function openUrl(url: string | undefined, e: React.MouseEvent) {
+  if (!url) return;
+  e.stopPropagation();
+  import("@tauri-apps/plugin-shell").then(({ open }) => open(url));
+}
+
 export function CIStatusIndicator({ ci }: Props) {
+  const clickable = !!ci.url;
+  const cursorClass = clickable ? "cursor-pointer" : "";
+
   if (ci.state === "success") {
     return (
       <Tooltip>
         <TooltipTrigger asChild>
-          <CircleCheck className="size-3 shrink-0 text-green-400" />
+          <CircleCheck
+            className={`size-3 shrink-0 text-green-400 ${cursorClass}`}
+            onClick={(e) => openUrl(ci.url, e)}
+          />
         </TooltipTrigger>
         <TooltipContent>CI passed</TooltipContent>
       </Tooltip>
@@ -26,7 +38,10 @@ export function CIStatusIndicator({ ci }: Props) {
     return (
       <Tooltip>
         <TooltipTrigger asChild>
-          <CircleAlert className="size-3 shrink-0 text-red-400" />
+          <CircleAlert
+            className={`size-3 shrink-0 text-red-400 ${cursorClass}`}
+            onClick={(e) => openUrl(ci.url, e)}
+          />
         </TooltipTrigger>
         <TooltipContent>CI failed</TooltipContent>
       </Tooltip>
@@ -37,7 +52,10 @@ export function CIStatusIndicator({ ci }: Props) {
     return (
       <Tooltip>
         <TooltipTrigger asChild>
-          <Loader className="size-3 shrink-0 text-yellow-400 animate-spin" />
+          <Loader
+            className={`size-3 shrink-0 text-yellow-400 animate-spin ${cursorClass}`}
+            onClick={(e) => openUrl(ci.url, e)}
+          />
         </TooltipTrigger>
         <TooltipContent>{ci.state === "running" ? "CI running" : "CI pending"}</TooltipContent>
       </Tooltip>

@@ -15,13 +15,20 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
 import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   FolderOpen,
-  X,
+  Save,
 } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { playSound, SOUNDS, type SoundId } from "@/lib/sounds";
 
 const AGENT_TYPES: { value: CodingAgentType; label: string }[] = [
   { value: "claude-code", label: "Claude Code" },
@@ -45,7 +52,7 @@ const DEFAULT_DEFAULTS = {
   ],
 };
 
-type Section = "menu" | "general" | "coding-agent" | "defaults" | "web-server";
+type Section = "menu" | "general" | "coding-agent" | "defaults" | "notifications" | "web-server";
 
 interface Props {
   onClose: () => void;
@@ -92,6 +99,12 @@ export function SettingsPage({ onClose }: Props) {
   const [webServerPort, setWebServerPort] = useState(
     settings.webServerPort?.toString() ?? "",
   );
+  const [soundOnNeedsAttention, setSoundOnNeedsAttention] = useState(
+    settings.notifications?.soundOnNeedsAttention ?? false,
+  );
+  const [selectedSound, setSelectedSound] = useState<SoundId>(
+    (settings.notifications?.sound as SoundId) ?? "chime",
+  );
 
   useEffect(() => {
     loadSettings();
@@ -105,7 +118,13 @@ export function SettingsPage({ onClose }: Props) {
     setAgentType(settings.codingAgent?.type ?? "");
     setAgentCommand(settings.codingAgent?.command ?? "");
     setWebServerPort(settings.webServerPort?.toString() ?? "");
-  }, [settings.worktreesDir, settings.defaults, settings.codingAgent, settings.webServerPort]);
+    setSoundOnNeedsAttention(
+      settings.notifications?.soundOnNeedsAttention ?? false,
+    );
+    setSelectedSound(
+      (settings.notifications?.sound as SoundId) ?? "chime",
+    );
+  }, [settings.worktreesDir, settings.defaults, settings.codingAgent, settings.webServerPort, settings.notifications]);
 
   const handleBrowse = async () => {
     try {
@@ -164,6 +183,7 @@ export function SettingsPage({ onClose }: Props) {
       defaults,
       codingAgent,
       webServerPort: parsedPort,
+      notifications: { soundOnNeedsAttention, sound: selectedSound },
     });
   };
 
@@ -171,6 +191,9 @@ export function SettingsPage({ onClose }: Props) {
   const agentPreview = agentType ? AGENT_LABEL[agentType] : "None";
   const defaultsPreview = defaultsJson.trim() ? "Configured" : "None";
   const portPreview = webServerPort || "3456";
+  const notificationsPreview = soundOnNeedsAttention
+    ? SOUNDS.find((s) => s.id === selectedSound)?.label ?? "On"
+    : "Off";
 
   if (section !== "menu") {
     return (
@@ -183,13 +206,28 @@ export function SettingsPage({ onClose }: Props) {
           >
             <ChevronLeft />
           </Button>
-          <h2 className="text-base font-semibold">
+          <h2 className="text-base font-semibold flex-1">
             {section === "general" && "General"}
             {section === "coding-agent" && "Coding Agent"}
             {section === "defaults" && "Workspace Settings"}
+            {section === "notifications" && "Notifications"}
             {section === "web-server" && "Web Server"}
           </h2>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                onClick={handleSave}
+                disabled={section === "defaults" && !!defaultsError}
+              >
+                <Save />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Save</TooltipContent>
+          </Tooltip>
         </div>
+        <Separator className="mb-3" />
 
         {section === "general" && (
           <div className="space-y-4 px-1">
@@ -216,9 +254,6 @@ export function SettingsPage({ onClose }: Props) {
                 default location.
               </p>
             </div>
-            <Button onClick={handleSave} size="sm">
-              Save
-            </Button>
           </div>
         )}
 
@@ -279,9 +314,6 @@ export function SettingsPage({ onClose }: Props) {
                 </p>
               </div>
             )}
-            <Button onClick={handleSave} size="sm">
-              Save
-            </Button>
           </div>
         )}
 
@@ -325,13 +357,65 @@ export function SettingsPage({ onClose }: Props) {
                 to disable.
               </p>
             </div>
-            <Button
-              onClick={handleSave}
-              size="sm"
-              disabled={!!defaultsError}
-            >
-              Save
-            </Button>
+          </div>
+        )}
+
+        {section === "notifications" && (
+          <div className="space-y-4 px-1">
+            <div className="space-y-2">
+              <Label>Notification sound</Label>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">
+                  Play when agent needs attention
+                </span>
+                <Switch
+                  id="sound-needs-attention"
+                  checked={soundOnNeedsAttention}
+                  onCheckedChange={(checked) => {
+                    setSoundOnNeedsAttention(checked);
+                    if (checked) {
+                      playSound(selectedSound);
+                    }
+                  }}
+                />
+              </div>
+            </div>
+            {soundOnNeedsAttention && (
+              <div className="space-y-2">
+                <Label>Sound</Label>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full justify-between font-normal h-7 text-xs px-2"
+                    >
+                      {SOUNDS.find((s) => s.id === selectedSound)?.label ?? "Chime"}
+                      <ChevronDown className="size-3 opacity-50" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-[--radix-dropdown-menu-trigger-width]">
+                    <DropdownMenuRadioGroup
+                      value={selectedSound}
+                      onValueChange={(v) => {
+                        setSelectedSound(v as SoundId);
+                        playSound(v as SoundId);
+                      }}
+                    >
+                      {SOUNDS.map((s) => (
+                        <DropdownMenuRadioItem key={s.id} value={s.id}>
+                          {s.label}
+                        </DropdownMenuRadioItem>
+                      ))}
+                    </DropdownMenuRadioGroup>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <p className="text-xs text-muted-foreground">
+                  Choose a sound to play when an agent transitions from working
+                  to needs attention.
+                </p>
+              </div>
+            )}
           </div>
         )}
 
@@ -364,11 +448,11 @@ export function SettingsPage({ onClose }: Props) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-2 px-1">
-        <h2 className="text-base font-semibold">Settings</h2>
+      <div className="flex items-center gap-1 mb-2 px-1">
         <Button variant="ghost" size="icon-xs" onClick={onClose}>
-          <X />
+          <ChevronLeft />
         </Button>
+        <h2 className="text-base font-semibold">Settings</h2>
       </div>
       <div className="flex flex-col gap-px">
         <SettingsRow
@@ -387,6 +471,12 @@ export function SettingsPage({ onClose }: Props) {
           label="Workspace Settings"
           value={defaultsPreview}
           onClick={() => setSection("defaults")}
+        />
+        <Separator />
+        <SettingsRow
+          label="Notifications"
+          value={notificationsPreview}
+          onClick={() => setSection("notifications")}
         />
         <Separator />
         <SettingsRow

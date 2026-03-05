@@ -70,22 +70,24 @@ pub fn workspace_remove(project: String, branch: String) -> Result<(), String> {
         .ok_or_else(|| format!("Worktree '{}' not found", branch))?;
 
     let worktree_path = wt.path.clone();
+    let project_path = proj.path.clone();
 
-    // Close VS Code window and kill any processes running inside the worktree
-    ide::close_workspace(&worktree_path);
-
-    // Remove git worktree (ignore errors if the path no longer exists on disk)
-    if std::path::Path::new(&worktree_path).exists() {
-        git::remove_worktree(&proj.path, &worktree_path)?;
-    }
-
-    // Remove from state
+    // Remove from state immediately so the UI stays responsive
     proj.worktrees.retain(|wt| wt.branch != branch);
     state::save_state(&app_state)?;
 
     // Clean up status file
     let status_file = state::status_dir().join(format!("{}-{}.json", project, branch));
     let _ = std::fs::remove_file(status_file);
+
+    // Do heavy cleanup (close IDE, remove worktree from disk) in a background thread
+    std::thread::spawn(move || {
+        ide::close_workspace(&worktree_path);
+
+        if std::path::Path::new(&worktree_path).exists() {
+            let _ = git::remove_worktree(&project_path, &worktree_path);
+        }
+    });
 
     Ok(())
 }

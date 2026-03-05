@@ -32,6 +32,18 @@ impl Default for AppState {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct NotificationSettings {
+    #[serde(
+        rename = "soundOnNeedsAttention",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub sound_on_needs_attention: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sound: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Settings {
     #[serde(rename = "worktreesDir", skip_serializing_if = "Option::is_none")]
     pub worktrees_dir: Option<String>,
@@ -41,6 +53,8 @@ pub struct Settings {
     pub coding_agent: Option<serde_json::Value>,
     #[serde(rename = "webServerPort", skip_serializing_if = "Option::is_none")]
     pub web_server_port: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notifications: Option<NotificationSettings>,
 }
 
 pub fn band_home() -> PathBuf {
