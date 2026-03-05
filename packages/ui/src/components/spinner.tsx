@@ -1,14 +1,12 @@
-import * as React from "react"
+import type * as React from "react";
 
-import { cn } from "../utils"
+import { cn } from "../utils";
 
-function Spinner({
-  className,
-  ...props
-}: React.ComponentProps<"svg">) {
+function Spinner({ className, ...props }: React.ComponentProps<"svg">) {
   return (
     <svg
       data-slot="spinner"
+      aria-hidden="true"
       xmlns="http://www.w3.org/2000/svg"
       width="24"
       height="24"
@@ -23,7 +21,7 @@ function Spinner({
     >
       <path d="M21 12a9 9 0 1 1-6.219-8.56" />
     </svg>
-  )
+  );
 }
 
-export { Spinner }
+export { Spinner };

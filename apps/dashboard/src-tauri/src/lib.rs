@@ -59,7 +59,7 @@ pub fn run() {
 
             // Set window title with git branch if available
             let title = match git::get_current_branch() {
-                Some(branch) => format!("Band - {}", branch),
+                Some(branch) => format!("Band - {branch}"),
                 None => "Band".to_string(),
             };
             let _ = window.set_title(&title);
@@ -67,30 +67,30 @@ pub fn run() {
             // Set window background to black so the transparent title bar appears black
             #[cfg(target_os = "macos")]
             {
-                use cocoa::appkit::NSWindow;
                 use cocoa::appkit::NSColor;
+                use cocoa::appkit::NSWindow;
                 use cocoa::base::{id, nil};
                 let ns_window = window.ns_window().unwrap() as id;
                 unsafe {
-                    let color = NSColor::colorWithSRGBRed_green_blue_alpha_(nil, 0.0, 0.0, 0.0, 1.0);
+                    let color =
+                        NSColor::colorWithSRGBRed_green_blue_alpha_(nil, 0.0, 0.0, 0.0, 1.0);
                     ns_window.setBackgroundColor_(color);
                 }
             }
 
             // Position dashboard at left edge, full screen height
-            if let Ok(monitor) = window.current_monitor() {
-                if let Some(monitor) = monitor {
-                    let screen_size = monitor.size();
-                    let scale_factor = monitor.scale_factor();
-                    let screen_height = (screen_size.height as f64 / scale_factor) as u32;
+            if let Ok(Some(monitor)) = window.current_monitor() {
+                let screen_size = monitor.size();
+                let scale_factor = monitor.scale_factor();
+                let screen_height = (f64::from(screen_size.height) / scale_factor) as u32;
 
-                    let _ = window.set_position(tauri::Position::Logical(
-                        tauri::LogicalPosition::new(0.0, 0.0),
-                    ));
-                    let _ = window.set_size(tauri::Size::Logical(
-                        tauri::LogicalSize::new(DASHBOARD_WIDTH as f64, screen_height as f64),
-                    ));
-                }
+                let _ = window.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(
+                    0.0, 0.0,
+                )));
+                let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(
+                    f64::from(DASHBOARD_WIDTH),
+                    f64::from(screen_height),
+                )));
             }
 
             // Poll the frontmost VS Code window to track active workspace

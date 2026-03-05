@@ -4,10 +4,7 @@ function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
-async function invoke<T>(
-  cmd: string,
-  args?: Record<string, unknown>,
-): Promise<T> {
+async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   if (!isTauri()) {
     throw new Error("Not running inside Tauri");
   }

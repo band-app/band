@@ -1,10 +1,6 @@
-import { CIStatus } from "@/stores/dashboard-store";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { CircleCheck, CircleAlert, Loader } from "lucide-react";
+import { CircleAlert, CircleCheck, Loader } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import type { CIStatus } from "@/stores/dashboard-store";
 
 interface Props {
   ci: CIStatus;

@@ -1,0 +1,72 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.4.5/schema.json",
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "semicolons": "always"
+    }
+  },
+  "css": {
+    "parser": {
+      "cssModules": true,
+      "tailwindDirectives": true
+    },
+    "linter": {
+      "enabled": true
+    }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "correctness": {
+        "noUnusedImports": "warn",
+        "useExhaustiveDependencies": "warn"
+      },
+      "suspicious": {
+        "noArrayIndexKey": "warn"
+      },
+      "a11y": {
+        "useSemanticElements": "warn",
+        "noNoninteractiveTabindex": "off",
+        "noStaticElementInteractions": "off"
+      },
+      "style": {
+        "noNonNullAssertion": "off",
+        "useImportType": "warn"
+      }
+    }
+  },
+  "assist": {
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
+  },
+  "files": {
+    "includes": [
+      "**/*.ts",
+      "**/*.tsx",
+      "**/*.js",
+      "**/*.jsx",
+      "**/*.json",
+      "**/*.css",
+      "!**/node_modules",
+      "!**/dist",
+      "!**/build",
+      "!**/target",
+      "!**/.next",
+      "!**/.vinxi",
+      "!**/.output",
+      "!**/*.gen.ts",
+      "!**/apps/dashboard/src-tauri/gen"
+    ]
+  }
+}

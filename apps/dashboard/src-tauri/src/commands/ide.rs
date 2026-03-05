@@ -43,13 +43,7 @@ extern "C" {
 
 extern "C" {
     fn proc_listpids(type_: u32, typeinfo: u32, buffer: *mut c_void, buffersize: i32) -> i32;
-    fn proc_pidinfo(
-        pid: i32,
-        flavor: i32,
-        arg: u64,
-        buffer: *mut c_void,
-        buffersize: i32,
-    ) -> i32;
+    fn proc_pidinfo(pid: i32, flavor: i32, arg: u64, buffer: *mut c_void, buffersize: i32) -> i32;
 }
 
 // --- Objective-C runtime for NSWindow manipulation ---
@@ -78,7 +72,13 @@ unsafe fn cfstring_to_string(cf: *const c_void) -> Option<String> {
     }
     let buf_size = (len * 4 + 1) as usize;
     let mut buf = vec![0i8; buf_size];
-    if CFStringGetCString(cf, buf.as_mut_ptr(), buf_size as i64, K_CF_STRING_ENCODING_UTF8) != 0 {
+    if CFStringGetCString(
+        cf,
+        buf.as_mut_ptr(),
+        buf_size as i64,
+        K_CF_STRING_ENCODING_UTF8,
+    ) != 0
+    {
         Some(CStr::from_ptr(buf.as_ptr()).to_string_lossy().into_owned())
     } else {
         None
@@ -96,7 +96,7 @@ fn get_frontmost_window() -> Option<(i32, String)> {
 
         let attr = cfstr("AXFocusedApplication");
         let mut focused_app: *const c_void = std::ptr::null();
-        let err = AXUIElementCopyAttributeValue(system_wide, attr, &mut focused_app);
+        let err = AXUIElementCopyAttributeValue(system_wide, attr, &raw mut focused_app);
         CFRelease(attr);
         CFRelease(system_wide);
 
@@ -105,14 +105,14 @@ fn get_frontmost_window() -> Option<(i32, String)> {
         }
 
         let mut pid: i32 = 0;
-        if AXUIElementGetPid(focused_app, &mut pid) != 0 {
+        if AXUIElementGetPid(focused_app, &raw mut pid) != 0 {
             CFRelease(focused_app);
             return None;
         }
 
         let attr = cfstr("AXFocusedWindow");
         let mut focused_window: *const c_void = std::ptr::null();
-        let err = AXUIElementCopyAttributeValue(focused_app, attr, &mut focused_window);
+        let err = AXUIElementCopyAttributeValue(focused_app, attr, &raw mut focused_window);
         CFRelease(attr);
         CFRelease(focused_app);
 
@@ -122,7 +122,7 @@ fn get_frontmost_window() -> Option<(i32, String)> {
 
         let attr = cfstr("AXTitle");
         let mut title_ref: *const c_void = std::ptr::null();
-        let err = AXUIElementCopyAttributeValue(focused_window, attr, &mut title_ref);
+        let err = AXUIElementCopyAttributeValue(focused_window, attr, &raw mut title_ref);
         CFRelease(attr);
         CFRelease(focused_window);
 
@@ -141,27 +141,24 @@ fn get_frontmost_window() -> Option<(i32, String)> {
 
 fn get_bundle_id(pid: i32) -> Option<String> {
     unsafe {
-        type MsgSendPid =
-            unsafe extern "C" fn(*const c_void, *const c_void, i32) -> *const c_void;
+        type MsgSendPid = unsafe extern "C" fn(*const c_void, *const c_void, i32) -> *const c_void;
         type MsgSend = unsafe extern "C" fn(*const c_void, *const c_void) -> *const c_void;
 
         let msg_pid: MsgSendPid = std::mem::transmute(objc_msgSend as unsafe extern "C" fn());
         let msg: MsgSend = std::mem::transmute(objc_msgSend as unsafe extern "C" fn());
 
-        let cls = objc_getClass(b"NSRunningApplication\0".as_ptr() as *const i8);
+        let cls = objc_getClass(c"NSRunningApplication".as_ptr());
         if cls.is_null() {
             return None;
         }
 
-        let sel = sel_registerName(
-            b"runningApplicationWithProcessIdentifier:\0".as_ptr() as *const i8,
-        );
+        let sel = sel_registerName(c"runningApplicationWithProcessIdentifier:".as_ptr());
         let app = msg_pid(cls, sel, pid);
         if app.is_null() {
             return None;
         }
 
-        let sel = sel_registerName(b"bundleIdentifier\0".as_ptr() as *const i8);
+        let sel = sel_registerName(c"bundleIdentifier".as_ptr());
         let bundle_id = msg(app, sel);
         if bundle_id.is_null() {
             return None;
@@ -187,7 +184,7 @@ fn get_all_pids() -> Vec<i32> {
         let actual = proc_listpids(
             PROC_ALL_PIDS,
             0,
-            pids.as_mut_ptr() as *mut c_void,
+            pids.as_mut_ptr().cast::<c_void>(),
             buf_size,
         );
 
@@ -202,6 +199,7 @@ fn get_all_pids() -> Vec<i32> {
     }
 }
 
+#[allow(clippy::similar_names)]
 fn get_ppid(pid: i32) -> Option<i32> {
     unsafe {
         let mut buf = [0u8; 256]; // proc_bsdinfo is ~136 bytes
@@ -209,7 +207,7 @@ fn get_ppid(pid: i32) -> Option<i32> {
             pid,
             PROC_PIDTBSDINFO,
             0,
-            buf.as_mut_ptr() as *mut c_void,
+            buf.as_mut_ptr().cast::<c_void>(),
             buf.len() as i32,
         );
         if ret <= 20 {
@@ -232,7 +230,7 @@ fn get_process_cwd(pid: i32) -> Option<PathBuf> {
             pid,
             PROC_PIDVNODEPATHINFO,
             0,
-            buf.as_mut_ptr() as *mut c_void,
+            buf.as_mut_ptr().cast::<c_void>(),
             buf.len() as i32,
         );
         if ret <= 152 {
@@ -291,7 +289,7 @@ extern "C" {
 }
 
 /// Close all processes associated with a worktree.
-/// 1. Close the VS Code window gracefully via AppleScript.
+/// 1. Close the VS Code window gracefully via `AppleScript`.
 /// 2. SIGTERM any remaining processes whose CWD is inside the worktree.
 pub fn close_workspace(worktree_path: &str) {
     let wt_path = PathBuf::from(worktree_path);
@@ -310,8 +308,7 @@ pub fn close_workspace(worktree_path: &str) {
             end repeat
         end tell
     end if
-end tell"#,
-            folder = folder
+end tell"#
         );
         let _ = std::process::Command::new("osascript")
             .args(["-e", &script])
@@ -378,7 +375,7 @@ pub fn write_active_marker(workspace_id: &str) {
     let active_file = state::status_dir().join("active.json");
     let _ = std::fs::write(
         active_file,
-        format!("{{\"workspaceId\":\"{}\"}}", workspace_id),
+        format!("{{\"workspaceId\":\"{workspace_id}\"}}"),
     );
 }
 
@@ -401,7 +398,7 @@ fn match_title_to_workspace(title: &str) -> Option<String> {
                 // Prefer the longest folder name match to avoid "app" matching "my-app"
                 if best_match
                     .as_ref()
-                    .map_or(true, |(_, len)| folder_name.len() > *len)
+                    .is_none_or(|(_, len)| folder_name.len() > *len)
                 {
                     best_match = Some((ws_id, folder_name.len()));
                 }
@@ -412,15 +409,9 @@ fn match_title_to_workspace(title: &str) -> Option<String> {
     best_match.map(|(id, _)| id)
 }
 
-/// Detect the frontmost workspace using native macOS APIs.
-/// 1. Get frontmost window PID + title via Accessibility API
-/// 2. Try CWD matching on descendant processes (works for any app)
-/// 3. Fall back to window title matching
 /// Check if the dashboard (our own process) is the frontmost application.
 fn is_dashboard_frontmost() -> bool {
-    get_frontmost_window()
-        .map(|(pid, _)| pid as u32 == std::process::id())
-        .unwrap_or(false)
+    get_frontmost_window().is_some_and(|(pid, _)| pid as u32 == std::process::id())
 }
 
 /// Look up the worktree folder name for a given workspace ID.
@@ -435,13 +426,17 @@ fn workspace_folder_name(workspace_id: &str) -> Option<String> {
                 return Path::new(&wt.path)
                     .file_name()
                     .and_then(|n| n.to_str())
-                    .map(|s| s.to_string());
+                    .map(std::string::ToString::to_string);
             }
         }
     }
     None
 }
 
+/// Detect the frontmost workspace using native macOS APIs.
+/// 1. Get frontmost window PID + title via Accessibility API
+/// 2. Try CWD matching on descendant processes (works for any app)
+/// 3. Fall back to window title matching
 fn detect_frontmost_workspace() -> Option<String> {
     let (pid, title) = get_frontmost_window()?;
 
@@ -459,8 +454,7 @@ fn detect_frontmost_workspace() -> Option<String> {
     // Fall back to window title matching, but only for VS Code
     // (other apps like Chrome can have titles that accidentally match workspace names)
     if !title.is_empty() {
-        let is_vscode = get_bundle_id(pid)
-            .map_or(false, |id| id == VSCODE_BUNDLE_ID);
+        let is_vscode = get_bundle_id(pid).is_some_and(|id| id == VSCODE_BUNDLE_ID);
         if is_vscode {
             return match_title_to_workspace(&title);
         }
@@ -469,17 +463,15 @@ fn detect_frontmost_workspace() -> Option<String> {
     None
 }
 
-/// If the workspace status file has agent.status == "needs_attention",
+/// If the workspace status file has agent.status == "`needs_attention`",
 /// update it to "waiting" (the user is now looking at it).
 fn clear_needs_attention(workspace_id: &str) {
-    let status_file = state::status_dir().join(format!("{}.json", workspace_id));
-    let data = match std::fs::read_to_string(&status_file) {
-        Ok(d) => d,
-        Err(_) => return,
+    let status_file = state::status_dir().join(format!("{workspace_id}.json"));
+    let Ok(data) = std::fs::read_to_string(&status_file) else {
+        return;
     };
-    let mut status: serde_json::Value = match serde_json::from_str(&data) {
-        Ok(v) => v,
-        Err(_) => return,
+    let Ok(mut status) = serde_json::from_str::<serde_json::Value>(&data) else {
+        return;
     };
     let needs_clear = status
         .get("agent")
@@ -498,7 +490,7 @@ fn clear_needs_attention(workspace_id: &str) {
 }
 
 /// Bring all dashboard windows to front without activating the app.
-/// Uses NSWindow's orderFrontRegardless to raise without stealing focus.
+/// Uses `NSWindow`'s orderFrontRegardless to raise without stealing focus.
 /// Must be called on the main thread.
 unsafe fn raise_dashboard_windows() {
     // Use transmute to cast objc_msgSend to the correct function signatures.
@@ -511,33 +503,24 @@ unsafe fn raise_dashboard_windows() {
     let msg_idx: MsgSendIdx = std::mem::transmute(objc_msgSend as unsafe extern "C" fn());
     let msg_count: MsgSendCount = std::mem::transmute(objc_msgSend as unsafe extern "C" fn());
 
-    let cls = objc_getClass(b"NSApplication\0".as_ptr() as *const i8);
+    let cls = objc_getClass(c"NSApplication".as_ptr());
     if cls.is_null() {
         return;
     }
 
-    let app = msg(
-        cls,
-        sel_registerName(b"sharedApplication\0".as_ptr() as *const i8),
-    );
+    let app = msg(cls, sel_registerName(c"sharedApplication".as_ptr()));
     if app.is_null() {
         return;
     }
 
-    let windows = msg(
-        app,
-        sel_registerName(b"windows\0".as_ptr() as *const i8),
-    );
+    let windows = msg(app, sel_registerName(c"windows".as_ptr()));
     if windows.is_null() {
         return;
     }
 
-    let count = msg_count(
-        windows,
-        sel_registerName(b"count\0".as_ptr() as *const i8),
-    );
-    let obj_at = sel_registerName(b"objectAtIndex:\0".as_ptr() as *const i8);
-    let raise = sel_registerName(b"orderFrontRegardless\0".as_ptr() as *const i8);
+    let count = msg_count(windows, sel_registerName(c"count".as_ptr()));
+    let obj_at = sel_registerName(c"objectAtIndex:".as_ptr());
+    let raise = sel_registerName(c"orderFrontRegardless".as_ptr());
 
     for i in 0..count {
         let win = msg_idx(windows, obj_at, i);
@@ -595,7 +578,7 @@ pub fn start_focus_polling(app_handle: tauri::AppHandle) {
 }
 
 /// Raise the VS Code window matching the branch to front without activating VS Code.
-/// Uses AXRaise via AppleScript so VS Code doesn't steal focus from the dashboard.
+/// Uses `AXRaise` via `AppleScript` so VS Code doesn't steal focus from the dashboard.
 pub fn raise_vscode_window(branch: &str) {
     let branch = branch.to_string();
     std::thread::spawn(move || {
@@ -611,8 +594,7 @@ pub fn raise_vscode_window(branch: &str) {
             end repeat
         end tell
     end if
-end tell"#,
-            branch = branch
+end tell"#
         );
 
         let _ = std::process::Command::new("osascript")
@@ -621,7 +603,7 @@ end tell"#,
     });
 }
 
-/// Use AppleScript + System Events to position the VS Code window
+/// Use `AppleScript` + System Events to position the VS Code window
 /// to fill the screen to the right of the dashboard.
 pub fn align_vscode_window(branch: &str) {
     let branch = branch.to_string();
@@ -634,7 +616,7 @@ end tell
 set screenWidth to item 3 of screenBounds
 set screenHeight to item 4 of screenBounds
 
-set dashWidth to {dashboard_width}
+set dashWidth to {DASHBOARD_WIDTH}
 set vsW to screenWidth - dashWidth
 set vsH to screenHeight
 
@@ -659,9 +641,7 @@ tell application "System Events"
         end if
     end tell
 end tell
-"#,
-            dashboard_width = DASHBOARD_WIDTH,
-            branch = branch
+"#
         );
 
         let _ = std::process::Command::new("osascript")
@@ -700,7 +680,7 @@ end tell"#,
                 std::process::Command::new("osascript")
                     .args(["-e", &script])
                     .output()
-                    .map_err(|e| format!("Failed to focus window: {}", e))?;
+                    .map_err(|e| format!("Failed to focus window: {e}"))?;
 
                 // Track the active workspace
                 write_active_marker(&ws_id);
@@ -713,23 +693,22 @@ end tell"#,
         }
     }
 
-    Err(format!("Workspace '{}' not found", workspace_id))
+    Err(format!("Workspace '{workspace_id}' not found"))
 }
 
 /// Return the currently active workspace ID by reading the marker file.
 #[tauri::command]
 pub fn get_active_workspace() -> Result<Option<String>, String> {
-    let active_file = state::status_dir().join("active.json");
-    let data = match std::fs::read_to_string(&active_file) {
-        Ok(d) => d,
-        Err(_) => return Ok(None),
-    };
-
     #[derive(serde::Deserialize)]
     struct ActiveMarker {
         #[serde(rename = "workspaceId")]
         workspace_id: String,
     }
+
+    let active_file = state::status_dir().join("active.json");
+    let Ok(data) = std::fs::read_to_string(&active_file) else {
+        return Ok(None);
+    };
 
     match serde_json::from_str::<ActiveMarker>(&data) {
         Ok(marker) => Ok(Some(marker.workspace_id)),
@@ -757,7 +736,7 @@ pub fn pick_folder() -> Result<Option<String>, String> {
 return POSIX path of theFolder"#,
         ])
         .output()
-        .map_err(|e| format!("Failed to open folder picker: {}", e))?;
+        .map_err(|e| format!("Failed to open folder picker: {e}"))?;
 
     if output.status.success() {
         let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -776,6 +755,6 @@ pub fn reveal_in_finder(path: String) -> Result<(), String> {
     std::process::Command::new("open")
         .arg(&path)
         .output()
-        .map_err(|e| format!("Failed to open Finder: {}", e))?;
+        .map_err(|e| format!("Failed to open Finder: {e}"))?;
     Ok(())
 }

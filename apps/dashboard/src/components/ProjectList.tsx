@@ -1,6 +1,5 @@
+import { Clipboard, Ellipsis, FolderOpen, ListMinus, Plus } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useDashboardStore } from "@/stores/dashboard-store";
-import { WorkspaceCard } from "@/components/WorkspaceCard";
 import { NewWorkspaceDialog } from "@/components/NewWorkspaceForm";
 import { Button } from "@/components/ui/button";
 import {
@@ -9,12 +8,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { Clipboard, Ellipsis, FolderOpen, ListMinus, Plus } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { WorkspaceCard } from "@/components/WorkspaceCard";
+import { useDashboardStore } from "@/stores/dashboard-store";
 
 export function ProjectList() {
   const projects = useDashboardStore((s) => s.projects);
@@ -29,10 +25,8 @@ export function ProjectList() {
 
   const allWorkspaceIds = useMemo(
     () =>
-      projects.flatMap((project) =>
-        project.worktrees.map((wt) => `${project.name}-${wt.branch}`)
-      ),
-    [projects]
+      projects.flatMap((project) => project.worktrees.map((wt) => `${project.name}-${wt.branch}`)),
+    [projects],
   );
 
   useEffect(() => {
@@ -53,9 +47,7 @@ export function ProjectList() {
 
     if (e.key === "ArrowDown") {
       e.preventDefault();
-      setFocusedIndex((prev) =>
-        prev < allWorkspaceIds.length - 1 ? prev + 1 : prev
-      );
+      setFocusedIndex((prev) => (prev < allWorkspaceIds.length - 1 ? prev + 1 : prev));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setFocusedIndex((prev) => (prev > 0 ? prev - 1 : prev));
@@ -70,9 +62,7 @@ export function ProjectList() {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
         <p className="text-lg mb-2">No projects registered</p>
-        <p className="text-sm">
-          Click the + button to register a git repository
-        </p>
+        <p className="text-sm">Click the + button to register a git repository</p>
       </div>
     );
   }
@@ -82,7 +72,7 @@ export function ProjectList() {
   return (
     <div
       ref={containerRef}
-      tabIndex={0}
+      tabIndex={-1}
       onKeyDown={handleKeyDown}
       className="flex flex-col gap-2 outline-none min-w-0"
     >
@@ -109,32 +99,26 @@ export function ProjectList() {
               </Tooltip>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    className="text-muted-foreground"
-                  >
+                  <Button variant="ghost" size="icon-xs" className="text-muted-foreground">
                     <Ellipsis />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                  <DropdownMenuItem
-                    onClick={() => navigator.clipboard.writeText(project.path)}
-                  >
+                  <DropdownMenuItem onClick={() => navigator.clipboard.writeText(project.path)}>
                     <Clipboard />
                     Copy path
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     onClick={() => {
-                      import("@tauri-apps/api/core").then(({ invoke }) => invoke("reveal_in_finder", { path: project.path }));
+                      import("@tauri-apps/api/core").then(({ invoke }) =>
+                        invoke("reveal_in_finder", { path: project.path }),
+                      );
                     }}
                   >
                     <FolderOpen />
                     Open in Finder
                   </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={() => removeProject(project.name)}
-                  >
+                  <DropdownMenuItem onClick={() => removeProject(project.name)}>
                     <ListMinus />
                     Remove from list
                   </DropdownMenuItem>
@@ -151,9 +135,7 @@ export function ProjectList() {
 
           <div className="flex flex-col gap-0.5 overflow-hidden">
             {project.worktrees.length === 0 ? (
-              <p className="text-sm text-muted-foreground px-4 py-2">
-                No workspaces yet
-              </p>
+              <p className="text-sm text-muted-foreground px-4 py-2">No workspaces yet</p>
             ) : (
               project.worktrees.map((wt) => {
                 const wsId = `${project.name}-${wt.branch}`;

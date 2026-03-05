@@ -4,10 +4,7 @@ function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
-async function invoke<T>(
-  cmd: string,
-  args?: Record<string, unknown>,
-): Promise<T> {
+async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   if (!isTauri()) {
     throw new Error("Not running inside Tauri");
   }
@@ -77,11 +74,7 @@ interface DashboardState {
   loadProjects: () => Promise<void>;
   addProject: (path: string) => Promise<void>;
   removeProject: (name: string) => Promise<void>;
-  createWorkspace: (
-    project: string,
-    branch: string,
-    base?: string,
-  ) => Promise<void>;
+  createWorkspace: (project: string, branch: string, base?: string) => Promise<void>;
   removeWorkspace: (project: string, branch: string) => Promise<void>;
   openWorkspace: (workspaceId: string) => void;
   clearError: () => void;
@@ -185,7 +178,12 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   },
 
   setActiveWorkspace: (workspaceId: string | null) => {
-    console.log("[dashboard] setActiveWorkspace:", workspaceId, "(current:", get().activeWorkspaceId + ")");
+    console.log(
+      "[dashboard] setActiveWorkspace:",
+      workspaceId,
+      "(current:",
+      `${get().activeWorkspaceId})`,
+    );
     if (get().activeWorkspaceId === workspaceId) return;
     set({ activeWorkspaceId: workspaceId });
   },
@@ -207,7 +205,13 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
       const branchStatuses = new Map(state.branchStatuses);
       const existing = branchStatuses.get(workspaceId);
       branchStatuses.set(workspaceId, {
-        git: existing?.git ?? { dirty: false, conflict: false, ahead: 0, behind: 0, sync_state: "synced" },
+        git: existing?.git ?? {
+          dirty: false,
+          conflict: false,
+          ahead: 0,
+          behind: 0,
+          sync_state: "synced",
+        },
         ci,
       });
       return { branchStatuses };

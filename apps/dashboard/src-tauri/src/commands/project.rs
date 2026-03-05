@@ -40,7 +40,7 @@ impl From<&ProjectState> for ProjectInfo {
 #[tauri::command]
 pub fn project_init(path: String) -> Result<ProjectInfo, String> {
     if !git::is_git_repo(&path) {
-        return Err(format!("{} is not a git repository", path));
+        return Err(format!("{path} is not a git repository"));
     }
 
     let name = git::get_repo_name(&path);
@@ -50,7 +50,7 @@ pub fn project_init(path: String) -> Result<ProjectInfo, String> {
 
     // Check if already registered
     if app_state.projects.iter().any(|p| p.name == name) {
-        return Err(format!("Project '{}' already registered", name));
+        return Err(format!("Project '{name}' already registered"));
     }
 
     // Get existing worktrees
@@ -87,7 +87,8 @@ pub fn project_list() -> Result<Vec<ProjectInfo>, String> {
     let mut changed = false;
     for proj in &mut app_state.projects {
         let before = proj.worktrees.len();
-        proj.worktrees.retain(|wt| std::path::Path::new(&wt.path).exists());
+        proj.worktrees
+            .retain(|wt| std::path::Path::new(&wt.path).exists());
         if proj.worktrees.len() != before {
             changed = true;
         }
@@ -106,7 +107,7 @@ pub fn project_remove(name: String) -> Result<(), String> {
     app_state.projects.retain(|p| p.name != name);
 
     if app_state.projects.len() == initial_len {
-        return Err(format!("Project '{}' not found", name));
+        return Err(format!("Project '{name}' not found"));
     }
 
     state::save_state(&app_state)?;
@@ -116,7 +117,7 @@ pub fn project_remove(name: String) -> Result<(), String> {
     if let Ok(entries) = std::fs::read_dir(&status_dir) {
         for entry in entries.flatten() {
             let filename = entry.file_name().to_string_lossy().to_string();
-            if filename.starts_with(&format!("{}-", name)) {
+            if filename.starts_with(&format!("{name}-")) {
                 let _ = std::fs::remove_file(entry.path());
             }
         }

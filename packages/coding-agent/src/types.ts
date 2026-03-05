@@ -1,11 +1,11 @@
 import type { AgentEvent } from "./events.js";
 
 export interface CodingAgentFeatures {
-	costTracking: boolean;
+  costTracking: boolean;
 }
 
 export interface CodingAgent {
-	readonly name: string;
-	readonly supportedFeatures: CodingAgentFeatures;
-	runSession(prompt: string, sessionId?: string): AsyncGenerator<AgentEvent>;
+  readonly name: string;
+  readonly supportedFeatures: CodingAgentFeatures;
+  runSession(prompt: string, sessionId?: string): AsyncGenerator<AgentEvent>;
 }

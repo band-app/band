@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { loadConfig, loadUserDefaults, isBandWorktree } from "./config";
+import { isBandWorktree, loadConfig, loadUserDefaults } from "./config";
 import { setupWorkspace } from "./workspace-setup";
 
 let log: vscode.OutputChannel;
@@ -12,7 +12,7 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand("band.setupWorkspace", async () => {
       await runSetup();
-    })
+    }),
   );
 
   // Auto-setup if config exists
@@ -26,15 +26,13 @@ export async function activate(context: vscode.ExtensionContext) {
       vscode.window.showInformationMessage("Band workspace setup complete");
     } else if (await isBandWorktree(workspacePath)) {
       log.appendLine(
-        "No project config, but workspace is a Band worktree. Checking user defaults..."
+        "No project config, but workspace is a Band worktree. Checking user defaults...",
       );
       const defaults = await loadUserDefaults();
       if (defaults) {
         log.appendLine("User defaults loaded, setting up workspace...");
         await setupWorkspace(defaults);
-        vscode.window.showInformationMessage(
-          "Band workspace setup complete (using defaults)"
-        );
+        vscode.window.showInformationMessage("Band workspace setup complete (using defaults)");
       } else {
         log.appendLine("No user defaults found");
       }
@@ -68,15 +66,13 @@ async function runSetup() {
     const defaults = await loadUserDefaults();
     if (defaults) {
       await setupWorkspace(defaults);
-      vscode.window.showInformationMessage(
-        "Band workspace setup complete (using defaults)"
-      );
+      vscode.window.showInformationMessage("Band workspace setup complete (using defaults)");
       return;
     }
   }
 
   vscode.window.showErrorMessage(
-    `No .band/config.json found. Checked: ${workspacePath}/.band/config.json`
+    `No .band/config.json found. Checked: ${workspacePath}/.band/config.json`,
   );
 }
 
