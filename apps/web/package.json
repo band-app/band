@@ -6,7 +6,8 @@
 	"scripts": {
 		"dev": "vite dev --port 3456 --host 0.0.0.0",
 		"build": "vite build",
-		"start": "node start-server.mjs"
+		"start": "node start-server.mjs",
+		"test": "node --test auth.test.mjs"
 	},
 	"dependencies": {
 		"@ai-sdk/react": "^3.0.0",

@@ -24,6 +24,7 @@ export function useTunnel() {
     try {
       await invoke("webserver_start");
       await invoke("webserver_wait_ready");
+      await invoke<string>("webserver_get_token");
       setWebServerRunning(true);
       setShowDialog(true);
     } catch (e) {

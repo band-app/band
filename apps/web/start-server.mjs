@@ -2,10 +2,13 @@ import { createServer } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import sirv from "sirv";
+import { createAuthMiddleware } from "./auth.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const clientDir = join(__dirname, "dist", "client");
 const port = parseInt(process.env.PORT || "3456", 10);
+
+const { handleAuth } = createAuthMiddleware(process.env.BAND_TOKEN_SECRET);
 
 const assets = sirv(clientDir, {
 	maxAge: 31536000,
@@ -19,6 +22,9 @@ async function main() {
 	const server = mod.default;
 
 	const httpServer = createServer(async (req, res) => {
+		// Auth check runs first
+		if (handleAuth(req, res)) return;
+
 		// Try serving static assets first (sirv calls next() if no match)
 		assets(req, res, async () => {
 			const protocol = "http";

@@ -182,11 +182,11 @@ export function TunnelDialog({ open, onOpenChange, onStopped, initialUrl, onTunn
 
           {step === "ready" && tunnelUrl && (
             <>
-              <div className="rounded-lg bg-white p-3">
+              <a href={tunnelUrl} target="_blank" rel="noopener noreferrer" className="rounded-lg bg-white p-3 block cursor-pointer hover:opacity-80 transition-opacity">
                 <QRCodeSVG value={tunnelUrl} size={200} />
-              </div>
+              </a>
               <p className="text-xs text-muted-foreground text-center break-all max-w-[260px]">
-                {tunnelUrl}
+                {tunnelUrl.replace(/\?token=[^&]+/, "")}
               </p>
             </>
           )}

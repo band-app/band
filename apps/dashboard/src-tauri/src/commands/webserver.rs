@@ -47,6 +47,17 @@ fn get_configured_port() -> u16 {
         .unwrap_or(DEFAULT_WEB_SERVER_PORT)
 }
 
+/// Generate a 32-byte hex secret from /dev/urandom.
+fn generate_secret() -> Result<String, String> {
+    use std::io::Read;
+    let mut f = std::fs::File::open("/dev/urandom")
+        .map_err(|e| format!("Failed to open /dev/urandom: {}", e))?;
+    let mut buf = [0u8; 32];
+    f.read_exact(&mut buf)
+        .map_err(|e| format!("Failed to read random bytes: {}", e))?;
+    Ok(buf.iter().map(|b| format!("{:02x}", b)).collect())
+}
+
 /// Send SIGTERM to the entire process group, then fall back to SIGKILL.
 fn kill_process_tree(child: &mut Child) {
     let pid = child.id() as libc::pid_t;
@@ -123,12 +134,17 @@ pub struct TunnelInner {
 
 pub struct TunnelState(pub Arc<Mutex<TunnelInner>>);
 
+pub struct AccessTokenState(pub Arc<Mutex<Option<String>>>);
+
 // ---------------------------------------------------------------------------
 // Web server commands
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
-pub fn webserver_start(state: State<'_, WebServerState>) -> Result<(), String> {
+pub fn webserver_start(
+    state: State<'_, WebServerState>,
+    token_state: State<'_, AccessTokenState>,
+) -> Result<(), String> {
     if state.0.is_running() {
         return Ok(());
     }
@@ -136,11 +152,16 @@ pub fn webserver_start(state: State<'_, WebServerState>) -> Result<(), String> {
     let web_dir = resolve_web_dir()?;
     let start_script = web_dir.join("start-server.mjs");
     let port = get_configured_port();
+    let secret = generate_secret()?;
+
+    // Clear any cached token from a previous session
+    *token_state.0.lock().unwrap() = None;
 
     let mut cmd = Command::new("node");
     cmd.arg(&start_script)
         .current_dir(&web_dir)
         .env("PORT", port.to_string())
+        .env("BAND_TOKEN_SECRET", &secret)
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     set_process_group(&mut cmd);
@@ -154,8 +175,12 @@ pub fn webserver_start(state: State<'_, WebServerState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn webserver_stop(state: State<'_, WebServerState>) -> Result<(), String> {
+pub fn webserver_stop(
+    state: State<'_, WebServerState>,
+    token_state: State<'_, AccessTokenState>,
+) -> Result<(), String> {
     state.0.kill();
+    *token_state.0.lock().unwrap() = None;
     Ok(())
 }
 
@@ -182,6 +207,47 @@ pub async fn webserver_wait_ready() -> Result<(), String> {
         }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
+}
+
+#[tauri::command]
+pub async fn webserver_get_token(
+    token_state: State<'_, AccessTokenState>,
+) -> Result<String, String> {
+    // Return cached token if available
+    {
+        let guard = token_state.0.lock().unwrap();
+        if let Some(ref token) = *guard {
+            return Ok(token.clone());
+        }
+    }
+
+    let port = get_configured_port();
+    let output = tokio::process::Command::new("curl")
+        .args([
+            "-s",
+            "-f",
+            &format!("http://127.0.0.1:{}/api/auth/token", port),
+        ])
+        .output()
+        .await
+        .map_err(|e| format!("Failed to fetch token: {}", e))?;
+
+    if !output.status.success() {
+        return Err("Failed to fetch auth token from web server".to_string());
+    }
+
+    let body = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|e| format!("Failed to parse token response: {}", e))?;
+    let token = parsed["token"]
+        .as_str()
+        .ok_or_else(|| "Token not found in response".to_string())?
+        .to_string();
+
+    // Cache the token
+    *token_state.0.lock().unwrap() = Some(token.clone());
+
+    Ok(token)
 }
 
 // ---------------------------------------------------------------------------
@@ -212,13 +278,18 @@ pub async fn tunnel_install() -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn tunnel_start(app: AppHandle, state: State<'_, TunnelState>) -> Result<(), String> {
+pub fn tunnel_start(
+    app: AppHandle,
+    state: State<'_, TunnelState>,
+    token_state: State<'_, AccessTokenState>,
+) -> Result<(), String> {
     let mut guard = state.0.lock().unwrap();
 
-    // Already running — re-emit URL if we have it
+    // Already running — re-emit URL (with token) if we have it
     if guard.process.is_running() {
-        if let Some(ref url) = guard.url {
-            let _ = app.emit("tunnel-url", url.clone());
+        if let Some(ref base_url) = guard.url {
+            let url = append_token(base_url, &token_state);
+            let _ = app.emit("tunnel-url", url);
         }
         return Ok(());
     }
@@ -241,6 +312,7 @@ pub fn tunnel_start(app: AppHandle, state: State<'_, TunnelState>) -> Result<(),
 
     let tunnel_state = state.0.clone();
     let app_handle = app.clone();
+    let token_arc = token_state.0.clone();
 
     std::thread::spawn(move || {
         let reader = BufReader::new(stderr);
@@ -250,11 +322,21 @@ pub fn tunnel_start(app: AppHandle, state: State<'_, TunnelState>) -> Result<(),
                 if let Some(start) = line.find("https://") {
                     let rest = &line[start..];
                     if rest.contains(".trycloudflare.com") {
-                        let url: String =
+                        let base_url: String =
                             rest.chars().take_while(|c| !c.is_whitespace()).collect();
                         if let Ok(mut guard) = tunnel_state.lock() {
-                            guard.url = Some(url.clone());
+                            // Store the base URL (without token)
+                            guard.url = Some(base_url.clone());
                         }
+                        // Emit URL with token appended
+                        let token_guard = token_arc.lock().ok();
+                        let token = token_guard
+                            .as_ref()
+                            .and_then(|g| g.as_ref().cloned());
+                        let url = match token {
+                            Some(t) => format!("{}?token={}", base_url, t),
+                            None => base_url,
+                        };
                         let _ = app_handle.emit("tunnel-url", url);
                         found = true;
                     }
@@ -283,11 +365,23 @@ pub fn tunnel_stop(state: State<'_, TunnelState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn tunnel_status(state: State<'_, TunnelState>) -> Result<Option<String>, String> {
+pub fn tunnel_status(
+    state: State<'_, TunnelState>,
+    token_state: State<'_, AccessTokenState>,
+) -> Result<Option<String>, String> {
     let guard = state.0.lock().unwrap();
     if guard.process.is_running() {
-        Ok(guard.url.clone())
+        Ok(guard.url.as_ref().map(|base_url| append_token(base_url, &token_state)))
     } else {
         Ok(None)
+    }
+}
+
+/// Append ?token=XXX to a base URL if a cached token exists.
+fn append_token(base_url: &str, token_state: &State<'_, AccessTokenState>) -> String {
+    let guard = token_state.0.lock().unwrap();
+    match *guard {
+        Some(ref token) => format!("{}?token={}", base_url, token),
+        None => base_url.to_string(),
     }
 }

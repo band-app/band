@@ -4,7 +4,7 @@ mod state;
 
 use commands::branch_status::BranchStatusPollerState;
 use commands::status::WatcherState;
-use commands::webserver::{ManagedProcess, TunnelInner, TunnelState, WebServerState};
+use commands::webserver::{AccessTokenState, ManagedProcess, TunnelInner, TunnelState, WebServerState};
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
 
@@ -23,6 +23,7 @@ pub fn run() {
             process: ManagedProcess::new(),
             url: None,
         }))))
+        .manage(AccessTokenState(Arc::new(Mutex::new(None))))
         .invoke_handler(tauri::generate_handler![
             commands::project::project_init,
             commands::project::project_list,
@@ -52,6 +53,7 @@ pub fn run() {
             commands::webserver::tunnel_install,
             commands::webserver::tunnel_start,
             commands::webserver::tunnel_stop,
+            commands::webserver::webserver_get_token,
             commands::webserver::tunnel_status,
         ])
         .setup(|app| {
