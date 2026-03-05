@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { isBandWorktree, loadConfig, loadUserDefaults } from "./config";
+import { isBandWorktree, loadConfig, loadEffectiveConfig } from "./config";
 import { setupWorkspace } from "./workspace-setup";
 
 let log: vscode.OutputChannel;
@@ -15,26 +15,20 @@ export async function activate(context: vscode.ExtensionContext) {
     }),
   );
 
-  // Auto-setup if config exists
+  // Auto-setup if config exists or workspace is a Band worktree
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (workspaceFolders && workspaceFolders.length > 0) {
     const workspacePath = workspaceFolders[0].uri.fsPath;
-    const config = await loadConfig(workspacePath);
-    if (config) {
-      log.appendLine("Project config loaded, setting up workspace...");
-      await setupWorkspace(config);
-      vscode.window.showInformationMessage("Band workspace setup complete");
-    } else if (await isBandWorktree(workspacePath)) {
-      log.appendLine(
-        "No project config, but workspace is a Band worktree. Checking user defaults...",
-      );
-      const defaults = await loadUserDefaults();
-      if (defaults) {
-        log.appendLine("User defaults loaded, setting up workspace...");
-        await setupWorkspace(defaults);
-        vscode.window.showInformationMessage("Band workspace setup complete (using defaults)");
+    const hasProjectConfig = (await loadConfig(workspacePath)) !== null;
+
+    if (hasProjectConfig || (await isBandWorktree(workspacePath))) {
+      const effective = await loadEffectiveConfig(workspacePath);
+      if (effective) {
+        log.appendLine("Effective config loaded, setting up workspace...");
+        await setupWorkspace(effective);
+        vscode.window.showInformationMessage("Band workspace setup complete");
       } else {
-        log.appendLine("No user defaults found");
+        log.appendLine("No effective config resolved");
       }
     } else {
       log.appendLine("No config found and not a Band worktree");
@@ -54,8 +48,11 @@ async function runSetup() {
   for (const folder of workspaceFolders) {
     const config = await loadConfig(folder.uri.fsPath);
     if (config) {
-      await setupWorkspace(config);
-      vscode.window.showInformationMessage("Band workspace setup complete");
+      const effective = await loadEffectiveConfig(folder.uri.fsPath);
+      if (effective) {
+        await setupWorkspace(effective);
+        vscode.window.showInformationMessage("Band workspace setup complete");
+      }
       return;
     }
   }
@@ -63,10 +60,10 @@ async function runSetup() {
   // No project config found — try user defaults if it's a Band worktree
   const workspacePath = workspaceFolders[0].uri.fsPath;
   if (await isBandWorktree(workspacePath)) {
-    const defaults = await loadUserDefaults();
-    if (defaults) {
-      await setupWorkspace(defaults);
-      vscode.window.showInformationMessage("Band workspace setup complete (using defaults)");
+    const effective = await loadEffectiveConfig(workspacePath);
+    if (effective) {
+      await setupWorkspace(effective);
+      vscode.window.showInformationMessage("Band workspace setup complete");
       return;
     }
   }

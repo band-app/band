@@ -69,6 +69,32 @@ export async function loadUserDefaults(): Promise<BandConfig | null> {
   }
 }
 
+export function mergeConfigs(
+  defaults: BandConfig | null,
+  projectConfig: BandConfig | null,
+): BandConfig | null {
+  if (!defaults && !projectConfig) {
+    return null;
+  }
+  if (!defaults) {
+    return projectConfig;
+  }
+  if (!projectConfig) {
+    return defaults;
+  }
+
+  return {
+    ...defaults,
+    ...projectConfig,
+  };
+}
+
+export async function loadEffectiveConfig(workspacePath: string): Promise<BandConfig | null> {
+  const projectConfig = await loadConfig(workspacePath);
+  const defaults = await loadUserDefaults();
+  return mergeConfigs(defaults, projectConfig);
+}
+
 export async function isBandWorktree(workspacePath: string): Promise<boolean> {
   const statePath = path.join(os.homedir(), ".band", "state.json");
 
