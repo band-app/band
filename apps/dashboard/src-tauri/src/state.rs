@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use std::process::Command;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectState {
@@ -126,4 +127,43 @@ pub fn worktrees_dir() -> PathBuf {
         .and_then(|s| s.worktrees_dir)
         .map(PathBuf::from)
         .unwrap_or_else(|| band_home().join("worktrees"))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ProjectConfig {
+    pub setup: Option<String>,
+    pub teardown: Option<String>,
+}
+
+pub fn load_project_config(project_path: &str) -> ProjectConfig {
+    let config_path = PathBuf::from(project_path).join(".band").join("config.json");
+    if !config_path.exists() {
+        return ProjectConfig::default();
+    }
+    fs::read_to_string(&config_path)
+        .ok()
+        .and_then(|data| serde_json::from_str(&data).ok())
+        .unwrap_or_default()
+}
+
+pub fn run_script(command: &str, cwd: &str) -> Result<(), String> {
+    let output = Command::new("sh")
+        .args(["-c", command])
+        .current_dir(cwd)
+        .env(
+            "PATH",
+            format!(
+                "/opt/homebrew/bin:/usr/local/bin:{}",
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
+        .output()
+        .map_err(|e| format!("Failed to run script: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Script failed: {}", stderr));
+    }
+
+    Ok(())
 }
