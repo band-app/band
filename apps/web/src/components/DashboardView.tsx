@@ -107,7 +107,7 @@ function DroppableLabelHeader({ labelId, label }: { labelId: string; label: Labe
   return (
     <div
       ref={setNodeRef}
-      className={`flex items-center gap-2 px-2 py-1.5 mb-1 rounded-md transition-colors ${isOver ? "bg-primary/20 ring-1 ring-primary/40" : "bg-accent"}`}
+      className={`flex items-center gap-2 py-1.5 mb-1 transition-colors ${isOver ? "bg-primary/20" : ""}`}
     >
       <span
         className="size-2.5 rounded-full shrink-0"
@@ -123,7 +123,7 @@ function DroppableUnlabeledHeader() {
   return (
     <div
       ref={setNodeRef}
-      className={`flex items-center gap-2 px-2 py-1.5 mb-1 rounded-md transition-colors ${isOver ? "bg-primary/20 ring-1 ring-primary/40" : "bg-accent"}`}
+      className={`flex items-center gap-2 py-1.5 mb-1 transition-colors ${isOver ? "bg-primary/20" : ""}`}
     >
       <span className="text-sm font-semibold text-foreground/80">Unlabeled</span>
     </div>

@@ -73,7 +73,7 @@ function SortableProject({
   let workspaceIndex = workspaceIndexStart;
 
   return (
-    <div ref={setNodeRef} style={style} className="min-w-0">
+    <div ref={setNodeRef} style={style} className="min-w-0 px-2">
       <div className="flex items-center justify-between mb-1 px-1">
         <div
           className="flex items-center gap-2 min-w-0 cursor-grab touch-none"
@@ -191,7 +191,7 @@ function DroppableLabelHeader({ labelId, label }: { labelId: string; label: Labe
   return (
     <div
       ref={setNodeRef}
-      className={`flex items-center gap-2 px-2 py-1.5 mb-1 rounded-md transition-colors ${isOver ? "bg-primary/20 ring-1 ring-primary/40" : "bg-accent"}`}
+      className={`flex items-center gap-2 px-3 py-2.5 mb-1 transition-colors ${isOver ? "bg-primary/20" : "bg-accent"}`}
     >
       <span
         className="size-2.5 rounded-full shrink-0"
@@ -207,7 +207,7 @@ function DroppableUnlabeledHeader() {
   return (
     <div
       ref={setNodeRef}
-      className={`flex items-center gap-2 px-2 py-1.5 mb-1 rounded-md transition-colors ${isOver ? "bg-primary/20 ring-1 ring-primary/40" : "bg-accent"}`}
+      className={`flex items-center gap-2 px-3 py-2.5 mb-1 transition-colors ${isOver ? "bg-primary/20" : "bg-accent"}`}
     >
       <span className="text-sm font-semibold text-foreground/80">Unlabeled</span>
     </div>
@@ -384,7 +384,7 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
         <SortableContext items={allProjectNames} strategy={verticalListSortingStrategy}>
           {visibleGroups.map((group, groupIndex) => (
             <div key={group.labelId ?? "__unlabeled"}>
-              {groupIndex > 0 && <hr className="border-border my-1" />}
+              {groupIndex > 0 && !labels.length && <hr className="border-border my-1 mx-2" />}
               {labels.length > 0 && !labelFilter && (
                 group.label ? (
                   <DroppableLabelHeader labelId={group.labelId!} label={group.label} />
@@ -394,7 +394,7 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
               )}
               {group.projects.map((project, index) => (
                 <div key={project.name}>
-                  {index > 0 && <hr className="border-border mb-1" />}
+                  {index > 0 && <hr className="border-border mb-1 mx-2" />}
                   <SortableProject
                     project={project}
                     statuses={statuses}

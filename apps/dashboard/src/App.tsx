@@ -177,7 +177,7 @@ export default function App() {
           list?.focus();
         }}
       >
-        <main className="px-2 py-2 overflow-hidden">
+        <main className="py-2 overflow-hidden">
           {view === "dashboard" ? (
             <ProjectList labelFilter={labelFilter} />
           ) : (
