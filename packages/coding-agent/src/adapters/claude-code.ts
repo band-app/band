@@ -210,22 +210,31 @@ function* mapClaudeCodeEvent(
           startIdx = 0;
         }
 
+        let processedUpTo = startIdx;
         for (let i = startIdx; i < content.length; i++) {
           const block = content[i];
-          if (block.type === "text" && block.text) {
+          if (block.type === "text") {
+            if (!block.text) {
+              // Text block exists but content hasn't streamed yet;
+              // don't advance past it so we re-process on the next event.
+              break;
+            }
             yield { type: "text-delta", text: block.text };
-          }
-          if (block.type === "tool_use") {
+            processedUpTo = i + 1;
+          } else if (block.type === "tool_use") {
             yield {
               type: "tool-use",
               toolCallId: block.id ?? crypto.randomUUID(),
               toolName: block.name ?? "unknown",
               input: block.input ?? {},
             };
+            processedUpTo = i + 1;
+          } else {
+            processedUpTo = i + 1;
           }
         }
 
-        state.assistantContentIndex = content.length;
+        state.assistantContentIndex = processedUpTo;
       }
       break;
     }
