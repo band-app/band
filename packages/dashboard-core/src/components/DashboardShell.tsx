@@ -1,4 +1,4 @@
-import { Check, Plus, Settings, Tag, X } from "lucide-react";
+import { Check, FolderPlus, Plus, Settings, Tag, X } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import {
   Button,
@@ -8,6 +8,7 @@ import {
   DropdownMenuTrigger,
   ScrollArea,
   Separator,
+  Spinner,
   Tooltip,
   TooltipContent,
   TooltipTrigger,
@@ -29,6 +30,8 @@ interface DashboardShellProps {
 
 export function DashboardShell({ toolbarExtra }: DashboardShellProps) {
   const loadProjects = useDashboardStore((s) => s.loadProjects);
+  const loading = useDashboardStore((s) => s.loading);
+  const projects = useDashboardStore((s) => s.projects);
   const error = useDashboardStore((s) => s.error);
   const clearError = useDashboardStore((s) => s.clearError);
   const loadSettings = useSettingsStore((s) => s.loadSettings);
@@ -158,10 +161,26 @@ export function DashboardShell({ toolbarExtra }: DashboardShellProps) {
         }}
       >
         <main className="px-2 py-2 overflow-hidden">
-          {view === "dashboard" ? (
-            <ProjectList labelFilter={labelFilter} />
-          ) : (
+          {view === "settings" ? (
             <SettingsPage onClose={() => setView("dashboard")} />
+          ) : loading ? (
+            <div className="flex items-center justify-center py-12">
+              <Spinner className="size-5 text-muted-foreground" />
+            </div>
+          ) : projects.length === 0 ? (
+            <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+              <FolderPlus className="size-8 text-muted-foreground/50" />
+              <div>
+                <p className="text-sm font-medium text-muted-foreground">No projects yet</p>
+                <p className="text-xs text-muted-foreground/70 mt-1">Add a project to get started</p>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => setShowAddDialog(true)}>
+                <Plus className="size-3 mr-1" />
+                Add project
+              </Button>
+            </div>
+          ) : (
+            <ProjectList labelFilter={labelFilter} />
           )}
         </main>
       </ScrollArea>
