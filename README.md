@@ -1,5 +1,9 @@
 # Band
 
+
+
+
+
 IDE-agnostic agent orchestrator. A central dashboard for managing AI coding agents across multiple workspaces and projects, with IDE extensions that report agent status in real time.
 
 ```
