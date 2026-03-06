@@ -87,19 +87,19 @@ pub fn workspace_remove(project: String, branch: String) -> Result<(), String> {
     let status_file = state::status_dir().join(format!("{project}-{branch}.json"));
     let _ = std::fs::remove_file(status_file);
 
-    // Do heavy cleanup (close IDE, remove worktree from disk) in a background thread
+    // Remove git worktree synchronously so project_list won't re-discover it
+    if std::path::Path::new(&worktree_path).exists() {
+        let _ = git::remove_worktree(&project_path, &worktree_path);
+    }
+
+    // Do remaining cleanup (close IDE, teardown script) in a background thread
     std::thread::spawn(move || {
-        // Run teardown script if configured
         let config = state::load_project_config(&worktree_path);
         if let Some(teardown) = &config.teardown {
             let _ = state::run_script(teardown, &worktree_path);
         }
 
         ide::close_workspace(&worktree_path);
-
-        if std::path::Path::new(&worktree_path).exists() {
-            let _ = git::remove_worktree(&project_path, &worktree_path);
-        }
     });
 
     Ok(())

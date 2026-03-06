@@ -157,6 +157,18 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
   removeWorkspace: async (project: string, branch: string) => {
     // Optimistically remove from UI immediately so it doesn't feel blocked
     const previousProjects = get().projects;
+    const deletedWorkspaceId = `${project}-${branch}`;
+
+    // If deleting the active workspace, switch to the default branch
+    let switchToId: string | null = null;
+    if (get().activeWorkspaceId === deletedWorkspaceId) {
+      const proj = previousProjects.find((p) => p.name === project);
+      if (proj) {
+        switchToId = `${project}-${proj.defaultBranch}`;
+        set({ activeWorkspaceId: switchToId });
+      }
+    }
+
     set({
       projects: previousProjects.map((p) =>
         p.name === project
@@ -167,10 +179,15 @@ export const useDashboardStore = create<DashboardState>((set, get) => ({
 
     try {
       await invoke("workspace_remove", { project, branch });
-      await get().loadProjects();
     } catch (e) {
       // Restore previous state on failure
       set({ projects: previousProjects, error: String(e) });
+      return;
+    }
+
+    await get().loadProjects();
+    if (switchToId) {
+      get().openWorkspace(switchToId);
     }
   },
 

@@ -1,6 +1,7 @@
 import { Clipboard, Ellipsis, FolderOpen, GitBranch, Play, Square, Trash2 } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AgentStatusBadge } from "@/components/AgentStatusBadge";
+import { DeleteWorkspaceDialog } from "@/components/DeleteWorkspaceDialog";
 import { CIStatusIndicator } from "@/components/CIStatusIndicator";
 import { GitStatusIndicator } from "@/components/GitStatusIndicator";
 import { Button } from "@/components/ui/button";
@@ -46,8 +47,28 @@ export function WorkspaceCard({
   const runScript = useDashboardStore((s) => s.runScript);
   const activeWorkspaceId = useDashboardStore((s) => s.activeWorkspaceId);
 
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+
   const workspaceId = `${projectName}-${worktree.branch}`;
   const isActive = activeWorkspaceId === workspaceId;
+
+  const ciState = branchStatus?.ci.state;
+  const hasUnmergedPR = ciState !== undefined && ciState !== "none" && ciState !== "merged";
+  const isDirty = branchStatus?.git.dirty ?? false;
+  const hasUnpushedCommits = (branchStatus?.git.ahead ?? 0) > 0;
+
+  const handleDelete = () => {
+    if (!hasUnmergedPR && !isDirty && !hasUnpushedCommits) {
+      removeWorkspace(projectName, worktree.branch);
+    } else {
+      setShowDeleteDialog(true);
+    }
+  };
+
+  const confirmDelete = () => {
+    setShowDeleteDialog(false);
+    removeWorkspace(projectName, worktree.branch);
+  };
 
   return (
     <div
@@ -108,10 +129,7 @@ export function WorkspaceCard({
               </DropdownMenuItem>
             )}
             {worktree.branch !== defaultBranch && (
-              <DropdownMenuItem
-                variant="destructive"
-                onClick={() => removeWorkspace(projectName, worktree.branch)}
-              >
+              <DropdownMenuItem variant="destructive" onClick={handleDelete}>
                 <Trash2 />
                 Delete workspace
               </DropdownMenuItem>
@@ -119,6 +137,15 @@ export function WorkspaceCard({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+      <DeleteWorkspaceDialog
+        open={showDeleteDialog}
+        onOpenChange={setShowDeleteDialog}
+        onConfirm={confirmDelete}
+        branchName={worktree.branch}
+        isUnmerged={hasUnmergedPR}
+        isDirty={isDirty}
+        hasUnpushedCommits={hasUnpushedCommits}
+      />
     </div>
   );
 }
