@@ -1,11 +1,21 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useDashboardStore } from "@/stores/dashboard-store";
+import { useSettingsStore } from "@/stores/settings-store";
+
+interface PrereqStatus {
+  node: boolean;
+  instatunnel: boolean;
+}
 
 export function useTunnel() {
   const [webServerRunning, setWebServerRunning] = useState(false);
   const [tunnelUrl, setTunnelUrl] = useState<string | null>(null);
+  const [showPrereq, setShowPrereq] = useState(false);
   const [showDialog, setShowDialog] = useState(false);
+  const stoppedRef = useRef(false);
+  const settings = useSettingsStore((s) => s.settings);
 
   useEffect(() => {
     invoke<boolean>("webserver_status")
@@ -18,24 +28,97 @@ export function useTunnel() {
       .catch(() => {});
   }, []);
 
-  const openDialog = useCallback(async () => {
-    if (webServerRunning) {
-      setShowDialog(true);
-      return;
-    }
-    try {
-      await invoke("webserver_start");
-      await invoke("webserver_wait_ready");
-      await invoke<string>("webserver_get_token");
+  // Persistent tunnel-url listener (works even when dialog is closed)
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen<string>("tunnel-url", (event) => {
+      setTunnelUrl(event.payload);
       setWebServerRunning(true);
-      setShowDialog(true);
-    } catch (e) {
-      useDashboardStore.getState().clearError();
-      useDashboardStore.setState({ error: String(e) });
-    }
-  }, [webServerRunning]);
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      unlisten?.();
+    };
+  }, []);
+
+  // Auto-restart on tunnel-exited (handles 24h expiry)
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen("tunnel-exited", () => {
+      if (!stoppedRef.current) {
+        invoke("tunnel_start").catch(() => {});
+      }
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      unlisten?.();
+    };
+  }, []);
+
+  // Open dialog when subdomain is taken so user can choose fallback
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen("tunnel-subdomain-taken", () => {
+      if (!stoppedRef.current) {
+        setShowDialog(true);
+      }
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      unlisten?.();
+    };
+  }, []);
+
+  // Auto-start on app launch if enabled
+  useEffect(() => {
+    if (!settings.autoStartTunnel) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const running = await invoke<boolean>("webserver_status");
+        if (running || cancelled) return;
+
+        // Skip auto-start if prerequisites are missing
+        const status = await invoke<PrereqStatus>("prereq_check");
+        if (!status.node || !status.instatunnel || cancelled) return;
+
+        await invoke("webserver_start");
+        await invoke("webserver_wait_ready");
+        await invoke<string>("webserver_get_token");
+        if (cancelled) return;
+        setWebServerRunning(true);
+        await invoke("tunnel_start");
+      } catch (e) {
+        if (!cancelled) {
+          useDashboardStore.getState().clearError();
+          useDashboardStore.setState({ error: String(e) });
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [settings.autoStartTunnel]);
+
+  // Globe click → open prereq check first
+  const openDialog = useCallback(() => {
+    stoppedRef.current = false;
+    setShowPrereq(true);
+  }, []);
+
+  // Prereq passed → open tunnel dialog
+  const onPrereqReady = useCallback(() => {
+    setShowPrereq(false);
+    setShowDialog(true);
+  }, []);
 
   const handleStopped = useCallback(() => {
+    stoppedRef.current = true;
     setWebServerRunning(false);
     setTunnelUrl(null);
     setShowDialog(false);
@@ -45,6 +128,9 @@ export function useTunnel() {
     webServerRunning,
     tunnelUrl,
     setTunnelUrl,
+    showPrereq,
+    setShowPrereq,
+    onPrereqReady,
     showDialog,
     setShowDialog,
     openDialog,

@@ -7,13 +7,19 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { useSettingsStore } from "@/stores/settings-store";
 
-type TunnelStep = "checking" | "not_installed" | "installing" | "connecting" | "ready" | "error";
+type TunnelStep =
+  | "starting"
+  | "auth_required"
+  | "connecting"
+  | "ready"
+  | "subdomain_taken"
+  | "error";
 
 interface Props {
   open: boolean;
@@ -24,36 +30,50 @@ interface Props {
 }
 
 export function TunnelDialog({ open, onOpenChange, onStopped, initialUrl, onTunnelUrl }: Props) {
-  const [step, setStep] = useState<TunnelStep>("checking");
+  const [step, setStep] = useState<TunnelStep>("starting");
   const [tunnelUrl, setTunnelUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const settings = useSettingsStore((s) => s.settings);
 
-  const startFlow = useCallback(async () => {
+  const ensureWebServer = useCallback(async () => {
+    const running = await invoke<boolean>("webserver_status");
+    if (!running) {
+      await invoke("webserver_start");
+      await invoke("webserver_wait_ready");
+      await invoke<string>("webserver_get_token");
+    }
+  }, []);
+
+  const startConnection = useCallback(async () => {
     try {
-      setStep("checking");
-      const installed = await invoke<boolean>("tunnel_check");
-      if (!installed) {
-        setStep("not_installed");
-        return;
+      setStep("starting");
+      await ensureWebServer();
+
+      if (settings.tunnelSubdomain) {
+        const authed = await invoke<boolean>("tunnel_auth_check");
+        if (!authed) {
+          setStep("auth_required");
+          return;
+        }
       }
+
       setStep("connecting");
       await invoke("tunnel_start");
     } catch (e) {
       setError(String(e));
       setStep("error");
     }
-  }, []);
+  }, [settings.tunnelSubdomain, ensureWebServer]);
 
   useEffect(() => {
     if (!open) return;
 
-    // If we already have a tunnel URL, show it immediately
     if (initialUrl) {
       setTunnelUrl(initialUrl);
       setStep("ready");
       setError(null);
     } else {
-      setStep("checking");
+      setStep("starting");
       setTunnelUrl(null);
       setError(null);
     }
@@ -61,9 +81,9 @@ export function TunnelDialog({ open, onOpenChange, onStopped, initialUrl, onTunn
     let cancelled = false;
     let unlisten: (() => void) | undefined;
     let unlistenError: (() => void) | undefined;
+    let unlistenSubdomainTaken: (() => void) | undefined;
 
     (async () => {
-      // Listen for the tunnel URL event
       unlisten = await listen<string>("tunnel-url", (event) => {
         if (!cancelled) {
           setTunnelUrl(event.payload);
@@ -72,7 +92,6 @@ export function TunnelDialog({ open, onOpenChange, onStopped, initialUrl, onTunn
         }
       });
 
-      // Listen for tunnel errors (e.g. cloudflared exited without URL)
       unlistenError = await listen<string>("tunnel-error", (event) => {
         if (!cancelled) {
           setError(event.payload);
@@ -80,10 +99,14 @@ export function TunnelDialog({ open, onOpenChange, onStopped, initialUrl, onTunn
         }
       });
 
-      // Already showing cached URL — no need to start flow
+      unlistenSubdomainTaken = await listen("tunnel-subdomain-taken", () => {
+        if (!cancelled) {
+          setStep("subdomain_taken");
+        }
+      });
+
       if (initialUrl) return;
 
-      // Check if tunnel is already running with a URL
       try {
         const existingUrl = await invoke<string | null>("tunnel_status");
         if (existingUrl && !cancelled) {
@@ -95,7 +118,7 @@ export function TunnelDialog({ open, onOpenChange, onStopped, initialUrl, onTunn
       } catch {}
 
       if (!cancelled) {
-        await startFlow();
+        await startConnection();
       }
     })();
 
@@ -103,13 +126,18 @@ export function TunnelDialog({ open, onOpenChange, onStopped, initialUrl, onTunn
       cancelled = true;
       unlisten?.();
       unlistenError?.();
+      unlistenSubdomainTaken?.();
     };
-  }, [open, startFlow, initialUrl, onTunnelUrl]);
+  }, [open, startConnection, initialUrl, onTunnelUrl]);
 
-  const handleInstall = async () => {
+  const handleRetryAuth = async () => {
     try {
-      setStep("installing");
-      await invoke("tunnel_install");
+      setStep("starting");
+      const authed = await invoke<boolean>("tunnel_auth_check");
+      if (!authed) {
+        setStep("auth_required");
+        return;
+      }
       setStep("connecting");
       await invoke("tunnel_start");
     } catch (e) {
@@ -118,11 +146,19 @@ export function TunnelDialog({ open, onOpenChange, onStopped, initialUrl, onTunn
     }
   };
 
-  const handleStop = async () => {
+  const handleContinueRandom = async () => {
     try {
-      await invoke("tunnel_stop");
-      await invoke("webserver_stop");
-    } catch {}
+      setStep("connecting");
+      await invoke("tunnel_start", { skipSubdomain: true });
+    } catch (e) {
+      setError(String(e));
+      setStep("error");
+    }
+  };
+
+  const handleStop = async () => {
+    await invoke("tunnel_stop").catch(() => {});
+    await invoke("webserver_stop").catch(() => {});
     onStopped();
     onOpenChange(false);
   };
@@ -131,40 +167,37 @@ export function TunnelDialog({ open, onOpenChange, onStopped, initialUrl, onTunn
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[320px]">
         <DialogHeader>
-          <DialogTitle>
-            {step === "not_installed" ? "cloudflared Required" : "Mobile Access"}
-          </DialogTitle>
-          {step === "not_installed" && (
-            <DialogDescription>
-              cloudflared is needed to create a secure tunnel so you can access the dashboard from
-              your phone.
-            </DialogDescription>
-          )}
+          <DialogTitle>Mobile Access</DialogTitle>
         </DialogHeader>
 
         <div className="flex flex-col items-center gap-4 py-2">
-          {step === "checking" && (
+          {(step === "starting" || step === "connecting") && (
             <>
               <Loader2 className="size-8 animate-spin text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">Checking cloudflared...</p>
+              <p className="text-sm text-muted-foreground">
+                {step === "starting" ? "Starting web server..." : "Creating tunnel..."}
+              </p>
             </>
           )}
 
-          {step === "not_installed" && (
-            <Button onClick={handleInstall}>Install with Homebrew</Button>
-          )}
-
-          {step === "installing" && (
+          {step === "auth_required" && (
             <>
-              <Loader2 className="size-8 animate-spin text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">Installing cloudflared...</p>
-            </>
-          )}
-
-          {step === "connecting" && (
-            <>
-              <Loader2 className="size-8 animate-spin text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">Creating tunnel...</p>
+              <p className="text-sm text-muted-foreground text-center">
+                You need to log in to instatunnel to use the subdomain{" "}
+                <strong>{settings.tunnelSubdomain}</strong>.
+              </p>
+              <p className="text-xs text-muted-foreground text-center">
+                Run in your terminal:
+              </p>
+              <code className="text-xs bg-muted px-2 py-1 rounded select-all">
+                instatunnel auth login
+              </code>
+              <Button onClick={handleRetryAuth} className="w-full">
+                Try Again
+              </Button>
+              <Button variant="ghost" size="sm" onClick={handleContinueRandom}>
+                Continue without subdomain
+              </Button>
             </>
           )}
 
@@ -179,10 +212,24 @@ export function TunnelDialog({ open, onOpenChange, onStopped, initialUrl, onTunn
             </>
           )}
 
+          {step === "subdomain_taken" && (
+            <>
+              <p className="text-sm text-muted-foreground text-center">
+                The subdomain <strong>{settings.tunnelSubdomain}</strong> is already in use by another session.
+              </p>
+              <p className="text-xs text-muted-foreground text-center">
+                You can change it in Settings &gt; Web Server.
+              </p>
+              <Button onClick={handleContinueRandom} className="w-full">
+                Continue with Random URL
+              </Button>
+            </>
+          )}
+
           {step === "error" && (
             <>
               <p className="text-sm text-destructive text-center">{error}</p>
-              <Button variant="outline" size="sm" onClick={startFlow}>
+              <Button variant="outline" size="sm" onClick={startConnection}>
                 Retry
               </Button>
             </>

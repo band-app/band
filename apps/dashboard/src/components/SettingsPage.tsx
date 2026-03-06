@@ -89,7 +89,8 @@ export function SettingsPage({ onClose }: Props) {
     (settings.notifications?.sound as SoundId) ?? "chime",
   );
   const [labels, setLabels] = useState<LabelDefinition[]>(settings.labels ?? []);
-
+  const [tunnelSubdomain, setTunnelSubdomain] = useState(settings.tunnelSubdomain ?? "");
+  const [autoStartTunnel, setAutoStartTunnel] = useState(settings.autoStartTunnel ?? false);
 
   useEffect(() => {
     loadSettings();
@@ -104,6 +105,8 @@ export function SettingsPage({ onClose }: Props) {
     setSoundOnNeedsAttention(settings.notifications?.soundOnNeedsAttention ?? false);
     setSelectedSound((settings.notifications?.sound as SoundId) ?? "chime");
     setLabels(settings.labels ?? []);
+    setTunnelSubdomain(settings.tunnelSubdomain ?? "");
+    setAutoStartTunnel(settings.autoStartTunnel ?? false);
   }, [
     settings.worktreesDir,
     settings.defaults,
@@ -111,6 +114,8 @@ export function SettingsPage({ onClose }: Props) {
     settings.webServerPort,
     settings.notifications,
     settings.labels,
+    settings.tunnelSubdomain,
+    settings.autoStartTunnel,
   ]);
 
   const handleBrowse = async () => {
@@ -172,13 +177,18 @@ export function SettingsPage({ onClose }: Props) {
       webServerPort: parsedPort,
       notifications: { soundOnNeedsAttention, sound: selectedSound },
       labels: labels.length > 0 ? labels : undefined,
+      tokenSecret: settings.tokenSecret,
+      tunnelSubdomain: tunnelSubdomain.trim() || undefined,
+      autoStartTunnel: autoStartTunnel || undefined,
     });
   };
 
   const worktreesDirPreview = worktreesDir || "Default";
   const agentPreview = agentType ? AGENT_LABEL[agentType] : "None";
   const defaultsPreview = defaultsJson.trim() ? "Configured" : "None";
-  const portPreview = webServerPort || "3456";
+  const portPreview = tunnelSubdomain
+    ? `${tunnelSubdomain}.instatunnel.my`
+    : webServerPort || "3456";
   const labelsPreview = labels.length > 0 ? `${labels.length} label${labels.length === 1 ? "" : "s"}` : "None";
   const notificationsPreview = soundOnNeedsAttention
     ? (SOUNDS.find((s) => s.id === selectedSound)?.label ?? "On")
@@ -458,11 +468,35 @@ export function SettingsPage({ onClose }: Props) {
                 (3456). Requires restart.
               </p>
             </div>
-            <Button onClick={handleSave} size="sm">
-              Save
-            </Button>
+            <div className="space-y-2">
+              <Label htmlFor="tunnel-subdomain">Tunnel subdomain</Label>
+              <Input
+                id="tunnel-subdomain"
+                placeholder="e.g., myapp"
+                value={tunnelSubdomain}
+                onChange={(e) => setTunnelSubdomain(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Fixed subdomain for your tunnel URL (e.g., <code className="text-xs">myapp</code> becomes{" "}
+                <code className="text-xs">myapp.instatunnel.my</code>). Requires instatunnel authentication.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="auto-start-tunnel">Auto-start tunnel</Label>
+                <Switch
+                  id="auto-start-tunnel"
+                  checked={autoStartTunnel}
+                  onCheckedChange={setAutoStartTunnel}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Automatically start the web server and tunnel when the app launches.
+              </p>
+            </div>
           </div>
         )}
+
       </div>
     );
   }

@@ -58,15 +58,13 @@ export function createAuthMiddleware(secret) {
 		// Check token in query param
 		const queryToken = url.searchParams.get("token");
 		if (queryToken && tokensEqual(queryToken, expectedToken)) {
-			// Set cookie and redirect to clean URL
-			url.searchParams.delete("token");
-			const cleanUrl = url.pathname + (url.search || "");
-			res.writeHead(302, {
-				Location: cleanUrl,
-				"Set-Cookie": `band_token=${expectedToken}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=86400`,
-			});
-			res.end();
-			return true;
+			// Set cookie and continue to normal handler (no redirect — tunnel
+			// proxies follow redirects internally and lose the Set-Cookie).
+			res.setHeader(
+				"Set-Cookie",
+				`band_token=${expectedToken}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=86400`,
+			);
+			return false;
 		}
 
 		// Check cookie

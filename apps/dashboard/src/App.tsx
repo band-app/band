@@ -1,6 +1,7 @@
 import { Check, Globe, Plus, Settings, Tag, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { AddProjectDialog } from "@/components/AddProjectDialog";
+import { PrereqDialog } from "@/components/PrereqDialog";
 import { ProjectList } from "@/components/ProjectList";
 import { SettingsPage } from "@/components/SettingsPage";
 import { TunnelDialog } from "@/components/TunnelDialog";
@@ -38,6 +39,9 @@ export default function App() {
     webServerRunning,
     tunnelUrl,
     setTunnelUrl,
+    showPrereq,
+    setShowPrereq,
+    onPrereqReady,
     showDialog: showTunnelDialog,
     setShowDialog: setShowTunnelDialog,
     openDialog,
@@ -177,7 +181,7 @@ export default function App() {
           list?.focus();
         }}
       >
-        <main className="px-2 py-2 overflow-hidden">
+        <main className="py-2 overflow-hidden">
           {view === "dashboard" ? (
             <ProjectList labelFilter={labelFilter} />
           ) : (
@@ -187,6 +191,12 @@ export default function App() {
       </ScrollArea>
 
       <AddProjectDialog open={showAddDialog} onOpenChange={setShowAddDialog} defaultLabel={labelFilter} />
+
+      <PrereqDialog
+        open={showPrereq}
+        onOpenChange={setShowPrereq}
+        onReady={onPrereqReady}
+      />
 
       <TunnelDialog
         open={showTunnelDialog}

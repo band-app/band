@@ -53,6 +53,9 @@ export interface Settings {
   webServerPort?: number;
   notifications?: NotificationSettings;
   labels?: LabelDefinition[];
+  tokenSecret?: string;
+  tunnelSubdomain?: string;
+  autoStartTunnel?: boolean;
 }
 
 interface SettingsState {

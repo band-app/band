@@ -1,10 +1,10 @@
 use std::io::{BufRead, BufReader};
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Stdio};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use tauri::{AppHandle, Emitter, State};
 
-use crate::state::load_settings;
+use crate::state::{load_settings, save_settings};
 
 const DEFAULT_WEB_SERVER_PORT: u16 = 3456;
 
@@ -43,6 +43,42 @@ fn get_configured_port() -> u16 {
         .unwrap_or(DEFAULT_WEB_SERVER_PORT)
 }
 
+/// Resolve the user's full shell PATH once (includes nvm/npm paths).
+pub(crate) fn shell_path() -> &'static str {
+    static PATH: OnceLock<String> = OnceLock::new();
+    PATH.get_or_init(|| {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+        if let Ok(output) = Command::new(&shell)
+            .args(["-l", "-c", "echo $PATH"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .output()
+        {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path.is_empty() {
+                return path;
+            }
+        }
+        format!(
+            "/opt/homebrew/bin:/usr/local/bin:{}",
+            std::env::var("PATH").unwrap_or_default()
+        )
+    })
+}
+
+/// Resolve a binary using `which` — returns the path as-is (e.g. Node.js wrapper).
+pub(crate) fn which_binary(name: &str) -> Result<String, String> {
+    let output = Command::new("which")
+        .arg(name)
+        .env("PATH", shell_path())
+        .output()
+        .map_err(|e| format!("Failed to run which: {e}"))?;
+    if !output.status.success() {
+        return Err(format!("{name} not found in PATH"));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
 /// Generate a 32-byte hex secret from /dev/urandom.
 fn generate_secret() -> Result<String, String> {
     use std::io::Read;
@@ -52,6 +88,18 @@ fn generate_secret() -> Result<String, String> {
     f.read_exact(&mut buf)
         .map_err(|e| format!("Failed to read random bytes: {}", e))?;
     Ok(buf.iter().map(|b| format!("{:02x}", b)).collect())
+}
+
+/// Load or create a persistent token secret (saved in settings).
+fn get_or_create_secret() -> Result<String, String> {
+    let mut settings = load_settings()?;
+    if let Some(ref secret) = settings.token_secret {
+        return Ok(secret.clone());
+    }
+    let secret = generate_secret()?;
+    settings.token_secret = Some(secret.clone());
+    save_settings(&settings)?;
+    Ok(secret)
 }
 
 /// Send SIGTERM to the entire process group, then fall back to SIGKILL.
@@ -75,6 +123,12 @@ fn set_process_group(cmd: &mut Command) -> &mut Command {
             Ok(())
         })
     }
+}
+
+/// Extract the subdomain from a tunnel URL like `https://foo.instatunnel.my`.
+pub(crate) fn extract_subdomain(url: &str) -> Option<&str> {
+    url.strip_prefix("https://")
+        .and_then(|rest| rest.strip_suffix(".instatunnel.my"))
 }
 
 // ---------------------------------------------------------------------------
@@ -149,7 +203,7 @@ pub fn webserver_start(
     let web_dir = resolve_web_dir()?;
     let start_script = web_dir.join("start-server.mjs");
     let port = get_configured_port();
-    let secret = generate_secret()?;
+    let secret = get_or_create_secret()?;
 
     // Clear any cached token from a previous session
     *token_state.0.lock().unwrap() = None;
@@ -157,6 +211,7 @@ pub fn webserver_start(
     let mut cmd = Command::new("node");
     cmd.arg(&start_script)
         .current_dir(&web_dir)
+        .env("PATH", shell_path())
         .env("PORT", port.to_string())
         .env("BAND_TOKEN_SECRET", &secret)
         .stdout(Stdio::null())
@@ -247,28 +302,56 @@ pub async fn webserver_get_token(
 }
 
 // ---------------------------------------------------------------------------
-// Tunnel commands
+// Prerequisite checks & installs
 // ---------------------------------------------------------------------------
 
-#[tauri::command]
-pub fn tunnel_check() -> Result<bool, String> {
-    let output = Command::new("which")
-        .arg("cloudflared")
-        .output()
-        .map_err(|e| format!("Failed to check cloudflared: {e}"))?;
-    Ok(output.status.success())
+#[derive(serde::Serialize)]
+pub struct PrereqStatus {
+    pub node: bool,
+    pub instatunnel: bool,
 }
 
 #[tauri::command]
-pub async fn tunnel_install() -> Result<(), String> {
+pub fn prereq_check() -> Result<PrereqStatus, String> {
+    Ok(PrereqStatus {
+        node: which_binary("node").is_ok(),
+        instatunnel: which_binary("instatunnel").is_ok(),
+    })
+}
+
+#[tauri::command]
+pub async fn node_install() -> Result<(), String> {
+    let path = shell_path().to_string();
     let output = tokio::process::Command::new("brew")
-        .args(["install", "cloudflared"])
+        .args(["install", "node"])
+        .env("PATH", &path)
         .output()
         .await
         .map_err(|e| format!("Failed to run brew: {e}"))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("brew install cloudflared failed: {stderr}"));
+        return Err(format!("brew install node failed: {stderr}"));
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Tunnel commands
+// ---------------------------------------------------------------------------
+
+
+#[tauri::command]
+pub async fn tunnel_install() -> Result<(), String> {
+    let path = shell_path().to_string();
+    let output = tokio::process::Command::new("npm")
+        .args(["install", "-g", "instatunnel"])
+        .env("PATH", &path)
+        .output()
+        .await
+        .map_err(|e| format!("Failed to run npm: {e}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("npm install -g instatunnel failed: {stderr}"));
     }
     Ok(())
 }
@@ -278,6 +361,7 @@ pub fn tunnel_start(
     app: AppHandle,
     state: State<'_, TunnelState>,
     token_state: State<'_, AccessTokenState>,
+    skip_subdomain: Option<bool>,
 ) -> Result<(), String> {
     let mut guard = state.0.lock().unwrap();
 
@@ -291,16 +375,30 @@ pub fn tunnel_start(
     }
 
     let port = get_configured_port();
-    let mut cmd = Command::new("cloudflared");
-    cmd.args(["tunnel", "--url", &format!("http://127.0.0.1:{port}")])
-        .stderr(Stdio::piped())
-        .stdout(Stdio::null());
+    let settings = load_settings().unwrap_or_default();
+    let subdomain = settings.tunnel_subdomain.clone();
+    let bin = which_binary("instatunnel")?;
+
+    let mut cmd = Command::new(&bin);
+    cmd.arg(format!("{port}"));
+    if !skip_subdomain.unwrap_or(false) {
+        if let Some(ref name) = subdomain {
+            if !name.is_empty() {
+                cmd.args(["--subdomain", name]);
+            }
+        }
+    }
+    cmd.env("PATH", shell_path())
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     set_process_group(&mut cmd);
 
     let mut child = cmd
         .spawn()
-        .map_err(|e| format!("Failed to start cloudflared: {e}"))?;
+        .map_err(|e| format!("Failed to start instatunnel: {e}"))?;
 
+    let stdout = child.stdout.take().unwrap();
     let stderr = child.stderr.take().unwrap();
     guard.process.set(child);
     guard.url = None;
@@ -310,24 +408,55 @@ pub fn tunnel_start(
     let app_handle = app.clone();
     let token_arc = token_state.0.clone();
 
+    // Merge stdout and stderr into a single channel
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
+    let tx2 = tx.clone();
+
+    std::thread::spawn(move || {
+        let reader = BufReader::new(stdout);
+        for line in reader.lines().map_while(Result::ok) {
+            if tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
     std::thread::spawn(move || {
         let reader = BufReader::new(stderr);
-        let mut found = false;
         for line in reader.lines().map_while(Result::ok) {
+            if tx2.send(line).is_err() {
+                break;
+            }
+        }
+    });
+
+    std::thread::spawn(move || {
+        let mut found = false;
+        let mut output_lines: Vec<String> = Vec::new();
+        for line in rx {
             if !found {
+                output_lines.push(line.clone());
                 if let Some(start) = line.find("https://") {
                     let rest = &line[start..];
-                    if rest.contains(".trycloudflare.com") {
-                        let base_url: String = rest.chars().take_while(|c| !c.is_whitespace()).collect();
+                    // Extract URL: take chars valid in a URL, then trim trailing punctuation
+                    let raw_url: String = rest
+                        .chars()
+                        .take_while(|c| !c.is_whitespace())
+                        .collect();
+                    let base_url = raw_url.trim_end_matches(|c: char| {
+                        matches!(c, '"' | '\'' | ')' | '(' | ']' | '[' | '>' | ',')
+                    });
+                    // Must end with .instatunnel.my (with optional path/port)
+                    // but exclude api.instatunnel.my
+                    if base_url.contains(".instatunnel.my")
+                        && !base_url.contains("://api.instatunnel.my")
+                    {
+                        let base_url = base_url.to_string();
                         if let Ok(mut guard) = tunnel_state.lock() {
-                            // Store the base URL (without token)
                             guard.url = Some(base_url.clone());
                         }
-                        // Emit URL with token appended
                         let token_guard = token_arc.lock().ok();
-                        let token = token_guard
-                            .as_ref()
-                            .and_then(|g| g.as_ref().cloned());
+                        let token =
+                            token_guard.as_ref().and_then(|g| g.as_ref().cloned());
                         let url = match token {
                             Some(t) => format!("{}?token={}", base_url, t),
                             None => base_url,
@@ -337,17 +466,45 @@ pub fn tunnel_start(
                     }
                 }
             }
-            // Keep draining stderr so cloudflared doesn't get SIGPIPE
+            // Keep draining so instatunnel doesn't get SIGPIPE
         }
-        if !found {
+        if found {
+            // Process exited after successful connect — emit for auto-restart
+            let _ = app_handle.emit("tunnel-exited", ());
+        } else {
             if let Ok(mut guard) = tunnel_state.lock() {
                 guard.process.kill();
                 guard.url = None;
             }
-            let _ = app_handle.emit(
-                "tunnel-error",
-                "cloudflared exited without creating a tunnel",
-            );
+            let all_output = output_lines.join("\n");
+            if all_output.contains("subdomain already taken") {
+                let _ = app_handle.emit("tunnel-subdomain-taken", ());
+            } else {
+                let msg = if all_output.is_empty() {
+                    "instatunnel exited without output".to_string()
+                } else {
+                    // Show the first meaningful lines (skip update notices)
+                    let meaningful: Vec<_> = output_lines
+                        .iter()
+                        .filter(|l| {
+                            !l.contains("Update available")
+                                && !l.contains("Run: npm")
+                                && !l.contains("Release notes:")
+                                && !l.starts_with("  ")
+                                && !l.trim().is_empty()
+                        })
+                        .take(5)
+                        .cloned()
+                        .collect();
+                    let display = if meaningful.is_empty() {
+                        all_output.lines().take(10).collect::<Vec<_>>().join("\n")
+                    } else {
+                        meaningful.join("\n")
+                    };
+                    format!("instatunnel failed:\n{}", display)
+                };
+                let _ = app_handle.emit("tunnel-error", msg);
+            }
         }
     });
 
@@ -355,10 +512,39 @@ pub fn tunnel_start(
 }
 
 #[tauri::command]
-pub fn tunnel_stop(state: State<'_, TunnelState>) -> Result<(), String> {
-    let mut guard = state.0.lock().unwrap();
-    guard.process.kill();
-    guard.url = None;
+pub async fn tunnel_auth_check() -> Result<bool, String> {
+    let bin = which_binary("instatunnel")?;
+    let path = shell_path().to_string();
+    let output = tokio::process::Command::new(&bin)
+        .args(["auth", "show-key"])
+        .env("PATH", &path)
+        .output()
+        .await
+        .map_err(|e| format!("Failed to check auth status: {e}"))?;
+    Ok(output.status.success())
+}
+
+#[tauri::command]
+pub async fn tunnel_stop(state: State<'_, TunnelState>) -> Result<(), String> {
+    let subdomain = {
+        let mut guard = state.0.lock().unwrap();
+        let sub = guard.url.as_ref().and_then(|url| extract_subdomain(url).map(|s| s.to_string()));
+        guard.url = None;
+        sub
+    };
+
+    // Use CLI to close the tunnel — the process will exit on its own
+    if let Some(ref name) = subdomain {
+        if let Ok(bin) = which_binary("instatunnel") {
+            let path = shell_path().to_string();
+            let _ = tokio::process::Command::new(&bin)
+                .args(["--kill", name])
+                .env("PATH", &path)
+                .output()
+                .await;
+        }
+    }
+
     Ok(())
 }
 

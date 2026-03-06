@@ -4,7 +4,9 @@ mod state;
 
 use commands::branch_status::BranchStatusPollerState;
 use commands::status::WatcherState;
-use commands::webserver::{AccessTokenState, ManagedProcess, TunnelInner, TunnelState, WebServerState};
+use commands::webserver::{
+    self as webserver, AccessTokenState, ManagedProcess, TunnelInner, TunnelState, WebServerState,
+};
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
 
@@ -52,12 +54,14 @@ pub fn run() {
             commands::webserver::webserver_stop,
             commands::webserver::webserver_status,
             commands::webserver::webserver_wait_ready,
-            commands::webserver::tunnel_check,
+            commands::webserver::prereq_check,
+            commands::webserver::node_install,
             commands::webserver::tunnel_install,
             commands::webserver::tunnel_start,
             commands::webserver::tunnel_stop,
             commands::webserver::webserver_get_token,
             commands::webserver::tunnel_status,
+            commands::webserver::tunnel_auth_check,
         ])
         .setup(|app| {
             let window = app.get_webview_window("main").unwrap();
@@ -108,9 +112,18 @@ pub fn run() {
             let tunnel_arc = app.state::<TunnelState>().inner().0.clone();
             window.on_window_event(move |event| {
                 if let tauri::WindowEvent::CloseRequested { .. } = event {
-                    if let Ok(mut tguard) = tunnel_arc.lock() {
-                        tguard.process.kill();
-                        tguard.url = None;
+                    // Close the tunnel on the server via CLI
+                    if let Ok(tguard) = tunnel_arc.lock() {
+                        if let Some(ref url) = tguard.url {
+                            if let Some(name) = webserver::extract_subdomain(url) {
+                                if let Ok(bin) = webserver::which_binary("instatunnel") {
+                                    let _ = std::process::Command::new(&bin)
+                                        .args(["--kill", name])
+                                        .env("PATH", webserver::shell_path())
+                                        .output();
+                                }
+                            }
+                        }
                     }
                     web_proc.kill();
                 }
