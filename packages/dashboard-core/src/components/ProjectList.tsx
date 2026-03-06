@@ -1,32 +1,37 @@
 import {
-  DndContext,
-  DragOverlay,
-  closestCenter,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  useDroppable,
-  type DragEndEvent,
-  type DragStartEvent,
-} from "@dnd-kit/core";
-import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
-import { Check, Clipboard, Ellipsis, FolderOpen, ListMinus, Plus, Tag } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
-import {
   Button,
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuPortal,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuPortal,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@band/ui";
+import {
+  closestCenter,
+  DndContext,
+  type DragEndEvent,
+  DragOverlay,
+  type DragStartEvent,
+  PointerSensor,
+  useDroppable,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { Check, Clipboard, FolderOpen, ListMinus, Plus, Tag } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useCapabilities } from "../context";
 import { useDashboardStore, useSettingsStore } from "../stores/index";
 import type {
@@ -78,86 +83,79 @@ function SortableProject({
 
   return (
     <div ref={setNodeRef} style={style} className="min-w-0 px-2">
-      <div className="flex items-center justify-between mb-1 px-1">
-        <div
-          className="flex items-center gap-2 min-w-0 cursor-grab touch-none"
-          {...attributes}
-          {...listeners}
-        >
-          <FolderOpen className="size-3.5 shrink-0 text-muted-foreground" />
-          <h2 className="text-sm font-semibold text-foreground truncate">{project.name}</h2>
-        </div>
-        <div className="flex items-center gap-1">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                onClick={() => setWorkspaceDialog(project.name)}
-              >
-                <Plus />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Add workspace</TooltipContent>
-          </Tooltip>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon-xs" className="text-muted-foreground">
-                <Ellipsis />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {labels.length > 0 && (
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger>
-                    <Tag className="size-4 mr-2" />
-                    Set label
-                  </DropdownMenuSubTrigger>
-                  <DropdownMenuPortal>
-                    <DropdownMenuSubContent>
-                      <DropdownMenuItem onClick={() => updateProjectLabel(project.name, null)}>
-                        <span className="flex-1">None</span>
-                        {!project.label && <Check className="size-3 ml-2" />}
-                      </DropdownMenuItem>
-                      {labels.map((lbl) => (
-                        <DropdownMenuItem
-                          key={lbl.id}
-                          onClick={() => updateProjectLabel(project.name, lbl.id)}
-                        >
-                          <span
-                            className="size-2.5 rounded-full shrink-0 mr-2"
-                            style={{ backgroundColor: lbl.color }}
-                          />
-                          <span className="flex-1">{lbl.name}</span>
-                          {project.label === lbl.id && <Check className="size-3 ml-2" />}
-                        </DropdownMenuItem>
-                      ))}
-                    </DropdownMenuSubContent>
-                  </DropdownMenuPortal>
-                </DropdownMenuSub>
-              )}
-              {capabilities.copyPath && (
-                <DropdownMenuItem onClick={() => navigator.clipboard.writeText(project.path)}>
-                  <Clipboard />
-                  Copy path
-                </DropdownMenuItem>
-              )}
-              {capabilities.revealInFinder && (
-                <DropdownMenuItem
-                  onClick={() => capabilities.revealInFinder!(project.path)}
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <div className="flex items-center justify-between mb-1 px-1">
+            <div
+              className="flex items-center gap-2 min-w-0 cursor-grab touch-none"
+              {...attributes}
+              {...listeners}
+            >
+              <FolderOpen className="size-3.5 shrink-0 text-muted-foreground" />
+              <h2 className="text-sm font-semibold text-foreground truncate">{project.name}</h2>
+            </div>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  onClick={() => setWorkspaceDialog(project.name)}
                 >
-                  <FolderOpen />
-                  Open in Finder
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuItem onClick={() => removeProject(project.name)}>
-                <ListMinus />
-                Remove from list
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </div>
+                  <Plus />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Add workspace</TooltipContent>
+            </Tooltip>
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent>
+          {labels.length > 0 && (
+            <ContextMenuSub>
+              <ContextMenuSubTrigger>
+                <Tag className="size-4 mr-2" />
+                Set label
+              </ContextMenuSubTrigger>
+              <ContextMenuPortal>
+                <ContextMenuSubContent>
+                  <ContextMenuItem onClick={() => updateProjectLabel(project.name, null)}>
+                    <span className="flex-1">None</span>
+                    {!project.label && <Check className="size-3 ml-2" />}
+                  </ContextMenuItem>
+                  {labels.map((lbl) => (
+                    <ContextMenuItem
+                      key={lbl.id}
+                      onClick={() => updateProjectLabel(project.name, lbl.id)}
+                    >
+                      <span
+                        className="size-2.5 rounded-full shrink-0 mr-2"
+                        style={{ backgroundColor: lbl.color }}
+                      />
+                      <span className="flex-1">{lbl.name}</span>
+                      {project.label === lbl.id && <Check className="size-3 ml-2" />}
+                    </ContextMenuItem>
+                  ))}
+                </ContextMenuSubContent>
+              </ContextMenuPortal>
+            </ContextMenuSub>
+          )}
+          {capabilities.copyPath && (
+            <ContextMenuItem onClick={() => navigator.clipboard.writeText(project.path)}>
+              <Clipboard />
+              Copy path
+            </ContextMenuItem>
+          )}
+          {capabilities.revealInFinder && (
+            <ContextMenuItem onClick={() => capabilities.revealInFinder!(project.path)}>
+              <FolderOpen />
+              Open in Finder
+            </ContextMenuItem>
+          )}
+          <ContextMenuItem onClick={() => removeProject(project.name)}>
+            <ListMinus />
+            Remove from list
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
 
       <NewWorkspaceDialog
         projectName={project.name}
@@ -197,10 +195,7 @@ function DroppableLabelHeader({ labelId, label }: { labelId: string; label: Labe
       ref={setNodeRef}
       className={`flex items-center gap-2 px-3 py-2.5 mb-1 transition-colors ${isOver ? "bg-primary/20" : "bg-accent"}`}
     >
-      <span
-        className="size-2.5 rounded-full shrink-0"
-        style={{ backgroundColor: label.color }}
-      />
+      <span className="size-2.5 rounded-full shrink-0" style={{ backgroundColor: label.color }} />
       <span className="text-sm font-semibold text-foreground/80">{label.name}</span>
     </div>
   );
@@ -240,7 +235,8 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
   const groups = useMemo(() => {
-    if (labels.length === 0) return [{ labelId: null as string | null, label: null as LabelDefinition | null, projects }];
+    if (labels.length === 0)
+      return [{ labelId: null as string | null, label: null as LabelDefinition | null, projects }];
 
     const byLabel = new Map<string | null, ProjectInfo[]>();
     for (const p of projects) {
@@ -249,7 +245,11 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
       byLabel.get(key)!.push(p);
     }
 
-    const result: { labelId: string | null; label: LabelDefinition | null; projects: ProjectInfo[] }[] = [];
+    const result: {
+      labelId: string | null;
+      label: LabelDefinition | null;
+      projects: ProjectInfo[];
+    }[] = [];
     for (const lbl of labels) {
       const grouped = byLabel.get(lbl.id);
       if (grouped) {
@@ -381,13 +381,13 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
           {visibleGroups.map((group, groupIndex) => (
             <div key={group.labelId ?? "__unlabeled"}>
               {groupIndex > 0 && !labels.length && <hr className="border-border my-1 mx-2" />}
-              {labels.length > 0 && !labelFilter && (
-                group.label ? (
+              {labels.length > 0 &&
+                !labelFilter &&
+                (group.label ? (
                   <DroppableLabelHeader labelId={group.labelId!} label={group.label} />
                 ) : (
                   <DroppableUnlabeledHeader />
-                )
-              )}
+                ))}
               {group.projects.map((project, index) => (
                 <div key={project.name}>
                   {index > 0 && <hr className="border-border mb-1 mx-2" />}

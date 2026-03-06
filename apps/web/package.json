@@ -5,9 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev --port 3456 --host 0.0.0.0",
-    "build": "vite build",
+    "build": "vite build && esbuild start-server.mjs --bundle --platform=node --format=esm --outfile=dist/start-server.mjs --external:./dist/server/server.js",
     "start": "node start-server.mjs",
-    "bundle:server": "esbuild start-server.mjs --bundle --platform=node --format=esm --outfile=dist/start-server.mjs --external:./dist/server/server.js",
     "test": "node --test auth.test.mjs"
   },
   "dependencies": {
