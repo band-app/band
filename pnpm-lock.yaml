@@ -202,6 +202,9 @@ importers:
       '@vitejs/plugin-react':
         specifier: ^4.3.0
         version: 4.7.0(vite@7.3.1(@types/node@22.19.13)(jiti@2.6.1)(lightningcss@1.31.1)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2))
+      esbuild:
+        specifier: ^0.25.0
+        version: 0.25.12
       tailwindcss:
         specifier: ^4.0.0
         version: 4.2.1
@@ -276,6 +279,16 @@ importers:
       tailwind-merge:
         specifier: ^3.5.0
         version: 3.5.0
+    devDependencies:
+      '@types/react':
+        specifier: ^19.0.0
+        version: 19.2.14
+      '@types/react-dom':
+        specifier: ^19.0.0
+        version: 19.2.3(@types/react@19.2.14)
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
 
 packages:
 

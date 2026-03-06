@@ -218,9 +218,13 @@ pub fn webserver_start(
         .stderr(Stdio::null());
     set_process_group(&mut cmd);
 
-    let child = cmd
-        .spawn()
-        .map_err(|e| format!("Failed to start web server: {e}"))?;
+    let child = cmd.spawn().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            "Node.js is required but not installed. Install it from https://nodejs.org".to_string()
+        } else {
+            format!("Failed to start web server: {e}")
+        }
+    })?;
 
     state.0.set(child);
     Ok(())
