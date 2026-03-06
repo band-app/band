@@ -65,6 +65,18 @@
   --chart-5: oklch(0.769 0.188 70.08);
 }
 
+button,
+[role="menuitem"],
+[role="option"],
+[data-slot="dropdown-menu-trigger"],
+[data-slot="dialog-trigger"] {
+  cursor: pointer;
+}
+
+[data-slot="scroll-area-viewport"] > div {
+  display: block;
+}
+
 html,
 body {
   height: 100%;

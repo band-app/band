@@ -3,7 +3,6 @@ import type {
   CIStatus,
   GitStatus,
   HooksStatus,
-  LabelDefinition,
   ProjectInfo,
   Settings,
   WorkspaceStatus,
@@ -21,7 +20,6 @@ type SSEEvent = {
 type SSEHandler = (data: SSEEvent) => void;
 
 let _eventSource: EventSource | null = null;
-let _refCount = 0;
 const _handlers = new Set<SSEHandler>();
 
 function _ensureEventSource(): void {
@@ -42,15 +40,12 @@ function _ensureEventSource(): void {
 
 function _addHandler(handler: SSEHandler): Unsubscribe {
   _handlers.add(handler);
-  _refCount++;
   _ensureEventSource();
   return () => {
     _handlers.delete(handler);
-    _refCount--;
-    if (_refCount <= 0) {
+    if (_handlers.size === 0) {
       _eventSource?.close();
       _eventSource = null;
-      _refCount = 0;
     }
   };
 }
@@ -59,14 +54,9 @@ export class WebDashboardAdapter implements DashboardAdapter {
   async listProjects(): Promise<ProjectInfo[]> {
     const res = await fetch("/api/projects");
     if (!res.ok) throw new Error("Failed to fetch projects");
-    const data = (await res.json()) as { projects: ProjectInfo[]; labels: LabelDefinition[] };
-    // Store labels on the side for the settings store to pick up
-    this._lastLabels = data.labels;
+    const data = (await res.json()) as { projects: ProjectInfo[] };
     return data.projects;
   }
-
-  // Cached labels from the last listProjects() call
-  _lastLabels: LabelDefinition[] = [];
 
   async addProject(path: string, label?: string): Promise<void> {
     const res = await fetch("/api/projects/add", {

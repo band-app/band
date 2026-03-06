@@ -3,14 +3,7 @@ import { execFileSync } from "node:child_process";
 import { loadState, worktreesDir } from "../../lib/state";
 import { join } from "node:path";
 import { mkdirSync } from "node:fs";
-
-function gitCmd(): { command: string; env: NodeJS.ProcessEnv } {
-  const env = { ...process.env };
-  if (env.PATH) {
-    env.PATH = `/opt/homebrew/bin:/usr/local/bin:${env.PATH}`;
-  }
-  return { command: "git", env };
-}
+import { gitCmd } from "../../lib/git";
 
 export const Route = createFileRoute("/api/workspaces/create")({
   server: {
