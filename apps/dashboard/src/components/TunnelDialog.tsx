@@ -3,15 +3,15 @@ import { listen } from "@tauri-apps/api/event";
 import { Loader2 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { useCallback, useEffect, useState } from "react";
-import { Button } from "@/components/ui/button";
+import { useSettingsStore } from "@band/dashboard-core";
 import {
+  Button,
   Dialog,
   DialogContent,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { useSettingsStore } from "@/stores/settings-store";
+} from "@band/ui";
 
 type TunnelStep =
   | "starting"

@@ -1,8 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useDashboardStore } from "@/stores/dashboard-store";
-import { useSettingsStore } from "@/stores/settings-store";
+import { useRawDashboardStore, useSettingsStore } from "@band/dashboard-core";
 
 interface PrereqStatus {
   node: boolean;
@@ -10,6 +9,7 @@ interface PrereqStatus {
 }
 
 export function useTunnel() {
+  const dashboardStore = useRawDashboardStore();
   const [webServerRunning, setWebServerRunning] = useState(false);
   const [tunnelUrl, setTunnelUrl] = useState<string | null>(null);
   const [showPrereq, setShowPrereq] = useState(false);
@@ -94,8 +94,8 @@ export function useTunnel() {
         await invoke("tunnel_start");
       } catch (e) {
         if (!cancelled) {
-          useDashboardStore.getState().clearError();
-          useDashboardStore.setState({ error: String(e) });
+          dashboardStore.getState().clearError();
+          dashboardStore.setState({ error: String(e) });
         }
       }
     })();
@@ -103,7 +103,7 @@ export function useTunnel() {
     return () => {
       cancelled = true;
     };
-  }, [settings.autoStartTunnel]);
+  }, [settings.autoStartTunnel, dashboardStore]);
 
   // Globe click → open prereq check first
   const openDialog = useCallback(() => {

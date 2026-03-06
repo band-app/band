@@ -7,7 +7,7 @@ export interface WorktreeInfo {
   isBare: boolean;
 }
 
-function gitCmd(): { command: string; env: NodeJS.ProcessEnv } {
+export function gitCmd(): { command: string; env: NodeJS.ProcessEnv } {
   const env = { ...process.env };
   if (env.PATH) {
     env.PATH = `/opt/homebrew/bin:/usr/local/bin:${env.PATH}`;

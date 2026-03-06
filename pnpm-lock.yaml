@@ -14,6 +14,9 @@ importers:
 
   apps/dashboard:
     dependencies:
+      '@band/dashboard-core':
+        specifier: workspace:^
+        version: link:../../packages/dashboard-core
       '@band/ui':
         specifier: workspace:^
         version: link:../../packages/ui
@@ -102,6 +105,9 @@ importers:
       '@band/coding-agent':
         specifier: workspace:^
         version: link:../../packages/coding-agent
+      '@band/dashboard-core':
+        specifier: workspace:^
+        version: link:../../packages/dashboard-core
       '@band/logger':
         specifier: workspace:^
         version: link:../../packages/logger
@@ -245,6 +251,49 @@ importers:
         specifier: ^3.25.67
         version: 3.25.76
 
+  packages/dashboard-core:
+    dependencies:
+      '@band/ui':
+        specifier: workspace:^
+        version: link:../ui
+      '@dnd-kit/core':
+        specifier: ^6.3.1
+        version: 6.3.1(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      '@dnd-kit/sortable':
+        specifier: ^10.0.0
+        version: 10.0.0(@dnd-kit/core@6.3.1(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(react@19.2.4)
+      '@dnd-kit/utilities':
+        specifier: ^3.2.2
+        version: 3.2.2(react@19.2.4)
+      lucide-react:
+        specifier: ^0.576.0
+        version: 0.576.0(react@19.2.4)
+      react:
+        specifier: ^19.0.0
+        version: 19.2.4
+      react-dom:
+        specifier: ^19.0.0
+        version: 19.2.4(react@19.2.4)
+      zustand:
+        specifier: ^5.0.0
+        version: 5.0.11(@types/react@19.2.14)(react@19.2.4)(use-sync-external-store@1.6.0(react@19.2.4))
+    devDependencies:
+      '@tauri-apps/api':
+        specifier: ^2.0.0
+        version: 2.10.1
+      '@tauri-apps/plugin-shell':
+        specifier: ^2.0.0
+        version: 2.3.5
+      '@types/react':
+        specifier: ^19.0.0
+        version: 19.2.14
+      '@types/react-dom':
+        specifier: ^19.0.0
+        version: 19.2.3(@types/react@19.2.14)
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   packages/logger:
     dependencies:
       pino:
@@ -286,9 +335,6 @@ importers:
       '@types/react-dom':
         specifier: ^19.0.0
         version: 19.2.3(@types/react@19.2.14)
-      typescript:
-        specifier: ^5.7.0
-        version: 5.9.3
 
 packages:
 
