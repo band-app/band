@@ -174,16 +174,10 @@ pub fn run_script_in_terminal(command: &str, cwd: &str) -> Result<(), String> {
 }
 
 pub fn run_script(command: &str, cwd: &str) -> Result<(), String> {
-    let output = Command::new("sh")
-        .args(["-c", command])
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    let output = Command::new(&shell)
+        .args(["-l", "-c", command])
         .current_dir(cwd)
-        .env(
-            "PATH",
-            format!(
-                "/opt/homebrew/bin:/usr/local/bin:{}",
-                std::env::var("PATH").unwrap_or_default()
-            ),
-        )
         .output()
         .map_err(|e| format!("Failed to run script: {}", e))?;
 
