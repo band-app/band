@@ -11,12 +11,21 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ChatWorkspaceIdRouteImport } from './routes/chat.$workspaceId'
+import { Route as ApiSettingsRouteImport } from './routes/api/settings'
 import { Route as ApiProjectsRouteImport } from './routes/api/projects'
 import { Route as ApiChatRouteImport } from './routes/api/chat'
+import { Route as ApiWorkspacesRunScriptRouteImport } from './routes/api/workspaces.run-script'
+import { Route as ApiWorkspacesRemoveRouteImport } from './routes/api/workspaces.remove'
+import { Route as ApiWorkspacesOpenRouteImport } from './routes/api/workspaces.open'
+import { Route as ApiWorkspacesCreateRouteImport } from './routes/api/workspaces.create'
 import { Route as ApiStatusStreamRouteImport } from './routes/api/status.stream'
 import { Route as ApiSessionsWorkspaceIdRouteImport } from './routes/api/sessions.$workspaceId'
 import { Route as ApiProjectsReorderRouteImport } from './routes/api/projects.reorder'
+import { Route as ApiProjectsRemoveRouteImport } from './routes/api/projects.remove'
 import { Route as ApiProjectsLabelRouteImport } from './routes/api/projects.label'
+import { Route as ApiProjectsAddRouteImport } from './routes/api/projects.add'
+import { Route as ApiHooksInstallRouteImport } from './routes/api/hooks.install'
+import { Route as ApiHooksCheckRouteImport } from './routes/api/hooks.check'
 import { Route as ApiSessionsWorkspaceIdSessionIdMessagesRouteImport } from './routes/api/sessions.$workspaceId.$sessionId.messages'
 
 const IndexRoute = IndexRouteImport.update({
@@ -29,6 +38,11 @@ const ChatWorkspaceIdRoute = ChatWorkspaceIdRouteImport.update({
   path: '/chat/$workspaceId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiSettingsRoute = ApiSettingsRouteImport.update({
+  id: '/api/settings',
+  path: '/api/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiProjectsRoute = ApiProjectsRouteImport.update({
   id: '/api/projects',
   path: '/api/projects',
@@ -37,6 +51,26 @@ const ApiProjectsRoute = ApiProjectsRouteImport.update({
 const ApiChatRoute = ApiChatRouteImport.update({
   id: '/api/chat',
   path: '/api/chat',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiWorkspacesRunScriptRoute = ApiWorkspacesRunScriptRouteImport.update({
+  id: '/api/workspaces/run-script',
+  path: '/api/workspaces/run-script',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiWorkspacesRemoveRoute = ApiWorkspacesRemoveRouteImport.update({
+  id: '/api/workspaces/remove',
+  path: '/api/workspaces/remove',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiWorkspacesOpenRoute = ApiWorkspacesOpenRouteImport.update({
+  id: '/api/workspaces/open',
+  path: '/api/workspaces/open',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiWorkspacesCreateRoute = ApiWorkspacesCreateRouteImport.update({
+  id: '/api/workspaces/create',
+  path: '/api/workspaces/create',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiStatusStreamRoute = ApiStatusStreamRouteImport.update({
@@ -54,10 +88,30 @@ const ApiProjectsReorderRoute = ApiProjectsReorderRouteImport.update({
   path: '/reorder',
   getParentRoute: () => ApiProjectsRoute,
 } as any)
+const ApiProjectsRemoveRoute = ApiProjectsRemoveRouteImport.update({
+  id: '/remove',
+  path: '/remove',
+  getParentRoute: () => ApiProjectsRoute,
+} as any)
 const ApiProjectsLabelRoute = ApiProjectsLabelRouteImport.update({
   id: '/label',
   path: '/label',
   getParentRoute: () => ApiProjectsRoute,
+} as any)
+const ApiProjectsAddRoute = ApiProjectsAddRouteImport.update({
+  id: '/add',
+  path: '/add',
+  getParentRoute: () => ApiProjectsRoute,
+} as any)
+const ApiHooksInstallRoute = ApiHooksInstallRouteImport.update({
+  id: '/api/hooks/install',
+  path: '/api/hooks/install',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiHooksCheckRoute = ApiHooksCheckRouteImport.update({
+  id: '/api/hooks/check',
+  path: '/api/hooks/check',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const ApiSessionsWorkspaceIdSessionIdMessagesRoute =
   ApiSessionsWorkspaceIdSessionIdMessagesRouteImport.update({
@@ -70,22 +124,40 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/api/chat': typeof ApiChatRoute
   '/api/projects': typeof ApiProjectsRouteWithChildren
+  '/api/settings': typeof ApiSettingsRoute
   '/chat/$workspaceId': typeof ChatWorkspaceIdRoute
+  '/api/hooks/check': typeof ApiHooksCheckRoute
+  '/api/hooks/install': typeof ApiHooksInstallRoute
+  '/api/projects/add': typeof ApiProjectsAddRoute
   '/api/projects/label': typeof ApiProjectsLabelRoute
+  '/api/projects/remove': typeof ApiProjectsRemoveRoute
   '/api/projects/reorder': typeof ApiProjectsReorderRoute
   '/api/sessions/$workspaceId': typeof ApiSessionsWorkspaceIdRouteWithChildren
   '/api/status/stream': typeof ApiStatusStreamRoute
+  '/api/workspaces/create': typeof ApiWorkspacesCreateRoute
+  '/api/workspaces/open': typeof ApiWorkspacesOpenRoute
+  '/api/workspaces/remove': typeof ApiWorkspacesRemoveRoute
+  '/api/workspaces/run-script': typeof ApiWorkspacesRunScriptRoute
   '/api/sessions/$workspaceId/$sessionId/messages': typeof ApiSessionsWorkspaceIdSessionIdMessagesRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/api/chat': typeof ApiChatRoute
   '/api/projects': typeof ApiProjectsRouteWithChildren
+  '/api/settings': typeof ApiSettingsRoute
   '/chat/$workspaceId': typeof ChatWorkspaceIdRoute
+  '/api/hooks/check': typeof ApiHooksCheckRoute
+  '/api/hooks/install': typeof ApiHooksInstallRoute
+  '/api/projects/add': typeof ApiProjectsAddRoute
   '/api/projects/label': typeof ApiProjectsLabelRoute
+  '/api/projects/remove': typeof ApiProjectsRemoveRoute
   '/api/projects/reorder': typeof ApiProjectsReorderRoute
   '/api/sessions/$workspaceId': typeof ApiSessionsWorkspaceIdRouteWithChildren
   '/api/status/stream': typeof ApiStatusStreamRoute
+  '/api/workspaces/create': typeof ApiWorkspacesCreateRoute
+  '/api/workspaces/open': typeof ApiWorkspacesOpenRoute
+  '/api/workspaces/remove': typeof ApiWorkspacesRemoveRoute
+  '/api/workspaces/run-script': typeof ApiWorkspacesRunScriptRoute
   '/api/sessions/$workspaceId/$sessionId/messages': typeof ApiSessionsWorkspaceIdSessionIdMessagesRoute
 }
 export interface FileRoutesById {
@@ -93,11 +165,20 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/api/chat': typeof ApiChatRoute
   '/api/projects': typeof ApiProjectsRouteWithChildren
+  '/api/settings': typeof ApiSettingsRoute
   '/chat/$workspaceId': typeof ChatWorkspaceIdRoute
+  '/api/hooks/check': typeof ApiHooksCheckRoute
+  '/api/hooks/install': typeof ApiHooksInstallRoute
+  '/api/projects/add': typeof ApiProjectsAddRoute
   '/api/projects/label': typeof ApiProjectsLabelRoute
+  '/api/projects/remove': typeof ApiProjectsRemoveRoute
   '/api/projects/reorder': typeof ApiProjectsReorderRoute
   '/api/sessions/$workspaceId': typeof ApiSessionsWorkspaceIdRouteWithChildren
   '/api/status/stream': typeof ApiStatusStreamRoute
+  '/api/workspaces/create': typeof ApiWorkspacesCreateRoute
+  '/api/workspaces/open': typeof ApiWorkspacesOpenRoute
+  '/api/workspaces/remove': typeof ApiWorkspacesRemoveRoute
+  '/api/workspaces/run-script': typeof ApiWorkspacesRunScriptRoute
   '/api/sessions/$workspaceId/$sessionId/messages': typeof ApiSessionsWorkspaceIdSessionIdMessagesRoute
 }
 export interface FileRouteTypes {
@@ -106,33 +187,60 @@ export interface FileRouteTypes {
     | '/'
     | '/api/chat'
     | '/api/projects'
+    | '/api/settings'
     | '/chat/$workspaceId'
+    | '/api/hooks/check'
+    | '/api/hooks/install'
+    | '/api/projects/add'
     | '/api/projects/label'
+    | '/api/projects/remove'
     | '/api/projects/reorder'
     | '/api/sessions/$workspaceId'
     | '/api/status/stream'
+    | '/api/workspaces/create'
+    | '/api/workspaces/open'
+    | '/api/workspaces/remove'
+    | '/api/workspaces/run-script'
     | '/api/sessions/$workspaceId/$sessionId/messages'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/api/chat'
     | '/api/projects'
+    | '/api/settings'
     | '/chat/$workspaceId'
+    | '/api/hooks/check'
+    | '/api/hooks/install'
+    | '/api/projects/add'
     | '/api/projects/label'
+    | '/api/projects/remove'
     | '/api/projects/reorder'
     | '/api/sessions/$workspaceId'
     | '/api/status/stream'
+    | '/api/workspaces/create'
+    | '/api/workspaces/open'
+    | '/api/workspaces/remove'
+    | '/api/workspaces/run-script'
     | '/api/sessions/$workspaceId/$sessionId/messages'
   id:
     | '__root__'
     | '/'
     | '/api/chat'
     | '/api/projects'
+    | '/api/settings'
     | '/chat/$workspaceId'
+    | '/api/hooks/check'
+    | '/api/hooks/install'
+    | '/api/projects/add'
     | '/api/projects/label'
+    | '/api/projects/remove'
     | '/api/projects/reorder'
     | '/api/sessions/$workspaceId'
     | '/api/status/stream'
+    | '/api/workspaces/create'
+    | '/api/workspaces/open'
+    | '/api/workspaces/remove'
+    | '/api/workspaces/run-script'
     | '/api/sessions/$workspaceId/$sessionId/messages'
   fileRoutesById: FileRoutesById
 }
@@ -140,9 +248,16 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ApiChatRoute: typeof ApiChatRoute
   ApiProjectsRoute: typeof ApiProjectsRouteWithChildren
+  ApiSettingsRoute: typeof ApiSettingsRoute
   ChatWorkspaceIdRoute: typeof ChatWorkspaceIdRoute
+  ApiHooksCheckRoute: typeof ApiHooksCheckRoute
+  ApiHooksInstallRoute: typeof ApiHooksInstallRoute
   ApiSessionsWorkspaceIdRoute: typeof ApiSessionsWorkspaceIdRouteWithChildren
   ApiStatusStreamRoute: typeof ApiStatusStreamRoute
+  ApiWorkspacesCreateRoute: typeof ApiWorkspacesCreateRoute
+  ApiWorkspacesOpenRoute: typeof ApiWorkspacesOpenRoute
+  ApiWorkspacesRemoveRoute: typeof ApiWorkspacesRemoveRoute
+  ApiWorkspacesRunScriptRoute: typeof ApiWorkspacesRunScriptRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -161,6 +276,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatWorkspaceIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/settings': {
+      id: '/api/settings'
+      path: '/api/settings'
+      fullPath: '/api/settings'
+      preLoaderRoute: typeof ApiSettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/projects': {
       id: '/api/projects'
       path: '/api/projects'
@@ -173,6 +295,34 @@ declare module '@tanstack/react-router' {
       path: '/api/chat'
       fullPath: '/api/chat'
       preLoaderRoute: typeof ApiChatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/workspaces/run-script': {
+      id: '/api/workspaces/run-script'
+      path: '/api/workspaces/run-script'
+      fullPath: '/api/workspaces/run-script'
+      preLoaderRoute: typeof ApiWorkspacesRunScriptRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/workspaces/remove': {
+      id: '/api/workspaces/remove'
+      path: '/api/workspaces/remove'
+      fullPath: '/api/workspaces/remove'
+      preLoaderRoute: typeof ApiWorkspacesRemoveRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/workspaces/open': {
+      id: '/api/workspaces/open'
+      path: '/api/workspaces/open'
+      fullPath: '/api/workspaces/open'
+      preLoaderRoute: typeof ApiWorkspacesOpenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/workspaces/create': {
+      id: '/api/workspaces/create'
+      path: '/api/workspaces/create'
+      fullPath: '/api/workspaces/create'
+      preLoaderRoute: typeof ApiWorkspacesCreateRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/status/stream': {
@@ -196,12 +346,40 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiProjectsReorderRouteImport
       parentRoute: typeof ApiProjectsRoute
     }
+    '/api/projects/remove': {
+      id: '/api/projects/remove'
+      path: '/remove'
+      fullPath: '/api/projects/remove'
+      preLoaderRoute: typeof ApiProjectsRemoveRouteImport
+      parentRoute: typeof ApiProjectsRoute
+    }
     '/api/projects/label': {
       id: '/api/projects/label'
       path: '/label'
       fullPath: '/api/projects/label'
       preLoaderRoute: typeof ApiProjectsLabelRouteImport
       parentRoute: typeof ApiProjectsRoute
+    }
+    '/api/projects/add': {
+      id: '/api/projects/add'
+      path: '/add'
+      fullPath: '/api/projects/add'
+      preLoaderRoute: typeof ApiProjectsAddRouteImport
+      parentRoute: typeof ApiProjectsRoute
+    }
+    '/api/hooks/install': {
+      id: '/api/hooks/install'
+      path: '/api/hooks/install'
+      fullPath: '/api/hooks/install'
+      preLoaderRoute: typeof ApiHooksInstallRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/hooks/check': {
+      id: '/api/hooks/check'
+      path: '/api/hooks/check'
+      fullPath: '/api/hooks/check'
+      preLoaderRoute: typeof ApiHooksCheckRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/api/sessions/$workspaceId/$sessionId/messages': {
       id: '/api/sessions/$workspaceId/$sessionId/messages'
@@ -214,12 +392,16 @@ declare module '@tanstack/react-router' {
 }
 
 interface ApiProjectsRouteChildren {
+  ApiProjectsAddRoute: typeof ApiProjectsAddRoute
   ApiProjectsLabelRoute: typeof ApiProjectsLabelRoute
+  ApiProjectsRemoveRoute: typeof ApiProjectsRemoveRoute
   ApiProjectsReorderRoute: typeof ApiProjectsReorderRoute
 }
 
 const ApiProjectsRouteChildren: ApiProjectsRouteChildren = {
+  ApiProjectsAddRoute: ApiProjectsAddRoute,
   ApiProjectsLabelRoute: ApiProjectsLabelRoute,
+  ApiProjectsRemoveRoute: ApiProjectsRemoveRoute,
   ApiProjectsReorderRoute: ApiProjectsReorderRoute,
 }
 
@@ -246,9 +428,16 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ApiChatRoute: ApiChatRoute,
   ApiProjectsRoute: ApiProjectsRouteWithChildren,
+  ApiSettingsRoute: ApiSettingsRoute,
   ChatWorkspaceIdRoute: ChatWorkspaceIdRoute,
+  ApiHooksCheckRoute: ApiHooksCheckRoute,
+  ApiHooksInstallRoute: ApiHooksInstallRoute,
   ApiSessionsWorkspaceIdRoute: ApiSessionsWorkspaceIdRouteWithChildren,
   ApiStatusStreamRoute: ApiStatusStreamRoute,
+  ApiWorkspacesCreateRoute: ApiWorkspacesCreateRoute,
+  ApiWorkspacesOpenRoute: ApiWorkspacesOpenRoute,
+  ApiWorkspacesRemoveRoute: ApiWorkspacesRemoveRoute,
+  ApiWorkspacesRunScriptRoute: ApiWorkspacesRunScriptRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

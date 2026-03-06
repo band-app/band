@@ -2,6 +2,7 @@ use crate::git;
 use crate::state;
 use serde::Serialize;
 use std::collections::HashMap;
+use std::fs;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -37,6 +38,35 @@ pub struct CIStatusEvent {
 }
 
 pub struct BranchStatusPollerState(pub Arc<Mutex<Option<Arc<AtomicBool>>>>);
+
+#[derive(Debug, Clone, Serialize)]
+struct BranchStatusFile {
+    #[serde(rename = "workspaceId")]
+    workspace_id: String,
+    git: GitStatus,
+    ci: CIStatus,
+}
+
+fn branch_status_dir() -> std::path::PathBuf {
+    dirs::home_dir()
+        .unwrap_or_default()
+        .join(".band")
+        .join("branch-status")
+}
+
+fn write_branch_status(workspace_id: &str, git: &GitStatus, ci: &CIStatus) {
+    let dir = branch_status_dir();
+    let _ = fs::create_dir_all(&dir);
+    let file = dir.join(format!("{workspace_id}.json"));
+    let data = BranchStatusFile {
+        workspace_id: workspace_id.to_string(),
+        git: git.clone(),
+        ci: ci.clone(),
+    };
+    if let Ok(json) = serde_json::to_string(&data) {
+        let _ = fs::write(file, json);
+    }
+}
 
 fn gh_cmd() -> Command {
     let mut cmd = Command::new("gh");
@@ -355,7 +385,7 @@ pub fn branch_status_watch_start(app: AppHandle) -> Result<(), String> {
                         "branch-git-status",
                         GitStatusEvent {
                             workspace_id: ws_id.clone(),
-                            git: git_status,
+                            git: git_status.clone(),
                         },
                     );
 
@@ -368,10 +398,13 @@ pub fn branch_status_watch_start(app: AppHandle) -> Result<(), String> {
                         let _ = app_handle.emit(
                             "branch-ci-status",
                             CIStatusEvent {
-                                workspace_id: ws_id,
-                                ci,
+                                workspace_id: ws_id.clone(),
+                                ci: ci.clone(),
                             },
                         );
+
+                        // Write combined status to file for web server
+                        write_branch_status(&ws_id, &git_status, &ci);
                     }
                 }
             }
@@ -381,16 +414,20 @@ pub fn branch_status_watch_start(app: AppHandle) -> Result<(), String> {
                 for proj in &app_state.projects {
                     for wt in &proj.worktrees {
                         let ws_id = format!("{}-{}", proj.name, wt.branch);
+                        let git_status = get_git_status(&wt.path);
                         let ci = get_ci_status(&wt.path, &wt.branch);
                         ci_cache.insert(ws_id.clone(), ci.clone());
 
                         let _ = app_handle.emit(
                             "branch-ci-status",
                             CIStatusEvent {
-                                workspace_id: ws_id,
-                                ci,
+                                workspace_id: ws_id.clone(),
+                                ci: ci.clone(),
                             },
                         );
+
+                        // Write combined status to file for web server
+                        write_branch_status(&ws_id, &git_status, &ci);
                     }
                 }
             }

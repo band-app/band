@@ -1,6 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { TooltipProvider } from "@band/ui";
 import App from "./App";
 import "./styles/globals.css";
 
