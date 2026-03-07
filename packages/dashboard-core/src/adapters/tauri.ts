@@ -194,9 +194,6 @@ export class TauriCapabilities implements PlatformCapabilities {
     async stop(): Promise<void> {
       await invoke("tunnel_stop");
     },
-    async status(): Promise<string | null> {
-      return invoke<string | null>("tunnel_status");
-    },
     async install(): Promise<void> {
       await invoke("tunnel_install");
     },
@@ -218,17 +215,11 @@ export class TauriCapabilities implements PlatformCapabilities {
   };
 
   webserver = {
-    async status(): Promise<boolean> {
-      return invoke<boolean>("webserver_status");
-    },
     async start(): Promise<void> {
       await invoke("webserver_start");
     },
     async stop(): Promise<void> {
       await invoke("webserver_stop");
-    },
-    async waitReady(): Promise<void> {
-      await invoke("webserver_wait_ready");
     },
     async getToken(): Promise<string> {
       return invoke<string>("webserver_get_token");

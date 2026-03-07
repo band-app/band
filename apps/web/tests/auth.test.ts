@@ -60,13 +60,6 @@ describe("auth middleware (with secret)", () => {
     expect(res.status).toBe(401);
   });
 
-  it("token endpoint returns token from localhost", async () => {
-    const res = await fetch(`${server.url}/api/auth/token`);
-    expect(res.status).toBe(200);
-    const data = await res.json();
-    expect(data.token).toBe(EXPECTED_TOKEN);
-  });
-
   it("valid token query param sets cookie and passes through", async () => {
     const res = await fetch(`${server.url}/?token=${EXPECTED_TOKEN}`);
     expect(res.status).toBe(200);
@@ -106,14 +99,50 @@ describe("auth middleware (with secret)", () => {
     expect(res.status).toBe(200);
     expect(await res.text()).toBe("OK");
   });
+});
 
-  it("token endpoint is only accessible via GET", async () => {
-    const res = await fetch(`${server.url}/api/auth/token`, {
-      method: "POST",
+// -------------------------------------------------------------------------
+// /api/health endpoint
+// -------------------------------------------------------------------------
+
+describe("/api/health endpoint", () => {
+  let server: Awaited<ReturnType<typeof startServer>>;
+
+  beforeEach(async () => {
+    server = await startServer(TEST_SECRET);
+  });
+
+  afterEach(async () => {
+    await server.close();
+  });
+
+  it("returns 401 without auth", async () => {
+    const res = await fetch(`${server.url}/api/health`);
+    expect(res.status).toBe(401);
+  });
+
+  it("returns health JSON with valid token query param", async () => {
+    const res = await fetch(`${server.url}/api/health?token=${EXPECTED_TOKEN}`);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.status).toBe("ok");
+    expect(data.app).toBe("band-web-server");
+    expect(typeof data.hostname).toBe("string");
+    expect(data.hostname.length).toBeGreaterThan(0);
+  });
+
+  it("returns health JSON with valid cookie", async () => {
+    const res = await fetch(`${server.url}/api/health`, {
       headers: { Cookie: `band_token=${EXPECTED_TOKEN}` },
     });
     expect(res.status).toBe(200);
-    expect(await res.text()).toBe("OK");
+    const data = await res.json();
+    expect(data.app).toBe("band-web-server");
+  });
+
+  it("returns 401 with invalid token", async () => {
+    const res = await fetch(`${server.url}/api/health?token=bad-token`);
+    expect(res.status).toBe(401);
   });
 });
 
@@ -144,8 +173,8 @@ describe("auth middleware (without secret — dev mode)", () => {
     expect(await res.text()).toBe("OK");
   });
 
-  it("token endpoint does not exist (passes through)", async () => {
-    const res = await fetch(`${server.url}/api/auth/token`);
+  it("passes unknown API paths through to app handler", async () => {
+    const res = await fetch(`${server.url}/api/something`);
     expect(res.status).toBe(200);
     expect(await res.text()).toBe("OK");
   });

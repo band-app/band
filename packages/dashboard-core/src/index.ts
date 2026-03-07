@@ -21,6 +21,7 @@ export {
   useBranchStatusWatcher,
   useStatusWatcher,
 } from "./hooks/use-status";
+export { isServiceHealthy, type ServiceHealth } from "./lib/service-health";
 // Lib
 export { playSound, SOUNDS, type SoundId } from "./lib/sounds";
 export type { DashboardState, DashboardStore } from "./stores/dashboard-store";

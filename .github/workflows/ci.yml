@@ -85,6 +85,9 @@ jobs:
           touch apps/web/dist/start-server.mjs
           cargo clippy --manifest-path apps/dashboard/src-tauri/Cargo.toml -- -D warnings
 
+      - name: Build web (needed by tests)
+        run: pnpm build:web
+
       - name: Test (web)
         run: pnpm --filter @band/web test
 
@@ -92,16 +95,10 @@ jobs:
         run: cargo test --manifest-path apps/cli/Cargo.toml
 
       - name: Test (Dashboard)
-        run: |
-          mkdir -p apps/web/dist
-          touch apps/web/dist/start-server.mjs
-          cargo test --manifest-path apps/dashboard/src-tauri/Cargo.toml
-          rm -rf apps/web/dist
+        run: cargo test --manifest-path apps/dashboard/src-tauri/Cargo.toml
 
       - name: Build frontend
-        run: |
-          pnpm build:web
-          pnpm --filter @band/dashboard build
+        run: pnpm --filter @band/dashboard build
 
       - name: Build DMG
         run: pnpm --filter @band/dashboard tauri build --ci --config '{"build":{"beforeBuildCommand":""}}'

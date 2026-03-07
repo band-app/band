@@ -60,15 +60,12 @@ export interface PlatformCapabilities {
     check(): Promise<boolean>;
     start(): Promise<void>;
     stop(): Promise<void>;
-    status(): Promise<string | null>;
     install(): Promise<void>;
     subscribeTunnelUrl(onUrl: (url: string) => void, onError: (err: string) => void): Unsubscribe;
   };
   webserver?: {
-    status(): Promise<boolean>;
     start(): Promise<void>;
     stop(): Promise<void>;
-    waitReady(): Promise<void>;
     getToken(): Promise<string>;
   };
 }
