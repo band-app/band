@@ -98,8 +98,11 @@ jobs:
           cargo test --manifest-path apps/dashboard/src-tauri/Cargo.toml
           rm -rf apps/web/dist
 
+      - name: Build web
+        run: pnpm build:web
+
       - name: Build DMG
-        run: pnpm build:dashboard
+        run: pnpm --filter @band/dashboard tauri build --ci --config '{"build":{"beforeBuildCommand":""}}'
 
       - name: Upload DMG
         uses: actions/upload-artifact@v4
