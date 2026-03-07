@@ -168,10 +168,7 @@ fn resolve_detached_branch(worktree_path: &str) -> String {
         let head_name = gitdir.join(rebase_dir).join("head-name");
         if let Ok(name) = std::fs::read_to_string(&head_name) {
             let name = name.trim();
-            return name
-                .strip_prefix("refs/heads/")
-                .unwrap_or(name)
-                .to_string();
+            return name.strip_prefix("refs/heads/").unwrap_or(name).to_string();
         }
     }
 
@@ -436,19 +433,12 @@ mod tests {
 
         // Read gitdir from the worktree's .git file
         let git_content = fs::read_to_string(wt_path.join(".git")).unwrap();
-        let gitdir = git_content
-            .strip_prefix("gitdir: ")
-            .unwrap()
-            .trim();
+        let gitdir = git_content.strip_prefix("gitdir: ").unwrap().trim();
 
         // Simulate interactive rebase state
         let rebase_dir = Path::new(gitdir).join("rebase-merge");
         fs::create_dir_all(&rebase_dir).unwrap();
-        fs::write(
-            rebase_dir.join("head-name"),
-            "refs/heads/rebasing-branch\n",
-        )
-        .unwrap();
+        fs::write(rebase_dir.join("head-name"), "refs/heads/rebasing-branch\n").unwrap();
 
         let worktrees = list_worktrees(repo.to_str().unwrap()).unwrap();
 
