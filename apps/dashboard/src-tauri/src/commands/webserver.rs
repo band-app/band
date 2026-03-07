@@ -83,11 +83,15 @@ pub(crate) fn which_binary(name: &str) -> Result<String, String> {
 fn generate_secret() -> Result<String, String> {
     use std::io::Read;
     let mut f = std::fs::File::open("/dev/urandom")
-        .map_err(|e| format!("Failed to open /dev/urandom: {}", e))?;
+        .map_err(|e| format!("Failed to open /dev/urandom: {e}"))?;
     let mut buf = [0u8; 32];
     f.read_exact(&mut buf)
-        .map_err(|e| format!("Failed to read random bytes: {}", e))?;
-    Ok(buf.iter().map(|b| format!("{:02x}", b)).collect())
+        .map_err(|e| format!("Failed to read random bytes: {e}"))?;
+    Ok(buf.iter().fold(String::with_capacity(64), |mut acc, b| {
+        use std::fmt::Write;
+        write!(acc, "{b:02x}").unwrap();
+        acc
+    }))
 }
 
 /// Load or create a persistent token secret (saved in settings).
@@ -281,11 +285,11 @@ pub async fn webserver_get_token(
         .args([
             "-s",
             "-f",
-            &format!("http://127.0.0.1:{}/api/auth/token", port),
+            &format!("http://127.0.0.1:{port}/api/auth/token"),
         ])
         .output()
         .await
-        .map_err(|e| format!("Failed to fetch token: {}", e))?;
+        .map_err(|e| format!("Failed to fetch token: {e}"))?;
 
     if !output.status.success() {
         return Err("Failed to fetch auth token from web server".to_string());
@@ -293,7 +297,7 @@ pub async fn webserver_get_token(
 
     let body = String::from_utf8_lossy(&output.stdout);
     let parsed: serde_json::Value = serde_json::from_str(&body)
-        .map_err(|e| format!("Failed to parse token response: {}", e))?;
+        .map_err(|e| format!("Failed to parse token response: {e}"))?;
     let token = parsed["token"]
         .as_str()
         .ok_or_else(|| "Token not found in response".to_string())?
@@ -457,7 +461,7 @@ pub fn tunnel_start(
                         let token_guard = token_arc.lock().ok();
                         let token = token_guard.as_ref().and_then(|g| g.as_ref().cloned());
                         let url = match token {
-                            Some(t) => format!("{}?token={}", base_url, t),
+                            Some(t) => format!("{base_url}?token={t}"),
                             None => base_url,
                         };
                         let _ = app_handle.emit("tunnel-url", url);
@@ -500,7 +504,7 @@ pub fn tunnel_start(
                     } else {
                         meaningful.join("\n")
                     };
-                    format!("instatunnel failed:\n{}", display)
+                    format!("instatunnel failed:\n{display}")
                 };
                 let _ = app_handle.emit("tunnel-error", msg);
             }
@@ -530,7 +534,7 @@ pub async fn tunnel_stop(state: State<'_, TunnelState>) -> Result<(), String> {
         let sub = guard
             .url
             .as_ref()
-            .and_then(|url| extract_subdomain(url).map(|s| s.to_string()));
+            .and_then(|url| extract_subdomain(url).map(std::string::ToString::to_string));
         guard.url = None;
         sub
     };
@@ -570,7 +574,7 @@ pub fn tunnel_status(
 fn append_token(base_url: &str, token_state: &State<'_, AccessTokenState>) -> String {
     let guard = token_state.0.lock().unwrap();
     match *guard {
-        Some(ref token) => format!("{}?token={}", base_url, token),
+        Some(ref token) => format!("{base_url}?token={token}"),
         None => base_url.to_string(),
     }
 }

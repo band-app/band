@@ -156,15 +156,14 @@ pub fn load_project_config(project_path: &str) -> ProjectConfig {
 }
 
 pub fn run_script_in_terminal(command: &str, cwd: &str) -> Result<(), String> {
-    let escaped_cwd = cwd.replace('\'', "'\\''");
+    let safe_cwd = cwd.replace('\'', "'\\''");
     let escaped_cmd = command.replace('\'', "'\\''");
 
     let apple_script = format!(
         "tell application \"Terminal\"\n\
              activate\n\
-             do script \"cd '{}' && {}\"\n\
-         end tell",
-        escaped_cwd, escaped_cmd
+             do script \"cd '{safe_cwd}' && {escaped_cmd}\"\n\
+         end tell"
     );
 
     Command::new("osascript")
@@ -181,11 +180,11 @@ pub fn run_script(command: &str, cwd: &str) -> Result<(), String> {
         .current_dir(cwd)
         .env("PATH", crate::commands::webserver::shell_path())
         .output()
-        .map_err(|e| format!("Failed to run script: {}", e))?;
+        .map_err(|e| format!("Failed to run script: {e}"))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Script failed: {}", stderr));
+        return Err(format!("Script failed: {stderr}"));
     }
 
     Ok(())

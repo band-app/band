@@ -118,8 +118,8 @@ fn check_accessibility() -> bool {
                 keys.as_ptr(),
                 values.as_ptr(),
                 1,
-                &kCFTypeDictionaryKeyCallBacks as *const c_void,
-                &kCFTypeDictionaryValueCallBacks as *const c_void,
+                &raw const kCFTypeDictionaryKeyCallBacks,
+                &raw const kCFTypeDictionaryValueCallBacks,
             );
             let result = AXIsProcessTrustedWithOptions(opts);
             CFRelease(key);
