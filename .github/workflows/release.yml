@@ -1,0 +1,158 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Explicit version (e.g. 1.2.3). Leave empty to use bump or auto-detect."
+        required: false
+        type: string
+      bump:
+        description: "Bump type. Leave empty to auto-detect from commits."
+        required: false
+        type: choice
+        default: ""
+        options:
+          - ""
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Release
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ~/.pnpm-store
+          key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-registry-${{ runner.os }}-
+
+      - name: Cache CLI target
+        uses: actions/cache@v4
+        with:
+          path: apps/cli/target
+          key: cargo-cli-${{ runner.os }}-${{ hashFiles('apps/cli/Cargo.lock') }}
+          restore-keys: cargo-cli-${{ runner.os }}-
+
+      - name: Cache Dashboard target
+        uses: actions/cache@v4
+        with:
+          path: apps/dashboard/src-tauri/target
+          key: cargo-dashboard-${{ runner.os }}-${{ hashFiles('apps/dashboard/src-tauri/Cargo.lock') }}
+          restore-keys: cargo-dashboard-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            BUMP_ARGS="--version ${{ inputs.version }}"
+          elif [ -n "${{ inputs.bump }}" ]; then
+            BUMP_ARGS="--bump ${{ inputs.bump }}"
+          else
+            BUMP_ARGS="--from-commits"
+          fi
+          NEW_VERSION=$(node scripts/bump-version.mjs $BUMP_ARGS --dry-run 2>&1 | grep "^Version:" | sed 's/Version: .* → //')
+          echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "bump_args=$BUMP_ARGS" >> "$GITHUB_OUTPUT"
+          echo "Will release version: $NEW_VERSION"
+
+      - name: Verify tag does not exist
+        run: |
+          if git rev-parse "v${{ steps.version.outputs.new_version }}" >/dev/null 2>&1; then
+            echo "Error: Tag v${{ steps.version.outputs.new_version }} already exists"
+            exit 1
+          fi
+
+      - name: Bump versions
+        run: node scripts/bump-version.mjs ${{ steps.version.outputs.bump_args }}
+
+      - name: Lint
+        run: |
+          biome check .
+          cargo fmt --manifest-path apps/cli/Cargo.toml -- --check
+          cargo fmt --manifest-path apps/dashboard/src-tauri/Cargo.toml -- --check
+          cargo clippy --manifest-path apps/cli/Cargo.toml -- -D warnings
+          cargo clippy --manifest-path apps/dashboard/src-tauri/Cargo.toml -- -D warnings
+
+      - name: Test
+        run: |
+          pnpm --filter @band/web test
+          cargo test --manifest-path apps/cli/Cargo.toml
+          pnpm build:cli
+          mkdir -p apps/web/dist
+          touch apps/web/dist/start-server.mjs
+          cargo test --manifest-path apps/dashboard/src-tauri/Cargo.toml
+          rm -rf apps/web/dist
+
+      - name: Build DMG
+        run: pnpm build:dashboard
+
+      - name: Commit and tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: release v${{ steps.version.outputs.new_version }}"
+          git tag "v${{ steps.version.outputs.new_version }}"
+          git push origin main --follow-tags
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          LAST_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$LAST_TAG" ]; then
+            RANGE="${LAST_TAG}..v${{ steps.version.outputs.new_version }}"
+          else
+            RANGE="v${{ steps.version.outputs.new_version }}"
+          fi
+          CHANGELOG=$(git log $RANGE --pretty=format:"- %s" --no-merges | grep -v "^- chore: release" || true)
+          {
+            echo "changelog<<EOF"
+            echo "$CHANGELOG"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.new_version }}
+          name: v${{ steps.version.outputs.new_version }}
+          body: ${{ steps.changelog.outputs.changelog }}
+          files: apps/dashboard/src-tauri/target/release/bundle/dmg/*.dmg

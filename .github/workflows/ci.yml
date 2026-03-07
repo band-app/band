@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.head_ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Lint, Test & Build
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ~/.pnpm-store
+          key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-registry-${{ runner.os }}-
+
+      - name: Cache CLI target
+        uses: actions/cache@v4
+        with:
+          path: apps/cli/target
+          key: cargo-cli-${{ runner.os }}-${{ hashFiles('apps/cli/Cargo.lock') }}
+          restore-keys: cargo-cli-${{ runner.os }}-
+
+      - name: Cache Dashboard target
+        uses: actions/cache@v4
+        with:
+          path: apps/dashboard/src-tauri/target
+          key: cargo-dashboard-${{ runner.os }}-${{ hashFiles('apps/dashboard/src-tauri/Cargo.lock') }}
+          restore-keys: cargo-dashboard-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint (Biome)
+        run: biome check .
+
+      - name: Lint (cargo fmt)
+        run: |
+          cargo fmt --manifest-path apps/cli/Cargo.toml -- --check
+          cargo fmt --manifest-path apps/dashboard/src-tauri/Cargo.toml -- --check
+
+      - name: Lint (cargo clippy)
+        run: |
+          cargo clippy --manifest-path apps/cli/Cargo.toml -- -D warnings
+          cargo clippy --manifest-path apps/dashboard/src-tauri/Cargo.toml -- -D warnings
+
+      - name: Test (web)
+        run: pnpm --filter @band/web test
+
+      - name: Test (CLI)
+        run: cargo test --manifest-path apps/cli/Cargo.toml
+
+      - name: Build CLI
+        run: pnpm build:cli
+
+      - name: Test (Dashboard)
+        run: |
+          mkdir -p apps/web/dist
+          touch apps/web/dist/start-server.mjs
+          cargo test --manifest-path apps/dashboard/src-tauri/Cargo.toml
+          rm -rf apps/web/dist
+
+      - name: Build DMG
+        run: pnpm build:dashboard
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: band-dmg
+          path: apps/dashboard/src-tauri/target/release/bundle/dmg/*.dmg
+          retention-days: 7
