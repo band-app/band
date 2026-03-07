@@ -40,8 +40,7 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "../../web/dist/": "web/dist/",
-      "../../web/dist/start-server.mjs": "web/start-server.mjs"
+      "../../web/dist/": "web/dist/"
     }
   },
   "plugins": {}
