@@ -6,12 +6,20 @@ import { Loader2 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { useCallback, useEffect, useState } from "react";
 
+interface ServiceHealth {
+  webserver: boolean;
+  tunnel: boolean;
+  tunnel_url: string | null;
+  tunnel_remote_host: string | null;
+}
+
 type TunnelStep =
   | "starting"
   | "auth_required"
   | "connecting"
   | "ready"
   | "subdomain_taken"
+  | "remote_host"
   | "error";
 
 interface Props {
@@ -26,21 +34,41 @@ export function TunnelDialog({ open, onOpenChange, onStopped, initialUrl, onTunn
   const [step, setStep] = useState<TunnelStep>("starting");
   const [tunnelUrl, setTunnelUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [remoteHost, setRemoteHost] = useState<string | null>(null);
   const settings = useSettingsStore((s) => s.settings);
 
   const ensureWebServer = useCallback(async () => {
-    const running = await invoke<boolean>("webserver_status");
-    if (!running) {
+    const health = await invoke<ServiceHealth>("service_health_check");
+    if (!health.webserver) {
       await invoke("webserver_start");
-      await invoke("webserver_wait_ready");
+      // Wait for server to be ready by polling health
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        const h = await invoke<ServiceHealth>("service_health_check");
+        if (h.webserver) break;
+        await new Promise((r) => setTimeout(r, 200));
+      }
       await invoke<string>("webserver_get_token");
     }
+    return health;
   }, []);
 
   const startConnection = useCallback(async () => {
     try {
       setStep("starting");
-      await ensureWebServer();
+      const health = await ensureWebServer();
+
+      // If tunnel is already running on a different host, show message
+      if (health.tunnel && health.tunnel_remote_host) {
+        setRemoteHost(health.tunnel_remote_host);
+        setStep("remote_host");
+        return;
+      }
+
+      // If tunnel is broken (subdomain configured but not healthy), kill it first
+      if (settings.tunnelSubdomain && !health.tunnel) {
+        await invoke("tunnel_stop").catch(() => {});
+      }
 
       if (settings.tunnelSubdomain) {
         const authed = await invoke<boolean>("tunnel_auth_check");
@@ -65,16 +93,19 @@ export function TunnelDialog({ open, onOpenChange, onStopped, initialUrl, onTunn
       setTunnelUrl(initialUrl);
       setStep("ready");
       setError(null);
+      setRemoteHost(null);
     } else {
       setStep("starting");
       setTunnelUrl(null);
       setError(null);
+      setRemoteHost(null);
     }
 
     let cancelled = false;
     let unlisten: (() => void) | undefined;
     let unlistenError: (() => void) | undefined;
     let unlistenSubdomainTaken: (() => void) | undefined;
+    let unlistenRemoteHost: (() => void) | undefined;
 
     (async () => {
       unlisten = await listen<string>("tunnel-url", (event) => {
@@ -98,14 +129,29 @@ export function TunnelDialog({ open, onOpenChange, onStopped, initialUrl, onTunn
         }
       });
 
+      unlistenRemoteHost = await listen<string>("tunnel-remote-host", (event) => {
+        if (!cancelled) {
+          setRemoteHost(event.payload);
+          setStep("remote_host");
+        }
+      });
+
       if (initialUrl) return;
 
+      // Check if services are already running
       try {
-        const existingUrl = await invoke<string | null>("tunnel_status");
-        if (existingUrl && !cancelled) {
-          setTunnelUrl(existingUrl);
-          setStep("ready");
-          onTunnelUrl?.(existingUrl);
+        const health = await invoke<ServiceHealth>("service_health_check");
+        if (health.tunnel && health.tunnel_url && !cancelled) {
+          const token = await invoke<string>("webserver_get_token").catch(() => null);
+          const url = token ? `${health.tunnel_url}?token=${token}` : health.tunnel_url;
+          if (health.tunnel_remote_host) {
+            setRemoteHost(health.tunnel_remote_host);
+            setStep("remote_host");
+          } else {
+            setTunnelUrl(url);
+            setStep("ready");
+            onTunnelUrl?.(url);
+          }
           return;
         }
       } catch {}
@@ -120,6 +166,7 @@ export function TunnelDialog({ open, onOpenChange, onStopped, initialUrl, onTunn
       unlisten?.();
       unlistenError?.();
       unlistenSubdomainTaken?.();
+      unlistenRemoteHost?.();
     };
   }, [open, startConnection, initialUrl, onTunnelUrl]);
 
@@ -219,6 +266,24 @@ export function TunnelDialog({ open, onOpenChange, onStopped, initialUrl, onTunn
               </p>
               <Button onClick={handleContinueRandom} className="w-full">
                 Continue with Random URL
+              </Button>
+            </>
+          )}
+
+          {step === "remote_host" && (
+            <>
+              <p className="text-sm text-muted-foreground text-center">
+                Tunnel subdomain <strong>{settings.tunnelSubdomain}</strong> is currently in use on{" "}
+                <strong>{remoteHost}</strong>.
+              </p>
+              <p className="text-xs text-muted-foreground text-center">
+                Stop it on the other computer first, or use a different subdomain.
+              </p>
+              <Button onClick={handleContinueRandom} className="w-full">
+                Continue with Random URL
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
+                Close
               </Button>
             </>
           )}

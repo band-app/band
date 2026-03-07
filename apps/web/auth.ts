@@ -1,10 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-
-function isLocalhost(req: IncomingMessage): boolean {
-  const addr = req.socket.remoteAddress;
-  return addr === "127.0.0.1" || addr === "::1" || addr === "::ffff:127.0.0.1";
-}
+import { hostname } from "node:os";
 
 function parseCookies(req: IncomingMessage): Record<string, string> {
   const header = req.headers.cookie || "";
@@ -39,14 +35,25 @@ export function createAuthMiddleware(secret: string | undefined) {
 
     const url = new URL(req.url!, `http://${req.headers.host}`);
 
-    // Localhost-only token endpoint
-    if (url.pathname === "/api/auth/token" && req.method === "GET") {
-      if (isLocalhost(req)) {
+    // Health check endpoint (auth-protected)
+    if (url.pathname === "/api/health" && req.method === "GET") {
+      const queryToken = url.searchParams.get("token");
+      const cookies = parseCookies(req);
+      if (
+        tokensEqual(queryToken, expectedToken) ||
+        tokensEqual(cookies.band_token, expectedToken)
+      ) {
         res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ token: expectedToken }));
+        res.end(
+          JSON.stringify({
+            status: "ok",
+            app: "band-web-server",
+            hostname: hostname(),
+          }),
+        );
       } else {
-        res.writeHead(403);
-        res.end("Forbidden");
+        res.writeHead(401);
+        res.end("Unauthorized");
       }
       return true;
     }

@@ -1,4 +1,9 @@
-import { useRawDashboardStore, useSettingsStore } from "@band/dashboard-core";
+import {
+  isServiceHealthy,
+  type ServiceHealth,
+  useRawDashboardStore,
+  useSettingsStore,
+} from "@band/dashboard-core";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -8,25 +13,48 @@ interface PrereqStatus {
   instatunnel: boolean;
 }
 
+const HEALTH_POLL_INTERVAL = 30_000;
+
 export function useTunnel() {
   const dashboardStore = useRawDashboardStore();
   const [webServerRunning, setWebServerRunning] = useState(false);
   const [tunnelUrl, setTunnelUrl] = useState<string | null>(null);
+  const [tunnelRemoteHost, setTunnelRemoteHost] = useState<string | null>(null);
   const [showPrereq, setShowPrereq] = useState(false);
   const [showDialog, setShowDialog] = useState(false);
   const stoppedRef = useRef(false);
   const settings = useSettingsStore((s) => s.settings);
 
+  // Health polling — check service status every 30s
   useEffect(() => {
-    invoke<boolean>("webserver_status")
-      .then(setWebServerRunning)
-      .catch(() => {});
-    invoke<string | null>("tunnel_status")
-      .then((url) => {
-        if (url) setTunnelUrl(url);
-      })
-      .catch(() => {});
-  }, []);
+    let intervalId: ReturnType<typeof setInterval> | undefined;
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const health = await invoke<ServiceHealth>("service_health_check");
+        if (cancelled) return;
+        setWebServerRunning(isServiceHealthy(health, settings.tunnelSubdomain));
+        if (health.tunnel && health.tunnel_url) {
+          // Only update tunnel URL if we don't already have one (avoid overwriting token-bearing URL)
+          setTunnelUrl((prev) => prev ?? health.tunnel_url);
+        } else if (!health.tunnel) {
+          setTunnelUrl(null);
+        }
+        setTunnelRemoteHost(health.tunnel_remote_host);
+      } catch {
+        // ignore errors during polling
+      }
+    };
+
+    poll();
+    intervalId = setInterval(poll, HEALTH_POLL_INTERVAL);
+
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+    };
+  }, [settings.tunnelSubdomain]);
 
   // Persistent tunnel-url listener (works even when dialog is closed)
   useEffect(() => {
@@ -34,6 +62,19 @@ export function useTunnel() {
     listen<string>("tunnel-url", (event) => {
       setTunnelUrl(event.payload);
       setWebServerRunning(true);
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      unlisten?.();
+    };
+  }, []);
+
+  // Listen for tunnel-remote-host events
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen<string>("tunnel-remote-host", (event) => {
+      setTunnelRemoteHost(event.payload);
     }).then((fn) => {
       unlisten = fn;
     });
@@ -79,19 +120,40 @@ export function useTunnel() {
     let cancelled = false;
     (async () => {
       try {
-        const running = await invoke<boolean>("webserver_status");
-        if (running || cancelled) return;
+        // Check current health first — skip what's already running
+        const health = await invoke<ServiceHealth>("service_health_check");
+        if (cancelled) return;
+
+        if (health.webserver && health.tunnel) {
+          // Both already running
+          setWebServerRunning(true);
+          if (health.tunnel_url) setTunnelUrl(health.tunnel_url);
+          return;
+        }
 
         // Skip auto-start if prerequisites are missing
         const status = await invoke<PrereqStatus>("prereq_check");
         if (!status.node || !status.instatunnel || cancelled) return;
 
-        await invoke("webserver_start");
-        await invoke("webserver_wait_ready");
-        await invoke<string>("webserver_get_token");
+        if (!health.webserver) {
+          await invoke("webserver_start");
+          // Wait for server to be ready by polling health
+          const deadline = Date.now() + 10_000;
+          while (Date.now() < deadline) {
+            if (cancelled) return;
+            const h = await invoke<ServiceHealth>("service_health_check");
+            if (h.webserver) break;
+            await new Promise((r) => setTimeout(r, 200));
+          }
+          await invoke<string>("webserver_get_token");
+        }
+
         if (cancelled) return;
         setWebServerRunning(true);
-        await invoke("tunnel_start");
+
+        if (!health.tunnel) {
+          await invoke("tunnel_start");
+        }
       } catch (e) {
         if (!cancelled) {
           dashboardStore.getState().clearError();
@@ -105,11 +167,23 @@ export function useTunnel() {
     };
   }, [settings.autoStartTunnel, dashboardStore]);
 
-  // Globe click → open prereq check first
-  const openDialog = useCallback(() => {
+  // Globe click → fresh health check, update state, then open prereq dialog
+  const openDialog = useCallback(async () => {
     stoppedRef.current = false;
+    try {
+      const health = await invoke<ServiceHealth>("service_health_check");
+      setWebServerRunning(isServiceHealthy(health, settings.tunnelSubdomain));
+      if (health.tunnel && health.tunnel_url) {
+        setTunnelUrl((prev) => prev ?? health.tunnel_url);
+      } else if (!health.tunnel) {
+        setTunnelUrl(null);
+      }
+      setTunnelRemoteHost(health.tunnel_remote_host);
+    } catch {
+      // continue to dialog even if check fails
+    }
     setShowPrereq(true);
-  }, []);
+  }, [settings.tunnelSubdomain]);
 
   // Prereq passed → open tunnel dialog
   const onPrereqReady = useCallback(() => {
@@ -121,12 +195,14 @@ export function useTunnel() {
     stoppedRef.current = true;
     setWebServerRunning(false);
     setTunnelUrl(null);
+    setTunnelRemoteHost(null);
     setShowDialog(false);
   }, []);
 
   return {
     webServerRunning,
     tunnelUrl,
+    tunnelRemoteHost,
     setTunnelUrl,
     showPrereq,
     setShowPrereq,
