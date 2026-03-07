@@ -343,7 +343,6 @@ pub async fn node_install() -> Result<(), String> {
 // Tunnel commands
 // ---------------------------------------------------------------------------
 
-
 #[tauri::command]
 pub async fn tunnel_install() -> Result<(), String> {
     let path = shell_path().to_string();
@@ -442,10 +441,7 @@ pub fn tunnel_start(
                 if let Some(start) = line.find("https://") {
                     let rest = &line[start..];
                     // Extract URL: take chars valid in a URL, then trim trailing punctuation
-                    let raw_url: String = rest
-                        .chars()
-                        .take_while(|c| !c.is_whitespace())
-                        .collect();
+                    let raw_url: String = rest.chars().take_while(|c| !c.is_whitespace()).collect();
                     let base_url = raw_url.trim_end_matches(|c: char| {
                         matches!(c, '"' | '\'' | ')' | '(' | ']' | '[' | '>' | ',')
                     });
@@ -459,8 +455,7 @@ pub fn tunnel_start(
                             guard.url = Some(base_url.clone());
                         }
                         let token_guard = token_arc.lock().ok();
-                        let token =
-                            token_guard.as_ref().and_then(|g| g.as_ref().cloned());
+                        let token = token_guard.as_ref().and_then(|g| g.as_ref().cloned());
                         let url = match token {
                             Some(t) => format!("{}?token={}", base_url, t),
                             None => base_url,
@@ -532,7 +527,10 @@ pub async fn tunnel_auth_check() -> Result<bool, String> {
 pub async fn tunnel_stop(state: State<'_, TunnelState>) -> Result<(), String> {
     let subdomain = {
         let mut guard = state.0.lock().unwrap();
-        let sub = guard.url.as_ref().and_then(|url| extract_subdomain(url).map(|s| s.to_string()));
+        let sub = guard
+            .url
+            .as_ref()
+            .and_then(|url| extract_subdomain(url).map(|s| s.to_string()));
         guard.url = None;
         sub
     };
@@ -559,7 +557,10 @@ pub fn tunnel_status(
 ) -> Result<Option<String>, String> {
     let guard = state.0.lock().unwrap();
     if guard.process.is_running() {
-        Ok(guard.url.as_ref().map(|base_url| append_token(base_url, &token_state)))
+        Ok(guard
+            .url
+            .as_ref()
+            .map(|base_url| append_token(base_url, &token_state)))
     } else {
         Ok(None)
     }

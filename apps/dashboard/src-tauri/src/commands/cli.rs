@@ -79,12 +79,8 @@ pub fn install_cli(symlink_path: &Path, sidecar_path: &Path) -> Result<(), Strin
 
     // Remove existing symlink/file if it exists
     if symlink_path.symlink_metadata().is_ok() {
-        fs::remove_file(symlink_path).map_err(|e| {
-            format!(
-                "Failed to remove existing {}: {e}",
-                symlink_path.display()
-            )
-        })?;
+        fs::remove_file(symlink_path)
+            .map_err(|e| format!("Failed to remove existing {}: {e}", symlink_path.display()))?;
     }
 
     #[cfg(unix)]
@@ -255,7 +251,11 @@ mod tests {
 
         install_cli(&symlink_path, &sidecar).unwrap();
 
-        assert!(symlink_path.symlink_metadata().unwrap().file_type().is_symlink());
+        assert!(symlink_path
+            .symlink_metadata()
+            .unwrap()
+            .file_type()
+            .is_symlink());
         assert_eq!(fs::read_link(&symlink_path).unwrap(), sidecar);
     }
 
@@ -267,7 +267,11 @@ mod tests {
 
         install_cli(&symlink_path, &sidecar).unwrap();
 
-        assert!(symlink_path.symlink_metadata().unwrap().file_type().is_symlink());
+        assert!(symlink_path
+            .symlink_metadata()
+            .unwrap()
+            .file_type()
+            .is_symlink());
         assert_eq!(fs::read_link(&symlink_path).unwrap(), sidecar);
     }
 
@@ -300,7 +304,11 @@ mod tests {
         let sidecar = make_sidecar(tmp.path());
         install_cli(&symlink_path, &sidecar).unwrap();
 
-        assert!(symlink_path.symlink_metadata().unwrap().file_type().is_symlink());
+        assert!(symlink_path
+            .symlink_metadata()
+            .unwrap()
+            .file_type()
+            .is_symlink());
         assert_eq!(fs::read_link(&symlink_path).unwrap(), sidecar);
     }
 
