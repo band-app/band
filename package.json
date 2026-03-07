@@ -12,11 +12,11 @@
     "build:cli": "cd apps/cli && cargo build --release && mkdir -p ../dashboard/src-tauri/binaries && cp target/release/band \"../dashboard/src-tauri/binaries/band-$(rustc -vV | sed -n 's/host: //p')\"",
     "build:extension": "pnpm --filter band-vscode build",
     "test": "pnpm --filter @band/web test && cargo test --manifest-path apps/cli/Cargo.toml && pnpm build:cli && mkdir -p apps/web/dist && touch apps/web/dist/start-server.mjs && cargo test --manifest-path apps/dashboard/src-tauri/Cargo.toml; rm -rf apps/web/dist",
-    "lint": "biome check . && cargo clippy --manifest-path apps/dashboard/src-tauri/Cargo.toml -- -D warnings",
-    "lint:fix": "biome check --fix . && cargo clippy --manifest-path apps/dashboard/src-tauri/Cargo.toml --fix --allow-dirty",
-    "format": "biome format . && cargo fmt --manifest-path apps/dashboard/src-tauri/Cargo.toml -- --check",
-    "format:fix": "biome format --fix . && cargo fmt --manifest-path apps/dashboard/src-tauri/Cargo.toml",
-    "check": "biome check . && cargo fmt --manifest-path apps/dashboard/src-tauri/Cargo.toml -- --check && cargo clippy --manifest-path apps/dashboard/src-tauri/Cargo.toml -- -D warnings"
+    "lint": "biome check . && cargo clippy --manifest-path apps/cli/Cargo.toml -- -D warnings && cargo clippy --manifest-path apps/dashboard/src-tauri/Cargo.toml -- -D warnings",
+    "lint:fix": "biome check --fix . && cargo clippy --manifest-path apps/cli/Cargo.toml --fix --allow-dirty && cargo clippy --manifest-path apps/dashboard/src-tauri/Cargo.toml --fix --allow-dirty",
+    "format": "biome format . && cargo fmt --manifest-path apps/cli/Cargo.toml -- --check && cargo fmt --manifest-path apps/dashboard/src-tauri/Cargo.toml -- --check",
+    "format:fix": "biome format --fix . && cargo fmt --manifest-path apps/cli/Cargo.toml && cargo fmt --manifest-path apps/dashboard/src-tauri/Cargo.toml",
+    "check": "biome check . && cargo fmt --manifest-path apps/cli/Cargo.toml -- --check && cargo fmt --manifest-path apps/dashboard/src-tauri/Cargo.toml -- --check && cargo clippy --manifest-path apps/cli/Cargo.toml -- -D warnings && cargo clippy --manifest-path apps/dashboard/src-tauri/Cargo.toml -- -D warnings"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.5"

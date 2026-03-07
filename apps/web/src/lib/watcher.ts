@@ -1,7 +1,13 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { watch } from "chokidar";
-import { loadCurrentStatuses, loadStatusFile, statusDir, bandHome, type WorkspaceStatus } from "./state";
+import {
+  bandHome,
+  loadCurrentStatuses,
+  loadStatusFile,
+  statusDir,
+  type WorkspaceStatus,
+} from "./state";
 
 interface GitStatus {
   dirty: boolean;

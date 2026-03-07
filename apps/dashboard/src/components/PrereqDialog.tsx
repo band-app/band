@@ -1,6 +1,3 @@
-import { invoke } from "@tauri-apps/api/core";
-import { Loader2 } from "lucide-react";
-import { useEffect, useState } from "react";
 import {
   Button,
   Dialog,
@@ -9,6 +6,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@band/ui";
+import { invoke } from "@tauri-apps/api/core";
+import { Loader2 } from "lucide-react";
+import { useEffect, useState } from "react";
 
 type PrereqStep = "checking" | "missing" | "installing" | "error";
 
@@ -71,11 +71,8 @@ export function PrereqDialog({ open, onOpenChange, onReady }: Props) {
     }
   };
 
-  const missingLabel = needNode && needInstatunnel
-    ? "Node.js & instatunnel"
-    : needNode
-      ? "Node.js"
-      : "instatunnel";
+  const missingLabel =
+    needNode && needInstatunnel ? "Node.js & instatunnel" : needNode ? "Node.js" : "instatunnel";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

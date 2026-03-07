@@ -1,17 +1,10 @@
+import { useSettingsStore } from "@band/dashboard-core";
+import { Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@band/ui";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Loader2 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { useCallback, useEffect, useState } from "react";
-import { useSettingsStore } from "@band/dashboard-core";
-import {
-  Button,
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@band/ui";
 
 type TunnelStep =
   | "starting"
@@ -186,9 +179,7 @@ export function TunnelDialog({ open, onOpenChange, onStopped, initialUrl, onTunn
                 You need to log in to instatunnel to use the subdomain{" "}
                 <strong>{settings.tunnelSubdomain}</strong>.
               </p>
-              <p className="text-xs text-muted-foreground text-center">
-                Run in your terminal:
-              </p>
+              <p className="text-xs text-muted-foreground text-center">Run in your terminal:</p>
               <code className="text-xs bg-muted px-2 py-1 rounded select-all">
                 instatunnel auth login
               </code>
@@ -203,7 +194,12 @@ export function TunnelDialog({ open, onOpenChange, onStopped, initialUrl, onTunn
 
           {step === "ready" && tunnelUrl && (
             <>
-              <a href={tunnelUrl} target="_blank" rel="noopener noreferrer" className="rounded-lg bg-white p-3 block cursor-pointer hover:opacity-80 transition-opacity">
+              <a
+                href={tunnelUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded-lg bg-white p-3 block cursor-pointer hover:opacity-80 transition-opacity"
+              >
                 <QRCodeSVG value={tunnelUrl} size={200} />
               </a>
               <p className="text-xs text-muted-foreground text-center break-all max-w-[260px]">
@@ -215,7 +211,8 @@ export function TunnelDialog({ open, onOpenChange, onStopped, initialUrl, onTunn
           {step === "subdomain_taken" && (
             <>
               <p className="text-sm text-muted-foreground text-center">
-                The subdomain <strong>{settings.tunnelSubdomain}</strong> is already in use by another session.
+                The subdomain <strong>{settings.tunnelSubdomain}</strong> is already in use by
+                another session.
               </p>
               <p className="text-xs text-muted-foreground text-center">
                 You can change it in Settings &gt; Web Server.

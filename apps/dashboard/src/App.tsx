@@ -1,5 +1,5 @@
 import { DashboardProvider, DashboardShell } from "@band/dashboard-core";
-import { TauriDashboardAdapter, TauriCapabilities } from "@band/dashboard-core/adapters/tauri";
+import { TauriCapabilities, TauriDashboardAdapter } from "@band/dashboard-core/adapters/tauri";
 import { TunnelToolbarButton } from "@/components/TunnelToolbarButton";
 
 const adapter = new TauriDashboardAdapter();

@@ -1,5 +1,5 @@
-import { CircleAlert, CircleCheck, GitMerge, Loader } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@band/ui";
+import { CircleAlert, CircleCheck, GitMerge, Loader } from "lucide-react";
 import { useCapabilities } from "../context";
 import type { CIStatus } from "../types";
 

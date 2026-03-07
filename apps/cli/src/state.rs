@@ -163,7 +163,9 @@ pub fn load_settings() -> Result<Settings, String> {
 }
 
 pub fn load_project_config(project_path: &str) -> ProjectConfig {
-    let config_path = PathBuf::from(project_path).join(".band").join("config.json");
+    let config_path = PathBuf::from(project_path)
+        .join(".band")
+        .join("config.json");
     if !config_path.exists() {
         return ProjectConfig::default();
     }

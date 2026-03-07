@@ -1,5 +1,3 @@
-import { ChevronDown, ChevronLeft, ChevronRight, FolderOpen, Plus, Save, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
 import {
   Button,
   ColorPicker,
@@ -16,6 +14,16 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@band/ui";
+import {
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  FolderOpen,
+  Plus,
+  Save,
+  Trash2,
+} from "lucide-react";
+import { useEffect, useState } from "react";
 import { useCapabilities } from "../context";
 import { playSound, SOUNDS, type SoundId } from "../lib/sounds";
 import { useSettingsStore } from "../stores/index";
@@ -40,7 +48,14 @@ const DEFAULT_DEFAULTS = {
   ],
 };
 
-type Section = "menu" | "general" | "coding-agent" | "defaults" | "notifications" | "web-server" | "labels";
+type Section =
+  | "menu"
+  | "general"
+  | "coding-agent"
+  | "defaults"
+  | "notifications"
+  | "web-server"
+  | "labels";
 
 interface Props {
   onClose: () => void;
@@ -193,7 +208,8 @@ export function SettingsPage({ onClose }: Props) {
   const portPreview = tunnelSubdomain
     ? `${tunnelSubdomain}.instatunnel.my`
     : webServerPort || "3456";
-  const labelsPreview = labels.length > 0 ? `${labels.length} label${labels.length === 1 ? "" : "s"}` : "None";
+  const labelsPreview =
+    labels.length > 0 ? `${labels.length} label${labels.length === 1 ? "" : "s"}` : "None";
   const notificationsPreview = soundOnNeedsAttention
     ? (SOUNDS.find((s) => s.id === selectedSound)?.label ?? "On")
     : "Off";
@@ -238,7 +254,9 @@ export function SettingsPage({ onClose }: Props) {
                   id="worktrees-dir"
                   placeholder="~/.band/worktrees (default)"
                   value={worktreesDir}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setWorktreesDir(e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    setWorktreesDir(e.target.value)
+                  }
                 />
                 {capabilities.pickFolder && (
                   <Button type="button" variant="ghost" size="icon" onClick={handleBrowse}>
@@ -260,9 +278,7 @@ export function SettingsPage({ onClose }: Props) {
                 <ColorPicker
                   value={lbl.color}
                   onChange={(color) =>
-                    setLabels((prev) =>
-                      prev.map((l) => (l.id === lbl.id ? { ...l, color } : l)),
-                    )
+                    setLabels((prev) => prev.map((l) => (l.id === lbl.id ? { ...l, color } : l)))
                   }
                   showHex={false}
                   className="w-auto h-7 px-1.5 shrink-0"
@@ -346,7 +362,9 @@ export function SettingsPage({ onClose }: Props) {
                   id="agent-command"
                   placeholder="claude --dangerously-skip-permissions"
                   value={agentCommand}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAgentCommand(e.target.value)}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    setAgentCommand(e.target.value)
+                  }
                 />
                 <p className="text-xs text-muted-foreground">
                   Custom command with arguments to run the agent. Leave empty to use the default
@@ -379,7 +397,9 @@ export function SettingsPage({ onClose }: Props) {
                 className="w-full min-h-[160px] rounded-md border border-input bg-background px-2 py-1.5 text-xs font-mono ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 dark:bg-input/30"
                 placeholder='{"layout": {...}, "terminals": [...]}'
                 value={defaultsJson}
-                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => handleDefaultsChange(e.target.value)}
+                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                  handleDefaultsChange(e.target.value)
+                }
                 autoCapitalize="off"
                 autoCorrect="off"
                 autoComplete="off"
@@ -465,7 +485,9 @@ export function SettingsPage({ onClose }: Props) {
                 type="number"
                 placeholder="3456 (default)"
                 value={webServerPort}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setWebServerPort(e.target.value)}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                  setWebServerPort(e.target.value)
+                }
                 min={1}
                 max={65535}
               />
@@ -483,8 +505,9 @@ export function SettingsPage({ onClose }: Props) {
                 onChange={(e) => setTunnelSubdomain(e.target.value)}
               />
               <p className="text-xs text-muted-foreground">
-                Fixed subdomain for your tunnel URL (e.g., <code className="text-xs">myapp</code> becomes{" "}
-                <code className="text-xs">myapp.instatunnel.my</code>). Requires instatunnel authentication.
+                Fixed subdomain for your tunnel URL (e.g., <code className="text-xs">myapp</code>{" "}
+                becomes <code className="text-xs">myapp.instatunnel.my</code>). Requires instatunnel
+                authentication.
               </p>
             </div>
             <div className="space-y-2">
@@ -502,7 +525,6 @@ export function SettingsPage({ onClose }: Props) {
             </div>
           </div>
         )}
-
       </div>
     );
   }
@@ -523,11 +545,7 @@ export function SettingsPage({ onClose }: Props) {
           onClick={() => setSection("general")}
         />
         <Separator />
-        <SettingsRow
-          label="Labels"
-          value={labelsPreview}
-          onClick={() => setSection("labels")}
-        />
+        <SettingsRow label="Labels" value={labelsPreview} onClick={() => setSection("labels")} />
         <Separator />
         <SettingsRow
           label="Coding Agent"

@@ -1,7 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router";
 import { execFileSync } from "node:child_process";
-import { loadState } from "../../lib/state";
+import { createFileRoute } from "@tanstack/react-router";
 import { gitCmd } from "../../lib/git";
+import { loadState } from "../../lib/state";
 
 export const Route = createFileRoute("/api/workspaces/remove")({
   server: {
@@ -22,11 +22,11 @@ export const Route = createFileRoute("/api/workspaces/remove")({
 
         try {
           // First find the worktree path
-          const output = execFileSync(
-            command,
-            ["worktree", "list", "--porcelain"],
-            { cwd: proj.path, env, encoding: "utf-8" },
-          );
+          const output = execFileSync(command, ["worktree", "list", "--porcelain"], {
+            cwd: proj.path,
+            env,
+            encoding: "utf-8",
+          });
 
           let currentPath = "";
           let currentBranch = "";
@@ -41,18 +41,18 @@ export const Route = createFileRoute("/api/workspaces/remove")({
             } else if (line === "" && currentPath) {
               if (currentBranch === branch) {
                 // Remove the worktree
-                execFileSync(
-                  command,
-                  ["worktree", "remove", "--force", currentPath],
-                  { cwd: proj.path, env, encoding: "utf-8" },
-                );
+                execFileSync(command, ["worktree", "remove", "--force", currentPath], {
+                  cwd: proj.path,
+                  env,
+                  encoding: "utf-8",
+                });
                 // Delete the branch
                 try {
-                  execFileSync(
-                    command,
-                    ["branch", "-D", branch],
-                    { cwd: proj.path, env, encoding: "utf-8" },
-                  );
+                  execFileSync(command, ["branch", "-D", branch], {
+                    cwd: proj.path,
+                    env,
+                    encoding: "utf-8",
+                  });
                 } catch {
                   // Branch may already be deleted
                 }

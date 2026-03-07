@@ -9,13 +9,17 @@ interface StoreContextValue {
 
 export const StoreContext = createContext<StoreContextValue | null>(null);
 
-export function useDashboardStore<T>(selector: (state: import("./dashboard-store").DashboardState) => T): T {
+export function useDashboardStore<T>(
+  selector: (state: import("./dashboard-store").DashboardState) => T,
+): T {
   const ctx = useContext(StoreContext);
   if (!ctx) throw new Error("useDashboardStore must be used within DashboardProvider");
   return ctx.dashboardStore(selector);
 }
 
-export function useSettingsStore<T>(selector: (state: import("./settings-store").SettingsState) => T): T {
+export function useSettingsStore<T>(
+  selector: (state: import("./settings-store").SettingsState) => T,
+): T {
   const ctx = useContext(StoreContext);
   if (!ctx) throw new Error("useSettingsStore must be used within DashboardProvider");
   return ctx.settingsStore(selector);

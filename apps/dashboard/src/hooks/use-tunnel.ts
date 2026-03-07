@@ -1,7 +1,7 @@
+import { useRawDashboardStore, useSettingsStore } from "@band/dashboard-core";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useRawDashboardStore, useSettingsStore } from "@band/dashboard-core";
 
 interface PrereqStatus {
   node: boolean;

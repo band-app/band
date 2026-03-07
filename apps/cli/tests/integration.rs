@@ -316,11 +316,7 @@ fn setup_failure_is_non_fatal() {
 
     let band_dir = env.repo_path.join(".band");
     fs::create_dir_all(&band_dir).unwrap();
-    fs::write(
-        band_dir.join("config.json"),
-        r#"{ "setup": "exit 1" }"#,
-    )
-    .unwrap();
+    fs::write(band_dir.join("config.json"), r#"{ "setup": "exit 1" }"#).unwrap();
     git(&env.repo_path, &["add", ".band/config.json"]);
     git(&env.repo_path, &["commit", "-m", "add failing setup"]);
 
