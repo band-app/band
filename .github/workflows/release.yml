@@ -130,8 +130,10 @@ jobs:
           cargo test --manifest-path apps/dashboard/src-tauri/Cargo.toml
           rm -rf apps/web/dist
 
-      - name: Build web
-        run: pnpm build:web
+      - name: Build frontend
+        run: |
+          pnpm build:web
+          pnpm --filter @band/dashboard build
 
       - name: Build DMG
         run: pnpm --filter @band/dashboard tauri build --ci --config '{"build":{"beforeBuildCommand":""}}'
