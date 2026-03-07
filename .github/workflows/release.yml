@@ -116,7 +116,10 @@ jobs:
         run: pnpm build:cli
 
       - name: Lint (cargo clippy — Dashboard)
-        run: cargo clippy --manifest-path apps/dashboard/src-tauri/Cargo.toml -- -D warnings
+        run: |
+          mkdir -p apps/web/dist
+          touch apps/web/dist/start-server.mjs
+          cargo clippy --manifest-path apps/dashboard/src-tauri/Cargo.toml -- -D warnings
 
       - name: Test
         run: |
