@@ -95,11 +95,7 @@ jobs:
         run: cargo test --manifest-path apps/cli/Cargo.toml
 
       - name: Test (Dashboard)
-        run: |
-          mkdir -p apps/web/dist
-          touch apps/web/dist/start-server.mjs
-          cargo test --manifest-path apps/dashboard/src-tauri/Cargo.toml
-          rm -rf apps/web/dist
+        run: cargo test --manifest-path apps/dashboard/src-tauri/Cargo.toml
 
       - name: Build frontend
         run: pnpm --filter @band/dashboard build
