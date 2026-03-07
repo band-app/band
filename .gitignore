@@ -9,3 +9,5 @@ apps/dashboard/src-tauri/icons/android/
 apps/dashboard/src-tauri/icons/ios/
 apps/dashboard/src-tauri/gen/
 *.tsbuildinfo
+apps/dashboard/src-tauri/binaries/*
+!apps/dashboard/src-tauri/binaries/.gitkeep

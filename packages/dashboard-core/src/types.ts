@@ -110,3 +110,10 @@ export interface HooksStatus {
   installed: boolean;
   other_hooks_exist: boolean;
 }
+
+export type CliStatus =
+  | "Installed"
+  | "NotInstalled"
+  | "ConflictingBinary"
+  | "DirNotFound"
+  | "NotWritable";

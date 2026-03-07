@@ -1,5 +1,6 @@
 import type {
   CIStatus,
+  CliStatus,
   GitStatus,
   HooksStatus,
   ProjectInfo,
@@ -45,6 +46,10 @@ export interface DashboardAdapter {
   // Hooks
   checkHooks(): Promise<HooksStatus>;
   installHooks(): Promise<void>;
+
+  // CLI
+  checkCli(): Promise<CliStatus>;
+  installCli(): Promise<void>;
 }
 
 export interface PlatformCapabilities {

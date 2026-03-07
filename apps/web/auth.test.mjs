@@ -74,12 +74,10 @@ describe("auth middleware (with secret)", () => {
 		assert.equal(data.token, EXPECTED_TOKEN);
 	});
 
-	it("valid token query param sets cookie and redirects to clean URL", async () => {
-		const res = await fetch(`${server.url}/?token=${EXPECTED_TOKEN}`, {
-			redirect: "manual",
-		});
-		assert.equal(res.status, 302);
-		assert.equal(res.headers.get("location"), "/");
+	it("valid token query param sets cookie and passes through", async () => {
+		const res = await fetch(`${server.url}/?token=${EXPECTED_TOKEN}`);
+		assert.equal(res.status, 200);
+		assert.equal(await res.text(), "OK");
 
 		const setCookie = res.headers.get("set-cookie");
 		assert.ok(setCookie, "should set a cookie");
@@ -90,16 +88,16 @@ describe("auth middleware (with secret)", () => {
 		assert.ok(setCookie.includes("Max-Age=86400"));
 	});
 
-	it("valid token preserves other query params after redirect", async () => {
+	it("valid token on any path sets cookie and passes through", async () => {
 		const res = await fetch(
 			`${server.url}/chat?project=foo&token=${EXPECTED_TOKEN}&page=1`,
-			{ redirect: "manual" },
 		);
-		assert.equal(res.status, 302);
-		const location = res.headers.get("location");
-		assert.ok(location.includes("project=foo"), `location=${location}`);
-		assert.ok(location.includes("page=1"), `location=${location}`);
-		assert.ok(!location.includes("token="), `token should be stripped: ${location}`);
+		assert.equal(res.status, 200);
+		assert.equal(await res.text(), "OK");
+
+		const setCookie = res.headers.get("set-cookie");
+		assert.ok(setCookie, "should set a cookie");
+		assert.ok(setCookie.includes(`band_token=${EXPECTED_TOKEN}`));
 	});
 
 	it("valid cookie allows request through", async () => {
