@@ -1,11 +1,11 @@
-import { createServer } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import sirv from "sirv";
-import { createAuthMiddleware } from "./auth.mjs";
+import { createAuthMiddleware } from "./auth.ts";
 
-const __dirname = fileURLToPath(new URL(".", import.meta.url));
-const clientDir = join(__dirname, "dist", "client");
+// After bundling, this file lives at dist/start-server.mjs,
+// so paths are relative to dist/.
+const clientDir = join(import.meta.dirname, "client");
 const port = parseInt(process.env.PORT || "3456", 10);
 
 const { handleAuth } = createAuthMiddleware(process.env.BAND_TOKEN_SECRET);
@@ -18,17 +18,17 @@ const assets = sirv(clientDir, {
 });
 
 async function main() {
-	const mod = await import("./dist/server/server.js");
-	const server = mod.default;
+	const mod = await import("./server/server.js");
+	const server = mod.default as { fetch: (req: Request) => Promise<Response> };
 
-	const httpServer = createServer(async (req, res) => {
+	const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
 		// Auth check runs first
 		if (handleAuth(req, res)) return;
 
 		// Try serving static assets first (sirv calls next() if no match)
 		assets(req, res, async () => {
 			const protocol = "http";
-			const url = new URL(req.url, `${protocol}://${req.headers.host}`);
+			const url = new URL(req.url!, `${protocol}://${req.headers.host}`);
 
 			const headers = new Headers();
 			for (const [key, value] of Object.entries(req.headers)) {
@@ -41,11 +41,11 @@ async function main() {
 				}
 			}
 
-			let body = undefined;
+			let body: Buffer | undefined = undefined;
 			if (req.method !== "GET" && req.method !== "HEAD") {
-				body = await new Promise((resolve, reject) => {
-					const chunks = [];
-					req.on("data", (chunk) => chunks.push(chunk));
+				body = await new Promise<Buffer>((resolve, reject) => {
+					const chunks: Buffer[] = [];
+					req.on("data", (chunk: Buffer) => chunks.push(chunk));
 					req.on("end", () => resolve(Buffer.concat(chunks)));
 					req.on("error", reject);
 				});
@@ -56,7 +56,7 @@ async function main() {
 				headers,
 				body,
 				duplex: "half",
-			});
+			} as RequestInit);
 
 			const response = await server.fetch(request);
 

@@ -1,13 +1,14 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import type { IncomingMessage, ServerResponse } from "node:http";
 
-function isLocalhost(req) {
+function isLocalhost(req: IncomingMessage): boolean {
 	const addr = req.socket.remoteAddress;
 	return addr === "127.0.0.1" || addr === "::1" || addr === "::ffff:127.0.0.1";
 }
 
-function parseCookies(req) {
+function parseCookies(req: IncomingMessage): Record<string, string> {
 	const header = req.headers.cookie || "";
-	const cookies = {};
+	const cookies: Record<string, string> = {};
 	for (const pair of header.split(";")) {
 		const [name, ...rest] = pair.trim().split("=");
 		if (name) cookies[name] = rest.join("=");
@@ -15,7 +16,7 @@ function parseCookies(req) {
 	return cookies;
 }
 
-function tokensEqual(a, b) {
+function tokensEqual(a: string | undefined, b: string): boolean {
 	if (!a || !b) return false;
 	const bufA = Buffer.from(a);
 	const bufB = Buffer.from(b);
@@ -23,12 +24,7 @@ function tokensEqual(a, b) {
 	return timingSafeEqual(bufA, bufB);
 }
 
-/**
- * Create an auth middleware function.
- * @param {string | undefined} secret - The BAND_TOKEN_SECRET. If falsy, auth is disabled.
- * @returns {{ handleAuth: (req, res) => boolean, expectedToken: string | null }}
- */
-export function createAuthMiddleware(secret) {
+export function createAuthMiddleware(secret: string | undefined) {
 	const expectedToken = secret
 		? createHmac("sha256", secret).update("band-access").digest("hex")
 		: null;
@@ -37,11 +33,11 @@ export function createAuthMiddleware(secret) {
 	 * Returns true if the request was handled (auth endpoint or rejection).
 	 * Returns false if the request should continue to the normal handler.
 	 */
-	function handleAuth(req, res) {
+	function handleAuth(req: IncomingMessage, res: ServerResponse): boolean {
 		// No secret configured — skip auth entirely (dev mode)
 		if (!expectedToken) return false;
 
-		const url = new URL(req.url, `http://${req.headers.host}`);
+		const url = new URL(req.url!, `http://${req.headers.host}`);
 
 		// Localhost-only token endpoint
 		if (url.pathname === "/api/auth/token" && req.method === "GET") {
