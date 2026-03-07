@@ -97,17 +97,10 @@ async function resolveDetachedBranch(worktreePath: string): Promise<string> {
     // Check interactive rebase (rebase-merge) then regular rebase (rebase-apply)
     for (const rebaseDir of ["rebase-merge", "rebase-apply"]) {
       try {
-        const headName = await readFile(
-          join(gitdir, rebaseDir, "head-name"),
-          "utf-8",
-        );
+        const headName = await readFile(join(gitdir, rebaseDir, "head-name"), "utf-8");
         const name = headName.trim();
-        return name.startsWith("refs/heads/")
-          ? name.slice("refs/heads/".length)
-          : name;
-      } catch {
-        continue;
-      }
+        return name.startsWith("refs/heads/") ? name.slice("refs/heads/".length) : name;
+      } catch {}
     }
   } catch {
     // .git file doesn't exist or isn't readable — not a worktree or main repo
