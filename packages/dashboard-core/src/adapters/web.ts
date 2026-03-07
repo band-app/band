@@ -1,6 +1,7 @@
 import type { DashboardAdapter, PlatformCapabilities, Unsubscribe } from "../adapter";
 import type {
   CIStatus,
+  CliStatus,
   GitStatus,
   HooksStatus,
   ProjectInfo,
@@ -190,6 +191,14 @@ export class WebDashboardAdapter implements DashboardAdapter {
   async installHooks(): Promise<void> {
     const res = await fetch("/api/hooks/install", { method: "POST" });
     if (!res.ok) throw new Error("Failed to install hooks");
+  }
+
+  async checkCli(): Promise<CliStatus> {
+    return "Installed";
+  }
+
+  async installCli(): Promise<void> {
+    // CLI install not supported in web adapter
   }
 }
 

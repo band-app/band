@@ -19,6 +19,7 @@ import {
 } from "@band/ui";
 import { Check, FolderPlus, Plus, Settings, Tag, X } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
+import { useCliSetup } from "../hooks/use-cli-setup";
 import { useHooksSetup } from "../hooks/use-hooks-setup";
 import {
   useActiveWorkspaceWatcher,
@@ -47,6 +48,7 @@ export function DashboardShell({ toolbarExtra }: DashboardShellProps) {
   const [view, setView] = useState<"dashboard" | "settings">("dashboard");
   const [labelFilter, setLabelFilter] = useState<string | null>(null);
   const { state: hooksState, install: installHooks } = useHooksSetup();
+  const { state: cliState, install: installCli } = useCliSetup();
 
   useStatusWatcher();
   useActiveWorkspaceWatcher();
@@ -133,6 +135,19 @@ export function DashboardShell({ toolbarExtra }: DashboardShellProps) {
                 className="shrink-0 text-xs"
                 onClick={installHooks}
               >
+                Install
+              </Button>
+            </div>
+          )}
+
+          {(cliState.status === "manual" || cliState.status === "conflict") && (
+            <div className="mx-4 mt-2 px-4 py-2 bg-blue-500/10 border border-blue-500/30 rounded-lg text-sm flex items-center justify-between gap-2">
+              <span className="text-blue-200">
+                {cliState.status === "conflict"
+                  ? "A different `band` binary exists — replace it to use the bundled CLI"
+                  : `Install \`band\` CLI to /usr/local/bin (${cliState.reason})`}
+              </span>
+              <Button variant="outline" size="sm" className="shrink-0 text-xs" onClick={installCli}>
                 Install
               </Button>
             </div>

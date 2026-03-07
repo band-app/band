@@ -46,6 +46,8 @@ pub fn run() {
             commands::ide::reveal_in_finder,
             commands::hooks::hooks_check,
             commands::hooks::hooks_install,
+            commands::cli::cli_check_cmd,
+            commands::cli::cli_install_cmd,
             commands::settings::settings_get,
             commands::settings::settings_update,
             commands::branch_status::branch_status_watch_start,
