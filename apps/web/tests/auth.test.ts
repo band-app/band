@@ -83,7 +83,7 @@ describe("auth middleware (with secret)", () => {
 		expect(setCookie).toContain("Max-Age=86400");
 	});
 
-	it("valid token sets cookie regardless of path or other params", async () => {
+	it("valid token on any path sets cookie and passes through", async () => {
 		const res = await fetch(
 			`${server.url}/chat?project=foo&token=${EXPECTED_TOKEN}&page=1`,
 		);

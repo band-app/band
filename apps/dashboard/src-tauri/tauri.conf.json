@@ -7,7 +7,7 @@
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
     "beforeDevCommand": "pnpm dev",
-    "beforeBuildCommand": "pnpm -F @band/web build && pnpm build"
+    "beforeBuildCommand": "pnpm -F @band/web build && pnpm build && pnpm build:cli"
   },
   "app": {
     "windows": [
@@ -31,6 +31,7 @@
   "bundle": {
     "active": true,
     "targets": ["dmg"],
+    "externalBin": ["binaries/band"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

@@ -1,4 +1,5 @@
 pub mod branch_status;
+pub mod cli;
 pub mod hooks;
 pub mod ide;
 pub mod project;

@@ -1,6 +1,7 @@
 import type { DashboardAdapter, PlatformCapabilities, Unsubscribe } from "../adapter";
 import type {
   CIStatus,
+  CliStatus,
   GitStatus,
   HooksStatus,
   ProjectInfo,
@@ -158,6 +159,14 @@ export class TauriDashboardAdapter implements DashboardAdapter {
 
   async installHooks(): Promise<void> {
     await invoke("hooks_install");
+  }
+
+  async checkCli(): Promise<CliStatus> {
+    return invoke<CliStatus>("cli_check_cmd");
+  }
+
+  async installCli(): Promise<void> {
+    await invoke("cli_install_cmd");
   }
 }
 
