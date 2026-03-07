@@ -312,7 +312,7 @@ pub async fn webserver_start(state: State<'_, WebServerState>) -> Result<(), Str
     }
 
     let web_dir = resolve_web_dir()?;
-    let start_script = web_dir.join("start-server.mjs");
+    let start_script = web_dir.join("dist/start-server.mjs");
 
     let mut cmd = Command::new("node");
     cmd.arg(&start_script)
@@ -621,10 +621,7 @@ pub async fn tunnel_start(
             }
             // Keep draining so instatunnel doesn't get SIGPIPE
         }
-        if found {
-            // Process exited after successful connect — emit for auto-restart
-            let _ = app_handle.emit("tunnel-exited", ());
-        } else {
+        if !found {
             if let Ok(mut guard) = tunnel_state.lock() {
                 guard.process.kill();
                 guard.url = None;
