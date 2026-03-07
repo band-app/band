@@ -112,6 +112,9 @@ pub fn list_worktrees(repo_path: &str) -> Result<Vec<WorktreeInfo>, String> {
         } else if line == "bare" {
             is_bare = true;
         } else if line.is_empty() && !current_path.is_empty() {
+            if current_branch.is_empty() && !is_bare {
+                current_branch = resolve_detached_branch(&current_path);
+            }
             worktrees.push(WorktreeInfo {
                 branch: current_branch.clone(),
                 path: current_path.clone(),
@@ -127,6 +130,9 @@ pub fn list_worktrees(repo_path: &str) -> Result<Vec<WorktreeInfo>, String> {
 
     // Push last entry
     if !current_path.is_empty() {
+        if current_branch.is_empty() && !is_bare {
+            current_branch = resolve_detached_branch(&current_path);
+        }
         worktrees.push(WorktreeInfo {
             branch: current_branch,
             path: current_path,
@@ -136,6 +142,40 @@ pub fn list_worktrees(repo_path: &str) -> Result<Vec<WorktreeInfo>, String> {
     }
 
     Ok(worktrees)
+}
+
+/// When a worktree has a detached HEAD (e.g. during rebase), try to resolve
+/// the original branch name from git's rebase state files.
+fn resolve_detached_branch(worktree_path: &str) -> String {
+    let git_file = Path::new(worktree_path).join(".git");
+    let gitdir = if git_file.is_file() {
+        // Worktree: .git is a file containing "gitdir: <path>"
+        match std::fs::read_to_string(&git_file) {
+            Ok(content) => match content.strip_prefix("gitdir: ") {
+                Some(dir) => std::path::PathBuf::from(dir.trim()),
+                None => return String::new(),
+            },
+            Err(_) => return String::new(),
+        }
+    } else if git_file.is_dir() {
+        git_file
+    } else {
+        return String::new();
+    };
+
+    // Check interactive rebase (rebase-merge) then regular rebase (rebase-apply)
+    for rebase_dir in &["rebase-merge", "rebase-apply"] {
+        let head_name = gitdir.join(rebase_dir).join("head-name");
+        if let Ok(name) = std::fs::read_to_string(&head_name) {
+            let name = name.trim();
+            return name
+                .strip_prefix("refs/heads/")
+                .unwrap_or(name)
+                .to_string();
+        }
+    }
+
+    String::new()
 }
 
 pub fn create_worktree(
@@ -188,4 +228,260 @@ pub fn remove_worktree(repo_path: &str, worktree_path: &str) -> Result<(), Strin
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn git(dir: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env("GIT_AUTHOR_NAME", "Test")
+            .env("GIT_AUTHOR_EMAIL", "test@test.com")
+            .env("GIT_COMMITTER_NAME", "Test")
+            .env("GIT_COMMITTER_EMAIL", "test@test.com")
+            .output()
+            .expect("git command failed");
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    /// Resolve symlinks (macOS /var -> /private/var) to match git's output.
+    fn real_path(p: &Path) -> std::path::PathBuf {
+        fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
+    }
+
+    fn create_repo(tmp: &Path) -> std::path::PathBuf {
+        let tmp = real_path(tmp);
+        let repo = tmp.join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-b", "main"]);
+        fs::write(repo.join("file.txt"), "hello").unwrap();
+        git(&repo, &["add", "file.txt"]);
+        git(&repo, &["commit", "-m", "initial"]);
+        repo
+    }
+
+    #[test]
+    fn resolve_detached_branch_with_rebase_merge() {
+        let tmp = tempfile::tempdir().unwrap();
+        let worktree_path = tmp.path().join("my-worktree");
+        fs::create_dir_all(&worktree_path).unwrap();
+
+        // Create a fake gitdir
+        let gitdir = tmp.path().join("gitdir");
+        fs::create_dir_all(&gitdir).unwrap();
+
+        // Write .git file pointing to the gitdir
+        fs::write(
+            worktree_path.join(".git"),
+            format!("gitdir: {}", gitdir.display()),
+        )
+        .unwrap();
+
+        // Create rebase-merge/head-name
+        let rebase_dir = gitdir.join("rebase-merge");
+        fs::create_dir_all(&rebase_dir).unwrap();
+        fs::write(rebase_dir.join("head-name"), "refs/heads/my-feature\n").unwrap();
+
+        let branch = resolve_detached_branch(worktree_path.to_str().unwrap());
+        assert_eq!(branch, "my-feature");
+    }
+
+    #[test]
+    fn resolve_detached_branch_with_rebase_apply() {
+        let tmp = tempfile::tempdir().unwrap();
+        let worktree_path = tmp.path().join("my-worktree");
+        fs::create_dir_all(&worktree_path).unwrap();
+
+        let gitdir = tmp.path().join("gitdir");
+        fs::create_dir_all(&gitdir).unwrap();
+
+        fs::write(
+            worktree_path.join(".git"),
+            format!("gitdir: {}", gitdir.display()),
+        )
+        .unwrap();
+
+        // Create rebase-apply/head-name (regular rebase)
+        let rebase_dir = gitdir.join("rebase-apply");
+        fs::create_dir_all(&rebase_dir).unwrap();
+        fs::write(rebase_dir.join("head-name"), "refs/heads/fix-branch\n").unwrap();
+
+        let branch = resolve_detached_branch(worktree_path.to_str().unwrap());
+        assert_eq!(branch, "fix-branch");
+    }
+
+    #[test]
+    fn resolve_detached_branch_prefers_rebase_merge_over_apply() {
+        let tmp = tempfile::tempdir().unwrap();
+        let worktree_path = tmp.path().join("my-worktree");
+        fs::create_dir_all(&worktree_path).unwrap();
+
+        let gitdir = tmp.path().join("gitdir");
+        fs::create_dir_all(&gitdir).unwrap();
+
+        fs::write(
+            worktree_path.join(".git"),
+            format!("gitdir: {}", gitdir.display()),
+        )
+        .unwrap();
+
+        // Both exist — rebase-merge should win (checked first)
+        let merge_dir = gitdir.join("rebase-merge");
+        fs::create_dir_all(&merge_dir).unwrap();
+        fs::write(merge_dir.join("head-name"), "refs/heads/merge-branch\n").unwrap();
+
+        let apply_dir = gitdir.join("rebase-apply");
+        fs::create_dir_all(&apply_dir).unwrap();
+        fs::write(apply_dir.join("head-name"), "refs/heads/apply-branch\n").unwrap();
+
+        let branch = resolve_detached_branch(worktree_path.to_str().unwrap());
+        assert_eq!(branch, "merge-branch");
+    }
+
+    #[test]
+    fn resolve_detached_branch_no_rebase_state() {
+        let tmp = tempfile::tempdir().unwrap();
+        let worktree_path = tmp.path().join("my-worktree");
+        fs::create_dir_all(&worktree_path).unwrap();
+
+        let gitdir = tmp.path().join("gitdir");
+        fs::create_dir_all(&gitdir).unwrap();
+
+        fs::write(
+            worktree_path.join(".git"),
+            format!("gitdir: {}", gitdir.display()),
+        )
+        .unwrap();
+
+        // No rebase state files — should return empty
+        let branch = resolve_detached_branch(worktree_path.to_str().unwrap());
+        assert_eq!(branch, "");
+    }
+
+    #[test]
+    fn resolve_detached_branch_no_git_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let worktree_path = tmp.path().join("no-git");
+        fs::create_dir_all(&worktree_path).unwrap();
+
+        // No .git file at all
+        let branch = resolve_detached_branch(worktree_path.to_str().unwrap());
+        assert_eq!(branch, "");
+    }
+
+    #[test]
+    fn list_worktrees_returns_main_branch() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = create_repo(tmp.path());
+
+        let worktrees = list_worktrees(repo.to_str().unwrap()).unwrap();
+
+        assert_eq!(worktrees.len(), 1);
+        assert_eq!(worktrees[0].branch, "main");
+        assert_eq!(worktrees[0].path, repo.to_str().unwrap());
+        assert!(!worktrees[0].head.is_empty());
+        assert!(!worktrees[0].is_bare);
+    }
+
+    #[test]
+    fn list_worktrees_returns_named_branch() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = create_repo(tmp.path());
+        let wt_path = real_path(tmp.path()).join("wt-feature");
+
+        git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                "feature",
+                wt_path.to_str().unwrap(),
+            ],
+        );
+
+        let worktrees = list_worktrees(repo.to_str().unwrap()).unwrap();
+
+        assert_eq!(worktrees.len(), 2);
+        let feature = worktrees.iter().find(|wt| wt.branch == "feature");
+        assert!(feature.is_some());
+        assert_eq!(feature.unwrap().path, wt_path.to_str().unwrap());
+    }
+
+    #[test]
+    fn list_worktrees_resolves_detached_with_rebase_state() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = create_repo(tmp.path());
+        let wt_path = real_path(tmp.path()).join("wt-detached");
+
+        // Create a detached worktree
+        git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                wt_path.to_str().unwrap(),
+                "HEAD",
+            ],
+        );
+
+        // Read gitdir from the worktree's .git file
+        let git_content = fs::read_to_string(wt_path.join(".git")).unwrap();
+        let gitdir = git_content
+            .strip_prefix("gitdir: ")
+            .unwrap()
+            .trim();
+
+        // Simulate interactive rebase state
+        let rebase_dir = Path::new(gitdir).join("rebase-merge");
+        fs::create_dir_all(&rebase_dir).unwrap();
+        fs::write(
+            rebase_dir.join("head-name"),
+            "refs/heads/rebasing-branch\n",
+        )
+        .unwrap();
+
+        let worktrees = list_worktrees(repo.to_str().unwrap()).unwrap();
+
+        let detached = worktrees
+            .iter()
+            .find(|wt| wt.path == wt_path.to_str().unwrap());
+        assert!(detached.is_some());
+        assert_eq!(detached.unwrap().branch, "rebasing-branch");
+    }
+
+    #[test]
+    fn list_worktrees_detached_without_rebase_returns_empty() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = create_repo(tmp.path());
+        let wt_path = real_path(tmp.path()).join("wt-detached-plain");
+
+        git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                wt_path.to_str().unwrap(),
+                "HEAD",
+            ],
+        );
+
+        let worktrees = list_worktrees(repo.to_str().unwrap()).unwrap();
+
+        let detached = worktrees
+            .iter()
+            .find(|wt| wt.path == wt_path.to_str().unwrap());
+        assert!(detached.is_some());
+        assert_eq!(detached.unwrap().branch, "");
+    }
 }

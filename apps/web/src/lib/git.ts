@@ -1,4 +1,6 @@
 import { execFile } from "node:child_process";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 
 export interface WorktreeInfo {
   branch: string;
@@ -49,6 +51,9 @@ export async function listWorktrees(repoPath: string): Promise<WorktreeInfo[]> {
     } else if (line === "bare") {
       isBare = true;
     } else if (line === "" && currentPath) {
+      if (!currentBranch && !isBare) {
+        currentBranch = await resolveDetachedBranch(currentPath);
+      }
       worktrees.push({
         branch: currentBranch,
         path: currentPath,
@@ -64,6 +69,9 @@ export async function listWorktrees(repoPath: string): Promise<WorktreeInfo[]> {
 
   // Push last entry
   if (currentPath) {
+    if (!currentBranch && !isBare) {
+      currentBranch = await resolveDetachedBranch(currentPath);
+    }
     worktrees.push({
       branch: currentBranch,
       path: currentPath,
@@ -73,4 +81,36 @@ export async function listWorktrees(repoPath: string): Promise<WorktreeInfo[]> {
   }
 
   return worktrees;
+}
+
+/**
+ * When a worktree has a detached HEAD (e.g. during rebase), try to resolve
+ * the original branch name from git's rebase state files.
+ */
+async function resolveDetachedBranch(worktreePath: string): Promise<string> {
+  try {
+    const gitContent = await readFile(join(worktreePath, ".git"), "utf-8");
+    const match = gitContent.match(/^gitdir:\s*(.+)/);
+    if (!match) return "";
+    const gitdir = match[1].trim();
+
+    // Check interactive rebase (rebase-merge) then regular rebase (rebase-apply)
+    for (const rebaseDir of ["rebase-merge", "rebase-apply"]) {
+      try {
+        const headName = await readFile(
+          join(gitdir, rebaseDir, "head-name"),
+          "utf-8",
+        );
+        const name = headName.trim();
+        return name.startsWith("refs/heads/")
+          ? name.slice("refs/heads/".length)
+          : name;
+      } catch {
+        continue;
+      }
+    }
+  } catch {
+    // .git file doesn't exist or isn't readable — not a worktree or main repo
+  }
+  return "";
 }
