@@ -1,4 +1,3 @@
-import { AlertTriangle } from "lucide-react";
 import {
   Button,
   Dialog,
@@ -8,6 +7,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@band/ui";
+import { AlertTriangle } from "lucide-react";
 
 interface Props {
   open: boolean;

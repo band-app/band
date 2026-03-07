@@ -1,6 +1,6 @@
-import { createFileRoute } from "@tanstack/react-router";
 import { readFileSync, writeFileSync } from "node:fs";
-import { settingsFile, ensureDirs, type Settings } from "../../lib/state";
+import { createFileRoute } from "@tanstack/react-router";
+import { ensureDirs, type Settings, settingsFile } from "../../lib/state";
 
 export const Route = createFileRoute("/api/settings")({
   server: {

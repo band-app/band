@@ -1,8 +1,8 @@
-import { createContext, useContext, useMemo, type ReactNode } from "react";
+import { createContext, type ReactNode, useContext, useMemo } from "react";
 import type { DashboardAdapter, PlatformCapabilities } from "./adapter";
 import { createDashboardStore } from "./stores/dashboard-store";
-import { createSettingsStore } from "./stores/settings-store";
 import { StoreContext } from "./stores/index";
+import { createSettingsStore } from "./stores/settings-store";
 
 interface DashboardContextValue {
   adapter: DashboardAdapter;
@@ -40,9 +40,7 @@ export function DashboardProvider({ adapter, capabilities, children }: Dashboard
 
   return (
     <DashboardContext.Provider value={{ adapter, capabilities }}>
-      <StoreContext.Provider value={stores}>
-        {children}
-      </StoreContext.Provider>
+      <StoreContext.Provider value={stores}>{children}</StoreContext.Provider>
     </DashboardContext.Provider>
   );
 }

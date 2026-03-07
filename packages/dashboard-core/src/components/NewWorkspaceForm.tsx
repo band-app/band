@@ -1,4 +1,3 @@
-import { useState } from "react";
 import {
   Button,
   Dialog,
@@ -10,6 +9,7 @@ import {
   Input,
   Label,
 } from "@band/ui";
+import { useState } from "react";
 import { useDashboardStore } from "../stores/index";
 
 interface Props {

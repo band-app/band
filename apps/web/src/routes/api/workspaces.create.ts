@@ -1,9 +1,9 @@
-import { createFileRoute } from "@tanstack/react-router";
 import { execFileSync } from "node:child_process";
-import { loadState, worktreesDir } from "../../lib/state";
-import { join } from "node:path";
 import { mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { createFileRoute } from "@tanstack/react-router";
 import { gitCmd } from "../../lib/git";
+import { loadState, worktreesDir } from "../../lib/state";
 
 export const Route = createFileRoute("/api/workspaces/create")({
   server: {

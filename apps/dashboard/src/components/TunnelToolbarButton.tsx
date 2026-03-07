@@ -1,8 +1,8 @@
-import { Globe } from "lucide-react";
 import { Button, Tooltip, TooltipContent, TooltipTrigger } from "@band/ui";
+import { Globe } from "lucide-react";
+import { useTunnel } from "@/hooks/use-tunnel";
 import { PrereqDialog } from "./PrereqDialog";
 import { TunnelDialog } from "./TunnelDialog";
-import { useTunnel } from "@/hooks/use-tunnel";
 
 export function TunnelToolbarButton() {
   const {
@@ -31,16 +31,10 @@ export function TunnelToolbarButton() {
             <Globe className="size-5" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>
-          {webServerRunning ? "Mobile access" : "Start web server"}
-        </TooltipContent>
+        <TooltipContent>{webServerRunning ? "Mobile access" : "Start web server"}</TooltipContent>
       </Tooltip>
 
-      <PrereqDialog
-        open={showPrereq}
-        onOpenChange={setShowPrereq}
-        onReady={onPrereqReady}
-      />
+      <PrereqDialog open={showPrereq} onOpenChange={setShowPrereq} onReady={onPrereqReady} />
 
       <TunnelDialog
         open={showDialog}

@@ -19,7 +19,7 @@ export * from "./components/scroll-area";
 export * from "./components/select";
 export * from "./components/separator";
 export * from "./components/spinner";
-export * from "./components/textarea";
 export * from "./components/switch";
+export * from "./components/textarea";
 export * from "./components/tooltip";
 export { cn } from "./utils";

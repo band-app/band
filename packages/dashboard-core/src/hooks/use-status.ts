@@ -1,8 +1,8 @@
 import { useEffect, useRef } from "react";
 import { useAdapter } from "../context";
+import { playSound, type SoundId } from "../lib/sounds";
 import { useDashboardStore, useRawSettingsStore } from "../stores/index";
 import type { AgentStatusType } from "../types";
-import { playSound, type SoundId } from "../lib/sounds";
 
 export function useStatusWatcher() {
   const adapter = useAdapter();

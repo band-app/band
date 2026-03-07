@@ -163,9 +163,7 @@ export class WebDashboardAdapter implements DashboardAdapter {
     });
   }
 
-  subscribeActiveWorkspace(
-    _onChange: (workspaceId: string | null) => void,
-  ): Unsubscribe {
+  subscribeActiveWorkspace(_onChange: (workspaceId: string | null) => void): Unsubscribe {
     // Web app doesn't have active workspace tracking
     return () => {};
   }

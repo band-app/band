@@ -97,9 +97,7 @@ export class TauriDashboardAdapter implements DashboardAdapter {
     return () => cleanup?.();
   }
 
-  subscribeActiveWorkspace(
-    onChange: (workspaceId: string | null) => void,
-  ): Unsubscribe {
+  subscribeActiveWorkspace(onChange: (workspaceId: string | null) => void): Unsubscribe {
     let cleanup: (() => void) | undefined;
 
     (async () => {
@@ -202,10 +200,7 @@ export class TauriCapabilities implements PlatformCapabilities {
     async install(): Promise<void> {
       await invoke("tunnel_install");
     },
-    subscribeTunnelUrl(
-      onUrl: (url: string) => void,
-      onError: (err: string) => void,
-    ): Unsubscribe {
+    subscribeTunnelUrl(onUrl: (url: string) => void, onError: (err: string) => void): Unsubscribe {
       let cleanup: (() => void) | undefined;
 
       (async () => {

@@ -115,21 +115,21 @@ export function SessionList({
                   onClick={() => onSelectSession(session.sessionId)}
                   className={`flex flex-col gap-1 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-accent/50 active:bg-accent/50 ${isActive ? "bg-accent/50 ring-1 ring-primary/30" : ""}`}
                 >
-                <span className="line-clamp-2 text-sm font-medium text-foreground">
-                  {session.summary}
-                </span>
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span>{relativeTime(session.lastModified)}</span>
-                  {session.gitBranch && (
-                    <>
-                      <span className="text-border">·</span>
-                      <span className="inline-flex items-center gap-1">
-                        <GitBranch className="size-3" />
-                        {session.gitBranch}
-                      </span>
-                    </>
-                  )}
-                </div>
+                  <span className="line-clamp-2 text-sm font-medium text-foreground">
+                    {session.summary}
+                  </span>
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <span>{relativeTime(session.lastModified)}</span>
+                    {session.gitBranch && (
+                      <>
+                        <span className="text-border">·</span>
+                        <span className="inline-flex items-center gap-1">
+                          <GitBranch className="size-3" />
+                          {session.gitBranch}
+                        </span>
+                      </>
+                    )}
+                  </div>
                 </button>
               );
             })}

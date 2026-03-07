@@ -1,5 +1,3 @@
-import { FolderOpen } from "lucide-react";
-import { useState } from "react";
 import {
   Button,
   Dialog,
@@ -11,6 +9,8 @@ import {
   Input,
   Label,
 } from "@band/ui";
+import { FolderOpen } from "lucide-react";
+import { useState } from "react";
 import { useCapabilities } from "../context";
 import { useDashboardStore } from "../stores/index";
 

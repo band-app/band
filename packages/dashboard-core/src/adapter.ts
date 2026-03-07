@@ -34,9 +34,7 @@ export interface DashboardAdapter {
     onRemove: (workspaceId: string) => void,
   ): Unsubscribe;
 
-  subscribeActiveWorkspace(
-    onChange: (workspaceId: string | null) => void,
-  ): Unsubscribe;
+  subscribeActiveWorkspace(onChange: (workspaceId: string | null) => void): Unsubscribe;
 
   subscribeBranchStatus(
     onGit: (workspaceId: string, git: GitStatus) => void,

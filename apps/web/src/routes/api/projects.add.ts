@@ -1,9 +1,8 @@
-import { createFileRoute } from "@tanstack/react-router";
 import { execFileSync } from "node:child_process";
-import { loadState, saveState, worktreesDir } from "../../lib/state";
+import { basename } from "node:path";
+import { createFileRoute } from "@tanstack/react-router";
 import { listWorktrees } from "../../lib/git";
-import { join, basename } from "node:path";
-import { mkdirSync } from "node:fs";
+import { loadState, saveState } from "../../lib/state";
 
 export const Route = createFileRoute("/api/projects/add")({
   server: {
@@ -27,11 +26,11 @@ export const Route = createFileRoute("/api/projects/add")({
           if (env.PATH) {
             env.PATH = `/opt/homebrew/bin:/usr/local/bin:${env.PATH}`;
           }
-          const output = execFileSync(
-            "git",
-            ["symbolic-ref", "--short", "HEAD"],
-            { cwd: path, env, encoding: "utf-8" },
-          ).trim();
+          const output = execFileSync("git", ["symbolic-ref", "--short", "HEAD"], {
+            cwd: path,
+            env,
+            encoding: "utf-8",
+          }).trim();
           if (output) defaultBranch = output;
         } catch {
           // Fall back to "main"
