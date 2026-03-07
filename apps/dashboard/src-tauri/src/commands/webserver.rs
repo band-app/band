@@ -296,8 +296,8 @@ pub async fn webserver_get_token(
     }
 
     let body = String::from_utf8_lossy(&output.stdout);
-    let parsed: serde_json::Value = serde_json::from_str(&body)
-        .map_err(|e| format!("Failed to parse token response: {e}"))?;
+    let parsed: serde_json::Value =
+        serde_json::from_str(&body).map_err(|e| format!("Failed to parse token response: {e}"))?;
     let token = parsed["token"]
         .as_str()
         .ok_or_else(|| "Token not found in response".to_string())?
