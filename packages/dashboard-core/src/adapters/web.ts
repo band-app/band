@@ -2,10 +2,13 @@ import type { DashboardAdapter, PlatformCapabilities, Unsubscribe } from "../ada
 import type {
   CIStatus,
   CliStatus,
+  FileContentResult,
+  FileListResult,
   GitStatus,
   HooksStatus,
   ProjectInfo,
   Settings,
+  WorkspaceDiff,
   WorkspaceStatus,
 } from "../types";
 
@@ -202,6 +205,28 @@ export class WebDashboardAdapter implements DashboardAdapter {
 
   async installCli(): Promise<void> {
     // CLI install not supported in web adapter
+  }
+
+  async getWorkspaceDiff(workspaceId: string): Promise<WorkspaceDiff> {
+    const res = await fetch(`/api/workspace/${encodeURIComponent(workspaceId)}/diff`);
+    if (!res.ok) throw new Error("Failed to fetch diff");
+    return (await res.json()) as WorkspaceDiff;
+  }
+
+  async listWorkspaceFiles(workspaceId: string, path: string): Promise<FileListResult> {
+    const res = await fetch(
+      `/api/workspace/${encodeURIComponent(workspaceId)}/files?path=${encodeURIComponent(path)}`,
+    );
+    if (!res.ok) throw new Error("Failed to list files");
+    return (await res.json()) as FileListResult;
+  }
+
+  async getWorkspaceFile(workspaceId: string, path: string): Promise<FileContentResult> {
+    const res = await fetch(
+      `/api/workspace/${encodeURIComponent(workspaceId)}/file?path=${encodeURIComponent(path)}`,
+    );
+    if (!res.ok) throw new Error("Failed to read file");
+    return (await res.json()) as FileContentResult;
   }
 }
 

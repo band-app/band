@@ -17,7 +17,7 @@ export function gitCmd(): { command: string; env: NodeJS.ProcessEnv } {
   return { command: "git", env };
 }
 
-function execGit(args: string[], cwd: string): Promise<string> {
+export function execGit(args: string[], cwd: string): Promise<string> {
   const { command, env } = gitCmd();
   return new Promise((resolve, reject) => {
     execFile(command, args, { cwd, env }, (err, stdout, stderr) => {

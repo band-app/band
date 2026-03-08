@@ -7,11 +7,15 @@ export { AddProjectDialog } from "./components/AddProjectDialog";
 export { AgentStatusBadge } from "./components/AgentStatusBadge";
 export { CIStatusIndicator } from "./components/CIStatusIndicator";
 export { DashboardShell } from "./components/DashboardShell";
+export { DiffView } from "./components/DiffView";
+export { FileBrowser } from "./components/FileBrowser";
+export { FileViewer } from "./components/FileViewer";
 export { GitStatusIndicator } from "./components/GitStatusIndicator";
 export { NewWorkspaceDialog } from "./components/NewWorkspaceForm";
 export { ProjectList } from "./components/ProjectList";
 export { SettingsPage } from "./components/SettingsPage";
 export { WorkspaceCard } from "./components/WorkspaceCard";
+export { type WorkspaceTab, WorkspaceTabNav } from "./components/WorkspaceTabNav";
 // Context
 export { DashboardProvider, useAdapter, useCapabilities } from "./context";
 export { type HooksSetupState, useHooksSetup } from "./hooks/use-hooks-setup";
@@ -43,6 +47,9 @@ export type {
   CIStatus,
   CodingAgentConfig,
   CodingAgentType,
+  FileContentResult,
+  FileEntry,
+  FileListResult,
   GitStatus,
   GitSyncState,
   HooksStatus,
@@ -51,6 +58,7 @@ export type {
   ProjectInfo,
   Settings,
   WorkspaceBranchStatus,
+  WorkspaceDiff,
   WorkspaceStatus,
   WorktreeInfo,
 } from "./types";

@@ -1,7 +1,18 @@
+import {
+  DashboardProvider,
+  DiffView,
+  type WorkspaceTab,
+  WorkspaceTabNav,
+} from "@band/dashboard-core";
+import { WebCapabilities, WebDashboardAdapter } from "@band/dashboard-core/adapters/web";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowLeft, Clock } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { ChatView } from "../components/ChatView";
+import { CodeBrowserView } from "../components/CodeBrowserView";
+
+const adapter = new WebDashboardAdapter();
+const capabilities = new WebCapabilities();
 
 export const Route = createFileRoute("/chat/$workspaceId")({
   component: ChatPage,
@@ -12,6 +23,7 @@ function ChatPage() {
   const decoded = decodeURIComponent(workspaceId);
   const [supportsSessionListing, setSupportsSessionListing] = useState(false);
   const [showSessionList, setShowSessionList] = useState(false);
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>("chat");
 
   useEffect(() => {
     let cancelled = false;
@@ -53,7 +65,7 @@ function ChatPage() {
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-sm font-semibold">{decoded}</h1>
         </div>
-        {supportsSessionListing && (
+        {supportsSessionListing && activeTab === "chat" && (
           <button
             type="button"
             onClick={handleToggleSessionList}
@@ -63,14 +75,23 @@ function ChatPage() {
           </button>
         )}
       </header>
+      <WorkspaceTabNav activeTab={activeTab} onTabChange={setActiveTab} />
       <main className="min-h-0 flex-1">
-        <ChatView
-          workspaceId={decoded}
-          workspaceName={decoded}
-          supportsSessionListing={supportsSessionListing}
-          showSessionList={showSessionList}
-          onShowSessionListChange={setShowSessionList}
-        />
+        {activeTab === "chat" && (
+          <ChatView
+            workspaceId={decoded}
+            workspaceName={decoded}
+            supportsSessionListing={supportsSessionListing}
+            showSessionList={showSessionList}
+            onShowSessionListChange={setShowSessionList}
+          />
+        )}
+        {(activeTab === "diff" || activeTab === "code") && (
+          <DashboardProvider adapter={adapter} capabilities={capabilities}>
+            {activeTab === "diff" && <DiffView workspaceId={decoded} />}
+            {activeTab === "code" && <CodeBrowserView workspaceId={decoded} />}
+          </DashboardProvider>
+        )}
       </main>
     </div>
   );
