@@ -1,21 +1,19 @@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@band/ui";
-import { getToolName } from "ai";
 import { ChevronDownIcon, WrenchIcon } from "lucide-react";
 
-import type { ToolGroupSegment } from "./group-parts";
-import type { ToolPart } from "./tool";
 import { ToolInput, ToolOutput } from "./tool";
 
-const IN_PROGRESS_STATES = new Set<ToolPart["state"]>([
-  "input-available",
-  "input-streaming",
-  "approval-requested",
-  "approval-responded",
-]);
+export interface ToolCallItem {
+  toolCallId: string;
+  toolName: string;
+  input: unknown;
+  output: unknown;
+  errorText?: string;
+  isError: boolean;
+  isInProgress: boolean;
+}
 
-const ERROR_STATES = new Set<ToolPart["state"]>(["output-error", "output-denied"]);
-
-function formatToolTitle(name: string, input: ToolPart["input"]): string {
+export function formatToolTitle(name: string, input: unknown): string {
   if (!input || typeof input !== "object") return name;
   const record = input as Record<string, unknown>;
   const arg =
@@ -32,20 +30,20 @@ function formatToolTitle(name: string, input: ToolPart["input"]): string {
   return name;
 }
 
-function StatusDot({ state }: { state: ToolPart["state"] }) {
-  if (ERROR_STATES.has(state)) {
+function StatusDot({ isError, isInProgress }: { isError: boolean; isInProgress: boolean }) {
+  if (isError) {
     return <span className="size-2 shrink-0 rounded-full bg-red-500" />;
   }
-  if (IN_PROGRESS_STATES.has(state)) {
+  if (isInProgress) {
     return <span className="size-2 shrink-0 animate-pulse rounded-full bg-orange-500" />;
   }
   return <span className="size-2 shrink-0 rounded-full bg-green-500" />;
 }
 
-export function ToolCallGroup({ segment }: { segment: ToolGroupSegment }) {
-  const inProgress = segment.parts.filter((p) => IN_PROGRESS_STATES.has(p.part.state));
+export function ToolCallGroup({ items }: { items: ToolCallItem[] }) {
+  const inProgress = items.filter((item) => item.isInProgress);
   const allDone = inProgress.length === 0;
-  const errorCount = segment.parts.filter((p) => ERROR_STATES.has(p.part.state)).length;
+  const errorCount = items.filter((item) => item.isError).length;
 
   return (
     <Collapsible className="group/outer not-prose mb-4 w-full rounded border border-border/50">
@@ -55,8 +53,7 @@ export function ToolCallGroup({ segment }: { segment: ToolGroupSegment }) {
             <div className="flex items-center gap-2">
               <WrenchIcon className="size-4 shrink-0 text-muted-foreground" />
               <span className="font-medium text-sm text-muted-foreground">
-                {segment.parts.length} tool{segment.parts.length !== 1 ? " calls" : " call"}{" "}
-                completed
+                {items.length} tool{items.length !== 1 ? " calls" : " call"} completed
                 {errorCount > 0 && ` (${errorCount} failed)`}
               </span>
             </div>
@@ -65,14 +62,14 @@ export function ToolCallGroup({ segment }: { segment: ToolGroupSegment }) {
               <div className="flex items-center gap-2">
                 <WrenchIcon className="size-4 shrink-0 text-muted-foreground" />
                 <span className="font-medium text-sm text-muted-foreground">
-                  {segment.parts.length} tool{segment.parts.length !== 1 ? " calls" : " call"}
+                  {items.length} tool{items.length !== 1 ? " calls" : " call"}
                 </span>
               </div>
-              {inProgress.map((p) => {
-                const title = formatToolTitle(getToolName(p.part), p.part.input);
+              {inProgress.map((item) => {
+                const title = formatToolTitle(item.toolName, item.input);
                 return (
-                  <div key={p.part.toolCallId} className="flex items-center gap-2 pl-6">
-                    <StatusDot state={p.part.state} />
+                  <div key={item.toolCallId} className="flex items-center gap-2 pl-6">
+                    <StatusDot isError={item.isError} isInProgress={item.isInProgress} />
                     <span className="truncate text-sm">{title}</span>
                   </div>
                 );
@@ -85,8 +82,8 @@ export function ToolCallGroup({ segment }: { segment: ToolGroupSegment }) {
 
       <CollapsibleContent>
         <div className="border-t border-border/50">
-          {segment.parts.map((p) => (
-            <ToolItem key={p.part.toolCallId} part={p.part} />
+          {items.map((item) => (
+            <ToolItem key={item.toolCallId} item={item} />
           ))}
         </div>
       </CollapsibleContent>
@@ -94,21 +91,21 @@ export function ToolCallGroup({ segment }: { segment: ToolGroupSegment }) {
   );
 }
 
-function ToolItem({ part }: { part: ToolPart }) {
-  const title = formatToolTitle(getToolName(part), part.input);
+function ToolItem({ item }: { item: ToolCallItem }) {
+  const title = formatToolTitle(item.toolName, item.input);
   return (
     <Collapsible className="group/inner border-b border-border/50 last:border-b-0">
       <CollapsibleTrigger className="flex w-full items-center justify-between gap-4 px-4 py-2">
         <div className="flex min-w-0 items-center gap-2">
-          <StatusDot state={part.state} />
+          <StatusDot isError={item.isError} isInProgress={item.isInProgress} />
           <span className="truncate text-sm">{title}</span>
         </div>
         <ChevronDownIcon className="size-3.5 text-muted-foreground transition-transform group-data-[state=open]/inner:rotate-180" />
       </CollapsibleTrigger>
 
       <CollapsibleContent className="space-y-4 px-4 pb-3 text-popover-foreground">
-        <ToolInput input={part.input} />
-        <ToolOutput output={part.output} errorText={part.errorText} />
+        <ToolInput input={item.input} />
+        <ToolOutput output={item.output} errorText={item.errorText} />
       </CollapsibleContent>
     </Collapsible>
   );

@@ -1,7 +1,6 @@
 import { useChat } from "@ai-sdk/react";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@band/ui";
-import { DefaultChatTransport, isToolUIPart } from "ai";
-import { Bot, ChevronDownIcon, Loader2, WrenchIcon } from "lucide-react";
+import { DefaultChatTransport, getToolName, isToolUIPart } from "ai";
+import { Bot, Loader2 } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
   Conversation,
@@ -19,8 +18,31 @@ import {
   PromptInputSubmit,
   PromptInputTextarea,
 } from "./ai-elements/prompt-input";
+import type { ToolPart } from "./ai-elements/tool";
+import type { ToolCallItem } from "./ai-elements/tool-call-group";
 import { ToolCallGroup } from "./ai-elements/tool-call-group";
 import { SessionList } from "./SessionList";
+
+const IN_PROGRESS_STATES = new Set<ToolPart["state"]>([
+  "input-available",
+  "input-streaming",
+  "approval-requested",
+  "approval-responded",
+]);
+
+const ERROR_STATES = new Set<ToolPart["state"]>(["output-error", "output-denied"]);
+
+function toolPartToItem(part: ToolPart): ToolCallItem {
+  return {
+    toolCallId: part.toolCallId,
+    toolName: getToolName(part),
+    input: part.input,
+    output: part.output,
+    errorText: part.errorText,
+    isError: ERROR_STATES.has(part.state),
+    isInProgress: IN_PROGRESS_STATES.has(part.state),
+  };
+}
 
 function ThinkingIndicator() {
   return (
@@ -232,10 +254,11 @@ export function ChatView({
                       }
                       return null;
                     }
+                    const items = segment.parts.map((p) => toolPartToItem(p.part));
                     return (
                       <ToolCallGroup
                         key={`${message.id}-tools-${segment.startIndex}`}
-                        segment={segment}
+                        items={items}
                       />
                     );
                   })}
@@ -323,6 +346,21 @@ function HistoryMessageView({
   );
 }
 
+function historyToolToItem(
+  tool: HistoryMessageContent,
+  result: HistoryMessageContent | undefined,
+): ToolCallItem {
+  return {
+    toolCallId: tool.toolCallId ?? "",
+    toolName: tool.toolName ?? "unknown",
+    input: tool.input,
+    output: result?.output,
+    errorText: result?.isError ? (result.output ?? undefined) : undefined,
+    isError: result?.isError ?? false,
+    isInProgress: false,
+  };
+}
+
 function renderHistoryContent(
   message: HistoryMessage,
   toolResultMap: Map<string, HistoryMessageContent>,
@@ -332,13 +370,10 @@ function renderHistoryContent(
 
   const flushToolGroup = () => {
     if (toolGroup.length > 0) {
-      elements.push(
-        <HistoryToolGroup
-          key={`tools-${elements.length}`}
-          tools={toolGroup}
-          toolResultMap={toolResultMap}
-        />,
+      const items = toolGroup.map((tool) =>
+        historyToolToItem(tool, toolResultMap.get(tool.toolCallId ?? "")),
       );
+      elements.push(<ToolCallGroup key={`tools-${elements.length}`} items={items} />);
       toolGroup = [];
     }
   };
@@ -356,103 +391,4 @@ function renderHistoryContent(
   flushToolGroup();
 
   return elements;
-}
-
-function HistoryToolGroup({
-  tools,
-  toolResultMap,
-}: {
-  tools: HistoryMessageContent[];
-  toolResultMap: Map<string, HistoryMessageContent>;
-}) {
-  const errorCount = tools.filter((t) => toolResultMap.get(t.toolCallId ?? "")?.isError).length;
-
-  return (
-    <Collapsible className="group/outer not-prose mb-4 w-full rounded border border-border/50">
-      <CollapsibleTrigger className="flex w-full items-center justify-between gap-4 p-3">
-        <div className="flex items-center gap-2">
-          <WrenchIcon className="size-4 shrink-0 text-muted-foreground" />
-          <span className="font-medium text-sm text-muted-foreground">
-            {tools.length} tool{tools.length !== 1 ? " calls" : " call"} completed
-            {errorCount > 0 && ` (${errorCount} failed)`}
-          </span>
-        </div>
-        <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]/outer:rotate-180" />
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <div className="border-t border-border/50">
-          {tools.map((tool) => {
-            const result = toolResultMap.get(tool.toolCallId ?? "");
-            return <HistoryToolItem key={tool.toolCallId} tool={tool} result={result} />;
-          })}
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
-  );
-}
-
-function formatToolTitle(tool: HistoryMessageContent): string {
-  const name = tool.toolName ?? "unknown";
-  const input = tool.input as Record<string, unknown> | null | undefined;
-  if (!input) return name;
-
-  const arg =
-    input.command ?? input.pattern ?? input.query ?? input.file_path ?? input.url ?? input.content;
-
-  if (typeof arg === "string") {
-    const summary = arg.length > 80 ? `${arg.slice(0, 80)}...` : arg;
-    return `${name}(${summary})`;
-  }
-
-  return name;
-}
-
-function HistoryToolItem({
-  tool,
-  result,
-}: {
-  tool: HistoryMessageContent;
-  result?: HistoryMessageContent;
-}) {
-  return (
-    <Collapsible className="group/inner border-b border-border/50 last:border-b-0">
-      <CollapsibleTrigger className="flex w-full items-center justify-between gap-4 px-4 py-2">
-        <div className="flex items-center gap-2">
-          <span
-            className={`size-2 shrink-0 rounded-full ${result?.isError ? "bg-red-500" : "bg-green-500"}`}
-          />
-          <span className="text-sm truncate">{formatToolTitle(tool)}</span>
-        </div>
-        <ChevronDownIcon className="size-3.5 text-muted-foreground transition-transform group-data-[state=open]/inner:rotate-180" />
-      </CollapsibleTrigger>
-      <CollapsibleContent className="space-y-4 px-4 pb-3">
-        {tool.input != null && (
-          <div className="space-y-2 overflow-hidden">
-            <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
-              Parameters
-            </h4>
-            <div className="rounded-md bg-muted/50">
-              <pre className="overflow-auto p-3 text-xs">
-                <code>{JSON.stringify(tool.input, null, 2)}</code>
-              </pre>
-            </div>
-          </div>
-        )}
-        {result?.output && (
-          <div className="space-y-2">
-            <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
-              {result.isError ? "Error" : "Result"}
-            </h4>
-            <div
-              className={`overflow-x-auto rounded-md text-xs ${result.isError ? "bg-destructive/10 text-destructive" : "bg-muted/50"}`}
-            >
-              <pre className="overflow-auto p-3 text-xs">
-                <code>{result.output}</code>
-              </pre>
-            </div>
-          </div>
-        )}
-      </CollapsibleContent>
-    </Collapsible>
-  );
 }
