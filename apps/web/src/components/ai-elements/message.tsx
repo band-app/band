@@ -4,6 +4,7 @@ import { code } from "@streamdown/code";
 import { math } from "@streamdown/math";
 import { mermaid } from "@streamdown/mermaid";
 import type { UIMessage } from "ai";
+import { FileIcon } from "lucide-react";
 import type { ComponentProps, HTMLAttributes } from "react";
 import { memo } from "react";
 import { Streamdown } from "streamdown";
@@ -56,3 +57,28 @@ export const MessageResponse = memo(
 );
 
 MessageResponse.displayName = "MessageResponse";
+
+interface FilePartData {
+  type: "file";
+  mediaType: string;
+  url: string;
+  filename?: string;
+}
+
+export function MessageFilePart({ part }: { part: FilePartData }) {
+  const isImage = part.mediaType.startsWith("image/");
+
+  if (isImage) {
+    return (
+      <img src={part.url} alt={part.filename ?? "Uploaded image"} className="max-w-xs rounded-md" />
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2 rounded-md border border-border/30 bg-muted/30 px-3 py-2">
+      <FileIcon className="size-4 shrink-0 text-muted-foreground" />
+      <span className="truncate text-xs">{part.filename ?? "File"}</span>
+      <span className="text-xs text-muted-foreground">{part.mediaType}</span>
+    </div>
+  );
+}

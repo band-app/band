@@ -9,12 +9,18 @@ import {
   ConversationScrollButton,
 } from "./ai-elements/conversation";
 import { groupMessageParts } from "./ai-elements/group-parts";
-import { Message, MessageContent, MessageResponse } from "./ai-elements/message";
+import { Message, MessageContent, MessageFilePart, MessageResponse } from "./ai-elements/message";
 import type { PromptInputMessage } from "./ai-elements/prompt-input";
-import { PromptInput, PromptInputSubmit, PromptInputTextarea } from "./ai-elements/prompt-input";
+import {
+  PromptInput,
+  PromptInputActions,
+  PromptInputAttach,
+  PromptInputSubmit,
+  PromptInputTextarea,
+} from "./ai-elements/prompt-input";
 import type { ToolPart } from "./ai-elements/tool";
-import type { ToolCallItem } from "./ai-elements/tool-call-group";
-import { ToolCallGroup } from "./ai-elements/tool-call-group";
+import type { ToolCallItem } from "./ai-elements/tool-call";
+import { ToolCall } from "./ai-elements/tool-call";
 import { SessionList } from "./SessionList";
 
 const IN_PROGRESS_STATES = new Set<ToolPart["state"]>([
@@ -96,7 +102,7 @@ export function ChatView({
     [workspaceId],
   );
 
-  const { messages, sendMessage, status, setMessages } = useChat({
+  const { messages, sendMessage, status, setMessages, stop } = useChat({
     transport,
     onData: (dataPart) => {
       if (
@@ -151,8 +157,16 @@ export function ChatView({
 
   const handleSubmit = useCallback(
     (message: PromptInputMessage) => {
-      if (!message.text.trim()) return;
-      sendMessage({ text: message.text });
+      if (!message.text.trim() && !message.files?.length) return;
+      if (message.files?.length) {
+        const dataTransfer = new DataTransfer();
+        for (const file of message.files) {
+          dataTransfer.items.add(file);
+        }
+        sendMessage({ text: message.text, files: dataTransfer.files });
+      } else {
+        sendMessage({ text: message.text });
+      }
     },
     [sendMessage],
   );
@@ -206,7 +220,7 @@ export function ChatView({
             const showThinking = isLastAssistant && isStreaming;
 
             const visibleParts = message.parts.filter(
-              (p) => (p.type === "text" && p.text.trim()) || isToolUIPart(p),
+              (p) => (p.type === "text" && p.text.trim()) || p.type === "file" || isToolUIPart(p),
             );
             if (message.role === "assistant" && visibleParts.length === 0 && !showThinking) {
               return null;
@@ -214,6 +228,22 @@ export function ChatView({
             return (
               <Message key={message.id} from={message.role}>
                 <MessageContent>
+                  {message.role === "user" &&
+                    message.parts.map((part, partIdx) =>
+                      part.type === "file" ? (
+                        <MessageFilePart
+                          key={`${message.id}-file-${part.filename ?? partIdx}`}
+                          part={
+                            part as {
+                              type: "file";
+                              mediaType: string;
+                              url: string;
+                              filename?: string;
+                            }
+                          }
+                        />
+                      ) : null,
+                    )}
                   {groupMessageParts(message.parts).map((segment) => {
                     if (segment.type === "text") {
                       const { part, partIndex } = segment;
@@ -226,13 +256,8 @@ export function ChatView({
                       }
                       return null;
                     }
-                    const items = segment.parts.map((p) => toolPartToItem(p.part));
-                    return (
-                      <ToolCallGroup
-                        key={`${message.id}-tools-${segment.startIndex}`}
-                        items={items}
-                      />
-                    );
+                    const item = toolPartToItem(segment.part);
+                    return <ToolCall key={`${message.id}-tool-${segment.partIndex}`} item={item} />;
                   })}
                   {showThinking && <ThinkingIndicator />}
                 </MessageContent>
@@ -253,7 +278,10 @@ export function ChatView({
       <div className="shrink-0 px-4 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))]">
         <PromptInput onSubmit={handleSubmit}>
           <PromptInputTextarea placeholder="Type a message..." />
-          <PromptInputSubmit status={status} />
+          <PromptInputActions>
+            <PromptInputAttach />
+            <PromptInputSubmit status={status} onStop={stop} />
+          </PromptInputActions>
         </PromptInput>
       </div>
     </div>
@@ -335,29 +363,17 @@ function renderHistoryContent(
   toolResultMap: Map<string, HistoryMessageContent>,
 ) {
   const elements: React.ReactNode[] = [];
-  let toolGroup: HistoryMessageContent[] = [];
-
-  const flushToolGroup = () => {
-    if (toolGroup.length > 0) {
-      const items = toolGroup.map((tool) =>
-        historyToolToItem(tool, toolResultMap.get(tool.toolCallId ?? "")),
-      );
-      elements.push(<ToolCallGroup key={`tools-${elements.length}`} items={items} />);
-      toolGroup = [];
-    }
-  };
 
   for (const block of message.content) {
     if (block.type === "text" && block.text?.trim()) {
-      flushToolGroup();
       elements.push(
         <MessageResponse key={`text-${elements.length}`}>{block.text}</MessageResponse>,
       );
     } else if (block.type === "tool_use") {
-      toolGroup.push(block);
+      const item = historyToolToItem(block, toolResultMap.get(block.toolCallId ?? ""));
+      elements.push(<ToolCall key={`tool-${elements.length}`} item={item} />);
     }
   }
-  flushToolGroup();
 
   return elements;
 }
