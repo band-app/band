@@ -17,6 +17,7 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "lucide-react": "^0.576.0",
+    "shiki": "^3.0.0",
     "zustand": "^5.0.0"
   },
   "peerDependencies": {

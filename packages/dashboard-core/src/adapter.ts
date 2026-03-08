@@ -1,10 +1,13 @@
 import type {
   CIStatus,
   CliStatus,
+  FileContentResult,
+  FileListResult,
   GitStatus,
   HooksStatus,
   ProjectInfo,
   Settings,
+  WorkspaceDiff,
   WorkspaceStatus,
 } from "./types";
 
@@ -48,6 +51,11 @@ export interface DashboardAdapter {
   // CLI
   checkCli(): Promise<CliStatus>;
   installCli(): Promise<void>;
+
+  // Code browsing (optional)
+  getWorkspaceDiff?(workspaceId: string): Promise<WorkspaceDiff>;
+  listWorkspaceFiles?(workspaceId: string, path: string): Promise<FileListResult>;
+  getWorkspaceFile?(workspaceId: string, path: string): Promise<FileContentResult>;
 }
 
 export interface PlatformCapabilities {

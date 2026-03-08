@@ -125,3 +125,29 @@ export interface DeleteDialogInfo {
   isDirty: boolean;
   hasUnpushedCommits: boolean;
 }
+
+export interface WorkspaceDiff {
+  diff: string;
+  stats: { filesChanged: number; insertions: number; deletions: number };
+  baseBranch: string;
+  headBranch: string;
+}
+
+export interface FileEntry {
+  name: string;
+  type: "file" | "directory";
+  size?: number;
+}
+
+export interface FileListResult {
+  entries: FileEntry[];
+  path: string;
+}
+
+export interface FileContentResult {
+  content?: string;
+  binary?: boolean;
+  tooLarge?: boolean;
+  size: number;
+  language?: string;
+}

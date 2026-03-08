@@ -26,6 +26,9 @@ import { Route as ApiProjectsLabelRouteImport } from './routes/api/projects.labe
 import { Route as ApiProjectsAddRouteImport } from './routes/api/projects.add'
 import { Route as ApiHooksInstallRouteImport } from './routes/api/hooks.install'
 import { Route as ApiHooksCheckRouteImport } from './routes/api/hooks.check'
+import { Route as ApiWorkspaceWorkspaceIdFilesRouteImport } from './routes/api/workspace.$workspaceId.files'
+import { Route as ApiWorkspaceWorkspaceIdFileRouteImport } from './routes/api/workspace.$workspaceId.file'
+import { Route as ApiWorkspaceWorkspaceIdDiffRouteImport } from './routes/api/workspace.$workspaceId.diff'
 import { Route as ApiSessionsWorkspaceIdSessionIdMessagesRouteImport } from './routes/api/sessions.$workspaceId.$sessionId.messages'
 
 const IndexRoute = IndexRouteImport.update({
@@ -113,6 +116,24 @@ const ApiHooksCheckRoute = ApiHooksCheckRouteImport.update({
   path: '/api/hooks/check',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiWorkspaceWorkspaceIdFilesRoute =
+  ApiWorkspaceWorkspaceIdFilesRouteImport.update({
+    id: '/api/workspace/$workspaceId/files',
+    path: '/api/workspace/$workspaceId/files',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiWorkspaceWorkspaceIdFileRoute =
+  ApiWorkspaceWorkspaceIdFileRouteImport.update({
+    id: '/api/workspace/$workspaceId/file',
+    path: '/api/workspace/$workspaceId/file',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiWorkspaceWorkspaceIdDiffRoute =
+  ApiWorkspaceWorkspaceIdDiffRouteImport.update({
+    id: '/api/workspace/$workspaceId/diff',
+    path: '/api/workspace/$workspaceId/diff',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiSessionsWorkspaceIdSessionIdMessagesRoute =
   ApiSessionsWorkspaceIdSessionIdMessagesRouteImport.update({
     id: '/$sessionId/messages',
@@ -138,6 +159,9 @@ export interface FileRoutesByFullPath {
   '/api/workspaces/open': typeof ApiWorkspacesOpenRoute
   '/api/workspaces/remove': typeof ApiWorkspacesRemoveRoute
   '/api/workspaces/run-script': typeof ApiWorkspacesRunScriptRoute
+  '/api/workspace/$workspaceId/diff': typeof ApiWorkspaceWorkspaceIdDiffRoute
+  '/api/workspace/$workspaceId/file': typeof ApiWorkspaceWorkspaceIdFileRoute
+  '/api/workspace/$workspaceId/files': typeof ApiWorkspaceWorkspaceIdFilesRoute
   '/api/sessions/$workspaceId/$sessionId/messages': typeof ApiSessionsWorkspaceIdSessionIdMessagesRoute
 }
 export interface FileRoutesByTo {
@@ -158,6 +182,9 @@ export interface FileRoutesByTo {
   '/api/workspaces/open': typeof ApiWorkspacesOpenRoute
   '/api/workspaces/remove': typeof ApiWorkspacesRemoveRoute
   '/api/workspaces/run-script': typeof ApiWorkspacesRunScriptRoute
+  '/api/workspace/$workspaceId/diff': typeof ApiWorkspaceWorkspaceIdDiffRoute
+  '/api/workspace/$workspaceId/file': typeof ApiWorkspaceWorkspaceIdFileRoute
+  '/api/workspace/$workspaceId/files': typeof ApiWorkspaceWorkspaceIdFilesRoute
   '/api/sessions/$workspaceId/$sessionId/messages': typeof ApiSessionsWorkspaceIdSessionIdMessagesRoute
 }
 export interface FileRoutesById {
@@ -179,6 +206,9 @@ export interface FileRoutesById {
   '/api/workspaces/open': typeof ApiWorkspacesOpenRoute
   '/api/workspaces/remove': typeof ApiWorkspacesRemoveRoute
   '/api/workspaces/run-script': typeof ApiWorkspacesRunScriptRoute
+  '/api/workspace/$workspaceId/diff': typeof ApiWorkspaceWorkspaceIdDiffRoute
+  '/api/workspace/$workspaceId/file': typeof ApiWorkspaceWorkspaceIdFileRoute
+  '/api/workspace/$workspaceId/files': typeof ApiWorkspaceWorkspaceIdFilesRoute
   '/api/sessions/$workspaceId/$sessionId/messages': typeof ApiSessionsWorkspaceIdSessionIdMessagesRoute
 }
 export interface FileRouteTypes {
@@ -201,6 +231,9 @@ export interface FileRouteTypes {
     | '/api/workspaces/open'
     | '/api/workspaces/remove'
     | '/api/workspaces/run-script'
+    | '/api/workspace/$workspaceId/diff'
+    | '/api/workspace/$workspaceId/file'
+    | '/api/workspace/$workspaceId/files'
     | '/api/sessions/$workspaceId/$sessionId/messages'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -221,6 +254,9 @@ export interface FileRouteTypes {
     | '/api/workspaces/open'
     | '/api/workspaces/remove'
     | '/api/workspaces/run-script'
+    | '/api/workspace/$workspaceId/diff'
+    | '/api/workspace/$workspaceId/file'
+    | '/api/workspace/$workspaceId/files'
     | '/api/sessions/$workspaceId/$sessionId/messages'
   id:
     | '__root__'
@@ -241,6 +277,9 @@ export interface FileRouteTypes {
     | '/api/workspaces/open'
     | '/api/workspaces/remove'
     | '/api/workspaces/run-script'
+    | '/api/workspace/$workspaceId/diff'
+    | '/api/workspace/$workspaceId/file'
+    | '/api/workspace/$workspaceId/files'
     | '/api/sessions/$workspaceId/$sessionId/messages'
   fileRoutesById: FileRoutesById
 }
@@ -258,6 +297,9 @@ export interface RootRouteChildren {
   ApiWorkspacesOpenRoute: typeof ApiWorkspacesOpenRoute
   ApiWorkspacesRemoveRoute: typeof ApiWorkspacesRemoveRoute
   ApiWorkspacesRunScriptRoute: typeof ApiWorkspacesRunScriptRoute
+  ApiWorkspaceWorkspaceIdDiffRoute: typeof ApiWorkspaceWorkspaceIdDiffRoute
+  ApiWorkspaceWorkspaceIdFileRoute: typeof ApiWorkspaceWorkspaceIdFileRoute
+  ApiWorkspaceWorkspaceIdFilesRoute: typeof ApiWorkspaceWorkspaceIdFilesRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -381,6 +423,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiHooksCheckRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/workspace/$workspaceId/files': {
+      id: '/api/workspace/$workspaceId/files'
+      path: '/api/workspace/$workspaceId/files'
+      fullPath: '/api/workspace/$workspaceId/files'
+      preLoaderRoute: typeof ApiWorkspaceWorkspaceIdFilesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/workspace/$workspaceId/file': {
+      id: '/api/workspace/$workspaceId/file'
+      path: '/api/workspace/$workspaceId/file'
+      fullPath: '/api/workspace/$workspaceId/file'
+      preLoaderRoute: typeof ApiWorkspaceWorkspaceIdFileRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/workspace/$workspaceId/diff': {
+      id: '/api/workspace/$workspaceId/diff'
+      path: '/api/workspace/$workspaceId/diff'
+      fullPath: '/api/workspace/$workspaceId/diff'
+      preLoaderRoute: typeof ApiWorkspaceWorkspaceIdDiffRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/sessions/$workspaceId/$sessionId/messages': {
       id: '/api/sessions/$workspaceId/$sessionId/messages'
       path: '/$sessionId/messages'
@@ -438,6 +501,9 @@ const rootRouteChildren: RootRouteChildren = {
   ApiWorkspacesOpenRoute: ApiWorkspacesOpenRoute,
   ApiWorkspacesRemoveRoute: ApiWorkspacesRemoveRoute,
   ApiWorkspacesRunScriptRoute: ApiWorkspacesRunScriptRoute,
+  ApiWorkspaceWorkspaceIdDiffRoute: ApiWorkspaceWorkspaceIdDiffRoute,
+  ApiWorkspaceWorkspaceIdFileRoute: ApiWorkspaceWorkspaceIdFileRoute,
+  ApiWorkspaceWorkspaceIdFilesRoute: ApiWorkspaceWorkspaceIdFilesRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
