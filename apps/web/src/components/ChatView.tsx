@@ -13,8 +13,8 @@ import { Message, MessageContent, MessageResponse } from "./ai-elements/message"
 import type { PromptInputMessage } from "./ai-elements/prompt-input";
 import { PromptInput, PromptInputSubmit, PromptInputTextarea } from "./ai-elements/prompt-input";
 import type { ToolPart } from "./ai-elements/tool";
-import type { ToolCallItem } from "./ai-elements/tool-call-group";
-import { ToolCallGroup } from "./ai-elements/tool-call-group";
+import type { ToolCallItem } from "./ai-elements/tool-call";
+import { ToolCall } from "./ai-elements/tool-call";
 import { SessionList } from "./SessionList";
 
 const IN_PROGRESS_STATES = new Set<ToolPart["state"]>([
@@ -224,13 +224,8 @@ export function ChatView({
                       }
                       return null;
                     }
-                    const items = segment.parts.map((p) => toolPartToItem(p.part));
-                    return (
-                      <ToolCallGroup
-                        key={`${message.id}-tools-${segment.startIndex}`}
-                        items={items}
-                      />
-                    );
+                    const item = toolPartToItem(segment.part);
+                    return <ToolCall key={`${message.id}-tool-${segment.partIndex}`} item={item} />;
                   })}
                   {showThinking && <ThinkingIndicator />}
                 </MessageContent>
@@ -333,29 +328,17 @@ function renderHistoryContent(
   toolResultMap: Map<string, HistoryMessageContent>,
 ) {
   const elements: React.ReactNode[] = [];
-  let toolGroup: HistoryMessageContent[] = [];
-
-  const flushToolGroup = () => {
-    if (toolGroup.length > 0) {
-      const items = toolGroup.map((tool) =>
-        historyToolToItem(tool, toolResultMap.get(tool.toolCallId ?? "")),
-      );
-      elements.push(<ToolCallGroup key={`tools-${elements.length}`} items={items} />);
-      toolGroup = [];
-    }
-  };
 
   for (const block of message.content) {
     if (block.type === "text" && block.text?.trim()) {
-      flushToolGroup();
       elements.push(
         <MessageResponse key={`text-${elements.length}`}>{block.text}</MessageResponse>,
       );
     } else if (block.type === "tool_use") {
-      toolGroup.push(block);
+      const item = historyToolToItem(block, toolResultMap.get(block.toolCallId ?? ""));
+      elements.push(<ToolCall key={`tool-${elements.length}`} item={item} />);
     }
   }
-  flushToolGroup();
 
   return elements;
 }
