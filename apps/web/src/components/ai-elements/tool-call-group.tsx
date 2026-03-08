@@ -15,6 +15,23 @@ const IN_PROGRESS_STATES = new Set<ToolPart["state"]>([
 
 const ERROR_STATES = new Set<ToolPart["state"]>(["output-error", "output-denied"]);
 
+function formatToolTitle(name: string, input: ToolPart["input"]): string {
+  if (!input || typeof input !== "object") return name;
+  const record = input as Record<string, unknown>;
+  const arg =
+    record.command ??
+    record.pattern ??
+    record.query ??
+    record.file_path ??
+    record.url ??
+    record.content;
+  if (typeof arg === "string") {
+    const summary = arg.length > 80 ? `${arg.slice(0, 80)}...` : arg;
+    return `${name}(${summary})`;
+  }
+  return name;
+}
+
 function StatusDot({ state }: { state: ToolPart["state"] }) {
   if (ERROR_STATES.has(state)) {
     return <span className="size-2 shrink-0 rounded-full bg-red-500" />;
@@ -52,11 +69,11 @@ export function ToolCallGroup({ segment }: { segment: ToolGroupSegment }) {
                 </span>
               </div>
               {inProgress.map((p) => {
-                const toolName = getToolName(p.part);
+                const title = formatToolTitle(getToolName(p.part), p.part.input);
                 return (
                   <div key={p.part.toolCallId} className="flex items-center gap-2 pl-6">
                     <StatusDot state={p.part.state} />
-                    <span className="truncate text-sm">{toolName}</span>
+                    <span className="truncate text-sm">{title}</span>
                   </div>
                 );
               })}
@@ -78,13 +95,13 @@ export function ToolCallGroup({ segment }: { segment: ToolGroupSegment }) {
 }
 
 function ToolItem({ part }: { part: ToolPart }) {
-  const toolName = getToolName(part);
+  const title = formatToolTitle(getToolName(part), part.input);
   return (
     <Collapsible className="group/inner border-b border-border/50 last:border-b-0">
       <CollapsibleTrigger className="flex w-full items-center justify-between gap-4 px-4 py-2">
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           <StatusDot state={part.state} />
-          <span className="text-sm">{toolName}</span>
+          <span className="truncate text-sm">{title}</span>
         </div>
         <ChevronDownIcon className="size-3.5 text-muted-foreground transition-transform group-data-[state=open]/inner:rotate-180" />
       </CollapsibleTrigger>
