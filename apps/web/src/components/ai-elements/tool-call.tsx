@@ -79,7 +79,7 @@ export function ToolCall({ item }: { item: ToolCallItem }) {
 
   return (
     <>
-      <Collapsible className="group not-prose mb-4 w-full rounded border border-border/50">
+      <Collapsible className="group not-prose w-full rounded border border-border/50">
         <CollapsibleTrigger className="flex w-full items-center justify-between gap-4 p-3">
           <div className="flex min-w-0 items-center gap-2">
             <StatusDot isError={item.isError} isInProgress={item.isInProgress} />

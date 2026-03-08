@@ -1,7 +1,7 @@
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, getToolName, isToolUIPart } from "ai";
 import { Bot, Loader2 } from "lucide-react";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Conversation,
   ConversationContent,
@@ -77,6 +77,7 @@ interface ChatViewProps {
   workspaceId: string;
   workspaceName: string;
   supportsSessionListing: boolean;
+  initialSessionId?: string;
   showSessionList: boolean;
   onShowSessionListChange: (show: boolean) => void;
 }
@@ -85,6 +86,7 @@ export function ChatView({
   workspaceId,
   workspaceName,
   supportsSessionListing,
+  initialSessionId,
   showSessionList,
   onShowSessionListChange,
 }: ChatViewProps) {
@@ -92,6 +94,7 @@ export function ChatView({
   const [activeSessionId, setActiveSessionId] = useState<string | undefined>(undefined);
   const [historicalMessages, setHistoricalMessages] = useState<HistoryMessage[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const initialSessionLoadedRef = useRef(false);
 
   const transport = useMemo(
     () =>
@@ -136,6 +139,15 @@ export function ChatView({
     },
     [workspaceId],
   );
+
+  useEffect(() => {
+    if (initialSessionId && !initialSessionLoadedRef.current) {
+      initialSessionLoadedRef.current = true;
+      sessionIdRef.current = initialSessionId;
+      setActiveSessionId(initialSessionId);
+      loadMessages(initialSessionId);
+    }
+  }, [initialSessionId, loadMessages]);
 
   const handleSelectSession = useCallback(
     async (sessionId: string) => {
@@ -304,7 +316,7 @@ export function ChatView({
         <ConversationScrollButton />
       </Conversation>
 
-      <div className="shrink-0 px-4 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))]">
+      <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))]">
         <PromptInput onSubmit={handleSubmit}>
           <PromptInputTextarea placeholder="Type a message..." />
           <PromptInputActions>

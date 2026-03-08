@@ -22,6 +22,7 @@ function ChatPage() {
   const { workspaceId } = Route.useParams();
   const decoded = decodeURIComponent(workspaceId);
   const [supportsSessionListing, setSupportsSessionListing] = useState(false);
+  const [initialSessionId, setInitialSessionId] = useState<string | undefined>(undefined);
   const [showSessionList, setShowSessionList] = useState(false);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("chat");
 
@@ -35,12 +36,23 @@ function ChatPage() {
         }
         return res.json();
       })
-      .then((data: { supported?: boolean } | null) => {
-        console.log("[sessions] response:", data);
-        if (!cancelled && data?.supported) {
-          setSupportsSessionListing(true);
-        }
-      })
+      .then(
+        (
+          data: {
+            supported?: boolean;
+            sessions?: { sessionId: string; lastModified: number }[];
+          } | null,
+        ) => {
+          if (cancelled) return;
+          if (data?.supported) {
+            setSupportsSessionListing(true);
+            const latest = data.sessions?.sort((a, b) => b.lastModified - a.lastModified)[0];
+            if (latest) {
+              setInitialSessionId(latest.sessionId);
+            }
+          }
+        },
+      )
       .catch((err) => {
         console.error("[sessions] error:", err);
       });
@@ -77,21 +89,24 @@ function ChatPage() {
       </header>
       <WorkspaceTabNav activeTab={activeTab} onTabChange={setActiveTab} />
       <main className="min-h-0 flex-1">
-        {activeTab === "chat" && (
+        <div className={activeTab === "chat" ? "flex h-full flex-col" : "hidden"}>
           <ChatView
             workspaceId={decoded}
             workspaceName={decoded}
             supportsSessionListing={supportsSessionListing}
+            initialSessionId={initialSessionId}
             showSessionList={showSessionList}
             onShowSessionListChange={setShowSessionList}
           />
-        )}
-        {(activeTab === "diff" || activeTab === "code") && (
-          <DashboardProvider adapter={adapter} capabilities={capabilities}>
-            {activeTab === "diff" && <DiffView workspaceId={decoded} />}
-            {activeTab === "code" && <CodeBrowserView workspaceId={decoded} />}
-          </DashboardProvider>
-        )}
+        </div>
+        <DashboardProvider adapter={adapter} capabilities={capabilities}>
+          <div className={activeTab === "diff" ? "h-full" : "hidden"}>
+            <DiffView workspaceId={decoded} />
+          </div>
+          <div className={activeTab === "code" ? "h-full" : "hidden"}>
+            <CodeBrowserView workspaceId={decoded} />
+          </div>
+        </DashboardProvider>
       </main>
     </div>
   );
