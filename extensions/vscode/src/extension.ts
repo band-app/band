@@ -5,7 +5,12 @@ import {
   loadConfig,
   loadEffectiveConfig,
 } from "./config";
-import { buildAgentCommand, ensureTrustDialogAccepted, loadPrompt, markPromptAsRun } from "./prompt";
+import {
+  buildAgentCommand,
+  ensureTrustDialogAccepted,
+  loadPrompt,
+  markPromptAsRun,
+} from "./prompt";
 import { setupWorkspace } from "./workspace-setup";
 
 let log: vscode.OutputChannel;
