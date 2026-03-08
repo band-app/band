@@ -26,6 +26,7 @@ import { Route as ApiProjectsLabelRouteImport } from './routes/api/projects.labe
 import { Route as ApiProjectsAddRouteImport } from './routes/api/projects.add'
 import { Route as ApiHooksInstallRouteImport } from './routes/api/hooks.install'
 import { Route as ApiHooksCheckRouteImport } from './routes/api/hooks.check'
+import { Route as ApiChatAnswerRouteImport } from './routes/api/chat.answer'
 import { Route as ApiWorkspaceWorkspaceIdFilesRouteImport } from './routes/api/workspace.$workspaceId.files'
 import { Route as ApiWorkspaceWorkspaceIdFileRouteImport } from './routes/api/workspace.$workspaceId.file'
 import { Route as ApiWorkspaceWorkspaceIdDiffRouteImport } from './routes/api/workspace.$workspaceId.diff'
@@ -116,6 +117,11 @@ const ApiHooksCheckRoute = ApiHooksCheckRouteImport.update({
   path: '/api/hooks/check',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiChatAnswerRoute = ApiChatAnswerRouteImport.update({
+  id: '/answer',
+  path: '/answer',
+  getParentRoute: () => ApiChatRoute,
+} as any)
 const ApiWorkspaceWorkspaceIdFilesRoute =
   ApiWorkspaceWorkspaceIdFilesRouteImport.update({
     id: '/api/workspace/$workspaceId/files',
@@ -143,10 +149,11 @@ const ApiSessionsWorkspaceIdSessionIdMessagesRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/api/chat': typeof ApiChatRoute
+  '/api/chat': typeof ApiChatRouteWithChildren
   '/api/projects': typeof ApiProjectsRouteWithChildren
   '/api/settings': typeof ApiSettingsRoute
   '/chat/$workspaceId': typeof ChatWorkspaceIdRoute
+  '/api/chat/answer': typeof ApiChatAnswerRoute
   '/api/hooks/check': typeof ApiHooksCheckRoute
   '/api/hooks/install': typeof ApiHooksInstallRoute
   '/api/projects/add': typeof ApiProjectsAddRoute
@@ -166,10 +173,11 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/api/chat': typeof ApiChatRoute
+  '/api/chat': typeof ApiChatRouteWithChildren
   '/api/projects': typeof ApiProjectsRouteWithChildren
   '/api/settings': typeof ApiSettingsRoute
   '/chat/$workspaceId': typeof ChatWorkspaceIdRoute
+  '/api/chat/answer': typeof ApiChatAnswerRoute
   '/api/hooks/check': typeof ApiHooksCheckRoute
   '/api/hooks/install': typeof ApiHooksInstallRoute
   '/api/projects/add': typeof ApiProjectsAddRoute
@@ -190,10 +198,11 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/api/chat': typeof ApiChatRoute
+  '/api/chat': typeof ApiChatRouteWithChildren
   '/api/projects': typeof ApiProjectsRouteWithChildren
   '/api/settings': typeof ApiSettingsRoute
   '/chat/$workspaceId': typeof ChatWorkspaceIdRoute
+  '/api/chat/answer': typeof ApiChatAnswerRoute
   '/api/hooks/check': typeof ApiHooksCheckRoute
   '/api/hooks/install': typeof ApiHooksInstallRoute
   '/api/projects/add': typeof ApiProjectsAddRoute
@@ -219,6 +228,7 @@ export interface FileRouteTypes {
     | '/api/projects'
     | '/api/settings'
     | '/chat/$workspaceId'
+    | '/api/chat/answer'
     | '/api/hooks/check'
     | '/api/hooks/install'
     | '/api/projects/add'
@@ -242,6 +252,7 @@ export interface FileRouteTypes {
     | '/api/projects'
     | '/api/settings'
     | '/chat/$workspaceId'
+    | '/api/chat/answer'
     | '/api/hooks/check'
     | '/api/hooks/install'
     | '/api/projects/add'
@@ -265,6 +276,7 @@ export interface FileRouteTypes {
     | '/api/projects'
     | '/api/settings'
     | '/chat/$workspaceId'
+    | '/api/chat/answer'
     | '/api/hooks/check'
     | '/api/hooks/install'
     | '/api/projects/add'
@@ -285,7 +297,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  ApiChatRoute: typeof ApiChatRoute
+  ApiChatRoute: typeof ApiChatRouteWithChildren
   ApiProjectsRoute: typeof ApiProjectsRouteWithChildren
   ApiSettingsRoute: typeof ApiSettingsRoute
   ChatWorkspaceIdRoute: typeof ChatWorkspaceIdRoute
@@ -423,6 +435,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiHooksCheckRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/chat/answer': {
+      id: '/api/chat/answer'
+      path: '/answer'
+      fullPath: '/api/chat/answer'
+      preLoaderRoute: typeof ApiChatAnswerRouteImport
+      parentRoute: typeof ApiChatRoute
+    }
     '/api/workspace/$workspaceId/files': {
       id: '/api/workspace/$workspaceId/files'
       path: '/api/workspace/$workspaceId/files'
@@ -453,6 +472,17 @@ declare module '@tanstack/react-router' {
     }
   }
 }
+
+interface ApiChatRouteChildren {
+  ApiChatAnswerRoute: typeof ApiChatAnswerRoute
+}
+
+const ApiChatRouteChildren: ApiChatRouteChildren = {
+  ApiChatAnswerRoute: ApiChatAnswerRoute,
+}
+
+const ApiChatRouteWithChildren =
+  ApiChatRoute._addFileChildren(ApiChatRouteChildren)
 
 interface ApiProjectsRouteChildren {
   ApiProjectsAddRoute: typeof ApiProjectsAddRoute
@@ -489,7 +519,7 @@ const ApiSessionsWorkspaceIdRouteWithChildren =
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  ApiChatRoute: ApiChatRoute,
+  ApiChatRoute: ApiChatRouteWithChildren,
   ApiProjectsRoute: ApiProjectsRouteWithChildren,
   ApiSettingsRoute: ApiSettingsRoute,
   ChatWorkspaceIdRoute: ChatWorkspaceIdRoute,

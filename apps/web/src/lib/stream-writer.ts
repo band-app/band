@@ -1,6 +1,7 @@
 import type { CodingAgent } from "@band/coding-agent";
 import { createLogger } from "@band/logger";
 import type { UIMessageStreamWriter } from "ai";
+import { createPendingInput } from "./pending-inputs";
 
 const log = createLogger("stream-writer");
 
@@ -21,6 +22,15 @@ export async function writeAgentStream(
   let textStarted = false;
   let finished = false;
   const announcedToolCalls = new Set<string>();
+
+  agent.onUserInputNeeded = async (request) => {
+    writer.write({
+      type: "tool-approval-request" as const,
+      toolCallId: request.toolCallId,
+      approvalId: request.approvalId,
+    });
+    return createPendingInput(request.approvalId);
+  };
 
   try {
     for await (const event of agent.runSession(text, sessionId)) {

@@ -35,6 +35,7 @@ const IN_PROGRESS_STATES = new Set<ToolPart["state"]>([
 const ERROR_STATES = new Set<ToolPart["state"]>(["output-error", "output-denied"]);
 
 function toolPartToItem(part: ToolPart): ToolCallItem {
+  const approval = "approval" in part ? (part.approval as { id?: string } | undefined) : undefined;
   return {
     toolCallId: part.toolCallId,
     toolName: getToolName(part),
@@ -43,6 +44,7 @@ function toolPartToItem(part: ToolPart): ToolCallItem {
     errorText: part.errorText,
     isError: ERROR_STATES.has(part.state),
     isInProgress: IN_PROGRESS_STATES.has(part.state),
+    approvalId: approval?.id,
   };
 }
 

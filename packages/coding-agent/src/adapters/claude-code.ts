@@ -1,11 +1,23 @@
-import type { SDKSessionInfo, SessionMessage } from "@anthropic-ai/claude-agent-sdk";
+import type { CanUseTool, SDKSessionInfo, SessionMessage } from "@anthropic-ai/claude-agent-sdk";
 import { getSessionMessages, listSessions, query } from "@anthropic-ai/claude-agent-sdk";
 import { createLogger } from "@band/logger";
 import type { ClaudeCodeConfig } from "../config.js";
 import type { AgentEvent } from "../events.js";
-import type { CodingAgent, SessionListItem, SessionMessageItem } from "../types.js";
+import type {
+  CodingAgent,
+  SessionListItem,
+  SessionMessageItem,
+  UserInputRequest,
+} from "../types.js";
 
 const log = createLogger("coding-agent:claude-code");
+
+const ASK_USER_QUESTION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
+function formatUserAnswer(answers: Record<string, string>): string {
+  const lines = Object.entries(answers).map(([question, answer]) => `${question}: ${answer}`);
+  return `The user selected:\n${lines.join("\n")}`;
+}
 
 export class ClaudeCodeAdapter implements CodingAgent {
   readonly name = "Claude Code";
@@ -13,6 +25,8 @@ export class ClaudeCodeAdapter implements CodingAgent {
     costTracking: true,
     sessionListing: true,
   } as const;
+
+  onUserInputNeeded?: (request: UserInputRequest) => Promise<Record<string, string>>;
 
   private readonly workspaceDir: string;
   private readonly maxTurns: number;
@@ -44,6 +58,37 @@ export class ClaudeCodeAdapter implements CodingAgent {
       "runSession starting",
     );
 
+    const canUseTool: CanUseTool = async (toolName, input, options) => {
+      if (toolName !== "AskUserQuestion" || !this.onUserInputNeeded) {
+        return { behavior: "allow" };
+      }
+
+      const approvalId = crypto.randomUUID();
+      log.info(
+        { toolName, approvalId, toolUseID: options.toolUseID },
+        "AskUserQuestion intercepted",
+      );
+
+      try {
+        const answers = await Promise.race([
+          this.onUserInputNeeded({
+            approvalId,
+            toolCallId: options.toolUseID,
+            toolName,
+            input: input as Record<string, unknown>,
+          }),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("User input timeout")), ASK_USER_QUESTION_TIMEOUT_MS),
+          ),
+        ]);
+
+        return { behavior: "deny", message: formatUserAnswer(answers) };
+      } catch (err) {
+        log.warn({ err, approvalId }, "AskUserQuestion timed out or errored, auto-allowing");
+        return { behavior: "allow" };
+      }
+    };
+
     const conversation = query({
       prompt,
       options: {
@@ -51,8 +96,7 @@ export class ClaudeCodeAdapter implements CodingAgent {
         model: this.model,
         maxTurns: this.maxTurns,
         resume: sessionId,
-        permissionMode: "bypassPermissions",
-        allowDangerouslySkipPermissions: true,
+        canUseTool,
         env,
         pathToClaudeCodeExecutable: this.executablePath,
         settingSources: ["user", "project"],

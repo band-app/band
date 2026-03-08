@@ -1,6 +1,7 @@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@band/ui";
 import { ChevronDownIcon } from "lucide-react";
 
+import { AskUserQuestion } from "./ask-user-question";
 import { MessageResponse } from "./message";
 import { ToolInput, ToolOutput } from "./tool";
 
@@ -22,6 +23,7 @@ export interface ToolCallItem {
   errorText?: string;
   isError: boolean;
   isInProgress: boolean;
+  approvalId?: string;
 }
 
 export function formatToolTitle(name: string, input: unknown): string {
@@ -52,6 +54,25 @@ function StatusDot({ isError, isInProgress }: { isError: boolean; isInProgress: 
 }
 
 export function ToolCall({ item }: { item: ToolCallItem }) {
+  if (item.toolName === "AskUserQuestion" && item.approvalId && item.isInProgress) {
+    const input = item.input as
+      | {
+          questions?: Array<{
+            question: string;
+            header?: string;
+            options: Array<{ label: string; description?: string }>;
+            multiSelect?: boolean;
+          }>;
+        }
+      | undefined;
+    const questions = input?.questions ?? [];
+    return (
+      <div className="not-prose mb-4">
+        <AskUserQuestion questions={questions} approvalId={item.approvalId} />
+      </div>
+    );
+  }
+
   const title = formatToolTitle(item.toolName, item.input);
 
   const markdown = extractMarkdown(item);

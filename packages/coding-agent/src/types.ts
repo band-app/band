@@ -1,5 +1,12 @@
 import type { AgentEvent } from "./events.js";
 
+export interface UserInputRequest {
+  approvalId: string;
+  toolCallId: string;
+  toolName: string;
+  input: Record<string, unknown>;
+}
+
 export interface CodingAgentFeatures {
   costTracking: boolean;
   sessionListing: boolean;
@@ -26,6 +33,7 @@ export interface SessionMessageItem {
 export interface CodingAgent {
   readonly name: string;
   readonly supportedFeatures: CodingAgentFeatures;
+  onUserInputNeeded?: (request: UserInputRequest) => Promise<Record<string, string>>;
   runSession(prompt: string, sessionId?: string): AsyncGenerator<AgentEvent>;
   listSessions?(dir: string): Promise<SessionListItem[]>;
   getSessionMessages?(
