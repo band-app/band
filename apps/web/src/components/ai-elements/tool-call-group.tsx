@@ -1,6 +1,7 @@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@band/ui";
 import { ChevronDownIcon, WrenchIcon } from "lucide-react";
 
+import { AskUserQuestion } from "./ask-user-question";
 import { ToolInput, ToolOutput } from "./tool";
 
 export interface ToolCallItem {
@@ -11,6 +12,7 @@ export interface ToolCallItem {
   errorText?: string;
   isError: boolean;
   isInProgress: boolean;
+  approvalId?: string;
 }
 
 export function formatToolTitle(name: string, input: unknown): string {
@@ -44,9 +46,10 @@ export function ToolCallGroup({ items }: { items: ToolCallItem[] }) {
   const inProgress = items.filter((item) => item.isInProgress);
   const allDone = inProgress.length === 0;
   const errorCount = items.filter((item) => item.isError).length;
+  const hasAskUserQuestion = items.some(isAskUserQuestionItem);
 
   return (
-    <Collapsible className="group/outer not-prose mb-4 w-full rounded border border-border/50">
+    <Collapsible defaultOpen={hasAskUserQuestion} className="group/outer not-prose mb-4 w-full rounded border border-border/50">
       <CollapsibleTrigger className="flex w-full items-center justify-between gap-4 p-3">
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           {allDone ? (
@@ -91,7 +94,24 @@ export function ToolCallGroup({ items }: { items: ToolCallItem[] }) {
   );
 }
 
+function isAskUserQuestionItem(item: ToolCallItem): boolean {
+  return item.toolName === "AskUserQuestion" && !!item.approvalId && item.isInProgress;
+}
+
 function ToolItem({ item }: { item: ToolCallItem }) {
+  if (isAskUserQuestionItem(item)) {
+    const input = item.input as { questions?: Array<{ question: string; header?: string; options: Array<{ label: string; description?: string }>; multiSelect?: boolean }> } | undefined;
+    const questions = input?.questions ?? [];
+    return (
+      <div className="border-b border-border/50 px-4 py-3 last:border-b-0">
+        <AskUserQuestion
+          questions={questions}
+          approvalId={item.approvalId!}
+        />
+      </div>
+    );
+  }
+
   const title = formatToolTitle(item.toolName, item.input);
   return (
     <Collapsible className="group/inner border-b border-border/50 last:border-b-0">

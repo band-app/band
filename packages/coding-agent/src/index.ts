@@ -21,4 +21,5 @@ export type {
   CodingAgentFeatures,
   SessionListItem,
   SessionMessageItem,
+  UserInputRequest,
 } from "./types.js";
