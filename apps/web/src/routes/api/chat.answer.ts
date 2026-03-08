@@ -16,7 +16,10 @@ export const Route = createFileRoute("/api/chat/answer")({
 
         const resolved = resolvePendingInput(body.approvalId, body.answers);
         if (!resolved) {
-          return Response.json({ error: "No pending input found for this approvalId" }, { status: 404 });
+          return Response.json(
+            { error: "No pending input found for this approvalId" },
+            { status: 404 },
+          );
         }
 
         return Response.json({ ok: true });

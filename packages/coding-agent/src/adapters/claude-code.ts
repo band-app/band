@@ -3,7 +3,12 @@ import { getSessionMessages, listSessions, query } from "@anthropic-ai/claude-ag
 import { createLogger } from "@band/logger";
 import type { ClaudeCodeConfig } from "../config.js";
 import type { AgentEvent } from "../events.js";
-import type { CodingAgent, SessionListItem, SessionMessageItem, UserInputRequest } from "../types.js";
+import type {
+  CodingAgent,
+  SessionListItem,
+  SessionMessageItem,
+  UserInputRequest,
+} from "../types.js";
 
 const log = createLogger("coding-agent:claude-code");
 
@@ -59,7 +64,10 @@ export class ClaudeCodeAdapter implements CodingAgent {
       }
 
       const approvalId = crypto.randomUUID();
-      log.info({ toolName, approvalId, toolUseID: options.toolUseID }, "AskUserQuestion intercepted");
+      log.info(
+        { toolName, approvalId, toolUseID: options.toolUseID },
+        "AskUserQuestion intercepted",
+      );
 
       try {
         const answers = await Promise.race([

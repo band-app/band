@@ -49,7 +49,10 @@ export function ToolCallGroup({ items }: { items: ToolCallItem[] }) {
   const hasAskUserQuestion = items.some(isAskUserQuestionItem);
 
   return (
-    <Collapsible defaultOpen={hasAskUserQuestion} className="group/outer not-prose mb-4 w-full rounded border border-border/50">
+    <Collapsible
+      defaultOpen={hasAskUserQuestion}
+      className="group/outer not-prose mb-4 w-full rounded border border-border/50"
+    >
       <CollapsibleTrigger className="flex w-full items-center justify-between gap-4 p-3">
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           {allDone ? (
@@ -100,14 +103,20 @@ function isAskUserQuestionItem(item: ToolCallItem): boolean {
 
 function ToolItem({ item }: { item: ToolCallItem }) {
   if (isAskUserQuestionItem(item)) {
-    const input = item.input as { questions?: Array<{ question: string; header?: string; options: Array<{ label: string; description?: string }>; multiSelect?: boolean }> } | undefined;
+    const input = item.input as
+      | {
+          questions?: Array<{
+            question: string;
+            header?: string;
+            options: Array<{ label: string; description?: string }>;
+            multiSelect?: boolean;
+          }>;
+        }
+      | undefined;
     const questions = input?.questions ?? [];
     return (
       <div className="border-b border-border/50 px-4 py-3 last:border-b-0">
-        <AskUserQuestion
-          questions={questions}
-          approvalId={item.approvalId!}
-        />
+        <AskUserQuestion questions={questions} approvalId={item.approvalId!} />
       </div>
     );
   }

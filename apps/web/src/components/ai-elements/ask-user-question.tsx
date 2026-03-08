@@ -20,36 +20,29 @@ interface AskUserQuestionProps {
   disabled?: boolean;
 }
 
-export function AskUserQuestion({
-  questions,
-  approvalId,
-  disabled,
-}: AskUserQuestionProps) {
+export function AskUserQuestion({ questions, approvalId, disabled }: AskUserQuestionProps) {
   const [selections, setSelections] = useState<Record<string, Set<string>>>({});
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
-  const toggleOption = useCallback(
-    (questionText: string, label: string, multiSelect: boolean) => {
-      setSelections((prev) => {
-        const next = { ...prev };
-        const current = new Set(prev[questionText] ?? []);
-        if (multiSelect) {
-          if (current.has(label)) {
-            current.delete(label);
-          } else {
-            current.add(label);
-          }
+  const toggleOption = useCallback((questionText: string, label: string, multiSelect: boolean) => {
+    setSelections((prev) => {
+      const next = { ...prev };
+      const current = new Set(prev[questionText] ?? []);
+      if (multiSelect) {
+        if (current.has(label)) {
+          current.delete(label);
         } else {
-          current.clear();
           current.add(label);
         }
-        next[questionText] = current;
-        return next;
-      });
-    },
-    [],
-  );
+      } else {
+        current.clear();
+        current.add(label);
+      }
+      next[questionText] = current;
+      return next;
+    });
+  }, []);
 
   const handleSubmit = useCallback(async () => {
     setSubmitting(true);
@@ -120,19 +113,11 @@ export function AskUserQuestion({
         );
       })}
       <div className="flex items-center gap-2">
-        <Button
-          size="sm"
-          disabled={isDisabled || !hasSelections}
-          onClick={handleSubmit}
-        >
+        <Button size="sm" disabled={isDisabled || !hasSelections} onClick={handleSubmit}>
           {submitting && <Loader2 className="mr-1.5 size-3.5 animate-spin" />}
           {submitted ? "Submitted" : "Submit"}
         </Button>
-        {submitted && (
-          <span className="text-xs text-muted-foreground">
-            Answer sent to agent
-          </span>
-        )}
+        {submitted && <span className="text-xs text-muted-foreground">Answer sent to agent</span>}
       </div>
     </div>
   );
