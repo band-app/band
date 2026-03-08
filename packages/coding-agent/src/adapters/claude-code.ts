@@ -62,7 +62,7 @@ export class ClaudeCodeAdapter implements CodingAgent {
 
     log.info("query() called, waiting for messages...");
 
-    const state: ProcessedState = { assistantContentIndex: 0 };
+    const state: ProcessedState = { assistantContentIndex: 0, toolNames: new Map() };
 
     try {
       for await (const message of conversation) {
@@ -171,6 +171,7 @@ function mapSessionMessage(msg: SessionMessage): SessionMessageItem {
 
 interface ProcessedState {
   assistantContentIndex: number;
+  toolNames: Map<string, string>;
 }
 
 function* mapClaudeCodeEvent(
@@ -222,10 +223,13 @@ function* mapClaudeCodeEvent(
             yield { type: "text-delta", text: block.text };
             processedUpTo = i + 1;
           } else if (block.type === "tool_use") {
+            const toolCallId = block.id ?? crypto.randomUUID();
+            const toolName = block.name ?? "unknown";
+            state.toolNames.set(toolCallId, toolName);
             yield {
               type: "tool-use",
-              toolCallId: block.id ?? crypto.randomUUID(),
-              toolName: block.name ?? "unknown",
+              toolCallId,
+              toolName,
               input: block.input ?? {},
             };
             processedUpTo = i + 1;
@@ -263,6 +267,7 @@ function* mapClaudeCodeEvent(
             yield {
               type: "tool-result",
               toolCallId: block.tool_use_id,
+              toolName: state.toolNames.get(block.tool_use_id),
               output,
               isError: block.is_error ?? false,
             };

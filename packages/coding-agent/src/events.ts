@@ -18,6 +18,7 @@ export interface ToolUseEvent {
 export interface ToolResultEvent {
   type: "tool-result";
   toolCallId: string;
+  toolName?: string;
   output: string;
   isError: boolean;
 }

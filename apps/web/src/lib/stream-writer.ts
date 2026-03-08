@@ -76,7 +76,7 @@ export async function writeAgentStream(
             writer.write({
               type: "tool-input-available",
               toolCallId: event.toolCallId,
-              toolName: "tool",
+              toolName: event.toolName ?? "tool",
               input: {},
             });
             announcedToolCalls.add(event.toolCallId);

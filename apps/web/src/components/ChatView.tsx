@@ -166,9 +166,7 @@ export function ChatView({
             </div>
           )}
 
-          {historicalMessages.map((msg) => (
-            <HistoryMessageView key={msg.id} message={msg} />
-          ))}
+          {historicalMessages.length > 0 && <HistoryMessages messages={historicalMessages} />}
 
           {hasHistory && hasLiveMessages && (
             <div className="flex items-center gap-3 py-2">
@@ -237,18 +235,48 @@ export function ChatView({
   );
 }
 
-function HistoryMessageView({ message }: { message: HistoryMessage }) {
+function buildToolResultMap(messages: HistoryMessage[]) {
+  const map = new Map<string, HistoryMessageContent>();
+  for (const msg of messages) {
+    for (const block of msg.content) {
+      if (block.type === "tool_result" && block.toolCallId) {
+        map.set(block.toolCallId, block);
+      }
+    }
+  }
+  return map;
+}
+
+function HistoryMessages({ messages }: { messages: HistoryMessage[] }) {
+  const toolResultMap = useMemo(() => buildToolResultMap(messages), [messages]);
+
+  return (
+    <>
+      {messages.map((msg) => (
+        <HistoryMessageView key={msg.id} message={msg} toolResultMap={toolResultMap} />
+      ))}
+    </>
+  );
+}
+
+function HistoryMessageView({
+  message,
+  toolResultMap,
+}: {
+  message: HistoryMessage;
+  toolResultMap: Map<string, HistoryMessageContent>;
+}) {
   const textBlocks = message.content.filter((b) => b.type === "text" && b.text?.trim());
   const toolUseBlocks = message.content.filter((b) => b.type === "tool_use");
-  const toolResultBlocks = message.content.filter((b) => b.type === "tool_result");
 
   if (message.role === "user") {
     const userText = textBlocks.map((b) => b.text).join("\n");
-    if (!userText && toolResultBlocks.length === 0) return null;
-    if (toolResultBlocks.length > 0 && !userText) return null;
+    if (!userText) return null;
     return (
       <Message from="user">
-        <MessageContent>{userText && <MessageResponse>{userText}</MessageResponse>}</MessageContent>
+        <MessageContent>
+          <MessageResponse>{userText}</MessageResponse>
+        </MessageContent>
       </Message>
     );
   }
@@ -257,18 +285,27 @@ function HistoryMessageView({ message }: { message: HistoryMessage }) {
 
   return (
     <Message from="assistant">
-      <MessageContent>{renderHistoryContent(message)}</MessageContent>
+      <MessageContent>{renderHistoryContent(message, toolResultMap)}</MessageContent>
     </Message>
   );
 }
 
-function renderHistoryContent(message: HistoryMessage) {
+function renderHistoryContent(
+  message: HistoryMessage,
+  toolResultMap: Map<string, HistoryMessageContent>,
+) {
   const elements: React.ReactNode[] = [];
   let toolGroup: HistoryMessageContent[] = [];
 
   const flushToolGroup = () => {
     if (toolGroup.length > 0) {
-      elements.push(<HistoryToolGroup key={`tools-${elements.length}`} tools={toolGroup} />);
+      elements.push(
+        <HistoryToolGroup
+          key={`tools-${elements.length}`}
+          tools={toolGroup}
+          toolResultMap={toolResultMap}
+        />,
+      );
       toolGroup = [];
     }
   };
@@ -288,7 +325,15 @@ function renderHistoryContent(message: HistoryMessage) {
   return elements;
 }
 
-function HistoryToolGroup({ tools }: { tools: HistoryMessageContent[] }) {
+function HistoryToolGroup({
+  tools,
+  toolResultMap,
+}: {
+  tools: HistoryMessageContent[];
+  toolResultMap: Map<string, HistoryMessageContent>;
+}) {
+  const errorCount = tools.filter((t) => toolResultMap.get(t.toolCallId ?? "")?.isError).length;
+
   return (
     <Collapsible className="group/outer not-prose mb-4 w-full rounded border border-border/50">
       <CollapsibleTrigger className="flex w-full items-center justify-between gap-4 p-3">
@@ -296,24 +341,84 @@ function HistoryToolGroup({ tools }: { tools: HistoryMessageContent[] }) {
           <WrenchIcon className="size-4 shrink-0 text-muted-foreground" />
           <span className="font-medium text-sm text-muted-foreground">
             {tools.length} tool{tools.length !== 1 ? " calls" : " call"} completed
+            {errorCount > 0 && ` (${errorCount} failed)`}
           </span>
         </div>
         <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]/outer:rotate-180" />
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="border-t border-border/50">
-          {tools.map((tool) => (
-            <div
-              key={tool.toolCallId}
-              className="border-b border-border/50 px-4 py-2 last:border-b-0"
-            >
-              <div className="flex items-center gap-2">
-                <span className="size-2 shrink-0 rounded-full bg-green-500" />
-                <span className="text-sm">{tool.toolName}</span>
-              </div>
-            </div>
-          ))}
+          {tools.map((tool) => {
+            const result = toolResultMap.get(tool.toolCallId ?? "");
+            return <HistoryToolItem key={tool.toolCallId} tool={tool} result={result} />;
+          })}
         </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+function formatToolTitle(tool: HistoryMessageContent): string {
+  const name = tool.toolName ?? "unknown";
+  const input = tool.input as Record<string, unknown> | null | undefined;
+  if (!input) return name;
+
+  const arg =
+    input.command ?? input.pattern ?? input.query ?? input.file_path ?? input.url ?? input.content;
+
+  if (typeof arg === "string") {
+    const summary = arg.length > 80 ? `${arg.slice(0, 80)}...` : arg;
+    return `${name}(${summary})`;
+  }
+
+  return name;
+}
+
+function HistoryToolItem({
+  tool,
+  result,
+}: {
+  tool: HistoryMessageContent;
+  result?: HistoryMessageContent;
+}) {
+  return (
+    <Collapsible className="group/inner border-b border-border/50 last:border-b-0">
+      <CollapsibleTrigger className="flex w-full items-center justify-between gap-4 px-4 py-2">
+        <div className="flex items-center gap-2">
+          <span
+            className={`size-2 shrink-0 rounded-full ${result?.isError ? "bg-red-500" : "bg-green-500"}`}
+          />
+          <span className="text-sm truncate">{formatToolTitle(tool)}</span>
+        </div>
+        <ChevronDownIcon className="size-3.5 text-muted-foreground transition-transform group-data-[state=open]/inner:rotate-180" />
+      </CollapsibleTrigger>
+      <CollapsibleContent className="space-y-4 px-4 pb-3">
+        {tool.input != null && (
+          <div className="space-y-2 overflow-hidden">
+            <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
+              Parameters
+            </h4>
+            <div className="rounded-md bg-muted/50">
+              <pre className="overflow-auto p-3 text-xs">
+                <code>{JSON.stringify(tool.input, null, 2)}</code>
+              </pre>
+            </div>
+          </div>
+        )}
+        {result?.output && (
+          <div className="space-y-2">
+            <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
+              {result.isError ? "Error" : "Result"}
+            </h4>
+            <div
+              className={`overflow-x-auto rounded-md text-xs ${result.isError ? "bg-destructive/10 text-destructive" : "bg-muted/50"}`}
+            >
+              <pre className="overflow-auto p-3 text-xs">
+                <code>{result.output}</code>
+              </pre>
+            </div>
+          </div>
+        )}
       </CollapsibleContent>
     </Collapsible>
   );
