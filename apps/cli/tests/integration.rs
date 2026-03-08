@@ -311,6 +311,129 @@ fn teardown_script_runs_on_remove() {
 }
 
 #[test]
+fn run_creates_worktree_and_writes_prompt_file() {
+    let env = TestEnv::new();
+    let output = env.band(&["run", "my-project", "feat/run", "--prompt", "hello world"]);
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let path = stdout(&output);
+    let expected = env
+        .worktrees_dir()
+        .join("my-project")
+        .join("feat/run")
+        .to_string_lossy()
+        .to_string();
+    assert_eq!(path, expected);
+
+    // Worktree directory exists on disk
+    assert!(Path::new(&path).exists(), "worktree dir should exist");
+
+    // Prompt file exists with correct content
+    let prompt_file = env
+        .band_home
+        .join("workspace-prompts")
+        .join("my-project-feat/run.json");
+    assert!(prompt_file.exists(), "prompt file should exist");
+
+    let prompt_data: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&prompt_file).unwrap()).unwrap();
+    assert_eq!(prompt_data["prompt"], "hello world");
+    assert_eq!(prompt_data["didRun"], false);
+}
+
+#[test]
+fn run_with_base_branch() {
+    let env = TestEnv::new();
+
+    // Create a commit on main so there's something to branch from
+    let marker = env.repo_path.join("marker.txt");
+    fs::write(&marker, "hello").unwrap();
+    git(&env.repo_path, &["add", "marker.txt"]);
+    git(&env.repo_path, &["commit", "-m", "add marker"]);
+
+    let output = env.band(&[
+        "run",
+        "my-project",
+        "feat/run-base",
+        "--prompt",
+        "do stuff",
+        "--base",
+        "main",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let path = stdout(&output);
+    // The new worktree should contain the marker file
+    assert!(
+        Path::new(&path).join("marker.txt").exists(),
+        "worktree should have marker.txt from main"
+    );
+}
+
+#[test]
+fn run_unknown_project_fails() {
+    let env = TestEnv::new();
+    let output = env.band(&["run", "nonexistent", "feat/x", "--prompt", "hello"]);
+
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("not found"),
+        "stderr: {}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn run_idempotent_workspace_overwrites_prompt() {
+    let env = TestEnv::new();
+
+    let out1 = env.band(&["run", "my-project", "feat/idem-run", "--prompt", "first"]);
+    assert!(out1.status.success());
+
+    let out2 = env.band(&["run", "my-project", "feat/idem-run", "--prompt", "second"]);
+    assert!(out2.status.success());
+
+    // Both return the same path
+    assert_eq!(stdout(&out1), stdout(&out2));
+
+    // Prompt file has the second prompt and didRun reset to false
+    let prompt_file = env
+        .band_home
+        .join("workspace-prompts")
+        .join("my-project-feat/idem-run.json");
+    let prompt_data: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&prompt_file).unwrap()).unwrap();
+    assert_eq!(prompt_data["prompt"], "second");
+    assert_eq!(prompt_data["didRun"], false);
+}
+
+#[test]
+fn remove_cleans_up_prompt_file() {
+    let env = TestEnv::new();
+
+    let create_out = env.band(&["run", "my-project", "feat/rm-prompt", "--prompt", "hello"]);
+    assert!(create_out.status.success());
+
+    let prompt_file = env
+        .band_home
+        .join("workspace-prompts")
+        .join("my-project-feat/rm-prompt.json");
+    assert!(
+        prompt_file.exists(),
+        "prompt file should exist before remove"
+    );
+
+    let output = env.band(&["remove", "my-project", "feat/rm-prompt"]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    assert!(
+        !prompt_file.exists(),
+        "prompt file should be cleaned up after remove"
+    );
+}
+
+#[test]
 fn setup_failure_is_non_fatal() {
     let env = TestEnv::new();
 

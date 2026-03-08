@@ -75,11 +75,17 @@ pub fn status_dir() -> PathBuf {
     band_home().join("status")
 }
 
+pub fn workspace_prompts_dir() -> PathBuf {
+    band_home().join("workspace-prompts")
+}
+
 pub fn ensure_dirs() -> Result<(), String> {
     let home = band_home();
     fs::create_dir_all(&home).map_err(|e| format!("Failed to create ~/.band: {e}"))?;
     fs::create_dir_all(home.join("status"))
         .map_err(|e| format!("Failed to create ~/.band/status: {e}"))?;
+    fs::create_dir_all(home.join("workspace-prompts"))
+        .map_err(|e| format!("Failed to create ~/.band/workspace-prompts: {e}"))?;
     Ok(())
 }
 

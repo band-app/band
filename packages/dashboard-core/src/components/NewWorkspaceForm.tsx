@@ -8,6 +8,7 @@ import {
   DialogTitle,
   Input,
   Label,
+  Textarea,
 } from "@band/ui";
 import { useState } from "react";
 import { useDashboardStore } from "../stores/index";
@@ -21,14 +22,21 @@ interface Props {
 export function NewWorkspaceDialog({ projectName, open, onOpenChange }: Props) {
   const [branch, setBranch] = useState("");
   const [base, setBase] = useState("");
+  const [prompt, setPrompt] = useState("");
   const createWorkspace = useDashboardStore((s) => s.createWorkspace);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!branch.trim()) return;
-    await createWorkspace(projectName, branch.trim(), base.trim() || undefined);
+    await createWorkspace(
+      projectName,
+      branch.trim(),
+      base.trim() || undefined,
+      prompt.trim() || undefined,
+    );
     setBranch("");
     setBase("");
+    setPrompt("");
     onOpenChange(false);
   };
 
@@ -61,6 +69,14 @@ export function NewWorkspaceDialog({ projectName, open, onOpenChange }: Props) {
               autoCapitalize="off"
               autoCorrect="off"
               spellCheck={false}
+            />
+            <Label htmlFor="initial-prompt">Initial prompt (optional)</Label>
+            <Textarea
+              id="initial-prompt"
+              placeholder="Describe the task for the coding agent..."
+              value={prompt}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setPrompt(e.target.value)}
+              rows={3}
             />
           </div>
           <DialogFooter>

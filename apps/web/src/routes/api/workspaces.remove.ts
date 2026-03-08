@@ -1,7 +1,9 @@
 import { execFileSync } from "node:child_process";
+import { unlinkSync } from "node:fs";
+import { join } from "node:path";
 import { createFileRoute } from "@tanstack/react-router";
 import { gitCmd } from "../../lib/git";
-import { loadState } from "../../lib/state";
+import { bandHome, loadState } from "../../lib/state";
 
 export const Route = createFileRoute("/api/workspaces/remove")({
   server: {
@@ -55,6 +57,13 @@ export const Route = createFileRoute("/api/workspaces/remove")({
                   });
                 } catch {
                   // Branch may already be deleted
+                }
+                // Clean up prompt file
+                const workspaceId = `${project}-${branch}`;
+                try {
+                  unlinkSync(join(bandHome(), "workspace-prompts", `${workspaceId}.json`));
+                } catch {
+                  // Prompt file may not exist
                 }
                 return Response.json({ ok: true });
               }

@@ -20,7 +20,12 @@ export interface DashboardState {
   addProject: (path: string, label?: string) => Promise<void>;
   removeProject: (name: string) => Promise<void>;
   reorderProjects: (projectNames: string[]) => Promise<void>;
-  createWorkspace: (project: string, branch: string, base?: string) => Promise<void>;
+  createWorkspace: (
+    project: string,
+    branch: string,
+    base?: string,
+    prompt?: string,
+  ) => Promise<void>;
   removeWorkspace: (project: string, branch: string) => Promise<void>;
   openWorkspace: (workspaceId: string) => void;
   clearError: () => void;
@@ -86,13 +91,16 @@ export function createDashboardStore(adapter: DashboardAdapter): DashboardStore 
       }
     },
 
-    createWorkspace: async (project: string, branch: string, base?: string) => {
+    createWorkspace: async (project: string, branch: string, base?: string, prompt?: string) => {
       try {
-        await adapter.createWorkspace(project, branch, base);
+        await adapter.createWorkspace(project, branch, base, prompt);
       } catch (e) {
         set({ error: String(e) });
+        return;
       }
       await get().loadProjects();
+      const workspaceId = `${project}-${branch}`;
+      get().openWorkspace(workspaceId);
     },
 
     removeWorkspace: async (project: string, branch: string) => {

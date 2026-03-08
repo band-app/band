@@ -43,8 +43,13 @@ export class TauriDashboardAdapter implements DashboardAdapter {
     await invoke("project_update_label", { name, label });
   }
 
-  async createWorkspace(project: string, branch: string, base?: string): Promise<void> {
-    await invoke("workspace_create", { project, branch, base });
+  async createWorkspace(
+    project: string,
+    branch: string,
+    base?: string,
+    prompt?: string,
+  ): Promise<void> {
+    await invoke("workspace_create", { project, branch, base, prompt });
   }
 
   async removeWorkspace(project: string, branch: string): Promise<void> {

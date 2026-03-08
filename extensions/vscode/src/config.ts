@@ -95,7 +95,15 @@ export async function loadEffectiveConfig(workspacePath: string): Promise<BandCo
   return mergeConfigs(defaults, projectConfig);
 }
 
-export async function isBandWorktree(workspacePath: string): Promise<boolean> {
+export interface WorkspaceIdentity {
+  project: string;
+  branch: string;
+  workspaceId: string;
+}
+
+export async function getBandWorktreeIdentity(
+  workspacePath: string,
+): Promise<WorkspaceIdentity | null> {
   const statePath = path.join(os.homedir(), ".band", "state.json");
 
   try {
@@ -108,16 +116,44 @@ export async function isBandWorktree(workspacePath: string): Promise<boolean> {
         if (Array.isArray(project.worktrees)) {
           for (const wt of project.worktrees) {
             if (wt.path === workspacePath) {
-              return true;
+              return {
+                project: project.name,
+                branch: wt.branch,
+                workspaceId: `${project.name}-${wt.branch}`,
+              };
             }
           }
         }
       }
     }
 
-    return false;
+    return null;
   } catch (err) {
     console.log(`[Band] Failed to read state.json:`, err);
-    return false;
+    return null;
+  }
+}
+
+export interface CodingAgentSettings {
+  type: string;
+  command?: string;
+}
+
+export async function loadCodingAgentSettings(): Promise<CodingAgentSettings | null> {
+  const settingsPath = path.join(os.homedir(), ".band", "settings.json");
+
+  try {
+    await fs.promises.access(settingsPath, fs.constants.R_OK);
+    const content = await fs.promises.readFile(settingsPath, "utf-8");
+    const settings = JSON.parse(content);
+
+    if (settings?.codingAgent) {
+      return settings.codingAgent as CodingAgentSettings;
+    }
+
+    return null;
+  } catch (err) {
+    console.log(`[Band] Failed to load coding agent settings:`, err);
+    return null;
   }
 }
