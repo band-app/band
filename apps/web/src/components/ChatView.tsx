@@ -18,6 +18,8 @@ import {
   PromptInputSubmit,
   PromptInputTextarea,
 } from "./ai-elements/prompt-input";
+import { TaskListWidget } from "./ai-elements/task-list-widget";
+import { applyTaskToolCall, isTaskTool, type TaskMap } from "./ai-elements/task-state";
 import type { ToolPart } from "./ai-elements/tool";
 import type { ToolCallItem } from "./ai-elements/tool-call";
 import { ToolCall } from "./ai-elements/tool-call";
@@ -169,6 +171,21 @@ export function ChatView({
     [sendMessage],
   );
 
+  const liveTaskMap: TaskMap = useMemo(() => {
+    let map: TaskMap = new Map();
+    for (const msg of messages) {
+      for (const part of msg.parts) {
+        if (!isToolUIPart(part)) continue;
+        const toolPart = part as ToolPart;
+        const name = getToolName(toolPart);
+        if (!isTaskTool(name)) continue;
+        const item = toolPartToItem(toolPart);
+        map = applyTaskToolCall(map, item);
+      }
+    }
+    return map;
+  }, [messages]);
+
   if (supportsSessionListing && showSessionList) {
     return (
       <SessionList
@@ -212,56 +229,68 @@ export function ChatView({
             </div>
           )}
 
-          {messages.map((message, messageIndex) => {
-            const isLastMessage = messageIndex === messages.length - 1;
-            const isLastAssistant = message.role === "assistant" && isLastMessage;
-            const showThinking = isLastAssistant && isStreaming;
+          {(() => {
+            let taskWidgetRendered = false;
+            return messages.map((message, messageIndex) => {
+              const isLastMessage = messageIndex === messages.length - 1;
+              const isLastAssistant = message.role === "assistant" && isLastMessage;
+              const showThinking = isLastAssistant && isStreaming;
 
-            const visibleParts = message.parts.filter(
-              (p) => (p.type === "text" && p.text.trim()) || p.type === "file" || isToolUIPart(p),
-            );
-            if (message.role === "assistant" && visibleParts.length === 0 && !showThinking) {
-              return null;
-            }
-            return (
-              <Message key={message.id} from={message.role}>
-                <MessageContent>
-                  {message.role === "user" &&
-                    message.parts.map((part, partIdx) =>
-                      part.type === "file" ? (
-                        <MessageFilePart
-                          key={`${message.id}-file-${part.filename ?? partIdx}`}
-                          part={
-                            part as {
-                              type: "file";
-                              mediaType: string;
-                              url: string;
-                              filename?: string;
+              const visibleParts = message.parts.filter(
+                (p) => (p.type === "text" && p.text.trim()) || p.type === "file" || isToolUIPart(p),
+              );
+              if (message.role === "assistant" && visibleParts.length === 0 && !showThinking) {
+                return null;
+              }
+              return (
+                <Message key={message.id} from={message.role}>
+                  <MessageContent>
+                    {message.role === "user" &&
+                      message.parts.map((part, partIdx) =>
+                        part.type === "file" ? (
+                          <MessageFilePart
+                            key={`${message.id}-file-${part.filename ?? partIdx}`}
+                            part={
+                              part as {
+                                type: "file";
+                                mediaType: string;
+                                url: string;
+                                filename?: string;
+                              }
                             }
-                          }
-                        />
-                      ) : null,
-                    )}
-                  {groupMessageParts(message.parts).map((segment) => {
-                    if (segment.type === "text") {
-                      const { part, partIndex } = segment;
-                      if (part.type === "text" && part.text.trim()) {
-                        return (
-                          <MessageResponse key={`${message.id}-text-${partIndex}`}>
-                            {part.text}
-                          </MessageResponse>
-                        );
+                          />
+                        ) : null,
+                      )}
+                    {groupMessageParts(message.parts).map((segment) => {
+                      if (segment.type === "text") {
+                        const { part, partIndex } = segment;
+                        if (part.type === "text" && part.text.trim()) {
+                          return (
+                            <MessageResponse key={`${message.id}-text-${partIndex}`}>
+                              {part.text}
+                            </MessageResponse>
+                          );
+                        }
+                        return null;
                       }
-                      return null;
-                    }
-                    const item = toolPartToItem(segment.part);
-                    return <ToolCall key={`${message.id}-tool-${segment.partIndex}`} item={item} />;
-                  })}
-                  {showThinking && <ThinkingIndicator />}
-                </MessageContent>
-              </Message>
-            );
-          })}
+                      const item = toolPartToItem(segment.part);
+                      if (isTaskTool(item.toolName)) {
+                        if (!taskWidgetRendered && liveTaskMap.size > 0) {
+                          taskWidgetRendered = true;
+                          return <TaskListWidget key="task-list-widget" tasks={liveTaskMap} />;
+                        }
+                        return null;
+                      }
+                      return (
+                        <ToolCall key={`${message.id}-tool-${segment.partIndex}`} item={item} />
+                      );
+                    })}
+                    {showThinking && <ThinkingIndicator />}
+                  </MessageContent>
+                </Message>
+              );
+            });
+          })()}
           {isStreaming && (!messages.length || messages[messages.length - 1].role === "user") && (
             <Message from="assistant">
               <MessageContent>
@@ -298,13 +327,47 @@ function buildToolResultMap(messages: HistoryMessage[]) {
   return map;
 }
 
+function buildHistoryTaskMap(
+  messages: HistoryMessage[],
+  toolResultMap: Map<string, HistoryMessageContent>,
+): { taskMap: TaskMap; taskToolCallIds: Set<string> } {
+  const taskToolCallIds = new Set<string>();
+  let map: TaskMap = new Map();
+  for (const msg of messages) {
+    for (const block of msg.content) {
+      if (block.type !== "tool_use" || !block.toolName || !isTaskTool(block.toolName)) continue;
+      const id = block.toolCallId ?? "";
+      taskToolCallIds.add(id);
+      const item = historyToolToItem(block, toolResultMap.get(id));
+      map = applyTaskToolCall(map, item);
+    }
+  }
+  return { taskMap: map, taskToolCallIds };
+}
+
 function HistoryMessages({ messages }: { messages: HistoryMessage[] }) {
   const toolResultMap = useMemo(() => buildToolResultMap(messages), [messages]);
+  const { taskMap, taskToolCallIds } = useMemo(
+    () => buildHistoryTaskMap(messages, toolResultMap),
+    [messages, toolResultMap],
+  );
+
+  let taskWidgetRendered = false;
 
   return (
     <>
       {messages.map((msg) => (
-        <HistoryMessageView key={msg.id} message={msg} toolResultMap={toolResultMap} />
+        <HistoryMessageView
+          key={msg.id}
+          message={msg}
+          toolResultMap={toolResultMap}
+          taskMap={taskMap}
+          taskToolCallIds={taskToolCallIds}
+          taskWidgetRendered={taskWidgetRendered}
+          onTaskWidgetRendered={() => {
+            taskWidgetRendered = true;
+          }}
+        />
       ))}
     </>
   );
@@ -313,9 +376,17 @@ function HistoryMessages({ messages }: { messages: HistoryMessage[] }) {
 function HistoryMessageView({
   message,
   toolResultMap,
+  taskMap,
+  taskToolCallIds,
+  taskWidgetRendered,
+  onTaskWidgetRendered,
 }: {
   message: HistoryMessage;
   toolResultMap: Map<string, HistoryMessageContent>;
+  taskMap: TaskMap;
+  taskToolCallIds: Set<string>;
+  taskWidgetRendered: boolean;
+  onTaskWidgetRendered: () => void;
 }) {
   const textBlocks = message.content.filter((b) => b.type === "text" && b.text?.trim());
   const toolUseBlocks = message.content.filter((b) => b.type === "tool_use");
@@ -336,7 +407,16 @@ function HistoryMessageView({
 
   return (
     <Message from="assistant">
-      <MessageContent>{renderHistoryContent(message, toolResultMap)}</MessageContent>
+      <MessageContent>
+        {renderHistoryContent(
+          message,
+          toolResultMap,
+          taskMap,
+          taskToolCallIds,
+          taskWidgetRendered,
+          onTaskWidgetRendered,
+        )}
+      </MessageContent>
     </Message>
   );
 }
@@ -359,6 +439,10 @@ function historyToolToItem(
 function renderHistoryContent(
   message: HistoryMessage,
   toolResultMap: Map<string, HistoryMessageContent>,
+  taskMap: TaskMap,
+  taskToolCallIds: Set<string>,
+  taskWidgetRendered: boolean,
+  onTaskWidgetRendered: () => void,
 ) {
   const elements: React.ReactNode[] = [];
 
@@ -368,7 +452,16 @@ function renderHistoryContent(
         <MessageResponse key={`text-${elements.length}`}>{block.text}</MessageResponse>,
       );
     } else if (block.type === "tool_use") {
-      const item = historyToolToItem(block, toolResultMap.get(block.toolCallId ?? ""));
+      const callId = block.toolCallId ?? "";
+      if (taskToolCallIds.has(callId)) {
+        if (!taskWidgetRendered && taskMap.size > 0) {
+          taskWidgetRendered = true;
+          onTaskWidgetRendered();
+          elements.push(<TaskListWidget key="task-list-widget" tasks={taskMap} />);
+        }
+        continue;
+      }
+      const item = historyToolToItem(block, toolResultMap.get(callId));
       elements.push(<ToolCall key={`tool-${elements.length}`} item={item} />);
     }
   }
