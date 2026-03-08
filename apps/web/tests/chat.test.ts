@@ -154,8 +154,8 @@ interface SSEEvent {
 /**
  * Parse an SSE response body into an array of { event, data } objects.
  *
- * The Vercel AI SDK uses `data:` lines with JSON that has a `type` field.
- * There are no `event:` headers — the event type is inside the JSON data.
+ * The task runner emits UIMessageChunk objects as JSON in `data:` lines.
+ * The event type is inside the JSON data's `type` field.
  */
 async function parseSSEStream(response: Response): Promise<SSEEvent[]> {
   const text = await response.text();
@@ -181,11 +181,39 @@ async function parseSSEStream(response: Response): Promise<SSEEvent[]> {
   return events;
 }
 
+/**
+ * Submit a task and wait for the SSE stream to complete.
+ * Returns the SSE events from the stream.
+ */
+async function submitAndStream(
+  serverUrl: string,
+  workspaceId: string,
+  prompt: string,
+): Promise<{ submitRes: Response; streamRes: Response; events: SSEEvent[] }> {
+  const submitRes = await fetch(`${serverUrl}/api/tasks/submit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ workspaceId, prompt }),
+  });
+
+  if (!submitRes.ok) {
+    return { submitRes, streamRes: submitRes, events: [] };
+  }
+
+  // Give the task a moment to start producing events
+  await new Promise((r) => setTimeout(r, 100));
+
+  const streamRes = await fetch(`${serverUrl}/api/tasks/${encodeURIComponent(workspaceId)}/stream`);
+  const events = await parseSSEStream(streamRes);
+
+  return { submitRes, streamRes, events };
+}
+
 // ---------------------------------------------------------------------------
-// POST /api/chat — Validation
+// POST /api/tasks/submit — Validation
 // ---------------------------------------------------------------------------
 
-describe("POST /api/chat — validation", () => {
+describe("POST /api/tasks/submit — validation", () => {
   let server: ServerHandle;
   let tmpHome: string;
 
@@ -202,36 +230,33 @@ describe("POST /api/chat — validation", () => {
   });
 
   it("returns 400 when workspaceId is missing", async () => {
-    const res = await fetch(`${server.url}/api/chat`, {
+    const res = await fetch(`${server.url}/api/tasks/submit`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: [{ content: "hello" }] }),
+      body: JSON.stringify({ prompt: "hello" }),
     });
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error).toContain("workspaceId");
   });
 
-  it("returns 404 when workspaceId does not match any workspace", async () => {
-    const res = await fetch(`${server.url}/api/chat`, {
+  it("returns 400 when prompt is missing", async () => {
+    const res = await fetch(`${server.url}/api/tasks/submit`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        workspaceId: "nonexistent-main",
-        messages: [{ content: "hello" }],
-      }),
+      body: JSON.stringify({ workspaceId: "testproject-main" }),
     });
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.error).toContain("not found");
+    expect(body.error).toContain("prompt");
   });
 });
 
 // ---------------------------------------------------------------------------
-// POST /api/chat — Streaming
+// Task submit + stream — Streaming
 // ---------------------------------------------------------------------------
 
-describe("POST /api/chat — streaming", () => {
+describe("Task submit + stream — streaming", () => {
   let server: ServerHandle;
   let tmpHome: string;
 
@@ -300,22 +325,18 @@ describe("POST /api/chat — streaming", () => {
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  it("returns 200 with streaming SSE events for a full conversation", async () => {
-    const res = await fetch(`${server.url}/api/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        workspaceId: "testproject-main",
-        messages: [{ content: "hello" }],
-      }),
-    });
-    expect(res.status).toBe(200);
-    const contentType = res.headers.get("content-type")!;
-    expect(contentType.includes("text/event-stream") || contentType.includes("text/plain")).toBe(
-      true,
+  it("returns 202 on submit and streams UIMessageChunk events", async () => {
+    const { submitRes, streamRes, events } = await submitAndStream(
+      server.url,
+      "testproject-main",
+      "hello",
     );
+    expect(submitRes.status).toBe(202);
+    expect(streamRes.status).toBe(200);
 
-    const events = await parseSSEStream(res);
+    const contentType = streamRes.headers.get("content-type")!;
+    expect(contentType).toContain("text/event-stream");
+
     const eventTypes = events.map((e) => e.event).filter(Boolean) as string[];
 
     expect(eventTypes).toContain("data-session");
@@ -328,10 +349,10 @@ describe("POST /api/chat — streaming", () => {
 });
 
 // ---------------------------------------------------------------------------
-// POST /api/chat — Agent failure
+// Task submit + stream — Agent failure
 // ---------------------------------------------------------------------------
 
-describe("POST /api/chat — agent failure", () => {
+describe("Task submit + stream — agent failure", () => {
   let server: ServerHandle;
   let tmpHome: string;
 
@@ -369,27 +390,19 @@ describe("POST /api/chat — agent failure", () => {
   });
 
   it("stream contains error event when agent returns failure result", async () => {
-    const res = await fetch(`${server.url}/api/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        workspaceId: "testproject-main",
-        messages: [{ content: "hello" }],
-      }),
-    });
-    expect(res.status).toBe(200);
+    const { submitRes, events } = await submitAndStream(server.url, "testproject-main", "hello");
+    expect(submitRes.status).toBe(202);
 
-    const events = await parseSSEStream(res);
     const errorEvents = events.filter((e) => e.event === "error");
     expect(errorEvents.length).toBeGreaterThan(0);
   });
 });
 
 // ---------------------------------------------------------------------------
-// POST /api/chat — Agent crash
+// Task submit + stream — Agent crash
 // ---------------------------------------------------------------------------
 
-describe("POST /api/chat — agent crash", () => {
+describe("Task submit + stream — agent crash", () => {
   let server: ServerHandle;
   let tmpHome: string;
 
@@ -416,17 +429,9 @@ describe("POST /api/chat — agent crash", () => {
   });
 
   it("stream contains error event when agent binary crashes", async () => {
-    const res = await fetch(`${server.url}/api/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        workspaceId: "testproject-main",
-        messages: [{ content: "hello" }],
-      }),
-    });
-    expect(res.status).toBe(200);
+    const { submitRes, events } = await submitAndStream(server.url, "testproject-main", "hello");
+    expect(submitRes.status).toBe(202);
 
-    const events = await parseSSEStream(res);
     const eventTypes = events.map((e) => e.event).filter(Boolean) as string[];
     const hasError = eventTypes.includes("error");
     const hasNoResult = !eventTypes.includes("data-result");
@@ -435,10 +440,10 @@ describe("POST /api/chat — agent crash", () => {
 });
 
 // ---------------------------------------------------------------------------
-// POST /api/chat — Auth
+// POST /api/tasks/submit — Auth
 // ---------------------------------------------------------------------------
 
-describe("POST /api/chat — auth", () => {
+describe("POST /api/tasks/submit — auth", () => {
   let server: ServerHandle;
   let tmpHome: string;
 
@@ -458,12 +463,12 @@ describe("POST /api/chat — auth", () => {
   });
 
   it("returns 401 when BAND_TOKEN_SECRET is set and no token provided", async () => {
-    const res = await fetch(`${server.url}/api/chat`, {
+    const res = await fetch(`${server.url}/api/tasks/submit`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         workspaceId: "testproject-main",
-        messages: [{ content: "hello" }],
+        prompt: "hello",
       }),
     });
     expect(res.status).toBe(401);
