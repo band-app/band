@@ -24,6 +24,19 @@ enum Commands {
         #[arg(long)]
         base: Option<String>,
     },
+    /// Create a workspace and write a prompt file for automated agent runs
+    Run {
+        /// Project name
+        project: String,
+        /// Branch name
+        branch: String,
+        /// Prompt to pass to the coding agent
+        #[arg(long)]
+        prompt: String,
+        /// Base branch to create from (defaults to project's default branch)
+        #[arg(long)]
+        base: Option<String>,
+    },
     /// List workspaces, optionally filtered by project
     List {
         /// Project name (optional filter)
@@ -49,6 +62,12 @@ fn main() {
             branch,
             base,
         } => cmd_create(&project, &branch, base.as_deref()),
+        Commands::Run {
+            project,
+            branch,
+            prompt,
+            base,
+        } => cmd_run(&project, &branch, &prompt, base.as_deref()),
         Commands::List { project } => cmd_list(project.as_deref()),
         Commands::Remove { project, branch } => cmd_remove(&project, &branch),
         Commands::Projects => cmd_projects(),
@@ -60,7 +79,8 @@ fn main() {
     }
 }
 
-fn cmd_create(project: &str, branch: &str, base: Option<&str>) -> Result<(), String> {
+/// Core logic: create a workspace and return the worktree path without printing.
+fn create_workspace(project: &str, branch: &str, base: Option<&str>) -> Result<String, String> {
     let worktree_path = state::with_locked_state(|app_state| {
         let proj = app_state
             .projects
@@ -99,7 +119,51 @@ fn cmd_create(project: &str, branch: &str, base: Option<&str>) -> Result<(), Str
         }
     }
 
-    // Print the worktree path to stdout on success
+    Ok(worktree_path)
+}
+
+fn cmd_create(project: &str, branch: &str, base: Option<&str>) -> Result<(), String> {
+    let worktree_path = create_workspace(project, branch, base)?;
+    println!("{worktree_path}");
+    Ok(())
+}
+
+fn cmd_run(project: &str, branch: &str, prompt: &str, base: Option<&str>) -> Result<(), String> {
+    let worktree_path = create_workspace(project, branch, base)?;
+
+    // Write prompt file
+    let workspace_id = format!("{project}-{branch}");
+    let prompt_file = state::workspace_prompts_dir().join(format!("{workspace_id}.json"));
+    if let Some(parent) = prompt_file.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create prompt directory: {e}"))?;
+    }
+    let prompt_data = serde_json::json!({
+        "prompt": prompt,
+        "didRun": false
+    });
+    let prompt_json = serde_json::to_string_pretty(&prompt_data)
+        .map_err(|e| format!("Failed to serialize prompt: {e}"))?;
+    std::fs::write(&prompt_file, prompt_json)
+        .map_err(|e| format!("Failed to write prompt file: {e}"))?;
+
+    // Open workspace in VS Code so the extension picks up the prompt.
+    // Try macOS `open -g` first (opens without stealing focus), fall back to `code`.
+    let opened = std::process::Command::new("open")
+        .args(["-g", "-a", "Visual Studio Code", "--args", &worktree_path])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if !opened {
+        let open_result = std::process::Command::new("code")
+            .arg(&worktree_path)
+            .env("PATH", shell::shell_path())
+            .output();
+        if let Err(e) = open_result {
+            eprintln!("Warning: failed to open VS Code: {e}");
+        }
+    }
+
     println!("{worktree_path}");
     Ok(())
 }
@@ -159,6 +223,10 @@ fn cmd_remove(project: &str, branch: &str) -> Result<(), String> {
     // Clean up status file
     let status_file = state::status_dir().join(format!("{project}-{branch}.json"));
     let _ = std::fs::remove_file(status_file);
+
+    // Clean up prompt file
+    let prompt_file = state::workspace_prompts_dir().join(format!("{project}-{branch}.json"));
+    let _ = std::fs::remove_file(prompt_file);
 
     // Run teardown script before removing worktree so it can access project files
     if let Some(teardown) = &config.teardown {

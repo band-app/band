@@ -7,6 +7,7 @@ pub fn workspace_create(
     project: String,
     branch: String,
     base: Option<String>,
+    prompt: Option<String>,
 ) -> Result<(), String> {
     let mut app_state = state::load_state()?;
 
@@ -38,6 +39,24 @@ pub fn workspace_create(
     });
 
     state::save_state(&app_state)?;
+
+    // Write prompt file if provided
+    if let Some(prompt_text) = &prompt {
+        let workspace_id = format!("{project}-{branch}");
+        let prompt_file = state::band_home()
+            .join("workspace-prompts")
+            .join(format!("{workspace_id}.json"));
+        if let Some(parent) = prompt_file.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let prompt_data = serde_json::json!({
+            "prompt": prompt_text,
+            "didRun": false
+        });
+        if let Ok(json) = serde_json::to_string_pretty(&prompt_data) {
+            let _ = std::fs::write(&prompt_file, json);
+        }
+    }
 
     // Run setup script if configured — failure is non-fatal since the workspace
     // was already created successfully.
@@ -89,6 +108,12 @@ pub fn workspace_remove(project: String, branch: String) -> Result<(), String> {
     // Clean up status file
     let status_file = state::status_dir().join(format!("{project}-{branch}.json"));
     let _ = std::fs::remove_file(status_file);
+
+    // Clean up prompt file
+    let prompt_file = state::band_home()
+        .join("workspace-prompts")
+        .join(format!("{project}-{branch}.json"));
+    let _ = std::fs::remove_file(prompt_file);
 
     // Remove git worktree synchronously so project_list won't re-discover it
     if std::path::Path::new(&worktree_path).exists() {

@@ -1,18 +1,19 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { createFileRoute } from "@tanstack/react-router";
 import { gitCmd } from "../../lib/git";
-import { loadState, worktreesDir } from "../../lib/state";
+import { bandHome, loadState, worktreesDir } from "../../lib/state";
 
 export const Route = createFileRoute("/api/workspaces/create")({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        const { project, branch, base } = (await request.json()) as {
+        const { project, branch, base, prompt } = (await request.json()) as {
           project: string;
           branch: string;
           base?: string;
+          prompt?: string;
         };
 
         const state = loadState();
@@ -40,6 +41,13 @@ export const Route = createFileRoute("/api/workspaces/create")({
             { error: e instanceof Error ? e.message : String(e) },
             { status: 500 },
           );
+        }
+
+        if (prompt) {
+          const workspaceId = `${project}-${branch}`;
+          const promptFile = join(bandHome(), "workspace-prompts", `${workspaceId}.json`);
+          mkdirSync(dirname(promptFile), { recursive: true });
+          writeFileSync(promptFile, JSON.stringify({ prompt, didRun: false }, null, 2), "utf-8");
         }
 
         return Response.json({ ok: true });

@@ -95,11 +95,16 @@ export class WebDashboardAdapter implements DashboardAdapter {
     if (!res.ok) throw new Error("Failed to update label");
   }
 
-  async createWorkspace(project: string, branch: string, base?: string): Promise<void> {
+  async createWorkspace(
+    project: string,
+    branch: string,
+    base?: string,
+    prompt?: string,
+  ): Promise<void> {
     const res = await fetch("/api/workspaces/create", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ project, branch, base }),
+      body: JSON.stringify({ project, branch, base, prompt }),
     });
     if (!res.ok) throw new Error("Failed to create workspace");
   }

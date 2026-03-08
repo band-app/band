@@ -19,7 +19,7 @@ export interface DashboardAdapter {
   updateProjectLabel(name: string, label: string | null): Promise<void>;
 
   // Workspaces
-  createWorkspace(project: string, branch: string, base?: string): Promise<void>;
+  createWorkspace(project: string, branch: string, base?: string, prompt?: string): Promise<void>;
   removeWorkspace(project: string, branch: string): Promise<void>;
   openWorkspace(workspaceId: string): Promise<void>;
   runScript(path: string, scriptType: string): Promise<void>;
