@@ -1,4 +1,4 @@
-import { lstatSync, readlinkSync, realpathSync, symlinkSync, unlinkSync } from "node:fs";
+import { lstatSync, realpathSync, symlinkSync, unlinkSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 export type CliStatus =

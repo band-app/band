@@ -70,7 +70,7 @@ export function useCliSetup() {
       } else {
         setState({
           status: "manual",
-          reason: "Install completed but CLI check still reports: " + result,
+          reason: `Install completed but CLI check still reports: ${result}`,
         });
       }
     } catch (err) {
