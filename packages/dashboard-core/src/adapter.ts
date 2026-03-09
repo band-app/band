@@ -63,5 +63,5 @@ export interface PlatformCapabilities {
   revealInFinder?(path: string): Promise<void>;
   pickFolder?(): Promise<string | null>;
   openUrl?(url: string): Promise<void>;
-  getWorkspaceHref?(workspaceId: string): string;
+  getWorkspaceHref?(workspaceId: string): string | undefined;
 }

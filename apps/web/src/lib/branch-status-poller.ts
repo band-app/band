@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { execGh, execGit } from "./git";
 import { bandHome, loadState } from "./state";
@@ -225,9 +225,21 @@ async function pollTick() {
   await Promise.allSettled(
     workspaces.map(async (ws) => {
       const git = await getGitStatus(ws.worktreePath);
+
       let ci: CIStatus = { state: "none" };
       if (isCITick) {
         ci = await getCIStatus(ws.worktreePath, ws.branch);
+      } else {
+        // Preserve existing CI status from file on non-CI ticks
+        const filePath = join(dir, `${ws.workspaceId}.json`);
+        try {
+          const existing = JSON.parse(readFileSync(filePath, "utf-8")) as {
+            ci?: CIStatus;
+          };
+          if (existing.ci) ci = existing.ci;
+        } catch {
+          // File may not exist yet
+        }
       }
 
       const data = {
