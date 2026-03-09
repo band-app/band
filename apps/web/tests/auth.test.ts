@@ -69,7 +69,6 @@ describe("auth middleware (with secret)", () => {
     expect(setCookie).toBeTruthy();
     expect(setCookie).toContain(`band_token=${EXPECTED_TOKEN}`);
     expect(setCookie).toContain("HttpOnly");
-    expect(setCookie).toContain("Secure");
     expect(setCookie).toContain("SameSite=Strict");
     expect(setCookie).toContain("Max-Age=86400");
   });

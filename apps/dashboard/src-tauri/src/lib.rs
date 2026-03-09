@@ -65,6 +65,19 @@ pub fn run() {
         .setup(|app| {
             let window = app.get_webview_window("main").unwrap();
 
+            // Auto-start the web server and navigate with auth token
+            match webserver::ensure_webserver_running() {
+                Ok((port, token)) => {
+                    let url_str = format!("http://localhost:{port}?token={token}");
+                    if let Ok(url) = url::Url::parse(&url_str) {
+                        let _ = window.navigate(url);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to start web server: {e}");
+                }
+            }
+
             // Set window title with git branch if available
             let title = match git::get_current_branch() {
                 Some(branch) => format!("Band - {branch}"),

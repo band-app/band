@@ -150,6 +150,12 @@ importers:
       '@tanstack/react-start':
         specifier: ^1.154.0
         version: 1.166.2(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(vite@7.3.1(@types/node@22.19.13)(jiti@2.6.1)(lightningcss@1.31.1)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2))
+      '@tauri-apps/api':
+        specifier: ^2.0.0
+        version: 2.10.1
+      '@tauri-apps/plugin-shell':
+        specifier: ^2.0.0
+        version: 2.3.5
       ai:
         specifier: ^6.0.105
         version: 6.0.114(zod@3.25.76)

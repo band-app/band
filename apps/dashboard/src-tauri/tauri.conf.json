@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "com.band.dashboard",
   "build": {
-    "frontendDist": "../dist",
-    "devUrl": "http://localhost:1420",
-    "beforeDevCommand": "pnpm dev",
+    "frontendDist": "http://localhost:3456",
+    "devUrl": "http://localhost:3456",
+    "beforeDevCommand": "pnpm -w dev:web",
     "beforeBuildCommand": "pnpm -w build:web && pnpm build && pnpm -w build:cli"
   },
   "app": {
