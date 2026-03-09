@@ -63,11 +63,20 @@ export function useCliSetup() {
   const install = async () => {
     try {
       await adapter.installCli();
-      setState({ status: "installed" });
+      // Re-check to confirm it actually worked
+      const result = await adapter.checkCli();
+      if (result === "Installed") {
+        setState({ status: "installed" });
+      } else {
+        setState({
+          status: "manual",
+          reason: "Install completed but CLI check still reports: " + result,
+        });
+      }
     } catch (err) {
       setState({
-        status: "error",
-        message: err instanceof Error ? err.message : String(err),
+        status: "manual",
+        reason: err instanceof Error ? err.message : String(err),
       });
     }
   };

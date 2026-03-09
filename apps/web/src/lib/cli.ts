@@ -1,5 +1,5 @@
-import { lstatSync, readlinkSync, symlinkSync } from "node:fs";
-import { join } from "node:path";
+import { lstatSync, readlinkSync, realpathSync, symlinkSync, unlinkSync } from "node:fs";
+import { join, resolve } from "node:path";
 
 export type CliStatus =
   | "Installed"
@@ -10,20 +10,25 @@ export type CliStatus =
 
 const SYMLINK_PATH = "/usr/local/bin/band";
 
+/** Resolve the project root from the web app's working directory (apps/web/). */
+function projectRoot(): string {
+  // Both Vite dev and the production server run with cwd = apps/web/
+  return resolve(process.cwd(), "..", "..");
+}
+
 export async function checkCli(): Promise<CliStatus> {
   try {
     const stat = lstatSync(SYMLINK_PATH);
     if (!stat.isSymbolicLink()) {
       return "ConflictingBinary";
     }
-    // Check if the symlink target exists
-    const target = readlinkSync(SYMLINK_PATH);
-    try {
-      lstatSync(target);
-      return "Installed";
-    } catch {
-      return "NotInstalled";
+    // Check if the symlink points to our CLI binary
+    const target = realpathSync(SYMLINK_PATH);
+    const root = projectRoot();
+    if (!target.startsWith(join(root, "apps", "cli"))) {
+      return "ConflictingBinary";
     }
+    return "Installed";
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "ENOENT") {
@@ -43,12 +48,10 @@ export async function checkCli(): Promise<CliStatus> {
 }
 
 export async function installCli(): Promise<void> {
-  // Find the CLI binary from npm package build output
-  // The CLI binary is built with cargo and placed at apps/cli/target/release/band
-  // In production, it may be at various locations. Try common paths.
+  const root = projectRoot();
   const possiblePaths = [
-    join(import.meta.dirname, "..", "..", "..", "..", "cli", "target", "release", "band"),
-    join(import.meta.dirname, "..", "..", "..", "..", "cli", "target", "debug", "band"),
+    join(root, "apps", "cli", "target", "release", "band"),
+    join(root, "apps", "cli", "target", "debug", "band"),
   ];
 
   let binaryPath: string | null = null;
@@ -68,13 +71,13 @@ export async function installCli(): Promise<void> {
     );
   }
 
-  // Remove existing symlink if present
+  // Remove existing file/symlink if present
   try {
     lstatSync(SYMLINK_PATH);
-    const { unlinkSync } = await import("node:fs");
     unlinkSync(SYMLINK_PATH);
-  } catch {
-    // No existing file
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT") throw err;
   }
 
   symlinkSync(binaryPath, SYMLINK_PATH);
