@@ -93,6 +93,3 @@ export class NativeShellCapabilities implements PlatformCapabilities {
     await open(url);
   }
 }
-
-/** @deprecated Use NativeShellCapabilities instead */
-export const HybridCapabilities = NativeShellCapabilities;
