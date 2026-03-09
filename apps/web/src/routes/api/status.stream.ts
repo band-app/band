@@ -11,6 +11,9 @@ export const Route = createFileRoute("/api/status/stream")({
 
         const stream = new ReadableStream({
           start(controller) {
+            // Flush an initial SSE comment so response headers are sent immediately
+            controller.enqueue(encoder.encode(": connected\n\n"));
+
             unsubscribe = subscribe((event) => {
               try {
                 const data = JSON.stringify(event);
