@@ -104,13 +104,15 @@ async function getGitStatus(worktreePath: string): Promise<GitStatus> {
 }
 
 async function getCIStatus(worktreePath: string, branch: string): Promise<CIStatus> {
-  // Check if PR is merged
+  // Check PR status
+  let prUrl: string | null = null;
   try {
     const prOutput = await execGh(["pr", "view", branch, "--json", "state,url"], worktreePath);
     const pr = JSON.parse(prOutput) as { state: string; url: string };
     if (pr.state === "MERGED") {
       return { state: "merged", url: pr.url };
     }
+    prUrl = pr.url;
   } catch {
     // No PR or gh not available
   }
@@ -177,7 +179,7 @@ async function getCIStatus(worktreePath: string, branch: string): Promise<CIStat
       }
     }
 
-    return { state: aggregatedState, url: aggregatedUrl };
+    return { state: aggregatedState, url: prUrl ?? aggregatedUrl };
   } catch {
     return { state: "none" };
   }
