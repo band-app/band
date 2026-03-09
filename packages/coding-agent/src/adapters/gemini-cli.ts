@@ -1,3 +1,4 @@
+import type { ChildProcess } from "node:child_process";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { createLogger } from "@band/logger";
@@ -18,12 +19,21 @@ export class GeminiCliAdapter implements CodingAgent {
   private readonly maxTurns: number;
   private readonly model: string | undefined;
   private readonly executablePath: string;
+  private activeChild: ChildProcess | null = null;
 
   constructor(config: GeminiCliConfig) {
     this.workspaceDir = config.workspaceDir;
     this.maxTurns = config.maxTurns;
     this.model = config.options.model;
     this.executablePath = config.options.executablePath ?? "gemini";
+  }
+
+  abort(): void {
+    if (this.activeChild) {
+      log.info("aborting active gemini process");
+      this.activeChild.kill();
+      this.activeChild = null;
+    }
   }
 
   async *runSession(prompt: string, _sessionId?: string): AsyncGenerator<AgentEvent> {
@@ -48,6 +58,7 @@ export class GeminiCliAdapter implements CodingAgent {
       stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env },
     });
+    this.activeChild = child;
 
     const startMs = Date.now();
     let turnCount = 0;
@@ -139,6 +150,8 @@ export class GeminiCliAdapter implements CodingAgent {
       log.error({ err }, "gemini error");
       child.kill();
       throw err;
+    } finally {
+      this.activeChild = null;
     }
   }
 }

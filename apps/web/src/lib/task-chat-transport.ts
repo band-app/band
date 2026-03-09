@@ -57,6 +57,14 @@ export class TaskChatTransport implements ChatTransport<UIMessage> {
     this.getSessionId = getSessionId;
   }
 
+  abort(): void {
+    fetch(`/api/tasks/${encodeURIComponent(this.workspaceId)}/abort`, {
+      method: "POST",
+    }).catch(() => {
+      // fire-and-forget
+    });
+  }
+
   async sendMessages({
     messages,
     abortSignal,

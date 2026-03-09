@@ -16,12 +16,21 @@ export class OpenAICodexAdapter implements CodingAgent {
   private readonly maxTurns: number;
   private readonly model: string;
   private readonly sandboxMode: string;
+  private activeIterator: AsyncIterator<unknown> | null = null;
 
   constructor(config: OpenAICodexConfig) {
     this.workspaceDir = config.workspaceDir;
     this.maxTurns = config.maxTurns;
     this.model = config.options.model ?? "codex-mini";
     this.sandboxMode = config.options.sandboxMode ?? "docker";
+  }
+
+  abort(): void {
+    if (this.activeIterator) {
+      log.info("aborting active codex stream");
+      this.activeIterator.return?.(undefined);
+      this.activeIterator = null;
+    }
   }
 
   async *runSession(prompt: string, sessionId?: string): AsyncGenerator<AgentEvent> {
@@ -59,8 +68,11 @@ export class OpenAICodexAdapter implements CodingAgent {
       sandbox: this.sandboxMode,
     });
 
+    const iterator = stream[Symbol.asyncIterator]();
+    this.activeIterator = iterator;
+
     try {
-      for await (const event of stream) {
+      for await (const event of { [Symbol.asyncIterator]: () => iterator }) {
         const type = event.type as string;
         log.debug({ eventType: type }, "codex event");
 
@@ -139,6 +151,8 @@ export class OpenAICodexAdapter implements CodingAgent {
     } catch (err) {
       log.error({ err }, "codex error");
       throw err;
+    } finally {
+      this.activeIterator = null;
     }
   }
 }

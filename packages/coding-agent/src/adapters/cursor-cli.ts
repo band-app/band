@@ -57,10 +57,19 @@ export class CursorCliAdapter implements CodingAgent {
 
   private readonly maxTurns: number;
   private readonly model: string;
+  private activeIterator: AsyncIterator<unknown> | null = null;
 
   constructor(config: CursorCliConfig) {
     this.maxTurns = config.maxTurns;
     this.model = config.options.model;
+  }
+
+  abort(): void {
+    if (this.activeIterator) {
+      log.info("aborting active cursor stream");
+      this.activeIterator.return?.(undefined);
+      this.activeIterator = null;
+    }
   }
 
   async *runSession(prompt: string, sessionId?: string): AsyncGenerator<AgentEvent> {
@@ -89,8 +98,11 @@ export class CursorCliAdapter implements CodingAgent {
     const startMs = Date.now();
     let lastAssistantText = "";
 
+    const iterator = stream[Symbol.asyncIterator]();
+    this.activeIterator = iterator;
+
     try {
-      for await (const event of stream) {
+      for await (const event of { [Symbol.asyncIterator]: () => iterator }) {
         const type = event.type as string;
         log.debug(
           {
@@ -137,6 +149,8 @@ export class CursorCliAdapter implements CodingAgent {
     } catch (err) {
       log.error({ err }, "cursor error");
       throw err;
+    } finally {
+      this.activeIterator = null;
     }
   }
 }

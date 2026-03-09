@@ -35,6 +35,7 @@ export interface CodingAgent {
   readonly supportedFeatures: CodingAgentFeatures;
   onUserInputNeeded?: (request: UserInputRequest) => Promise<Record<string, string>>;
   runSession(prompt: string, sessionId?: string): AsyncGenerator<AgentEvent>;
+  abort?(): void;
   listSessions?(dir: string): Promise<SessionListItem[]>;
   getSessionMessages?(
     sessionId: string,

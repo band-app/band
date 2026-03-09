@@ -33,6 +33,7 @@ export class ClaudeCodeAdapter implements CodingAgent {
   private readonly model: string | undefined;
   private readonly executablePath: string | undefined;
   private readonly additionalDirectories: string[] | undefined;
+  private activeConversation: ReturnType<typeof query> | null = null;
 
   constructor(config: ClaudeCodeConfig) {
     this.workspaceDir = config.workspaceDir;
@@ -40,6 +41,14 @@ export class ClaudeCodeAdapter implements CodingAgent {
     this.model = config.options.model;
     this.executablePath = config.options.executablePath;
     this.additionalDirectories = config.additionalDirectories;
+  }
+
+  abort(): void {
+    if (this.activeConversation) {
+      log.info("aborting active conversation");
+      this.activeConversation.close();
+      this.activeConversation = null;
+    }
   }
 
   async *runSession(prompt: string, sessionId?: string): AsyncGenerator<AgentEvent> {
@@ -107,6 +116,7 @@ export class ClaudeCodeAdapter implements CodingAgent {
       },
     });
 
+    this.activeConversation = conversation;
     log.info("query() called, waiting for messages...");
 
     const state: ProcessedState = {
@@ -132,6 +142,7 @@ export class ClaudeCodeAdapter implements CodingAgent {
       log.error({ err }, "conversation error");
       throw err;
     } finally {
+      this.activeConversation = null;
       log.info("closing conversation");
       conversation.close();
     }
