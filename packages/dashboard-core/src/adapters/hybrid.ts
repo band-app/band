@@ -67,7 +67,10 @@ export class NativeShellCapabilities implements PlatformCapabilities {
     return isTauri();
   }
 
-  getWorkspaceHref(workspaceId: string): string {
+  getWorkspaceHref(workspaceId: string): string | undefined {
+    // Inside Tauri, clicking a workspace should focus the IDE window
+    // via openWorkspace (Tauri IPC), not navigate to the chat page.
+    if (isTauri()) return undefined;
     return this.web.getWorkspaceHref(workspaceId);
   }
 
