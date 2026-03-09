@@ -42,6 +42,7 @@ import { Route as ApiWorkspaceWorkspaceIdFilesRouteImport } from './routes/api/w
 import { Route as ApiWorkspaceWorkspaceIdFileRouteImport } from './routes/api/workspace.$workspaceId.file'
 import { Route as ApiWorkspaceWorkspaceIdDiffRouteImport } from './routes/api/workspace.$workspaceId.diff'
 import { Route as ApiTasksWorkspaceIdStreamRouteImport } from './routes/api/tasks.$workspaceId.stream'
+import { Route as ApiTasksWorkspaceIdAbortRouteImport } from './routes/api/tasks.$workspaceId.abort'
 import { Route as ApiSessionsWorkspaceIdSessionIdMessagesRouteImport } from './routes/api/sessions.$workspaceId.$sessionId.messages'
 
 const IndexRoute = IndexRouteImport.update({
@@ -213,6 +214,12 @@ const ApiTasksWorkspaceIdStreamRoute =
     path: '/stream',
     getParentRoute: () => ApiTasksWorkspaceIdRoute,
   } as any)
+const ApiTasksWorkspaceIdAbortRoute =
+  ApiTasksWorkspaceIdAbortRouteImport.update({
+    id: '/abort',
+    path: '/abort',
+    getParentRoute: () => ApiTasksWorkspaceIdRoute,
+  } as any)
 const ApiSessionsWorkspaceIdSessionIdMessagesRoute =
   ApiSessionsWorkspaceIdSessionIdMessagesRouteImport.update({
     id: '/$sessionId/messages',
@@ -250,6 +257,7 @@ export interface FileRoutesByFullPath {
   '/api/workspaces/create': typeof ApiWorkspacesCreateRoute
   '/api/workspaces/remove': typeof ApiWorkspacesRemoveRoute
   '/api/workspaces/run-script': typeof ApiWorkspacesRunScriptRoute
+  '/api/tasks/$workspaceId/abort': typeof ApiTasksWorkspaceIdAbortRoute
   '/api/tasks/$workspaceId/stream': typeof ApiTasksWorkspaceIdStreamRoute
   '/api/workspace/$workspaceId/diff': typeof ApiWorkspaceWorkspaceIdDiffRoute
   '/api/workspace/$workspaceId/file': typeof ApiWorkspaceWorkspaceIdFileRoute
@@ -286,6 +294,7 @@ export interface FileRoutesByTo {
   '/api/workspaces/create': typeof ApiWorkspacesCreateRoute
   '/api/workspaces/remove': typeof ApiWorkspacesRemoveRoute
   '/api/workspaces/run-script': typeof ApiWorkspacesRunScriptRoute
+  '/api/tasks/$workspaceId/abort': typeof ApiTasksWorkspaceIdAbortRoute
   '/api/tasks/$workspaceId/stream': typeof ApiTasksWorkspaceIdStreamRoute
   '/api/workspace/$workspaceId/diff': typeof ApiWorkspaceWorkspaceIdDiffRoute
   '/api/workspace/$workspaceId/file': typeof ApiWorkspaceWorkspaceIdFileRoute
@@ -323,6 +332,7 @@ export interface FileRoutesById {
   '/api/workspaces/create': typeof ApiWorkspacesCreateRoute
   '/api/workspaces/remove': typeof ApiWorkspacesRemoveRoute
   '/api/workspaces/run-script': typeof ApiWorkspacesRunScriptRoute
+  '/api/tasks/$workspaceId/abort': typeof ApiTasksWorkspaceIdAbortRoute
   '/api/tasks/$workspaceId/stream': typeof ApiTasksWorkspaceIdStreamRoute
   '/api/workspace/$workspaceId/diff': typeof ApiWorkspaceWorkspaceIdDiffRoute
   '/api/workspace/$workspaceId/file': typeof ApiWorkspaceWorkspaceIdFileRoute
@@ -361,6 +371,7 @@ export interface FileRouteTypes {
     | '/api/workspaces/create'
     | '/api/workspaces/remove'
     | '/api/workspaces/run-script'
+    | '/api/tasks/$workspaceId/abort'
     | '/api/tasks/$workspaceId/stream'
     | '/api/workspace/$workspaceId/diff'
     | '/api/workspace/$workspaceId/file'
@@ -397,6 +408,7 @@ export interface FileRouteTypes {
     | '/api/workspaces/create'
     | '/api/workspaces/remove'
     | '/api/workspaces/run-script'
+    | '/api/tasks/$workspaceId/abort'
     | '/api/tasks/$workspaceId/stream'
     | '/api/workspace/$workspaceId/diff'
     | '/api/workspace/$workspaceId/file'
@@ -433,6 +445,7 @@ export interface FileRouteTypes {
     | '/api/workspaces/create'
     | '/api/workspaces/remove'
     | '/api/workspaces/run-script'
+    | '/api/tasks/$workspaceId/abort'
     | '/api/tasks/$workspaceId/stream'
     | '/api/workspace/$workspaceId/diff'
     | '/api/workspace/$workspaceId/file'
@@ -704,6 +717,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiTasksWorkspaceIdStreamRouteImport
       parentRoute: typeof ApiTasksWorkspaceIdRoute
     }
+    '/api/tasks/$workspaceId/abort': {
+      id: '/api/tasks/$workspaceId/abort'
+      path: '/abort'
+      fullPath: '/api/tasks/$workspaceId/abort'
+      preLoaderRoute: typeof ApiTasksWorkspaceIdAbortRouteImport
+      parentRoute: typeof ApiTasksWorkspaceIdRoute
+    }
     '/api/sessions/$workspaceId/$sessionId/messages': {
       id: '/api/sessions/$workspaceId/$sessionId/messages'
       path: '/$sessionId/messages'
@@ -748,10 +768,12 @@ const ApiSessionsWorkspaceIdRouteWithChildren =
   )
 
 interface ApiTasksWorkspaceIdRouteChildren {
+  ApiTasksWorkspaceIdAbortRoute: typeof ApiTasksWorkspaceIdAbortRoute
   ApiTasksWorkspaceIdStreamRoute: typeof ApiTasksWorkspaceIdStreamRoute
 }
 
 const ApiTasksWorkspaceIdRouteChildren: ApiTasksWorkspaceIdRouteChildren = {
+  ApiTasksWorkspaceIdAbortRoute: ApiTasksWorkspaceIdAbortRoute,
   ApiTasksWorkspaceIdStreamRoute: ApiTasksWorkspaceIdStreamRoute,
 }
 

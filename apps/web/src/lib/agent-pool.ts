@@ -22,6 +22,10 @@ function getAgentConfig(worktreePath: string): CodingAgentConfig {
   } as CodingAgentConfig;
 }
 
+export function getAgent(workspaceId: string): CodingAgent | undefined {
+  return pool.get(workspaceId);
+}
+
 export async function getOrCreateAgent(
   workspaceId: string,
   worktreePath: string,

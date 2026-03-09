@@ -132,6 +132,11 @@ export function ChatView({
     },
   });
 
+  const handleStop = useCallback(() => {
+    transport.abort();
+    stop();
+  }, [transport, stop]);
+
   const isStreaming = status === "submitted" || status === "streaming";
 
   const loadMessages = useCallback(
@@ -345,7 +350,7 @@ export function ChatView({
           <PromptInputTextarea placeholder="Type a message..." />
           <PromptInputActions>
             <PromptInputAttach />
-            <PromptInputSubmit status={status} onStop={stop} />
+            <PromptInputSubmit status={status} onStop={handleStop} />
           </PromptInputActions>
         </PromptInput>
       </div>

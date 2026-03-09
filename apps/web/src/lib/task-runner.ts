@@ -1,6 +1,6 @@
 import { createLogger } from "@band/logger";
 import type { UIMessageChunk } from "ai";
-import { getOrCreateAgent } from "./agent-pool";
+import { getAgent, getOrCreateAgent } from "./agent-pool";
 import { createPendingInput } from "./pending-inputs";
 import { resolveWorkspace } from "./workspace";
 
@@ -90,6 +90,27 @@ export function submitTask(
   });
 
   return toTaskInfo(task);
+}
+
+export function abortTask(workspaceId: string): boolean {
+  const task = tasks.get(workspaceId);
+  if (!task || task.status !== "running") {
+    return false;
+  }
+
+  const agent = getAgent(workspaceId);
+  if (agent?.abort) {
+    agent.abort();
+  }
+
+  task.status = "failed";
+  task.completedAt = Date.now();
+  emit(workspaceId, task, { type: "error", errorText: "Task aborted by user" });
+  emit(workspaceId, task, { type: "finish" });
+  scheduleExpiry(workspaceId);
+
+  log.info({ workspaceId }, "task aborted by user");
+  return true;
 }
 
 async function runTask(workspaceId: string, task: InternalTask) {
