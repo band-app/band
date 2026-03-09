@@ -456,6 +456,9 @@ describe("GET /api/status/stream — SSE event format", () => {
 
     controller.abort();
 
+    // Drain the rejected read promise caused by the abort
+    await readPromise.catch(() => {});
+
     // The stream should have sent at least a snapshot event (even if empty)
     // because subscribe() in watcher.ts sends a snapshot on connect
     expect(typeof chunk).toBe("string");
