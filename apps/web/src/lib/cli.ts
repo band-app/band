@@ -1,5 +1,6 @@
-import { lstatSync, realpathSync, symlinkSync, unlinkSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { execSync } from "node:child_process";
+import { accessSync, constants, lstatSync, realpathSync, symlinkSync, unlinkSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 
 export type CliStatus =
   | "Installed"
@@ -65,6 +66,16 @@ export async function checkCli(): Promise<CliStatus> {
   }
 }
 
+/** Check if the current process can write to a directory. */
+function isDirWritable(dir: string): boolean {
+  try {
+    accessSync(dir, constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function installCli(): Promise<void> {
   const binaryPath = findCliBinary();
   if (!binaryPath) {
@@ -73,14 +84,27 @@ export async function installCli(): Promise<void> {
     );
   }
 
-  // Remove existing file/symlink if present
-  try {
-    lstatSync(SYMLINK_PATH);
-    unlinkSync(SYMLINK_PATH);
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code !== "ENOENT") throw err;
-  }
+  const dir = dirname(SYMLINK_PATH);
 
-  symlinkSync(binaryPath, SYMLINK_PATH);
+  if (isDirWritable(dir)) {
+    // Directory is writable — do it directly
+    try {
+      lstatSync(SYMLINK_PATH);
+      unlinkSync(SYMLINK_PATH);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT") throw err;
+    }
+    symlinkSync(binaryPath, SYMLINK_PATH);
+  } else {
+    // Need elevated permissions — use osascript to prompt for admin auth
+    const script = `do shell script "ln -sf '${binaryPath}' '${SYMLINK_PATH}'" with administrator privileges`;
+    try {
+      execSync(`osascript -e '${script}'`, { stdio: "pipe" });
+    } catch {
+      throw new Error(
+        `Permission denied. Run manually: sudo ln -sf "${binaryPath}" "${SYMLINK_PATH}"`,
+      );
+    }
+  }
 }
