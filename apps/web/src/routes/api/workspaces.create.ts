@@ -1,9 +1,10 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { createFileRoute } from "@tanstack/react-router";
 import { gitCmd } from "../../lib/git";
-import { bandHome, loadState, saveState, worktreesDir } from "../../lib/state";
+import { loadState, saveState, worktreesDir } from "../../lib/state";
+import { submitTask } from "../../lib/task-runner";
 
 export const Route = createFileRoute("/api/workspaces/create")({
   server: {
@@ -52,11 +53,10 @@ export const Route = createFileRoute("/api/workspaces/create")({
         proj.worktrees.push({ branch, path: worktreePath, head: null });
         saveState(state);
 
+        const workspaceId = `${project}-${branch}`;
+
         if (prompt) {
-          const workspaceId = `${project}-${branch}`;
-          const promptFile = join(bandHome(), "workspace-prompts", `${workspaceId}.json`);
-          mkdirSync(dirname(promptFile), { recursive: true });
-          writeFileSync(promptFile, JSON.stringify({ prompt, didRun: false }, null, 2), "utf-8");
+          submitTask(workspaceId, prompt);
         }
 
         return Response.json({ ok: true });
