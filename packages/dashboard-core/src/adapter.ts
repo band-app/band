@@ -64,16 +64,4 @@ export interface PlatformCapabilities {
   pickFolder?(): Promise<string | null>;
   openUrl?(url: string): Promise<void>;
   getWorkspaceHref?(workspaceId: string): string;
-  tunnel?: {
-    check(): Promise<boolean>;
-    start(): Promise<void>;
-    stop(): Promise<void>;
-    install(): Promise<void>;
-    subscribeTunnelUrl(onUrl: (url: string) => void, onError: (err: string) => void): Unsubscribe;
-  };
-  webserver?: {
-    start(): Promise<void>;
-    stop(): Promise<void>;
-    getToken(): Promise<string>;
-  };
 }

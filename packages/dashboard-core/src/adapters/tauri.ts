@@ -188,46 +188,4 @@ export class TauriCapabilities implements PlatformCapabilities {
     const { open } = await import("@tauri-apps/plugin-shell");
     await open(url);
   }
-
-  tunnel = {
-    async check(): Promise<boolean> {
-      return invoke<boolean>("tunnel_check");
-    },
-    async start(): Promise<void> {
-      await invoke("tunnel_start");
-    },
-    async stop(): Promise<void> {
-      await invoke("tunnel_stop");
-    },
-    async install(): Promise<void> {
-      await invoke("tunnel_install");
-    },
-    subscribeTunnelUrl(onUrl: (url: string) => void, onError: (err: string) => void): Unsubscribe {
-      let cleanup: (() => void) | undefined;
-
-      (async () => {
-        const unlistenUrl = await listen<string>("tunnel-url", onUrl);
-        const unlistenError = await listen<string>("tunnel-error", onError);
-
-        cleanup = () => {
-          unlistenUrl();
-          unlistenError();
-        };
-      })();
-
-      return () => cleanup?.();
-    },
-  };
-
-  webserver = {
-    async start(): Promise<void> {
-      await invoke("webserver_start");
-    },
-    async stop(): Promise<void> {
-      await invoke("webserver_stop");
-    },
-    async getToken(): Promise<string> {
-      return invoke<string>("webserver_get_token");
-    },
-  };
 }

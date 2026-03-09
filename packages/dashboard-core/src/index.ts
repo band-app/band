@@ -28,6 +28,7 @@ export {
 export { isServiceHealthy, type ServiceHealth } from "./lib/service-health";
 // Lib
 export { playSound, SOUNDS, type SoundId } from "./lib/sounds";
+export { type SSEEvent, subscribeSSE } from "./lib/sse";
 export type { DashboardState, DashboardStore } from "./stores/dashboard-store";
 export { createDashboardStore } from "./stores/dashboard-store";
 // Stores

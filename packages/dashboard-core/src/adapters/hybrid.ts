@@ -56,10 +56,11 @@ export class HybridDashboardAdapter extends WebDashboardAdapter {
 }
 
 /**
- * Hybrid capabilities: delegates to TauriCapabilities for native features
- * when inside Tauri, falls back to WebCapabilities otherwise.
+ * Native shell capabilities: Tauri IPC for native OS features
+ * (copy path, reveal in finder, pick folder, open URL).
+ * Tunnel and web server management are handled via HTTP endpoints.
  */
-export class HybridCapabilities implements PlatformCapabilities {
+export class NativeShellCapabilities implements PlatformCapabilities {
   private web = new WebCapabilities();
 
   get copyPath(): boolean {
@@ -88,53 +89,7 @@ export class HybridCapabilities implements PlatformCapabilities {
     const { open } = await import("@tauri-apps/plugin-shell");
     await open(url);
   }
-
-  tunnel = isTauri()
-    ? {
-        async check(): Promise<boolean> {
-          return tauriInvoke<boolean>("tunnel_check");
-        },
-        async start(): Promise<void> {
-          await tauriInvoke("tunnel_start");
-        },
-        async stop(): Promise<void> {
-          await tauriInvoke("tunnel_stop");
-        },
-        async install(): Promise<void> {
-          await tauriInvoke("tunnel_install");
-        },
-        subscribeTunnelUrl(
-          onUrl: (url: string) => void,
-          onError: (err: string) => void,
-        ): Unsubscribe {
-          let cleanup: (() => void) | undefined;
-
-          (async () => {
-            const unlistenUrl = await tauriListen<string>("tunnel-url", onUrl);
-            const unlistenError = await tauriListen<string>("tunnel-error", onError);
-
-            cleanup = () => {
-              unlistenUrl();
-              unlistenError();
-            };
-          })();
-
-          return () => cleanup?.();
-        },
-      }
-    : undefined;
-
-  webserver = isTauri()
-    ? {
-        async start(): Promise<void> {
-          await tauriInvoke("webserver_start");
-        },
-        async stop(): Promise<void> {
-          await tauriInvoke("webserver_stop");
-        },
-        async getToken(): Promise<string> {
-          return tauriInvoke<string>("webserver_get_token");
-        },
-      }
-    : undefined;
 }
+
+/** @deprecated Use NativeShellCapabilities instead */
+export const HybridCapabilities = NativeShellCapabilities;

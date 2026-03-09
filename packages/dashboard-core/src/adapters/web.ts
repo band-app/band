@@ -1,4 +1,5 @@
 import type { DashboardAdapter, PlatformCapabilities, Unsubscribe } from "../adapter";
+import { subscribeSSE } from "../lib/sse";
 import type {
   CIStatus,
   CliStatus,
@@ -11,48 +12,6 @@ import type {
   WorkspaceDiff,
   WorkspaceStatus,
 } from "../types";
-
-type SSEEvent = {
-  kind: "update" | "remove" | "snapshot" | "branch-status";
-  status?: WorkspaceStatus;
-  statuses?: WorkspaceStatus[];
-  workspaceId?: string;
-  git?: GitStatus;
-  ci?: CIStatus;
-};
-
-type SSEHandler = (data: SSEEvent) => void;
-
-let _eventSource: EventSource | null = null;
-const _handlers = new Set<SSEHandler>();
-
-function _ensureEventSource(): void {
-  if (_eventSource) return;
-  const es = new EventSource("/api/status/stream");
-  es.onmessage = (event) => {
-    try {
-      const data = JSON.parse(event.data) as SSEEvent;
-      for (const handler of _handlers) {
-        handler(data);
-      }
-    } catch {
-      // Skip malformed events
-    }
-  };
-  _eventSource = es;
-}
-
-function _addHandler(handler: SSEHandler): Unsubscribe {
-  _handlers.add(handler);
-  _ensureEventSource();
-  return () => {
-    _handlers.delete(handler);
-    if (_handlers.size === 0) {
-      _eventSource?.close();
-      _eventSource = null;
-    }
-  };
-}
 
 export class WebDashboardAdapter implements DashboardAdapter {
   async listProjects(): Promise<ProjectInfo[]> {
@@ -153,7 +112,7 @@ export class WebDashboardAdapter implements DashboardAdapter {
     onUpdate: (status: WorkspaceStatus) => void,
     onRemove: (workspaceId: string) => void,
   ): Unsubscribe {
-    return _addHandler((data) => {
+    return subscribeSSE((data) => {
       if (data.kind === "snapshot" && data.statuses) {
         for (const status of data.statuses) {
           onUpdate(status);
@@ -175,7 +134,7 @@ export class WebDashboardAdapter implements DashboardAdapter {
     onGit: (workspaceId: string, git: GitStatus) => void,
     onCI: (workspaceId: string, ci: CIStatus) => void,
   ): Unsubscribe {
-    return _addHandler((data) => {
+    return subscribeSSE((data) => {
       if (data.kind === "branch-status" && data.workspaceId) {
         if (data.git) onGit(data.workspaceId, data.git);
         if (data.ci) onCI(data.workspaceId, data.ci);
@@ -195,11 +154,15 @@ export class WebDashboardAdapter implements DashboardAdapter {
   }
 
   async checkCli(): Promise<CliStatus> {
-    return "Installed";
+    const res = await fetch("/api/cli/check");
+    if (!res.ok) throw new Error("Failed to check CLI");
+    const data = (await res.json()) as { status: CliStatus };
+    return data.status;
   }
 
   async installCli(): Promise<void> {
-    // CLI install not supported in web adapter
+    const res = await fetch("/api/cli/install", { method: "POST" });
+    if (!res.ok) throw new Error("Failed to install CLI");
   }
 
   async getWorkspaceDiff(workspaceId: string): Promise<WorkspaceDiff> {
