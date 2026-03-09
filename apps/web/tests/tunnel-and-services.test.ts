@@ -454,10 +454,9 @@ describe("GET /api/status/stream — SSE event format", () => {
     const timeout = new Promise<string>((resolve) => setTimeout(() => resolve(""), 2000));
     const chunk = await Promise.race([readPromise, timeout]);
 
+    // Cancel the reader first, then abort — avoids hanging on unsettled read promises
+    await reader.cancel().catch(() => {});
     controller.abort();
-
-    // Drain the rejected read promise caused by the abort
-    await readPromise.catch(() => {});
 
     // The stream should have sent at least a snapshot event (even if empty)
     // because subscribe() in watcher.ts sends a snapshot on connect
