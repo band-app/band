@@ -2,7 +2,9 @@ mod commands;
 mod git;
 mod state;
 
-use commands::webserver::{self as webserver, ManagedProcess, TunnelInner, TunnelState, WebServerState};
+use commands::webserver::{
+    self as webserver, ManagedProcess, TunnelInner, TunnelState, WebServerState,
+};
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
 
