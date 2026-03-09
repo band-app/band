@@ -32,12 +32,14 @@ export class ClaudeCodeAdapter implements CodingAgent {
   private readonly maxTurns: number;
   private readonly model: string | undefined;
   private readonly executablePath: string | undefined;
+  private readonly additionalDirectories: string[] | undefined;
 
   constructor(config: ClaudeCodeConfig) {
     this.workspaceDir = config.workspaceDir;
     this.maxTurns = config.maxTurns;
     this.model = config.options.model;
     this.executablePath = config.options.executablePath;
+    this.additionalDirectories = config.additionalDirectories;
   }
 
   async *runSession(prompt: string, sessionId?: string): AsyncGenerator<AgentEvent> {
@@ -98,6 +100,7 @@ export class ClaudeCodeAdapter implements CodingAgent {
         resume: sessionId,
         canUseTool,
         env,
+        additionalDirectories: this.additionalDirectories,
         pathToClaudeCodeExecutable: this.executablePath,
         settingSources: ["user", "project"],
         stderr: (data) => log.warn({ data }, "claude-code stderr"),

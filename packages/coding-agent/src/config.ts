@@ -4,6 +4,7 @@ const claudeCodeConfigSchema = z.object({
   type: z.literal("claude-code"),
   workspaceDir: z.string().default(process.cwd()),
   maxTurns: z.number().int().positive().default(3),
+  additionalDirectories: z.array(z.string()).optional(),
   options: z
     .object({
       model: z.string().optional(),
