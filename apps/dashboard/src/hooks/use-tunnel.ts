@@ -8,7 +8,7 @@ interface PrereqStatus {
   instatunnel: boolean;
 }
 
-const HEALTH_POLL_INTERVAL = 30_000;
+const HEALTH_POLL_INTERVAL = 300_000;
 
 export function useTunnel() {
   const [webServerRunning, setWebServerRunning] = useState(false);

@@ -55,12 +55,6 @@ jobs:
           key: cargo-cli-${{ runner.os }}-${{ hashFiles('apps/cli/Cargo.lock') }}
           restore-keys: cargo-cli-${{ runner.os }}-
 
-      - name: Cache Dashboard target
-        uses: actions/cache@v4
-        with:
-          path: apps/dashboard/src-tauri/target
-          key: cargo-dashboard-${{ runner.os }}-${{ hashFiles('apps/dashboard/src-tauri/Cargo.lock') }}
-          restore-keys: cargo-dashboard-${{ runner.os }}-
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -100,12 +94,4 @@ jobs:
       - name: Build frontend
         run: pnpm --filter @band/dashboard build
 
-      - name: Build DMG
-        run: pnpm --filter @band/dashboard tauri build --ci --config '{"build":{"beforeBuildCommand":""}}'
 
-      - name: Upload DMG
-        uses: actions/upload-artifact@v4
-        with:
-          name: band-dmg
-          path: apps/dashboard/src-tauri/target/release/bundle/dmg/*.dmg
-          retention-days: 7
