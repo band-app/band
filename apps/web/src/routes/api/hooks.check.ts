@@ -1,12 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { checkHooks } from "../../lib/hooks";
 
 export const Route = createFileRoute("/api/hooks/check")({
   server: {
     handlers: {
       GET: async () => {
-        // Web app assumes hooks are handled by the desktop app
-        // Return as "installed" to avoid showing the install banner
-        return Response.json({ installed: true, other_hooks_exist: false });
+        const status = await checkHooks();
+        return Response.json(status);
       },
     },
   },

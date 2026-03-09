@@ -2,6 +2,10 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { join } from "node:path";
 import sirv from "sirv";
 import { createAuthMiddleware } from "./auth.ts";
+import { startBranchStatusPoller, stopBranchStatusPoller } from "./src/lib/branch-status-poller.ts";
+import { checkPrereqs } from "./src/lib/process-utils.ts";
+import { loadSettings } from "./src/lib/state.ts";
+import { startTunnel, stopTunnel } from "./src/lib/tunnel.ts";
 
 // After bundling, this file lives at dist/start-server.mjs,
 // so paths are relative to dist/.
@@ -84,7 +88,38 @@ async function main() {
 
   httpServer.listen(port, "0.0.0.0", () => {
     console.log(`Web server listening on http://0.0.0.0:${port}`);
+
+    // Start branch status poller
+    startBranchStatusPoller();
+
+    // Auto-start tunnel if configured
+    const settings = loadSettings() as Record<string, unknown>;
+    if (settings.autoStartTunnel) {
+      checkPrereqs()
+        .then((prereqs) => {
+          if (prereqs.instatunnel) {
+            return startTunnel({
+              port,
+              subdomain: settings.tunnelSubdomain as string | undefined,
+            });
+          }
+        })
+        .catch((err) => {
+          console.error("Failed to auto-start tunnel:", err);
+        });
+    }
   });
+
+  // Graceful shutdown
+  const shutdown = async () => {
+    stopBranchStatusPoller();
+    await stopTunnel().catch(() => {});
+    httpServer.close();
+    process.exit(0);
+  };
+
+  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", shutdown);
 }
 
 main().catch((err) => {

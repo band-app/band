@@ -3,6 +3,7 @@ mod shell;
 mod state;
 
 use clap::{Parser, Subcommand};
+use std::fs;
 use std::process;
 
 #[derive(Parser)]
@@ -51,6 +52,8 @@ enum Commands {
     },
     /// List registered projects
     Projects,
+    /// Receive hook notifications from Claude Code (reads JSON from stdin)
+    Notify,
 }
 
 fn main() {
@@ -71,6 +74,7 @@ fn main() {
         Commands::List { project } => cmd_list(project.as_deref()),
         Commands::Remove { project, branch } => cmd_remove(&project, &branch),
         Commands::Projects => cmd_projects(),
+        Commands::Notify => cmd_notify(),
     };
 
     if let Err(e) = result {
@@ -259,4 +263,104 @@ fn cmd_projects() -> Result<(), String> {
         }
         Ok(())
     })
+}
+
+fn cmd_notify() -> Result<(), String> {
+    use std::io::Read;
+
+    // Read JSON from stdin
+    let mut input = String::new();
+    std::io::stdin()
+        .read_to_string(&mut input)
+        .map_err(|e| format!("Failed to read stdin: {e}"))?;
+
+    let payload: serde_json::Value = serde_json::from_str(&input)
+        .map_err(|e| format!("Failed to parse JSON from stdin: {e}"))?;
+
+    let hook_event = payload
+        .get("hook_event_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    // Map hook event to agent status
+    let agent_status = match hook_event {
+        "Stop" | "PermissionRequest" => "needs_attention",
+        _ => "working",
+    };
+
+    // Get CWD from the hook payload, or fall back to current dir
+    let cwd = payload
+        .get("cwd")
+        .and_then(|v| v.as_str())
+        .map(String::from)
+        .or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .map(|p| p.to_string_lossy().to_string())
+        })
+        .unwrap_or_default();
+
+    // Match CWD to workspace via state.json
+    let workspace_id = state::with_locked_state_read(|app_state| {
+        for proj in &app_state.projects {
+            for wt in &proj.worktrees {
+                if cwd.starts_with(&wt.path) || wt.path == cwd {
+                    return Ok(Some(format!("{}-{}", proj.name, wt.branch)));
+                }
+            }
+        }
+        Ok(None)
+    })?;
+
+    let Some(workspace_id) = workspace_id else {
+        return Ok(()); // Not a tracked workspace, silently ignore
+    };
+
+    // Write status file atomically (temp file + rename)
+    let status_dir = state::status_dir();
+    fs::create_dir_all(&status_dir).map_err(|e| format!("Failed to create status dir: {e}"))?;
+
+    let status_file = status_dir.join(format!("{workspace_id}.json"));
+
+    // Read existing status file if present, to preserve fields
+    let mut status: serde_json::Value = if status_file.exists() {
+        fs::read_to_string(&status_file)
+            .ok()
+            .and_then(|data| serde_json::from_str(&data).ok())
+            .unwrap_or_else(|| serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+
+    // Update agent status fields
+    if let Some(obj) = status.as_object_mut() {
+        obj.insert("workspaceId".to_string(), serde_json::json!(workspace_id));
+
+        let agent = obj.entry("agent").or_insert_with(|| serde_json::json!({}));
+        if let Some(agent_obj) = agent.as_object_mut() {
+            agent_obj.insert("status".to_string(), serde_json::json!(agent_status));
+            agent_obj.insert("lastActivity".to_string(), serde_json::json!(chrono_now()));
+        }
+    }
+
+    let json =
+        serde_json::to_string_pretty(&status).map_err(|e| format!("Failed to serialize: {e}"))?;
+
+    // Atomic write: write to temp file then rename
+    let tmp_file = status_dir.join(format!(".{workspace_id}.json.tmp"));
+    fs::write(&tmp_file, &json).map_err(|e| format!("Failed to write temp file: {e}"))?;
+    fs::rename(&tmp_file, &status_file)
+        .map_err(|e| format!("Failed to rename status file: {e}"))?;
+
+    Ok(())
+}
+
+/// Simple ISO 8601 timestamp without pulling in chrono crate.
+fn chrono_now() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let dur = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    // Return Unix timestamp as string (good enough for ordering)
+    format!("{}", dur.as_secs())
 }

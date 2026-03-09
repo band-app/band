@@ -11,12 +11,17 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ChatWorkspaceIdRouteImport } from './routes/chat.$workspaceId'
+import { Route as ApiTokenRouteImport } from './routes/api/token'
 import { Route as ApiSettingsRouteImport } from './routes/api/settings'
+import { Route as ApiServiceHealthRouteImport } from './routes/api/service-health'
 import { Route as ApiProjectsRouteImport } from './routes/api/projects'
 import { Route as ApiWorkspacesRunScriptRouteImport } from './routes/api/workspaces.run-script'
 import { Route as ApiWorkspacesRemoveRouteImport } from './routes/api/workspaces.remove'
-import { Route as ApiWorkspacesOpenRouteImport } from './routes/api/workspaces.open'
 import { Route as ApiWorkspacesCreateRouteImport } from './routes/api/workspaces.create'
+import { Route as ApiTunnelStopRouteImport } from './routes/api/tunnel.stop'
+import { Route as ApiTunnelStatusRouteImport } from './routes/api/tunnel.status'
+import { Route as ApiTunnelStartRouteImport } from './routes/api/tunnel.start'
+import { Route as ApiTunnelAuthCheckRouteImport } from './routes/api/tunnel.auth-check'
 import { Route as ApiTasksSubmitRouteImport } from './routes/api/tasks.submit'
 import { Route as ApiTasksWorkspaceIdRouteImport } from './routes/api/tasks.$workspaceId'
 import { Route as ApiStatusStreamRouteImport } from './routes/api/status.stream'
@@ -25,8 +30,13 @@ import { Route as ApiProjectsReorderRouteImport } from './routes/api/projects.re
 import { Route as ApiProjectsRemoveRouteImport } from './routes/api/projects.remove'
 import { Route as ApiProjectsLabelRouteImport } from './routes/api/projects.label'
 import { Route as ApiProjectsAddRouteImport } from './routes/api/projects.add'
+import { Route as ApiPrereqsInstallTunnelRouteImport } from './routes/api/prereqs.install-tunnel'
+import { Route as ApiPrereqsInstallNodeRouteImport } from './routes/api/prereqs.install-node'
+import { Route as ApiPrereqsCheckRouteImport } from './routes/api/prereqs.check'
 import { Route as ApiHooksInstallRouteImport } from './routes/api/hooks.install'
 import { Route as ApiHooksCheckRouteImport } from './routes/api/hooks.check'
+import { Route as ApiCliInstallRouteImport } from './routes/api/cli.install'
+import { Route as ApiCliCheckRouteImport } from './routes/api/cli.check'
 import { Route as ApiChatAnswerRouteImport } from './routes/api/chat.answer'
 import { Route as ApiWorkspaceWorkspaceIdFilesRouteImport } from './routes/api/workspace.$workspaceId.files'
 import { Route as ApiWorkspaceWorkspaceIdFileRouteImport } from './routes/api/workspace.$workspaceId.file'
@@ -44,9 +54,19 @@ const ChatWorkspaceIdRoute = ChatWorkspaceIdRouteImport.update({
   path: '/chat/$workspaceId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiTokenRoute = ApiTokenRouteImport.update({
+  id: '/api/token',
+  path: '/api/token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiSettingsRoute = ApiSettingsRouteImport.update({
   id: '/api/settings',
   path: '/api/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiServiceHealthRoute = ApiServiceHealthRouteImport.update({
+  id: '/api/service-health',
+  path: '/api/service-health',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiProjectsRoute = ApiProjectsRouteImport.update({
@@ -64,14 +84,29 @@ const ApiWorkspacesRemoveRoute = ApiWorkspacesRemoveRouteImport.update({
   path: '/api/workspaces/remove',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiWorkspacesOpenRoute = ApiWorkspacesOpenRouteImport.update({
-  id: '/api/workspaces/open',
-  path: '/api/workspaces/open',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ApiWorkspacesCreateRoute = ApiWorkspacesCreateRouteImport.update({
   id: '/api/workspaces/create',
   path: '/api/workspaces/create',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiTunnelStopRoute = ApiTunnelStopRouteImport.update({
+  id: '/api/tunnel/stop',
+  path: '/api/tunnel/stop',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiTunnelStatusRoute = ApiTunnelStatusRouteImport.update({
+  id: '/api/tunnel/status',
+  path: '/api/tunnel/status',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiTunnelStartRoute = ApiTunnelStartRouteImport.update({
+  id: '/api/tunnel/start',
+  path: '/api/tunnel/start',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiTunnelAuthCheckRoute = ApiTunnelAuthCheckRouteImport.update({
+  id: '/api/tunnel/auth-check',
+  path: '/api/tunnel/auth-check',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiTasksSubmitRoute = ApiTasksSubmitRouteImport.update({
@@ -114,6 +149,21 @@ const ApiProjectsAddRoute = ApiProjectsAddRouteImport.update({
   path: '/add',
   getParentRoute: () => ApiProjectsRoute,
 } as any)
+const ApiPrereqsInstallTunnelRoute = ApiPrereqsInstallTunnelRouteImport.update({
+  id: '/api/prereqs/install-tunnel',
+  path: '/api/prereqs/install-tunnel',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiPrereqsInstallNodeRoute = ApiPrereqsInstallNodeRouteImport.update({
+  id: '/api/prereqs/install-node',
+  path: '/api/prereqs/install-node',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiPrereqsCheckRoute = ApiPrereqsCheckRouteImport.update({
+  id: '/api/prereqs/check',
+  path: '/api/prereqs/check',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiHooksInstallRoute = ApiHooksInstallRouteImport.update({
   id: '/api/hooks/install',
   path: '/api/hooks/install',
@@ -122,6 +172,16 @@ const ApiHooksInstallRoute = ApiHooksInstallRouteImport.update({
 const ApiHooksCheckRoute = ApiHooksCheckRouteImport.update({
   id: '/api/hooks/check',
   path: '/api/hooks/check',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiCliInstallRoute = ApiCliInstallRouteImport.update({
+  id: '/api/cli/install',
+  path: '/api/cli/install',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiCliCheckRoute = ApiCliCheckRouteImport.update({
+  id: '/api/cli/check',
+  path: '/api/cli/check',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiChatAnswerRoute = ApiChatAnswerRouteImport.update({
@@ -163,11 +223,18 @@ const ApiSessionsWorkspaceIdSessionIdMessagesRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/api/projects': typeof ApiProjectsRouteWithChildren
+  '/api/service-health': typeof ApiServiceHealthRoute
   '/api/settings': typeof ApiSettingsRoute
+  '/api/token': typeof ApiTokenRoute
   '/chat/$workspaceId': typeof ChatWorkspaceIdRoute
   '/api/chat/answer': typeof ApiChatAnswerRoute
+  '/api/cli/check': typeof ApiCliCheckRoute
+  '/api/cli/install': typeof ApiCliInstallRoute
   '/api/hooks/check': typeof ApiHooksCheckRoute
   '/api/hooks/install': typeof ApiHooksInstallRoute
+  '/api/prereqs/check': typeof ApiPrereqsCheckRoute
+  '/api/prereqs/install-node': typeof ApiPrereqsInstallNodeRoute
+  '/api/prereqs/install-tunnel': typeof ApiPrereqsInstallTunnelRoute
   '/api/projects/add': typeof ApiProjectsAddRoute
   '/api/projects/label': typeof ApiProjectsLabelRoute
   '/api/projects/remove': typeof ApiProjectsRemoveRoute
@@ -176,8 +243,11 @@ export interface FileRoutesByFullPath {
   '/api/status/stream': typeof ApiStatusStreamRoute
   '/api/tasks/$workspaceId': typeof ApiTasksWorkspaceIdRouteWithChildren
   '/api/tasks/submit': typeof ApiTasksSubmitRoute
+  '/api/tunnel/auth-check': typeof ApiTunnelAuthCheckRoute
+  '/api/tunnel/start': typeof ApiTunnelStartRoute
+  '/api/tunnel/status': typeof ApiTunnelStatusRoute
+  '/api/tunnel/stop': typeof ApiTunnelStopRoute
   '/api/workspaces/create': typeof ApiWorkspacesCreateRoute
-  '/api/workspaces/open': typeof ApiWorkspacesOpenRoute
   '/api/workspaces/remove': typeof ApiWorkspacesRemoveRoute
   '/api/workspaces/run-script': typeof ApiWorkspacesRunScriptRoute
   '/api/tasks/$workspaceId/stream': typeof ApiTasksWorkspaceIdStreamRoute
@@ -189,11 +259,18 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/api/projects': typeof ApiProjectsRouteWithChildren
+  '/api/service-health': typeof ApiServiceHealthRoute
   '/api/settings': typeof ApiSettingsRoute
+  '/api/token': typeof ApiTokenRoute
   '/chat/$workspaceId': typeof ChatWorkspaceIdRoute
   '/api/chat/answer': typeof ApiChatAnswerRoute
+  '/api/cli/check': typeof ApiCliCheckRoute
+  '/api/cli/install': typeof ApiCliInstallRoute
   '/api/hooks/check': typeof ApiHooksCheckRoute
   '/api/hooks/install': typeof ApiHooksInstallRoute
+  '/api/prereqs/check': typeof ApiPrereqsCheckRoute
+  '/api/prereqs/install-node': typeof ApiPrereqsInstallNodeRoute
+  '/api/prereqs/install-tunnel': typeof ApiPrereqsInstallTunnelRoute
   '/api/projects/add': typeof ApiProjectsAddRoute
   '/api/projects/label': typeof ApiProjectsLabelRoute
   '/api/projects/remove': typeof ApiProjectsRemoveRoute
@@ -202,8 +279,11 @@ export interface FileRoutesByTo {
   '/api/status/stream': typeof ApiStatusStreamRoute
   '/api/tasks/$workspaceId': typeof ApiTasksWorkspaceIdRouteWithChildren
   '/api/tasks/submit': typeof ApiTasksSubmitRoute
+  '/api/tunnel/auth-check': typeof ApiTunnelAuthCheckRoute
+  '/api/tunnel/start': typeof ApiTunnelStartRoute
+  '/api/tunnel/status': typeof ApiTunnelStatusRoute
+  '/api/tunnel/stop': typeof ApiTunnelStopRoute
   '/api/workspaces/create': typeof ApiWorkspacesCreateRoute
-  '/api/workspaces/open': typeof ApiWorkspacesOpenRoute
   '/api/workspaces/remove': typeof ApiWorkspacesRemoveRoute
   '/api/workspaces/run-script': typeof ApiWorkspacesRunScriptRoute
   '/api/tasks/$workspaceId/stream': typeof ApiTasksWorkspaceIdStreamRoute
@@ -216,11 +296,18 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/api/projects': typeof ApiProjectsRouteWithChildren
+  '/api/service-health': typeof ApiServiceHealthRoute
   '/api/settings': typeof ApiSettingsRoute
+  '/api/token': typeof ApiTokenRoute
   '/chat/$workspaceId': typeof ChatWorkspaceIdRoute
   '/api/chat/answer': typeof ApiChatAnswerRoute
+  '/api/cli/check': typeof ApiCliCheckRoute
+  '/api/cli/install': typeof ApiCliInstallRoute
   '/api/hooks/check': typeof ApiHooksCheckRoute
   '/api/hooks/install': typeof ApiHooksInstallRoute
+  '/api/prereqs/check': typeof ApiPrereqsCheckRoute
+  '/api/prereqs/install-node': typeof ApiPrereqsInstallNodeRoute
+  '/api/prereqs/install-tunnel': typeof ApiPrereqsInstallTunnelRoute
   '/api/projects/add': typeof ApiProjectsAddRoute
   '/api/projects/label': typeof ApiProjectsLabelRoute
   '/api/projects/remove': typeof ApiProjectsRemoveRoute
@@ -229,8 +316,11 @@ export interface FileRoutesById {
   '/api/status/stream': typeof ApiStatusStreamRoute
   '/api/tasks/$workspaceId': typeof ApiTasksWorkspaceIdRouteWithChildren
   '/api/tasks/submit': typeof ApiTasksSubmitRoute
+  '/api/tunnel/auth-check': typeof ApiTunnelAuthCheckRoute
+  '/api/tunnel/start': typeof ApiTunnelStartRoute
+  '/api/tunnel/status': typeof ApiTunnelStatusRoute
+  '/api/tunnel/stop': typeof ApiTunnelStopRoute
   '/api/workspaces/create': typeof ApiWorkspacesCreateRoute
-  '/api/workspaces/open': typeof ApiWorkspacesOpenRoute
   '/api/workspaces/remove': typeof ApiWorkspacesRemoveRoute
   '/api/workspaces/run-script': typeof ApiWorkspacesRunScriptRoute
   '/api/tasks/$workspaceId/stream': typeof ApiTasksWorkspaceIdStreamRoute
@@ -244,11 +334,18 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/api/projects'
+    | '/api/service-health'
     | '/api/settings'
+    | '/api/token'
     | '/chat/$workspaceId'
     | '/api/chat/answer'
+    | '/api/cli/check'
+    | '/api/cli/install'
     | '/api/hooks/check'
     | '/api/hooks/install'
+    | '/api/prereqs/check'
+    | '/api/prereqs/install-node'
+    | '/api/prereqs/install-tunnel'
     | '/api/projects/add'
     | '/api/projects/label'
     | '/api/projects/remove'
@@ -257,8 +354,11 @@ export interface FileRouteTypes {
     | '/api/status/stream'
     | '/api/tasks/$workspaceId'
     | '/api/tasks/submit'
+    | '/api/tunnel/auth-check'
+    | '/api/tunnel/start'
+    | '/api/tunnel/status'
+    | '/api/tunnel/stop'
     | '/api/workspaces/create'
-    | '/api/workspaces/open'
     | '/api/workspaces/remove'
     | '/api/workspaces/run-script'
     | '/api/tasks/$workspaceId/stream'
@@ -270,11 +370,18 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/api/projects'
+    | '/api/service-health'
     | '/api/settings'
+    | '/api/token'
     | '/chat/$workspaceId'
     | '/api/chat/answer'
+    | '/api/cli/check'
+    | '/api/cli/install'
     | '/api/hooks/check'
     | '/api/hooks/install'
+    | '/api/prereqs/check'
+    | '/api/prereqs/install-node'
+    | '/api/prereqs/install-tunnel'
     | '/api/projects/add'
     | '/api/projects/label'
     | '/api/projects/remove'
@@ -283,8 +390,11 @@ export interface FileRouteTypes {
     | '/api/status/stream'
     | '/api/tasks/$workspaceId'
     | '/api/tasks/submit'
+    | '/api/tunnel/auth-check'
+    | '/api/tunnel/start'
+    | '/api/tunnel/status'
+    | '/api/tunnel/stop'
     | '/api/workspaces/create'
-    | '/api/workspaces/open'
     | '/api/workspaces/remove'
     | '/api/workspaces/run-script'
     | '/api/tasks/$workspaceId/stream'
@@ -296,11 +406,18 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/api/projects'
+    | '/api/service-health'
     | '/api/settings'
+    | '/api/token'
     | '/chat/$workspaceId'
     | '/api/chat/answer'
+    | '/api/cli/check'
+    | '/api/cli/install'
     | '/api/hooks/check'
     | '/api/hooks/install'
+    | '/api/prereqs/check'
+    | '/api/prereqs/install-node'
+    | '/api/prereqs/install-tunnel'
     | '/api/projects/add'
     | '/api/projects/label'
     | '/api/projects/remove'
@@ -309,8 +426,11 @@ export interface FileRouteTypes {
     | '/api/status/stream'
     | '/api/tasks/$workspaceId'
     | '/api/tasks/submit'
+    | '/api/tunnel/auth-check'
+    | '/api/tunnel/start'
+    | '/api/tunnel/status'
+    | '/api/tunnel/stop'
     | '/api/workspaces/create'
-    | '/api/workspaces/open'
     | '/api/workspaces/remove'
     | '/api/workspaces/run-script'
     | '/api/tasks/$workspaceId/stream'
@@ -323,17 +443,27 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ApiProjectsRoute: typeof ApiProjectsRouteWithChildren
+  ApiServiceHealthRoute: typeof ApiServiceHealthRoute
   ApiSettingsRoute: typeof ApiSettingsRoute
+  ApiTokenRoute: typeof ApiTokenRoute
   ChatWorkspaceIdRoute: typeof ChatWorkspaceIdRoute
   ApiChatAnswerRoute: typeof ApiChatAnswerRoute
+  ApiCliCheckRoute: typeof ApiCliCheckRoute
+  ApiCliInstallRoute: typeof ApiCliInstallRoute
   ApiHooksCheckRoute: typeof ApiHooksCheckRoute
   ApiHooksInstallRoute: typeof ApiHooksInstallRoute
+  ApiPrereqsCheckRoute: typeof ApiPrereqsCheckRoute
+  ApiPrereqsInstallNodeRoute: typeof ApiPrereqsInstallNodeRoute
+  ApiPrereqsInstallTunnelRoute: typeof ApiPrereqsInstallTunnelRoute
   ApiSessionsWorkspaceIdRoute: typeof ApiSessionsWorkspaceIdRouteWithChildren
   ApiStatusStreamRoute: typeof ApiStatusStreamRoute
   ApiTasksWorkspaceIdRoute: typeof ApiTasksWorkspaceIdRouteWithChildren
   ApiTasksSubmitRoute: typeof ApiTasksSubmitRoute
+  ApiTunnelAuthCheckRoute: typeof ApiTunnelAuthCheckRoute
+  ApiTunnelStartRoute: typeof ApiTunnelStartRoute
+  ApiTunnelStatusRoute: typeof ApiTunnelStatusRoute
+  ApiTunnelStopRoute: typeof ApiTunnelStopRoute
   ApiWorkspacesCreateRoute: typeof ApiWorkspacesCreateRoute
-  ApiWorkspacesOpenRoute: typeof ApiWorkspacesOpenRoute
   ApiWorkspacesRemoveRoute: typeof ApiWorkspacesRemoveRoute
   ApiWorkspacesRunScriptRoute: typeof ApiWorkspacesRunScriptRoute
   ApiWorkspaceWorkspaceIdDiffRoute: typeof ApiWorkspaceWorkspaceIdDiffRoute
@@ -357,11 +487,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatWorkspaceIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/token': {
+      id: '/api/token'
+      path: '/api/token'
+      fullPath: '/api/token'
+      preLoaderRoute: typeof ApiTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/settings': {
       id: '/api/settings'
       path: '/api/settings'
       fullPath: '/api/settings'
       preLoaderRoute: typeof ApiSettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/service-health': {
+      id: '/api/service-health'
+      path: '/api/service-health'
+      fullPath: '/api/service-health'
+      preLoaderRoute: typeof ApiServiceHealthRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/projects': {
@@ -385,18 +529,39 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiWorkspacesRemoveRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/workspaces/open': {
-      id: '/api/workspaces/open'
-      path: '/api/workspaces/open'
-      fullPath: '/api/workspaces/open'
-      preLoaderRoute: typeof ApiWorkspacesOpenRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/api/workspaces/create': {
       id: '/api/workspaces/create'
       path: '/api/workspaces/create'
       fullPath: '/api/workspaces/create'
       preLoaderRoute: typeof ApiWorkspacesCreateRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/tunnel/stop': {
+      id: '/api/tunnel/stop'
+      path: '/api/tunnel/stop'
+      fullPath: '/api/tunnel/stop'
+      preLoaderRoute: typeof ApiTunnelStopRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/tunnel/status': {
+      id: '/api/tunnel/status'
+      path: '/api/tunnel/status'
+      fullPath: '/api/tunnel/status'
+      preLoaderRoute: typeof ApiTunnelStatusRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/tunnel/start': {
+      id: '/api/tunnel/start'
+      path: '/api/tunnel/start'
+      fullPath: '/api/tunnel/start'
+      preLoaderRoute: typeof ApiTunnelStartRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/tunnel/auth-check': {
+      id: '/api/tunnel/auth-check'
+      path: '/api/tunnel/auth-check'
+      fullPath: '/api/tunnel/auth-check'
+      preLoaderRoute: typeof ApiTunnelAuthCheckRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/tasks/submit': {
@@ -455,6 +620,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiProjectsAddRouteImport
       parentRoute: typeof ApiProjectsRoute
     }
+    '/api/prereqs/install-tunnel': {
+      id: '/api/prereqs/install-tunnel'
+      path: '/api/prereqs/install-tunnel'
+      fullPath: '/api/prereqs/install-tunnel'
+      preLoaderRoute: typeof ApiPrereqsInstallTunnelRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/prereqs/install-node': {
+      id: '/api/prereqs/install-node'
+      path: '/api/prereqs/install-node'
+      fullPath: '/api/prereqs/install-node'
+      preLoaderRoute: typeof ApiPrereqsInstallNodeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/prereqs/check': {
+      id: '/api/prereqs/check'
+      path: '/api/prereqs/check'
+      fullPath: '/api/prereqs/check'
+      preLoaderRoute: typeof ApiPrereqsCheckRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/hooks/install': {
       id: '/api/hooks/install'
       path: '/api/hooks/install'
@@ -467,6 +653,20 @@ declare module '@tanstack/react-router' {
       path: '/api/hooks/check'
       fullPath: '/api/hooks/check'
       preLoaderRoute: typeof ApiHooksCheckRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/cli/install': {
+      id: '/api/cli/install'
+      path: '/api/cli/install'
+      fullPath: '/api/cli/install'
+      preLoaderRoute: typeof ApiCliInstallRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/cli/check': {
+      id: '/api/cli/check'
+      path: '/api/cli/check'
+      fullPath: '/api/cli/check'
+      preLoaderRoute: typeof ApiCliCheckRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/chat/answer': {
@@ -561,17 +761,27 @@ const ApiTasksWorkspaceIdRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ApiProjectsRoute: ApiProjectsRouteWithChildren,
+  ApiServiceHealthRoute: ApiServiceHealthRoute,
   ApiSettingsRoute: ApiSettingsRoute,
+  ApiTokenRoute: ApiTokenRoute,
   ChatWorkspaceIdRoute: ChatWorkspaceIdRoute,
   ApiChatAnswerRoute: ApiChatAnswerRoute,
+  ApiCliCheckRoute: ApiCliCheckRoute,
+  ApiCliInstallRoute: ApiCliInstallRoute,
   ApiHooksCheckRoute: ApiHooksCheckRoute,
   ApiHooksInstallRoute: ApiHooksInstallRoute,
+  ApiPrereqsCheckRoute: ApiPrereqsCheckRoute,
+  ApiPrereqsInstallNodeRoute: ApiPrereqsInstallNodeRoute,
+  ApiPrereqsInstallTunnelRoute: ApiPrereqsInstallTunnelRoute,
   ApiSessionsWorkspaceIdRoute: ApiSessionsWorkspaceIdRouteWithChildren,
   ApiStatusStreamRoute: ApiStatusStreamRoute,
   ApiTasksWorkspaceIdRoute: ApiTasksWorkspaceIdRouteWithChildren,
   ApiTasksSubmitRoute: ApiTasksSubmitRoute,
+  ApiTunnelAuthCheckRoute: ApiTunnelAuthCheckRoute,
+  ApiTunnelStartRoute: ApiTunnelStartRoute,
+  ApiTunnelStatusRoute: ApiTunnelStatusRoute,
+  ApiTunnelStopRoute: ApiTunnelStopRoute,
   ApiWorkspacesCreateRoute: ApiWorkspacesCreateRoute,
-  ApiWorkspacesOpenRoute: ApiWorkspacesOpenRoute,
   ApiWorkspacesRemoveRoute: ApiWorkspacesRemoveRoute,
   ApiWorkspacesRunScriptRoute: ApiWorkspacesRunScriptRoute,
   ApiWorkspaceWorkspaceIdDiffRoute: ApiWorkspaceWorkspaceIdDiffRoute,

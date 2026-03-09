@@ -1,12 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { installHooks } from "../../lib/hooks";
+import { stopTunnel } from "../../lib/tunnel";
 
-export const Route = createFileRoute("/api/hooks/install")({
+export const Route = createFileRoute("/api/tunnel/stop")({
   server: {
     handlers: {
       POST: async () => {
         try {
-          await installHooks();
+          await stopTunnel();
           return Response.json({ ok: true });
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);

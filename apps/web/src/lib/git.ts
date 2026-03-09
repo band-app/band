@@ -30,6 +30,22 @@ export function execGit(args: string[], cwd: string): Promise<string> {
   });
 }
 
+export function execGh(args: string[], cwd: string): Promise<string> {
+  const env = { ...process.env };
+  if (env.PATH) {
+    env.PATH = `/opt/homebrew/bin:/usr/local/bin:${env.PATH}`;
+  }
+  return new Promise((resolve, reject) => {
+    execFile("gh", args, { cwd, env }, (err, stdout, stderr) => {
+      if (err) {
+        reject(new Error(stderr || err.message));
+        return;
+      }
+      resolve(stdout);
+    });
+  });
+}
+
 export async function listWorktrees(repoPath: string): Promise<WorktreeInfo[]> {
   const output = await execGit(["worktree", "list", "--porcelain"], repoPath);
   const worktrees: WorktreeInfo[] = [];

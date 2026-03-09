@@ -19,3 +19,7 @@ Unit tests with heavy mocking verify that your mocks work, not that your system 
 - **Node.js built-in test runner.** Use `node:test` with `node:assert/strict`. Don't add test framework dependencies unless already present.
 
 See `.claude/skills/integration-tests.md` for the full set of rules and examples.
+
+## Architecture: Web Server vs Tauri App
+
+The web server (`apps/web`) handles **data, state, and background processes** only. It must never do window management — no spawning `code`, no AppleScript, no opening/focusing/positioning IDE windows. Window management (VS Code focus, window positioning, folder pickers, Finder reveal) is the Tauri desktop app's responsibility (`apps/dashboard`).

@@ -121,13 +121,8 @@ export class WebDashboardAdapter implements DashboardAdapter {
     if (!res.ok) throw new Error("Failed to remove workspace");
   }
 
-  async openWorkspace(workspaceId: string): Promise<void> {
-    const res = await fetch("/api/workspaces/open", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ workspaceId }),
-    });
-    if (!res.ok) throw new Error("Failed to open workspace");
+  async openWorkspace(_workspaceId: string): Promise<void> {
+    // No-op: window management is handled by the desktop app
   }
 
   async runScript(path: string, scriptType: string): Promise<void> {

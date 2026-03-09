@@ -1,12 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { installHooks } from "../../lib/hooks";
+import { installCli } from "../../lib/cli";
 
-export const Route = createFileRoute("/api/hooks/install")({
+export const Route = createFileRoute("/api/cli/install")({
   server: {
     handlers: {
       POST: async () => {
         try {
-          await installHooks();
+          await installCli();
           return Response.json({ ok: true });
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);

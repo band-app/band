@@ -23,12 +23,24 @@ interface CIStatus {
 }
 
 export interface StatusEvent {
-  kind: "update" | "remove" | "snapshot" | "branch-status";
+  kind:
+    | "update"
+    | "remove"
+    | "snapshot"
+    | "branch-status"
+    | "tunnel-url"
+    | "tunnel-error"
+    | "tunnel-subdomain-taken"
+    | "tunnel-remote-host";
   status?: WorkspaceStatus;
   statuses?: WorkspaceStatus[];
   workspaceId?: string;
   git?: GitStatus;
   ci?: CIStatus;
+  url?: string;
+  error?: string;
+  subdomain?: string;
+  remoteHost?: string;
 }
 
 type StatusListener = (event: StatusEvent) => void;
@@ -125,7 +137,7 @@ function loadCurrentBranchStatuses(): StatusEvent[] {
   return events;
 }
 
-function emit(event: StatusEvent) {
+export function emit(event: StatusEvent) {
   for (const listener of listeners) {
     listener(event);
   }
