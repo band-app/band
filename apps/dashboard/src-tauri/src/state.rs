@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectState {
@@ -77,11 +76,11 @@ pub fn status_dir() -> PathBuf {
     band_home().join("status")
 }
 
-pub fn state_file() -> PathBuf {
+fn state_file() -> PathBuf {
     band_home().join("state.json")
 }
 
-pub fn ensure_dirs() -> Result<(), String> {
+fn ensure_dirs() -> Result<(), String> {
     let home = band_home();
     fs::create_dir_all(&home).map_err(|e| format!("Failed to create ~/.band: {e}"))?;
     fs::create_dir_all(home.join("status"))
@@ -99,15 +98,7 @@ pub fn load_state() -> Result<AppState, String> {
     serde_json::from_str(&data).map_err(|e| format!("Failed to parse state: {e}"))
 }
 
-pub fn save_state(state: &AppState) -> Result<(), String> {
-    ensure_dirs()?;
-    let path = state_file();
-    let data =
-        serde_json::to_string_pretty(state).map_err(|e| format!("Failed to serialize: {e}"))?;
-    fs::write(&path, data).map_err(|e| format!("Failed to write state: {e}"))
-}
-
-pub fn settings_file() -> PathBuf {
+fn settings_file() -> PathBuf {
     band_home().join("settings.json")
 }
 
@@ -127,65 +118,4 @@ pub fn save_settings(settings: &Settings) -> Result<(), String> {
     let data = serde_json::to_string_pretty(settings)
         .map_err(|e| format!("Failed to serialize settings: {e}"))?;
     fs::write(&path, data).map_err(|e| format!("Failed to write settings: {e}"))
-}
-
-pub fn worktrees_dir() -> PathBuf {
-    load_settings()
-        .ok()
-        .and_then(|s| s.worktrees_dir)
-        .map_or_else(|| band_home().join("worktrees"), PathBuf::from)
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ProjectConfig {
-    pub setup: Option<String>,
-    pub teardown: Option<String>,
-}
-
-pub fn load_project_config(project_path: &str) -> ProjectConfig {
-    let config_path = PathBuf::from(project_path)
-        .join(".band")
-        .join("config.json");
-    if !config_path.exists() {
-        return ProjectConfig::default();
-    }
-    fs::read_to_string(&config_path)
-        .ok()
-        .and_then(|data| serde_json::from_str(&data).ok())
-        .unwrap_or_default()
-}
-
-pub fn run_script_in_terminal(command: &str, cwd: &str) -> Result<(), String> {
-    let safe_cwd = cwd.replace('\'', "'\\''");
-    let escaped_cmd = command.replace('\'', "'\\''");
-
-    let apple_script = format!(
-        "tell application \"Terminal\"\n\
-             activate\n\
-             do script \"cd '{safe_cwd}' && {escaped_cmd}\"\n\
-         end tell"
-    );
-
-    Command::new("osascript")
-        .args(["-e", &apple_script])
-        .output()
-        .map_err(|e| format!("Failed to open terminal: {e}"))?;
-
-    Ok(())
-}
-
-pub fn run_script(command: &str, cwd: &str) -> Result<(), String> {
-    let output = Command::new("sh")
-        .args(["-c", command])
-        .current_dir(cwd)
-        .env("PATH", crate::commands::webserver::shell_path())
-        .output()
-        .map_err(|e| format!("Failed to run script: {e}"))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Script failed: {stderr}"));
-    }
-
-    Ok(())
 }

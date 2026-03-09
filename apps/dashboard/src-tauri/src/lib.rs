@@ -2,11 +2,7 @@ mod commands;
 mod git;
 mod state;
 
-use commands::branch_status::BranchStatusPollerState;
-use commands::status::WatcherState;
-use commands::webserver::{
-    self as webserver, ManagedProcess, TunnelInner, TunnelState, WebServerState,
-};
+use commands::webserver::{self as webserver, ManagedProcess, TunnelInner, TunnelState, WebServerState};
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
 
@@ -18,39 +14,17 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
-        .manage(WatcherState(Arc::new(Mutex::new(None))))
-        .manage(BranchStatusPollerState(Arc::new(Mutex::new(None))))
         .manage(WebServerState(ManagedProcess::new()))
         .manage(TunnelState(Arc::new(Mutex::new(TunnelInner {
             process: ManagedProcess::new(),
             url: None,
         }))))
         .invoke_handler(tauri::generate_handler![
-            commands::project::project_init,
-            commands::project::project_list,
-            commands::project::project_remove,
-            commands::project::project_reorder,
-            commands::project::project_update_label,
-            commands::workspace::workspace_create,
-            commands::workspace::workspace_list,
-            commands::workspace::workspace_remove,
-            commands::workspace::workspace_open,
-            commands::workspace::workspace_run_script,
-            commands::status::status_watch_start,
-            commands::status::status_watch_stop,
             commands::ide::workspace_focus,
             commands::ide::get_active_workspace,
             commands::ide::detect_active_workspace,
             commands::ide::pick_folder,
             commands::ide::reveal_in_finder,
-            commands::hooks::hooks_check,
-            commands::hooks::hooks_install,
-            commands::cli::cli_check_cmd,
-            commands::cli::cli_install_cmd,
-            commands::settings::settings_get,
-            commands::settings::settings_update,
-            commands::branch_status::branch_status_watch_start,
-            commands::branch_status::branch_status_watch_stop,
             commands::webserver::webserver_start,
             commands::webserver::webserver_stop,
             commands::webserver::service_health_check,

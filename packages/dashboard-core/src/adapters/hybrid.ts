@@ -23,7 +23,7 @@ async function tauriListen<T>(event: string, handler: (payload: T) => void): Pro
 export class HybridDashboardAdapter extends WebDashboardAdapter {
   async openWorkspace(workspaceId: string): Promise<void> {
     if (isTauri()) {
-      await tauriInvoke("workspace_open", { workspaceId });
+      await tauriInvoke("workspace_focus", { workspaceId });
       return;
     }
     return super.openWorkspace(workspaceId);
