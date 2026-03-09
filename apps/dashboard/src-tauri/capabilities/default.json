@@ -2,6 +2,9 @@
   "identifier": "default",
   "description": "Default permissions for Band dashboard",
   "windows": ["main"],
+  "remote": {
+    "urls": ["http://localhost:*"]
+  },
   "permissions": [
     "core:default",
     "fs:default",

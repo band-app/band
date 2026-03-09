@@ -1,9 +1,9 @@
 import { DashboardProvider, DashboardShell } from "@band/dashboard-core";
-import { WebCapabilities, WebDashboardAdapter } from "@band/dashboard-core/adapters/web";
+import { HybridCapabilities, HybridDashboardAdapter } from "@band/dashboard-core/adapters/hybrid";
 import { TooltipProvider } from "@band/ui";
 
-const adapter = new WebDashboardAdapter();
-const capabilities = new WebCapabilities();
+const adapter = new HybridDashboardAdapter();
+const capabilities = new HybridCapabilities();
 
 export function DashboardView() {
   return (

@@ -9,7 +9,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./adapters/tauri": "./src/adapters/tauri.ts",
-    "./adapters/web": "./src/adapters/web.ts"
+    "./adapters/web": "./src/adapters/web.ts",
+    "./adapters/hybrid": "./src/adapters/hybrid.ts"
   },
   "dependencies": {
     "@band/ui": "workspace:^",

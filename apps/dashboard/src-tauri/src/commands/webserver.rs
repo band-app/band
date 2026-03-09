@@ -293,6 +293,70 @@ pub struct ServiceHealth {
 }
 
 // ---------------------------------------------------------------------------
+// Auto-start helper (called from setup(), no Tauri state available)
+// ---------------------------------------------------------------------------
+
+/// Check the local health endpoint synchronously using a blocking curl call.
+fn check_local_health_sync(port: u16, token: &str) -> bool {
+    let url = format!("http://127.0.0.1:{port}/api/health?token={token}");
+    let output = Command::new("curl")
+        .args(["-s", "-f", "--max-time", "2", &url])
+        .output();
+    match output {
+        Ok(o) if o.status.success() => parse_local_health(&String::from_utf8_lossy(&o.stdout)),
+        _ => false,
+    }
+}
+
+/// Ensure the web server is running and return `(port, token)`.
+///
+/// 1. Checks if a server is already responding on the configured port.
+/// 2. If not, spawns `node dist/start-server.mjs`.
+/// 3. Polls the health endpoint until ready (max 15 s).
+pub(crate) fn ensure_webserver_running() -> Result<(u16, String), String> {
+    let port = get_configured_port();
+    let secret = get_or_create_secret()?;
+    let token = compute_token(&secret);
+
+    // Already running?
+    if check_local_health_sync(port, &token) {
+        return Ok((port, token));
+    }
+
+    let web_dir = resolve_web_dir()?;
+    let start_script = web_dir.join("dist/start-server.mjs");
+
+    let mut cmd = Command::new("node");
+    cmd.arg(&start_script)
+        .current_dir(&web_dir)
+        .env("PATH", shell_path())
+        .env("PORT", port.to_string())
+        .env("BAND_TOKEN_SECRET", &secret)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    set_process_group(&mut cmd);
+
+    let _child = cmd.spawn().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            "Node.js is required but not installed. Install it from https://nodejs.org".to_string()
+        } else {
+            format!("Failed to start web server: {e}")
+        }
+    })?;
+
+    // Poll health endpoint until ready (max 15 s)
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        if check_local_health_sync(port, &token) {
+            return Ok((port, token));
+        }
+    }
+
+    Err("Web server did not become healthy within 15 seconds".to_string())
+}
+
+// ---------------------------------------------------------------------------
 // Web server commands
 // ---------------------------------------------------------------------------
 
