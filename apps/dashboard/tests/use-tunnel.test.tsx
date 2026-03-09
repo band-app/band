@@ -24,7 +24,7 @@ function emitEvent(name: string, payload?: unknown) {
 }
 
 // ---------------------------------------------------------------------------
-// Mock dashboard-core — useSettingsStore uses React Context internally,
+// Mock dashboard-core — useSettingsQuery uses React Context internally,
 // so we replace it with a controlled mock.
 // isServiceHealthy is a pure function — we use the real logic.
 // ---------------------------------------------------------------------------
@@ -40,8 +40,7 @@ vi.mock("@band/dashboard-core", () => ({
     if (subdomain) return health.tunnel;
     return true;
   },
-  useSettingsStore: (selector: (state: { settings: typeof mockSettings }) => unknown) =>
-    selector({ settings: mockSettings }),
+  useSettingsQuery: () => ({ settings: mockSettings, isLoading: false, error: null }),
 }));
 
 // ---------------------------------------------------------------------------

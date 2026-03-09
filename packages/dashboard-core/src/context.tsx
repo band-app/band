@@ -1,8 +1,9 @@
+import { QueryClientProvider } from "@tanstack/react-query";
 import { createContext, type ReactNode, useContext, useMemo } from "react";
 import type { DashboardAdapter, PlatformCapabilities } from "./adapter";
+import { queryClient } from "./query-client";
 import { createDashboardStore } from "./stores/dashboard-store";
 import { StoreContext } from "./stores/index";
-import { createSettingsStore } from "./stores/settings-store";
 
 interface DashboardContextValue {
   adapter: DashboardAdapter;
@@ -33,14 +34,15 @@ export function DashboardProvider({ adapter, capabilities, children }: Dashboard
   const stores = useMemo(
     () => ({
       dashboardStore: createDashboardStore(adapter),
-      settingsStore: createSettingsStore(adapter),
     }),
     [adapter],
   );
 
   return (
     <DashboardContext.Provider value={{ adapter, capabilities }}>
-      <StoreContext.Provider value={stores}>{children}</StoreContext.Provider>
+      <QueryClientProvider client={queryClient}>
+        <StoreContext.Provider value={stores}>{children}</StoreContext.Provider>
+      </QueryClientProvider>
     </DashboardContext.Provider>
   );
 }

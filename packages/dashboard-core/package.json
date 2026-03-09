@@ -16,6 +16,9 @@
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
+    "@tanstack/react-query": "^5.90.21",
+    "@trpc/client": "^11.12.0",
+    "@trpc/server": "^11.12.0",
     "lucide-react": "^0.576.0",
     "shiki": "^3.0.0",
     "zustand": "^5.0.0"

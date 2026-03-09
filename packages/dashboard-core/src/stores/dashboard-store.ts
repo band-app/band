@@ -1,39 +1,20 @@
 import { create, type StoreApi, type UseBoundStore } from "zustand";
 import type { DashboardAdapter } from "../adapter";
-import type {
-  CIStatus,
-  GitStatus,
-  ProjectInfo,
-  WorkspaceBranchStatus,
-  WorkspaceStatus,
-} from "../types";
+import type { CIStatus, GitStatus, WorkspaceBranchStatus, WorkspaceStatus } from "../types";
 
 export interface DashboardState {
-  projects: ProjectInfo[];
   statuses: Map<string, WorkspaceStatus>;
   activeWorkspaceId: string | null;
-  loading: boolean;
   error: string | null;
   branchStatuses: Map<string, WorkspaceBranchStatus>;
 
-  loadProjects: () => Promise<void>;
-  addProject: (path: string, label?: string) => Promise<void>;
-  removeProject: (name: string) => Promise<void>;
-  reorderProjects: (projectNames: string[]) => Promise<void>;
-  createWorkspace: (
-    project: string,
-    branch: string,
-    base?: string,
-    prompt?: string,
-  ) => Promise<void>;
-  removeWorkspace: (project: string, branch: string) => Promise<void>;
   openWorkspace: (workspaceId: string) => void;
   clearError: () => void;
+  setError: (error: string) => void;
   updateStatus: (status: WorkspaceStatus) => void;
   removeStatus: (workspaceId: string) => void;
   setActiveWorkspace: (workspaceId: string | null) => void;
   runScript: (path: string, scriptType: string) => Promise<void>;
-  updateProjectLabel: (project: string, label: string | null) => Promise<void>;
   updateGitStatus: (workspaceId: string, git: GitStatus) => void;
   updateCIStatus: (workspaceId: string, ci: CIStatus) => void;
 }
@@ -42,84 +23,10 @@ export type DashboardStore = UseBoundStore<StoreApi<DashboardState>>;
 
 export function createDashboardStore(adapter: DashboardAdapter): DashboardStore {
   return create<DashboardState>((set, get) => ({
-    projects: [],
     statuses: new Map(),
     branchStatuses: new Map(),
     activeWorkspaceId: null,
-    loading: false,
     error: null,
-
-    loadProjects: async () => {
-      set({ loading: true, error: null });
-      try {
-        const projects = await adapter.listProjects();
-        set({ projects, loading: false });
-      } catch (e) {
-        set({ error: String(e), loading: false });
-      }
-    },
-
-    addProject: async (path: string, label?: string) => {
-      try {
-        await adapter.addProject(path, label);
-        await get().loadProjects();
-      } catch (e) {
-        set({ error: String(e) });
-      }
-    },
-
-    removeProject: async (name: string) => {
-      try {
-        await adapter.removeProject(name);
-        await get().loadProjects();
-      } catch (e) {
-        set({ error: String(e) });
-      }
-    },
-
-    reorderProjects: async (projectNames: string[]) => {
-      const previousProjects = get().projects;
-      const reordered = [...previousProjects].sort(
-        (a, b) => projectNames.indexOf(a.name) - projectNames.indexOf(b.name),
-      );
-      set({ projects: reordered });
-
-      try {
-        await adapter.reorderProjects(projectNames);
-      } catch (e) {
-        set({ projects: previousProjects, error: String(e) });
-      }
-    },
-
-    createWorkspace: async (project: string, branch: string, base?: string, prompt?: string) => {
-      try {
-        await adapter.createWorkspace(project, branch, base, prompt);
-      } catch (e) {
-        set({ error: String(e) });
-        return;
-      }
-      await get().loadProjects();
-      const workspaceId = `${project}-${branch}`;
-      get().openWorkspace(workspaceId);
-    },
-
-    removeWorkspace: async (project: string, branch: string) => {
-      const previousProjects = get().projects;
-      set({
-        projects: previousProjects.map((p) =>
-          p.name === project
-            ? { ...p, worktrees: p.worktrees.filter((wt) => wt.branch !== branch) }
-            : p,
-        ),
-      });
-
-      try {
-        await adapter.removeWorkspace(project, branch);
-        await get().loadProjects();
-      } catch (e) {
-        set({ projects: previousProjects, error: String(e) });
-      }
-    },
 
     openWorkspace: (workspaceId: string) => {
       set({ activeWorkspaceId: workspaceId });
@@ -129,6 +36,8 @@ export function createDashboardStore(adapter: DashboardAdapter): DashboardStore 
     },
 
     clearError: () => set({ error: null }),
+
+    setError: (error: string) => set({ error }),
 
     updateStatus: (status: WorkspaceStatus) => {
       set((state) => {
@@ -154,15 +63,6 @@ export function createDashboardStore(adapter: DashboardAdapter): DashboardStore 
     runScript: async (path: string, scriptType: string) => {
       try {
         await adapter.runScript(path, scriptType);
-      } catch (e) {
-        set({ error: String(e) });
-      }
-    },
-
-    updateProjectLabel: async (project: string, label: string | null) => {
-      try {
-        await adapter.updateProjectLabel(project, label);
-        await get().loadProjects();
       } catch (e) {
         set({ error: String(e) });
       }

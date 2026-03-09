@@ -25,8 +25,9 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useCapabilities } from "../context";
+import { useUpdateSettings } from "../hooks/use-settings-mutations";
+import { useSettingsQuery } from "../hooks/use-settings-query";
 import { playSound, SOUNDS, type SoundId } from "../lib/sounds";
-import { useSettingsStore } from "../stores/index";
 import type { CodingAgentConfig, CodingAgentType, LabelDefinition } from "../types";
 
 const AGENT_TYPES: { value: CodingAgentType; label: string }[] = [
@@ -86,11 +87,8 @@ function SettingsRow({
 }
 
 export function SettingsPage({ onClose }: Props) {
-  const { settings, loadSettings, updateSettings } = {
-    settings: useSettingsStore((s) => s.settings),
-    loadSettings: useSettingsStore((s) => s.loadSettings),
-    updateSettings: useSettingsStore((s) => s.updateSettings),
-  };
+  const { settings } = useSettingsQuery();
+  const updateSettingsMutation = useUpdateSettings();
   const capabilities = useCapabilities();
   const [section, setSection] = useState<Section>("menu");
   const [worktreesDir, setWorktreesDir] = useState(settings.worktreesDir ?? "");
@@ -110,10 +108,6 @@ export function SettingsPage({ onClose }: Props) {
   const [labels, setLabels] = useState<LabelDefinition[]>(settings.labels ?? []);
   const [tunnelSubdomain, setTunnelSubdomain] = useState(settings.tunnelSubdomain ?? "");
   const [autoStartTunnel, setAutoStartTunnel] = useState(settings.autoStartTunnel ?? false);
-
-  useEffect(() => {
-    loadSettings();
-  }, [loadSettings]);
 
   useEffect(() => {
     setWorktreesDir(settings.worktreesDir ?? "");
@@ -189,7 +183,7 @@ export function SettingsPage({ onClose }: Props) {
       if (Number.isNaN(n) || n <= 0 || n >= 65536) return;
       parsedPort = n;
     }
-    await updateSettings({
+    await updateSettingsMutation.mutateAsync({
       worktreesDir: worktreesDir.trim() || null,
       defaults,
       codingAgent,

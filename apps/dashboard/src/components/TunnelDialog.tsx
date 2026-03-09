@@ -1,4 +1,4 @@
-import { useSettingsStore } from "@band/dashboard-core";
+import { useSettingsQuery } from "@band/dashboard-core";
 import { Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@band/ui";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -35,7 +35,7 @@ export function TunnelDialog({ open, onOpenChange, onStopped, initialUrl, onTunn
   const [tunnelUrl, setTunnelUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [remoteHost, setRemoteHost] = useState<string | null>(null);
-  const settings = useSettingsStore((s) => s.settings);
+  const { settings } = useSettingsQuery();
 
   const ensureWebServer = useCallback(async () => {
     const health = await invoke<ServiceHealth>("service_health_check");

@@ -2,6 +2,7 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } 
 import { Clipboard, FolderOpen, GitBranch, Play, Square, Trash2 } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { useCapabilities } from "../context";
+import { useRemoveWorkspace } from "../hooks/use-project-mutations";
 import { useDashboardStore } from "../stores/index";
 import type {
   DeleteDialogInfo,
@@ -42,9 +43,9 @@ export function WorkspaceCard({
   }, [isFocused]);
 
   const openWorkspace = useDashboardStore((s) => s.openWorkspace);
-  const removeWorkspace = useDashboardStore((s) => s.removeWorkspace);
   const runScript = useDashboardStore((s) => s.runScript);
   const activeWorkspaceId = useDashboardStore((s) => s.activeWorkspaceId);
+  const removeWorkspaceMutation = useRemoveWorkspace();
 
   const workspaceId = `${projectName}-${worktree.branch}`;
   const isActive = activeWorkspaceId === workspaceId;
@@ -76,7 +77,7 @@ export function WorkspaceCard({
 
   const handleDelete = () => {
     if (!hasUnmergedPR && !isDirty && !hasUnpushedCommits) {
-      removeWorkspace(projectName, worktree.branch);
+      removeWorkspaceMutation.mutate({ project: projectName, branch: worktree.branch });
     } else {
       onShowDeleteDialog({
         projectName,

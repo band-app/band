@@ -33,7 +33,15 @@ import { CSS } from "@dnd-kit/utilities";
 import { Check, Clipboard, FolderOpen, ListMinus, Plus, Tag } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useCapabilities } from "../context";
-import { useDashboardStore, useSettingsStore } from "../stores/index";
+import {
+  useRemoveProject,
+  useRemoveWorkspace,
+  useReorderProjects,
+  useUpdateProjectLabel,
+} from "../hooks/use-project-mutations";
+import { useProjects } from "../hooks/use-projects";
+import { useSettingsQuery } from "../hooks/use-settings-query";
+import { useDashboardStore } from "../stores/index";
 import type {
   DeleteDialogInfo,
   LabelDefinition,
@@ -215,21 +223,24 @@ interface ProjectListProps {
 }
 
 export function ProjectList({ labelFilter }: ProjectListProps) {
-  const projects = useDashboardStore((s) => s.projects);
+  const { projects } = useProjects();
+  const { settings } = useSettingsQuery();
+  const labels = settings.labels ?? [];
   const statuses = useDashboardStore((s) => s.statuses);
   const branchStatuses = useDashboardStore((s) => s.branchStatuses);
-  const removeProject = useDashboardStore((s) => s.removeProject);
-  const reorderProjects = useDashboardStore((s) => s.reorderProjects);
   const openWorkspace = useDashboardStore((s) => s.openWorkspace);
-  const removeWorkspace = useDashboardStore((s) => s.removeWorkspace);
-  const updateProjectLabel = useDashboardStore((s) => s.updateProjectLabel);
-  const labels = useSettingsStore((s) => s.settings.labels) ?? [];
+  const activeWorkspaceId = useDashboardStore((s) => s.activeWorkspaceId);
+
+  const removeProjectMutation = useRemoveProject();
+  const reorderProjectsMutation = useReorderProjects();
+  const updateProjectLabelMutation = useUpdateProjectLabel();
+  const removeWorkspaceMutation = useRemoveWorkspace();
+
   const [workspaceDialog, setWorkspaceDialog] = useState<string | null>(null);
   const [deleteDialog, setDeleteDialog] = useState<DeleteDialogInfo | null>(null);
   const [focusedIndex, setFocusedIndex] = useState(-1);
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const activeWorkspaceId = useDashboardStore((s) => s.activeWorkspaceId);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
@@ -335,7 +346,7 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
 
     if (overId.startsWith("group:")) {
       const targetLabelId = overId === "group:__unlabeled" ? null : overId.slice("group:".length);
-      updateProjectLabel(activeId, targetLabelId);
+      updateProjectLabelMutation.mutate({ name: activeId, label: targetLabelId });
       return;
     }
 
@@ -348,9 +359,9 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
       const allNames = projects.map((p) => p.name);
       const oldIndex = allNames.indexOf(activeId);
       const newIndex = allNames.indexOf(overId);
-      reorderProjects(arrayMove(allNames, oldIndex, newIndex));
+      reorderProjectsMutation.mutate(arrayMove(allNames, oldIndex, newIndex));
     } else {
-      updateProjectLabel(activeId, overGroup.labelId);
+      updateProjectLabelMutation.mutate({ name: activeId, label: overGroup.labelId });
     }
   }
 
@@ -395,8 +406,10 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
                       project={project}
                       statuses={statuses}
                       branchStatuses={branchStatuses}
-                      removeProject={removeProject}
-                      updateProjectLabel={updateProjectLabel}
+                      removeProject={(name) => removeProjectMutation.mutate(name)}
+                      updateProjectLabel={(name, label) =>
+                        updateProjectLabelMutation.mutate({ name, label })
+                      }
                       labels={labels}
                       setWorkspaceDialog={setWorkspaceDialog}
                       onShowDeleteDialog={setDeleteDialog}
@@ -432,7 +445,10 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
         }}
         onConfirm={() => {
           if (deleteDialog) {
-            removeWorkspace(deleteDialog.projectName, deleteDialog.branch);
+            removeWorkspaceMutation.mutate({
+              project: deleteDialog.projectName,
+              branch: deleteDialog.branch,
+            });
             setDeleteDialog(null);
           }
         }}

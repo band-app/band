@@ -1,11 +1,14 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { join } from "node:path";
+import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import sirv from "sirv";
 import { createAuthMiddleware } from "./auth.ts";
 import { stopBranchStatusPoller } from "./src/lib/branch-status-poller.ts";
 import { checkPrereqs } from "./src/lib/process-utils.ts";
 import { loadSettings } from "./src/lib/state.ts";
 import { startTunnel, stopTunnel } from "./src/lib/tunnel.ts";
+import { createContext } from "./src/trpc/context.ts";
+import { appRouter } from "./src/trpc/router.ts";
 
 // After bundling, this file lives at dist/start-server.mjs,
 // so paths are relative to dist/.
@@ -61,6 +64,21 @@ async function main() {
         body,
         duplex: "half",
       } as RequestInit);
+
+      // Handle tRPC requests before TanStack router
+      if (url.pathname.startsWith("/trpc")) {
+        const response = await fetchRequestHandler({
+          endpoint: "/trpc",
+          req: request,
+          router: appRouter,
+          createContext,
+        });
+
+        res.writeHead(response.status, Object.fromEntries(response.headers.entries()));
+        const text = await response.text();
+        res.end(text);
+        return;
+      }
 
       const response = await server.fetch(request);
 

@@ -1,15 +1,15 @@
 import { useEffect, useRef } from "react";
 import { useAdapter } from "../context";
 import { playSound, type SoundId } from "../lib/sounds";
-import { useDashboardStore, useRawSettingsStore } from "../stores/index";
-import type { AgentStatusType } from "../types";
+import { queryClient, queryKeys } from "../query-client";
+import { useDashboardStore } from "../stores/index";
+import type { AgentStatusType, Settings } from "../types";
 
 export function useStatusWatcher() {
   const adapter = useAdapter();
   const updateStatus = useDashboardStore((s) => s.updateStatus);
   const removeStatus = useDashboardStore((s) => s.removeStatus);
   const previousStatuses = useRef<Map<string, AgentStatusType>>(new Map());
-  const settingsStore = useRawSettingsStore();
 
   useEffect(() => {
     const unsubscribe = adapter.subscribeAgentStatus(
@@ -25,7 +25,8 @@ export function useStatusWatcher() {
         }
 
         if (prevAgentStatus === "working" && newAgentStatus === "needs_attention") {
-          const notifications = settingsStore.getState().settings.notifications;
+          const settings = queryClient.getQueryData<Settings>(queryKeys.settings);
+          const notifications = settings?.notifications;
           if (notifications?.soundOnNeedsAttention) {
             playSound((notifications.sound ?? "chime") as SoundId);
           }
@@ -40,7 +41,7 @@ export function useStatusWatcher() {
     );
 
     return unsubscribe;
-  }, [adapter, updateStatus, removeStatus, settingsStore]);
+  }, [adapter, updateStatus, removeStatus]);
 }
 
 export function useActiveWorkspaceWatcher() {

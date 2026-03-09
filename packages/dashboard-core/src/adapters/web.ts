@@ -1,3 +1,4 @@
+import { createTRPCClient, httpBatchLink } from "@trpc/client";
 import type { DashboardAdapter, PlatformCapabilities, Unsubscribe } from "../adapter";
 import { subscribeSSE } from "../lib/sse";
 import type {
@@ -14,47 +15,32 @@ import type {
 } from "../types";
 
 export class WebDashboardAdapter implements DashboardAdapter {
+  // The AppRouter type lives in apps/web which cannot be imported here
+  // (circular dep). Type safety comes from the DashboardAdapter interface.
+  // biome-ignore lint/suspicious/noExplicitAny: tRPC client without router type
+  private trpc: any = createTRPCClient({
+    links: [httpBatchLink({ url: "/trpc" })],
+  });
+
   async listProjects(): Promise<ProjectInfo[]> {
-    const res = await fetch("/api/projects");
-    if (!res.ok) throw new Error("Failed to fetch projects");
-    const data = (await res.json()) as { projects: ProjectInfo[] };
+    const data = await this.trpc.projects.list.query();
     return data.projects;
   }
 
   async addProject(path: string, label?: string): Promise<void> {
-    const res = await fetch("/api/projects/add", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path, label }),
-    });
-    if (!res.ok) throw new Error("Failed to add project");
+    await this.trpc.projects.add.mutate({ path, label });
   }
 
   async removeProject(name: string): Promise<void> {
-    const res = await fetch("/api/projects/remove", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
-    });
-    if (!res.ok) throw new Error("Failed to remove project");
+    await this.trpc.projects.remove.mutate({ name });
   }
 
   async reorderProjects(names: string[]): Promise<void> {
-    const res = await fetch("/api/projects/reorder", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ names }),
-    });
-    if (!res.ok) throw new Error("Failed to reorder projects");
+    await this.trpc.projects.reorder.mutate({ names });
   }
 
   async updateProjectLabel(name: string, label: string | null): Promise<void> {
-    const res = await fetch("/api/projects/label", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, label }),
-    });
-    if (!res.ok) throw new Error("Failed to update label");
+    await this.trpc.projects.updateLabel.mutate({ name, label });
   }
 
   async createWorkspace(
@@ -63,21 +49,11 @@ export class WebDashboardAdapter implements DashboardAdapter {
     base?: string,
     prompt?: string,
   ): Promise<void> {
-    const res = await fetch("/api/workspaces/create", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ project, branch, base, prompt }),
-    });
-    if (!res.ok) throw new Error("Failed to create workspace");
+    await this.trpc.workspaces.create.mutate({ project, branch, base, prompt });
   }
 
   async removeWorkspace(project: string, branch: string): Promise<void> {
-    const res = await fetch("/api/workspaces/remove", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ project, branch }),
-    });
-    if (!res.ok) throw new Error("Failed to remove workspace");
+    await this.trpc.workspaces.remove.mutate({ project, branch });
   }
 
   async openWorkspace(_workspaceId: string): Promise<void> {
@@ -85,27 +61,15 @@ export class WebDashboardAdapter implements DashboardAdapter {
   }
 
   async runScript(path: string, scriptType: string): Promise<void> {
-    const res = await fetch("/api/workspaces/run-script", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path, scriptType }),
-    });
-    if (!res.ok) throw new Error("Failed to run script");
+    await this.trpc.workspaces.runScript.mutate({ path, scriptType });
   }
 
   async getSettings(): Promise<Settings> {
-    const res = await fetch("/api/settings");
-    if (!res.ok) throw new Error("Failed to fetch settings");
-    return (await res.json()) as Settings;
+    return (await this.trpc.settings.get.query()) as Settings;
   }
 
   async updateSettings(settings: Settings): Promise<void> {
-    const res = await fetch("/api/settings", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(settings),
-    });
-    if (!res.ok) throw new Error("Failed to update settings");
+    await this.trpc.settings.update.mutate(settings as unknown as Record<string, unknown>);
   }
 
   subscribeAgentStatus(
@@ -143,51 +107,32 @@ export class WebDashboardAdapter implements DashboardAdapter {
   }
 
   async checkHooks(): Promise<HooksStatus> {
-    const res = await fetch("/api/hooks/check");
-    if (!res.ok) throw new Error("Failed to check hooks");
-    return (await res.json()) as HooksStatus;
+    return await this.trpc.hooks.check.query();
   }
 
   async installHooks(): Promise<void> {
-    const res = await fetch("/api/hooks/install", { method: "POST" });
-    if (!res.ok) throw new Error("Failed to install hooks");
+    await this.trpc.hooks.install.mutate();
   }
 
   async checkCli(): Promise<CliStatus> {
-    const res = await fetch("/api/cli/check");
-    if (!res.ok) throw new Error("Failed to check CLI");
-    const data = (await res.json()) as { status: CliStatus };
-    return data.status;
+    const data = await this.trpc.cli.check.query();
+    return data.status as CliStatus;
   }
 
   async installCli(): Promise<void> {
-    const res = await fetch("/api/cli/install", { method: "POST" });
-    if (!res.ok) {
-      const data = await res.json().catch(() => null);
-      throw new Error(data?.error || "Failed to install CLI");
-    }
+    await this.trpc.cli.install.mutate();
   }
 
   async getWorkspaceDiff(workspaceId: string): Promise<WorkspaceDiff> {
-    const res = await fetch(`/api/workspace/${encodeURIComponent(workspaceId)}/diff`);
-    if (!res.ok) throw new Error("Failed to fetch diff");
-    return (await res.json()) as WorkspaceDiff;
+    return (await this.trpc.workspace.getDiff.query({ workspaceId })) as WorkspaceDiff;
   }
 
   async listWorkspaceFiles(workspaceId: string, path: string): Promise<FileListResult> {
-    const res = await fetch(
-      `/api/workspace/${encodeURIComponent(workspaceId)}/files?path=${encodeURIComponent(path)}`,
-    );
-    if (!res.ok) throw new Error("Failed to list files");
-    return (await res.json()) as FileListResult;
+    return (await this.trpc.workspace.listFiles.query({ workspaceId, path })) as FileListResult;
   }
 
   async getWorkspaceFile(workspaceId: string, path: string): Promise<FileContentResult> {
-    const res = await fetch(
-      `/api/workspace/${encodeURIComponent(workspaceId)}/file?path=${encodeURIComponent(path)}`,
-    );
-    if (!res.ok) throw new Error("Failed to read file");
-    return (await res.json()) as FileContentResult;
+    return (await this.trpc.workspace.getFile.query({ workspaceId, path })) as FileContentResult;
   }
 }
 

@@ -2,7 +2,7 @@ import {
   isServiceHealthy,
   type ServiceHealth,
   subscribeSSE,
-  useSettingsStore,
+  useSettingsQuery,
 } from "@band/dashboard-core";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -16,7 +16,7 @@ export function useTunnel() {
   const [showDialog, setShowDialog] = useState(false);
   const shouldBeRunningRef = useRef(false);
   const isRecoveringRef = useRef(false);
-  const settings = useSettingsStore((s) => s.settings);
+  const { settings } = useSettingsQuery();
 
   // Health polling — check service status every 30s, recover tunnel if shouldBeRunning
   useEffect(() => {

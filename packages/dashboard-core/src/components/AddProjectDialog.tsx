@@ -12,7 +12,7 @@ import {
 import { FolderOpen } from "lucide-react";
 import { useState } from "react";
 import { useCapabilities } from "../context";
-import { useDashboardStore } from "../stores/index";
+import { useAddProject } from "../hooks/use-project-mutations";
 
 interface Props {
   open: boolean;
@@ -22,13 +22,13 @@ interface Props {
 
 export function AddProjectDialog({ open, onOpenChange, defaultLabel }: Props) {
   const [path, setPath] = useState("");
-  const addProject = useDashboardStore((s) => s.addProject);
+  const addProjectMutation = useAddProject();
   const capabilities = useCapabilities();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!path.trim()) return;
-    await addProject(path.trim(), defaultLabel ?? undefined);
+    await addProjectMutation.mutateAsync({ path: path.trim(), label: defaultLabel ?? undefined });
     setPath("");
     onOpenChange(false);
   };

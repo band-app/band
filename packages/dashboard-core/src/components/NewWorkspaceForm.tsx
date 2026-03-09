@@ -11,7 +11,7 @@ import {
   Textarea,
 } from "@band/ui";
 import { useState } from "react";
-import { useDashboardStore } from "../stores/index";
+import { useCreateWorkspace } from "../hooks/use-project-mutations";
 
 interface Props {
   projectName: string;
@@ -23,17 +23,17 @@ export function NewWorkspaceDialog({ projectName, open, onOpenChange }: Props) {
   const [branch, setBranch] = useState("");
   const [base, setBase] = useState("");
   const [prompt, setPrompt] = useState("");
-  const createWorkspace = useDashboardStore((s) => s.createWorkspace);
+  const createWorkspaceMutation = useCreateWorkspace();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!branch.trim()) return;
-    await createWorkspace(
-      projectName,
-      branch.trim(),
-      base.trim() || undefined,
-      prompt.trim() || undefined,
-    );
+    await createWorkspaceMutation.mutateAsync({
+      project: projectName,
+      branch: branch.trim(),
+      base: base.trim() || undefined,
+      prompt: prompt.trim() || undefined,
+    });
     setBranch("");
     setBase("");
     setPrompt("");

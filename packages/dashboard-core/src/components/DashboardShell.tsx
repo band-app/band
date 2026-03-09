@@ -18,15 +18,17 @@ import {
   TooltipTrigger,
 } from "@band/ui";
 import { Check, FolderPlus, Plus, Settings, Tag, X } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useState } from "react";
 import { useCliSetup } from "../hooks/use-cli-setup";
 import { useHooksSetup } from "../hooks/use-hooks-setup";
+import { useProjects } from "../hooks/use-projects";
+import { useSettingsQuery } from "../hooks/use-settings-query";
 import {
   useActiveWorkspaceWatcher,
   useBranchStatusWatcher,
   useStatusWatcher,
 } from "../hooks/use-status";
-import { useDashboardStore, useSettingsStore } from "../stores/index";
+import { useDashboardStore } from "../stores/index";
 import { AddProjectDialog } from "./AddProjectDialog";
 import { ProjectList } from "./ProjectList";
 import { SettingsPage } from "./SettingsPage";
@@ -36,13 +38,11 @@ interface DashboardShellProps {
 }
 
 export function DashboardShell({ toolbarExtra }: DashboardShellProps) {
-  const loadProjects = useDashboardStore((s) => s.loadProjects);
-  const loading = useDashboardStore((s) => s.loading);
-  const projects = useDashboardStore((s) => s.projects);
+  const { projects, isLoading: loading } = useProjects();
+  const { settings } = useSettingsQuery();
+  const labels = settings.labels ?? [];
   const error = useDashboardStore((s) => s.error);
   const clearError = useDashboardStore((s) => s.clearError);
-  const loadSettings = useSettingsStore((s) => s.loadSettings);
-  const labels = useSettingsStore((s) => s.settings.labels) ?? [];
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [showErrorDialog, setShowErrorDialog] = useState(false);
   const [view, setView] = useState<"dashboard" | "settings">("dashboard");
@@ -53,11 +53,6 @@ export function DashboardShell({ toolbarExtra }: DashboardShellProps) {
   useStatusWatcher();
   useActiveWorkspaceWatcher();
   useBranchStatusWatcher();
-
-  useEffect(() => {
-    loadProjects();
-    loadSettings();
-  }, [loadProjects, loadSettings]);
 
   return (
     <div className="h-dvh w-full overflow-hidden flex flex-col bg-background text-foreground p-0 pt-[env(safe-area-inset-top)]">

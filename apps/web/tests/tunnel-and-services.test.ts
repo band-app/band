@@ -255,41 +255,6 @@ describe("GET /api/prereqs/check", () => {
 });
 
 // ---------------------------------------------------------------------------
-// GET /api/cli/check
-// ---------------------------------------------------------------------------
-
-describe("GET /api/cli/check", () => {
-  let server: ServerHandle;
-  let tmpHome: string;
-
-  beforeAll(async () => {
-    tmpHome = createTmpHome();
-    seedState(tmpHome, createDefaultState(tmpHome));
-    seedSettings(tmpHome, {});
-    server = await startServer({ tmpHome });
-  });
-
-  afterAll(async () => {
-    await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
-  });
-
-  it("returns a valid CLI status string", async () => {
-    const res = await fetch(`${server.url}/api/cli/check`);
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { status: string };
-    expect(typeof body.status).toBe("string");
-    expect([
-      "Installed",
-      "NotInstalled",
-      "ConflictingBinary",
-      "DirNotFound",
-      "NotWritable",
-    ]).toContain(body.status);
-  });
-});
-
-// ---------------------------------------------------------------------------
 // GET /api/token
 // ---------------------------------------------------------------------------
 
@@ -509,18 +474,6 @@ describe("Tunnel and service endpoints require auth when secret is set", () => {
 
   it("returns 200 for /api/prereqs/check with auth", async () => {
     const res = await fetch(`${server.url}/api/prereqs/check`, {
-      headers: { Cookie: authCookie },
-    });
-    expect(res.status).toBe(200);
-  });
-
-  it("returns 401 for /api/cli/check without auth", async () => {
-    const res = await fetch(`${server.url}/api/cli/check`);
-    expect(res.status).toBe(401);
-  });
-
-  it("returns 200 for /api/cli/check with auth", async () => {
-    const res = await fetch(`${server.url}/api/cli/check`, {
       headers: { Cookie: authCookie },
     });
     expect(res.status).toBe(200);

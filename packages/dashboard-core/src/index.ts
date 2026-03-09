@@ -19,6 +19,17 @@ export { type WorkspaceTab, WorkspaceTabNav } from "./components/WorkspaceTabNav
 // Context
 export { DashboardProvider, useAdapter, useCapabilities } from "./context";
 export { type HooksSetupState, useHooksSetup } from "./hooks/use-hooks-setup";
+export {
+  useAddProject,
+  useCreateWorkspace,
+  useRemoveProject,
+  useRemoveWorkspace,
+  useReorderProjects,
+  useUpdateProjectLabel,
+} from "./hooks/use-project-mutations";
+export { useProjects } from "./hooks/use-projects";
+export { useUpdateSettings } from "./hooks/use-settings-mutations";
+export { useSettingsQuery } from "./hooks/use-settings-query";
 // Hooks
 export {
   useActiveWorkspaceWatcher,
@@ -29,17 +40,15 @@ export { isServiceHealthy, type ServiceHealth } from "./lib/service-health";
 // Lib
 export { playSound, SOUNDS, type SoundId } from "./lib/sounds";
 export { type SSEEvent, subscribeSSE } from "./lib/sse";
+// Query
+export { queryClient, queryKeys } from "./query-client";
 export type { DashboardState, DashboardStore } from "./stores/dashboard-store";
 export { createDashboardStore } from "./stores/dashboard-store";
 // Stores
 export {
   useDashboardStore,
   useRawDashboardStore,
-  useRawSettingsStore,
-  useSettingsStore,
 } from "./stores/index";
-export type { SettingsState, SettingsStore } from "./stores/settings-store";
-export { createSettingsStore } from "./stores/settings-store";
 export type {
   AgentInfo,
   AgentStatusType,
