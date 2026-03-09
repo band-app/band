@@ -1,16 +1,5 @@
 import * as vscode from "vscode";
-import {
-  getBandWorktreeIdentity,
-  loadCodingAgentSettings,
-  loadConfig,
-  loadEffectiveConfig,
-} from "./config";
-import {
-  buildAgentCommand,
-  ensureTrustDialogAccepted,
-  loadPrompt,
-  markPromptAsRun,
-} from "./prompt";
+import { getBandWorktreeIdentity, loadConfig, loadEffectiveConfig } from "./config";
 import { setupWorkspace } from "./workspace-setup";
 
 let log: vscode.OutputChannel;
@@ -44,7 +33,7 @@ export async function activate(context: vscode.ExtensionContext) {
       }
 
       if (identity) {
-        await handlePendingPrompt(workspacePath, identity.workspaceId);
+        log.appendLine(`Band worktree identified: ${identity.workspaceId}`);
       }
     } else {
       log.appendLine("No config found and not a Band worktree");
@@ -52,40 +41,6 @@ export async function activate(context: vscode.ExtensionContext) {
   } else {
     log.appendLine("No workspace folders");
   }
-}
-
-async function handlePendingPrompt(workspacePath: string, workspaceId: string) {
-  const prompt = await loadPrompt(workspaceId);
-  if (!prompt || prompt.didRun) {
-    log.appendLine(prompt ? "Prompt already run, skipping" : "No prompt file found");
-    return;
-  }
-
-  const agentSettings = await loadCodingAgentSettings();
-  if (!agentSettings) {
-    log.appendLine("No coding agent configured in settings");
-    return;
-  }
-
-  const command = buildAgentCommand(agentSettings, prompt.prompt);
-  if (!command) {
-    log.appendLine(`Unsupported agent type: ${agentSettings.type}`);
-    return;
-  }
-
-  await ensureTrustDialogAccepted(workspacePath);
-
-  log.appendLine(`Starting agent task: ${command}`);
-  const shell = process.env.SHELL || "/bin/zsh";
-  const terminal = vscode.window.createTerminal({
-    name: "task",
-    shellPath: shell,
-    shellArgs: ["-c", command],
-  });
-  terminal.show(false);
-
-  await markPromptAsRun(workspaceId);
-  log.appendLine("Prompt marked as run");
 }
 
 async function runSetup() {
