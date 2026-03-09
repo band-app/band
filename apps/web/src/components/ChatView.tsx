@@ -1,7 +1,8 @@
 import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport, getToolName, isToolUIPart } from "ai";
+import { getToolName, isToolUIPart } from "ai";
 import { Bot, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { TaskChatTransport } from "../lib/task-chat-transport";
 import {
   Conversation,
   ConversationContent,
@@ -91,24 +92,21 @@ export function ChatView({
   onShowSessionListChange,
 }: ChatViewProps) {
   const sessionIdRef = useRef<string | undefined>(undefined);
+  const reconnectedPromptRef = useRef<string | undefined>(undefined);
   const [activeSessionId, setActiveSessionId] = useState<string | undefined>(undefined);
   const [historicalMessages, setHistoricalMessages] = useState<HistoryMessage[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const initialSessionLoadedRef = useRef(false);
 
   const transport = useMemo(
-    () =>
-      new DefaultChatTransport({
-        body: () => ({
-          sessionId: sessionIdRef.current,
-          workspaceId,
-        }),
-      }),
+    () => new TaskChatTransport(workspaceId, () => sessionIdRef.current),
     [workspaceId],
   );
 
   const { messages, sendMessage, status, setMessages, stop } = useChat({
+    id: workspaceId,
     transport,
+    resume: true,
     onData: (dataPart) => {
       if (
         dataPart.type === "data-session" &&
@@ -117,6 +115,15 @@ export function ChatView({
         "sessionId" in (dataPart.data as Record<string, unknown>)
       ) {
         sessionIdRef.current = (dataPart.data as { sessionId: string }).sessionId;
+      }
+      // Store reconnected prompt for rendering (don't inject into useChat state)
+      if (
+        dataPart.type === "data-prompt" &&
+        dataPart.data != null &&
+        typeof dataPart.data === "object" &&
+        "text" in (dataPart.data as Record<string, unknown>)
+      ) {
+        reconnectedPromptRef.current = (dataPart.data as { text: string }).text;
       }
     },
   });
@@ -152,6 +159,7 @@ export function ChatView({
   const handleSelectSession = useCallback(
     async (sessionId: string) => {
       sessionIdRef.current = sessionId;
+      reconnectedPromptRef.current = undefined;
       setActiveSessionId(sessionId);
       setMessages([]);
       setHistoricalMessages([]);
@@ -163,6 +171,7 @@ export function ChatView({
 
   const handleNewSession = useCallback(() => {
     sessionIdRef.current = undefined;
+    reconnectedPromptRef.current = undefined;
     setActiveSessionId(undefined);
     setHistoricalMessages([]);
     setMessages([]);
@@ -213,7 +222,10 @@ export function ChatView({
 
   const hasHistory = historicalMessages.length > 0;
   const hasLiveMessages = messages.length > 0;
-  const isEmpty = !hasHistory && !hasLiveMessages;
+  // Show reconnected prompt only when history doesn't already include it
+  const showReconnectedPrompt =
+    reconnectedPromptRef.current && !hasHistory && !messages.some((m) => m.role === "user");
+  const isEmpty = !hasHistory && !hasLiveMessages && !showReconnectedPrompt;
 
   return (
     <div className="flex h-full flex-col">
@@ -241,6 +253,14 @@ export function ChatView({
               <span className="text-xs text-muted-foreground">new messages</span>
               <div className="h-px flex-1 bg-border/50" />
             </div>
+          )}
+
+          {showReconnectedPrompt && (
+            <Message from="user">
+              <MessageContent>
+                <MessageResponse>{reconnectedPromptRef.current}</MessageResponse>
+              </MessageContent>
+            </Message>
           )}
 
           {(() => {

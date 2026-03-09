@@ -249,6 +249,7 @@ export const PromptInputAttach = ({ className, ...props }: PromptInputAttachProp
 
 export type PromptInputTextareaProps = HTMLAttributes<HTMLTextAreaElement> & {
   placeholder?: string;
+  disabled?: boolean;
 };
 
 export const PromptInputTextarea = ({

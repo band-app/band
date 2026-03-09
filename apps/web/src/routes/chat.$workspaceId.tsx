@@ -28,6 +28,7 @@ function ChatPage() {
 
   useEffect(() => {
     let cancelled = false;
+
     fetch(`/api/sessions/${encodeURIComponent(decoded)}`)
       .then((res) => {
         if (!res.ok) {
@@ -56,6 +57,7 @@ function ChatPage() {
       .catch((err) => {
         console.error("[sessions] error:", err);
       });
+
     return () => {
       cancelled = true;
     };
