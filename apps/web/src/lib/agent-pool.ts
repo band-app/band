@@ -1,6 +1,7 @@
+import { join } from "node:path";
 import { type CodingAgent, type CodingAgentConfig, createCodingAgent } from "@band/coding-agent";
 import { createLogger } from "@band/logger";
-import { loadSettings } from "./state";
+import { bandHome, loadSettings } from "./state";
 
 const log = createLogger("agent-pool");
 
@@ -14,6 +15,7 @@ function getAgentConfig(worktreePath: string): CodingAgentConfig {
     type: agentType,
     workspaceDir: worktreePath,
     maxTurns: 50,
+    additionalDirectories: [join(bandHome(), "uploads")],
     options: {
       executablePath: settings.codingAgent?.command,
     },
