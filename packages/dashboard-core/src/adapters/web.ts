@@ -162,7 +162,10 @@ export class WebDashboardAdapter implements DashboardAdapter {
 
   async installCli(): Promise<void> {
     const res = await fetch("/api/cli/install", { method: "POST" });
-    if (!res.ok) throw new Error("Failed to install CLI");
+    if (!res.ok) {
+      const data = await res.json().catch(() => null);
+      throw new Error(data?.error || "Failed to install CLI");
+    }
   }
 
   async getWorkspaceDiff(workspaceId: string): Promise<WorkspaceDiff> {

@@ -10,10 +10,29 @@ export type CliStatus =
 
 const SYMLINK_PATH = "/usr/local/bin/band";
 
-/** Resolve the project root from the web app's working directory (apps/web/). */
-function projectRoot(): string {
-  // Both Vite dev and the production server run with cwd = apps/web/
-  return resolve(process.cwd(), "..", "..");
+/** Find the CLI binary by trying multiple resolution strategies. */
+function findCliBinary(): string | null {
+  const strategies = [
+    // cwd = apps/web/ (Vite dev and production server)
+    resolve(process.cwd(), ".."),
+    // cwd = project root (fallback)
+    resolve(process.cwd(), "apps"),
+    // From this source file (apps/web/src/lib/ → apps/)
+    resolve(import.meta.dirname, "..", "..", ".."),
+  ];
+
+  for (const appsDir of strategies) {
+    for (const profile of ["release", "debug"]) {
+      const p = join(appsDir, "cli", "target", profile, "band");
+      try {
+        lstatSync(p);
+        return p;
+      } catch {
+        // Continue
+      }
+    }
+  }
+  return null;
 }
 
 export async function checkCli(): Promise<CliStatus> {
@@ -24,8 +43,7 @@ export async function checkCli(): Promise<CliStatus> {
     }
     // Check if the symlink points to our CLI binary
     const target = realpathSync(SYMLINK_PATH);
-    const root = projectRoot();
-    if (!target.startsWith(join(root, "apps", "cli"))) {
+    if (!target.includes(join("apps", "cli", "target"))) {
       return "ConflictingBinary";
     }
     return "Installed";
@@ -48,23 +66,7 @@ export async function checkCli(): Promise<CliStatus> {
 }
 
 export async function installCli(): Promise<void> {
-  const root = projectRoot();
-  const possiblePaths = [
-    join(root, "apps", "cli", "target", "release", "band"),
-    join(root, "apps", "cli", "target", "debug", "band"),
-  ];
-
-  let binaryPath: string | null = null;
-  for (const p of possiblePaths) {
-    try {
-      lstatSync(p);
-      binaryPath = p;
-      break;
-    } catch {
-      // Continue
-    }
-  }
-
+  const binaryPath = findCliBinary();
   if (!binaryPath) {
     throw new Error(
       "Could not find band CLI binary. Build it first with: cargo build --release -p band-cli",
