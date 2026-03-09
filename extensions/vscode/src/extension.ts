@@ -1,9 +1,5 @@
 import * as vscode from "vscode";
-import {
-  getBandWorktreeIdentity,
-  loadConfig,
-  loadEffectiveConfig,
-} from "./config";
+import { getBandWorktreeIdentity, loadConfig, loadEffectiveConfig } from "./config";
 import { setupWorkspace } from "./workspace-setup";
 
 let log: vscode.OutputChannel;
