@@ -11,8 +11,8 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { syncWorktrees } from "../src/lib/sync-state";
 import type { AppState } from "../src/lib/state";
+import { syncWorktrees } from "../src/lib/sync-state";
 
 const gitEnv = {
   ...process.env,
@@ -86,15 +86,11 @@ describe("syncWorktrees", () => {
     const state = readState(bandHome);
     expect(state.projects[0].worktrees.length).toBe(2);
 
-    const mainWt = state.projects[0].worktrees.find(
-      (wt) => wt.branch === "main",
-    );
+    const mainWt = state.projects[0].worktrees.find((wt) => wt.branch === "main");
     expect(mainWt).toBeDefined();
     expect(mainWt!.path).toBe(repoPath);
 
-    const featureWt = state.projects[0].worktrees.find(
-      (wt) => wt.branch === "feature",
-    );
+    const featureWt = state.projects[0].worktrees.find((wt) => wt.branch === "feature");
     expect(featureWt).toBeDefined();
     expect(featureWt!.path).toBe(wtPath);
   });
@@ -165,9 +161,7 @@ describe("syncWorktrees", () => {
           name: "broken-project",
           path: join(tmp, "does-not-exist"),
           defaultBranch: "main",
-          worktrees: [
-            { branch: "stale", path: join(tmp, "does-not-exist", "wt") },
-          ],
+          worktrees: [{ branch: "stale", path: join(tmp, "does-not-exist", "wt") }],
         },
         {
           name: "good-project",
@@ -188,8 +182,6 @@ describe("syncWorktrees", () => {
 
     // Good project gets synced
     expect(state.projects[1].worktrees.length).toBe(2);
-    expect(
-      state.projects[1].worktrees.find((wt) => wt.branch === "feature"),
-    ).toBeDefined();
+    expect(state.projects[1].worktrees.find((wt) => wt.branch === "feature")).toBeDefined();
   });
 });

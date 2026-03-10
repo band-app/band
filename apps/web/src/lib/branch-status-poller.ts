@@ -208,9 +208,7 @@ async function pollTick() {
   const isCITick = tickCount % CI_POLL_TICKS === 0;
 
   if (tickCount === 1 || isCITick) {
-    await syncWorktrees().catch((err) =>
-      console.error("syncWorktrees error:", err),
-    );
+    await syncWorktrees().catch((err) => console.error("syncWorktrees error:", err));
   }
 
   const workspaces = getWorkspaces();

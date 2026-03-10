@@ -17,12 +17,8 @@ export async function syncWorktrees(): Promise<void> {
       continue;
     }
 
-    const existingSet = new Set(
-      project.worktrees.map((wt) => `${wt.branch}\0${wt.path}`),
-    );
-    const diskSet = new Set(
-      diskWorktrees.map((wt) => `${wt.branch}\0${wt.path}`),
-    );
+    const existingSet = new Set(project.worktrees.map((wt) => `${wt.branch}\0${wt.path}`));
+    const diskSet = new Set(diskWorktrees.map((wt) => `${wt.branch}\0${wt.path}`));
 
     if (
       existingSet.size !== diskSet.size ||
