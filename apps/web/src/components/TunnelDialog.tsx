@@ -43,6 +43,14 @@ export function TunnelDialog({ open, onOpenChange, onStopped, initialUrl, onTunn
         return;
       }
 
+      // If tunnel is already healthy (same machine, e.g. after restart), show QR
+      if (health.tunnel && health.tunnel_url) {
+        setTunnelUrl(health.tunnel_url);
+        setStep("ready");
+        onTunnelUrl?.(health.tunnel_url);
+        return;
+      }
+
       // If tunnel is broken (subdomain configured but not healthy), stop it first
       if (settings.tunnelSubdomain && !health.tunnel) {
         await trpc.tunnel.stop.mutate().catch(() => {});
@@ -112,21 +120,13 @@ export function TunnelDialog({ open, onOpenChange, onStopped, initialUrl, onTunn
           if (cancelled) return;
 
           if (health.tunnel && health.tunnel_url && !cancelled) {
-            let token: string | null = null;
-            try {
-              const tokenResult = await trpc.services.token.query();
-              token = tokenResult.token;
-            } catch {
-              // no token configured
-            }
-            const url = token ? `${health.tunnel_url}?token=${token}` : health.tunnel_url;
             if (health.tunnel_remote_host) {
               setRemoteHost(health.tunnel_remote_host);
               setStep("remote_host");
             } else {
-              setTunnelUrl(url);
+              setTunnelUrl(health.tunnel_url);
               setStep("ready");
-              onTunnelUrl?.(url);
+              onTunnelUrl?.(health.tunnel_url);
             }
             return;
           }

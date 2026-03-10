@@ -1,6 +1,7 @@
 import { execFile, execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { hostname } from "node:os";
 import { basename, extname, join, resolve } from "node:path";
 import { initTRPC, TRPCError } from "@trpc/server";
 import { z } from "zod";
@@ -582,7 +583,20 @@ const tunnelRouter = t.router({
         skipSubdomain: input.skipSubdomain,
       });
       const status = getTunnelStatus();
-      return { ok: true, url: status.url };
+      if (status.url) {
+        return { ok: true, url: status.url };
+      }
+      // No URL (e.g. subdomain taken) — check if tunnel is already alive remotely
+      const resolvedSubdomain = (subdomain as string | undefined) ?? undefined;
+      if (resolvedSubdomain) {
+        const token = getToken();
+        const health = await checkTunnelHealth(resolvedSubdomain, token);
+        if (health.healthy) {
+          const sep = token ? `?token=${token}` : "";
+          return { ok: true, url: `https://${resolvedSubdomain}.instatunnel.my${sep}` };
+        }
+      }
+      return { ok: true, url: null as string | null };
     }),
 
   stop: publicProcedure.mutation(async () => {
@@ -784,28 +798,36 @@ const servicesRouter = t.router({
     let tunnelUrl = tunnel.url;
     let tunnelRemoteHost: string | undefined;
     const token = getToken();
+    const localHostname = hostname();
 
     // Check local tunnel process first
-    if (tunnel.running && tunnel.url && token) {
+    if (tunnel.running && tunnel.url) {
       const urlMatch = tunnel.url.match(/https:\/\/(.+)\.instatunnel\.my/);
       if (urlMatch) {
         const health = await checkTunnelHealth(urlMatch[1], token);
         tunnelHealthy = health.healthy;
-        tunnelRemoteHost = health.remoteHost;
+        // Only report as remote if it's a different machine
+        if (health.remoteHost && health.remoteHost !== localHostname) {
+          tunnelRemoteHost = health.remoteHost;
+        }
       }
     }
 
     // If no local tunnel, check if the configured subdomain is alive remotely
     // (handles app restart while tunnel is still active on the server)
-    if (!tunnelHealthy && token) {
+    if (!tunnelHealthy) {
       const settings = loadSettings();
       const subdomain = (settings as Record<string, unknown>).tunnelSubdomain as string | undefined;
       if (subdomain) {
         const health = await checkTunnelHealth(subdomain, token);
         if (health.healthy) {
           tunnelHealthy = true;
-          tunnelRemoteHost = health.remoteHost;
-          tunnelUrl = `https://${subdomain}.instatunnel.my?token=${token}`;
+          // Only report as remote if it's a different machine
+          if (health.remoteHost && health.remoteHost !== localHostname) {
+            tunnelRemoteHost = health.remoteHost;
+          }
+          const sep = token ? `?token=${token}` : "";
+          tunnelUrl = `https://${subdomain}.instatunnel.my${sep}`;
         }
       }
     }

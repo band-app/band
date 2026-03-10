@@ -188,19 +188,24 @@ export async function checkTunnelAuth(): Promise<boolean> {
 
 export async function checkTunnelHealth(
   subdomain: string,
-  token: string,
+  token: string | null,
 ): Promise<{ healthy: boolean; remoteHost?: string }> {
-  const url = `https://${subdomain}.instatunnel.my/api/health?token=${token}`;
+  const baseUrl = `https://${subdomain}.instatunnel.my`;
+  const url = token ? `${baseUrl}/api/health?token=${token}` : baseUrl;
   try {
     const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
-    if (!response.ok) {
-      return { healthy: false };
+    if (token) {
+      if (!response.ok) {
+        return { healthy: false };
+      }
+      const body = (await response.json()) as { status?: string; hostname?: string };
+      return {
+        healthy: body.status === "ok",
+        remoteHost: body.hostname,
+      };
     }
-    const body = (await response.json()) as { status?: string; hostname?: string };
-    return {
-      healthy: body.status === "ok",
-      remoteHost: body.hostname,
-    };
+    // No token — any HTTP response means the tunnel is alive
+    return { healthy: true };
   } catch {
     return { healthy: false };
   }
