@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { execGh, execGit } from "./git";
 import { bandHome, loadState } from "./state";
+import { syncWorktrees } from "./sync-state";
 
 interface GitStatus {
   dirty: boolean;
@@ -205,6 +206,13 @@ function statePriority(state: string): number {
 async function pollTick() {
   tickCount++;
   const isCITick = tickCount % CI_POLL_TICKS === 0;
+
+  if (tickCount === 1 || isCITick) {
+    await syncWorktrees().catch((err) =>
+      console.error("syncWorktrees error:", err),
+    );
+  }
+
   const workspaces = getWorkspaces();
 
   if (workspaces.length === 0) return;
