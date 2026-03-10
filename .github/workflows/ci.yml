@@ -9,9 +9,38 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  create-runner:
+    name: Create Runner
+    runs-on: ubuntu-latest
+    outputs:
+      label: ${{ steps.create.outputs.label }}
+      server_id: ${{ steps.create.outputs.server_id }}
+    steps:
+      - uses: Cyclenerd/hcloud-github-runner@v1
+        id: create
+        with:
+          mode: create
+          github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
+          server_type: cax21
+          image: ubuntu-24.04
+          location: nbg1
+          pre_runner_script: |
+            apt-get update
+            apt-get install -y build-essential curl wget pkg-config libssl-dev \
+              libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+              librsvg2-dev libxdo-dev patchelf
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+            source "$HOME/.cargo/env"
+            curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+            apt-get install -y nodejs
+            corepack enable
+            corepack prepare pnpm@latest --activate
+
   check:
     name: Lint, Test & Build
-    runs-on: [self-hosted, linux, arm64]
+    needs: create-runner
+    runs-on: ${{ needs.create-runner.outputs.label }}
 
     steps:
       - name: Checkout
@@ -65,3 +94,16 @@ jobs:
 
       - name: Build frontend
         run: pnpm --filter @band/dashboard build
+
+  delete-runner:
+    name: Delete Runner
+    needs: [create-runner, check]
+    runs-on: ubuntu-latest
+    if: ${{ always() }}
+    steps:
+      - uses: Cyclenerd/hcloud-github-runner@v1
+        with:
+          mode: delete
+          github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
+          server_id: ${{ needs.create-runner.outputs.server_id }}
