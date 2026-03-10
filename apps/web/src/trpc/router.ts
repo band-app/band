@@ -30,7 +30,14 @@ import {
   statusDir,
   worktreesDir,
 } from "../lib/state";
-import { abortTask, getTask, submitTask, TaskConflictError } from "../lib/task-runner";
+import {
+  abortTask,
+  getBufferedChunks,
+  getTask,
+  submitTask,
+  subscribe as subscribeTask,
+  TaskConflictError,
+} from "../lib/task-runner";
 import {
   checkTunnelAuth,
   checkTunnelHealth,
@@ -38,6 +45,7 @@ import {
   startTunnel,
   stopTunnel,
 } from "../lib/tunnel";
+import { subscribe as subscribeStatus } from "../lib/watcher";
 import { resolveWorkspace } from "../lib/workspace";
 import type { Context } from "./context";
 
@@ -799,6 +807,59 @@ const tasksRouter = t.router({
     }
     return { aborted: true };
   }),
+
+  stream: publicProcedure
+    .input(z.object({ workspaceId: z.string() }))
+    .subscription(async function* (opts) {
+      const workspaceId = opts.input.workspaceId;
+      const task = getTask(workspaceId);
+      const buffered = getBufferedChunks(workspaceId);
+
+      // No task and no buffered chunks — nothing to stream
+      if (!task && buffered.length === 0) return;
+
+      // Replay buffered chunks
+      for (const chunk of buffered) {
+        yield chunk;
+      }
+
+      // If task is already done, stop
+      if (!task || task.status !== "running") return;
+
+      // Stream live chunks
+      type Chunk = Parameters<Parameters<typeof subscribeTask>[1]>[0];
+      const queue: Chunk[] = [];
+      let resolve: (() => void) | null = null;
+      let done = false;
+
+      const unsubscribe = subscribeTask(workspaceId, (chunk) => {
+        queue.push(chunk);
+        if (chunk.type === "finish" || chunk.type === "error") {
+          done = true;
+        }
+        resolve?.();
+      });
+
+      opts.signal.addEventListener("abort", () => {
+        unsubscribe();
+        resolve?.();
+      });
+
+      try {
+        while (!opts.signal.aborted) {
+          while (queue.length > 0) {
+            yield queue.shift()!;
+          }
+          if (done) return;
+          await new Promise<void>((r) => {
+            resolve = r;
+          });
+          resolve = null;
+        }
+      } finally {
+        unsubscribe();
+      }
+    }),
 });
 
 // ---------------------------------------------------------------------------
@@ -981,6 +1042,42 @@ const statusesRouter = t.router({
 });
 
 // ---------------------------------------------------------------------------
+// Status (SSE subscription)
+// ---------------------------------------------------------------------------
+
+const statusRouter = t.router({
+  stream: publicProcedure.subscription(async function* (opts) {
+    type QueueItem = Parameters<Parameters<typeof subscribeStatus>[0]>[0];
+    const queue: QueueItem[] = [];
+    let resolve: (() => void) | null = null;
+
+    const unsubscribe = subscribeStatus((event) => {
+      queue.push(event);
+      resolve?.();
+    });
+
+    opts.signal.addEventListener("abort", () => {
+      unsubscribe();
+      resolve?.();
+    });
+
+    try {
+      while (!opts.signal.aborted) {
+        while (queue.length > 0) {
+          yield queue.shift()!;
+        }
+        await new Promise<void>((r) => {
+          resolve = r;
+        });
+        resolve = null;
+      }
+    } finally {
+      unsubscribe();
+    }
+  }),
+});
+
+// ---------------------------------------------------------------------------
 // App Router
 // ---------------------------------------------------------------------------
 
@@ -998,6 +1095,7 @@ export const appRouter = t.router({
   services: servicesRouter,
   chat: chatRouter,
   statuses: statusesRouter,
+  status: statusRouter,
 });
 
 export type AppRouter = typeof appRouter;

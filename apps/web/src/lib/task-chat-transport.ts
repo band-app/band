@@ -1,50 +1,33 @@
 import type { ChatTransport, UIMessage, UIMessageChunk } from "ai";
 import { trpc } from "./trpc-client";
 
-function parseSSEStream(body: ReadableStream<Uint8Array>): ReadableStream<UIMessageChunk> {
-  const decoder = new TextDecoder();
-  let buffer = "";
+function subscriptionToStream(
+  workspaceId: string,
+  abortSignal?: AbortSignal,
+): ReadableStream<UIMessageChunk> {
+  let receivedAny = false;
 
   return new ReadableStream<UIMessageChunk>({
-    async start(controller) {
-      const reader = body.getReader();
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          // Keep the last incomplete line in the buffer
-          buffer = lines.pop() ?? "";
-
-          for (const line of lines) {
-            if (line.startsWith("data: ")) {
-              const json = line.slice(6);
-              try {
-                const chunk = JSON.parse(json) as UIMessageChunk;
-                controller.enqueue(chunk);
-              } catch {
-                // ignore parse errors
-              }
-            }
-            // skip keepalive comments and empty lines
-          }
-        }
-        // Process any remaining data in buffer
-        if (buffer.startsWith("data: ")) {
-          const json = buffer.slice(6);
-          try {
-            const chunk = JSON.parse(json) as UIMessageChunk;
+    start(controller) {
+      const subscription = trpc.tasks.stream.subscribe(
+        { workspaceId },
+        {
+          onData(chunk: UIMessageChunk) {
+            receivedAny = true;
             controller.enqueue(chunk);
-          } catch {
-            // ignore
-          }
-        }
-        controller.close();
-      } catch (err) {
-        controller.error(err);
-      }
+          },
+          onComplete() {
+            controller.close();
+          },
+          onError(err: unknown) {
+            controller.error(err);
+          },
+        },
+      );
+
+      abortSignal?.addEventListener("abort", () => {
+        subscription.unsubscribe();
+      });
     },
   });
 }
@@ -106,31 +89,16 @@ export class TaskChatTransport implements ChatTransport<UIMessage> {
       throw new Error(err instanceof Error ? err.message : "Submit failed");
     }
 
-    // Open SSE stream to receive UIMessageChunk
-    const streamRes = await fetch(`/api/tasks/${encodeURIComponent(this.workspaceId)}/stream`, {
-      signal: abortSignal,
-    });
-
-    if (!streamRes.ok || !streamRes.body) {
-      throw new Error(`Stream failed: ${streamRes.status}`);
-    }
-
-    return parseSSEStream(streamRes.body);
+    return subscriptionToStream(this.workspaceId, abortSignal);
   }
 
   async reconnectToStream(
     _options: Parameters<ChatTransport<UIMessage>["reconnectToStream"]>[0],
   ): Promise<ReadableStream<UIMessageChunk> | null> {
-    const res = await fetch(`/api/tasks/${encodeURIComponent(this.workspaceId)}/stream`);
+    // Check if there's an active task or buffered chunks
+    const task = await trpc.tasks.get.query({ workspaceId: this.workspaceId });
+    if (!task.task) return null;
 
-    if (res.status === 204) {
-      return null;
-    }
-
-    if (!res.ok || !res.body) {
-      return null;
-    }
-
-    return parseSSEStream(res.body);
+    return subscriptionToStream(this.workspaceId);
   }
 }

@@ -371,10 +371,10 @@ describe("tunnel.stop — resets tunnel status", () => {
 });
 
 // ---------------------------------------------------------------------------
-// SSE stream — tunnel events propagate (stays as REST)
+// SSE stream — status subscription via tRPC
 // ---------------------------------------------------------------------------
 
-describe("GET /api/status/stream — SSE event format", () => {
+describe("tRPC status.stream subscription — SSE event format", () => {
   let server: ServerHandle;
   let tmpHome: string;
 
@@ -391,7 +391,7 @@ describe("GET /api/status/stream — SSE event format", () => {
   });
 
   it("returns SSE content-type and streams events", async () => {
-    const res = await fetch(`${server.url}/api/status/stream`, {
+    const res = await fetch(`${server.url}/trpc/status.stream`, {
       headers: { Cookie: authCookie(DEFAULT_TOKEN) },
       signal: AbortSignal.timeout(2000),
     }).catch(() => null);

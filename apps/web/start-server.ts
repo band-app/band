@@ -75,8 +75,23 @@ async function main() {
         });
 
         res.writeHead(response.status, Object.fromEntries(response.headers.entries()));
-        const text = await response.text();
-        res.end(text);
+
+        if (response.body) {
+          const reader = response.body.getReader();
+          const pump = async () => {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) {
+                res.end();
+                break;
+              }
+              res.write(value);
+            }
+          };
+          pump().catch(() => res.end());
+        } else {
+          res.end(await response.text());
+        }
         return;
       }
 

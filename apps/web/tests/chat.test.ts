@@ -186,7 +186,7 @@ async function trpcData<T>(res: Response): Promise<T> {
 }
 
 // ---------------------------------------------------------------------------
-// SSE helpers (for streaming endpoints that stay as REST)
+// SSE helpers (tRPC subscription SSE format)
 // ---------------------------------------------------------------------------
 
 interface SSEEvent {
@@ -195,33 +195,59 @@ interface SSEEvent {
 }
 
 /**
- * Parse an SSE response body into an array of { event, data } objects.
+ * Parse a tRPC SSE subscription response into an array of { event, data } objects.
  *
- * The task runner emits UIMessageChunk objects as JSON in `data:` lines.
- * The event type is inside the JSON data's `type` field.
+ * tRPC wraps subscription data in: data: {"id":null,"result":{"type":"data","data":<actual>}}
+ * We unwrap the actual data and extract the `type` field as the event name.
  */
-async function parseSSEStream(response: Response): Promise<SSEEvent[]> {
+async function parseTrpcSSEStream(response: Response): Promise<SSEEvent[]> {
   const text = await response.text();
   const events: SSEEvent[] = [];
 
   for (const line of text.split("\n")) {
     if (!line.startsWith("data:")) continue;
     const raw = line.slice(5).trim();
-    if (raw === "[DONE]") continue;
+    if (!raw || raw === "[DONE]") continue;
     let data: unknown;
     try {
       data = JSON.parse(raw);
     } catch {
-      data = raw;
+      continue;
     }
+
+    // tRPC SSE sends yielded objects directly in data: lines.
+    // Also handle tRPC envelope format: { result: { type: "data", data: <actual> } }
+    const envelope = data as Record<string, unknown>;
+    const result = envelope?.result as Record<string, unknown> | undefined;
+    if (result?.type === "data" && result.data !== undefined) {
+      data = result.data;
+    }
+
     const event =
       typeof data === "object" && data !== null
         ? ((data as Record<string, unknown>).type as string)
         : null;
-    events.push({ event, data });
+    if (event) {
+      events.push({ event, data });
+    }
   }
 
   return events;
+}
+
+/**
+ * Open a tRPC subscription for the tasks.stream procedure via raw HTTP.
+ */
+async function trpcSubscription(
+  serverUrl: string,
+  procedure: string,
+  input: unknown,
+  opts?: { headers?: Record<string, string> },
+): Promise<Response> {
+  const url = `${serverUrl}/trpc/${procedure}?input=${encodeURIComponent(JSON.stringify(input))}`;
+  return fetch(url, {
+    headers: { ...defaultHeaders, ...opts?.headers },
+  });
 }
 
 /**
@@ -242,17 +268,41 @@ async function submitAndStream(
   // Give the task a moment to start producing events
   await new Promise((r) => setTimeout(r, 100));
 
-  // SSE stream stays as REST
-  const streamRes = await fetch(
-    `${serverUrl}/api/tasks/${encodeURIComponent(workspaceId)}/stream`,
-    {
-      headers: defaultHeaders,
-    },
-  );
-  const events = await parseSSEStream(streamRes);
+  const streamRes = await trpcSubscription(serverUrl, "tasks.stream", { workspaceId });
+  const events = await parseTrpcSSEStream(streamRes);
 
   return { submitRes, streamRes, events };
 }
+
+// ---------------------------------------------------------------------------
+// tasks.stream — No active task
+// ---------------------------------------------------------------------------
+
+describe("tasks.stream — no active task", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    seedState(tmpHome, createDefaultState(tmpHome));
+    seedSettings(tmpHome, defaultSettings());
+    server = await startServer({ tmpHome });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("completes immediately with no data events when no task exists", async () => {
+    const streamRes = await trpcSubscription(server.url, "tasks.stream", {
+      workspaceId: "testproject-main",
+    });
+    expect(streamRes.status).toBe(200);
+    const events = await parseTrpcSSEStream(streamRes);
+    expect(events).toEqual([]);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // tasks.submit — Validation
@@ -752,13 +802,10 @@ describe("Task submit + stream — AskUserQuestion", () => {
       return data.task?.status !== "running";
     });
 
-    // 4. Read the buffered events from the completed stream (SSE stays as REST)
-    const streamRes = await fetch(
-      `${server.url}/api/tasks/${encodeURIComponent(workspaceId)}/stream`,
-      { headers: defaultHeaders },
-    );
+    // 4. Read the buffered events from the completed stream via tRPC subscription
+    const streamRes = await trpcSubscription(server.url, "tasks.stream", { workspaceId });
     expect(streamRes.status).toBe(200);
-    const events = await parseSSEStream(streamRes);
+    const events = await parseTrpcSSEStream(streamRes);
     const eventTypes = events.map((e) => e.event).filter(Boolean) as string[];
 
     // AskUserQuestion tool call was emitted

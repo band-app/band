@@ -11,8 +11,6 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ChatWorkspaceIdRouteImport } from './routes/chat.$workspaceId'
-import { Route as ApiStatusStreamRouteImport } from './routes/api/status.stream'
-import { Route as ApiTasksWorkspaceIdStreamRouteImport } from './routes/api/tasks.$workspaceId.stream'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -24,63 +22,31 @@ const ChatWorkspaceIdRoute = ChatWorkspaceIdRouteImport.update({
   path: '/chat/$workspaceId',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiStatusStreamRoute = ApiStatusStreamRouteImport.update({
-  id: '/api/status/stream',
-  path: '/api/status/stream',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiTasksWorkspaceIdStreamRoute =
-  ApiTasksWorkspaceIdStreamRouteImport.update({
-    id: '/api/tasks/$workspaceId/stream',
-    path: '/api/tasks/$workspaceId/stream',
-    getParentRoute: () => rootRouteImport,
-  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/chat/$workspaceId': typeof ChatWorkspaceIdRoute
-  '/api/status/stream': typeof ApiStatusStreamRoute
-  '/api/tasks/$workspaceId/stream': typeof ApiTasksWorkspaceIdStreamRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/chat/$workspaceId': typeof ChatWorkspaceIdRoute
-  '/api/status/stream': typeof ApiStatusStreamRoute
-  '/api/tasks/$workspaceId/stream': typeof ApiTasksWorkspaceIdStreamRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/chat/$workspaceId': typeof ChatWorkspaceIdRoute
-  '/api/status/stream': typeof ApiStatusStreamRoute
-  '/api/tasks/$workspaceId/stream': typeof ApiTasksWorkspaceIdStreamRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths:
-    | '/'
-    | '/chat/$workspaceId'
-    | '/api/status/stream'
-    | '/api/tasks/$workspaceId/stream'
+  fullPaths: '/' | '/chat/$workspaceId'
   fileRoutesByTo: FileRoutesByTo
-  to:
-    | '/'
-    | '/chat/$workspaceId'
-    | '/api/status/stream'
-    | '/api/tasks/$workspaceId/stream'
-  id:
-    | '__root__'
-    | '/'
-    | '/chat/$workspaceId'
-    | '/api/status/stream'
-    | '/api/tasks/$workspaceId/stream'
+  to: '/' | '/chat/$workspaceId'
+  id: '__root__' | '/' | '/chat/$workspaceId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ChatWorkspaceIdRoute: typeof ChatWorkspaceIdRoute
-  ApiStatusStreamRoute: typeof ApiStatusStreamRoute
-  ApiTasksWorkspaceIdStreamRoute: typeof ApiTasksWorkspaceIdStreamRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -99,28 +65,12 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatWorkspaceIdRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/status/stream': {
-      id: '/api/status/stream'
-      path: '/api/status/stream'
-      fullPath: '/api/status/stream'
-      preLoaderRoute: typeof ApiStatusStreamRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/tasks/$workspaceId/stream': {
-      id: '/api/tasks/$workspaceId/stream'
-      path: '/api/tasks/$workspaceId/stream'
-      fullPath: '/api/tasks/$workspaceId/stream'
-      preLoaderRoute: typeof ApiTasksWorkspaceIdStreamRouteImport
-      parentRoute: typeof rootRouteImport
-    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ChatWorkspaceIdRoute: ChatWorkspaceIdRoute,
-  ApiStatusStreamRoute: ApiStatusStreamRoute,
-  ApiTasksWorkspaceIdStreamRoute: ApiTasksWorkspaceIdStreamRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

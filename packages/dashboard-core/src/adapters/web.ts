@@ -1,6 +1,6 @@
-import { createTRPCClient, httpBatchLink } from "@trpc/client";
+import { createTRPCClient, httpBatchLink, httpSubscriptionLink, splitLink } from "@trpc/client";
 import type { DashboardAdapter, PlatformCapabilities, Unsubscribe } from "../adapter";
-import { subscribeSSE } from "../lib/sse";
+import type { SSEEvent } from "../lib/sse";
 import type {
   CIStatus,
   CliStatus,
@@ -19,7 +19,13 @@ export class WebDashboardAdapter implements DashboardAdapter {
   // (circular dep). Type safety comes from the DashboardAdapter interface.
   // biome-ignore lint/suspicious/noExplicitAny: tRPC client without router type
   private trpc: any = createTRPCClient({
-    links: [httpBatchLink({ url: "/trpc" })],
+    links: [
+      splitLink({
+        condition: (op) => op.type === "subscription",
+        true: httpSubscriptionLink({ url: "/trpc" }),
+        false: httpBatchLink({ url: "/trpc" }),
+      }),
+    ],
   });
 
   async listProjects(): Promise<ProjectInfo[]> {
@@ -72,11 +78,18 @@ export class WebDashboardAdapter implements DashboardAdapter {
     await this.trpc.settings.update.mutate(settings as unknown as Record<string, unknown>);
   }
 
+  private subscribeStatusStream(handler: (data: SSEEvent) => void): Unsubscribe {
+    const subscription = this.trpc.status.stream.subscribe(undefined, {
+      onData: (data: SSEEvent) => handler(data),
+    });
+    return () => subscription.unsubscribe();
+  }
+
   subscribeAgentStatus(
     onUpdate: (status: WorkspaceStatus) => void,
     onRemove: (workspaceId: string) => void,
   ): Unsubscribe {
-    return subscribeSSE((data) => {
+    return this.subscribeStatusStream((data) => {
       if (data.kind === "snapshot" && data.statuses) {
         for (const status of data.statuses) {
           onUpdate(status);
@@ -98,7 +111,7 @@ export class WebDashboardAdapter implements DashboardAdapter {
     onGit: (workspaceId: string, git: GitStatus) => void,
     onCI: (workspaceId: string, ci: CIStatus) => void,
   ): Unsubscribe {
-    return subscribeSSE((data) => {
+    return this.subscribeStatusStream((data) => {
       if (data.kind === "branch-status" && data.workspaceId) {
         if (data.git) onGit(data.workspaceId, data.git);
         if (data.ci) onCI(data.workspaceId, data.ci);

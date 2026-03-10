@@ -1,4 +1,4 @@
-import { isServiceHealthy, subscribeSSE, useSettingsQuery } from "@band/dashboard-core";
+import { isServiceHealthy, useSettingsQuery } from "@band/dashboard-core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { trpc } from "../lib/trpc-client";
 
@@ -67,20 +67,23 @@ export function useTunnel() {
     };
   }, [settings.tunnelSubdomain]);
 
-  // Persistent SSE listener for tunnel events (works even when dialog is closed)
+  // Persistent tRPC subscription listener for tunnel events (works even when dialog is closed)
   useEffect(() => {
-    return subscribeSSE((event) => {
-      if (event.kind === "tunnel-url" && event.url) {
-        shouldBeRunningRef.current = true;
-        setTunnelUrl(event.url);
-        setWebServerRunning(true);
-      } else if (event.kind === "tunnel-remote-host" && event.host) {
-        setTunnelRemoteHost(event.host);
-      } else if (event.kind === "tunnel-subdomain-taken") {
-        shouldBeRunningRef.current = false;
-        setShowDialog(true);
-      }
+    const subscription = trpc.status.stream.subscribe(undefined, {
+      onData: (event: { kind: string; url?: string; host?: string }) => {
+        if (event.kind === "tunnel-url" && event.url) {
+          shouldBeRunningRef.current = true;
+          setTunnelUrl(event.url);
+          setWebServerRunning(true);
+        } else if (event.kind === "tunnel-remote-host" && event.host) {
+          setTunnelRemoteHost(event.host);
+        } else if (event.kind === "tunnel-subdomain-taken") {
+          shouldBeRunningRef.current = false;
+          setShowDialog(true);
+        }
+      },
     });
+    return () => subscription.unsubscribe();
   }, []);
 
   // Auto-start on app launch if enabled

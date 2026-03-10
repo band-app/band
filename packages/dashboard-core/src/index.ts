@@ -39,7 +39,7 @@ export {
 export { isServiceHealthy, type ServiceHealth } from "./lib/service-health";
 // Lib
 export { playSound, SOUNDS, type SoundId } from "./lib/sounds";
-export { type SSEEvent, subscribeSSE } from "./lib/sse";
+export type { SSEEvent } from "./lib/sse";
 // Query
 export { queryClient, queryKeys } from "./query-client";
 export type { DashboardState, DashboardStore } from "./stores/dashboard-store";
