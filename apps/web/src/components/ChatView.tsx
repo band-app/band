@@ -3,6 +3,7 @@ import { getToolName, isToolUIPart } from "ai";
 import { Bot, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { TaskChatTransport } from "../lib/task-chat-transport";
+import { trpc } from "../lib/trpc-client";
 import {
   Conversation,
   ConversationContent,
@@ -143,12 +144,8 @@ export function ChatView({
     async (sessionId: string) => {
       setLoadingHistory(true);
       try {
-        const res = await fetch(
-          `/api/sessions/${encodeURIComponent(workspaceId)}/${encodeURIComponent(sessionId)}/messages`,
-        );
-        if (!res.ok) throw new Error("Failed to load messages");
-        const data = (await res.json()) as { messages: HistoryMessage[] };
-        setHistoricalMessages(data.messages);
+        const data = await trpc.sessions.messages.query({ workspaceId, sessionId });
+        setHistoricalMessages(data.messages as HistoryMessage[]);
       } finally {
         setLoadingHistory(false);
       }

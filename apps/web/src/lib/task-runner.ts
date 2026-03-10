@@ -32,8 +32,17 @@ interface InternalTask extends TaskInfo {
   expireTimer?: ReturnType<typeof setTimeout>;
 }
 
-const tasks = new Map<string, InternalTask>();
-const listeners = new Map<string, Set<Listener>>();
+// Use globalThis to ensure a single shared state across multiple bundles
+// (esbuild start-server.mjs and Vite SSR server.js produce separate copies of this module)
+const TASKS_KEY = Symbol.for("band.task-runner.tasks");
+const LISTENERS_KEY = Symbol.for("band.task-runner.listeners");
+
+const g = globalThis as unknown as Record<symbol, unknown>;
+if (!g[TASKS_KEY]) g[TASKS_KEY] = new Map<string, InternalTask>();
+if (!g[LISTENERS_KEY]) g[LISTENERS_KEY] = new Map<string, Set<Listener>>();
+
+const tasks = g[TASKS_KEY] as Map<string, InternalTask>;
+const listeners = g[LISTENERS_KEY] as Map<string, Set<Listener>>;
 
 const BUFFER_EXPIRE_MS = 30 * 60 * 1000; // 30 minutes
 

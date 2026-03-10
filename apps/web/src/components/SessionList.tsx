@@ -1,5 +1,6 @@
 import { GitBranch, Loader2, MessageSquare, Plus, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { trpc } from "../lib/trpc-client";
 
 interface SessionItem {
   sessionId: string;
@@ -43,10 +44,8 @@ export function SessionList({
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/sessions/${encodeURIComponent(workspaceId)}`);
-      if (!res.ok) throw new Error("Failed to fetch sessions");
-      const data = (await res.json()) as { sessions: SessionItem[]; supported: boolean };
-      setSessions(data.sessions);
+      const data = await trpc.sessions.list.query({ workspaceId });
+      setSessions(data.sessions as SessionItem[]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load sessions");
     } finally {

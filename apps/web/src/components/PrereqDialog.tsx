@@ -8,13 +8,9 @@ import {
 } from "@band/ui";
 import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { trpc } from "../lib/trpc-client";
 
 type PrereqStep = "checking" | "missing" | "installing" | "error";
-
-interface PrereqStatus {
-  node: boolean;
-  instatunnel: boolean;
-}
 
 interface Props {
   open: boolean;
@@ -36,9 +32,7 @@ export function PrereqDialog({ open, onOpenChange, onReady }: Props) {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/api/prereqs/check");
-        if (!res.ok) throw new Error("Failed to check prerequisites");
-        const status = (await res.json()) as PrereqStatus;
+        const status = await trpc.prereqs.check.query();
         if (cancelled) return;
         if (status.node && status.instatunnel) {
           onReady();
@@ -64,12 +58,10 @@ export function PrereqDialog({ open, onOpenChange, onReady }: Props) {
     try {
       setStep("installing");
       if (needNode) {
-        const res = await fetch("/api/prereqs/install-node", { method: "POST" });
-        if (!res.ok) throw new Error("Failed to install Node.js");
+        await trpc.prereqs.installNode.mutate();
       }
       if (needInstatunnel) {
-        const res = await fetch("/api/prereqs/install-tunnel", { method: "POST" });
-        if (!res.ok) throw new Error("Failed to install instatunnel");
+        await trpc.prereqs.installTunnel.mutate();
       }
       onReady();
     } catch (e) {

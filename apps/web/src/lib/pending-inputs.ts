@@ -3,7 +3,11 @@ interface PendingInput {
   reject: (error: Error) => void;
 }
 
-const pendingInputs = new Map<string, PendingInput>();
+// Use globalThis to ensure a single shared state across multiple bundles
+const PENDING_KEY = Symbol.for("band.pending-inputs");
+const g = globalThis as unknown as Record<symbol, unknown>;
+if (!g[PENDING_KEY]) g[PENDING_KEY] = new Map<string, PendingInput>();
+const pendingInputs = g[PENDING_KEY] as Map<string, PendingInput>;
 
 export function createPendingInput(approvalId: string): Promise<Record<string, string>> {
   return new Promise<Record<string, string>>((resolve, reject) => {

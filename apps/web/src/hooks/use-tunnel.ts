@@ -1,10 +1,6 @@
-import {
-  isServiceHealthy,
-  type ServiceHealth,
-  subscribeSSE,
-  useSettingsQuery,
-} from "@band/dashboard-core";
+import { isServiceHealthy, subscribeSSE, useSettingsQuery } from "@band/dashboard-core";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { trpc } from "../lib/trpc-client";
 
 const HEALTH_POLL_INTERVAL = 30_000;
 
@@ -23,17 +19,13 @@ export function useTunnel() {
     let intervalId: ReturnType<typeof setInterval> | undefined;
     let cancelled = false;
 
-    const recover = async (health: ServiceHealth) => {
+    const recover = async (health: { tunnel: boolean }) => {
       if (isRecoveringRef.current) return;
       isRecoveringRef.current = true;
       try {
         // Web server is always running (we are it), only restart tunnel
         if (!health.tunnel && !cancelled) {
-          await fetch("/api/tunnel/start", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({}),
-          });
+          await trpc.tunnel.start.mutate({});
         }
       } catch {
         // swallow — next poll tick will retry
@@ -44,9 +36,7 @@ export function useTunnel() {
 
     const poll = async () => {
       try {
-        const res = await fetch("/api/service-health");
-        if (!res.ok || cancelled) return;
-        const health = (await res.json()) as ServiceHealth;
+        const health = await trpc.services.health.query();
         if (cancelled) return;
         setWebServerRunning(isServiceHealthy(health, settings.tunnelSubdomain));
         if (health.tunnel && health.tunnel_url) {
@@ -96,9 +86,8 @@ export function useTunnel() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/api/prereqs/check");
-        if (!res.ok || cancelled) return;
-        const status = (await res.json()) as { node: boolean; instatunnel: boolean };
+        const status = await trpc.prereqs.check.query();
+        if (cancelled) return;
         if (!status.node || !status.instatunnel || cancelled) return;
         shouldBeRunningRef.current = true;
       } catch {
@@ -115,17 +104,14 @@ export function useTunnel() {
   const openDialog = useCallback(async () => {
     shouldBeRunningRef.current = true;
     try {
-      const res = await fetch("/api/service-health");
-      if (res.ok) {
-        const health = (await res.json()) as ServiceHealth;
-        setWebServerRunning(isServiceHealthy(health, settings.tunnelSubdomain));
-        if (health.tunnel && health.tunnel_url) {
-          setTunnelUrl((prev) => prev ?? health.tunnel_url);
-        } else if (!health.tunnel) {
-          setTunnelUrl(null);
-        }
-        setTunnelRemoteHost(health.tunnel_remote_host);
+      const health = await trpc.services.health.query();
+      setWebServerRunning(isServiceHealthy(health, settings.tunnelSubdomain));
+      if (health.tunnel && health.tunnel_url) {
+        setTunnelUrl((prev) => prev ?? health.tunnel_url);
+      } else if (!health.tunnel) {
+        setTunnelUrl(null);
       }
+      setTunnelRemoteHost(health.tunnel_remote_host ?? null);
     } catch {
       // continue to dialog even if check fails
     }

@@ -11,23 +11,8 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ChatWorkspaceIdRouteImport } from './routes/chat.$workspaceId'
-import { Route as ApiTokenRouteImport } from './routes/api/token'
-import { Route as ApiServiceHealthRouteImport } from './routes/api/service-health'
-import { Route as ApiTunnelStopRouteImport } from './routes/api/tunnel.stop'
-import { Route as ApiTunnelStatusRouteImport } from './routes/api/tunnel.status'
-import { Route as ApiTunnelStartRouteImport } from './routes/api/tunnel.start'
-import { Route as ApiTunnelAuthCheckRouteImport } from './routes/api/tunnel.auth-check'
-import { Route as ApiTasksSubmitRouteImport } from './routes/api/tasks.submit'
-import { Route as ApiTasksWorkspaceIdRouteImport } from './routes/api/tasks.$workspaceId'
 import { Route as ApiStatusStreamRouteImport } from './routes/api/status.stream'
-import { Route as ApiSessionsWorkspaceIdRouteImport } from './routes/api/sessions.$workspaceId'
-import { Route as ApiPrereqsInstallTunnelRouteImport } from './routes/api/prereqs.install-tunnel'
-import { Route as ApiPrereqsInstallNodeRouteImport } from './routes/api/prereqs.install-node'
-import { Route as ApiPrereqsCheckRouteImport } from './routes/api/prereqs.check'
-import { Route as ApiChatAnswerRouteImport } from './routes/api/chat.answer'
 import { Route as ApiTasksWorkspaceIdStreamRouteImport } from './routes/api/tasks.$workspaceId.stream'
-import { Route as ApiTasksWorkspaceIdAbortRouteImport } from './routes/api/tasks.$workspaceId.abort'
-import { Route as ApiSessionsWorkspaceIdSessionIdMessagesRouteImport } from './routes/api/sessions.$workspaceId.$sessionId.messages'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -39,242 +24,63 @@ const ChatWorkspaceIdRoute = ChatWorkspaceIdRouteImport.update({
   path: '/chat/$workspaceId',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiTokenRoute = ApiTokenRouteImport.update({
-  id: '/api/token',
-  path: '/api/token',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiServiceHealthRoute = ApiServiceHealthRouteImport.update({
-  id: '/api/service-health',
-  path: '/api/service-health',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiTunnelStopRoute = ApiTunnelStopRouteImport.update({
-  id: '/api/tunnel/stop',
-  path: '/api/tunnel/stop',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiTunnelStatusRoute = ApiTunnelStatusRouteImport.update({
-  id: '/api/tunnel/status',
-  path: '/api/tunnel/status',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiTunnelStartRoute = ApiTunnelStartRouteImport.update({
-  id: '/api/tunnel/start',
-  path: '/api/tunnel/start',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiTunnelAuthCheckRoute = ApiTunnelAuthCheckRouteImport.update({
-  id: '/api/tunnel/auth-check',
-  path: '/api/tunnel/auth-check',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiTasksSubmitRoute = ApiTasksSubmitRouteImport.update({
-  id: '/api/tasks/submit',
-  path: '/api/tasks/submit',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiTasksWorkspaceIdRoute = ApiTasksWorkspaceIdRouteImport.update({
-  id: '/api/tasks/$workspaceId',
-  path: '/api/tasks/$workspaceId',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ApiStatusStreamRoute = ApiStatusStreamRouteImport.update({
   id: '/api/status/stream',
   path: '/api/status/stream',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiSessionsWorkspaceIdRoute = ApiSessionsWorkspaceIdRouteImport.update({
-  id: '/api/sessions/$workspaceId',
-  path: '/api/sessions/$workspaceId',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiPrereqsInstallTunnelRoute = ApiPrereqsInstallTunnelRouteImport.update({
-  id: '/api/prereqs/install-tunnel',
-  path: '/api/prereqs/install-tunnel',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiPrereqsInstallNodeRoute = ApiPrereqsInstallNodeRouteImport.update({
-  id: '/api/prereqs/install-node',
-  path: '/api/prereqs/install-node',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiPrereqsCheckRoute = ApiPrereqsCheckRouteImport.update({
-  id: '/api/prereqs/check',
-  path: '/api/prereqs/check',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiChatAnswerRoute = ApiChatAnswerRouteImport.update({
-  id: '/api/chat/answer',
-  path: '/api/chat/answer',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ApiTasksWorkspaceIdStreamRoute =
   ApiTasksWorkspaceIdStreamRouteImport.update({
-    id: '/stream',
-    path: '/stream',
-    getParentRoute: () => ApiTasksWorkspaceIdRoute,
-  } as any)
-const ApiTasksWorkspaceIdAbortRoute =
-  ApiTasksWorkspaceIdAbortRouteImport.update({
-    id: '/abort',
-    path: '/abort',
-    getParentRoute: () => ApiTasksWorkspaceIdRoute,
-  } as any)
-const ApiSessionsWorkspaceIdSessionIdMessagesRoute =
-  ApiSessionsWorkspaceIdSessionIdMessagesRouteImport.update({
-    id: '/$sessionId/messages',
-    path: '/$sessionId/messages',
-    getParentRoute: () => ApiSessionsWorkspaceIdRoute,
+    id: '/api/tasks/$workspaceId/stream',
+    path: '/api/tasks/$workspaceId/stream',
+    getParentRoute: () => rootRouteImport,
   } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/api/service-health': typeof ApiServiceHealthRoute
-  '/api/token': typeof ApiTokenRoute
   '/chat/$workspaceId': typeof ChatWorkspaceIdRoute
-  '/api/chat/answer': typeof ApiChatAnswerRoute
-  '/api/prereqs/check': typeof ApiPrereqsCheckRoute
-  '/api/prereqs/install-node': typeof ApiPrereqsInstallNodeRoute
-  '/api/prereqs/install-tunnel': typeof ApiPrereqsInstallTunnelRoute
-  '/api/sessions/$workspaceId': typeof ApiSessionsWorkspaceIdRouteWithChildren
   '/api/status/stream': typeof ApiStatusStreamRoute
-  '/api/tasks/$workspaceId': typeof ApiTasksWorkspaceIdRouteWithChildren
-  '/api/tasks/submit': typeof ApiTasksSubmitRoute
-  '/api/tunnel/auth-check': typeof ApiTunnelAuthCheckRoute
-  '/api/tunnel/start': typeof ApiTunnelStartRoute
-  '/api/tunnel/status': typeof ApiTunnelStatusRoute
-  '/api/tunnel/stop': typeof ApiTunnelStopRoute
-  '/api/tasks/$workspaceId/abort': typeof ApiTasksWorkspaceIdAbortRoute
   '/api/tasks/$workspaceId/stream': typeof ApiTasksWorkspaceIdStreamRoute
-  '/api/sessions/$workspaceId/$sessionId/messages': typeof ApiSessionsWorkspaceIdSessionIdMessagesRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/api/service-health': typeof ApiServiceHealthRoute
-  '/api/token': typeof ApiTokenRoute
   '/chat/$workspaceId': typeof ChatWorkspaceIdRoute
-  '/api/chat/answer': typeof ApiChatAnswerRoute
-  '/api/prereqs/check': typeof ApiPrereqsCheckRoute
-  '/api/prereqs/install-node': typeof ApiPrereqsInstallNodeRoute
-  '/api/prereqs/install-tunnel': typeof ApiPrereqsInstallTunnelRoute
-  '/api/sessions/$workspaceId': typeof ApiSessionsWorkspaceIdRouteWithChildren
   '/api/status/stream': typeof ApiStatusStreamRoute
-  '/api/tasks/$workspaceId': typeof ApiTasksWorkspaceIdRouteWithChildren
-  '/api/tasks/submit': typeof ApiTasksSubmitRoute
-  '/api/tunnel/auth-check': typeof ApiTunnelAuthCheckRoute
-  '/api/tunnel/start': typeof ApiTunnelStartRoute
-  '/api/tunnel/status': typeof ApiTunnelStatusRoute
-  '/api/tunnel/stop': typeof ApiTunnelStopRoute
-  '/api/tasks/$workspaceId/abort': typeof ApiTasksWorkspaceIdAbortRoute
   '/api/tasks/$workspaceId/stream': typeof ApiTasksWorkspaceIdStreamRoute
-  '/api/sessions/$workspaceId/$sessionId/messages': typeof ApiSessionsWorkspaceIdSessionIdMessagesRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/api/service-health': typeof ApiServiceHealthRoute
-  '/api/token': typeof ApiTokenRoute
   '/chat/$workspaceId': typeof ChatWorkspaceIdRoute
-  '/api/chat/answer': typeof ApiChatAnswerRoute
-  '/api/prereqs/check': typeof ApiPrereqsCheckRoute
-  '/api/prereqs/install-node': typeof ApiPrereqsInstallNodeRoute
-  '/api/prereqs/install-tunnel': typeof ApiPrereqsInstallTunnelRoute
-  '/api/sessions/$workspaceId': typeof ApiSessionsWorkspaceIdRouteWithChildren
   '/api/status/stream': typeof ApiStatusStreamRoute
-  '/api/tasks/$workspaceId': typeof ApiTasksWorkspaceIdRouteWithChildren
-  '/api/tasks/submit': typeof ApiTasksSubmitRoute
-  '/api/tunnel/auth-check': typeof ApiTunnelAuthCheckRoute
-  '/api/tunnel/start': typeof ApiTunnelStartRoute
-  '/api/tunnel/status': typeof ApiTunnelStatusRoute
-  '/api/tunnel/stop': typeof ApiTunnelStopRoute
-  '/api/tasks/$workspaceId/abort': typeof ApiTasksWorkspaceIdAbortRoute
   '/api/tasks/$workspaceId/stream': typeof ApiTasksWorkspaceIdStreamRoute
-  '/api/sessions/$workspaceId/$sessionId/messages': typeof ApiSessionsWorkspaceIdSessionIdMessagesRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/api/service-health'
-    | '/api/token'
     | '/chat/$workspaceId'
-    | '/api/chat/answer'
-    | '/api/prereqs/check'
-    | '/api/prereqs/install-node'
-    | '/api/prereqs/install-tunnel'
-    | '/api/sessions/$workspaceId'
     | '/api/status/stream'
-    | '/api/tasks/$workspaceId'
-    | '/api/tasks/submit'
-    | '/api/tunnel/auth-check'
-    | '/api/tunnel/start'
-    | '/api/tunnel/status'
-    | '/api/tunnel/stop'
-    | '/api/tasks/$workspaceId/abort'
     | '/api/tasks/$workspaceId/stream'
-    | '/api/sessions/$workspaceId/$sessionId/messages'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/api/service-health'
-    | '/api/token'
     | '/chat/$workspaceId'
-    | '/api/chat/answer'
-    | '/api/prereqs/check'
-    | '/api/prereqs/install-node'
-    | '/api/prereqs/install-tunnel'
-    | '/api/sessions/$workspaceId'
     | '/api/status/stream'
-    | '/api/tasks/$workspaceId'
-    | '/api/tasks/submit'
-    | '/api/tunnel/auth-check'
-    | '/api/tunnel/start'
-    | '/api/tunnel/status'
-    | '/api/tunnel/stop'
-    | '/api/tasks/$workspaceId/abort'
     | '/api/tasks/$workspaceId/stream'
-    | '/api/sessions/$workspaceId/$sessionId/messages'
   id:
     | '__root__'
     | '/'
-    | '/api/service-health'
-    | '/api/token'
     | '/chat/$workspaceId'
-    | '/api/chat/answer'
-    | '/api/prereqs/check'
-    | '/api/prereqs/install-node'
-    | '/api/prereqs/install-tunnel'
-    | '/api/sessions/$workspaceId'
     | '/api/status/stream'
-    | '/api/tasks/$workspaceId'
-    | '/api/tasks/submit'
-    | '/api/tunnel/auth-check'
-    | '/api/tunnel/start'
-    | '/api/tunnel/status'
-    | '/api/tunnel/stop'
-    | '/api/tasks/$workspaceId/abort'
     | '/api/tasks/$workspaceId/stream'
-    | '/api/sessions/$workspaceId/$sessionId/messages'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  ApiServiceHealthRoute: typeof ApiServiceHealthRoute
-  ApiTokenRoute: typeof ApiTokenRoute
   ChatWorkspaceIdRoute: typeof ChatWorkspaceIdRoute
-  ApiChatAnswerRoute: typeof ApiChatAnswerRoute
-  ApiPrereqsCheckRoute: typeof ApiPrereqsCheckRoute
-  ApiPrereqsInstallNodeRoute: typeof ApiPrereqsInstallNodeRoute
-  ApiPrereqsInstallTunnelRoute: typeof ApiPrereqsInstallTunnelRoute
-  ApiSessionsWorkspaceIdRoute: typeof ApiSessionsWorkspaceIdRouteWithChildren
   ApiStatusStreamRoute: typeof ApiStatusStreamRoute
-  ApiTasksWorkspaceIdRoute: typeof ApiTasksWorkspaceIdRouteWithChildren
-  ApiTasksSubmitRoute: typeof ApiTasksSubmitRoute
-  ApiTunnelAuthCheckRoute: typeof ApiTunnelAuthCheckRoute
-  ApiTunnelStartRoute: typeof ApiTunnelStartRoute
-  ApiTunnelStatusRoute: typeof ApiTunnelStatusRoute
-  ApiTunnelStopRoute: typeof ApiTunnelStopRoute
+  ApiTasksWorkspaceIdStreamRoute: typeof ApiTasksWorkspaceIdStreamRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -293,62 +99,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatWorkspaceIdRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/token': {
-      id: '/api/token'
-      path: '/api/token'
-      fullPath: '/api/token'
-      preLoaderRoute: typeof ApiTokenRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/service-health': {
-      id: '/api/service-health'
-      path: '/api/service-health'
-      fullPath: '/api/service-health'
-      preLoaderRoute: typeof ApiServiceHealthRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/tunnel/stop': {
-      id: '/api/tunnel/stop'
-      path: '/api/tunnel/stop'
-      fullPath: '/api/tunnel/stop'
-      preLoaderRoute: typeof ApiTunnelStopRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/tunnel/status': {
-      id: '/api/tunnel/status'
-      path: '/api/tunnel/status'
-      fullPath: '/api/tunnel/status'
-      preLoaderRoute: typeof ApiTunnelStatusRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/tunnel/start': {
-      id: '/api/tunnel/start'
-      path: '/api/tunnel/start'
-      fullPath: '/api/tunnel/start'
-      preLoaderRoute: typeof ApiTunnelStartRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/tunnel/auth-check': {
-      id: '/api/tunnel/auth-check'
-      path: '/api/tunnel/auth-check'
-      fullPath: '/api/tunnel/auth-check'
-      preLoaderRoute: typeof ApiTunnelAuthCheckRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/tasks/submit': {
-      id: '/api/tasks/submit'
-      path: '/api/tasks/submit'
-      fullPath: '/api/tasks/submit'
-      preLoaderRoute: typeof ApiTasksSubmitRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/tasks/$workspaceId': {
-      id: '/api/tasks/$workspaceId'
-      path: '/api/tasks/$workspaceId'
-      fullPath: '/api/tasks/$workspaceId'
-      preLoaderRoute: typeof ApiTasksWorkspaceIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/api/status/stream': {
       id: '/api/status/stream'
       path: '/api/status/stream'
@@ -356,110 +106,21 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiStatusStreamRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/sessions/$workspaceId': {
-      id: '/api/sessions/$workspaceId'
-      path: '/api/sessions/$workspaceId'
-      fullPath: '/api/sessions/$workspaceId'
-      preLoaderRoute: typeof ApiSessionsWorkspaceIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/prereqs/install-tunnel': {
-      id: '/api/prereqs/install-tunnel'
-      path: '/api/prereqs/install-tunnel'
-      fullPath: '/api/prereqs/install-tunnel'
-      preLoaderRoute: typeof ApiPrereqsInstallTunnelRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/prereqs/install-node': {
-      id: '/api/prereqs/install-node'
-      path: '/api/prereqs/install-node'
-      fullPath: '/api/prereqs/install-node'
-      preLoaderRoute: typeof ApiPrereqsInstallNodeRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/prereqs/check': {
-      id: '/api/prereqs/check'
-      path: '/api/prereqs/check'
-      fullPath: '/api/prereqs/check'
-      preLoaderRoute: typeof ApiPrereqsCheckRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/api/chat/answer': {
-      id: '/api/chat/answer'
-      path: '/api/chat/answer'
-      fullPath: '/api/chat/answer'
-      preLoaderRoute: typeof ApiChatAnswerRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/api/tasks/$workspaceId/stream': {
       id: '/api/tasks/$workspaceId/stream'
-      path: '/stream'
+      path: '/api/tasks/$workspaceId/stream'
       fullPath: '/api/tasks/$workspaceId/stream'
       preLoaderRoute: typeof ApiTasksWorkspaceIdStreamRouteImport
-      parentRoute: typeof ApiTasksWorkspaceIdRoute
-    }
-    '/api/tasks/$workspaceId/abort': {
-      id: '/api/tasks/$workspaceId/abort'
-      path: '/abort'
-      fullPath: '/api/tasks/$workspaceId/abort'
-      preLoaderRoute: typeof ApiTasksWorkspaceIdAbortRouteImport
-      parentRoute: typeof ApiTasksWorkspaceIdRoute
-    }
-    '/api/sessions/$workspaceId/$sessionId/messages': {
-      id: '/api/sessions/$workspaceId/$sessionId/messages'
-      path: '/$sessionId/messages'
-      fullPath: '/api/sessions/$workspaceId/$sessionId/messages'
-      preLoaderRoute: typeof ApiSessionsWorkspaceIdSessionIdMessagesRouteImport
-      parentRoute: typeof ApiSessionsWorkspaceIdRoute
+      parentRoute: typeof rootRouteImport
     }
   }
 }
-
-interface ApiSessionsWorkspaceIdRouteChildren {
-  ApiSessionsWorkspaceIdSessionIdMessagesRoute: typeof ApiSessionsWorkspaceIdSessionIdMessagesRoute
-}
-
-const ApiSessionsWorkspaceIdRouteChildren: ApiSessionsWorkspaceIdRouteChildren =
-  {
-    ApiSessionsWorkspaceIdSessionIdMessagesRoute:
-      ApiSessionsWorkspaceIdSessionIdMessagesRoute,
-  }
-
-const ApiSessionsWorkspaceIdRouteWithChildren =
-  ApiSessionsWorkspaceIdRoute._addFileChildren(
-    ApiSessionsWorkspaceIdRouteChildren,
-  )
-
-interface ApiTasksWorkspaceIdRouteChildren {
-  ApiTasksWorkspaceIdAbortRoute: typeof ApiTasksWorkspaceIdAbortRoute
-  ApiTasksWorkspaceIdStreamRoute: typeof ApiTasksWorkspaceIdStreamRoute
-}
-
-const ApiTasksWorkspaceIdRouteChildren: ApiTasksWorkspaceIdRouteChildren = {
-  ApiTasksWorkspaceIdAbortRoute: ApiTasksWorkspaceIdAbortRoute,
-  ApiTasksWorkspaceIdStreamRoute: ApiTasksWorkspaceIdStreamRoute,
-}
-
-const ApiTasksWorkspaceIdRouteWithChildren =
-  ApiTasksWorkspaceIdRoute._addFileChildren(ApiTasksWorkspaceIdRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  ApiServiceHealthRoute: ApiServiceHealthRoute,
-  ApiTokenRoute: ApiTokenRoute,
   ChatWorkspaceIdRoute: ChatWorkspaceIdRoute,
-  ApiChatAnswerRoute: ApiChatAnswerRoute,
-  ApiPrereqsCheckRoute: ApiPrereqsCheckRoute,
-  ApiPrereqsInstallNodeRoute: ApiPrereqsInstallNodeRoute,
-  ApiPrereqsInstallTunnelRoute: ApiPrereqsInstallTunnelRoute,
-  ApiSessionsWorkspaceIdRoute: ApiSessionsWorkspaceIdRouteWithChildren,
   ApiStatusStreamRoute: ApiStatusStreamRoute,
-  ApiTasksWorkspaceIdRoute: ApiTasksWorkspaceIdRouteWithChildren,
-  ApiTasksSubmitRoute: ApiTasksSubmitRoute,
-  ApiTunnelAuthCheckRoute: ApiTunnelAuthCheckRoute,
-  ApiTunnelStartRoute: ApiTunnelStartRoute,
-  ApiTunnelStatusRoute: ApiTunnelStatusRoute,
-  ApiTunnelStopRoute: ApiTunnelStopRoute,
+  ApiTasksWorkspaceIdStreamRoute: ApiTasksWorkspaceIdStreamRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

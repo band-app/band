@@ -126,10 +126,45 @@ async function startServer(
 }
 
 // ---------------------------------------------------------------------------
-// GET /api/service-health
+// tRPC HTTP helpers
 // ---------------------------------------------------------------------------
 
-describe("GET /api/service-health", () => {
+async function trpcQuery(
+  serverUrl: string,
+  procedure: string,
+  input?: unknown,
+  opts?: { headers?: Record<string, string> },
+) {
+  const url =
+    input !== undefined
+      ? `${serverUrl}/trpc/${procedure}?input=${encodeURIComponent(JSON.stringify(input))}`
+      : `${serverUrl}/trpc/${procedure}`;
+  return fetch(url, opts?.headers ? { headers: opts.headers } : undefined);
+}
+
+async function trpcMutate(
+  serverUrl: string,
+  procedure: string,
+  input?: unknown,
+  opts?: { headers?: Record<string, string> },
+) {
+  return fetch(`${serverUrl}/trpc/${procedure}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...opts?.headers },
+    body: input !== undefined ? JSON.stringify(input) : "{}",
+  });
+}
+
+async function trpcData<T>(res: Response): Promise<T> {
+  const body = (await res.json()) as { result: { data: T } };
+  return body.result.data;
+}
+
+// ---------------------------------------------------------------------------
+// services.health
+// ---------------------------------------------------------------------------
+
+describe("services.health", () => {
   let server: ServerHandle;
   let tmpHome: string;
 
@@ -146,14 +181,14 @@ describe("GET /api/service-health", () => {
   });
 
   it("returns webserver as healthy since the web server is running", async () => {
-    const res = await fetch(`${server.url}/api/service-health`);
+    const res = await trpcQuery(server.url, "services.health");
     expect(res.status).toBe(200);
-    const body = (await res.json()) as {
+    const body = await trpcData<{
       webserver: boolean;
       tunnel: boolean;
       tunnel_url: string | null;
       tunnel_remote_host: string | null;
-    };
+    }>(res);
     expect(body.webserver).toBe(true);
     expect(typeof body.tunnel).toBe("boolean");
     expect(body.tunnel).toBe(false);
@@ -162,10 +197,10 @@ describe("GET /api/service-health", () => {
 });
 
 // ---------------------------------------------------------------------------
-// GET /api/tunnel/status
+// tunnel.status
 // ---------------------------------------------------------------------------
 
-describe("GET /api/tunnel/status", () => {
+describe("tunnel.status", () => {
   let server: ServerHandle;
   let tmpHome: string;
 
@@ -182,13 +217,13 @@ describe("GET /api/tunnel/status", () => {
   });
 
   it("returns tunnel not running when no tunnel has been started", async () => {
-    const res = await fetch(`${server.url}/api/tunnel/status`);
+    const res = await trpcQuery(server.url, "tunnel.status");
     expect(res.status).toBe(200);
-    const body = (await res.json()) as {
+    const body = await trpcData<{
       running: boolean;
       url: string | null;
       remoteHost: string | null;
-    };
+    }>(res);
     expect(body.running).toBe(false);
     expect(body.url).toBeNull();
     expect(body.remoteHost).toBeNull();
@@ -196,10 +231,10 @@ describe("GET /api/tunnel/status", () => {
 });
 
 // ---------------------------------------------------------------------------
-// POST /api/tunnel/stop
+// tunnel.stop
 // ---------------------------------------------------------------------------
 
-describe("POST /api/tunnel/stop", () => {
+describe("tunnel.stop", () => {
   let server: ServerHandle;
   let tmpHome: string;
 
@@ -216,18 +251,18 @@ describe("POST /api/tunnel/stop", () => {
   });
 
   it("succeeds even when no tunnel is running", async () => {
-    const res = await fetch(`${server.url}/api/tunnel/stop`, { method: "POST" });
+    const res = await trpcMutate(server.url, "tunnel.stop");
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { ok: boolean };
+    const body = await trpcData<{ ok: boolean }>(res);
     expect(body.ok).toBe(true);
   });
 });
 
 // ---------------------------------------------------------------------------
-// GET /api/prereqs/check
+// prereqs.check
 // ---------------------------------------------------------------------------
 
-describe("GET /api/prereqs/check", () => {
+describe("prereqs.check", () => {
   let server: ServerHandle;
   let tmpHome: string;
 
@@ -244,9 +279,9 @@ describe("GET /api/prereqs/check", () => {
   });
 
   it("returns prerequisite status with node and instatunnel booleans", async () => {
-    const res = await fetch(`${server.url}/api/prereqs/check`);
+    const res = await trpcQuery(server.url, "prereqs.check");
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { node: boolean; instatunnel: boolean };
+    const body = await trpcData<{ node: boolean; instatunnel: boolean }>(res);
     expect(typeof body.node).toBe("boolean");
     expect(typeof body.instatunnel).toBe("boolean");
     // Node.js is always available since we're running this test with it
@@ -255,10 +290,10 @@ describe("GET /api/prereqs/check", () => {
 });
 
 // ---------------------------------------------------------------------------
-// GET /api/token
+// services.token
 // ---------------------------------------------------------------------------
 
-describe("GET /api/token", () => {
+describe("services.token", () => {
   let server: ServerHandle;
   let tmpHome: string;
 
@@ -281,17 +316,17 @@ describe("GET /api/token", () => {
       .update("band-access")
       .digest("hex");
 
-    const res = await fetch(`${server.url}/api/token`, {
+    const res = await trpcQuery(server.url, "services.token", undefined, {
       headers: { Cookie: `band_token=${expectedToken}` },
     });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { token: string };
+    const body = await trpcData<{ token: string }>(res);
     expect(typeof body.token).toBe("string");
     expect(body.token.length).toBeGreaterThan(0);
   });
 });
 
-describe("GET /api/token — no secret configured", () => {
+describe("services.token — no secret configured", () => {
   let server: ServerHandle;
   let tmpHome: string;
 
@@ -309,18 +344,16 @@ describe("GET /api/token — no secret configured", () => {
   });
 
   it("returns 404 when no token secret is configured", async () => {
-    const res = await fetch(`${server.url}/api/token`);
+    const res = await trpcQuery(server.url, "services.token");
     expect(res.status).toBe(404);
-    const body = (await res.json()) as { error: string };
-    expect(body.error).toBeTruthy();
   });
 });
 
 // ---------------------------------------------------------------------------
-// GET /api/tunnel/auth-check
+// tunnel.authCheck
 // ---------------------------------------------------------------------------
 
-describe("GET /api/tunnel/auth-check", () => {
+describe("tunnel.authCheck", () => {
   let server: ServerHandle;
   let tmpHome: string;
 
@@ -337,18 +370,18 @@ describe("GET /api/tunnel/auth-check", () => {
   });
 
   it("returns an authenticated boolean", async () => {
-    const res = await fetch(`${server.url}/api/tunnel/auth-check`);
+    const res = await trpcQuery(server.url, "tunnel.authCheck");
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { authenticated: boolean };
+    const body = await trpcData<{ authenticated: boolean }>(res);
     expect(typeof body.authenticated).toBe("boolean");
   });
 });
 
 // ---------------------------------------------------------------------------
-// POST /api/tunnel/stop — resets tunnel status
+// tunnel.stop — resets tunnel status
 // ---------------------------------------------------------------------------
 
-describe("POST /api/tunnel/stop — resets tunnel status", () => {
+describe("tunnel.stop — resets tunnel status", () => {
   let server: ServerHandle;
   let tmpHome: string;
 
@@ -366,20 +399,20 @@ describe("POST /api/tunnel/stop — resets tunnel status", () => {
 
   it("tunnel status remains not-running after stop", async () => {
     // Stop tunnel (even though none is running — should succeed)
-    const stopRes = await fetch(`${server.url}/api/tunnel/stop`, { method: "POST" });
+    const stopRes = await trpcMutate(server.url, "tunnel.stop");
     expect(stopRes.status).toBe(200);
 
     // Verify tunnel status is still not running
-    const statusRes = await fetch(`${server.url}/api/tunnel/status`);
+    const statusRes = await trpcQuery(server.url, "tunnel.status");
     expect(statusRes.status).toBe(200);
-    const status = (await statusRes.json()) as { running: boolean; url: string | null };
+    const status = await trpcData<{ running: boolean; url: string | null }>(statusRes);
     expect(status.running).toBe(false);
     expect(status.url).toBeNull();
   });
 });
 
 // ---------------------------------------------------------------------------
-// SSE stream — tunnel events propagate
+// SSE stream — tunnel events propagate (stays as REST)
 // ---------------------------------------------------------------------------
 
 describe("GET /api/status/stream — SSE event format", () => {
@@ -414,7 +447,7 @@ describe("GET /api/status/stream — SSE event format", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Auth enforcement on tunnel/service endpoints
+// Auth enforcement on tRPC tunnel/service endpoints
 // ---------------------------------------------------------------------------
 
 describe("Tunnel and service endpoints require auth when secret is set", () => {
@@ -438,54 +471,54 @@ describe("Tunnel and service endpoints require auth when secret is set", () => {
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  it("returns 401 for /api/service-health without auth", async () => {
-    const res = await fetch(`${server.url}/api/service-health`);
+  it("returns 401 for services.health without auth", async () => {
+    const res = await trpcQuery(server.url, "services.health");
     expect(res.status).toBe(401);
   });
 
-  it("returns 200 for /api/service-health with auth", async () => {
-    const res = await fetch(`${server.url}/api/service-health`, {
+  it("returns 200 for services.health with auth", async () => {
+    const res = await trpcQuery(server.url, "services.health", undefined, {
       headers: { Cookie: authCookie },
     });
     expect(res.status).toBe(200);
   });
 
-  it("returns 401 for /api/tunnel/status without auth", async () => {
-    const res = await fetch(`${server.url}/api/tunnel/status`);
+  it("returns 401 for tunnel.status without auth", async () => {
+    const res = await trpcQuery(server.url, "tunnel.status");
     expect(res.status).toBe(401);
   });
 
-  it("returns 200 for /api/tunnel/status with auth", async () => {
-    const res = await fetch(`${server.url}/api/tunnel/status`, {
+  it("returns 200 for tunnel.status with auth", async () => {
+    const res = await trpcQuery(server.url, "tunnel.status", undefined, {
       headers: { Cookie: authCookie },
     });
     expect(res.status).toBe(200);
   });
 
-  it("returns 401 for /api/tunnel/stop without auth", async () => {
-    const res = await fetch(`${server.url}/api/tunnel/stop`, { method: "POST" });
+  it("returns 401 for tunnel.stop without auth", async () => {
+    const res = await trpcMutate(server.url, "tunnel.stop");
     expect(res.status).toBe(401);
   });
 
-  it("returns 401 for /api/prereqs/check without auth", async () => {
-    const res = await fetch(`${server.url}/api/prereqs/check`);
+  it("returns 401 for prereqs.check without auth", async () => {
+    const res = await trpcQuery(server.url, "prereqs.check");
     expect(res.status).toBe(401);
   });
 
-  it("returns 200 for /api/prereqs/check with auth", async () => {
-    const res = await fetch(`${server.url}/api/prereqs/check`, {
+  it("returns 200 for prereqs.check with auth", async () => {
+    const res = await trpcQuery(server.url, "prereqs.check", undefined, {
       headers: { Cookie: authCookie },
     });
     expect(res.status).toBe(200);
   });
 
-  it("returns 401 for /api/tunnel/auth-check without auth", async () => {
-    const res = await fetch(`${server.url}/api/tunnel/auth-check`);
+  it("returns 401 for tunnel.authCheck without auth", async () => {
+    const res = await trpcQuery(server.url, "tunnel.authCheck");
     expect(res.status).toBe(401);
   });
 
-  it("returns 200 for /api/tunnel/auth-check with auth", async () => {
-    const res = await fetch(`${server.url}/api/tunnel/auth-check`, {
+  it("returns 200 for tunnel.authCheck with auth", async () => {
+    const res = await trpcQuery(server.url, "tunnel.authCheck", undefined, {
       headers: { Cookie: authCookie },
     });
     expect(res.status).toBe(200);

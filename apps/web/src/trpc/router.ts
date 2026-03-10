@@ -1,12 +1,16 @@
 import { execFile, execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { readdir, readFile, stat } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, extname, join, resolve } from "node:path";
-import { initTRPC } from "@trpc/server";
+import { initTRPC, TRPCError } from "@trpc/server";
 import { z } from "zod";
+import { getOrCreateAgent } from "../lib/agent-pool";
+import { getToken } from "../lib/auth-token";
 import { checkCli, installCli } from "../lib/cli";
 import { execGit, gitCmd, listWorktrees } from "../lib/git";
 import { checkHooks, installHooks } from "../lib/hooks";
+import { resolvePendingInput } from "../lib/pending-inputs";
+import { checkPrereqs, shellPath } from "../lib/process-utils";
 import {
   bandHome,
   ensureDirs,
@@ -17,7 +21,14 @@ import {
   settingsFile,
   worktreesDir,
 } from "../lib/state";
-import { submitTask } from "../lib/task-runner";
+import { abortTask, getTask, submitTask, TaskConflictError } from "../lib/task-runner";
+import {
+  checkTunnelAuth,
+  checkTunnelHealth,
+  getTunnelStatus,
+  startTunnel,
+  stopTunnel,
+} from "../lib/tunnel";
 import { resolveWorkspace } from "../lib/workspace";
 import type { Context } from "./context";
 
@@ -551,6 +562,275 @@ const workspaceRouter = t.router({
 });
 
 // ---------------------------------------------------------------------------
+// Tunnel
+// ---------------------------------------------------------------------------
+
+const tunnelRouter = t.router({
+  status: publicProcedure.query(() => {
+    return getTunnelStatus();
+  }),
+
+  start: publicProcedure
+    .input(z.object({ subdomain: z.string().optional(), skipSubdomain: z.boolean().optional() }))
+    .mutation(async ({ input }) => {
+      const settings = loadSettings();
+      const port = parseInt(process.env.PORT || "3456", 10);
+      const subdomain = input.subdomain || (settings as Record<string, unknown>).tunnelSubdomain;
+      await startTunnel({
+        port,
+        subdomain: subdomain as string | undefined,
+        skipSubdomain: input.skipSubdomain,
+      });
+      return { ok: true };
+    }),
+
+  stop: publicProcedure.mutation(async () => {
+    await stopTunnel();
+    return { ok: true };
+  }),
+
+  authCheck: publicProcedure.query(async () => {
+    const authenticated = await checkTunnelAuth();
+    return { authenticated };
+  }),
+});
+
+// ---------------------------------------------------------------------------
+// Prerequisites
+// ---------------------------------------------------------------------------
+
+const prereqsRouter = t.router({
+  check: publicProcedure.query(async () => {
+    return await checkPrereqs();
+  }),
+
+  installNode: publicProcedure.mutation(async () => {
+    const resolvedPath = await shellPath();
+    await new Promise<void>((resolve, reject) => {
+      execFile(
+        "brew",
+        ["install", "node"],
+        { env: { ...process.env, PATH: resolvedPath }, timeout: 120_000 },
+        (err, _stdout, stderr) => {
+          if (err) {
+            reject(new Error(stderr || err.message));
+            return;
+          }
+          resolve();
+        },
+      );
+    });
+    return { ok: true };
+  }),
+
+  installTunnel: publicProcedure.mutation(async () => {
+    const resolvedPath = await shellPath();
+    await new Promise<void>((resolve, reject) => {
+      execFile(
+        "npm",
+        ["install", "-g", "instatunnel"],
+        { env: { ...process.env, PATH: resolvedPath }, timeout: 120_000 },
+        (err, _stdout, stderr) => {
+          if (err) {
+            reject(new Error(stderr || err.message));
+            return;
+          }
+          resolve();
+        },
+      );
+    });
+    return { ok: true };
+  }),
+});
+
+// ---------------------------------------------------------------------------
+// Tasks
+// ---------------------------------------------------------------------------
+
+interface FilePart {
+  mediaType: string;
+  url: string;
+  filename?: string;
+}
+
+async function saveUploadedFiles(fileParts: FilePart[]): Promise<string[]> {
+  const uploadDir = join(bandHome(), "uploads");
+  await mkdir(uploadDir, { recursive: true });
+
+  const savedPaths: string[] = [];
+
+  for (const part of fileParts) {
+    const dataUrlMatch = part.url.match(/^data:[^;]+;base64,(.+)$/);
+    if (!dataUrlMatch) continue;
+
+    const buffer = Buffer.from(dataUrlMatch[1], "base64");
+    const timestamp = Date.now();
+    const filename = part.filename || `file-${timestamp}`;
+    const safeName = `${timestamp}-${filename.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+    const filePath = join(uploadDir, safeName);
+
+    await writeFile(filePath, buffer);
+    savedPaths.push(filePath);
+  }
+
+  return savedPaths;
+}
+
+const tasksRouter = t.router({
+  submit: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        prompt: z.string(),
+        sessionId: z.string().optional(),
+        files: z
+          .array(
+            z.object({
+              mediaType: z.string(),
+              url: z.string(),
+              filename: z.string().optional(),
+            }),
+          )
+          .optional(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      let agentPrompt: string | undefined;
+      if (input.files && input.files.length > 0) {
+        const savedPaths = await saveUploadedFiles(input.files);
+        if (savedPaths.length > 0) {
+          const fileList = savedPaths.map((p) => `- ${p}`).join("\n");
+          agentPrompt = `I'm sharing these files with you:\n${fileList}\n\n${input.prompt}`;
+        }
+      }
+
+      try {
+        const task = submitTask(input.workspaceId, input.prompt, input.sessionId, agentPrompt);
+        return { workspaceId: task.workspaceId, sessionId: task.sessionId };
+      } catch (err) {
+        if (err instanceof TaskConflictError) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "Task already running for this workspace",
+          });
+        }
+        throw err;
+      }
+    }),
+
+  get: publicProcedure.input(z.object({ workspaceId: z.string() })).query(({ input }) => {
+    const task = getTask(input.workspaceId);
+    return { task };
+  }),
+
+  abort: publicProcedure.input(z.object({ workspaceId: z.string() })).mutation(({ input }) => {
+    const aborted = abortTask(input.workspaceId);
+    if (!aborted) {
+      throw new TRPCError({ code: "NOT_FOUND", message: "No running task found" });
+    }
+    return { aborted: true };
+  }),
+});
+
+// ---------------------------------------------------------------------------
+// Sessions
+// ---------------------------------------------------------------------------
+
+const sessionsRouter = t.router({
+  list: publicProcedure.input(z.object({ workspaceId: z.string() })).query(async ({ input }) => {
+    const workspace = resolveWorkspace(input.workspaceId);
+    if (!workspace) {
+      throw new TRPCError({ code: "NOT_FOUND", message: "Workspace not found" });
+    }
+
+    const agent = await getOrCreateAgent(input.workspaceId, workspace.worktree.path);
+
+    if (!agent.supportedFeatures.sessionListing || !agent.listSessions) {
+      return { sessions: [], supported: false };
+    }
+
+    const sessions = await agent.listSessions(workspace.worktree.path);
+    return { sessions, supported: true };
+  }),
+
+  messages: publicProcedure
+    .input(z.object({ workspaceId: z.string(), sessionId: z.string() }))
+    .query(async ({ input }) => {
+      const workspace = resolveWorkspace(input.workspaceId);
+      if (!workspace) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Workspace not found" });
+      }
+
+      const agent = await getOrCreateAgent(input.workspaceId, workspace.worktree.path);
+
+      if (!agent.supportedFeatures.sessionListing || !agent.getSessionMessages) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Session listing not supported" });
+      }
+
+      const messages = await agent.getSessionMessages(input.sessionId, workspace.worktree.path);
+      return { messages };
+    }),
+});
+
+// ---------------------------------------------------------------------------
+// Services
+// ---------------------------------------------------------------------------
+
+const servicesRouter = t.router({
+  health: publicProcedure.query(async () => {
+    const tunnel = getTunnelStatus();
+    let tunnelHealthy = false;
+    let tunnelRemoteHost: string | undefined;
+
+    if (tunnel.running && tunnel.url) {
+      const token = getToken();
+      if (token) {
+        const urlMatch = tunnel.url.match(/https:\/\/(.+)\.instatunnel\.my/);
+        if (urlMatch) {
+          const health = await checkTunnelHealth(urlMatch[1], token);
+          tunnelHealthy = health.healthy;
+          tunnelRemoteHost = health.remoteHost;
+        }
+      }
+    }
+
+    return {
+      webserver: true,
+      tunnel: tunnelHealthy,
+      tunnel_url: tunnel.url,
+      tunnel_remote_host: tunnelRemoteHost || tunnel.remoteHost,
+    };
+  }),
+
+  token: publicProcedure.query(() => {
+    const token = getToken();
+    if (!token) {
+      throw new TRPCError({ code: "NOT_FOUND", message: "No token secret configured" });
+    }
+    return { token };
+  }),
+});
+
+// ---------------------------------------------------------------------------
+// Chat
+// ---------------------------------------------------------------------------
+
+const chatRouter = t.router({
+  answer: publicProcedure
+    .input(z.object({ approvalId: z.string(), answers: z.record(z.string(), z.string()) }))
+    .mutation(({ input }) => {
+      const resolved = resolvePendingInput(input.approvalId, input.answers);
+      if (!resolved) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "No pending input found for this approvalId",
+        });
+      }
+      return { ok: true };
+    }),
+});
+
+// ---------------------------------------------------------------------------
 // App Router
 // ---------------------------------------------------------------------------
 
@@ -561,6 +841,12 @@ export const appRouter = t.router({
   hooks: hooksRouter,
   cli: cliRouter,
   workspace: workspaceRouter,
+  tunnel: tunnelRouter,
+  prereqs: prereqsRouter,
+  tasks: tasksRouter,
+  sessions: sessionsRouter,
+  services: servicesRouter,
+  chat: chatRouter,
 });
 
 export type AppRouter = typeof appRouter;

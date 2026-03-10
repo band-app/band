@@ -1,6 +1,7 @@
 import { Button, cn } from "@band/ui";
 import { CheckIcon, Loader2 } from "lucide-react";
 import { useCallback, useState } from "react";
+import { trpc } from "../../lib/trpc-client";
 
 interface QuestionOption {
   label: string;
@@ -55,11 +56,7 @@ export function AskUserQuestion({ questions, approvalId, disabled }: AskUserQues
         }
       }
 
-      await fetch(`/api/chat/answer`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ approvalId, answers }),
-      });
+      await trpc.chat.answer.mutate({ approvalId, answers });
       setSubmitted(true);
     } finally {
       setSubmitting(false);

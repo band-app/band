@@ -5,7 +5,11 @@ import { bandHome, loadSettings } from "./state";
 
 const log = createLogger("agent-pool");
 
-const pool = new Map<string, CodingAgent>();
+// Use globalThis to ensure a single shared state across multiple bundles
+const POOL_KEY = Symbol.for("band.agent-pool");
+const g = globalThis as unknown as Record<symbol, unknown>;
+if (!g[POOL_KEY]) g[POOL_KEY] = new Map<string, CodingAgent>();
+const pool = g[POOL_KEY] as Map<string, CodingAgent>;
 
 function getAgentConfig(worktreePath: string): CodingAgentConfig {
   const settings = loadSettings();

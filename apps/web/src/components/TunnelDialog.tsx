@@ -1,8 +1,9 @@
-import { type ServiceHealth, subscribeSSE, useSettingsQuery } from "@band/dashboard-core";
+import { subscribeSSE, useSettingsQuery } from "@band/dashboard-core";
 import { Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@band/ui";
 import { Loader2 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { useCallback, useEffect, useState } from "react";
+import { trpc } from "../lib/trpc-client";
 
 type TunnelStep =
   | "starting"
@@ -33,9 +34,7 @@ export function TunnelDialog({ open, onOpenChange, onStopped, initialUrl, onTunn
       setStep("starting");
 
       // Web server is always running — just check health for tunnel state
-      const healthRes = await fetch("/api/service-health");
-      if (!healthRes.ok) throw new Error("Failed to check service health");
-      const health = (await healthRes.json()) as ServiceHealth;
+      const health = await trpc.services.health.query();
 
       // If tunnel is already running on a different host, show message
       if (health.tunnel && health.tunnel_remote_host) {
@@ -46,13 +45,11 @@ export function TunnelDialog({ open, onOpenChange, onStopped, initialUrl, onTunn
 
       // If tunnel is broken (subdomain configured but not healthy), stop it first
       if (settings.tunnelSubdomain && !health.tunnel) {
-        await fetch("/api/tunnel/stop", { method: "POST" }).catch(() => {});
+        await trpc.tunnel.stop.mutate().catch(() => {});
       }
 
       if (settings.tunnelSubdomain) {
-        const authRes = await fetch("/api/tunnel/auth-check");
-        if (!authRes.ok) throw new Error("Failed to check auth");
-        const { authenticated } = (await authRes.json()) as { authenticated: boolean };
+        const { authenticated } = await trpc.tunnel.authCheck.query();
         if (!authenticated) {
           setStep("auth_required");
           return;
@@ -60,15 +57,7 @@ export function TunnelDialog({ open, onOpenChange, onStopped, initialUrl, onTunn
       }
 
       setStep("connecting");
-      const startRes = await fetch("/api/tunnel/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
-      if (!startRes.ok) {
-        const data = (await startRes.json()) as { error?: string };
-        throw new Error(data.error || "Failed to start tunnel");
-      }
+      await trpc.tunnel.start.mutate({});
     } catch (e) {
       setError(String(e));
       setStep("error");
@@ -114,13 +103,17 @@ export function TunnelDialog({ open, onOpenChange, onStopped, initialUrl, onTunn
       // Check if services are already running
       (async () => {
         try {
-          const healthRes = await fetch("/api/service-health");
-          if (!healthRes.ok || cancelled) return;
-          const health = (await healthRes.json()) as ServiceHealth;
+          const health = await trpc.services.health.query();
+          if (cancelled) return;
 
           if (health.tunnel && health.tunnel_url && !cancelled) {
-            const tokenRes = await fetch("/api/token");
-            const token = tokenRes.ok ? ((await tokenRes.json()) as { token: string }).token : null;
+            let token: string | null = null;
+            try {
+              const tokenResult = await trpc.services.token.query();
+              token = tokenResult.token;
+            } catch {
+              // no token configured
+            }
             const url = token ? `${health.tunnel_url}?token=${token}` : health.tunnel_url;
             if (health.tunnel_remote_host) {
               setRemoteHost(health.tunnel_remote_host);
@@ -149,19 +142,13 @@ export function TunnelDialog({ open, onOpenChange, onStopped, initialUrl, onTunn
   const handleRetryAuth = async () => {
     try {
       setStep("starting");
-      const authRes = await fetch("/api/tunnel/auth-check");
-      if (!authRes.ok) throw new Error("Failed to check auth");
-      const { authenticated } = (await authRes.json()) as { authenticated: boolean };
+      const { authenticated } = await trpc.tunnel.authCheck.query();
       if (!authenticated) {
         setStep("auth_required");
         return;
       }
       setStep("connecting");
-      await fetch("/api/tunnel/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
+      await trpc.tunnel.start.mutate({});
     } catch (e) {
       setError(String(e));
       setStep("error");
@@ -171,11 +158,7 @@ export function TunnelDialog({ open, onOpenChange, onStopped, initialUrl, onTunn
   const handleContinueRandom = async () => {
     try {
       setStep("connecting");
-      await fetch("/api/tunnel/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ skipSubdomain: true }),
-      });
+      await trpc.tunnel.start.mutate({ skipSubdomain: true });
     } catch (e) {
       setError(String(e));
       setStep("error");
@@ -183,7 +166,7 @@ export function TunnelDialog({ open, onOpenChange, onStopped, initialUrl, onTunn
   };
 
   const handleStop = async () => {
-    await fetch("/api/tunnel/stop", { method: "POST" }).catch(() => {});
+    await trpc.tunnel.stop.mutate().catch(() => {});
     onStopped();
     onOpenChange(false);
   };

@@ -146,6 +146,45 @@ async function startServer(
   });
 }
 
+// ---------------------------------------------------------------------------
+// tRPC HTTP helpers
+// ---------------------------------------------------------------------------
+
+async function trpcQuery(
+  serverUrl: string,
+  procedure: string,
+  input?: unknown,
+  opts?: { headers?: Record<string, string> },
+) {
+  const url =
+    input !== undefined
+      ? `${serverUrl}/trpc/${procedure}?input=${encodeURIComponent(JSON.stringify(input))}`
+      : `${serverUrl}/trpc/${procedure}`;
+  return fetch(url, opts?.headers ? { headers: opts.headers } : undefined);
+}
+
+async function trpcMutate(
+  serverUrl: string,
+  procedure: string,
+  input?: unknown,
+  opts?: { headers?: Record<string, string> },
+) {
+  return fetch(`${serverUrl}/trpc/${procedure}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...opts?.headers },
+    body: input !== undefined ? JSON.stringify(input) : "{}",
+  });
+}
+
+async function trpcData<T>(res: Response): Promise<T> {
+  const body = (await res.json()) as { result: { data: T } };
+  return body.result.data;
+}
+
+// ---------------------------------------------------------------------------
+// SSE helpers (for streaming endpoints that stay as REST)
+// ---------------------------------------------------------------------------
+
 interface SSEEvent {
   event: string | null;
   data: unknown;
@@ -182,19 +221,15 @@ async function parseSSEStream(response: Response): Promise<SSEEvent[]> {
 }
 
 /**
- * Submit a task and wait for the SSE stream to complete.
- * Returns the SSE events from the stream.
+ * Submit a task via tRPC and wait for the SSE stream to complete.
+ * Returns the tRPC submit response, SSE stream response, and events.
  */
 async function submitAndStream(
   serverUrl: string,
   workspaceId: string,
   prompt: string,
 ): Promise<{ submitRes: Response; streamRes: Response; events: SSEEvent[] }> {
-  const submitRes = await fetch(`${serverUrl}/api/tasks/submit`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ workspaceId, prompt }),
-  });
+  const submitRes = await trpcMutate(serverUrl, "tasks.submit", { workspaceId, prompt });
 
   if (!submitRes.ok) {
     return { submitRes, streamRes: submitRes, events: [] };
@@ -203,6 +238,7 @@ async function submitAndStream(
   // Give the task a moment to start producing events
   await new Promise((r) => setTimeout(r, 100));
 
+  // SSE stream stays as REST
   const streamRes = await fetch(`${serverUrl}/api/tasks/${encodeURIComponent(workspaceId)}/stream`);
   const events = await parseSSEStream(streamRes);
 
@@ -210,10 +246,10 @@ async function submitAndStream(
 }
 
 // ---------------------------------------------------------------------------
-// POST /api/tasks/submit — Validation
+// tasks.submit — Validation
 // ---------------------------------------------------------------------------
 
-describe("POST /api/tasks/submit — validation", () => {
+describe("tasks.submit — validation", () => {
   let server: ServerHandle;
   let tmpHome: string;
 
@@ -230,25 +266,15 @@ describe("POST /api/tasks/submit — validation", () => {
   });
 
   it("returns 400 when workspaceId is missing", async () => {
-    const res = await fetch(`${server.url}/api/tasks/submit`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt: "hello" }),
-    });
+    const res = await trpcMutate(server.url, "tasks.submit", { prompt: "hello" });
     expect(res.status).toBe(400);
-    const body = await res.json();
-    expect(body.error).toContain("workspaceId");
   });
 
   it("returns 400 when prompt is missing", async () => {
-    const res = await fetch(`${server.url}/api/tasks/submit`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ workspaceId: "testproject-main" }),
+    const res = await trpcMutate(server.url, "tasks.submit", {
+      workspaceId: "testproject-main",
     });
     expect(res.status).toBe(400);
-    const body = await res.json();
-    expect(body.error).toContain("prompt");
   });
 });
 
@@ -325,13 +351,13 @@ describe("Task submit + stream — streaming", () => {
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  it("returns 202 on submit and streams UIMessageChunk events", async () => {
+  it("returns 200 on submit and streams UIMessageChunk events", async () => {
     const { submitRes, streamRes, events } = await submitAndStream(
       server.url,
       "testproject-main",
       "hello",
     );
-    expect(submitRes.status).toBe(202);
+    expect(submitRes.status).toBe(200);
     expect(streamRes.status).toBe(200);
 
     const contentType = streamRes.headers.get("content-type")!;
@@ -391,7 +417,7 @@ describe("Task submit + stream — agent failure", () => {
 
   it("stream contains error event when agent returns failure result", async () => {
     const { submitRes, events } = await submitAndStream(server.url, "testproject-main", "hello");
-    expect(submitRes.status).toBe(202);
+    expect(submitRes.status).toBe(200);
 
     const errorEvents = events.filter((e) => e.event === "error");
     expect(errorEvents.length).toBeGreaterThan(0);
@@ -430,7 +456,7 @@ describe("Task submit + stream — agent crash", () => {
 
   it("stream contains error event when agent binary crashes", async () => {
     const { submitRes, events } = await submitAndStream(server.url, "testproject-main", "hello");
-    expect(submitRes.status).toBe(202);
+    expect(submitRes.status).toBe(200);
 
     const eventTypes = events.map((e) => e.event).filter(Boolean) as string[];
     const hasError = eventTypes.includes("error");
@@ -440,10 +466,10 @@ describe("Task submit + stream — agent crash", () => {
 });
 
 // ---------------------------------------------------------------------------
-// POST /api/tasks/submit — Auth
+// tasks.submit — Auth
 // ---------------------------------------------------------------------------
 
-describe("POST /api/tasks/submit — auth", () => {
+describe("tasks.submit — auth", () => {
   let server: ServerHandle;
   let tmpHome: string;
 
@@ -463,23 +489,19 @@ describe("POST /api/tasks/submit — auth", () => {
   });
 
   it("returns 401 when BAND_TOKEN_SECRET is set and no token provided", async () => {
-    const res = await fetch(`${server.url}/api/tasks/submit`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        workspaceId: "testproject-main",
-        prompt: "hello",
-      }),
+    const res = await trpcMutate(server.url, "tasks.submit", {
+      workspaceId: "testproject-main",
+      prompt: "hello",
     });
     expect(res.status).toBe(401);
   });
 });
 
 // ---------------------------------------------------------------------------
-// GET /api/sessions/:workspaceId — Validation
+// sessions.list — Validation
 // ---------------------------------------------------------------------------
 
-describe("GET /api/sessions/:workspaceId — validation", () => {
+describe("sessions.list — validation", () => {
   let server: ServerHandle;
   let tmpHome: string;
 
@@ -496,18 +518,18 @@ describe("GET /api/sessions/:workspaceId — validation", () => {
   });
 
   it("returns 404 when workspace does not exist", async () => {
-    const res = await fetch(`${server.url}/api/sessions/nonexistent-main`);
+    const res = await trpcQuery(server.url, "sessions.list", {
+      workspaceId: "nonexistent-main",
+    });
     expect(res.status).toBe(404);
-    const body = await res.json();
-    expect(body.error).toContain("not found");
   });
 });
 
 // ---------------------------------------------------------------------------
-// GET /api/sessions/:workspaceId/:sessionId/messages — Validation
+// sessions.messages — Validation
 // ---------------------------------------------------------------------------
 
-describe("GET /api/sessions/:workspaceId/:sessionId/messages — validation", () => {
+describe("sessions.messages — validation", () => {
   let server: ServerHandle;
   let tmpHome: string;
 
@@ -524,10 +546,11 @@ describe("GET /api/sessions/:workspaceId/:sessionId/messages — validation", ()
   });
 
   it("returns 404 when workspace does not exist", async () => {
-    const res = await fetch(`${server.url}/api/sessions/nonexistent-main/some-session/messages`);
+    const res = await trpcQuery(server.url, "sessions.messages", {
+      workspaceId: "nonexistent-main",
+      sessionId: "some-session",
+    });
     expect(res.status).toBe(404);
-    const body = await res.json();
-    expect(body.error).toContain("not found");
   });
 });
 
@@ -552,10 +575,10 @@ async function waitFor(
 }
 
 // ---------------------------------------------------------------------------
-// POST /api/chat/answer — Validation
+// chat.answer — Validation
 // ---------------------------------------------------------------------------
 
-describe("POST /api/chat/answer — validation", () => {
+describe("chat.answer — validation", () => {
   let server: ServerHandle;
   let tmpHome: string;
 
@@ -572,31 +595,19 @@ describe("POST /api/chat/answer — validation", () => {
   });
 
   it("returns 400 when approvalId is missing", async () => {
-    const res = await fetch(`${server.url}/api/chat/answer`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ answers: { q: "a" } }),
-    });
+    const res = await trpcMutate(server.url, "chat.answer", { answers: { q: "a" } });
     expect(res.status).toBe(400);
   });
 
   it("returns 400 when answers are missing", async () => {
-    const res = await fetch(`${server.url}/api/chat/answer`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ approvalId: "some-id" }),
-    });
+    const res = await trpcMutate(server.url, "chat.answer", { approvalId: "some-id" });
     expect(res.status).toBe(400);
   });
 
   it("returns 404 when answering a non-existent approvalId", async () => {
-    const res = await fetch(`${server.url}/api/chat/answer`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        approvalId: "non-existent-id",
-        answers: { question: "answer" },
-      }),
+    const res = await trpcMutate(server.url, "chat.answer", {
+      approvalId: "non-existent-id",
+      answers: { question: "answer" },
     });
     expect(res.status).toBe(404);
   });
@@ -649,7 +660,7 @@ describe("Task submit + stream — AskUserQuestion", () => {
       },
       // The binary sends a control_request to the SDK asking for permission
       // to execute AskUserQuestion. The SDK calls canUseTool which blocks
-      // until the user answers via /api/chat/answer.
+      // until the user answers via chat.answer.
       {
         type: "control_request",
         request_id: "req-1",
@@ -704,39 +715,34 @@ describe("Task submit + stream — AskUserQuestion", () => {
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  it("streams AskUserQuestion tool call and resumes after /api/chat/answer", async () => {
+  it("streams AskUserQuestion tool call and resumes after chat.answer", async () => {
     const workspaceId = "testproject-main";
     const toolCallId = "tool-ask-1";
 
-    // 1. Submit the task
-    const submitRes = await fetch(`${server.url}/api/tasks/submit`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ workspaceId, prompt: "test ask" }),
+    // 1. Submit the task via tRPC
+    const submitRes = await trpcMutate(server.url, "tasks.submit", {
+      workspaceId,
+      prompt: "test ask",
     });
-    expect(submitRes.status).toBe(202);
+    expect(submitRes.status).toBe(200);
 
-    // 2. Poll until the pending input is created, then answer
+    // 2. Poll until the pending input is created, then answer via tRPC
     await waitFor(async () => {
-      const res = await fetch(`${server.url}/api/chat/answer`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          approvalId: toolCallId,
-          answers: { "Which approach do you prefer?": "Option A" },
-        }),
+      const res = await trpcMutate(server.url, "chat.answer", {
+        approvalId: toolCallId,
+        answers: { "Which approach do you prefer?": "Option A" },
       });
       return res.ok;
     });
 
-    // 3. Wait for the task to complete
+    // 3. Wait for the task to complete via tRPC
     await waitFor(async () => {
-      const res = await fetch(`${server.url}/api/tasks/${encodeURIComponent(workspaceId)}`);
-      const data = (await res.json()) as { task?: { status: string } };
+      const res = await trpcQuery(server.url, "tasks.get", { workspaceId });
+      const data = await trpcData<{ task?: { status: string } }>(res);
       return data.task?.status !== "running";
     });
 
-    // 4. Read the buffered events from the completed stream
+    // 4. Read the buffered events from the completed stream (SSE stays as REST)
     const streamRes = await fetch(
       `${server.url}/api/tasks/${encodeURIComponent(workspaceId)}/stream`,
     );

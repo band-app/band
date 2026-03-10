@@ -1,4 +1,5 @@
 import type { ChatTransport, UIMessage, UIMessageChunk } from "ai";
+import { trpc } from "./trpc-client";
 
 function parseSSEStream(body: ReadableStream<Uint8Array>): ReadableStream<UIMessageChunk> {
   const decoder = new TextDecoder();
@@ -58,9 +59,7 @@ export class TaskChatTransport implements ChatTransport<UIMessage> {
   }
 
   abort(): void {
-    fetch(`/api/tasks/${encodeURIComponent(this.workspaceId)}/abort`, {
-      method: "POST",
-    }).catch(() => {
+    trpc.tasks.abort.mutate({ workspaceId: this.workspaceId }).catch(() => {
       // fire-and-forget
     });
   }
@@ -96,21 +95,15 @@ export class TaskChatTransport implements ChatTransport<UIMessage> {
     }
 
     // Submit the task
-    const submitRes = await fetch("/api/tasks/submit", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    try {
+      await trpc.tasks.submit.mutate({
         workspaceId: this.workspaceId,
         prompt: userText,
         sessionId: this.getSessionId(),
         ...(files.length > 0 && { files }),
-      }),
-      signal: abortSignal,
-    });
-
-    if (!submitRes.ok) {
-      const err = await submitRes.json().catch(() => ({ error: "Submit failed" }));
-      throw new Error((err as { error?: string }).error ?? `Submit failed: ${submitRes.status}`);
+      });
+    } catch (err) {
+      throw new Error(err instanceof Error ? err.message : "Submit failed");
     }
 
     // Open SSE stream to receive UIMessageChunk
