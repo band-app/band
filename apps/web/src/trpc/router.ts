@@ -799,9 +799,7 @@ const servicesRouter = t.router({
     // (handles app restart while tunnel is still active on the server)
     if (!tunnelHealthy && token) {
       const settings = loadSettings();
-      const subdomain = (settings as Record<string, unknown>).tunnelSubdomain as
-        | string
-        | undefined;
+      const subdomain = (settings as Record<string, unknown>).tunnelSubdomain as string | undefined;
       if (subdomain) {
         const health = await checkTunnelHealth(subdomain, token);
         if (health.healthy) {
