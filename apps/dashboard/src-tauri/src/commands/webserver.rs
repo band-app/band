@@ -82,9 +82,9 @@ pub(crate) fn which_binary(name: &str) -> Result<String, String> {
 /// Read the token from settings.json (web server creates it).
 fn get_token() -> Result<String, String> {
     let settings = load_settings()?;
-    settings
-        .token_secret
-        .ok_or_else(|| "tokenSecret not found in settings.json — start the web server first".to_string())
+    settings.token_secret.ok_or_else(|| {
+        "tokenSecret not found in settings.json — start the web server first".to_string()
+    })
 }
 
 /// Send SIGTERM to the entire process group, then fall back to SIGKILL.
