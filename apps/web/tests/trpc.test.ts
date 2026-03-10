@@ -406,14 +406,15 @@ describe("tRPC — workspace operations", () => {
 
   // -- workspace create / remove --
 
-  it("workspaces.create creates a new git worktree", async () => {
+  it("workspaces.create creates a new git worktree and returns path", async () => {
     const res = await trpcMutate(server.url, "workspaces.create", {
       project: "repo",
       branch: "feature-1",
     });
     expect(res.status).toBe(200);
-    const data = await trpcData<{ ok: boolean }>(res);
+    const data = await trpcData<{ ok: boolean; path: string }>(res);
     expect(data.ok).toBe(true);
+    expect(data.path).toContain("feature-1");
 
     // Verify worktree exists via projects.list
     const listRes = await trpcQuery(server.url, "projects.list");
@@ -662,6 +663,108 @@ describe("tRPC — workspace operations", () => {
       branch: "feature-3",
     });
     expect(res.status).toBe(200);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Statuses
+// ---------------------------------------------------------------------------
+
+describe("tRPC — statuses", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+  let repoPath: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    repoPath = createGitRepo(tmpHome, "myrepo");
+    seedState(tmpHome, {
+      projects: [
+        {
+          name: "myrepo",
+          path: repoPath,
+          defaultBranch: "main",
+          worktrees: [{ branch: "main", path: repoPath }],
+        },
+      ],
+    });
+    seedSettings(tmpHome, {
+      tokenSecret: DEFAULT_TOKEN,
+      worktreesDir: join(tmpHome, ".band", "worktrees"),
+    });
+    server = await startServer({ tmpHome });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("statuses.get returns null for non-existent workspace", async () => {
+    const res = await trpcQuery(server.url, "statuses.get", { workspaceId: "myrepo-nonexistent" });
+    expect(res.status).toBe(200);
+    const data = await trpcData<null>(res);
+    expect(data).toBeNull();
+  });
+
+  it("statuses.update creates a status file", async () => {
+    const res = await trpcMutate(server.url, "statuses.update", {
+      workspaceId: "myrepo-main",
+      agent: { status: "working", lastActivity: "1234567890" },
+    });
+    expect(res.status).toBe(200);
+    const data = await trpcData<{ ok: boolean }>(res);
+    expect(data.ok).toBe(true);
+  });
+
+  it("statuses.get returns the status after update", async () => {
+    const res = await trpcQuery(server.url, "statuses.get", { workspaceId: "myrepo-main" });
+    expect(res.status).toBe(200);
+    const data = await trpcData<{
+      workspaceId: string;
+      agent: { status: string; lastActivity: string };
+    }>(res);
+    expect(data.workspaceId).toBe("myrepo-main");
+    expect(data.agent.status).toBe("working");
+    expect(data.agent.lastActivity).toBe("1234567890");
+  });
+
+  it("statuses.update merges agent fields", async () => {
+    const res = await trpcMutate(server.url, "statuses.update", {
+      workspaceId: "myrepo-main",
+      agent: { status: "needs_attention" },
+    });
+    expect(res.status).toBe(200);
+
+    const getRes = await trpcQuery(server.url, "statuses.get", { workspaceId: "myrepo-main" });
+    const data = await trpcData<{
+      workspaceId: string;
+      agent: { status: string; lastActivity: string };
+    }>(getRes);
+    expect(data.agent.status).toBe("needs_attention");
+    // lastActivity should be preserved from previous update
+    expect(data.agent.lastActivity).toBe("1234567890");
+  });
+
+  it("statuses.resolve returns workspaceId for matching CWD", async () => {
+    const res = await trpcQuery(server.url, "statuses.resolve", { cwd: repoPath });
+    expect(res.status).toBe(200);
+    const data = await trpcData<{ workspaceId: string | null }>(res);
+    expect(data.workspaceId).toBe("myrepo-main");
+  });
+
+  it("statuses.resolve returns workspaceId for subdirectory CWD", async () => {
+    const res = await trpcQuery(server.url, "statuses.resolve", { cwd: join(repoPath, "src") });
+    expect(res.status).toBe(200);
+    const data = await trpcData<{ workspaceId: string | null }>(res);
+    expect(data.workspaceId).toBe("myrepo-main");
+  });
+
+  it("statuses.resolve returns null for unmatched CWD", async () => {
+    const res = await trpcQuery(server.url, "statuses.resolve", { cwd: "/tmp/nonexistent" });
+    expect(res.status).toBe(200);
+    const data = await trpcData<{ workspaceId: string | null }>(res);
+    expect(data.workspaceId).toBeNull();
   });
 });
 

@@ -23,19 +23,3 @@ pub fn shell_path() -> &'static str {
         )
     })
 }
-
-pub fn run_script(command: &str, cwd: &str) -> Result<(), String> {
-    let output = Command::new("sh")
-        .args(["-c", command])
-        .current_dir(cwd)
-        .env("PATH", shell_path())
-        .output()
-        .map_err(|e| format!("Failed to run script: {e}"))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Script failed: {stderr}"));
-    }
-
-    Ok(())
-}

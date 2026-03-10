@@ -1,5 +1,12 @@
 import { execFile, execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { basename, extname, join, resolve } from "node:path";
@@ -20,6 +27,7 @@ import {
   loadState,
   saveState,
   settingsFile,
+  statusDir,
   worktreesDir,
 } from "../lib/state";
 import { abortTask, getTask, submitTask, TaskConflictError } from "../lib/task-runner";
@@ -193,8 +201,9 @@ const workspacesRouter = t.router({
         throw new Error(`Project "${input.project}" not found`);
       }
 
-      if (proj.worktrees.some((wt) => wt.branch === input.branch)) {
-        return { ok: true };
+      const existing = proj.worktrees.find((wt) => wt.branch === input.branch);
+      if (existing) {
+        return { ok: true, path: existing.path };
       }
 
       const wtDir = worktreesDir();
@@ -218,12 +227,30 @@ const workspacesRouter = t.router({
       proj.worktrees.push({ branch: input.branch, path: worktreePath });
       saveState(state);
 
+      // Run setup script if configured
+      const configPath = join(worktreePath, ".band", "config.json");
+      try {
+        if (existsSync(configPath)) {
+          const config = JSON.parse(readFileSync(configPath, "utf-8"));
+          if (config.setup) {
+            execFileSync("bash", ["-c", config.setup], {
+              cwd: worktreePath,
+              env: { ...process.env, PATH: `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH}` },
+              encoding: "utf-8",
+              timeout: 60_000,
+            });
+          }
+        }
+      } catch {
+        // Setup script failure is non-fatal
+      }
+
       if (input.prompt) {
         const workspaceId = `${input.project}-${input.branch}`;
         submitTask(workspaceId, input.prompt);
       }
 
-      return { ok: true };
+      return { ok: true, path: worktreePath };
     }),
 
   remove: publicProcedure
@@ -255,7 +282,30 @@ const workspacesRouter = t.router({
             : branchRef;
         } else if (line === "" && currentPath) {
           if (currentBranch === input.branch) {
-            execFileSync(command, ["worktree", "remove", "--force", currentPath], {
+            const worktreePath = currentPath;
+
+            // Run teardown script before removing worktree so it can access project files
+            const configPath = join(worktreePath, ".band", "config.json");
+            try {
+              if (existsSync(configPath)) {
+                const config = JSON.parse(readFileSync(configPath, "utf-8"));
+                if (config.teardown) {
+                  execFileSync("bash", ["-c", config.teardown], {
+                    cwd: worktreePath,
+                    env: {
+                      ...process.env,
+                      PATH: `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH}`,
+                    },
+                    encoding: "utf-8",
+                    timeout: 60_000,
+                  });
+                }
+              }
+            } catch {
+              // Teardown script failure is non-fatal
+            }
+
+            execFileSync(command, ["worktree", "remove", "--force", worktreePath], {
               cwd: proj.path,
               env,
               encoding: "utf-8",
@@ -277,6 +327,11 @@ const workspacesRouter = t.router({
               unlinkSync(join(bandHome(), "workspace-prompts", `${workspaceId}.json`));
             } catch {
               // Prompt file may not exist
+            }
+            try {
+              unlinkSync(join(statusDir(), `${workspaceId}.json`));
+            } catch {
+              // Status file may not exist
             }
             return { ok: true };
           }
@@ -859,6 +914,73 @@ const chatRouter = t.router({
 });
 
 // ---------------------------------------------------------------------------
+// Statuses
+// ---------------------------------------------------------------------------
+
+const statusesRouter = t.router({
+  get: publicProcedure.input(z.object({ workspaceId: z.string() })).query(({ input }) => {
+    const filePath = join(statusDir(), `${input.workspaceId}.json`);
+    try {
+      const data = readFileSync(filePath, "utf-8");
+      return JSON.parse(data);
+    } catch {
+      return null;
+    }
+  }),
+
+  update: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        agent: z.object({
+          status: z.string(),
+          lastActivity: z.string().optional(),
+        }),
+      }),
+    )
+    .mutation(({ input }) => {
+      ensureDirs();
+      const filePath = join(statusDir(), `${input.workspaceId}.json`);
+
+      // Read existing status file to preserve fields
+      let status: Record<string, unknown> = {};
+      try {
+        const data = readFileSync(filePath, "utf-8");
+        status = JSON.parse(data);
+      } catch {
+        // File doesn't exist or is invalid — start fresh
+      }
+
+      status.workspaceId = input.workspaceId;
+
+      // Merge agent fields
+      const existing = (status.agent as Record<string, unknown>) ?? {};
+      status.agent = { ...existing, ...input.agent };
+
+      const json = JSON.stringify(status, null, 2);
+
+      // Atomic write: write to temp file then rename
+      const tmpPath = join(statusDir(), `.${input.workspaceId}.json.tmp`);
+      writeFileSync(tmpPath, json, "utf-8");
+      renameSync(tmpPath, filePath);
+
+      return { ok: true };
+    }),
+
+  resolve: publicProcedure.input(z.object({ cwd: z.string() })).query(({ input }) => {
+    const state = loadState();
+    for (const proj of state.projects) {
+      for (const wt of proj.worktrees) {
+        if (input.cwd === wt.path || input.cwd.startsWith(`${wt.path}/`)) {
+          return { workspaceId: `${proj.name}-${wt.branch}` };
+        }
+      }
+    }
+    return { workspaceId: null };
+  }),
+});
+
+// ---------------------------------------------------------------------------
 // App Router
 // ---------------------------------------------------------------------------
 
@@ -875,6 +997,7 @@ export const appRouter = t.router({
   sessions: sessionsRouter,
   services: servicesRouter,
   chat: chatRouter,
+  statuses: statusesRouter,
 });
 
 export type AppRouter = typeof appRouter;

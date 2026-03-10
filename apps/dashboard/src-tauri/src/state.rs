@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+
+// --- Data types for API responses ---
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectState {
@@ -66,36 +69,12 @@ pub struct Settings {
     pub auto_start_tunnel: Option<bool>,
 }
 
+// --- File system helpers (only for reading settings) ---
+
 pub fn band_home() -> PathBuf {
     dirs::home_dir()
         .expect("Could not find home directory")
         .join(".band")
-}
-
-pub fn status_dir() -> PathBuf {
-    band_home().join("status")
-}
-
-fn state_file() -> PathBuf {
-    band_home().join("state.json")
-}
-
-fn ensure_dirs() -> Result<(), String> {
-    let home = band_home();
-    fs::create_dir_all(&home).map_err(|e| format!("Failed to create ~/.band: {e}"))?;
-    fs::create_dir_all(home.join("status"))
-        .map_err(|e| format!("Failed to create ~/.band/status: {e}"))?;
-    Ok(())
-}
-
-pub fn load_state() -> Result<AppState, String> {
-    ensure_dirs()?;
-    let path = state_file();
-    if !path.exists() {
-        return Ok(AppState::default());
-    }
-    let data = fs::read_to_string(&path).map_err(|e| format!("Failed to read state: {e}"))?;
-    serde_json::from_str(&data).map_err(|e| format!("Failed to parse state: {e}"))
 }
 
 fn settings_file() -> PathBuf {
@@ -103,11 +82,51 @@ fn settings_file() -> PathBuf {
 }
 
 pub fn load_settings() -> Result<Settings, String> {
-    ensure_dirs()?;
     let path = settings_file();
     if !path.exists() {
         return Ok(Settings::default());
     }
     let data = fs::read_to_string(&path).map_err(|e| format!("Failed to read settings: {e}"))?;
     serde_json::from_str(&data).map_err(|e| format!("Failed to parse settings: {e}"))
+}
+
+// --- In-memory active workspace state ---
+
+pub struct ActiveWorkspaceState(pub Arc<Mutex<Option<String>>>);
+
+impl ActiveWorkspaceState {
+    pub fn new() -> Self {
+        Self(Arc::new(Mutex::new(None)))
+    }
+}
+
+// --- Cached project state (refreshed from web server API) ---
+
+pub struct CachedState {
+    pub app_state: AppState,
+    pub updated_at: std::time::Instant,
+}
+
+#[derive(Clone)]
+pub struct ProjectCache(Arc<Mutex<Option<CachedState>>>);
+
+impl ProjectCache {
+    pub fn new() -> Self {
+        Self(Arc::new(Mutex::new(None)))
+    }
+
+    /// Get a copy of the current cached state, if available.
+    pub fn get(&self) -> Option<AppState> {
+        self.0.lock().ok()?.as_ref().map(|c| c.app_state.clone())
+    }
+
+    /// Update the cached state.
+    pub fn set(&self, state: AppState) {
+        if let Ok(mut guard) = self.0.lock() {
+            *guard = Some(CachedState {
+                app_state: state,
+                updated_at: std::time::Instant::now(),
+            });
+        }
+    }
 }

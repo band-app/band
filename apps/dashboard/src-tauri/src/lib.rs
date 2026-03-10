@@ -1,3 +1,4 @@
+mod api;
 mod commands;
 mod git;
 mod state;
@@ -5,6 +6,7 @@ mod state;
 use commands::webserver::{
     self as webserver, ManagedProcess, TunnelInner, TunnelState, WebServerState,
 };
+use state::{ActiveWorkspaceState, ProjectCache};
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
 
@@ -21,6 +23,8 @@ pub fn run() {
             process: ManagedProcess::new(),
             url: None,
         }))))
+        .manage(ActiveWorkspaceState::new())
+        .manage(ProjectCache::new())
         .invoke_handler(tauri::generate_handler![
             commands::ide::workspace_focus,
             commands::ide::get_active_workspace,
@@ -124,30 +128,30 @@ pub fn run() {
             });
 
             // Raise the active workspace's VS Code window when dashboard gains focus
+            let active_ws_state: std::sync::Arc<std::sync::Mutex<Option<String>>> =
+                app.state::<ActiveWorkspaceState>().inner().0.clone();
+            let project_cache: ProjectCache = app.state::<ProjectCache>().inner().clone();
             let window_ref = app.get_webview_window("main").unwrap();
             window_ref.on_window_event(move |event| {
                 if let tauri::WindowEvent::Focused(true) = event {
-                    // Read active workspace from marker file
-                    let active_file = state::status_dir().join("active.json");
-                    if let Ok(data) = std::fs::read_to_string(&active_file) {
-                        #[derive(serde::Deserialize)]
-                        struct ActiveMarker {
-                            #[serde(rename = "workspaceId")]
-                            workspace_id: String,
-                        }
-                        if let Ok(marker) = serde_json::from_str::<ActiveMarker>(&data) {
-                            if let Ok(app_state) = state::load_state() {
-                                for proj in &app_state.projects {
-                                    for wt in &proj.worktrees {
-                                        let id = format!("{}-{}", proj.name, wt.branch);
-                                        if id == marker.workspace_id {
-                                            let folder = std::path::Path::new(&wt.path)
-                                                .file_name()
-                                                .and_then(|n| n.to_str())
-                                                .unwrap_or("");
-                                            commands::ide::raise_vscode_window(folder);
-                                            return;
-                                        }
+                    // Read active workspace from in-memory state
+                    let workspace_id: Option<String> = active_ws_state
+                        .lock()
+                        .ok()
+                        .and_then(|guard| guard.clone());
+
+                    if let Some(ws_id) = workspace_id {
+                        if let Some(app_state) = project_cache.get() {
+                            for proj in &app_state.projects {
+                                for wt in &proj.worktrees {
+                                    let id = format!("{}-{}", proj.name, wt.branch);
+                                    if id == ws_id {
+                                        let folder = std::path::Path::new(&wt.path)
+                                            .file_name()
+                                            .and_then(|n| n.to_str())
+                                            .unwrap_or("");
+                                        commands::ide::raise_vscode_window(folder);
+                                        return;
                                     }
                                 }
                             }

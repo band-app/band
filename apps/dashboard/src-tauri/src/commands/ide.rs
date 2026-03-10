@@ -1,8 +1,11 @@
+use crate::api::ApiClient;
 use crate::state;
+use crate::state::{ActiveWorkspaceState, ProjectCache};
 use std::collections::{HashMap, VecDeque};
 use std::ffi::{c_void, CStr, CString};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+use tauri::Manager;
 
 const DASHBOARD_WIDTH: i32 = 400;
 
@@ -361,8 +364,7 @@ fn get_descendant_cwds(parent_pid: i32) -> Vec<PathBuf> {
 
 // --- Workspace matching ---
 
-fn match_cwds_to_workspace(cwds: &[PathBuf]) -> Option<String> {
-    let app_state = state::load_state().ok()?;
+fn match_cwds_to_workspace(cwds: &[PathBuf], app_state: &state::AppState) -> Option<String> {
     let mut matches = Vec::new();
 
     for proj in &app_state.projects {
@@ -387,20 +389,17 @@ fn match_cwds_to_workspace(cwds: &[PathBuf]) -> Option<String> {
     }
 }
 
-/// Write the active workspace marker file.
-pub fn write_active_marker(workspace_id: &str) {
-    let active_file = state::status_dir().join("active.json");
-    let _ = std::fs::write(
-        active_file,
-        format!("{{\"workspaceId\":\"{workspace_id}\"}}"),
-    );
+/// Set the active workspace in in-memory state.
+fn set_active_workspace(active_state: &std::sync::Mutex<Option<String>>, workspace_id: &str) {
+    if let Ok(mut guard) = active_state.lock() {
+        *guard = Some(workspace_id.to_string());
+    }
 }
 
 /// Match a window title to a workspace ID.
 /// Uses the folder name from the worktree path (last path component),
 /// which VS Code always includes in its window title.
-fn match_title_to_workspace(title: &str) -> Option<String> {
-    let app_state = state::load_state().ok()?;
+fn match_title_to_workspace(title: &str, app_state: &state::AppState) -> Option<String> {
     let mut best_match: Option<(String, usize)> = None;
 
     for proj in &app_state.projects {
@@ -434,8 +433,7 @@ fn is_dashboard_frontmost() -> bool {
 /// Look up the worktree folder name for a given workspace ID.
 /// Returns the last path component of the worktree path, which is what
 /// VS Code displays in its window title (not the branch name).
-fn workspace_folder_name(workspace_id: &str) -> Option<String> {
-    let app_state = state::load_state().ok()?;
+fn workspace_folder_name(workspace_id: &str, app_state: &state::AppState) -> Option<String> {
     for proj in &app_state.projects {
         for wt in &proj.worktrees {
             let ws_id = format!("{}-{}", proj.name, wt.branch);
@@ -454,7 +452,7 @@ fn workspace_folder_name(workspace_id: &str) -> Option<String> {
 /// 1. Get frontmost window PID + title via Accessibility API
 /// 2. Try CWD matching on descendant processes (works for any app)
 /// 3. Fall back to window title matching
-fn detect_frontmost_workspace() -> Option<String> {
+fn detect_frontmost_workspace(app_state: &state::AppState) -> Option<String> {
     let (pid, title) = get_frontmost_window()?;
 
     // Skip if frontmost app is our own process
@@ -464,7 +462,7 @@ fn detect_frontmost_workspace() -> Option<String> {
 
     // Try CWD-based matching first (generic, works for any app)
     let cwds = get_descendant_cwds(pid);
-    if let Some(ws_id) = match_cwds_to_workspace(&cwds) {
+    if let Some(ws_id) = match_cwds_to_workspace(&cwds, app_state) {
         return Some(ws_id);
     }
 
@@ -473,37 +471,56 @@ fn detect_frontmost_workspace() -> Option<String> {
     if !title.is_empty() {
         let is_vscode = get_bundle_id(pid).is_some_and(|id| id == VSCODE_BUNDLE_ID);
         if is_vscode {
-            return match_title_to_workspace(&title);
+            return match_title_to_workspace(&title, app_state);
         }
     }
 
     None
 }
 
-/// If the workspace status file has agent.status == "`needs_attention`",
-/// update it to "waiting" (the user is now looking at it).
-fn clear_needs_attention(workspace_id: &str) {
-    let status_file = state::status_dir().join(format!("{workspace_id}.json"));
-    let Ok(data) = std::fs::read_to_string(&status_file) else {
-        return;
-    };
-    let Ok(mut status) = serde_json::from_str::<serde_json::Value>(&data) else {
-        return;
-    };
-    let needs_clear = status
-        .get("agent")
-        .and_then(|a| a.get("status"))
-        .and_then(|s| s.as_str())
-        == Some("needs_attention");
+/// Fetch fresh project state from the web server and update the cache.
+/// Returns the new state on success.
+fn refresh_project_cache(cache: &ProjectCache) -> Option<state::AppState> {
+    let client = ApiClient::from_settings().ok()?;
+    let data = client
+        .trpc_query("projects.list", &serde_json::json!({}))
+        .ok()?;
+    let projects_arr = data.get("projects").and_then(|p| p.as_array())?;
+    let projects: Vec<state::ProjectState> = projects_arr
+        .iter()
+        .filter_map(|p| serde_json::from_value(p.clone()).ok())
+        .collect();
+    let app_state = state::AppState { projects };
+    cache.set(app_state.clone());
+    Some(app_state)
+}
 
-    if needs_clear {
-        if let Some(agent) = status.get_mut("agent") {
-            agent["status"] = serde_json::json!("waiting");
-            if let Ok(updated) = serde_json::to_string_pretty(&status) {
-                let _ = std::fs::write(&status_file, updated);
+/// Look up a workspace in the app state by ID.
+fn find_workspace<'a>(
+    workspace_id: &str,
+    app_state: &'a state::AppState,
+) -> Option<(&'a state::ProjectState, &'a state::WorktreeState)> {
+    for proj in &app_state.projects {
+        for wt in &proj.worktrees {
+            let ws_id = format!("{}-{}", proj.name, wt.branch);
+            if ws_id == workspace_id {
+                return Some((proj, wt));
             }
         }
     }
+    None
+}
+
+/// Clear `needs_attention` status by calling the web server API.
+/// Fire-and-forget: errors are logged but otherwise ignored.
+fn clear_needs_attention(workspace_id: &str, api: &ApiClient) {
+    let _ = api.trpc_mutate(
+        "statuses.update",
+        &serde_json::json!({
+            "workspaceId": workspace_id,
+            "agent": { "status": "waiting" },
+        }),
+    );
 }
 
 /// Bring all dashboard windows to front without activating the app.
@@ -548,23 +565,55 @@ unsafe fn raise_dashboard_windows() {
 }
 
 /// Start a background thread that polls the frontmost window
-/// and updates active.json when the focused workspace changes.
+/// and updates active workspace state when the focused workspace changes.
 /// When a managed workspace is focused, also brings the dashboard to front.
+/// The thread also refreshes the project cache from the web server every 5 seconds.
 pub fn start_focus_polling(app_handle: tauri::AppHandle) {
+    let active_state = {
+        let s = app_handle.state::<ActiveWorkspaceState>();
+        s.inner().0.clone()
+    };
+    let project_cache = {
+        let s = app_handle.state::<ProjectCache>();
+        s.inner().clone()
+    };
+
     std::thread::spawn(move || {
         let mut last_active: Option<String> = None;
         let mut dashboard_raised = false;
         let mut vscode_raised = false;
+        let mut last_cache_refresh = std::time::Instant::now()
+            .checked_sub(Duration::from_secs(10))
+            .unwrap_or_else(std::time::Instant::now); // force initial refresh
+        let mut api: Option<ApiClient> = None;
+
         loop {
             std::thread::sleep(Duration::from_millis(500));
 
-            if let Some(ws_id) = detect_frontmost_workspace() {
+            // Refresh project cache from web server every 5 seconds
+            if last_cache_refresh.elapsed() >= Duration::from_secs(5) {
+                last_cache_refresh = std::time::Instant::now();
+                refresh_project_cache(&project_cache);
+
+                // Lazily initialize API client for status updates
+                if api.is_none() {
+                    api = ApiClient::from_settings().ok();
+                }
+            }
+
+            let Some(cached) = project_cache.get() else {
+                continue;
+            };
+
+            if let Some(ws_id) = detect_frontmost_workspace(&cached) {
                 // Always clear needs_attention for the focused workspace
-                clear_needs_attention(&ws_id);
+                if let Some(ref client) = api {
+                    clear_needs_attention(&ws_id, client);
+                }
 
                 if last_active.as_deref() != Some(ws_id.as_str()) {
                     last_active = Some(ws_id.clone());
-                    write_active_marker(&ws_id);
+                    set_active_workspace(&active_state, &ws_id);
                 }
                 // Bring dashboard to front when a managed workspace gains focus
                 if !dashboard_raised {
@@ -578,8 +627,10 @@ pub fn start_focus_polling(app_handle: tauri::AppHandle) {
                 // Dashboard gained focus — raise VS Code once for the active workspace
                 if !vscode_raised {
                     if let Some(ref ws_id) = last_active {
-                        clear_needs_attention(ws_id);
-                        if let Some(folder) = workspace_folder_name(ws_id) {
+                        if let Some(ref client) = api {
+                            clear_needs_attention(ws_id, client);
+                        }
+                        if let Some(folder) = workspace_folder_name(ws_id, &cached) {
                             raise_vscode_window(&folder);
                         }
                     }
@@ -668,7 +719,11 @@ end tell
 }
 
 #[tauri::command]
-pub fn workspace_focus(workspace_id: String) -> Result<(), String> {
+pub fn workspace_focus(
+    workspace_id: String,
+    active_state: tauri::State<'_, ActiveWorkspaceState>,
+    project_cache: tauri::State<'_, ProjectCache>,
+) -> Result<(), String> {
     use std::sync::Mutex;
     use std::time::Instant;
 
@@ -683,21 +738,34 @@ pub fn workspace_focus(workspace_id: String) -> Result<(), String> {
     *last = Some(Instant::now());
     drop(last);
 
-    let app_state = state::load_state()?;
+    // Try cache first, then refresh from API on miss
+    let app_state = project_cache
+        .get()
+        .or_else(|| refresh_project_cache(&project_cache))
+        .ok_or("Project state not available yet")?;
 
-    for proj in &app_state.projects {
-        for wt in &proj.worktrees {
-            let ws_id = format!("{}-{}", proj.name, wt.branch);
-            if ws_id == workspace_id {
-                let folder_name = Path::new(&wt.path)
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("")
-                    .to_string();
+    let (wt_path, ws_id) = match find_workspace(&workspace_id, &app_state) {
+        Some((_proj, wt)) => (wt.path.clone(), workspace_id.clone()),
+        None => {
+            // Cache miss — refresh from web server and retry
+            let fresh = refresh_project_cache(&project_cache)
+                .ok_or(format!("Workspace '{workspace_id}' not found"))?;
+            match find_workspace(&workspace_id, &fresh) {
+                Some((_proj, wt)) => (wt.path.clone(), workspace_id.clone()),
+                None => return Err(format!("Workspace '{workspace_id}' not found")),
+            }
+        }
+    };
 
-                // Focus VS Code window with matching folder name via System Events
-                let script = format!(
-                    r#"tell application "System Events"
+    let folder_name = Path::new(&wt_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_string();
+
+    // Focus VS Code window with matching folder name via System Events
+    let script = format!(
+        r#"tell application "System Events"
     if not (exists (first process whose bundle identifier is "com.microsoft.VSCode")) then
         return "no_vscode"
     end if
@@ -716,73 +784,62 @@ if foundWindow then
     tell application "Visual Studio Code" to activate
 end if
 return foundWindow"#
-                );
+    );
 
-                log_debug(&format!(
-                    "workspace_focus: id={workspace_id}, folder_name={folder_name}"
-                ));
+    log_debug(&format!(
+        "workspace_focus: id={ws_id}, folder_name={folder_name}"
+    ));
 
-                let output = std::process::Command::new("osascript")
-                    .args(["-e", &script])
-                    .output()
-                    .map_err(|e| format!("Failed to focus window: {e}"))?;
+    let output = std::process::Command::new("osascript")
+        .args(["-e", &script])
+        .output()
+        .map_err(|e| format!("Failed to focus window: {e}"))?;
 
-                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                let found = stdout.eq_ignore_ascii_case("true");
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let found = stdout.eq_ignore_ascii_case("true");
 
-                log_debug(&format!(
-                    "workspace_focus: found={found}, stdout={stdout:?}, stderr={stderr:?}"
-                ));
+    log_debug(&format!(
+        "workspace_focus: found={found}, stdout={stdout:?}, stderr={stderr:?}"
+    ));
 
-                if !found {
-                    // No matching window — open the folder in a new VS Code window
-                    log_debug(&format!("workspace_focus: opening new window for {}", &wt.path));
-                    std::process::Command::new("open")
-                        .args(["-a", "Visual Studio Code", &wt.path])
-                        .output()
-                        .map_err(|e| format!("Failed to open VS Code: {e}"))?;
-                }
-
-                // Track the active workspace
-                write_active_marker(&ws_id);
-
-                // Resize and position the window to the right of the dashboard
-                align_vscode_window(&folder_name);
-
-                return Ok(());
-            }
-        }
+    if !found {
+        // No matching window — open the folder in a new VS Code window
+        log_debug(&format!("workspace_focus: opening new window for {wt_path}"));
+        std::process::Command::new("open")
+            .args(["-a", "Visual Studio Code", &wt_path])
+            .output()
+            .map_err(|e| format!("Failed to open VS Code: {e}"))?;
     }
 
-    Err(format!("Workspace '{workspace_id}' not found"))
+    // Track the active workspace in memory
+    set_active_workspace(&active_state.0, &ws_id);
+
+    // Resize and position the window to the right of the dashboard
+    align_vscode_window(&folder_name);
+
+    Ok(())
 }
 
-/// Return the currently active workspace ID by reading the marker file.
+/// Return the currently active workspace ID from in-memory state.
 #[tauri::command]
-pub fn get_active_workspace() -> Result<Option<String>, String> {
-    #[derive(serde::Deserialize)]
-    struct ActiveMarker {
-        #[serde(rename = "workspaceId")]
-        workspace_id: String,
-    }
-
-    let active_file = state::status_dir().join("active.json");
-    let Ok(data) = std::fs::read_to_string(&active_file) else {
-        return Ok(None);
-    };
-
-    match serde_json::from_str::<ActiveMarker>(&data) {
-        Ok(marker) => Ok(Some(marker.workspace_id)),
-        Err(_) => Ok(None),
-    }
+pub fn get_active_workspace(
+    active_state: tauri::State<'_, ActiveWorkspaceState>,
+) -> Result<Option<String>, String> {
+    Ok(active_state.0.lock().ok().and_then(|guard| guard.clone()))
 }
 
 /// Detect the frontmost window and map it to a workspace ID using native APIs.
 #[tauri::command]
-pub fn detect_active_workspace() -> Result<Option<String>, String> {
-    if let Some(ws_id) = detect_frontmost_workspace() {
-        write_active_marker(&ws_id);
+pub fn detect_active_workspace(
+    active_state: tauri::State<'_, ActiveWorkspaceState>,
+    project_cache: tauri::State<'_, ProjectCache>,
+) -> Result<Option<String>, String> {
+    let Some(cached) = project_cache.get() else {
+        return Ok(None);
+    };
+    if let Some(ws_id) = detect_frontmost_workspace(&cached) {
+        set_active_workspace(&active_state.0, &ws_id);
         return Ok(Some(ws_id));
     }
     Ok(None)

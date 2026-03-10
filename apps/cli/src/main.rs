@@ -1,10 +1,8 @@
-mod git;
+mod api;
 mod shell;
 mod state;
 
 use clap::{Parser, Subcommand};
-use std::fs;
-use std::process;
 
 #[derive(Parser)]
 #[command(name = "band", about = "Band CLI — programmatic workspace management")]
@@ -25,7 +23,7 @@ enum Commands {
         #[arg(long)]
         base: Option<String>,
     },
-    /// Create a workspace and write a prompt file for automated agent runs
+    /// Create a workspace and dispatch a prompt to the coding agent
     Run {
         /// Project name
         project: String,
@@ -79,79 +77,46 @@ fn main() {
 
     if let Err(e) = result {
         eprintln!("error: {e}");
-        process::exit(1);
+        std::process::exit(1);
     }
-}
-
-/// Core logic: create a workspace and return the worktree path without printing.
-fn create_workspace(project: &str, branch: &str, base: Option<&str>) -> Result<String, String> {
-    let worktree_path = state::with_locked_state(|app_state| {
-        let proj = app_state
-            .projects
-            .iter_mut()
-            .find(|p| p.name == project)
-            .ok_or_else(|| format!("Project '{project}' not found"))?;
-
-        // Already tracked — return existing path
-        if let Some(wt) = proj.worktrees.iter().find(|wt| wt.branch == branch) {
-            return Ok(wt.path.clone());
-        }
-
-        let target_path = state::worktrees_dir().join(project).join(branch);
-        let target_path_str = target_path.to_string_lossy().to_string();
-
-        // Only create the git worktree if it doesn't already exist on disk
-        if !target_path.exists() {
-            let base_branch = base.unwrap_or(&proj.default_branch);
-            git::create_worktree(&proj.path, branch, &target_path_str, Some(base_branch))?;
-        }
-
-        proj.worktrees.push(state::WorktreeState {
-            branch: branch.to_string(),
-            path: target_path_str.clone(),
-            head: None,
-        });
-
-        Ok(target_path_str)
-    })?;
-
-    // Run setup script if configured — failure is non-fatal
-    let config = state::load_project_config(&worktree_path);
-    if let Some(setup) = &config.setup {
-        if let Err(e) = shell::run_script(setup, &worktree_path) {
-            eprintln!("Setup script failed for {project}/{branch}: {e}");
-        }
-    }
-
-    Ok(worktree_path)
 }
 
 fn cmd_create(project: &str, branch: &str, base: Option<&str>) -> Result<(), String> {
-    let worktree_path = create_workspace(project, branch, base)?;
-    println!("{worktree_path}");
+    let client = api::ApiClient::from_settings()?;
+    let mut input = serde_json::json!({
+        "project": project,
+        "branch": branch,
+    });
+    if let Some(base) = base {
+        input["base"] = serde_json::json!(base);
+    }
+    let data = client.trpc_mutate("workspaces.create", &input)?;
+    let path = data
+        .get("path")
+        .and_then(|p| p.as_str())
+        .unwrap_or("");
+    println!("{path}");
     Ok(())
 }
 
 fn cmd_run(project: &str, branch: &str, prompt: &str, base: Option<&str>) -> Result<(), String> {
-    let worktree_path = create_workspace(project, branch, base)?;
-
-    // Write prompt file
-    let workspace_id = format!("{project}-{branch}");
-    let prompt_file = state::workspace_prompts_dir().join(format!("{workspace_id}.json"));
-    if let Some(parent) = prompt_file.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create prompt directory: {e}"))?;
-    }
-    let prompt_data = serde_json::json!({
+    let client = api::ApiClient::from_settings()?;
+    let mut input = serde_json::json!({
+        "project": project,
+        "branch": branch,
         "prompt": prompt,
-        "didRun": false
     });
-    let prompt_json = serde_json::to_string_pretty(&prompt_data)
-        .map_err(|e| format!("Failed to serialize prompt: {e}"))?;
-    std::fs::write(&prompt_file, prompt_json)
-        .map_err(|e| format!("Failed to write prompt file: {e}"))?;
+    if let Some(base) = base {
+        input["base"] = serde_json::json!(base);
+    }
+    let data = client.trpc_mutate("workspaces.create", &input)?;
+    let worktree_path = data
+        .get("path")
+        .and_then(|p| p.as_str())
+        .unwrap_or("")
+        .to_string();
 
-    // Open workspace in VS Code so the extension picks up the prompt.
+    // Open workspace in VS Code so the extension picks up the task.
     // Try macOS `open -g` first (opens without stealing focus), fall back to `code`.
     let opened = std::process::Command::new("open")
         .args(["-g", "-a", "Visual Studio Code", "--args", &worktree_path])
@@ -173,96 +138,81 @@ fn cmd_run(project: &str, branch: &str, prompt: &str, base: Option<&str>) -> Res
 }
 
 fn cmd_list(project_filter: Option<&str>) -> Result<(), String> {
-    state::with_locked_state_read(|app_state| {
-        let projects: Vec<_> = if let Some(name) = project_filter {
-            app_state
-                .projects
-                .iter()
-                .filter(|p| p.name == name)
-                .collect()
-        } else {
-            app_state.projects.iter().collect()
-        };
+    let client = api::ApiClient::from_settings()?;
+    let data = client.trpc_query("projects.list", &serde_json::json!({}))?;
 
-        if let Some(name) = project_filter {
-            if projects.is_empty() {
-                return Err(format!("Project '{name}' not found"));
+    let projects = data
+        .get("projects")
+        .and_then(|p| p.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let mut found_any = false;
+    for proj in &projects {
+        let name = proj.get("name").and_then(|n| n.as_str()).unwrap_or("");
+        if let Some(filter) = project_filter {
+            if name != filter {
+                continue;
             }
         }
-
-        for proj in projects {
-            for wt in &proj.worktrees {
-                println!("{}\t{}\t{}", proj.name, wt.branch, wt.path);
-            }
-        }
-        Ok(())
-    })
-}
-
-fn cmd_remove(project: &str, branch: &str) -> Result<(), String> {
-    let (worktree_path, project_path) = state::with_locked_state(|app_state| {
-        let proj = app_state
-            .projects
-            .iter_mut()
-            .find(|p| p.name == project)
-            .ok_or_else(|| format!("Project '{project}' not found"))?;
-
-        let wt = proj
-            .worktrees
-            .iter()
-            .find(|wt| wt.branch == branch)
-            .ok_or_else(|| format!("Worktree '{branch}' not found in project '{project}'"))?;
-
-        let worktree_path = wt.path.clone();
-        let project_path = proj.path.clone();
-
-        proj.worktrees.retain(|wt| wt.branch != branch);
-
-        Ok((worktree_path, project_path))
-    })?;
-
-    // Load config before removing the worktree (teardown script lives in it)
-    let config = state::load_project_config(&worktree_path);
-
-    // Clean up status file
-    let status_file = state::status_dir().join(format!("{project}-{branch}.json"));
-    let _ = std::fs::remove_file(status_file);
-
-    // Clean up prompt file
-    let prompt_file = state::workspace_prompts_dir().join(format!("{project}-{branch}.json"));
-    let _ = std::fs::remove_file(prompt_file);
-
-    // Run teardown script before removing worktree so it can access project files
-    if let Some(teardown) = &config.teardown {
-        if let Err(e) = shell::run_script(teardown, &worktree_path) {
-            eprintln!("Teardown script failed for {project}/{branch}: {e}");
+        let worktrees = proj
+            .get("worktrees")
+            .and_then(|w| w.as_array())
+            .cloned()
+            .unwrap_or_default();
+        for wt in &worktrees {
+            let branch = wt.get("branch").and_then(|b| b.as_str()).unwrap_or("");
+            let path = wt.get("path").and_then(|p| p.as_str()).unwrap_or("");
+            println!("{name}\t{branch}\t{path}");
+            found_any = true;
         }
     }
 
-    // Remove git worktree
-    if std::path::Path::new(&worktree_path).exists() {
-        if let Err(e) = git::remove_worktree(&project_path, &worktree_path) {
-            eprintln!("Warning: failed to remove git worktree: {e}");
+    if let Some(filter) = project_filter {
+        if !found_any {
+            return Err(format!("Project '{filter}' not found"));
         }
     }
 
     Ok(())
 }
 
+fn cmd_remove(project: &str, branch: &str) -> Result<(), String> {
+    let client = api::ApiClient::from_settings()?;
+    client.trpc_mutate(
+        "workspaces.remove",
+        &serde_json::json!({
+            "project": project,
+            "branch": branch,
+        }),
+    )?;
+    Ok(())
+}
+
 fn cmd_projects() -> Result<(), String> {
-    state::with_locked_state_read(|app_state| {
-        for proj in &app_state.projects {
-            let wt_count = proj.worktrees.len();
-            println!(
-                "{}\t{}\t{} worktree{}",
-                proj.name,
-                proj.path,
-                wt_count,
-                if wt_count == 1 { "" } else { "s" }
-            );
-        }
-        Ok(())
-    })
+    let client = api::ApiClient::from_settings()?;
+    let data = client.trpc_query("projects.list", &serde_json::json!({}))?;
+
+    let projects = data
+        .get("projects")
+        .and_then(|p| p.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    for proj in &projects {
+        let name = proj.get("name").and_then(|n| n.as_str()).unwrap_or("");
+        let path = proj.get("path").and_then(|p| p.as_str()).unwrap_or("");
+        let wt_count = proj
+            .get("worktrees")
+            .and_then(|w| w.as_array())
+            .map_or(0, Vec::len);
+        println!(
+            "{name}\t{path}\t{wt_count} worktree{}",
+            if wt_count == 1 { "" } else { "s" }
+        );
+    }
+
+    Ok(())
 }
 
 fn cmd_notify() -> Result<(), String> {
@@ -300,67 +250,49 @@ fn cmd_notify() -> Result<(), String> {
         })
         .unwrap_or_default();
 
-    // Match CWD to workspace via state.json
-    let workspace_id = state::with_locked_state_read(|app_state| {
-        for proj in &app_state.projects {
-            for wt in &proj.worktrees {
-                if cwd.starts_with(&wt.path) || wt.path == cwd {
-                    return Ok(Some(format!("{}-{}", proj.name, wt.branch)));
-                }
-            }
-        }
-        Ok(None)
-    })?;
+    // All API calls for notify are fire-and-forget — fail silently
+    // because this runs from git hooks and must not break git workflows
+    let Ok(client) = api::ApiClient::from_settings() else {
+        return Ok(());
+    };
+
+    // Resolve CWD to workspace ID
+    let resolve_result = client.trpc_query(
+        "statuses.resolve",
+        &serde_json::json!({ "cwd": cwd }),
+    );
+    let workspace_id = match resolve_result {
+        Ok(data) => data
+            .get("workspaceId")
+            .and_then(|v| v.as_str())
+            .map(String::from),
+        Err(_) => return Ok(()),
+    };
 
     let Some(workspace_id) = workspace_id else {
         return Ok(()); // Not a tracked workspace, silently ignore
     };
 
-    // Write status file atomically (temp file + rename)
-    let status_dir = state::status_dir();
-    fs::create_dir_all(&status_dir).map_err(|e| format!("Failed to create status dir: {e}"))?;
-
-    let status_file = status_dir.join(format!("{workspace_id}.json"));
-
-    // Read existing status file if present, to preserve fields
-    let mut status: serde_json::Value = if status_file.exists() {
-        fs::read_to_string(&status_file)
-            .ok()
-            .and_then(|data| serde_json::from_str(&data).ok())
-            .unwrap_or_else(|| serde_json::json!({}))
-    } else {
-        serde_json::json!({})
-    };
-
-    // Update agent status fields
-    if let Some(obj) = status.as_object_mut() {
-        obj.insert("workspaceId".to_string(), serde_json::json!(workspace_id));
-
-        let agent = obj.entry("agent").or_insert_with(|| serde_json::json!({}));
-        if let Some(agent_obj) = agent.as_object_mut() {
-            agent_obj.insert("status".to_string(), serde_json::json!(agent_status));
-            agent_obj.insert("lastActivity".to_string(), serde_json::json!(chrono_now()));
-        }
-    }
-
-    let json =
-        serde_json::to_string_pretty(&status).map_err(|e| format!("Failed to serialize: {e}"))?;
-
-    // Atomic write: write to temp file then rename
-    let tmp_file = status_dir.join(format!(".{workspace_id}.json.tmp"));
-    fs::write(&tmp_file, &json).map_err(|e| format!("Failed to write temp file: {e}"))?;
-    fs::rename(&tmp_file, &status_file)
-        .map_err(|e| format!("Failed to rename status file: {e}"))?;
+    // Update status via API
+    let _ = client.trpc_mutate(
+        "statuses.update",
+        &serde_json::json!({
+            "workspaceId": workspace_id,
+            "agent": {
+                "status": agent_status,
+                "lastActivity": chrono_now(),
+            },
+        }),
+    );
 
     Ok(())
 }
 
-/// Simple ISO 8601 timestamp without pulling in chrono crate.
+/// Simple Unix timestamp without pulling in chrono crate.
 fn chrono_now() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let dur = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
-    // Return Unix timestamp as string (good enough for ordering)
     format!("{}", dur.as_secs())
 }

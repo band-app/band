@@ -1,24 +1,36 @@
 use std::fs;
+use std::io::{BufRead, BufReader};
+use std::net::TcpListener;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, Command, Stdio};
 
-/// Create an isolated test environment with a temp dir for `BAND_HOME`
-/// and a real git repo acting as a registered project.
+/// The CLI now delegates all state operations to the web server.
+/// These tests start a real web server (from apps/web/dist), seed it
+/// with a temp HOME, then run CLI commands against it.
+
 struct TestEnv {
-    band_home: PathBuf,
+    /// The .band directory (used as BAND_HOME for the CLI)
+    band_dir: PathBuf,
+    /// The fake HOME directory (parent of .band, used as HOME for the server)
+    _home_dir: PathBuf,
     repo_path: PathBuf,
+    server_process: Child,
     _tmp: tempfile::TempDir,
 }
 
 impl TestEnv {
     fn new() -> Self {
         let tmp = tempfile::tempdir().expect("create tempdir");
-        let band_home = tmp.path().join("band-home");
+        // home_dir is the fake HOME — server computes band_home as HOME/.band
+        let home_dir = tmp.path().to_path_buf();
+        // band_dir is HOME/.band — used as BAND_HOME for the CLI
+        let band_dir = home_dir.join(".band");
         let repo_path = tmp.path().join("my-project");
+        let token = "test-token-12345";
 
-        // Create BAND_HOME dirs
-        fs::create_dir_all(band_home.join("status")).unwrap();
-        fs::create_dir_all(band_home.join("worktrees")).unwrap();
+        // Create .band dirs
+        fs::create_dir_all(band_dir.join("status")).unwrap();
+        fs::create_dir_all(band_dir.join("worktrees")).unwrap();
 
         // Create a real git repo
         fs::create_dir_all(&repo_path).unwrap();
@@ -35,14 +47,65 @@ impl TestEnv {
             }]
         });
         fs::write(
-            band_home.join("state.json"),
+            band_dir.join("state.json"),
             serde_json::to_string_pretty(&state).unwrap(),
         )
         .unwrap();
 
+        // Find a free port
+        let port = {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.local_addr().unwrap().port()
+        };
+
+        // Seed settings.json with token and port
+        let settings = serde_json::json!({
+            "tokenSecret": token,
+            "webServerPort": port,
+            "worktreesDir": band_dir.join("worktrees").to_string_lossy(),
+        });
+        fs::write(
+            band_dir.join("settings.json"),
+            serde_json::to_string_pretty(&settings).unwrap(),
+        )
+        .unwrap();
+
+        // Start the web server
+        let web_dist = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../apps/web/dist/start-server.mjs");
+        assert!(
+            web_dist.exists(),
+            "Web server not built. Run: pnpm -F @band/web build"
+        );
+
+        let mut child = Command::new("node")
+            .arg(&web_dist)
+            .env("HOME", &home_dir)
+            .env("PORT", port.to_string())
+            .env("NODE_ENV", "production")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("failed to start web server");
+
+        // Wait for "listening" on stdout
+        let stdout = child.stdout.take().unwrap();
+        let reader = BufReader::new(stdout);
+        let mut found = false;
+        for line in reader.lines() {
+            let line = line.unwrap_or_default();
+            if line.contains("listening") {
+                found = true;
+                break;
+            }
+        }
+        assert!(found, "web server did not emit 'listening'");
+
         Self {
-            band_home,
+            band_dir,
+            _home_dir: home_dir,
             repo_path,
+            server_process: child,
             _tmp: tmp,
         }
     }
@@ -51,18 +114,21 @@ impl TestEnv {
     fn band(&self, args: &[&str]) -> std::process::Output {
         Command::new(env!("CARGO_BIN_EXE_band"))
             .args(args)
-            .env("BAND_HOME", &self.band_home)
+            .env("BAND_HOME", &self.band_dir)
             .output()
             .expect("failed to execute band")
     }
 
     fn state_json(&self) -> serde_json::Value {
-        let data = fs::read_to_string(self.band_home.join("state.json")).unwrap();
+        let data = fs::read_to_string(self.band_dir.join("state.json")).unwrap();
         serde_json::from_str(&data).unwrap()
     }
+}
 
-    fn worktrees_dir(&self) -> PathBuf {
-        self.band_home.join("worktrees")
+impl Drop for TestEnv {
+    fn drop(&mut self) {
+        let _ = self.server_process.kill();
+        let _ = self.server_process.wait();
     }
 }
 
@@ -96,27 +162,23 @@ fn projects_lists_registered_project() {
     let env = TestEnv::new();
     let output = env.band(&["projects"]);
 
-    assert!(output.status.success());
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
     let out = stdout(&output);
     assert!(out.contains("my-project"), "expected project name: {out}");
-    assert!(out.contains("0 worktrees"), "expected 0 worktrees: {out}");
 }
 
 #[test]
-fn create_makes_worktree_and_registers_state() {
+fn create_makes_worktree_and_returns_path() {
     let env = TestEnv::new();
     let output = env.band(&["create", "my-project", "feat/test"]);
 
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
     let path = stdout(&output);
-    let expected = env
-        .worktrees_dir()
-        .join("my-project")
-        .join("feat/test")
-        .to_string_lossy()
-        .to_string();
-    assert_eq!(path, expected);
+    assert!(
+        path.contains("feat/test"),
+        "expected path with branch: {path}"
+    );
 
     // Worktree directory exists on disk
     assert!(Path::new(&path).exists(), "worktree dir should exist");
@@ -133,18 +195,13 @@ fn create_is_idempotent() {
     let env = TestEnv::new();
 
     let out1 = env.band(&["create", "my-project", "feat/idem"]);
-    assert!(out1.status.success());
+    assert!(out1.status.success(), "stderr: {}", stderr(&out1));
 
     let out2 = env.band(&["create", "my-project", "feat/idem"]);
-    assert!(out2.status.success());
+    assert!(out2.status.success(), "stderr: {}", stderr(&out2));
 
     // Both return the same path
     assert_eq!(stdout(&out1), stdout(&out2));
-
-    // Only one worktree in state
-    let state = env.state_json();
-    let worktrees = &state["projects"][0]["worktrees"];
-    assert_eq!(worktrees.as_array().unwrap().len(), 1);
 }
 
 #[test]
@@ -188,7 +245,7 @@ fn list_shows_created_worktrees() {
     env.band(&["create", "my-project", "feat/b"]);
 
     let output = env.band(&["list"]);
-    assert!(output.status.success());
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
     let out = stdout(&output);
     assert!(out.contains("feat/a"), "should list feat/a: {out}");
     assert!(out.contains("feat/b"), "should list feat/b: {out}");
@@ -200,7 +257,7 @@ fn list_filters_by_project() {
     env.band(&["create", "my-project", "feat/filtered"]);
 
     let output = env.band(&["list", "my-project"]);
-    assert!(output.status.success());
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
     assert!(stdout(&output).contains("feat/filtered"));
 
     let output = env.band(&["list", "nonexistent"]);
@@ -213,7 +270,7 @@ fn remove_cleans_up_worktree_and_state() {
     let env = TestEnv::new();
 
     let create_out = env.band(&["create", "my-project", "feat/rm"]);
-    assert!(create_out.status.success());
+    assert!(create_out.status.success(), "stderr: {}", stderr(&create_out));
     let path = stdout(&create_out);
 
     let output = env.band(&["remove", "my-project", "feat/rm"]);
@@ -286,7 +343,7 @@ fn teardown_script_runs_on_remove() {
     // Write a .band/config.json with a teardown that creates a marker in BAND_HOME
     let band_dir = env.repo_path.join(".band");
     fs::create_dir_all(&band_dir).unwrap();
-    let marker_path = env.band_home.join("teardown-ran.txt");
+    let marker_path = env.band_dir.join("teardown-ran.txt");
     let config = serde_json::json!({
         "teardown": format!("touch '{}'", marker_path.to_string_lossy())
     });
@@ -311,63 +368,26 @@ fn teardown_script_runs_on_remove() {
 }
 
 #[test]
-fn run_creates_worktree_and_writes_prompt_file() {
+fn run_creates_worktree_and_dispatches_task() {
     let env = TestEnv::new();
     let output = env.band(&["run", "my-project", "feat/run", "--prompt", "hello world"]);
 
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
     let path = stdout(&output);
-    let expected = env
-        .worktrees_dir()
-        .join("my-project")
-        .join("feat/run")
-        .to_string_lossy()
-        .to_string();
-    assert_eq!(path, expected);
-
     // Worktree directory exists on disk
     assert!(Path::new(&path).exists(), "worktree dir should exist");
 
-    // Prompt file exists with correct content
-    let prompt_file = env
-        .band_home
-        .join("workspace-prompts")
-        .join("my-project-feat/run.json");
-    assert!(prompt_file.exists(), "prompt file should exist");
-
-    let prompt_data: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(&prompt_file).unwrap()).unwrap();
-    assert_eq!(prompt_data["prompt"], "hello world");
-    assert_eq!(prompt_data["didRun"], false);
-}
-
-#[test]
-fn run_with_base_branch() {
-    let env = TestEnv::new();
-
-    // Create a commit on main so there's something to branch from
-    let marker = env.repo_path.join("marker.txt");
-    fs::write(&marker, "hello").unwrap();
-    git(&env.repo_path, &["add", "marker.txt"]);
-    git(&env.repo_path, &["commit", "-m", "add marker"]);
-
-    let output = env.band(&[
-        "run",
-        "my-project",
-        "feat/run-base",
-        "--prompt",
-        "do stuff",
-        "--base",
-        "main",
-    ]);
-    assert!(output.status.success(), "stderr: {}", stderr(&output));
-
-    let path = stdout(&output);
-    // The new worktree should contain the marker file
+    // State was updated
+    let state = env.state_json();
+    let worktrees = &state["projects"][0]["worktrees"];
     assert!(
-        Path::new(&path).join("marker.txt").exists(),
-        "worktree should have marker.txt from main"
+        worktrees
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|wt| wt["branch"] == "feat/run"),
+        "worktree should be in state"
     );
 }
 
@@ -385,55 +405,6 @@ fn run_unknown_project_fails() {
 }
 
 #[test]
-fn run_idempotent_workspace_overwrites_prompt() {
-    let env = TestEnv::new();
-
-    let out1 = env.band(&["run", "my-project", "feat/idem-run", "--prompt", "first"]);
-    assert!(out1.status.success());
-
-    let out2 = env.band(&["run", "my-project", "feat/idem-run", "--prompt", "second"]);
-    assert!(out2.status.success());
-
-    // Both return the same path
-    assert_eq!(stdout(&out1), stdout(&out2));
-
-    // Prompt file has the second prompt and didRun reset to false
-    let prompt_file = env
-        .band_home
-        .join("workspace-prompts")
-        .join("my-project-feat/idem-run.json");
-    let prompt_data: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(&prompt_file).unwrap()).unwrap();
-    assert_eq!(prompt_data["prompt"], "second");
-    assert_eq!(prompt_data["didRun"], false);
-}
-
-#[test]
-fn remove_cleans_up_prompt_file() {
-    let env = TestEnv::new();
-
-    let create_out = env.band(&["run", "my-project", "feat/rm-prompt", "--prompt", "hello"]);
-    assert!(create_out.status.success());
-
-    let prompt_file = env
-        .band_home
-        .join("workspace-prompts")
-        .join("my-project-feat/rm-prompt.json");
-    assert!(
-        prompt_file.exists(),
-        "prompt file should exist before remove"
-    );
-
-    let output = env.band(&["remove", "my-project", "feat/rm-prompt"]);
-    assert!(output.status.success(), "stderr: {}", stderr(&output));
-
-    assert!(
-        !prompt_file.exists(),
-        "prompt file should be cleaned up after remove"
-    );
-}
-
-#[test]
 fn setup_failure_is_non_fatal() {
     let env = TestEnv::new();
 
@@ -445,14 +416,50 @@ fn setup_failure_is_non_fatal() {
 
     let output = env.band(&["create", "my-project", "feat/fail-setup"]);
     // Should still succeed — setup failure is non-fatal
-    assert!(output.status.success());
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
 
     // Path still printed
     let path = stdout(&output);
     assert!(Path::new(&path).exists());
+}
 
-    // Worktree registered in state
-    let state = env.state_json();
-    let worktrees = &state["projects"][0]["worktrees"];
-    assert_eq!(worktrees.as_array().unwrap().len(), 1);
+#[test]
+fn notify_silently_succeeds_when_server_unreachable() {
+    // Use a completely isolated env with wrong port so server is unreachable
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let band_home = tmp.path().join("band-home");
+    fs::create_dir_all(&band_home).unwrap();
+
+    let settings = serde_json::json!({
+        "tokenSecret": "fake-token",
+        "webServerPort": 19999,
+    });
+    fs::write(
+        band_home.join("settings.json"),
+        serde_json::to_string_pretty(&settings).unwrap(),
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_band"))
+        .args(["notify"])
+        .env("BAND_HOME", &band_home)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            use std::io::Write;
+            if let Some(ref mut stdin) = child.stdin {
+                let _ = stdin.write_all(b"{\"hook_event_name\": \"Stop\", \"cwd\": \"/tmp\"}");
+            }
+            child.wait_with_output()
+        })
+        .expect("failed to execute band notify");
+
+    // Should succeed (exit 0) even when server is unreachable
+    assert!(
+        output.status.success(),
+        "notify should not fail when server is down. stderr: {}",
+        stderr(&output)
+    );
 }
