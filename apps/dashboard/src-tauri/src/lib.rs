@@ -117,6 +117,9 @@ pub fn run() {
                         }
                     }
                     web_proc.kill();
+                    // Kill any server on the port (handles the detached process
+                    // spawned by ensure_webserver_running in release builds)
+                    webserver::kill_port_sync(webserver::get_configured_port());
                 }
             });
 

@@ -45,6 +45,7 @@ export async function startTunnel(options: {
 
     tunnelProcess = child;
     let settled = false;
+    const stderrChunks: string[] = [];
 
     const handleOutput = (data: Buffer) => {
       const text = data.toString();
@@ -79,7 +80,10 @@ export async function startTunnel(options: {
     };
 
     child.stdout?.on("data", handleOutput);
-    child.stderr?.on("data", handleOutput);
+    child.stderr?.on("data", (data: Buffer) => {
+      stderrChunks.push(data.toString());
+      handleOutput(data);
+    });
 
     child.on("error", (err) => {
       tunnelProcess = null;
@@ -102,7 +106,9 @@ export async function startTunnel(options: {
       if (!settled) {
         settled = true;
         if (code !== 0) {
-          reject(new Error(`instatunnel exited with code ${code}`));
+          reject(
+            new Error(`instatunnel exited with code ${code}: ${stderrChunks.join("").trim()}`),
+          );
         } else {
           resolve();
         }

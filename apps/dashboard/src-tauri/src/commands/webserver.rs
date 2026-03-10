@@ -38,7 +38,7 @@ fn resolve_web_dir() -> Result<std::path::PathBuf, String> {
     Err("Web server bundle not found. Run `pnpm -F @band/web build` first.".to_string())
 }
 
-fn get_configured_port() -> u16 {
+pub(crate) fn get_configured_port() -> u16 {
     load_settings()
         .ok()
         .and_then(|s| s.web_server_port)
@@ -309,7 +309,7 @@ fn check_local_health_sync(port: u16, token: &str) -> bool {
 }
 
 /// Kill any process listening on the given port.
-fn kill_port_sync(port: u16) {
+pub(crate) fn kill_port_sync(port: u16) {
     if let Ok(output) = Command::new("lsof")
         .args([&format!("-ti:{port}")])
         .output()
