@@ -103,6 +103,7 @@ jobs:
     if: ${{ always() }}
     steps:
       - uses: Cyclenerd/hcloud-github-runner@v1
+        continue-on-error: true
         with:
           mode: delete
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
