@@ -65,7 +65,7 @@ export function createAuthMiddleware(secret: string | undefined) {
       // proxies follow redirects internally and lose the Set-Cookie).
       res.setHeader(
         "Set-Cookie",
-        `band_token=${expectedToken}; HttpOnly; SameSite=Strict; Path=/; Max-Age=86400`,
+        `band_token=${expectedToken}; HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000`,
       );
       return false;
     }

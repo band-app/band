@@ -36,4 +36,9 @@ export default defineConfig({
       "@": resolve(import.meta.dirname, "./src"),
     },
   },
+  ssr: {
+    // Bundle all dependencies into server.js so the Tauri DMG
+    // doesn't need node_modules at runtime.
+    noExternal: true,
+  },
 });
