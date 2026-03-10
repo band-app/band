@@ -1,12 +1,10 @@
-use hmac::{Hmac, Mac};
-use sha2::Sha256;
 use std::io::{BufRead, BufReader};
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex, OnceLock};
 use tauri::{AppHandle, Emitter, State};
 
-use crate::state::{load_settings, save_settings};
+use crate::state::load_settings;
 
 const DEFAULT_WEB_SERVER_PORT: u16 = 3456;
 
@@ -81,51 +79,12 @@ pub(crate) fn which_binary(name: &str) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-/// Generate a 32-byte hex secret from /dev/urandom.
-fn generate_secret() -> Result<String, String> {
-    use std::io::Read;
-    let mut f = std::fs::File::open("/dev/urandom")
-        .map_err(|e| format!("Failed to open /dev/urandom: {e}"))?;
-    let mut buf = [0u8; 32];
-    f.read_exact(&mut buf)
-        .map_err(|e| format!("Failed to read random bytes: {e}"))?;
-    Ok(buf.iter().fold(String::with_capacity(64), |mut acc, b| {
-        use std::fmt::Write;
-        write!(acc, "{b:02x}").unwrap();
-        acc
-    }))
-}
-
-/// Load or create a persistent token secret (saved in settings).
-fn get_or_create_secret() -> Result<String, String> {
-    let mut settings = load_settings()?;
-    if let Some(ref secret) = settings.token_secret {
-        return Ok(secret.clone());
-    }
-    let secret = generate_secret()?;
-    settings.token_secret = Some(secret.clone());
-    save_settings(&settings)?;
-    Ok(secret)
-}
-
-/// Compute the access token from the secret: HMAC-SHA256(secret, "band-access").
-fn compute_token(secret: &str) -> String {
-    type HmacSha256 = Hmac<Sha256>;
-    let mut mac =
-        HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC accepts any key length");
-    mac.update(b"band-access");
-    let result = mac.finalize().into_bytes();
-    result.iter().fold(String::with_capacity(64), |mut acc, b| {
-        use std::fmt::Write;
-        write!(acc, "{b:02x}").unwrap();
-        acc
-    })
-}
-
-/// Get the access token, computing it from the stored secret.
+/// Read the token from settings.json (web server creates it).
 fn get_token() -> Result<String, String> {
-    let secret = get_or_create_secret()?;
-    Ok(compute_token(&secret))
+    let settings = load_settings()?;
+    settings
+        .token_secret
+        .ok_or_else(|| "tokenSecret not found in settings.json — start the web server first".to_string())
 }
 
 /// Send SIGTERM to the entire process group, then fall back to SIGKILL.
@@ -333,8 +292,6 @@ pub(crate) fn kill_port_sync(port: u16) {
 /// 3. Polls the health endpoint until ready (max 15 s).
 pub(crate) fn ensure_webserver_running() -> Result<(u16, String), String> {
     let port = get_configured_port();
-    let secret = get_or_create_secret()?;
-    let token = compute_token(&secret);
 
     // Kill any stale server so we always run our bundled version
     kill_port_sync(port);
@@ -347,7 +304,6 @@ pub(crate) fn ensure_webserver_running() -> Result<(u16, String), String> {
         .current_dir(&web_dir)
         .env("PATH", shell_path())
         .env("PORT", port.to_string())
-        .env("BAND_TOKEN_SECRET", &secret)
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     set_process_group(&mut cmd);
@@ -360,12 +316,16 @@ pub(crate) fn ensure_webserver_running() -> Result<(u16, String), String> {
         }
     })?;
 
-    // Poll health endpoint until ready (max 15 s)
+    // Poll health endpoint until ready (max 15 s).
+    // The web server creates tokenSecret in settings.json on startup,
+    // so we read it each iteration until it appears.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
     while std::time::Instant::now() < deadline {
         std::thread::sleep(std::time::Duration::from_millis(200));
-        if check_local_health_sync(port, &token) {
-            return Ok((port, token));
+        if let Ok(token) = get_token() {
+            if check_local_health_sync(port, &token) {
+                return Ok((port, token));
+            }
         }
     }
 
@@ -383,12 +343,12 @@ pub async fn webserver_start(state: State<'_, WebServerState>) -> Result<(), Str
     }
 
     let port = get_configured_port();
-    let secret = get_or_create_secret()?;
-    let token = compute_token(&secret);
 
     // Check if a server is already running (started externally)
-    if check_local_health(port, &token).await {
-        return Ok(());
+    if let Ok(token) = get_token() {
+        if check_local_health(port, &token).await {
+            return Ok(());
+        }
     }
 
     let web_dir = resolve_web_dir()?;
@@ -399,7 +359,6 @@ pub async fn webserver_start(state: State<'_, WebServerState>) -> Result<(), Str
         .current_dir(&web_dir)
         .env("PATH", shell_path())
         .env("PORT", port.to_string())
-        .env("BAND_TOKEN_SECRET", &secret)
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     set_process_group(&mut cmd);
@@ -804,40 +763,6 @@ fn append_token(base_url: &str, token: Option<&str>) -> String {
 mod tests {
     use super::*;
 
-    // -- compute_token --------------------------------------------------------
-
-    #[test]
-    fn compute_token_matches_js_hmac() {
-        // The JS side computes: createHmac("sha256", secret).update("band-access").digest("hex")
-        // Verified via: node -e "console.log(require('crypto').createHmac('sha256','test-secret-key-for-auth').update('band-access').digest('hex'))"
-        let token = compute_token("test-secret-key-for-auth");
-        assert_eq!(
-            token,
-            "6c2b86959205e665b407323dfe3ea35fb7fa84e450831720429dfccc99ed5bb3"
-        );
-    }
-
-    #[test]
-    fn compute_token_deterministic() {
-        let a = compute_token("my-secret");
-        let b = compute_token("my-secret");
-        assert_eq!(a, b);
-    }
-
-    #[test]
-    fn compute_token_different_secrets_differ() {
-        let a = compute_token("secret-a");
-        let b = compute_token("secret-b");
-        assert_ne!(a, b);
-    }
-
-    #[test]
-    fn compute_token_empty_secret() {
-        let token = compute_token("");
-        assert_eq!(token.len(), 64);
-        assert!(token.chars().all(|c| c.is_ascii_hexdigit()));
-    }
-
     // -- extract_subdomain ----------------------------------------------------
 
     #[test]
@@ -913,23 +838,6 @@ mod tests {
     fn append_token_preserves_base_url() {
         let base = "https://band6.instatunnel.my";
         assert_eq!(append_token(base, None), base);
-    }
-
-    // -- generate_secret ------------------------------------------------------
-
-    #[test]
-    fn generate_secret_length_and_format() {
-        let secret = generate_secret().unwrap();
-        // 32 bytes → 64 hex chars
-        assert_eq!(secret.len(), 64);
-        assert!(secret.chars().all(|c| c.is_ascii_hexdigit()));
-    }
-
-    #[test]
-    fn generate_secret_unique() {
-        let a = generate_secret().unwrap();
-        let b = generate_secret().unwrap();
-        assert_ne!(a, b, "two generated secrets should differ");
     }
 
     // -- ManagedProcess -------------------------------------------------------

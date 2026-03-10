@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const PROJECT_ROOT = join(import.meta.dirname, "..");
+const DEFAULT_TOKEN = "trpc-default-token";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -114,18 +115,20 @@ async function startServer(
 // tRPC HTTP helpers
 // ---------------------------------------------------------------------------
 
+const defaultHeaders = { Cookie: `band_token=${DEFAULT_TOKEN}` };
+
 async function trpcQuery(serverUrl: string, procedure: string, input?: unknown) {
   const url =
     input !== undefined
       ? `${serverUrl}/trpc/${procedure}?input=${encodeURIComponent(JSON.stringify(input))}`
       : `${serverUrl}/trpc/${procedure}`;
-  return fetch(url);
+  return fetch(url, { headers: defaultHeaders });
 }
 
 async function trpcMutate(serverUrl: string, procedure: string, input?: unknown) {
   return fetch(`${serverUrl}/trpc/${procedure}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...defaultHeaders },
     body: input !== undefined ? JSON.stringify(input) : "{}",
   });
 }
@@ -178,7 +181,7 @@ describe("tRPC — projects CRUD", () => {
     repoPath = createGitRepo(tmpHome, "myrepo");
     secondRepoPath = createGitRepo(tmpHome, "second-repo");
     seedState(tmpHome, { projects: [] });
-    seedSettings(tmpHome, {});
+    seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
     server = await startServer({ tmpHome });
   });
 
@@ -312,7 +315,7 @@ describe("tRPC — settings CRUD", () => {
   beforeAll(async () => {
     tmpHome = createTmpHome();
     seedState(tmpHome, { projects: [] });
-    // No settings file — should return defaults
+    seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
     server = await startServer({ tmpHome });
   });
 
@@ -321,11 +324,11 @@ describe("tRPC — settings CRUD", () => {
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  it("settings.get returns defaults when no settings file exists", async () => {
+  it("settings.get returns defaults when only tokenSecret is seeded", async () => {
     const res = await trpcQuery(server.url, "settings.get");
     expect(res.status).toBe(200);
-    const data = await trpcData<{ worktreesDir: null }>(res);
-    expect(data.worktreesDir).toBeNull();
+    const data = await trpcData<Record<string, unknown>>(res);
+    expect(data.worktreesDir).toBeUndefined();
   });
 
   it("settings.update persists settings", async () => {
@@ -389,7 +392,10 @@ describe("tRPC — workspace operations", () => {
         },
       ],
     });
-    seedSettings(tmpHome, { worktreesDir: join(tmpHome, ".band", "worktrees") });
+    seedSettings(tmpHome, {
+      tokenSecret: DEFAULT_TOKEN,
+      worktreesDir: join(tmpHome, ".band", "worktrees"),
+    });
     server = await startServer({ tmpHome });
   });
 
@@ -670,7 +676,7 @@ describe("tRPC — system checks", () => {
   beforeAll(async () => {
     tmpHome = createTmpHome();
     seedState(tmpHome, { projects: [] });
-    seedSettings(tmpHome, {});
+    seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
     server = await startServer({ tmpHome });
   });
 
@@ -709,6 +715,7 @@ describe("tRPC — system checks", () => {
 // ---------------------------------------------------------------------------
 
 describe("tRPC — auth enforcement", () => {
+  const TOKEN = "trpc-test-token";
   let server: ServerHandle;
   let tmpHome: string;
   let authCookie: string;
@@ -716,12 +723,10 @@ describe("tRPC — auth enforcement", () => {
   beforeAll(async () => {
     tmpHome = createTmpHome();
     seedState(tmpHome, { projects: [] });
-    seedSettings(tmpHome, {});
-    server = await startServer({ tmpHome, env: { BAND_TOKEN_SECRET: "trpc-test-secret" } });
+    seedSettings(tmpHome, { tokenSecret: TOKEN });
+    server = await startServer({ tmpHome });
 
-    const { createHmac } = await import("node:crypto");
-    const token = createHmac("sha256", "trpc-test-secret").update("band-access").digest("hex");
-    authCookie = `band_token=${token}`;
+    authCookie = `band_token=${TOKEN}`;
   });
 
   afterAll(async () => {

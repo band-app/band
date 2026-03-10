@@ -1,5 +1,4 @@
 import { spawn } from "node:child_process";
-import { createHmac } from "node:crypto";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -7,6 +6,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const PROJECT_ROOT = join(import.meta.dirname, "..");
+const DEFAULT_TOKEN = "test-tunnel-token";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -169,12 +169,14 @@ async function startServer(
 async function trpcQuery(
   serverUrl: string,
   procedure: string,
+  input?: unknown,
   opts?: { headers?: Record<string, string> },
 ) {
-  return fetch(
-    `${serverUrl}/trpc/${procedure}`,
-    opts?.headers ? { headers: opts.headers } : undefined,
-  );
+  const url =
+    input !== undefined
+      ? `${serverUrl}/trpc/${procedure}?input=${encodeURIComponent(JSON.stringify(input))}`
+      : `${serverUrl}/trpc/${procedure}`;
+  return fetch(url, opts?.headers ? { headers: opts.headers } : undefined);
 }
 
 async function trpcMutate(
@@ -211,8 +213,7 @@ async function waitFor(
   throw new Error("Timed out");
 }
 
-function authCookie(secret: string): string {
-  const token = createHmac("sha256", secret).update("band-access").digest("hex");
+function authCookie(token: string): string {
   return `band_token=${token}`;
 }
 
@@ -227,7 +228,7 @@ describe("tunnel.start — parses URL from emoji-prefixed instatunnel output", (
   beforeAll(async () => {
     tmpHome = createTmpHome();
     seedState(tmpHome, createDefaultState(tmpHome));
-    seedSettings(tmpHome, {});
+    seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
 
     const binDir = join(tmpHome, "bin");
     mkdirSync(binDir, { recursive: true });
@@ -244,23 +245,36 @@ describe("tunnel.start — parses URL from emoji-prefixed instatunnel output", (
 
   afterAll(async () => {
     // Stop tunnel first so the fake process is cleaned up
-    await trpcMutate(server.url, "tunnel.stop").catch(() => {});
+    await trpcMutate(server.url, "tunnel.stop", undefined, {
+      headers: { Cookie: authCookie(DEFAULT_TOKEN) },
+    }).catch(() => {});
     await server.close();
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
   it("starts tunnel and extracts URL with subdomain", async () => {
-    const res = await trpcMutate(server.url, "tunnel.start", {});
+    const res = await trpcMutate(
+      server.url,
+      "tunnel.start",
+      {},
+      {
+        headers: { Cookie: authCookie(DEFAULT_TOKEN) },
+      },
+    );
     expect(res.status).toBe(200);
 
     // Wait for tunnel status to report running with URL
     await waitFor(async () => {
-      const statusRes = await trpcQuery(server.url, "tunnel.status");
+      const statusRes = await trpcQuery(server.url, "tunnel.status", undefined, {
+        headers: { Cookie: authCookie(DEFAULT_TOKEN) },
+      });
       const status = await trpcData<{ running: boolean; url: string | null }>(statusRes);
       return status.running && status.url !== null;
     });
 
-    const statusRes = await trpcQuery(server.url, "tunnel.status");
+    const statusRes = await trpcQuery(server.url, "tunnel.status", undefined, {
+      headers: { Cookie: authCookie(DEFAULT_TOKEN) },
+    });
     const status = await trpcData<{ running: boolean; url: string | null }>(statusRes);
 
     expect(status.running).toBe(true);
@@ -279,7 +293,7 @@ describe("tunnel.start — returns URL in mutation response", () => {
   beforeAll(async () => {
     tmpHome = createTmpHome();
     seedState(tmpHome, createDefaultState(tmpHome));
-    seedSettings(tmpHome, {});
+    seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
 
     const binDir = join(tmpHome, "bin");
     mkdirSync(binDir, { recursive: true });
@@ -295,13 +309,22 @@ describe("tunnel.start — returns URL in mutation response", () => {
   });
 
   afterAll(async () => {
-    await trpcMutate(server.url, "tunnel.stop").catch(() => {});
+    await trpcMutate(server.url, "tunnel.stop", undefined, {
+      headers: { Cookie: authCookie(DEFAULT_TOKEN) },
+    }).catch(() => {});
     await server.close();
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
   it("mutation response includes the tunnel URL", async () => {
-    const res = await trpcMutate(server.url, "tunnel.start", {});
+    const res = await trpcMutate(
+      server.url,
+      "tunnel.start",
+      {},
+      {
+        headers: { Cookie: authCookie(DEFAULT_TOKEN) },
+      },
+    );
     expect(res.status).toBe(200);
     const data = await trpcData<{ ok: boolean; url: string | null }>(res);
     expect(data.ok).toBe(true);
@@ -320,7 +343,7 @@ describe("tunnel.start — subdomain taken resolves without error", () => {
   beforeAll(async () => {
     tmpHome = createTmpHome();
     seedState(tmpHome, createDefaultState(tmpHome));
-    seedSettings(tmpHome, {});
+    seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
 
     const binDir = join(tmpHome, "bin");
     mkdirSync(binDir, { recursive: true });
@@ -341,7 +364,14 @@ describe("tunnel.start — subdomain taken resolves without error", () => {
   });
 
   it("returns 200 with null URL when subdomain is taken", async () => {
-    const res = await trpcMutate(server.url, "tunnel.start", { subdomain: "taken-sub" });
+    const res = await trpcMutate(
+      server.url,
+      "tunnel.start",
+      { subdomain: "taken-sub" },
+      {
+        headers: { Cookie: authCookie(DEFAULT_TOKEN) },
+      },
+    );
     expect(res.status).toBe(200);
     const data = await trpcData<{ ok: boolean; url: string | null }>(res);
     expect(data.ok).toBe(true);
@@ -355,6 +385,7 @@ describe("tunnel.start — subdomain taken resolves without error", () => {
 // ---------------------------------------------------------------------------
 
 describe("services.health — configured subdomain, no tunnel running, remote unreachable", () => {
+  const TOKEN = "unreachable-test-token";
   let server: ServerHandle;
   let tmpHome: string;
 
@@ -362,7 +393,7 @@ describe("services.health — configured subdomain, no tunnel running, remote un
     tmpHome = createTmpHome();
     seedState(tmpHome, createDefaultState(tmpHome));
     // Configure a subdomain that won't resolve to a real tunnel
-    seedSettings(tmpHome, { tunnelSubdomain: "nonexistent-test-sub" });
+    seedSettings(tmpHome, { tunnelSubdomain: "nonexistent-test-sub", tokenSecret: TOKEN });
     server = await startServer({ tmpHome });
   });
 
@@ -371,8 +402,10 @@ describe("services.health — configured subdomain, no tunnel running, remote un
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  it("returns tunnel as not healthy when remote is unreachable (no token)", async () => {
-    const res = await trpcQuery(server.url, "services.health");
+  it("returns tunnel as not healthy when remote is unreachable", async () => {
+    const res = await trpcQuery(server.url, "services.health", undefined, {
+      headers: { Cookie: authCookie(TOKEN) },
+    });
     expect(res.status).toBe(200);
     const data = await trpcData<{
       webserver: boolean;
@@ -388,15 +421,15 @@ describe("services.health — configured subdomain, no tunnel running, remote un
 });
 
 describe("services.health — configured subdomain, no tunnel, with token, remote unreachable", () => {
-  const SECRET = "health-check-test-secret";
+  const TOKEN = "health-check-test-token";
   let server: ServerHandle;
   let tmpHome: string;
 
   beforeAll(async () => {
     tmpHome = createTmpHome();
     seedState(tmpHome, createDefaultState(tmpHome));
-    seedSettings(tmpHome, { tunnelSubdomain: "nonexistent-test-sub" });
-    server = await startServer({ tmpHome, env: { BAND_TOKEN_SECRET: SECRET } });
+    seedSettings(tmpHome, { tunnelSubdomain: "nonexistent-test-sub", tokenSecret: TOKEN });
+    server = await startServer({ tmpHome });
   });
 
   afterAll(async () => {
@@ -405,8 +438,8 @@ describe("services.health — configured subdomain, no tunnel, with token, remot
   });
 
   it("returns tunnel as not healthy when remote is unreachable (with token)", async () => {
-    const res = await trpcQuery(server.url, "services.health", {
-      headers: { Cookie: authCookie(SECRET) },
+    const res = await trpcQuery(server.url, "services.health", undefined, {
+      headers: { Cookie: authCookie(TOKEN) },
     });
     expect(res.status).toBe(200);
     const data = await trpcData<{
@@ -433,7 +466,7 @@ describe("services.health — with running local tunnel process", () => {
   beforeAll(async () => {
     tmpHome = createTmpHome();
     seedState(tmpHome, createDefaultState(tmpHome));
-    seedSettings(tmpHome, {});
+    seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
 
     const binDir = join(tmpHome, "bin");
     mkdirSync(binDir, { recursive: true });
@@ -449,24 +482,37 @@ describe("services.health — with running local tunnel process", () => {
   });
 
   afterAll(async () => {
-    await trpcMutate(server.url, "tunnel.stop").catch(() => {});
+    await trpcMutate(server.url, "tunnel.stop", undefined, {
+      headers: { Cookie: authCookie(DEFAULT_TOKEN) },
+    }).catch(() => {});
     await server.close();
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
   it("reports tunnel URL via services.health after tunnel starts", async () => {
     // Start the tunnel
-    await trpcMutate(server.url, "tunnel.start", {});
+    await trpcMutate(
+      server.url,
+      "tunnel.start",
+      {},
+      {
+        headers: { Cookie: authCookie(DEFAULT_TOKEN) },
+      },
+    );
 
     // Wait for tunnel to be running
     await waitFor(async () => {
-      const res = await trpcQuery(server.url, "tunnel.status");
+      const res = await trpcQuery(server.url, "tunnel.status", undefined, {
+        headers: { Cookie: authCookie(DEFAULT_TOKEN) },
+      });
       const status = await trpcData<{ running: boolean; url: string | null }>(res);
       return status.running && status.url !== null;
     });
 
     // Now check services.health — it should report the tunnel URL
-    const healthRes = await trpcQuery(server.url, "services.health");
+    const healthRes = await trpcQuery(server.url, "services.health", undefined, {
+      headers: { Cookie: authCookie(DEFAULT_TOKEN) },
+    });
     expect(healthRes.status).toBe(200);
     const health = await trpcData<{
       webserver: boolean;
@@ -487,7 +533,7 @@ describe("services.health — with running local tunnel process", () => {
 // ---------------------------------------------------------------------------
 
 describe("tunnel.start — subdomain taken attempts remote fallback", () => {
-  const SECRET = "fallback-test-secret";
+  const TOKEN = "fallback-test-token";
   let server: ServerHandle;
   let tmpHome: string;
 
@@ -495,7 +541,7 @@ describe("tunnel.start — subdomain taken attempts remote fallback", () => {
     tmpHome = createTmpHome();
     seedState(tmpHome, createDefaultState(tmpHome));
     // Configure a subdomain that will be "taken" by the fake script
-    seedSettings(tmpHome, { tunnelSubdomain: "taken-remote" });
+    seedSettings(tmpHome, { tunnelSubdomain: "taken-remote", tokenSecret: TOKEN });
 
     const binDir = join(tmpHome, "bin");
     mkdirSync(binDir, { recursive: true });
@@ -506,7 +552,6 @@ describe("tunnel.start — subdomain taken attempts remote fallback", () => {
       env: {
         PATH: `${binDir}:${process.env.PATH}`,
         SHELL: "/bin/sh",
-        BAND_TOKEN_SECRET: SECRET,
       },
     });
   });
@@ -522,7 +567,7 @@ describe("tunnel.start — subdomain taken attempts remote fallback", () => {
       "tunnel.start",
       {},
       {
-        headers: { Cookie: authCookie(SECRET) },
+        headers: { Cookie: authCookie(TOKEN) },
       },
     );
     expect(res.status).toBe(200);
@@ -544,7 +589,7 @@ describe("services.health — no subdomain configured, no tunnel", () => {
   beforeAll(async () => {
     tmpHome = createTmpHome();
     seedState(tmpHome, createDefaultState(tmpHome));
-    seedSettings(tmpHome, {}); // No tunnelSubdomain
+    seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN }); // No tunnelSubdomain
     server = await startServer({ tmpHome });
   });
 
@@ -554,7 +599,9 @@ describe("services.health — no subdomain configured, no tunnel", () => {
   });
 
   it("returns tunnel false without attempting remote check", async () => {
-    const res = await trpcQuery(server.url, "services.health");
+    const res = await trpcQuery(server.url, "services.health", undefined, {
+      headers: { Cookie: authCookie(DEFAULT_TOKEN) },
+    });
     expect(res.status).toBe(200);
     const data = await trpcData<{
       webserver: boolean;

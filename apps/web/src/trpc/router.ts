@@ -592,8 +592,7 @@ const tunnelRouter = t.router({
         const token = getToken();
         const health = await checkTunnelHealth(resolvedSubdomain, token);
         if (health.healthy) {
-          const sep = token ? `?token=${token}` : "";
-          return { ok: true, url: `https://${resolvedSubdomain}.instatunnel.my${sep}` };
+          return { ok: true, url: `https://${resolvedSubdomain}.instatunnel.my?token=${token}` };
         }
       }
       return { ok: true, url: null as string | null };
@@ -826,8 +825,7 @@ const servicesRouter = t.router({
           if (health.remoteHost && health.remoteHost !== localHostname) {
             tunnelRemoteHost = health.remoteHost;
           }
-          const sep = token ? `?token=${token}` : "";
-          tunnelUrl = `https://${subdomain}.instatunnel.my${sep}`;
+          tunnelUrl = `https://${subdomain}.instatunnel.my?token=${token}`;
         }
       }
     }
@@ -838,14 +836,6 @@ const servicesRouter = t.router({
       tunnel_url: tunnelUrl,
       tunnel_remote_host: tunnelRemoteHost || tunnel.remoteHost,
     };
-  }),
-
-  token: publicProcedure.query(() => {
-    const token = getToken();
-    if (!token) {
-      throw new TRPCError({ code: "NOT_FOUND", message: "No token secret configured" });
-    }
-    return { token };
   }),
 });
 

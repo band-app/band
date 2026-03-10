@@ -5,7 +5,7 @@ import sirv from "sirv";
 import { createAuthMiddleware } from "./auth.ts";
 import { stopBranchStatusPoller } from "./src/lib/branch-status-poller.ts";
 import { checkPrereqs } from "./src/lib/process-utils.ts";
-import { loadSettings } from "./src/lib/state.ts";
+import { getOrCreateToken, loadSettings } from "./src/lib/state.ts";
 import { startTunnel, stopTunnel } from "./src/lib/tunnel.ts";
 import { createContext } from "./src/trpc/context.ts";
 import { appRouter } from "./src/trpc/router.ts";
@@ -15,7 +15,7 @@ import { appRouter } from "./src/trpc/router.ts";
 const clientDir = join(import.meta.dirname, "client");
 const port = parseInt(process.env.PORT || "3456", 10);
 
-const { handleAuth } = createAuthMiddleware(process.env.BAND_TOKEN_SECRET);
+const { handleAuth } = createAuthMiddleware(getOrCreateToken());
 
 const assets = sirv(clientDir, {
   maxAge: 31536000,

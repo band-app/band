@@ -112,10 +112,4 @@ pub fn load_settings() -> Result<Settings, String> {
     serde_json::from_str(&data).map_err(|e| format!("Failed to parse settings: {e}"))
 }
 
-pub fn save_settings(settings: &Settings) -> Result<(), String> {
-    ensure_dirs()?;
-    let path = settings_file();
-    let data = serde_json::to_string_pretty(settings)
-        .map_err(|e| format!("Failed to serialize settings: {e}"))?;
-    fs::write(&path, data).map_err(|e| format!("Failed to write settings: {e}"))
-}
+

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const PROJECT_ROOT = join(import.meta.dirname, "..");
+const DEFAULT_TOKEN = "test-token-for-services";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -160,6 +161,10 @@ async function trpcData<T>(res: Response): Promise<T> {
   return body.result.data;
 }
 
+function authCookie(token: string): string {
+  return `band_token=${token}`;
+}
+
 // ---------------------------------------------------------------------------
 // services.health
 // ---------------------------------------------------------------------------
@@ -171,7 +176,7 @@ describe("services.health", () => {
   beforeAll(async () => {
     tmpHome = createTmpHome();
     seedState(tmpHome, createDefaultState(tmpHome));
-    seedSettings(tmpHome, {});
+    seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
     server = await startServer({ tmpHome });
   });
 
@@ -181,7 +186,9 @@ describe("services.health", () => {
   });
 
   it("returns webserver as healthy since the web server is running", async () => {
-    const res = await trpcQuery(server.url, "services.health");
+    const res = await trpcQuery(server.url, "services.health", undefined, {
+      headers: { Cookie: authCookie(DEFAULT_TOKEN) },
+    });
     expect(res.status).toBe(200);
     const body = await trpcData<{
       webserver: boolean;
@@ -207,7 +214,7 @@ describe("tunnel.status", () => {
   beforeAll(async () => {
     tmpHome = createTmpHome();
     seedState(tmpHome, createDefaultState(tmpHome));
-    seedSettings(tmpHome, {});
+    seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
     server = await startServer({ tmpHome });
   });
 
@@ -217,7 +224,9 @@ describe("tunnel.status", () => {
   });
 
   it("returns tunnel not running when no tunnel has been started", async () => {
-    const res = await trpcQuery(server.url, "tunnel.status");
+    const res = await trpcQuery(server.url, "tunnel.status", undefined, {
+      headers: { Cookie: authCookie(DEFAULT_TOKEN) },
+    });
     expect(res.status).toBe(200);
     const body = await trpcData<{
       running: boolean;
@@ -241,7 +250,7 @@ describe("tunnel.stop", () => {
   beforeAll(async () => {
     tmpHome = createTmpHome();
     seedState(tmpHome, createDefaultState(tmpHome));
-    seedSettings(tmpHome, {});
+    seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
     server = await startServer({ tmpHome });
   });
 
@@ -251,7 +260,9 @@ describe("tunnel.stop", () => {
   });
 
   it("succeeds even when no tunnel is running", async () => {
-    const res = await trpcMutate(server.url, "tunnel.stop");
+    const res = await trpcMutate(server.url, "tunnel.stop", undefined, {
+      headers: { Cookie: authCookie(DEFAULT_TOKEN) },
+    });
     expect(res.status).toBe(200);
     const body = await trpcData<{ ok: boolean }>(res);
     expect(body.ok).toBe(true);
@@ -269,7 +280,7 @@ describe("prereqs.check", () => {
   beforeAll(async () => {
     tmpHome = createTmpHome();
     seedState(tmpHome, createDefaultState(tmpHome));
-    seedSettings(tmpHome, {});
+    seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
     server = await startServer({ tmpHome });
   });
 
@@ -279,73 +290,15 @@ describe("prereqs.check", () => {
   });
 
   it("returns prerequisite status with node and instatunnel booleans", async () => {
-    const res = await trpcQuery(server.url, "prereqs.check");
+    const res = await trpcQuery(server.url, "prereqs.check", undefined, {
+      headers: { Cookie: authCookie(DEFAULT_TOKEN) },
+    });
     expect(res.status).toBe(200);
     const body = await trpcData<{ node: boolean; instatunnel: boolean }>(res);
     expect(typeof body.node).toBe("boolean");
     expect(typeof body.instatunnel).toBe("boolean");
     // Node.js is always available since we're running this test with it
     expect(body.node).toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// services.token
-// ---------------------------------------------------------------------------
-
-describe("services.token", () => {
-  let server: ServerHandle;
-  let tmpHome: string;
-
-  beforeAll(async () => {
-    tmpHome = createTmpHome();
-    seedState(tmpHome, createDefaultState(tmpHome));
-    seedSettings(tmpHome, {});
-    server = await startServer({ tmpHome, env: { BAND_TOKEN_SECRET: "test-secret-for-token" } });
-  });
-
-  afterAll(async () => {
-    await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
-  });
-
-  it("returns a token when BAND_TOKEN_SECRET is configured", async () => {
-    // We need to auth first to access the endpoint
-    const { createHmac } = await import("node:crypto");
-    const expectedToken = createHmac("sha256", "test-secret-for-token")
-      .update("band-access")
-      .digest("hex");
-
-    const res = await trpcQuery(server.url, "services.token", undefined, {
-      headers: { Cookie: `band_token=${expectedToken}` },
-    });
-    expect(res.status).toBe(200);
-    const body = await trpcData<{ token: string }>(res);
-    expect(typeof body.token).toBe("string");
-    expect(body.token.length).toBeGreaterThan(0);
-  });
-});
-
-describe("services.token — no secret configured", () => {
-  let server: ServerHandle;
-  let tmpHome: string;
-
-  beforeAll(async () => {
-    tmpHome = createTmpHome();
-    seedState(tmpHome, createDefaultState(tmpHome));
-    seedSettings(tmpHome, {});
-    // No BAND_TOKEN_SECRET env var
-    server = await startServer({ tmpHome });
-  });
-
-  afterAll(async () => {
-    await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
-  });
-
-  it("returns 404 when no token secret is configured", async () => {
-    const res = await trpcQuery(server.url, "services.token");
-    expect(res.status).toBe(404);
   });
 });
 
@@ -360,7 +313,7 @@ describe("tunnel.authCheck", () => {
   beforeAll(async () => {
     tmpHome = createTmpHome();
     seedState(tmpHome, createDefaultState(tmpHome));
-    seedSettings(tmpHome, {});
+    seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
     server = await startServer({ tmpHome });
   });
 
@@ -370,7 +323,9 @@ describe("tunnel.authCheck", () => {
   });
 
   it("returns an authenticated boolean", async () => {
-    const res = await trpcQuery(server.url, "tunnel.authCheck");
+    const res = await trpcQuery(server.url, "tunnel.authCheck", undefined, {
+      headers: { Cookie: authCookie(DEFAULT_TOKEN) },
+    });
     expect(res.status).toBe(200);
     const body = await trpcData<{ authenticated: boolean }>(res);
     expect(typeof body.authenticated).toBe("boolean");
@@ -388,7 +343,7 @@ describe("tunnel.stop — resets tunnel status", () => {
   beforeAll(async () => {
     tmpHome = createTmpHome();
     seedState(tmpHome, createDefaultState(tmpHome));
-    seedSettings(tmpHome, {});
+    seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
     server = await startServer({ tmpHome });
   });
 
@@ -399,11 +354,15 @@ describe("tunnel.stop — resets tunnel status", () => {
 
   it("tunnel status remains not-running after stop", async () => {
     // Stop tunnel (even though none is running — should succeed)
-    const stopRes = await trpcMutate(server.url, "tunnel.stop");
+    const stopRes = await trpcMutate(server.url, "tunnel.stop", undefined, {
+      headers: { Cookie: authCookie(DEFAULT_TOKEN) },
+    });
     expect(stopRes.status).toBe(200);
 
     // Verify tunnel status is still not running
-    const statusRes = await trpcQuery(server.url, "tunnel.status");
+    const statusRes = await trpcQuery(server.url, "tunnel.status", undefined, {
+      headers: { Cookie: authCookie(DEFAULT_TOKEN) },
+    });
     expect(statusRes.status).toBe(200);
     const status = await trpcData<{ running: boolean; url: string | null }>(statusRes);
     expect(status.running).toBe(false);
@@ -422,7 +381,7 @@ describe("GET /api/status/stream — SSE event format", () => {
   beforeAll(async () => {
     tmpHome = createTmpHome();
     seedState(tmpHome, createDefaultState(tmpHome));
-    seedSettings(tmpHome, {});
+    seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
     server = await startServer({ tmpHome });
   });
 
@@ -433,6 +392,7 @@ describe("GET /api/status/stream — SSE event format", () => {
 
   it("returns SSE content-type and streams events", async () => {
     const res = await fetch(`${server.url}/api/status/stream`, {
+      headers: { Cookie: authCookie(DEFAULT_TOKEN) },
       signal: AbortSignal.timeout(2000),
     }).catch(() => null);
 
@@ -450,20 +410,16 @@ describe("GET /api/status/stream — SSE event format", () => {
 // Auth enforcement on tRPC tunnel/service endpoints
 // ---------------------------------------------------------------------------
 
-describe("Tunnel and service endpoints require auth when secret is set", () => {
+describe("Tunnel and service endpoints require auth when token is set", () => {
+  const TOKEN = "my-test-token";
   let server: ServerHandle;
   let tmpHome: string;
-  let authCookie: string;
 
   beforeAll(async () => {
     tmpHome = createTmpHome();
     seedState(tmpHome, createDefaultState(tmpHome));
-    seedSettings(tmpHome, {});
-    server = await startServer({ tmpHome, env: { BAND_TOKEN_SECRET: "my-test-secret" } });
-
-    const { createHmac } = await import("node:crypto");
-    const token = createHmac("sha256", "my-test-secret").update("band-access").digest("hex");
-    authCookie = `band_token=${token}`;
+    seedSettings(tmpHome, { tokenSecret: TOKEN });
+    server = await startServer({ tmpHome });
   });
 
   afterAll(async () => {
@@ -478,7 +434,7 @@ describe("Tunnel and service endpoints require auth when secret is set", () => {
 
   it("returns 200 for services.health with auth", async () => {
     const res = await trpcQuery(server.url, "services.health", undefined, {
-      headers: { Cookie: authCookie },
+      headers: { Cookie: authCookie(TOKEN) },
     });
     expect(res.status).toBe(200);
   });
@@ -490,7 +446,7 @@ describe("Tunnel and service endpoints require auth when secret is set", () => {
 
   it("returns 200 for tunnel.status with auth", async () => {
     const res = await trpcQuery(server.url, "tunnel.status", undefined, {
-      headers: { Cookie: authCookie },
+      headers: { Cookie: authCookie(TOKEN) },
     });
     expect(res.status).toBe(200);
   });
@@ -507,7 +463,7 @@ describe("Tunnel and service endpoints require auth when secret is set", () => {
 
   it("returns 200 for prereqs.check with auth", async () => {
     const res = await trpcQuery(server.url, "prereqs.check", undefined, {
-      headers: { Cookie: authCookie },
+      headers: { Cookie: authCookie(TOKEN) },
     });
     expect(res.status).toBe(200);
   });
@@ -519,7 +475,7 @@ describe("Tunnel and service endpoints require auth when secret is set", () => {
 
   it("returns 200 for tunnel.authCheck with auth", async () => {
     const res = await trpcQuery(server.url, "tunnel.authCheck", undefined, {
-      headers: { Cookie: authCookie },
+      headers: { Cookie: authCookie(TOKEN) },
     });
     expect(res.status).toBe(200);
   });

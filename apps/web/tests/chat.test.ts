@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const PROJECT_ROOT = join(import.meta.dirname, "..");
 const FAKE_AGENT_PATH = join(import.meta.dirname, "fake-agent.mjs");
+const DEFAULT_TOKEN = "chat-test-token";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -68,6 +69,7 @@ function createDefaultState(tmpHome: string) {
 
 function defaultSettings() {
   return {
+    tokenSecret: DEFAULT_TOKEN,
     codingAgent: {
       type: "claude-code",
       command: FAKE_AGENT_PATH,
@@ -150,6 +152,8 @@ async function startServer(
 // tRPC HTTP helpers
 // ---------------------------------------------------------------------------
 
+const defaultHeaders = { Cookie: `band_token=${DEFAULT_TOKEN}` };
+
 async function trpcQuery(
   serverUrl: string,
   procedure: string,
@@ -160,7 +164,7 @@ async function trpcQuery(
     input !== undefined
       ? `${serverUrl}/trpc/${procedure}?input=${encodeURIComponent(JSON.stringify(input))}`
       : `${serverUrl}/trpc/${procedure}`;
-  return fetch(url, opts?.headers ? { headers: opts.headers } : undefined);
+  return fetch(url, { headers: { ...defaultHeaders, ...opts?.headers } });
 }
 
 async function trpcMutate(
@@ -171,7 +175,7 @@ async function trpcMutate(
 ) {
   return fetch(`${serverUrl}/trpc/${procedure}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...opts?.headers },
+    headers: { "Content-Type": "application/json", ...defaultHeaders, ...opts?.headers },
     body: input !== undefined ? JSON.stringify(input) : "{}",
   });
 }
@@ -239,7 +243,12 @@ async function submitAndStream(
   await new Promise((r) => setTimeout(r, 100));
 
   // SSE stream stays as REST
-  const streamRes = await fetch(`${serverUrl}/api/tasks/${encodeURIComponent(workspaceId)}/stream`);
+  const streamRes = await fetch(
+    `${serverUrl}/api/tasks/${encodeURIComponent(workspaceId)}/stream`,
+    {
+      headers: defaultHeaders,
+    },
+  );
   const events = await parseSSEStream(streamRes);
 
   return { submitRes, streamRes, events };
@@ -340,6 +349,7 @@ describe("Task submit + stream — streaming", () => {
     ]);
 
     seedSettings(tmpHome, {
+      tokenSecret: DEFAULT_TOKEN,
       codingAgent: { type: "claude-code", command: FAKE_AGENT_PATH },
     });
 
@@ -404,6 +414,7 @@ describe("Task submit + stream — agent failure", () => {
     ]);
 
     seedSettings(tmpHome, {
+      tokenSecret: DEFAULT_TOKEN,
       codingAgent: { type: "claude-code", command: FAKE_AGENT_PATH },
     });
 
@@ -439,6 +450,7 @@ describe("Task submit + stream — agent crash", () => {
     const scenarioPath = writeScenario(tmpHome, []);
 
     seedSettings(tmpHome, {
+      tokenSecret: DEFAULT_TOKEN,
       codingAgent: { type: "claude-code", command: FAKE_AGENT_PATH },
     });
 
@@ -476,11 +488,8 @@ describe("tasks.submit — auth", () => {
   beforeAll(async () => {
     tmpHome = createTmpHome();
     seedState(tmpHome, createDefaultState(tmpHome));
-    seedSettings(tmpHome, defaultSettings());
-    server = await startServer({
-      tmpHome,
-      env: { BAND_TOKEN_SECRET: "test-secret" },
-    });
+    seedSettings(tmpHome, { ...defaultSettings(), tokenSecret: "test-token" });
+    server = await startServer({ tmpHome });
   });
 
   afterAll(async () => {
@@ -488,7 +497,7 @@ describe("tasks.submit — auth", () => {
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  it("returns 401 when BAND_TOKEN_SECRET is set and no token provided", async () => {
+  it("returns 401 when tokenSecret is set and no token provided", async () => {
     const res = await trpcMutate(server.url, "tasks.submit", {
       workspaceId: "testproject-main",
       prompt: "hello",
@@ -704,6 +713,7 @@ describe("Task submit + stream — AskUserQuestion", () => {
     ]);
 
     seedSettings(tmpHome, {
+      tokenSecret: DEFAULT_TOKEN,
       codingAgent: { type: "claude-code", command: FAKE_AGENT_PATH },
     });
 
@@ -745,6 +755,7 @@ describe("Task submit + stream — AskUserQuestion", () => {
     // 4. Read the buffered events from the completed stream (SSE stays as REST)
     const streamRes = await fetch(
       `${server.url}/api/tasks/${encodeURIComponent(workspaceId)}/stream`,
+      { headers: defaultHeaders },
     );
     expect(streamRes.status).toBe(200);
     const events = await parseSSEStream(streamRes);

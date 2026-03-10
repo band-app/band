@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { mkdirSync, readdirSync, readFile, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -50,6 +51,7 @@ export interface Settings {
     command?: string;
   };
   labels?: LabelDefinition[];
+  tokenSecret?: string;
 }
 
 export function bandHome(): string {
@@ -94,6 +96,17 @@ export function loadSettings(): Settings {
   } catch {
     return {};
   }
+}
+
+export function getOrCreateToken(): string {
+  const settings = loadSettings();
+  if (settings.tokenSecret) return settings.tokenSecret;
+  const token = randomBytes(32).toString("hex");
+  ensureDirs();
+  const current = loadSettings();
+  current.tokenSecret = token;
+  writeFileSync(settingsFile(), JSON.stringify(current, null, 2), "utf-8");
+  return token;
 }
 
 export function worktreesDir(): string {

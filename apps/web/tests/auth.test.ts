@@ -1,13 +1,11 @@
-import { createHmac } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createAuthMiddleware } from "../auth.ts";
 
-const TEST_SECRET = "test-secret-key-for-auth";
-const EXPECTED_TOKEN = createHmac("sha256", TEST_SECRET).update("band-access").digest("hex");
+const TEST_TOKEN = "test-token-for-auth";
 
-function startServer(secret: string | undefined) {
-  const { handleAuth } = createAuthMiddleware(secret);
+function startServer(token: string | undefined) {
+  const { handleAuth } = createAuthMiddleware(token);
 
   return new Promise<{ url: string; close: () => Promise<void> }>((resolve) => {
     const server = createServer((req: IncomingMessage, res: ServerResponse) => {
@@ -27,14 +25,14 @@ function startServer(secret: string | undefined) {
 }
 
 // -------------------------------------------------------------------------
-// Auth enabled (with secret)
+// Auth enabled (with token)
 // -------------------------------------------------------------------------
 
-describe("auth middleware (with secret)", () => {
+describe("auth middleware (with token)", () => {
   let server: Awaited<ReturnType<typeof startServer>>;
 
   beforeEach(async () => {
-    server = await startServer(TEST_SECRET);
+    server = await startServer(TEST_TOKEN);
   });
 
   afterEach(async () => {
@@ -61,31 +59,31 @@ describe("auth middleware (with secret)", () => {
   });
 
   it("valid token query param sets cookie and passes through", async () => {
-    const res = await fetch(`${server.url}/?token=${EXPECTED_TOKEN}`);
+    const res = await fetch(`${server.url}/?token=${TEST_TOKEN}`);
     expect(res.status).toBe(200);
     expect(await res.text()).toBe("OK");
 
     const setCookie = res.headers.get("set-cookie");
     expect(setCookie).toBeTruthy();
-    expect(setCookie).toContain(`band_token=${EXPECTED_TOKEN}`);
+    expect(setCookie).toContain(`band_token=${TEST_TOKEN}`);
     expect(setCookie).toContain("HttpOnly");
     expect(setCookie).toContain("SameSite=Strict");
     expect(setCookie).toContain("Max-Age=31536000");
   });
 
   it("valid token on any path sets cookie and passes through", async () => {
-    const res = await fetch(`${server.url}/chat?project=foo&token=${EXPECTED_TOKEN}&page=1`);
+    const res = await fetch(`${server.url}/chat?project=foo&token=${TEST_TOKEN}&page=1`);
     expect(res.status).toBe(200);
     expect(await res.text()).toBe("OK");
 
     const setCookie = res.headers.get("set-cookie");
     expect(setCookie).toBeTruthy();
-    expect(setCookie).toContain(`band_token=${EXPECTED_TOKEN}`);
+    expect(setCookie).toContain(`band_token=${TEST_TOKEN}`);
   });
 
   it("valid cookie allows request through", async () => {
     const res = await fetch(`${server.url}/`, {
-      headers: { Cookie: `band_token=${EXPECTED_TOKEN}` },
+      headers: { Cookie: `band_token=${TEST_TOKEN}` },
     });
     expect(res.status).toBe(200);
     expect(await res.text()).toBe("OK");
@@ -93,7 +91,7 @@ describe("auth middleware (with secret)", () => {
 
   it("valid cookie works for any path", async () => {
     const res = await fetch(`${server.url}/some/deep/path`, {
-      headers: { Cookie: `band_token=${EXPECTED_TOKEN}` },
+      headers: { Cookie: `band_token=${TEST_TOKEN}` },
     });
     expect(res.status).toBe(200);
     expect(await res.text()).toBe("OK");
@@ -108,7 +106,7 @@ describe("/api/health endpoint", () => {
   let server: Awaited<ReturnType<typeof startServer>>;
 
   beforeEach(async () => {
-    server = await startServer(TEST_SECRET);
+    server = await startServer(TEST_TOKEN);
   });
 
   afterEach(async () => {
@@ -121,7 +119,7 @@ describe("/api/health endpoint", () => {
   });
 
   it("returns health JSON with valid token query param", async () => {
-    const res = await fetch(`${server.url}/api/health?token=${EXPECTED_TOKEN}`);
+    const res = await fetch(`${server.url}/api/health?token=${TEST_TOKEN}`);
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.status).toBe("ok");
@@ -132,7 +130,7 @@ describe("/api/health endpoint", () => {
 
   it("returns health JSON with valid cookie", async () => {
     const res = await fetch(`${server.url}/api/health`, {
-      headers: { Cookie: `band_token=${EXPECTED_TOKEN}` },
+      headers: { Cookie: `band_token=${TEST_TOKEN}` },
     });
     expect(res.status).toBe(200);
     const data = await res.json();
@@ -146,10 +144,10 @@ describe("/api/health endpoint", () => {
 });
 
 // -------------------------------------------------------------------------
-// Auth disabled (no secret — dev mode)
+// Auth disabled (no token — dev mode)
 // -------------------------------------------------------------------------
 
-describe("auth middleware (without secret — dev mode)", () => {
+describe("auth middleware (without token — dev mode)", () => {
   let server: Awaited<ReturnType<typeof startServer>>;
 
   beforeEach(async () => {
@@ -184,24 +182,24 @@ describe("auth middleware (without secret — dev mode)", () => {
 // -------------------------------------------------------------------------
 
 describe("createAuthMiddleware", () => {
-  it("returns expected token when secret is provided", () => {
-    const { expectedToken } = createAuthMiddleware(TEST_SECRET);
-    expect(expectedToken).toBe(EXPECTED_TOKEN);
+  it("returns expected token when token is provided", () => {
+    const { expectedToken } = createAuthMiddleware(TEST_TOKEN);
+    expect(expectedToken).toBe(TEST_TOKEN);
   });
 
-  it("returns null token when no secret is provided", () => {
+  it("returns null token when no token is provided", () => {
     const { expectedToken } = createAuthMiddleware(undefined);
     expect(expectedToken).toBeNull();
   });
 
-  it("returns null token for empty string secret", () => {
+  it("returns null token for empty string token", () => {
     const { expectedToken } = createAuthMiddleware("");
     expect(expectedToken).toBeNull();
   });
 
-  it("different secrets produce different tokens", () => {
-    const { expectedToken: t1 } = createAuthMiddleware("secret-a");
-    const { expectedToken: t2 } = createAuthMiddleware("secret-b");
+  it("different tokens produce different expected tokens", () => {
+    const { expectedToken: t1 } = createAuthMiddleware("token-a");
+    const { expectedToken: t2 } = createAuthMiddleware("token-b");
     expect(t1).not.toBe(t2);
   });
 });

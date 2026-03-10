@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { hostname } from "node:os";
 
@@ -20,17 +20,15 @@ function tokensEqual(a: string | undefined, b: string): boolean {
   return timingSafeEqual(bufA, bufB);
 }
 
-export function createAuthMiddleware(secret: string | undefined) {
-  const expectedToken = secret
-    ? createHmac("sha256", secret).update("band-access").digest("hex")
-    : null;
+export function createAuthMiddleware(token: string | undefined) {
+  const expectedToken = token || null;
 
   /**
    * Returns true if the request was handled (auth endpoint or rejection).
    * Returns false if the request should continue to the normal handler.
    */
   function handleAuth(req: IncomingMessage, res: ServerResponse): boolean {
-    // No secret configured — skip auth entirely (dev mode)
+    // No token configured — skip auth entirely (dev mode)
     if (!expectedToken) return false;
 
     const url = new URL(req.url!, `http://${req.headers.host}`);

@@ -68,7 +68,10 @@ export function WorkspaceCard({
         tabIndex: 0,
         onClick: handleClick,
         onKeyDown: (e: React.KeyboardEvent) => {
-          if (e.key === "Enter" || e.key === " ") handleClick();
+          if (e.key === "Enter" || e.key === " ") {
+            e.stopPropagation();
+            handleClick();
+          }
         },
       };
 

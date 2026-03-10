@@ -7,6 +7,7 @@ export interface DashboardState {
   activeWorkspaceId: string | null;
   error: string | null;
   branchStatuses: Map<string, WorkspaceBranchStatus>;
+  _openingWorkspace: boolean;
 
   openWorkspace: (workspaceId: string) => void;
   clearError: () => void;
@@ -27,12 +28,19 @@ export function createDashboardStore(adapter: DashboardAdapter): DashboardStore 
     branchStatuses: new Map(),
     activeWorkspaceId: null,
     error: null,
+    _openingWorkspace: false,
 
     openWorkspace: (workspaceId: string) => {
-      set({ activeWorkspaceId: workspaceId });
-      adapter.openWorkspace(workspaceId).catch((e) => {
-        set({ error: String(e) });
-      });
+      if (get()._openingWorkspace) return;
+      set({ activeWorkspaceId: workspaceId, _openingWorkspace: true });
+      adapter
+        .openWorkspace(workspaceId)
+        .catch((e) => {
+          set({ error: String(e) });
+        })
+        .finally(() => {
+          set({ _openingWorkspace: false });
+        });
     },
 
     clearError: () => set({ error: null }),
