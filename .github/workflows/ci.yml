@@ -14,6 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       label: ${{ steps.create.outputs.label }}
+      name: ${{ steps.create.outputs.name }}
       server_id: ${{ steps.create.outputs.server_id }}
     steps:
       - uses: Cyclenerd/hcloud-github-runner@v1
@@ -31,7 +32,7 @@ jobs:
               libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
               librsvg2-dev libxdo-dev patchelf
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-            source "$HOME/.cargo/env"
+            source /root/.cargo/env
             curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
             apt-get install -y nodejs
             corepack enable
@@ -48,7 +49,7 @@ jobs:
 
       - name: Build CLI
         run: |
-          source "$HOME/.cargo/env"
+          source /root/.cargo/env
           cargo build --release --manifest-path apps/cli/Cargo.toml
 
       - name: Install dependencies
@@ -59,18 +60,18 @@ jobs:
 
       - name: Lint (cargo fmt)
         run: |
-          source "$HOME/.cargo/env"
+          source /root/.cargo/env
           cargo fmt --manifest-path apps/cli/Cargo.toml -- --check
           cargo fmt --manifest-path apps/dashboard/src-tauri/Cargo.toml -- --check
 
       - name: Lint (cargo clippy — CLI)
         run: |
-          source "$HOME/.cargo/env"
+          source /root/.cargo/env
           cargo clippy --manifest-path apps/cli/Cargo.toml -- -D warnings
 
       - name: Lint (cargo clippy — Dashboard)
         run: |
-          source "$HOME/.cargo/env"
+          source /root/.cargo/env
           mkdir -p apps/web/dist apps/dashboard/src-tauri/binaries
           touch apps/web/dist/start-server.mjs
           cp apps/cli/target/release/band "apps/dashboard/src-tauri/binaries/band-$(rustc -vV | sed -n 's/host: //p')"
@@ -84,12 +85,12 @@ jobs:
 
       - name: Test (CLI)
         run: |
-          source "$HOME/.cargo/env"
+          source /root/.cargo/env
           cargo test --manifest-path apps/cli/Cargo.toml
 
       - name: Test (Dashboard)
         run: |
-          source "$HOME/.cargo/env"
+          source /root/.cargo/env
           cargo test --manifest-path apps/dashboard/src-tauri/Cargo.toml
 
       - name: Build frontend
@@ -106,4 +107,5 @@ jobs:
           mode: delete
           github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
           hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
+          name: ${{ needs.create-runner.outputs.name }}
           server_id: ${{ needs.create-runner.outputs.server_id }}
