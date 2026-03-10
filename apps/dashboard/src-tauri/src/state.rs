@@ -104,7 +104,6 @@ impl ActiveWorkspaceState {
 
 pub struct CachedState {
     pub app_state: AppState,
-    pub updated_at: std::time::Instant,
 }
 
 #[derive(Clone)]
@@ -120,13 +119,11 @@ impl ProjectCache {
         self.0.lock().ok()?.as_ref().map(|c| c.app_state.clone())
     }
 
-    /// Update the cached state.
+    /// Update the cached state. Used by macOS focus polling (ide.rs).
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub fn set(&self, state: AppState) {
         if let Ok(mut guard) = self.0.lock() {
-            *guard = Some(CachedState {
-                app_state: state,
-                updated_at: std::time::Instant::now(),
-            });
+            *guard = Some(CachedState { app_state: state });
         }
     }
 }
