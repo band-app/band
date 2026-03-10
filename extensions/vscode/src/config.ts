@@ -2,21 +2,6 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-export interface BrowserConfig {
-  url: string;
-  pinned?: boolean;
-}
-
-export interface LayoutGroup {
-  size: number;
-  browser?: BrowserConfig;
-}
-
-export interface LayoutConfig {
-  orientation: "horizontal" | "vertical";
-  groups: LayoutGroup[];
-}
-
 export type AgentType = "claude-code";
 
 export interface TerminalConfig {
@@ -26,9 +11,33 @@ export interface TerminalConfig {
   agentType?: AgentType;
 }
 
-export interface BandConfig {
-  layout?: LayoutConfig;
+export interface VsCodeAppConfig {
+  type: "vscode";
+  size?: number;
   terminals?: TerminalConfig[];
+}
+
+export interface ZedAppConfig {
+  type: "zed";
+  size?: number;
+}
+
+export interface ITermAppConfig {
+  type: "iterm";
+  size?: number;
+  commands?: { name?: string; command: string; split?: "horizontal" | "vertical" }[];
+}
+
+export interface ChromeAppConfig {
+  type: "chrome";
+  size?: number;
+  url?: string;
+}
+
+export type AppConfig = VsCodeAppConfig | ZedAppConfig | ITermAppConfig | ChromeAppConfig;
+
+export interface BandConfig {
+  apps?: AppConfig[];
 }
 
 export function getConfigPath(workspacePath: string): string {
@@ -83,9 +92,9 @@ export function mergeConfigs(
     return defaults;
   }
 
+  // Project apps fully replace user default apps (not merged per-element)
   return {
-    ...defaults,
-    ...projectConfig,
+    apps: projectConfig.apps ?? defaults.apps,
   };
 }
 

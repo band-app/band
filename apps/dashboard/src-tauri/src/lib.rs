@@ -99,33 +99,18 @@ pub fn run() {
                 }
             });
 
-            // Raise the active workspace's VS Code window when dashboard gains focus
+            // Raise the active workspace's app windows when dashboard gains focus
             let active_ws_state: std::sync::Arc<std::sync::Mutex<Option<String>>> =
                 app.state::<ActiveWorkspaceState>().inner().0.clone();
-            let project_cache: ProjectCache = app.state::<ProjectCache>().inner().clone();
+            let raise_cache = app.state::<ProjectCache>().inner().clone();
             let window_ref = app.get_webview_window("main").unwrap();
             window_ref.on_window_event(move |event| {
                 if let tauri::WindowEvent::Focused(true) = event {
-                    // Read active workspace from in-memory state
                     let workspace_id: Option<String> =
                         active_ws_state.lock().ok().and_then(|guard| guard.clone());
 
                     if let Some(ws_id) = workspace_id {
-                        if let Some(app_state) = project_cache.get() {
-                            for proj in &app_state.projects {
-                                for wt in &proj.worktrees {
-                                    let id = format!("{}-{}", proj.name, wt.branch);
-                                    if id == ws_id {
-                                        let folder = std::path::Path::new(&wt.path)
-                                            .file_name()
-                                            .and_then(|n| n.to_str())
-                                            .unwrap_or("");
-                                        commands::ide::raise_vscode_window(folder);
-                                        return;
-                                    }
-                                }
-                            }
-                        }
+                        commands::ide::raise_workspace_windows(&ws_id, &raise_cache);
                     }
                 }
             });

@@ -10,6 +10,8 @@ pub fn raise_vscode_window(_branch: &str) {}
 #[allow(dead_code)]
 pub fn align_vscode_window(_branch: &str) {}
 
+pub fn raise_workspace_windows(_workspace_id: &str) {}
+
 #[tauri::command]
 pub fn workspace_focus(
     _workspace_id: String,

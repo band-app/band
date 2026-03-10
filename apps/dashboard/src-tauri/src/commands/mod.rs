@@ -1,4 +1,6 @@
 #[cfg(target_os = "macos")]
+pub mod apps;
+#[cfg(target_os = "macos")]
 pub mod ide;
 #[cfg(not(target_os = "macos"))]
 pub mod ide_stub;
