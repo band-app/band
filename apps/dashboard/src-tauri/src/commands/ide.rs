@@ -2,7 +2,7 @@ use crate::api::ApiClient;
 use crate::state;
 use crate::state::{ActiveWorkspaceState, ProjectCache};
 use std::collections::{HashMap, VecDeque};
-use std::ffi::{c_void, CStr, CString};
+use std::ffi::c_void;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tauri::Manager;
@@ -10,6 +10,10 @@ use tauri::Manager;
 use std::io::Write;
 
 use super::apps;
+use super::ax_windows::{
+    self, get_bundle_id, get_frontmost_window, objc_getClass, objc_msgSend, proc_listpids,
+    proc_pidinfo, sel_registerName, PROC_ALL_PIDS, PROC_PIDTBSDINFO, PROC_PIDVNODEPATHINFO,
+};
 
 fn log_debug(msg: &str) {
     let log_file = state::band_home().join("debug.log");
@@ -24,230 +28,6 @@ fn log_debug(msg: &str) {
         let secs = elapsed.as_secs();
         let millis = elapsed.subsec_millis();
         let _ = writeln!(f, "[{secs}.{millis:03}] {msg}");
-    }
-}
-
-// --- macOS native API FFI declarations ---
-
-const K_CF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
-const PROC_ALL_PIDS: u32 = 1;
-const PROC_PIDTBSDINFO: i32 = 3;
-const PROC_PIDVNODEPATHINFO: i32 = 9;
-
-#[link(name = "ApplicationServices", kind = "framework")]
-extern "C" {
-    fn AXUIElementCreateSystemWide() -> *const c_void;
-    fn AXUIElementCopyAttributeValue(
-        element: *const c_void,
-        attribute: *const c_void,
-        value: *mut *const c_void,
-    ) -> i32;
-    fn AXUIElementGetPid(element: *const c_void, pid: *mut i32) -> i32;
-    fn AXIsProcessTrustedWithOptions(options: *const c_void) -> bool;
-}
-
-#[link(name = "CoreFoundation", kind = "framework")]
-extern "C" {
-    fn CFRelease(cf: *const c_void);
-    fn CFStringCreateWithCString(
-        alloc: *const c_void,
-        c_str: *const i8,
-        encoding: u32,
-    ) -> *const c_void;
-    fn CFStringGetCString(
-        the_string: *const c_void,
-        buffer: *mut i8,
-        buffer_size: i64,
-        encoding: u32,
-    ) -> u8;
-    fn CFStringGetLength(the_string: *const c_void) -> i64;
-    fn CFDictionaryCreate(
-        allocator: *const c_void,
-        keys: *const *const c_void,
-        values: *const *const c_void,
-        count: i64,
-        key_callbacks: *const c_void,
-        value_callbacks: *const c_void,
-    ) -> *const c_void;
-    static kCFBooleanTrue: *const c_void;
-    static kCFTypeDictionaryKeyCallBacks: c_void;
-    static kCFTypeDictionaryValueCallBacks: c_void;
-}
-
-extern "C" {
-    fn proc_listpids(type_: u32, typeinfo: u32, buffer: *mut c_void, buffersize: i32) -> i32;
-    fn proc_pidinfo(pid: i32, flavor: i32, arg: u64, buffer: *mut c_void, buffersize: i32) -> i32;
-}
-
-// --- Objective-C runtime for NSWindow manipulation ---
-
-#[link(name = "objc", kind = "dylib")]
-extern "C" {
-    fn objc_getClass(name: *const i8) -> *const c_void;
-    fn objc_msgSend();
-    fn sel_registerName(name: *const i8) -> *const c_void;
-}
-
-// --- CoreFoundation string helpers ---
-
-unsafe fn cfstr(s: &str) -> *const c_void {
-    let c = CString::new(s).unwrap();
-    CFStringCreateWithCString(std::ptr::null(), c.as_ptr(), K_CF_STRING_ENCODING_UTF8)
-}
-
-unsafe fn cfstring_to_string(cf: *const c_void) -> Option<String> {
-    if cf.is_null() {
-        return None;
-    }
-    let len = CFStringGetLength(cf);
-    if len <= 0 {
-        return Some(String::new());
-    }
-    let buf_size = (len * 4 + 1) as usize;
-    let mut buf = vec![0i8; buf_size];
-    if CFStringGetCString(
-        cf,
-        buf.as_mut_ptr(),
-        buf_size as i64,
-        K_CF_STRING_ENCODING_UTF8,
-    ) != 0
-    {
-        Some(CStr::from_ptr(buf.as_ptr()).to_string_lossy().into_owned())
-    } else {
-        None
-    }
-}
-
-// --- Accessibility API: get frontmost window PID + title ---
-
-/// Prompt for Accessibility permission on first launch, then check periodically.
-fn check_accessibility() -> bool {
-    use std::sync::atomic::{AtomicU8, Ordering};
-    // 0 = unchecked, 1 = trusted, 2 = not trusted (prompted)
-    static STATE: AtomicU8 = AtomicU8::new(0);
-
-    let prev = STATE.load(Ordering::Relaxed);
-
-    let trusted = unsafe {
-        if prev == 0 {
-            // First check: show the macOS Accessibility prompt if not trusted
-            let key = cfstr("AXTrustedCheckOptionPrompt");
-            let keys = [key];
-            let values = [kCFBooleanTrue];
-            let opts = CFDictionaryCreate(
-                std::ptr::null(),
-                keys.as_ptr(),
-                values.as_ptr(),
-                1,
-                &raw const kCFTypeDictionaryKeyCallBacks,
-                &raw const kCFTypeDictionaryValueCallBacks,
-            );
-            let result = AXIsProcessTrustedWithOptions(opts);
-            CFRelease(key);
-            if !opts.is_null() {
-                CFRelease(opts);
-            }
-            result
-        } else {
-            // Subsequent checks: no prompt
-            AXIsProcessTrustedWithOptions(std::ptr::null())
-        }
-    };
-
-    let new = if trusted { 1 } else { 2 };
-    if prev != new {
-        STATE.store(new, Ordering::Relaxed);
-        if trusted {
-            eprintln!("[band] Accessibility permission: granted");
-        } else {
-            eprintln!("[band] Accessibility permission: NOT granted — focus tracking and window management disabled");
-        }
-    }
-    trusted
-}
-
-fn get_frontmost_window() -> Option<(i32, String)> {
-    if !check_accessibility() {
-        return None;
-    }
-
-    unsafe {
-        let system_wide = AXUIElementCreateSystemWide();
-        if system_wide.is_null() {
-            return None;
-        }
-
-        let attr = cfstr("AXFocusedApplication");
-        let mut focused_app: *const c_void = std::ptr::null();
-        let err = AXUIElementCopyAttributeValue(system_wide, attr, &raw mut focused_app);
-        CFRelease(attr);
-        CFRelease(system_wide);
-
-        if err != 0 || focused_app.is_null() {
-            return None;
-        }
-
-        let mut pid: i32 = 0;
-        if AXUIElementGetPid(focused_app, &raw mut pid) != 0 {
-            CFRelease(focused_app);
-            return None;
-        }
-
-        let attr = cfstr("AXFocusedWindow");
-        let mut focused_window: *const c_void = std::ptr::null();
-        let err = AXUIElementCopyAttributeValue(focused_app, attr, &raw mut focused_window);
-        CFRelease(attr);
-        CFRelease(focused_app);
-
-        if err != 0 || focused_window.is_null() {
-            return Some((pid, String::new()));
-        }
-
-        let attr = cfstr("AXTitle");
-        let mut title_ref: *const c_void = std::ptr::null();
-        let err = AXUIElementCopyAttributeValue(focused_window, attr, &raw mut title_ref);
-        CFRelease(attr);
-        CFRelease(focused_window);
-
-        if err != 0 || title_ref.is_null() {
-            return Some((pid, String::new()));
-        }
-
-        let title = cfstring_to_string(title_ref).unwrap_or_default();
-        CFRelease(title_ref);
-
-        Some((pid, title))
-    }
-}
-
-// --- Bundle ID lookup via NSRunningApplication ---
-
-fn get_bundle_id(pid: i32) -> Option<String> {
-    unsafe {
-        type MsgSendPid = unsafe extern "C" fn(*const c_void, *const c_void, i32) -> *const c_void;
-        type MsgSend = unsafe extern "C" fn(*const c_void, *const c_void) -> *const c_void;
-
-        let msg_pid: MsgSendPid = std::mem::transmute(objc_msgSend as unsafe extern "C" fn());
-        let msg: MsgSend = std::mem::transmute(objc_msgSend as unsafe extern "C" fn());
-
-        let cls = objc_getClass(c"NSRunningApplication".as_ptr());
-        if cls.is_null() {
-            return None;
-        }
-
-        let sel = sel_registerName(c"runningApplicationWithProcessIdentifier:".as_ptr());
-        let app = msg_pid(cls, sel, pid);
-        if app.is_null() {
-            return None;
-        }
-
-        let sel = sel_registerName(c"bundleIdentifier".as_ptr());
-        let bundle_id = msg(app, sel);
-        if bundle_id.is_null() {
-            return None;
-        }
-
-        cfstring_to_string(bundle_id)
     }
 }
 
@@ -395,6 +175,22 @@ fn set_active_workspace(active_state: &std::sync::Mutex<Option<String>>, workspa
     }
 }
 
+/// Map a folder name back to a workspace ID using the given app state.
+fn folder_name_to_workspace_id(folder_name: &str, app_state: &state::AppState) -> Option<String> {
+    for proj in &app_state.projects {
+        for wt in &proj.worktrees {
+            let wt_folder = Path::new(&wt.path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("");
+            if wt_folder == folder_name {
+                return Some(format!("{}-{}", proj.name, wt.branch));
+            }
+        }
+    }
+    None
+}
+
 /// Check if the dashboard (our own process) is the frontmost application.
 fn is_dashboard_frontmost() -> bool {
     get_frontmost_window().is_some_and(|(pid, _)| pid as u32 == std::process::id())
@@ -420,20 +216,32 @@ fn workspace_info(workspace_id: &str, app_state: &state::AppState) -> Option<(St
 
 /// Detect the frontmost workspace using native macOS APIs.
 fn detect_frontmost_workspace(app_state: &state::AppState) -> Option<String> {
-    let (pid, title) = get_frontmost_window()?;
+    let (pid, cg_id, title) = ax_windows::get_frontmost_window_with_id()?;
 
     // Skip if frontmost app is our own process
     if pid as u32 == std::process::id() {
         return None;
     }
 
-    // Try CWD-based matching first (generic, works for any app)
+    // 1. Registry lookup: if the focused window's `CGWindowID` is registered,
+    //    we know immediately which workspace it belongs to. This handles
+    //    Cmd+` switching, iTerm (where title matching fails), and any app
+    //    whose window we previously opened.
+    if let Some(cg_id) = cg_id {
+        if let Some((_app_type, folder_name)) = ax_windows::find_workspace_by_cg_id(cg_id) {
+            if let Some(ws_id) = folder_name_to_workspace_id(&folder_name, app_state) {
+                return Some(ws_id);
+            }
+        }
+    }
+
+    // 2. CWD-based matching (generic, works for any app)
     let cwds = get_descendant_cwds(pid);
     if let Some(ws_id) = match_cwds_to_workspace(&cwds, app_state) {
         return Some(ws_id);
     }
 
-    // Fall back to window title matching for known managed apps
+    // 3. Window title matching for known managed apps
     if !title.is_empty() {
         if let Some(bundle_id) = get_bundle_id(pid) {
             let known = apps::all_known_bundle_ids();
@@ -568,6 +376,10 @@ pub fn raise_workspace_windows(workspace_id: &str, cache: &ProjectCache) {
     };
 
     let app_configs = apps::load_apps_config(&worktree_path);
+
+    if app_configs.is_empty() {
+        return;
+    }
 
     for app_config in &app_configs {
         if let Some(driver) = apps::get_driver(app_config.app_type()) {
@@ -707,25 +519,29 @@ pub fn workspace_focus(
 
     // Get screen size for layout computation
     let (screen_width, screen_height) =
-        apps::get_screen_size().ok_or("Failed to get screen size")?;
+        ax_windows::get_screen_size().ok_or("Failed to get screen size")?;
 
     // Compute layout for all apps
     let sizes: Vec<f64> = app_configs.iter().map(apps::AppConfig::size).collect();
     let rects = apps::compute_layout(&sizes, screen_width, screen_height);
 
-    // Open/focus each app and position its window
+    // Open/focus each app in its own thread so slow apps
+    // (e.g. iTerm AppleScript) don't block the UI.
     for (i, app_config) in app_configs.iter().enumerate() {
         if let Some(driver) = apps::get_driver(app_config.app_type()) {
             let config_json = app_config.to_json();
-            driver.open_or_focus(&wt_path, &folder_name, &config_json)?;
-
-            // Position with a small delay to allow the window to appear
-            let driver = apps::get_driver(app_config.app_type()).unwrap();
             let rect = rects[i].clone();
             let folder = folder_name.clone();
+            let path = wt_path.clone();
+            let app_type = app_config.app_type().to_string();
             std::thread::spawn(move || {
-                std::thread::sleep(Duration::from_millis(500));
-                let _ = driver.position_window(&folder, &rect);
+                if let Err(e) = driver.open_or_focus(&path, &folder, &config_json) {
+                    log_debug(&format!("Failed to open {app_type}: {e}"));
+                    return;
+                }
+                if let Err(e) = driver.position_window(&folder, &rect) {
+                    log_debug(&format!("Failed to position {app_type}: {e}"));
+                }
             });
         }
     }

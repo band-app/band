@@ -1,9 +1,8 @@
-use super::{
-    find_and_focus_window, position_window_by_bundle_id, raise_window_by_bundle_id, AppDriver,
-    ScreenRect,
-};
+use super::{AppDriver, ScreenRect};
+use crate::commands::ax_windows;
 
 pub const BUNDLE_ID: &str = "dev.zed.Zed";
+const APP_TYPE: &str = "zed";
 
 pub struct ZedDriver;
 
@@ -22,24 +21,62 @@ impl AppDriver for ZedDriver {
         folder_name: &str,
         _config: &serde_json::Value,
     ) -> Result<(), String> {
-        let found = find_and_focus_window(BUNDLE_ID, folder_name)?;
+        // 1. Check WindowRegistry for a known window
+        if let Some(entry) = ax_windows::get_window(APP_TYPE, folder_name) {
+            if ax_windows::is_window_valid(APP_TYPE, folder_name, BUNDLE_ID) {
+                ax_windows::focus_window(entry.pid, entry.cg_window_id);
+                return Ok(());
+            }
+            ax_windows::unregister_window(APP_TYPE, folder_name);
+        }
 
-        if !found {
-            std::process::Command::new("open")
-                .args(["-a", "Zed", worktree_path])
-                .output()
-                .map_err(|e| format!("Failed to open Zed: {e}"))?;
+        // 2. Try to find an existing window by title
+        if let Some(win) = ax_windows::find_window_by_title(BUNDLE_ID, folder_name) {
+            ax_windows::register_window(APP_TYPE, folder_name, win.pid, win.cg_window_id);
+            ax_windows::focus_window(win.pid, win.cg_window_id);
+            return Ok(());
+        }
+
+        // 3. Snapshot existing windows, launch app, discover new window
+        let existing = ax_windows::snapshot_window_ids(BUNDLE_ID);
+
+        std::process::Command::new("open")
+            .args(["-a", "Zed", worktree_path])
+            .output()
+            .map_err(|e| format!("Failed to open Zed: {e}"))?;
+
+        if let Some(win) =
+            ax_windows::await_new_window(BUNDLE_ID, Some(folder_name), &existing, 5000)
+        {
+            ax_windows::register_window(APP_TYPE, folder_name, win.pid, win.cg_window_id);
         }
 
         Ok(())
     }
 
     fn position_window(&self, folder_name: &str, rect: &ScreenRect) -> Result<(), String> {
-        position_window_by_bundle_id(BUNDLE_ID, folder_name, rect)
+        let entry = ax_windows::get_window(APP_TYPE, folder_name)
+            .ok_or_else(|| "No Zed window registered".to_string())?;
+        if !ax_windows::position_window(
+            entry.pid,
+            entry.cg_window_id,
+            rect.x,
+            rect.y,
+            rect.width,
+            rect.height,
+        ) {
+            ax_windows::unregister_window(APP_TYPE, folder_name);
+            return Err("Failed to position Zed window (stale reference)".to_string());
+        }
+        Ok(())
     }
 
     fn raise_window(&self, folder_name: &str) {
-        raise_window_by_bundle_id(BUNDLE_ID, folder_name);
+        if let Some(entry) = ax_windows::get_window(APP_TYPE, folder_name) {
+            if !ax_windows::raise_window(entry.pid, entry.cg_window_id) {
+                ax_windows::unregister_window(APP_TYPE, folder_name);
+            }
+        }
     }
 
     fn matches_window_title(&self, title: &str, folder_name: &str) -> bool {
