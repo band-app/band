@@ -71,8 +71,8 @@ impl TestEnv {
         .unwrap();
 
         // Start the web server
-        let web_dist = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../apps/web/dist/start-server.mjs");
+        let web_dist =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/web/dist/start-server.mjs");
         assert!(
             web_dist.exists(),
             "Web server not built. Run: pnpm -F @band/web build"
@@ -270,7 +270,11 @@ fn remove_cleans_up_worktree_and_state() {
     let env = TestEnv::new();
 
     let create_out = env.band(&["create", "my-project", "feat/rm"]);
-    assert!(create_out.status.success(), "stderr: {}", stderr(&create_out));
+    assert!(
+        create_out.status.success(),
+        "stderr: {}",
+        stderr(&create_out)
+    );
     let path = stdout(&create_out);
 
     let output = env.band(&["remove", "my-project", "feat/rm"]);

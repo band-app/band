@@ -91,10 +91,7 @@ fn cmd_create(project: &str, branch: &str, base: Option<&str>) -> Result<(), Str
         input["base"] = serde_json::json!(base);
     }
     let data = client.trpc_mutate("workspaces.create", &input)?;
-    let path = data
-        .get("path")
-        .and_then(|p| p.as_str())
-        .unwrap_or("");
+    let path = data.get("path").and_then(|p| p.as_str()).unwrap_or("");
     println!("{path}");
     Ok(())
 }
@@ -257,10 +254,7 @@ fn cmd_notify() -> Result<(), String> {
     };
 
     // Resolve CWD to workspace ID
-    let resolve_result = client.trpc_query(
-        "statuses.resolve",
-        &serde_json::json!({ "cwd": cwd }),
-    );
+    let resolve_result = client.trpc_query("statuses.resolve", &serde_json::json!({ "cwd": cwd }));
     let workspace_id = match resolve_result {
         Ok(data) => data
             .get("workspaceId")

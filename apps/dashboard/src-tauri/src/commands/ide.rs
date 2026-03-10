@@ -805,7 +805,9 @@ return foundWindow"#
 
     if !found {
         // No matching window — open the folder in a new VS Code window
-        log_debug(&format!("workspace_focus: opening new window for {wt_path}"));
+        log_debug(&format!(
+            "workspace_focus: opening new window for {wt_path}"
+        ));
         std::process::Command::new("open")
             .args(["-a", "Visual Studio Code", &wt_path])
             .output()

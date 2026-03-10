@@ -135,10 +135,8 @@ pub fn run() {
             window_ref.on_window_event(move |event| {
                 if let tauri::WindowEvent::Focused(true) = event {
                     // Read active workspace from in-memory state
-                    let workspace_id: Option<String> = active_ws_state
-                        .lock()
-                        .ok()
-                        .and_then(|guard| guard.clone());
+                    let workspace_id: Option<String> =
+                        active_ws_state.lock().ok().and_then(|guard| guard.clone());
 
                     if let Some(ws_id) = workspace_id {
                         if let Some(app_state) = project_cache.get() {

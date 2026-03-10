@@ -73,9 +73,7 @@ impl ApiClient {
     }
 }
 
-fn parse_trpc_body(
-    mut response: http::Response<Body>,
-) -> Result<serde_json::Value, String> {
+fn parse_trpc_body(mut response: http::Response<Body>) -> Result<serde_json::Value, String> {
     let status = response.status().as_u16();
 
     // Auth failure
