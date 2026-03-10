@@ -1,12 +1,14 @@
 //! Stub implementations of the IDE commands for non-macOS platforms.
 //! The real implementation lives in `ide.rs` and uses macOS-specific APIs.
 
+#[allow(dead_code)]
 pub fn write_active_marker(_workspace_id: &str) {}
 
 pub fn start_focus_polling(_app_handle: tauri::AppHandle) {}
 
 pub fn raise_vscode_window(_branch: &str) {}
 
+#[allow(dead_code)]
 pub fn align_vscode_window(_branch: &str) {}
 
 #[tauri::command]
