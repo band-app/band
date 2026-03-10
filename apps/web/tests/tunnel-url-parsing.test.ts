@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { spawn } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
@@ -165,14 +166,23 @@ async function startServer(
 // tRPC helpers
 // ---------------------------------------------------------------------------
 
-async function trpcQuery(serverUrl: string, procedure: string) {
-  return fetch(`${serverUrl}/trpc/${procedure}`);
+async function trpcQuery(
+  serverUrl: string,
+  procedure: string,
+  opts?: { headers?: Record<string, string> },
+) {
+  return fetch(`${serverUrl}/trpc/${procedure}`, opts?.headers ? { headers: opts.headers } : undefined);
 }
 
-async function trpcMutate(serverUrl: string, procedure: string, input?: unknown) {
+async function trpcMutate(
+  serverUrl: string,
+  procedure: string,
+  input?: unknown,
+  opts?: { headers?: Record<string, string> },
+) {
   return fetch(`${serverUrl}/trpc/${procedure}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...opts?.headers },
     body: input !== undefined ? JSON.stringify(input) : "{}",
   });
 }
@@ -196,6 +206,11 @@ async function waitFor(
     await new Promise((r) => setTimeout(r, interval));
   }
   throw new Error("Timed out");
+}
+
+function authCookie(secret: string): string {
+  const token = createHmac("sha256", secret).update("band-access").digest("hex");
+  return `band_token=${token}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -251,7 +266,48 @@ describe("tunnel.start — parses URL from emoji-prefixed instatunnel output", (
 });
 
 // ---------------------------------------------------------------------------
-// Tests: subdomain taken does not throw TRPCClientError
+// Tests: tunnel.start returns URL directly in response
+// ---------------------------------------------------------------------------
+
+describe("tunnel.start — returns URL in mutation response", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    seedState(tmpHome, createDefaultState(tmpHome));
+    seedSettings(tmpHome, {});
+
+    const binDir = join(tmpHome, "bin");
+    mkdirSync(binDir, { recursive: true });
+    createFakeInstatunnel(binDir, "directurl");
+
+    server = await startServer({
+      tmpHome,
+      env: {
+        PATH: `${binDir}:${process.env.PATH}`,
+        SHELL: "/bin/sh",
+      },
+    });
+  });
+
+  afterAll(async () => {
+    await trpcMutate(server.url, "tunnel.stop").catch(() => {});
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("mutation response includes the tunnel URL", async () => {
+    const res = await trpcMutate(server.url, "tunnel.start", {});
+    expect(res.status).toBe(200);
+    const data = await trpcData<{ ok: boolean; url: string | null }>(res);
+    expect(data.ok).toBe(true);
+    expect(data.url).toContain("https://directurl.instatunnel.my");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: subdomain taken — resolves without error and returns null URL
 // ---------------------------------------------------------------------------
 
 describe("tunnel.start — subdomain taken resolves without error", () => {
@@ -281,8 +337,224 @@ describe("tunnel.start — subdomain taken resolves without error", () => {
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  it("returns 200 when subdomain is taken (does not throw)", async () => {
+  it("returns 200 with null URL when subdomain is taken", async () => {
     const res = await trpcMutate(server.url, "tunnel.start", { subdomain: "taken-sub" });
     expect(res.status).toBe(200);
+    const data = await trpcData<{ ok: boolean; url: string | null }>(res);
+    expect(data.ok).toBe(true);
+    // URL is null because the subdomain is taken and no remote tunnel is reachable
+    expect(data.url).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: services.health — remote detection with configured subdomain
+// ---------------------------------------------------------------------------
+
+describe("services.health — configured subdomain, no tunnel running, remote unreachable", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    seedState(tmpHome, createDefaultState(tmpHome));
+    // Configure a subdomain that won't resolve to a real tunnel
+    seedSettings(tmpHome, { tunnelSubdomain: "nonexistent-test-sub" });
+    server = await startServer({ tmpHome });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("returns tunnel as not healthy when remote is unreachable (no token)", async () => {
+    const res = await trpcQuery(server.url, "services.health");
+    expect(res.status).toBe(200);
+    const data = await trpcData<{
+      webserver: boolean;
+      tunnel: boolean;
+      tunnel_url: string | null;
+      tunnel_remote_host: string | null;
+    }>(res);
+    expect(data.webserver).toBe(true);
+    expect(data.tunnel).toBe(false);
+    expect(data.tunnel_url).toBeNull();
+    expect(data.tunnel_remote_host).toBeNull();
+  });
+});
+
+describe("services.health — configured subdomain, no tunnel, with token, remote unreachable", () => {
+  const SECRET = "health-check-test-secret";
+  let server: ServerHandle;
+  let tmpHome: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    seedState(tmpHome, createDefaultState(tmpHome));
+    seedSettings(tmpHome, { tunnelSubdomain: "nonexistent-test-sub" });
+    server = await startServer({ tmpHome, env: { BAND_TOKEN_SECRET: SECRET } });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("returns tunnel as not healthy when remote is unreachable (with token)", async () => {
+    const res = await trpcQuery(server.url, "services.health", {
+      headers: { Cookie: authCookie(SECRET) },
+    });
+    expect(res.status).toBe(200);
+    const data = await trpcData<{
+      webserver: boolean;
+      tunnel: boolean;
+      tunnel_url: string | null;
+      tunnel_remote_host: string | null;
+    }>(res);
+    expect(data.webserver).toBe(true);
+    expect(data.tunnel).toBe(false);
+    expect(data.tunnel_url).toBeNull();
+    expect(data.tunnel_remote_host).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: services.health — local tunnel process running
+// ---------------------------------------------------------------------------
+
+describe("services.health — with running local tunnel process", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    seedState(tmpHome, createDefaultState(tmpHome));
+    seedSettings(tmpHome, {});
+
+    const binDir = join(tmpHome, "bin");
+    mkdirSync(binDir, { recursive: true });
+    createFakeInstatunnel(binDir, "healthcheck");
+
+    server = await startServer({
+      tmpHome,
+      env: {
+        PATH: `${binDir}:${process.env.PATH}`,
+        SHELL: "/bin/sh",
+      },
+    });
+  });
+
+  afterAll(async () => {
+    await trpcMutate(server.url, "tunnel.stop").catch(() => {});
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("reports tunnel URL via services.health after tunnel starts", async () => {
+    // Start the tunnel
+    await trpcMutate(server.url, "tunnel.start", {});
+
+    // Wait for tunnel to be running
+    await waitFor(async () => {
+      const res = await trpcQuery(server.url, "tunnel.status");
+      const status = await trpcData<{ running: boolean; url: string | null }>(res);
+      return status.running && status.url !== null;
+    });
+
+    // Now check services.health — it should report the tunnel URL
+    const healthRes = await trpcQuery(server.url, "services.health");
+    expect(healthRes.status).toBe(200);
+    const health = await trpcData<{
+      webserver: boolean;
+      tunnel: boolean;
+      tunnel_url: string | null;
+      tunnel_remote_host: string | null;
+    }>(healthRes);
+    expect(health.webserver).toBe(true);
+    // tunnel_url should be set (local process has it)
+    expect(health.tunnel_url).toContain("https://healthcheck.instatunnel.my");
+    // Note: tunnel may report as not healthy because the fake tunnel URL
+    // doesn't actually forward requests — but the URL should still be present
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: tunnel.start — subdomain taken with token triggers remote fallback
+// ---------------------------------------------------------------------------
+
+describe("tunnel.start — subdomain taken attempts remote fallback", () => {
+  const SECRET = "fallback-test-secret";
+  let server: ServerHandle;
+  let tmpHome: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    seedState(tmpHome, createDefaultState(tmpHome));
+    // Configure a subdomain that will be "taken" by the fake script
+    seedSettings(tmpHome, { tunnelSubdomain: "taken-remote" });
+
+    const binDir = join(tmpHome, "bin");
+    mkdirSync(binDir, { recursive: true });
+    createFakeInstatunnelSubdomainTaken(binDir);
+
+    server = await startServer({
+      tmpHome,
+      env: {
+        PATH: `${binDir}:${process.env.PATH}`,
+        SHELL: "/bin/sh",
+        BAND_TOKEN_SECRET: SECRET,
+      },
+    });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("returns null URL when subdomain is taken and remote is unreachable", async () => {
+    const res = await trpcMutate(server.url, "tunnel.start", {}, {
+      headers: { Cookie: authCookie(SECRET) },
+    });
+    expect(res.status).toBe(200);
+    const data = await trpcData<{ ok: boolean; url: string | null }>(res);
+    expect(data.ok).toBe(true);
+    // Remote tunnel (taken-remote.instatunnel.my) doesn't exist, so fallback returns null
+    expect(data.url).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: services.health — no subdomain configured skips remote check
+// ---------------------------------------------------------------------------
+
+describe("services.health — no subdomain configured, no tunnel", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    seedState(tmpHome, createDefaultState(tmpHome));
+    seedSettings(tmpHome, {}); // No tunnelSubdomain
+    server = await startServer({ tmpHome });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("returns tunnel false without attempting remote check", async () => {
+    const res = await trpcQuery(server.url, "services.health");
+    expect(res.status).toBe(200);
+    const data = await trpcData<{
+      webserver: boolean;
+      tunnel: boolean;
+      tunnel_url: string | null;
+    }>(res);
+    expect(data.webserver).toBe(true);
+    expect(data.tunnel).toBe(false);
+    expect(data.tunnel_url).toBeNull();
   });
 });

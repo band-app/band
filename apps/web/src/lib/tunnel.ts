@@ -194,17 +194,17 @@ export async function checkTunnelHealth(
   const url = token ? `${baseUrl}/api/health?token=${token}` : baseUrl;
   try {
     const response = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+    if (!response.ok) {
+      return { healthy: false };
+    }
     if (token) {
-      if (!response.ok) {
-        return { healthy: false };
-      }
       const body = (await response.json()) as { status?: string; hostname?: string };
       return {
         healthy: body.status === "ok",
         remoteHost: body.hostname,
       };
     }
-    // No token — any HTTP response means the tunnel is alive
+    // No token — a 2xx response from the tunnel means it's alive and forwarding
     return { healthy: true };
   } catch {
     return { healthy: false };
