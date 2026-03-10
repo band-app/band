@@ -1,5 +1,5 @@
-import { createHmac } from "node:crypto";
 import { spawn } from "node:child_process";
+import { createHmac } from "node:crypto";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -171,7 +171,10 @@ async function trpcQuery(
   procedure: string,
   opts?: { headers?: Record<string, string> },
 ) {
-  return fetch(`${serverUrl}/trpc/${procedure}`, opts?.headers ? { headers: opts.headers } : undefined);
+  return fetch(
+    `${serverUrl}/trpc/${procedure}`,
+    opts?.headers ? { headers: opts.headers } : undefined,
+  );
 }
 
 async function trpcMutate(
@@ -514,9 +517,14 @@ describe("tunnel.start — subdomain taken attempts remote fallback", () => {
   });
 
   it("returns null URL when subdomain is taken and remote is unreachable", async () => {
-    const res = await trpcMutate(server.url, "tunnel.start", {}, {
-      headers: { Cookie: authCookie(SECRET) },
-    });
+    const res = await trpcMutate(
+      server.url,
+      "tunnel.start",
+      {},
+      {
+        headers: { Cookie: authCookie(SECRET) },
+      },
+    );
     expect(res.status).toBe(200);
     const data = await trpcData<{ ok: boolean; url: string | null }>(res);
     expect(data.ok).toBe(true);
