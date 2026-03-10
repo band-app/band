@@ -42,8 +42,9 @@ jobs:
       - name: Lint (cargo clippy — Dashboard)
         run: |
           source "$HOME/.cargo/env"
-          mkdir -p apps/web/dist
+          mkdir -p apps/web/dist apps/dashboard/src-tauri/binaries
           touch apps/web/dist/start-server.mjs
+          cp apps/cli/target/release/band "apps/dashboard/src-tauri/binaries/band-$(rustc -vV | sed -n 's/host: //p')"
           cargo clippy --manifest-path apps/dashboard/src-tauri/Cargo.toml -- -D warnings
 
       - name: Build web (needed by tests)
