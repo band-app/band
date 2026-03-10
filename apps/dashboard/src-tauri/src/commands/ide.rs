@@ -6,6 +6,23 @@ use std::time::Duration;
 
 const DASHBOARD_WIDTH: i32 = 400;
 
+fn log_debug(msg: &str) {
+    let log_file = state::band_home().join("debug.log");
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_file)
+    {
+        let elapsed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default();
+        let secs = elapsed.as_secs();
+        let millis = elapsed.subsec_millis();
+        let _ = writeln!(f, "[{secs}.{millis:03}] {msg}");
+    }
+}
+
 // --- macOS native API FFI declarations ---
 
 const K_CF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
@@ -652,6 +669,20 @@ end tell
 
 #[tauri::command]
 pub fn workspace_focus(workspace_id: String) -> Result<(), String> {
+    use std::sync::Mutex;
+    use std::time::Instant;
+
+    static LAST_CALL: Mutex<Option<Instant>> = Mutex::new(None);
+    let mut last = LAST_CALL.lock().unwrap();
+    if let Some(t) = *last {
+        if t.elapsed() < Duration::from_millis(500) {
+            log_debug("workspace_focus: debounced (too soon after last call)");
+            return Ok(());
+        }
+    }
+    *last = Some(Instant::now());
+    drop(last);
+
     let app_state = state::load_state()?;
 
     for proj in &app_state.projects {
@@ -664,33 +695,49 @@ pub fn workspace_focus(workspace_id: String) -> Result<(), String> {
                     .unwrap_or("")
                     .to_string();
 
-                // Focus VS Code window with matching folder name
+                // Focus VS Code window with matching folder name via System Events
                 let script = format!(
-                    r#"tell application "Visual Studio Code"
-    activate
-    set foundWindow to false
-    repeat with w in windows
-        if name of w contains "{folder_name}" then
-            set index of w to 1
-            set foundWindow to true
-            exit repeat
-        end if
-    end repeat
+                    r#"tell application "System Events"
+    if not (exists (first process whose bundle identifier is "com.microsoft.VSCode")) then
+        return "no_vscode"
+    end if
+    tell (first process whose bundle identifier is "com.microsoft.VSCode")
+        set foundWindow to false
+        repeat with w in windows
+            if title of w contains "{folder_name}" then
+                perform action "AXRaise" of w
+                set foundWindow to true
+                exit repeat
+            end if
+        end repeat
+    end tell
 end tell
+if foundWindow then
+    tell application "Visual Studio Code" to activate
+end if
 return foundWindow"#
                 );
+
+                log_debug(&format!(
+                    "workspace_focus: id={workspace_id}, folder_name={folder_name}"
+                ));
 
                 let output = std::process::Command::new("osascript")
                     .args(["-e", &script])
                     .output()
                     .map_err(|e| format!("Failed to focus window: {e}"))?;
 
-                let found = String::from_utf8_lossy(&output.stdout)
-                    .trim()
-                    .eq_ignore_ascii_case("true");
+                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                let found = stdout.eq_ignore_ascii_case("true");
+
+                log_debug(&format!(
+                    "workspace_focus: found={found}, stdout={stdout:?}, stderr={stderr:?}"
+                ));
 
                 if !found {
                     // No matching window — open the folder in a new VS Code window
+                    log_debug(&format!("workspace_focus: opening new window for {}", &wt.path));
                     std::process::Command::new("open")
                         .args(["-a", "Visual Studio Code", &wt.path])
                         .output()

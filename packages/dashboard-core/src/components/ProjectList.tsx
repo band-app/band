@@ -273,6 +273,7 @@ export function ProjectList({ labelFilter, editMode }: ProjectListProps) {
   const [focusedIndex, setFocusedIndex] = useState(-1);
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const keyboardNavRef = useRef(false);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
@@ -331,6 +332,7 @@ export function ProjectList({ labelFilter, editMode }: ProjectListProps) {
   }, [visibleGroups]);
 
   useEffect(() => {
+    if (keyboardNavRef.current) return;
     if (activeWorkspaceId) {
       const idx = allWorkspaceIds.indexOf(activeWorkspaceId);
       setFocusedIndex(idx);
@@ -348,12 +350,15 @@ export function ProjectList({ labelFilter, editMode }: ProjectListProps) {
 
     if (e.key === "ArrowDown") {
       e.preventDefault();
+      keyboardNavRef.current = true;
       setFocusedIndex((prev) => (prev < allWorkspaceIds.length - 1 ? prev + 1 : prev));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
+      keyboardNavRef.current = true;
       setFocusedIndex((prev) => (prev > 0 ? prev - 1 : prev));
     } else if (e.key === "Enter") {
       if (focusedIndex >= 0 && focusedIndex < allWorkspaceIds.length) {
+        keyboardNavRef.current = false;
         openWorkspace(allWorkspaceIds[focusedIndex]);
       }
     }
@@ -412,6 +417,7 @@ export function ProjectList({ labelFilter, editMode }: ProjectListProps) {
         ref={containerRef}
         tabIndex={-1}
         onKeyDown={handleKeyDown}
+        onPointerDown={() => { keyboardNavRef.current = false; }}
         className="flex flex-col gap-1 outline-none min-w-0"
       >
         <DndContext
