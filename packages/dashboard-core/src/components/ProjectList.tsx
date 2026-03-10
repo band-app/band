@@ -30,7 +30,16 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Check, Clipboard, FolderOpen, ListMinus, Plus, Tag } from "lucide-react";
+import {
+  Check,
+  Clipboard,
+  FolderOpen,
+  GripVertical,
+  ListMinus,
+  Plus,
+  Tag,
+  Trash2,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useCapabilities } from "../context";
 import {
@@ -64,6 +73,7 @@ interface SortableProjectProps {
   onShowDeleteDialog: (info: DeleteDialogInfo) => void;
   focusedIndex: number;
   workspaceIndexStart: number;
+  editMode: boolean;
 }
 
 function SortableProject({
@@ -77,9 +87,11 @@ function SortableProject({
   onShowDeleteDialog,
   focusedIndex,
   workspaceIndexStart,
+  editMode,
 }: SortableProjectProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: project.name,
+    disabled: !editMode,
   });
   const capabilities = useCapabilities();
 
@@ -97,25 +109,43 @@ function SortableProject({
         <ContextMenuTrigger asChild>
           <div className="flex items-center justify-between mb-1 px-1">
             <div
-              className="flex items-center gap-2 min-w-0 cursor-grab touch-none"
-              {...attributes}
-              {...listeners}
+              className={`flex items-center gap-2 min-w-0 ${editMode ? "cursor-grab touch-none" : ""}`}
+              {...(editMode ? { ...attributes, ...listeners } : {})}
             >
+              {editMode && <GripVertical className="size-4 shrink-0 text-muted-foreground" />}
               <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
               <h2 className="text-sm font-semibold text-foreground truncate">{project.name}</h2>
             </div>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  onClick={() => setWorkspaceDialog(project.name)}
-                >
-                  <Plus />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Add workspace</TooltipContent>
-            </Tooltip>
+            <div className="flex items-center gap-1">
+              {editMode ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      className="text-destructive hover:text-destructive"
+                      onClick={() => removeProject(project.name)}
+                    >
+                      <Trash2 />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Remove project</TooltipContent>
+                </Tooltip>
+              ) : (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      onClick={() => setWorkspaceDialog(project.name)}
+                    >
+                      <Plus />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Add workspace</TooltipContent>
+                </Tooltip>
+              )}
+            </div>
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent>
@@ -184,6 +214,7 @@ function SortableProject({
                 branchStatus={branchStatuses.get(wsId)}
                 isFocused={currentIndex === focusedIndex}
                 onShowDeleteDialog={onShowDeleteDialog}
+                editMode={editMode}
               />
             );
           })
@@ -220,9 +251,10 @@ function DroppableUnlabeledHeader() {
 
 interface ProjectListProps {
   labelFilter: string | null;
+  editMode: boolean;
 }
 
-export function ProjectList({ labelFilter }: ProjectListProps) {
+export function ProjectList({ labelFilter, editMode }: ProjectListProps) {
   const { projects } = useProjects();
   const { settings } = useSettingsQuery();
   const labels = settings.labels ?? [];
@@ -415,6 +447,7 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
                       onShowDeleteDialog={setDeleteDialog}
                       focusedIndex={focusedIndex}
                       workspaceIndexStart={workspaceIndexMap.get(project.name) ?? 0}
+                      editMode={editMode}
                     />
                   </div>
                 ))}

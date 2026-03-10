@@ -17,7 +17,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@band/ui";
-import { Check, FolderPlus, Plus, Settings, Tag, X } from "lucide-react";
+import { Check, FolderPlus, Pencil, Plus, Settings, Tag, X } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useCliSetup } from "../hooks/use-cli-setup";
 import { useHooksSetup } from "../hooks/use-hooks-setup";
@@ -46,6 +46,7 @@ export function DashboardShell({ toolbarExtra }: DashboardShellProps) {
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [showErrorDialog, setShowErrorDialog] = useState(false);
   const [view, setView] = useState<"dashboard" | "settings">("dashboard");
+  const [editMode, setEditMode] = useState(false);
   const [labelFilter, setLabelFilter] = useState<string | null>(null);
   const { state: hooksState, install: installHooks } = useHooksSetup();
   const { state: cliState, install: installCli } = useCliSetup();
@@ -75,6 +76,18 @@ export function DashboardShell({ toolbarExtra }: DashboardShellProps) {
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>Settings</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    size="icon-sm"
+                    variant={editMode ? "secondary" : "ghost"}
+                    onClick={() => setEditMode((v) => !v)}
+                  >
+                    <Pencil className="size-5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{editMode ? "Done editing" : "Edit projects"}</TooltipContent>
               </Tooltip>
               {toolbarExtra}
               {labels.length > 0 && (
@@ -165,7 +178,7 @@ export function DashboardShell({ toolbarExtra }: DashboardShellProps) {
                   </Button>
                 </div>
               ) : (
-                <ProjectList labelFilter={labelFilter} />
+                <ProjectList labelFilter={labelFilter} editMode={editMode} />
               )}
             </main>
           </ScrollArea>

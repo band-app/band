@@ -22,6 +22,7 @@ interface Props {
   branchStatus?: WorkspaceBranchStatus;
   isFocused?: boolean;
   onShowDeleteDialog: (info: DeleteDialogInfo) => void;
+  editMode?: boolean;
 }
 
 export function WorkspaceCard({
@@ -32,6 +33,7 @@ export function WorkspaceCard({
   branchStatus,
   isFocused,
   onShowDeleteDialog,
+  editMode,
 }: Props) {
   const cardRef = useRef<HTMLDivElement>(null);
   const capabilities = useCapabilities();
@@ -103,12 +105,14 @@ export function WorkspaceCard({
             >
               {worktree.branch}
             </span>
-            <AgentStatusBadge agent={status?.agent} />
+            {!editMode && <AgentStatusBadge agent={status?.agent} />}
           </div>
-          <div className="flex items-center gap-2 shrink-0">
-            {branchStatus && <GitStatusIndicator git={branchStatus.git} />}
-            {branchStatus && <CIStatusIndicator ci={branchStatus.ci} />}
-          </div>
+          {!editMode && (
+            <div className="flex items-center gap-2 shrink-0">
+              {branchStatus && <GitStatusIndicator git={branchStatus.git} />}
+              {branchStatus && <CIStatusIndicator ci={branchStatus.ci} />}
+            </div>
+          )}
         </Container>
       </ContextMenuTrigger>
       <ContextMenuContent>
