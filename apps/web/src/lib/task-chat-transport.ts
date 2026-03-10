@@ -5,15 +5,12 @@ function subscriptionToStream(
   workspaceId: string,
   abortSignal?: AbortSignal,
 ): ReadableStream<UIMessageChunk> {
-  let receivedAny = false;
-
   return new ReadableStream<UIMessageChunk>({
     start(controller) {
       const subscription = trpc.tasks.stream.subscribe(
         { workspaceId },
         {
           onData(chunk: UIMessageChunk) {
-            receivedAny = true;
             controller.enqueue(chunk);
           },
           onComplete() {
