@@ -228,6 +228,7 @@ function* mapCursorEvent(
         yield {
           type: "tool-result",
           toolCallId: callId,
+          toolName: resolveToolName(toolCall),
           output,
           isError,
         };

@@ -259,7 +259,7 @@ async function runTask(workspaceId: string, task: InternalTask) {
             emit(workspaceId, task, {
               type: "tool-input-available",
               toolCallId: event.toolCallId,
-              toolName: "tool",
+              toolName: event.toolName ?? "tool",
               input: {},
             });
             announcedToolCalls.add(event.toolCallId);
