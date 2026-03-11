@@ -154,6 +154,64 @@ impl WindowManager {
             }
         }
     }
+
+    /// Close all windows matching a given folder name, wait for them to disappear,
+    /// then unregister them. Returns an error if any window is still open after the timeout.
+    pub fn close_all_for_folder(&self, folder_name: &str) -> Result<(), String> {
+        let suffix = format!(":{folder_name}");
+        let matching: Vec<(String, WindowEntry)> = {
+            let map = self.registry.lock().unwrap();
+            map.iter()
+                .filter(|(key, _)| key.ends_with(&suffix))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect()
+        };
+
+        if matching.is_empty() {
+            return Ok(());
+        }
+
+        // Press close button on each window
+        for (_key, entry) in &matching {
+            ax_windows::close_window(entry.pid, entry.cg_window_id);
+        }
+
+        // Poll until all windows are gone or timeout (5s)
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let still_open: Vec<&str> = matching
+                .iter()
+                .filter(|(_key, entry)| {
+                    ax_windows::window_exists(entry.pid, entry.cg_window_id)
+                })
+                .map(|(key, _)| key.as_str())
+                .collect();
+
+            if still_open.is_empty() {
+                break;
+            }
+
+            if std::time::Instant::now() >= deadline {
+                return Err(format!(
+                    "Windows still open: {}. Close them before deleting the workspace.",
+                    still_open.join(", ")
+                ));
+            }
+
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+
+        // All windows closed — unregister and persist
+        {
+            let mut map = self.registry.lock().unwrap();
+            for (key, _) in &matching {
+                map.remove(key);
+            }
+            save_to_disk(&map);
+        }
+
+        Ok(())
+    }
 }
 
 // --- Persistence helpers ---

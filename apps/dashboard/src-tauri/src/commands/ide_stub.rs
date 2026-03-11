@@ -17,6 +17,14 @@ pub fn workspace_focus(
 }
 
 #[tauri::command]
+pub fn workspace_close(
+    _workspace_id: String,
+    _project_cache: tauri::State<'_, ProjectCache>,
+) -> Result<(), String> {
+    Ok(())
+}
+
+#[tauri::command]
 pub fn get_active_workspace(
     _active_state: tauri::State<'_, ActiveWorkspaceState>,
 ) -> Result<Option<String>, String> {

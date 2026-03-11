@@ -21,6 +21,7 @@ pub fn run() {
         .manage(ProjectCache::new())
         .invoke_handler(tauri::generate_handler![
             commands::ide::workspace_focus,
+            commands::ide::workspace_close,
             commands::ide::get_active_workspace,
             commands::ide::detect_active_workspace,
             commands::ide::pick_folder,

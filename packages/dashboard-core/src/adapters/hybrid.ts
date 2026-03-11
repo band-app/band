@@ -21,6 +21,14 @@ async function tauriListen<T>(event: string, handler: (payload: T) => void): Pro
  * running inside the Tauri webview.
  */
 export class HybridDashboardAdapter extends WebDashboardAdapter {
+  async removeWorkspace(project: string, branch: string): Promise<void> {
+    if (isTauri()) {
+      const workspaceId = `${project}-${branch}`;
+      await tauriInvoke("workspace_close", { workspaceId });
+    }
+    return super.removeWorkspace(project, branch);
+  }
+
   async openWorkspace(workspaceId: string): Promise<void> {
     if (isTauri()) {
       await tauriInvoke("workspace_focus", { workspaceId });
