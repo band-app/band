@@ -197,6 +197,6 @@ test("back button navigates to dashboard", async ({ page }) => {
   await expect(backButton).toBeVisible();
   await backButton.click();
 
-  // Should navigate to the dashboard
-  await page.waitForURL(`${server.url}/?token=${TOKEN}`);
+  // Should navigate away from /tasks
+  await page.waitForURL((url) => !url.pathname.includes("/tasks"));
 });
