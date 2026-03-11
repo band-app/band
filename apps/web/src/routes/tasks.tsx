@@ -314,7 +314,11 @@ function TaskCard({ task, onAction }: { task: TaskRecord; onAction: () => void }
               disabled={acting}
               title="Cancel task"
             >
-              {acting ? <Loader2 className="size-3.5 animate-spin" /> : <XCircle className="size-3.5" />}
+              {acting ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <XCircle className="size-3.5" />
+              )}
             </Button>
           )}
           {(task.status === "completed" || task.status === "failed") && (
@@ -326,7 +330,11 @@ function TaskCard({ task, onAction }: { task: TaskRecord; onAction: () => void }
               disabled={acting}
               title="Re-run task"
             >
-              {acting ? <Loader2 className="size-3.5 animate-spin" /> : <RotateCcw className="size-3.5" />}
+              {acting ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <RotateCcw className="size-3.5" />
+              )}
             </Button>
           )}
           <StatusBadge status={task.status} />
