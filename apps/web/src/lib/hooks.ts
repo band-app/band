@@ -3,13 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { whichBinary } from "./process-utils";
 
-const HOOK_EVENTS = [
-  "UserPromptSubmit",
-  "PostToolUse",
-  "PostToolUseFailure",
-  "Stop",
-  "PermissionRequest",
-];
+const HOOK_EVENTS = ["UserPromptSubmit", "PostToolUse", "Stop"];
 
 function claudeSettingsPath(): string {
   return join(homedir(), ".claude", "settings.json");
@@ -86,6 +80,22 @@ export async function installHooks(): Promise<void> {
 
   const settings = loadClaudeSettings();
   const hooks = (settings.hooks || {}) as Record<string, unknown[]>;
+
+  // Remove band hooks from any events not in HOOK_EVENTS
+  for (const [event, eventHooks] of Object.entries(hooks)) {
+    if (HOOK_EVENTS.includes(event)) continue;
+    if (!Array.isArray(eventHooks)) continue;
+    const filtered = eventHooks.filter((entry) => {
+      const e = entry as { hooks?: Array<{ type?: string; command?: string }> };
+      if (!e.hooks || !Array.isArray(e.hooks)) return true;
+      return !e.hooks.some((h) => h.type === "command" && h.command && isBandHook(h.command));
+    });
+    if (filtered.length > 0) {
+      hooks[event] = filtered;
+    } else {
+      delete hooks[event];
+    }
+  }
 
   for (const event of HOOK_EVENTS) {
     const existing = hooks[event] || [];

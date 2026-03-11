@@ -318,7 +318,23 @@ fn find_workspace<'a>(
 }
 
 /// Clear `needs_attention` status by calling the web server API.
+/// Only resets to "waiting" if the current status is actually `needs_attention`,
+/// so it won't clobber "working" status while an agent is running.
 fn clear_needs_attention(workspace_id: &str, api: &ApiClient) {
+    let current = api.trpc_query(
+        "statuses.get",
+        &serde_json::json!({ "workspaceId": workspace_id }),
+    );
+    let is_needs_attention = current
+        .ok()
+        .and_then(|v| v.get("agent")?.get("status")?.as_str().map(String::from))
+        .as_deref()
+        == Some("needs_attention");
+
+    if !is_needs_attention {
+        return;
+    }
+
     let _ = api.trpc_mutate(
         "statuses.update",
         &serde_json::json!({
