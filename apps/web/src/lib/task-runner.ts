@@ -17,6 +17,7 @@ function truncateToolOutput(output: string): string {
 export type TaskStatus = "running" | "completed" | "failed";
 
 export interface TaskInfo {
+  id: string;
   workspaceId: string;
   sessionId?: string;
   status: TaskStatus;
@@ -378,6 +379,7 @@ export function getBufferedChunks(workspaceId: string): UIMessageChunk[] {
 
 function toTaskInfo(task: InternalTask): TaskInfo {
   return {
+    id: task.taskRecordId,
     workspaceId: task.workspaceId,
     sessionId: task.sessionId,
     status: task.status,

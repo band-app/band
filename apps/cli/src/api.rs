@@ -70,6 +70,30 @@ impl ApiClient {
         parse_trpc_body(response)
     }
 
+    /// Open an SSE subscription to a tRPC procedure.
+    /// Returns the raw response whose body can be read as an SSE event stream.
+    pub fn trpc_subscribe(
+        &self,
+        procedure: &str,
+        input: &serde_json::Value,
+    ) -> Result<http::Response<Body>, String> {
+        let input_str =
+            serde_json::to_string(input).map_err(|e| format!("Failed to serialize input: {e}"))?;
+        let url = format!(
+            "{}/trpc/{procedure}?input={}",
+            self.base_url,
+            urlencoded(&input_str),
+        );
+
+        let mut req = self.agent.get(&url);
+        if let Some(ref token) = self.token {
+            req = req.header("Cookie", &format!("band_token={token}"));
+        }
+
+        req.call()
+            .map_err(|e| format!("Cannot connect to Band web server. Make sure it's running.\n{e}"))
+    }
+
     pub fn trpc_mutate(
         &self,
         procedure: &str,

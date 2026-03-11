@@ -813,7 +813,7 @@ const tasksRouter = t.router({
 
       try {
         const task = submitTask(input.workspaceId, input.prompt, input.sessionId, agentPrompt);
-        return { workspaceId: task.workspaceId, sessionId: task.sessionId };
+        return { id: task.id, workspaceId: task.workspaceId, sessionId: task.sessionId };
       } catch (err) {
         if (err instanceof TaskConflictError) {
           throw new TRPCError({

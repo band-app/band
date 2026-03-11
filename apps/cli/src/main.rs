@@ -5,6 +5,7 @@ mod validate;
 
 use clap::{Parser, Subcommand};
 use std::fmt::Write;
+use std::io::{BufRead, Write as IoWrite};
 use std::process;
 
 #[derive(Parser)]
@@ -29,13 +30,13 @@ enum Commands {
         #[command(subcommand)]
         cmd: WorkspacesCmd,
     },
-    /// Show current settings
-    Settings,
-    /// Manage tasks
+    /// Manage coding agent tasks
     Tasks {
         #[command(subcommand)]
         cmd: TasksCmd,
     },
+    /// Show current settings
+    Settings,
     /// Manage the remote tunnel
     Tunnel {
         #[command(subcommand)]
@@ -109,6 +110,14 @@ enum TasksCmd {
         #[arg(long)]
         status: Option<String>,
     },
+    /// Submit a new task to the coding agent
+    Create {
+        /// Workspace ID
+        workspace_id: String,
+        /// Prompt text to send to the agent
+        #[arg(long)]
+        prompt: String,
+    },
     /// Cancel a running task
     Cancel {
         /// Task ID (e.g. `tsk_1234567890`)
@@ -118,6 +127,14 @@ enum TasksCmd {
     Rerun {
         /// Task ID (e.g. `tsk_1234567890`)
         task_id: String,
+    },
+    /// Stream task output in real-time
+    Watch {
+        /// Task ID (optional if --workspace is provided)
+        id: Option<String>,
+        /// Watch the latest task for this workspace
+        #[arg(long)]
+        workspace: Option<String>,
     },
 }
 
@@ -152,6 +169,18 @@ fn main() {
         return;
     }
 
+    // Watch streams output directly, handle separately
+    if let Commands::Tasks {
+        cmd: TasksCmd::Watch {
+            ref id,
+            ref workspace,
+        },
+    } = cli.command
+    {
+        let exit_code = handle_watch(id.as_deref(), workspace.as_deref(), json_output);
+        process::exit(exit_code);
+    }
+
     let result = match cli.command {
         Commands::Projects { cmd } => match cmd {
             ProjectsCmd::List => cmd_projects_list(),
@@ -172,8 +201,13 @@ fn main() {
             TasksCmd::List { project, status } => {
                 cmd_tasks_list(project.as_deref(), status.as_deref())
             }
+            TasksCmd::Create {
+                workspace_id,
+                prompt,
+            } => cmd_tasks_create(&workspace_id, &prompt),
             TasksCmd::Cancel { task_id } => cmd_tasks_cancel(&task_id),
             TasksCmd::Rerun { task_id } => cmd_tasks_rerun(&task_id),
+            TasksCmd::Watch { .. } => unreachable!(),
         },
         Commands::Settings => cmd_settings(json_output),
         Commands::Tunnel { cmd } => match cmd {
@@ -527,6 +561,28 @@ fn cmd_tasks_list(project: Option<&str>, status: Option<&str>) -> Result<Command
     })
 }
 
+fn cmd_tasks_create(workspace_id: &str, prompt: &str) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let data = client.trpc_mutate(
+        "tasks.submit",
+        &serde_json::json!({
+            "workspaceId": workspace_id,
+            "prompt": prompt,
+        }),
+    )?;
+
+    let id = data.get("id").and_then(|i| i.as_str()).unwrap_or("");
+    let ws = data
+        .get("workspaceId")
+        .and_then(|w| w.as_str())
+        .unwrap_or("");
+
+    Ok(CommandResult {
+        text: format!("{id}\n"),
+        json: serde_json::json!({"id": id, "workspaceId": ws}),
+    })
+}
+
 fn cmd_tasks_cancel(task_id: &str) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
     client.trpc_mutate("tasks.cancel", &serde_json::json!({"taskId": task_id}))?;
@@ -550,6 +606,242 @@ fn cmd_tasks_rerun(task_id: &str) -> Result<CommandResult, String> {
         text: format!("Task re-run started for workspace {workspace_id}\n"),
         json: data,
     })
+}
+
+fn handle_watch(id: Option<&str>, workspace: Option<&str>, json_output: bool) -> i32 {
+    match cmd_tasks_watch(id, workspace, json_output) {
+        Ok(success) => i32::from(!success),
+        Err(e) => {
+            if json_output {
+                eprintln!("{}", serde_json::json!({"error": e}));
+            } else {
+                eprintln!("error: {e}");
+            }
+            1
+        }
+    }
+}
+
+fn cmd_tasks_watch(
+    id: Option<&str>,
+    workspace: Option<&str>,
+    json_output: bool,
+) -> Result<bool, String> {
+    let client = api::ApiClient::from_settings()?;
+    let workspace_id = resolve_workspace_id(&client, id, workspace)?;
+
+    if !json_output {
+        let label = id.unwrap_or(&workspace_id);
+        eprintln!("[watching task {label} on {workspace_id}]");
+        eprintln!();
+    }
+
+    let mut response = client.trpc_subscribe(
+        "tasks.stream",
+        &serde_json::json!({"workspaceId": workspace_id}),
+    )?;
+    let status = response.status().as_u16();
+
+    if status == 401 {
+        return Err("Authentication failed. Check tokenSecret in settings.json".to_string());
+    }
+    if status >= 400 {
+        let body: serde_json::Value = response
+            .body_mut()
+            .read_json()
+            .unwrap_or(serde_json::Value::Null);
+        let msg = body
+            .get("error")
+            .and_then(|e| e.get("message"))
+            .and_then(|m| m.as_str())
+            .unwrap_or("Unknown server error");
+        return Err(msg.to_string());
+    }
+
+    let mut body = response.into_body();
+    let reader = std::io::BufReader::new(body.as_reader());
+    stream_sse_events(reader, json_output)
+}
+
+fn stream_sse_events(reader: impl BufRead, json_output: bool) -> Result<bool, String> {
+    let mut line_buf = String::new();
+    let mut data_buf = String::new();
+    let mut task_succeeded = true;
+    let mut in_tool = false;
+    let mut reader = reader;
+
+    loop {
+        line_buf.clear();
+        match reader.read_line(&mut line_buf) {
+            Ok(0) => break, // EOF
+            Ok(_) => {}
+            Err(e) => return Err(format!("Connection error: {e}")),
+        }
+
+        let line = line_buf.trim_end();
+
+        if line.is_empty() {
+            if !data_buf.is_empty() {
+                let should_exit =
+                    process_sse_data(&data_buf, json_output, &mut task_succeeded, &mut in_tool)?;
+                data_buf.clear();
+                if should_exit {
+                    return Ok(task_succeeded);
+                }
+            }
+            continue;
+        }
+
+        if let Some(data) = line.strip_prefix("data: ") {
+            if !data_buf.is_empty() {
+                data_buf.push('\n');
+            }
+            data_buf.push_str(data);
+        }
+        // Ignore id:, event:, and comment lines
+    }
+
+    Ok(task_succeeded)
+}
+
+fn process_sse_data(
+    data: &str,
+    json_output: bool,
+    task_succeeded: &mut bool,
+    in_tool: &mut bool,
+) -> Result<bool, String> {
+    let envelope: serde_json::Value =
+        serde_json::from_str(data).map_err(|e| format!("Invalid JSON in SSE: {e}"))?;
+
+    let Some(result) = envelope.get("result") else {
+        return Ok(false);
+    };
+
+    let event_type = result.get("type").and_then(|t| t.as_str()).unwrap_or("");
+
+    match event_type {
+        "stopped" => Ok(true),
+        "data" => {
+            let Some(chunk) = result.get("data") else {
+                return Ok(false);
+            };
+
+            if json_output {
+                println!("{}", serde_json::to_string(chunk).unwrap_or_default());
+            } else {
+                render_text_chunk(chunk, task_succeeded, in_tool);
+            }
+
+            let chunk_type = chunk.get("type").and_then(|t| t.as_str()).unwrap_or("");
+            Ok(chunk_type == "finish")
+        }
+        _ => Ok(false),
+    }
+}
+
+#[allow(clippy::needless_pass_by_ref_mut)]
+fn render_text_chunk(chunk: &serde_json::Value, task_succeeded: &mut bool, in_tool: &mut bool) {
+    let chunk_type = chunk.get("type").and_then(|t| t.as_str()).unwrap_or("");
+
+    match chunk_type {
+        "text-delta" => {
+            if *in_tool {
+                println!();
+                *in_tool = false;
+            }
+            let delta = chunk.get("delta").and_then(|d| d.as_str()).unwrap_or("");
+            print!("{delta}");
+            std::io::stdout().flush().ok();
+        }
+        "tool-input-available" => {
+            let tool_name = chunk
+                .get("toolName")
+                .and_then(|n| n.as_str())
+                .unwrap_or("tool");
+            let args = chunk.get("input").unwrap_or(&serde_json::Value::Null);
+            let summary = tool_summary(tool_name, args);
+            eprintln!("> {summary}");
+            *in_tool = true;
+        }
+        "error" => {
+            let text = chunk
+                .get("errorText")
+                .and_then(|t| t.as_str())
+                .unwrap_or("Unknown error");
+            eprintln!("\nError: {text}");
+            *task_succeeded = false;
+        }
+        "data-result" => {
+            if let Some(data) = chunk.get("data") {
+                if let Some(ms) = data.get("durationMs").and_then(serde_json::Value::as_f64) {
+                    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                    let total_secs = (ms / 1000.0) as u64;
+                    let mins = total_secs / 60;
+                    let secs = total_secs % 60;
+                    if mins > 0 {
+                        eprintln!("\nTask completed in {mins}m {secs}s.");
+                    } else {
+                        eprintln!("\nTask completed in {secs}s.");
+                    }
+                } else {
+                    eprintln!("\nTask completed.");
+                }
+            }
+        }
+        // "finish", "text-start", "text-end", etc. — no text rendering needed
+        _ => {}
+    }
+}
+
+fn tool_summary(name: &str, args: &serde_json::Value) -> String {
+    if let Some(obj) = args.as_object() {
+        for key in &[
+            "file_path",
+            "file",
+            "path",
+            "command",
+            "query",
+            "pattern",
+            "url",
+        ] {
+            if let Some(val) = obj.get(*key).and_then(|v| v.as_str()) {
+                return format!("{name}: {val}");
+            }
+        }
+    }
+    name.to_string()
+}
+
+/// Resolve a task ID (tsk_*) or workspace ID to a workspace ID.
+fn resolve_workspace_id(
+    client: &api::ApiClient,
+    id: Option<&str>,
+    workspace: Option<&str>,
+) -> Result<String, String> {
+    if let Some(ws) = workspace {
+        return Ok(ws.to_string());
+    }
+
+    let id = id.ok_or("Either a task ID or --workspace must be specified")?;
+
+    if id.starts_with("tsk_") {
+        let data = client.trpc_query("tasks.list", &serde_json::json!({}))?;
+        let tasks = data
+            .get("tasks")
+            .and_then(|t| t.as_array())
+            .ok_or("Failed to list tasks")?;
+        let task = tasks
+            .iter()
+            .find(|t| t.get("id").and_then(|i| i.as_str()) == Some(id))
+            .ok_or(format!("Task '{id}' not found"))?;
+        let workspace_id = task
+            .get("workspaceId")
+            .and_then(|w| w.as_str())
+            .ok_or("Task has no workspace ID")?;
+        Ok(workspace_id.to_string())
+    } else {
+        Ok(id.to_string())
+    }
 }
 
 // --- Settings command ---
@@ -830,6 +1122,14 @@ fn build_schema(command: Option<&str>) -> Result<serde_json::Value, String> {
             ]
         }),
         serde_json::json!({
+            "name": "tasks create",
+            "description": "Submit a new task to the coding agent",
+            "parameters": [
+                {"name": "workspace_id", "type": "string", "required": true, "positional": true, "description": "Workspace ID"},
+                {"name": "--prompt", "type": "string", "required": true, "description": "Prompt text to send to the agent"},
+            ]
+        }),
+        serde_json::json!({
             "name": "tasks cancel",
             "description": "Cancel a running task",
             "parameters": [
@@ -841,6 +1141,14 @@ fn build_schema(command: Option<&str>) -> Result<serde_json::Value, String> {
             "description": "Re-run a completed or failed task",
             "parameters": [
                 {"name": "task_id", "type": "string", "required": true, "positional": true, "description": "Task ID (e.g. tsk_1234567890)"},
+            ]
+        }),
+        serde_json::json!({
+            "name": "tasks watch",
+            "description": "Stream task output in real-time",
+            "parameters": [
+                {"name": "id", "type": "string", "required": false, "positional": true, "description": "Task ID (optional if --workspace is provided)"},
+                {"name": "--workspace", "type": "string", "required": false, "description": "Watch the latest task for this workspace"},
             ]
         }),
         serde_json::json!({
