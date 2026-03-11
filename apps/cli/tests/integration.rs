@@ -615,7 +615,12 @@ fn tunnel_status_json_output() {
 fn workspaces_create_json_output() {
     let env = TestEnv::new();
     let output = env.band(&[
-        "workspaces", "create", "my-project", "feat/json", "--output", "json",
+        "workspaces",
+        "create",
+        "my-project",
+        "feat/json",
+        "--output",
+        "json",
     ]);
 
     assert!(output.status.success(), "stderr: {}", stderr(&output));
@@ -664,7 +669,12 @@ fn workspaces_remove_json_output() {
     env.band(&["workspaces", "create", "my-project", "feat/rmjson"]);
 
     let output = env.band(&[
-        "workspaces", "remove", "my-project", "feat/rmjson", "--output", "json",
+        "workspaces",
+        "remove",
+        "my-project",
+        "feat/rmjson",
+        "--output",
+        "json",
     ]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
     let json: serde_json::Value = serde_json::from_str(&stdout(&output))
@@ -676,7 +686,12 @@ fn workspaces_remove_json_output() {
 fn error_json_output() {
     let env = TestEnv::new();
     let output = env.band(&[
-        "workspaces", "create", "nonexistent", "feat/x", "--output", "json",
+        "workspaces",
+        "create",
+        "nonexistent",
+        "feat/x",
+        "--output",
+        "json",
     ]);
 
     assert!(!output.status.success());
@@ -765,7 +780,10 @@ fn schema_shows_single_command() {
         .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)));
     assert_eq!(json["name"], "workspaces create");
     let params = json["parameters"].as_array().expect("parameters array");
-    assert!(params.iter().any(|p| p["name"] == "project"), "json: {json}");
+    assert!(
+        params.iter().any(|p| p["name"] == "project"),
+        "json: {json}"
+    );
     assert!(params.iter().any(|p| p["name"] == "branch"), "json: {json}");
 }
 

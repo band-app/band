@@ -50,10 +50,7 @@ impl ApiClient {
         parse_trpc_body(response)
     }
 
-    pub fn trpc_query_no_input(
-        &self,
-        procedure: &str,
-    ) -> Result<serde_json::Value, String> {
+    pub fn trpc_query_no_input(&self, procedure: &str) -> Result<serde_json::Value, String> {
         let url = format!("{}/trpc/{procedure}", self.base_url);
 
         let mut req = self.agent.get(&url);

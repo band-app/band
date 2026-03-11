@@ -143,7 +143,7 @@ fn main() {
         Commands::Settings => cmd_settings(json_output),
         Commands::Tunnel { cmd } => match cmd {
             TunnelCmd::Status => cmd_tunnel_status(),
-            TunnelCmd::Start { subdomain } => cmd_tunnel_start(subdomain),
+            TunnelCmd::Start { subdomain } => cmd_tunnel_start(subdomain.as_deref()),
             TunnelCmd::Stop => cmd_tunnel_stop(),
         },
         Commands::Notify => cmd_notify(),
@@ -375,10 +375,7 @@ fn cmd_settings(json_output: bool) -> Result<CommandResult, String> {
         serde_json::to_string_pretty(&result).unwrap_or_default() + "\n"
     };
 
-    Ok(CommandResult {
-        text,
-        json: result,
-    })
+    Ok(CommandResult { text, json: result })
 }
 
 // --- Tunnel commands ---
@@ -387,15 +384,14 @@ fn cmd_tunnel_status() -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
     let data = client.trpc_query_no_input("tunnel.status")?;
 
-    let running = data.get("running").and_then(|v| v.as_bool()).unwrap_or(false);
+    let running = data
+        .get("running")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
     let url = data.get("url").and_then(|v| v.as_str());
 
     let mut text = String::new();
-    let _ = writeln!(
-        text,
-        "running: {}",
-        if running { "yes" } else { "no" }
-    );
+    let _ = writeln!(text, "running: {}", if running { "yes" } else { "no" });
     if let Some(u) = url {
         let _ = writeln!(text, "url: {u}");
     }
@@ -406,10 +402,10 @@ fn cmd_tunnel_status() -> Result<CommandResult, String> {
     })
 }
 
-fn cmd_tunnel_start(subdomain: Option<String>) -> Result<CommandResult, String> {
+fn cmd_tunnel_start(subdomain: Option<&str>) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
     let mut input = serde_json::json!({});
-    if let Some(ref s) = subdomain {
+    if let Some(s) = subdomain {
         input["subdomain"] = serde_json::json!(s);
     }
     let data = client.trpc_mutate("tunnel.start", &input)?;
@@ -420,10 +416,7 @@ fn cmd_tunnel_start(subdomain: Option<String>) -> Result<CommandResult, String> 
         let _ = writeln!(text, "{u}");
     }
 
-    Ok(CommandResult {
-        text,
-        json: data,
-    })
+    Ok(CommandResult { text, json: data })
 }
 
 fn cmd_tunnel_stop() -> Result<CommandResult, String> {
@@ -480,8 +473,7 @@ fn cmd_notify() -> Result<CommandResult, String> {
     };
 
     // Resolve CWD to workspace ID
-    let resolve_result =
-        client.trpc_query("statuses.resolve", &serde_json::json!({ "cwd": cwd }));
+    let resolve_result = client.trpc_query("statuses.resolve", &serde_json::json!({ "cwd": cwd }));
     let workspace_id = match resolve_result {
         Ok(data) => data
             .get("workspaceId")

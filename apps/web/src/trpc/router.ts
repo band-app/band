@@ -1,8 +1,16 @@
 import { execFile, execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { basename, extname, join, resolve } from "node:path";
+import { createLogger } from "@band/logger";
 import { initTRPC, TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { getOrCreateAgent } from "../lib/agent-pool";
@@ -20,9 +28,17 @@ import {
   loadState,
   saveState,
   settingsFile,
+  statusDir,
   worktreesDir,
 } from "../lib/state";
-import { abortTask, getTask, submitTask, TaskConflictError } from "../lib/task-runner";
+import {
+  abortTask,
+  getBufferedChunks,
+  getTask,
+  submitTask,
+  subscribe as subscribeTask,
+  TaskConflictError,
+} from "../lib/task-runner";
 import {
   checkTunnelAuth,
   checkTunnelHealth,
@@ -30,8 +46,11 @@ import {
   startTunnel,
   stopTunnel,
 } from "../lib/tunnel";
+import { subscribe as subscribeStatus } from "../lib/watcher";
 import { resolveWorkspace } from "../lib/workspace";
 import type { Context } from "./context";
+
+const log = createLogger("trpc");
 
 const t = initTRPC.context<Context>().create();
 
@@ -193,8 +212,8 @@ const workspacesRouter = t.router({
         throw new Error(`Project "${input.project}" not found`);
       }
 
-      if (proj.worktrees.some((wt) => wt.branch === input.branch)) {
-        const existing = proj.worktrees.find((wt) => wt.branch === input.branch)!;
+      const existing = proj.worktrees.find((wt) => wt.branch === input.branch);
+      if (existing) {
         return { ok: true, path: existing.path };
       }
 
@@ -219,26 +238,22 @@ const workspacesRouter = t.router({
       proj.worktrees.push({ branch: input.branch, path: worktreePath });
       saveState(state);
 
-      // Run setup script if configured (non-fatal)
+      // Run setup script if configured
+      const configPath = join(worktreePath, ".band", "config.json");
       try {
-        const configPath = join(worktreePath, ".band", "config.json");
         if (existsSync(configPath)) {
           const config = JSON.parse(readFileSync(configPath, "utf-8"));
           if (config.setup) {
-            const env = { ...process.env };
-            if (env.PATH) {
-              env.PATH = `/opt/homebrew/bin:/usr/local/bin:${env.PATH}`;
-            }
             execFileSync("bash", ["-c", config.setup], {
               cwd: worktreePath,
-              env,
+              env: { ...process.env, PATH: `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH}` },
               encoding: "utf-8",
               timeout: 60_000,
             });
           }
         }
-      } catch (e) {
-        console.error(`Setup script failed: ${e instanceof Error ? e.message : e}`);
+      } catch {
+        // Setup script failure is non-fatal
       }
 
       if (input.prompt) {
@@ -278,29 +293,30 @@ const workspacesRouter = t.router({
             : branchRef;
         } else if (line === "" && currentPath) {
           if (currentBranch === input.branch) {
-            // Run teardown script if configured (non-fatal)
+            const worktreePath = currentPath;
+
+            // Run teardown script before removing worktree so it can access project files
+            const configPath = join(worktreePath, ".band", "config.json");
             try {
-              const configPath = join(currentPath, ".band", "config.json");
               if (existsSync(configPath)) {
                 const config = JSON.parse(readFileSync(configPath, "utf-8"));
                 if (config.teardown) {
-                  const teardownEnv = { ...process.env };
-                  if (teardownEnv.PATH) {
-                    teardownEnv.PATH = `/opt/homebrew/bin:/usr/local/bin:${teardownEnv.PATH}`;
-                  }
                   execFileSync("bash", ["-c", config.teardown], {
-                    cwd: currentPath,
-                    env: teardownEnv,
+                    cwd: worktreePath,
+                    env: {
+                      ...process.env,
+                      PATH: `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH}`,
+                    },
                     encoding: "utf-8",
                     timeout: 60_000,
                   });
                 }
               }
-            } catch (e) {
-              console.error(`Teardown script failed: ${e instanceof Error ? e.message : e}`);
+            } catch {
+              // Teardown script failure is non-fatal
             }
 
-            execFileSync(command, ["worktree", "remove", "--force", currentPath], {
+            execFileSync(command, ["worktree", "remove", "--force", worktreePath], {
               cwd: proj.path,
               env,
               encoding: "utf-8",
@@ -324,7 +340,7 @@ const workspacesRouter = t.router({
               // Prompt file may not exist
             }
             try {
-              unlinkSync(join(bandHome(), "status", `${workspaceId}.json`));
+              unlinkSync(join(statusDir(), `${workspaceId}.json`));
             } catch {
               // Status file may not exist
             }
@@ -355,61 +371,6 @@ const workspacesRouter = t.router({
           }
         });
       });
-    }),
-
-  notify: publicProcedure
-    .input(
-      z.object({
-        cwd: z.string(),
-        hookPayload: z.record(z.string(), z.unknown()),
-      }),
-    )
-    .mutation(({ input }) => {
-      const hookEvent = (input.hookPayload.hook_event_name as string) || "";
-      const agentStatus =
-        hookEvent === "Stop" || hookEvent === "PermissionRequest" ? "needs_attention" : "working";
-
-      // Match CWD to a tracked workspace
-      const state = loadState();
-      let workspaceId: string | null = null;
-      for (const proj of state.projects) {
-        for (const wt of proj.worktrees) {
-          if (input.cwd.startsWith(wt.path) || wt.path === input.cwd) {
-            workspaceId = `${proj.name}-${wt.branch}`;
-            break;
-          }
-        }
-        if (workspaceId) break;
-      }
-
-      if (!workspaceId) {
-        return { ok: true, matched: false };
-      }
-
-      // Write status file atomically
-      const dir = join(bandHome(), "status");
-      mkdirSync(dir, { recursive: true });
-      const statusFile = join(dir, `${workspaceId}.json`);
-
-      let status: Record<string, unknown> = {};
-      try {
-        status = JSON.parse(readFileSync(statusFile, "utf-8"));
-      } catch {
-        // New file
-      }
-
-      status.workspaceId = workspaceId;
-      if (!status.agent || typeof status.agent !== "object") {
-        status.agent = {};
-      }
-      (status.agent as Record<string, unknown>).status = agentStatus;
-      (status.agent as Record<string, unknown>).lastActivity = new Date().toISOString();
-
-      const tmpFile = join(dir, `.${workspaceId}.json.tmp`);
-      writeFileSync(tmpFile, JSON.stringify(status, null, 2));
-      renameSync(tmpFile, statusFile);
-
-      return { ok: true, matched: true };
     }),
 });
 
@@ -679,15 +640,23 @@ const tunnelRouter = t.router({
   start: publicProcedure
     .input(z.object({ subdomain: z.string().optional(), skipSubdomain: z.boolean().optional() }))
     .mutation(async ({ input }) => {
+      log.debug({ input }, "tunnel.start called");
       const settings = loadSettings();
       const port = parseInt(process.env.PORT || "3456", 10);
       const subdomain = input.subdomain || (settings as Record<string, unknown>).tunnelSubdomain;
+      log.debug(
+        "tunnel.start: port=%d subdomain=%s skipSubdomain=%s",
+        port,
+        subdomain,
+        input.skipSubdomain,
+      );
       await startTunnel({
         port,
         subdomain: subdomain as string | undefined,
         skipSubdomain: input.skipSubdomain,
       });
       const status = getTunnelStatus();
+      log.debug({ status }, "tunnel.start: after startTunnel");
       if (status.url) {
         return { ok: true, url: status.url };
       }
@@ -696,10 +665,12 @@ const tunnelRouter = t.router({
       if (resolvedSubdomain) {
         const token = getToken();
         const health = await checkTunnelHealth(resolvedSubdomain, token);
+        log.debug({ health }, "tunnel.start: remote health check");
         if (health.healthy) {
           return { ok: true, url: `https://${resolvedSubdomain}.instatunnel.my?token=${token}` };
         }
       }
+      log.debug("tunnel.start: no URL available");
       return { ok: true, url: null as string | null };
     }),
 
@@ -849,6 +820,59 @@ const tasksRouter = t.router({
     }
     return { aborted: true };
   }),
+
+  stream: publicProcedure
+    .input(z.object({ workspaceId: z.string() }))
+    .subscription(async function* (opts) {
+      const workspaceId = opts.input.workspaceId;
+      const task = getTask(workspaceId);
+      const buffered = getBufferedChunks(workspaceId);
+
+      // No task and no buffered chunks — nothing to stream
+      if (!task && buffered.length === 0) return;
+
+      // Replay buffered chunks
+      for (const chunk of buffered) {
+        yield chunk;
+      }
+
+      // If task is already done, stop
+      if (!task || task.status !== "running") return;
+
+      // Stream live chunks
+      type Chunk = Parameters<Parameters<typeof subscribeTask>[1]>[0];
+      const queue: Chunk[] = [];
+      let resolve: (() => void) | null = null;
+      let done = false;
+
+      const unsubscribe = subscribeTask(workspaceId, (chunk) => {
+        queue.push(chunk);
+        if (chunk.type === "finish" || chunk.type === "error") {
+          done = true;
+        }
+        resolve?.();
+      });
+
+      opts.signal.addEventListener("abort", () => {
+        unsubscribe();
+        resolve?.();
+      });
+
+      try {
+        while (!opts.signal.aborted) {
+          while (queue.length > 0) {
+            yield queue.shift()!;
+          }
+          if (done) return;
+          await new Promise<void>((r) => {
+            resolve = r;
+          });
+          resolve = null;
+        }
+      } finally {
+        unsubscribe();
+      }
+    }),
 });
 
 // ---------------------------------------------------------------------------
@@ -897,7 +921,9 @@ const sessionsRouter = t.router({
 
 const servicesRouter = t.router({
   health: publicProcedure.query(async () => {
+    log.debug("services.health called");
     const tunnel = getTunnelStatus();
+    log.debug({ tunnel }, "services.health: tunnel status");
     let tunnelHealthy = false;
     let tunnelUrl = tunnel.url;
     let tunnelRemoteHost: string | undefined;
@@ -908,7 +934,9 @@ const servicesRouter = t.router({
     if (tunnel.running && tunnel.url) {
       const urlMatch = tunnel.url.match(/https:\/\/(.+)\.instatunnel\.my/);
       if (urlMatch) {
+        log.debug("services.health: checking tunnel health for %s", urlMatch[1]);
         const health = await checkTunnelHealth(urlMatch[1], token);
+        log.debug({ health }, "services.health: tunnel health");
         tunnelHealthy = health.healthy;
         // Only report as remote if it's a different machine
         if (health.remoteHost && health.remoteHost !== localHostname) {
@@ -922,8 +950,15 @@ const servicesRouter = t.router({
     if (!tunnelHealthy) {
       const settings = loadSettings();
       const subdomain = (settings as Record<string, unknown>).tunnelSubdomain as string | undefined;
+      log.debug(
+        "services.health: tunnelSubdomain=%s token=%s",
+        subdomain ?? "none",
+        token ? `${token.slice(0, 6)}...` : "null",
+      );
       if (subdomain) {
+        log.debug("services.health: checking remote subdomain %s", subdomain);
         const health = await checkTunnelHealth(subdomain, token);
+        log.debug({ health }, "services.health: remote health");
         if (health.healthy) {
           tunnelHealthy = true;
           // Only report as remote if it's a different machine
@@ -932,15 +967,19 @@ const servicesRouter = t.router({
           }
           tunnelUrl = `https://${subdomain}.instatunnel.my?token=${token}`;
         }
+      } else {
+        log.debug("services.health: no tunnelSubdomain configured, skipping remote check");
       }
     }
 
-    return {
+    const result = {
       webserver: true,
       tunnel: tunnelHealthy,
       tunnel_url: tunnelUrl,
       tunnel_remote_host: tunnelRemoteHost || tunnel.remoteHost,
     };
+    log.debug({ result }, "services.health result");
+    return result;
   }),
 });
 
@@ -964,6 +1003,109 @@ const chatRouter = t.router({
 });
 
 // ---------------------------------------------------------------------------
+// Statuses
+// ---------------------------------------------------------------------------
+
+const statusesRouter = t.router({
+  get: publicProcedure.input(z.object({ workspaceId: z.string() })).query(({ input }) => {
+    const filePath = join(statusDir(), `${input.workspaceId}.json`);
+    try {
+      const data = readFileSync(filePath, "utf-8");
+      return JSON.parse(data);
+    } catch {
+      return null;
+    }
+  }),
+
+  update: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        agent: z.object({
+          status: z.string(),
+          lastActivity: z.string().optional(),
+        }),
+      }),
+    )
+    .mutation(({ input }) => {
+      ensureDirs();
+      const filePath = join(statusDir(), `${input.workspaceId}.json`);
+
+      // Read existing status file to preserve fields
+      let status: Record<string, unknown> = {};
+      try {
+        const data = readFileSync(filePath, "utf-8");
+        status = JSON.parse(data);
+      } catch {
+        // File doesn't exist or is invalid — start fresh
+      }
+
+      status.workspaceId = input.workspaceId;
+
+      // Merge agent fields
+      const existing = (status.agent as Record<string, unknown>) ?? {};
+      status.agent = { ...existing, ...input.agent };
+
+      const json = JSON.stringify(status, null, 2);
+
+      // Atomic write: write to temp file then rename
+      const tmpPath = join(statusDir(), `.${input.workspaceId}.json.tmp`);
+      writeFileSync(tmpPath, json, "utf-8");
+      renameSync(tmpPath, filePath);
+
+      return { ok: true };
+    }),
+
+  resolve: publicProcedure.input(z.object({ cwd: z.string() })).query(({ input }) => {
+    const state = loadState();
+    for (const proj of state.projects) {
+      for (const wt of proj.worktrees) {
+        if (input.cwd === wt.path || input.cwd.startsWith(`${wt.path}/`)) {
+          return { workspaceId: `${proj.name}-${wt.branch}` };
+        }
+      }
+    }
+    return { workspaceId: null };
+  }),
+});
+
+// ---------------------------------------------------------------------------
+// Status (SSE subscription)
+// ---------------------------------------------------------------------------
+
+const statusRouter = t.router({
+  stream: publicProcedure.subscription(async function* (opts) {
+    type QueueItem = Parameters<Parameters<typeof subscribeStatus>[0]>[0];
+    const queue: QueueItem[] = [];
+    let resolve: (() => void) | null = null;
+
+    const unsubscribe = subscribeStatus((event) => {
+      queue.push(event);
+      resolve?.();
+    });
+
+    opts.signal.addEventListener("abort", () => {
+      unsubscribe();
+      resolve?.();
+    });
+
+    try {
+      while (!opts.signal.aborted) {
+        while (queue.length > 0) {
+          yield queue.shift()!;
+        }
+        await new Promise<void>((r) => {
+          resolve = r;
+        });
+        resolve = null;
+      }
+    } finally {
+      unsubscribe();
+    }
+  }),
+});
+
+// ---------------------------------------------------------------------------
 // App Router
 // ---------------------------------------------------------------------------
 
@@ -980,6 +1122,8 @@ export const appRouter = t.router({
   sessions: sessionsRouter,
   services: servicesRouter,
   chat: chatRouter,
+  statuses: statusesRouter,
+  status: statusRouter,
 });
 
 export type AppRouter = typeof appRouter;
