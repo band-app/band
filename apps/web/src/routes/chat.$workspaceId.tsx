@@ -5,9 +5,9 @@ import {
   WorkspaceTabNav,
 } from "@band/dashboard-core";
 import { WebCapabilities, WebDashboardAdapter } from "@band/dashboard-core/adapters/web";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, Clock } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ChatView } from "../components/ChatView";
 import { CodeBrowserView } from "../components/CodeBrowserView";
 import { trpc } from "../lib/trpc-client";
@@ -19,6 +19,10 @@ export const Route = createFileRoute("/chat/$workspaceId")({
   component: ChatPage,
 });
 
+function isTauri(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
 function ChatPage() {
   const { workspaceId } = Route.useParams();
   const decoded = decodeURIComponent(workspaceId);
@@ -26,6 +30,22 @@ function ChatPage() {
   const [initialSessionId, setInitialSessionId] = useState<string | undefined>(undefined);
   const [showSessionList, setShowSessionList] = useState(false);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("chat");
+  const isTasksWindow = useRef<boolean | null>(null);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!isTauri()) {
+      isTasksWindow.current = false;
+      return;
+    }
+    import("@tauri-apps/api/webviewWindow").then(({ getCurrentWebviewWindow }) => {
+      isTasksWindow.current = getCurrentWebviewWindow().label === "tasks";
+    });
+  }, []);
+
+  const handleBack = useCallback(() => {
+    navigate({ to: isTasksWindow.current ? "/tasks" : "/" });
+  }, [navigate]);
 
   useEffect(() => {
     let cancelled = false;
@@ -58,12 +78,13 @@ function ChatPage() {
   return (
     <div className="flex h-dvh flex-col overflow-hidden">
       <header className="flex shrink-0 items-center gap-3 border-b border-border/50 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
-        <Link
-          to="/"
+        <button
+          type="button"
+          onClick={handleBack}
           className="inline-flex size-8 items-center justify-center rounded-md hover:bg-accent"
         >
           <ArrowLeft className="size-4" />
-        </Link>
+        </button>
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-sm font-semibold">{decoded}</h1>
         </div>
