@@ -1,8 +1,6 @@
-use std::collections::HashMap;
 use std::ffi::{c_void, CStr, CString};
-use std::sync::{LazyLock, Mutex};
-
-use crate::state;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 // --- Constants ---
 
@@ -36,6 +34,25 @@ extern "C" {
     pub fn AXIsProcessTrustedWithOptions(options: *const c_void) -> bool;
     fn AXValueCreate(value_type: u32, value: *const c_void) -> *const c_void;
     fn _AXUIElementGetWindow(element: *const c_void, window_id: *mut u32) -> i32;
+
+    // AXObserver
+    fn AXObserverCreate(
+        application: i32,
+        callback: unsafe extern "C" fn(*const c_void, *const c_void, *const c_void, *mut c_void),
+        observer: *mut *const c_void,
+    ) -> i32;
+    fn AXObserverAddNotification(
+        observer: *const c_void,
+        element: *const c_void,
+        notification: *const c_void,
+        refcon: *mut c_void,
+    ) -> i32;
+    fn AXObserverRemoveNotification(
+        observer: *const c_void,
+        element: *const c_void,
+        notification: *const c_void,
+    ) -> i32;
+    fn AXObserverGetRunLoopSource(observer: *const c_void) -> *const c_void;
 }
 
 // --- FFI: CoreGraphics ---
@@ -107,6 +124,12 @@ extern "C" {
     fn CFNumberGetValue(number: *const c_void, the_type: i32, value_ptr: *mut c_void) -> bool;
     fn CFGetTypeID(cf: *const c_void) -> u64;
     fn CFStringGetTypeID() -> u64;
+
+    // CFRunLoop
+    fn CFRunLoopGetCurrent() -> *const c_void;
+    fn CFRunLoopAddSource(rl: *const c_void, source: *const c_void, mode: *const c_void);
+    fn CFRunLoopRunInMode(mode: *const c_void, seconds: f64, return_after: u8) -> i32;
+    static kCFRunLoopDefaultMode: *const c_void;
 }
 
 // CFNumberType
@@ -329,19 +352,6 @@ pub fn get_frontmost_window_with_id() -> Option<(i32, Option<u32>, String)> {
     }
 }
 
-/// Look up a `CGWindowID` in the registry and return the matching key.
-pub fn find_workspace_by_cg_id(cg_id: u32) -> Option<(String, String)> {
-    let map = WINDOW_REGISTRY.lock().unwrap();
-    for (key, entry) in map.iter() {
-        if entry.cg_window_id == cg_id {
-            if let Some((app_type, folder_name)) = key.split_once(':') {
-                return Some((app_type.to_string(), folder_name.to_string()));
-            }
-        }
-    }
-    None
-}
-
 // --- Bundle ID lookup via NSRunningApplication ---
 
 pub fn get_bundle_id(pid: i32) -> Option<String> {
@@ -370,6 +380,55 @@ pub fn get_bundle_id(pid: i32) -> Option<String> {
         }
 
         cfstring_to_string(bundle_id)
+    }
+}
+
+/// Reverse lookup: get PID for a running application by its bundle ID.
+/// Uses `NSRunningApplication.runningApplicationsWithBundleIdentifier:`.
+pub fn pid_for_bundle_id(bundle_id: &str) -> Option<i32> {
+    unsafe {
+        type MsgSendStr =
+            unsafe extern "C" fn(*const c_void, *const c_void, *const c_void) -> *const c_void;
+        type MsgSendCount = unsafe extern "C" fn(*const c_void, *const c_void) -> u64;
+        type MsgSendIdx =
+            unsafe extern "C" fn(*const c_void, *const c_void, u64) -> *const c_void;
+        type MsgSendPid = unsafe extern "C" fn(*const c_void, *const c_void) -> i32;
+
+        let msg_str: MsgSendStr = std::mem::transmute(objc_msgSend as unsafe extern "C" fn());
+        let msg_count: MsgSendCount = std::mem::transmute(objc_msgSend as unsafe extern "C" fn());
+        let msg_idx: MsgSendIdx = std::mem::transmute(objc_msgSend as unsafe extern "C" fn());
+        let msg_pid: MsgSendPid = std::mem::transmute(objc_msgSend as unsafe extern "C" fn());
+
+        let cls = objc_getClass(c"NSRunningApplication".as_ptr());
+        if cls.is_null() {
+            return None;
+        }
+
+        let bid_cf = cfstr(bundle_id);
+        let sel =
+            sel_registerName(c"runningApplicationsWithBundleIdentifier:".as_ptr());
+        let apps = msg_str(cls, sel, bid_cf);
+        CFRelease(bid_cf);
+
+        if apps.is_null() {
+            return None;
+        }
+
+        let count_sel = sel_registerName(c"count".as_ptr());
+        let count = msg_count(apps, count_sel);
+        if count == 0 {
+            return None;
+        }
+
+        let obj_sel = sel_registerName(c"objectAtIndex:".as_ptr());
+        let first_app = msg_idx(apps, obj_sel, 0);
+        if first_app.is_null() {
+            return None;
+        }
+
+        let pid_sel = sel_registerName(c"processIdentifier".as_ptr());
+        let pid = msg_pid(first_app, pid_sel);
+        if pid > 0 { Some(pid) } else { None }
     }
 }
 
@@ -525,6 +584,225 @@ pub fn await_new_window(
             return None;
         }
         std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+}
+
+// --- AXObserver-based window watcher ---
+
+/// State passed to the `AXObserver` callback via refcon pointer.
+struct ObserverState {
+    existing_ids: Vec<u32>,
+    bundle_id: String,
+    tx: std::sync::mpsc::Sender<WindowInfo>,
+}
+
+/// Event-driven window watcher using `AXObserver`.
+///
+/// Create with [`start_watching`] **before** launching the app / creating the window,
+/// then call [`wait`] after the launch action to receive the new window info.
+pub struct WindowWatcher {
+    rx: std::sync::mpsc::Receiver<WindowInfo>,
+    stop: Arc<AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+    // Stored for polling fallback
+    bundle_id: String,
+    existing_ids: Vec<u32>,
+    title_match: Option<String>,
+}
+
+impl Drop for WindowWatcher {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+impl WindowWatcher {
+    /// Block until a new window is detected or the timeout expires.
+    /// Consumes the watcher.
+    pub fn wait(mut self, timeout_ms: u64) -> Option<WindowInfo> {
+        if self.thread.is_none() {
+            // No observer running (app wasn't running) — poll
+            return await_new_window(
+                &self.bundle_id,
+                self.title_match.as_deref(),
+                &self.existing_ids,
+                timeout_ms,
+            );
+        }
+
+        // Wait for the observer to deliver a result
+        let result = self
+            .rx
+            .recv_timeout(std::time::Duration::from_millis(timeout_ms))
+            .ok();
+
+        // Stop the observer thread
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+
+        if result.is_some() {
+            return result;
+        }
+
+        // Brief polling fallback in case the observer missed the event
+        // (e.g. `_AXUIElementGetWindow` failed in the callback).
+        await_new_window(
+            &self.bundle_id,
+            self.title_match.as_deref(),
+            &self.existing_ids,
+            500,
+        )
+    }
+}
+
+/// Set up an `AXObserver` to detect new window creation for a given bundle.
+///
+/// Call this **before** the action that creates the window (e.g. `open -a` or
+/// `AppleScript`). If the app is already running, an `AXObserver` with
+/// `kAXWindowCreatedNotification` is registered on a background thread.
+/// If the app isn't running yet, the watcher falls back to polling in [`WindowWatcher::wait`].
+pub fn start_watching(
+    bundle_id: &str,
+    existing_ids: &[u32],
+    title_match: Option<&str>,
+) -> WindowWatcher {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let stop = Arc::new(AtomicBool::new(false));
+
+    let thread = if let Some(pid) = pid_for_bundle_id(bundle_id) {
+        let stop_clone = stop.clone();
+        let state = ObserverState {
+            existing_ids: existing_ids.to_vec(),
+            bundle_id: bundle_id.to_string(),
+            tx,
+        };
+
+        Some(std::thread::spawn(move || {
+            run_observer(pid, state, stop_clone);
+        }))
+    } else {
+        None
+    };
+
+    WindowWatcher {
+        rx,
+        stop,
+        thread,
+        bundle_id: bundle_id.to_string(),
+        existing_ids: existing_ids.to_vec(),
+        title_match: title_match.map(String::from),
+    }
+}
+
+/// `AXObserver` callback — fires when `kAXWindowCreatedNotification` is delivered.
+/// The `element` parameter is the newly created `AXUIElement` (the window).
+unsafe extern "C" fn observer_callback(
+    _observer: *const c_void,
+    element: *const c_void,
+    _notification: *const c_void,
+    refcon: *mut c_void,
+) {
+    let state = &*(refcon as *const ObserverState);
+
+    // Try to get CGWindowID directly from the new AX window element
+    let mut cg_id: u32 = 0;
+    if _AXUIElementGetWindow(element, &raw mut cg_id) != 0 || cg_id == 0 {
+        // CGWindowID not available yet — try snapshot diff
+        let windows = list_windows_for_bundle(&state.bundle_id);
+        for w in &windows {
+            if !state.existing_ids.contains(&w.cg_window_id) {
+                let _ = state.tx.send(w.clone());
+                return;
+            }
+        }
+        return;
+    }
+
+    // Check if this is a new window (not in snapshot)
+    if state.existing_ids.contains(&cg_id) {
+        return;
+    }
+
+    let mut pid: i32 = 0;
+    AXUIElementGetPid(element, &raw mut pid);
+
+    let title = {
+        let attr = cfstr("AXTitle");
+        let mut title_ref: *const c_void = std::ptr::null();
+        let err = AXUIElementCopyAttributeValue(element, attr, &raw mut title_ref);
+        CFRelease(attr);
+        if err == 0 && !title_ref.is_null() {
+            let t = cfstring_to_string(title_ref).unwrap_or_default();
+            CFRelease(title_ref);
+            t
+        } else {
+            String::new()
+        }
+    };
+
+    let _ = state.tx.send(WindowInfo {
+        pid,
+        cg_window_id: cg_id,
+        title,
+    });
+}
+
+/// Run the `AXObserver` on the current thread's `CFRunLoop`.
+/// Blocks until `stop` is set or the thread is joined.
+fn run_observer(pid: i32, state: ObserverState, stop: Arc<AtomicBool>) {
+    unsafe {
+        let mut observer: *const c_void = std::ptr::null();
+        let err = AXObserverCreate(pid, observer_callback, &raw mut observer);
+        if err != 0 || observer.is_null() {
+            return;
+        }
+
+        let app = AXUIElementCreateApplication(pid);
+        if app.is_null() {
+            CFRelease(observer);
+            return;
+        }
+
+        let refcon = Box::into_raw(Box::new(state));
+
+        let notification = cfstr("AXWindowCreated");
+        let err = AXObserverAddNotification(
+            observer,
+            app,
+            notification,
+            refcon.cast::<c_void>(),
+        );
+
+        if err != 0 {
+            CFRelease(notification);
+            CFRelease(app);
+            CFRelease(observer);
+            drop(Box::from_raw(refcon));
+            return;
+        }
+
+        let source = AXObserverGetRunLoopSource(observer);
+        let rl = CFRunLoopGetCurrent();
+        CFRunLoopAddSource(rl, source, kCFRunLoopDefaultMode);
+
+        // Run the loop in short intervals, checking the stop flag between iterations.
+        while !stop.load(Ordering::Relaxed) {
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.1, 0);
+        }
+
+        // Cleanup
+        let notif_cleanup = cfstr("AXWindowCreated");
+        AXObserverRemoveNotification(observer, app, notif_cleanup);
+        CFRelease(notif_cleanup);
+        CFRelease(notification);
+        CFRelease(app);
+        CFRelease(observer);
+        drop(Box::from_raw(refcon));
     }
 }
 
@@ -705,78 +983,3 @@ pub fn get_screen_size() -> Option<(i32, i32)> {
     }
 }
 
-// --- Window Registry (in-memory + persisted to disk) ---
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct WindowEntry {
-    pub pid: i32,
-    pub cg_window_id: u32,
-}
-
-/// On-disk format: map of `"app_type:folder_name"` to `WindowEntry`.
-type RegistryMap = HashMap<String, WindowEntry>;
-
-static WINDOW_REGISTRY: LazyLock<Mutex<RegistryMap>> =
-    LazyLock::new(|| Mutex::new(load_registry()));
-
-fn registry_path() -> std::path::PathBuf {
-    state::band_home().join("status").join("window-registry.json")
-}
-
-fn load_registry() -> RegistryMap {
-    let path = registry_path();
-    std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|data| serde_json::from_str(&data).ok())
-        .unwrap_or_default()
-}
-
-fn save_registry(map: &RegistryMap) {
-    let path = registry_path();
-    if let Ok(data) = serde_json::to_string(map) {
-        let _ = std::fs::write(path, data);
-    }
-}
-
-fn registry_key(app_type: &str, folder_name: &str) -> String {
-    format!("{app_type}:{folder_name}")
-}
-
-/// Register a window in the centralized registry (memory + disk).
-pub fn register_window(app_type: &str, folder_name: &str, pid: i32, cg_id: u32) {
-    let mut map = WINDOW_REGISTRY.lock().unwrap();
-    map.insert(
-        registry_key(app_type, folder_name),
-        WindowEntry {
-            pid,
-            cg_window_id: cg_id,
-        },
-    );
-    save_registry(&map);
-}
-
-/// Look up a registered window.
-pub fn get_window(app_type: &str, folder_name: &str) -> Option<WindowEntry> {
-    WINDOW_REGISTRY
-        .lock()
-        .unwrap()
-        .get(&registry_key(app_type, folder_name))
-        .cloned()
-}
-
-/// Remove a window from the registry (memory + disk).
-pub fn unregister_window(app_type: &str, folder_name: &str) {
-    let mut map = WINDOW_REGISTRY.lock().unwrap();
-    map.remove(&registry_key(app_type, folder_name));
-    save_registry(&map);
-}
-
-/// Check if a registered window is still valid (its `CGWindowID` still exists on screen).
-pub fn is_window_valid(app_type: &str, folder_name: &str, bundle_id: &str) -> bool {
-    let Some(entry) = get_window(app_type, folder_name) else {
-        return false;
-    };
-
-    let windows = list_windows_for_bundle(bundle_id);
-    windows.iter().any(|w| w.cg_window_id == entry.cg_window_id)
-}

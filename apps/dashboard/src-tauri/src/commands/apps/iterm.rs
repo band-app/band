@@ -1,14 +1,13 @@
 use std::fmt::Write;
 
-use super::{AppDriver, ScreenRect};
+use super::AppHandler;
 use crate::commands::ax_windows;
 
 pub const BUNDLE_ID: &str = "com.googlecode.iterm2";
-const APP_TYPE: &str = "iterm";
 
 pub struct ITermDriver;
 
-impl AppDriver for ITermDriver {
+impl AppHandler for ITermDriver {
     fn bundle_id(&self) -> &str {
         BUNDLE_ID
     }
@@ -17,7 +16,42 @@ impl AppDriver for ITermDriver {
         "iTerm2"
     }
 
-    fn open_or_focus(
+    fn app_type(&self) -> &'static str {
+        "iterm"
+    }
+
+    fn window_title_hint(&self, folder_name: &str) -> Option<String> {
+        Some(format!("band:{folder_name}"))
+    }
+
+    fn watcher_title_hint(&self, _folder_name: &str) -> Option<String> {
+        None
+    }
+
+    fn launch(
+        &self,
+        _worktree_path: &str,
+        _folder_name: &str,
+        _config: &serde_json::Value,
+    ) -> Result<(), String> {
+        let is_running = !ax_windows::list_windows_for_bundle(BUNDLE_ID).is_empty()
+            || is_iterm_process_running();
+
+        if is_running {
+            run_applescript(
+                r#"tell application "iTerm2" to create window with default profile"#,
+            )?;
+        } else {
+            std::process::Command::new("open")
+                .args(["-a", "iTerm"])
+                .output()
+                .map_err(|e| format!("Failed to launch iTerm: {e}"))?;
+        }
+
+        Ok(())
+    }
+
+    fn setup(
         &self,
         worktree_path: &str,
         folder_name: &str,
@@ -35,30 +69,6 @@ impl AppDriver for ITermDriver {
             })
             .unwrap_or_default();
 
-        // 1. Check WindowRegistry for a known window
-        if let Some(entry) = ax_windows::get_window(APP_TYPE, folder_name) {
-            if ax_windows::is_window_valid(APP_TYPE, folder_name, BUNDLE_ID) {
-                ax_windows::focus_window(entry.pid, entry.cg_window_id);
-                return Ok(());
-            }
-            ax_windows::unregister_window(APP_TYPE, folder_name);
-        }
-
-        // 2. Try to find existing window by CGWindowList title
-        if let Some(win) = ax_windows::find_window_by_title(BUNDLE_ID, &window_name) {
-            ax_windows::register_window(APP_TYPE, folder_name, win.pid, win.cg_window_id);
-            ax_windows::focus_window(win.pid, win.cg_window_id);
-            return Ok(());
-        }
-
-        // 3. Snapshot existing iTerm windows before creation
-        let existing = ax_windows::snapshot_window_ids(BUNDLE_ID);
-
-        // Check if iTerm is running
-        let is_running = !ax_windows::list_windows_for_bundle(BUNDLE_ID).is_empty()
-            || is_iterm_process_running();
-
-        // 4. Create window via AppleScript (kept for iTerm session/split creation)
         let mut script = String::from("set windowName to ");
         script.push_str(&applescript_string(&window_name));
         let _ = write!(
@@ -70,31 +80,17 @@ impl AppDriver for ITermDriver {
             let _ = write!(script, "\nset cmd{} to {}", i + 1, applescript_string(cmd));
         }
 
-        if is_running {
-            // iTerm is running but our window doesn't exist. Create a new one.
-            script.push_str(
-                r#"
+        // Target the most recent window (the one launch() just created)
+        script.push_str(
+            r#"
 tell application "iTerm2"
-    set targetWindow to (create window with default profile)
-    tell targetWindow
-        tell current session of current tab
-            set name to windowName
-            write text "cd " & quoted form of worktreePath"#,
-            );
-        } else {
-            // iTerm is not running. `activate` launches it and creates a default window.
-            script.push_str(
-                r#"
-tell application "iTerm2"
-    activate
-    delay 1
     set targetWindow to current window
+    if targetWindow is missing value then return
     tell targetWindow
         tell current session of current tab
             set name to windowName
             write text "cd " & quoted form of worktreePath"#,
-            );
-        }
+        );
 
         // First command in the first session
         if let Some(cmd) = commands.first() {
@@ -133,58 +129,24 @@ tell application "iTerm2"
 end tell",
         );
 
-        let output = std::process::Command::new("osascript")
-            .args(["-e", &script])
-            .output()
-            .map_err(|e| format!("Failed to open iTerm: {e}"))?;
-
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if !output.status.success() && !stderr.is_empty() {
-            return Err(format!("iTerm AppleScript failed: {stderr}"));
-        }
-
-        // 5. Discover the new window via snapshot-diff or title match
-        if let Some(win) =
-            ax_windows::await_new_window(BUNDLE_ID, Some(&window_name), &existing, 5000)
-        {
-            ax_windows::register_window(APP_TYPE, folder_name, win.pid, win.cg_window_id);
-        } else if let Some(win) = ax_windows::await_new_window(BUNDLE_ID, None, &existing, 2000) {
-            // Fallback: if title didn't match (shell prompt override), use snapshot diff
-            ax_windows::register_window(APP_TYPE, folder_name, win.pid, win.cg_window_id);
-        }
-
+        run_applescript(&script)?;
         Ok(())
     }
+}
 
-    fn position_window(&self, folder_name: &str, rect: &ScreenRect) -> Result<(), String> {
-        let entry = ax_windows::get_window(APP_TYPE, folder_name)
-            .ok_or_else(|| "No iTerm window registered".to_string())?;
-        if !ax_windows::position_window(
-            entry.pid,
-            entry.cg_window_id,
-            rect.x,
-            rect.y,
-            rect.width,
-            rect.height,
-        ) {
-            ax_windows::unregister_window(APP_TYPE, folder_name);
-            return Err("Failed to position iTerm window (stale reference)".to_string());
-        }
-        Ok(())
+/// Run an `AppleScript` and return an error if it fails.
+fn run_applescript(script: &str) -> Result<(), String> {
+    let output = std::process::Command::new("osascript")
+        .args(["-e", script])
+        .output()
+        .map_err(|e| format!("Failed to run iTerm AppleScript: {e}"))?;
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !output.status.success() && !stderr.is_empty() {
+        return Err(format!("iTerm AppleScript failed: {stderr}"));
     }
 
-    fn raise_window(&self, folder_name: &str) {
-        if let Some(entry) = ax_windows::get_window(APP_TYPE, folder_name) {
-            if !ax_windows::raise_window(entry.pid, entry.cg_window_id) {
-                ax_windows::unregister_window(APP_TYPE, folder_name);
-            }
-        }
-    }
-
-    fn matches_window_title(&self, title: &str, folder_name: &str) -> bool {
-        let window_name = format!("band:{folder_name}");
-        title.contains(&window_name)
-    }
+    Ok(())
 }
 
 /// Check if iTerm2 process is running (it may have no windows yet).

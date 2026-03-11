@@ -15,27 +15,47 @@ pub struct ScreenRect {
     pub height: i32,
 }
 
-#[allow(dead_code)]
-pub trait AppDriver: Send + Sync {
+pub trait AppHandler: Send + Sync {
     fn bundle_id(&self) -> &str;
     fn display_name(&self) -> &'static str;
+    fn app_type(&self) -> &'static str;
 
-    /// Open app with workspace content, or focus existing window.
-    fn open_or_focus(
+    /// Launch the app / create a new window. Called only when no existing window was found.
+    fn launch(
         &self,
         worktree_path: &str,
         folder_name: &str,
         config: &serde_json::Value,
     ) -> Result<(), String>;
 
-    /// Position the app's window matching this workspace to the given rect.
-    fn position_window(&self, folder_name: &str, rect: &ScreenRect) -> Result<(), String>;
+    /// Post-launch setup (e.g. iTerm splits/commands). Called only for newly launched windows,
+    /// after the window has been positioned.
+    fn setup(
+        &self,
+        _worktree_path: &str,
+        _folder_name: &str,
+        _config: &serde_json::Value,
+    ) -> Result<(), String> {
+        Ok(())
+    }
 
-    /// Raise window without stealing focus (`AXRaise`).
-    fn raise_window(&self, folder_name: &str);
+    /// Title substring to search for in existing windows.
+    /// Return `None` to skip title-based discovery (e.g. Chrome --app).
+    fn window_title_hint(&self, folder_name: &str) -> Option<String> {
+        Some(folder_name.to_string())
+    }
+
+    /// Title hint passed to the `AXObserver` watcher for new window matching.
+    /// Defaults to same as `window_title_hint`.
+    fn watcher_title_hint(&self, folder_name: &str) -> Option<String> {
+        self.window_title_hint(folder_name)
+    }
 
     /// Check if a window title belongs to this workspace.
-    fn matches_window_title(&self, title: &str, folder_name: &str) -> bool;
+    fn matches_window_title(&self, title: &str, folder_name: &str) -> bool {
+        self.window_title_hint(folder_name)
+            .is_some_and(|hint| title.contains(&hint))
+    }
 }
 
 // --- Config types ---
@@ -192,9 +212,9 @@ pub fn load_apps_config(worktree_path: &str) -> Vec<AppConfig> {
     Vec::new()
 }
 
-// --- Driver registry ---
+// --- Handler registry ---
 
-pub fn get_driver(app_type: &str) -> Option<Box<dyn AppDriver>> {
+pub fn get_handler(app_type: &str) -> Option<Box<dyn AppHandler>> {
     match app_type {
         "vscode" => Some(Box::new(vscode::VsCodeDriver)),
         "zed" => Some(Box::new(zed::ZedDriver)),
@@ -204,7 +224,7 @@ pub fn get_driver(app_type: &str) -> Option<Box<dyn AppDriver>> {
     }
 }
 
-/// Get all registered drivers with their bundle IDs.
+/// Get all known app handlers with their bundle IDs.
 pub fn all_known_bundle_ids() -> Vec<(&'static str, &'static str)> {
     vec![
         ("vscode", vscode::BUNDLE_ID),

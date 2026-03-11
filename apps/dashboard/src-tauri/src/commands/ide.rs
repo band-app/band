@@ -14,6 +14,7 @@ use super::ax_windows::{
     self, get_bundle_id, get_frontmost_window, objc_getClass, objc_msgSend, proc_listpids,
     proc_pidinfo, sel_registerName, PROC_ALL_PIDS, PROC_PIDTBSDINFO, PROC_PIDVNODEPATHINFO,
 };
+use super::window_manager::WindowManager;
 
 fn log_debug(msg: &str) {
     let log_file = state::band_home().join("debug.log");
@@ -228,7 +229,7 @@ fn detect_frontmost_workspace(app_state: &state::AppState) -> Option<String> {
     //    Cmd+` switching, iTerm (where title matching fails), and any app
     //    whose window we previously opened.
     if let Some(cg_id) = cg_id {
-        if let Some((_app_type, folder_name)) = ax_windows::find_workspace_by_cg_id(cg_id) {
+        if let Some((_app_type, folder_name)) = WindowManager::global().find_by_cg_id(cg_id) {
             if let Some(ws_id) = folder_name_to_workspace_id(&folder_name, app_state) {
                 return Some(ws_id);
             }
@@ -247,7 +248,7 @@ fn detect_frontmost_workspace(app_state: &state::AppState) -> Option<String> {
             let known = apps::all_known_bundle_ids();
             for (app_type, known_bundle_id) in &known {
                 if bundle_id == *known_bundle_id {
-                    if let Some(driver) = apps::get_driver(app_type) {
+                    if let Some(driver) = apps::get_handler(app_type) {
                         let mut best_match: Option<(String, usize)> = None;
 
                         for proj in &app_state.projects {
@@ -381,10 +382,9 @@ pub fn raise_workspace_windows(workspace_id: &str, cache: &ProjectCache) {
         return;
     }
 
+    let wm = WindowManager::global();
     for app_config in &app_configs {
-        if let Some(driver) = apps::get_driver(app_config.app_type()) {
-            driver.raise_window(&folder_name);
-        }
+        wm.raise_window(app_config.app_type(), &folder_name);
     }
 }
 
@@ -527,20 +527,31 @@ pub fn workspace_focus(
 
     // Open/focus each app in its own thread so slow apps
     // (e.g. iTerm AppleScript) don't block the UI.
+    let wm = WindowManager::global();
     for (i, app_config) in app_configs.iter().enumerate() {
-        if let Some(driver) = apps::get_driver(app_config.app_type()) {
+        if let Some(handler) = apps::get_handler(app_config.app_type()) {
             let config_json = app_config.to_json();
             let rect = rects[i].clone();
             let folder = folder_name.clone();
             let path = wt_path.clone();
             let app_type = app_config.app_type().to_string();
             std::thread::spawn(move || {
-                if let Err(e) = driver.open_or_focus(&path, &folder, &config_json) {
-                    log_debug(&format!("Failed to open {app_type}: {e}"));
-                    return;
-                }
-                if let Err(e) = driver.position_window(&folder, &rect) {
+                let launched = match wm.open_or_focus(&*handler, &path, &folder, &config_json) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        log_debug(&format!("Failed to open {app_type}: {e}"));
+                        return;
+                    }
+                };
+                if let Err(e) =
+                    wm.position_window(handler.app_type(), handler.display_name(), &folder, &rect)
+                {
                     log_debug(&format!("Failed to position {app_type}: {e}"));
+                }
+                if launched {
+                    if let Err(e) = handler.setup(&path, &folder, &config_json) {
+                        log_debug(&format!("Failed to setup {app_type}: {e}"));
+                    }
                 }
             });
         }

@@ -4,6 +4,8 @@ pub mod apps;
 pub mod ax_windows;
 #[cfg(target_os = "macos")]
 pub mod ide;
+#[cfg(target_os = "macos")]
+pub mod window_manager;
 #[cfg(not(target_os = "macos"))]
 pub mod ide_stub;
 #[cfg(not(target_os = "macos"))]
