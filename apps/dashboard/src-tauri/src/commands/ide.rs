@@ -447,6 +447,14 @@ pub fn start_focus_polling(app_handle: tauri::AppHandle) {
                 continue;
             };
 
+            // Sync last_active from shared state (workspace_focus may have changed it)
+            if let Ok(guard) = active_state.lock() {
+                if *guard != last_active {
+                    last_active = guard.clone();
+                    apps_raised = false;
+                }
+            }
+
             if let Some(ws_id) = detect_frontmost_workspace(&cached) {
                 if let Some(ref client) = api {
                     clear_needs_attention(&ws_id, client);
