@@ -33,6 +33,12 @@ export interface SessionResultEvent {
   errors: string[];
 }
 
+export interface FileEvent {
+  type: "file";
+  mediaType: string;
+  url: string;
+}
+
 export interface ErrorEvent {
   type: "error";
   message: string;
@@ -43,5 +49,6 @@ export type AgentEvent =
   | TextDeltaEvent
   | ToolUseEvent
   | ToolResultEvent
+  | FileEvent
   | SessionResultEvent
   | ErrorEvent;

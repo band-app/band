@@ -313,6 +313,14 @@ export function ChatView({
                         }
                         return null;
                       }
+                      if (segment.type === "file") {
+                        return (
+                          <MessageFilePart
+                            key={`${message.id}-file-${segment.partIndex}`}
+                            part={segment.part}
+                          />
+                        );
+                      }
                       const item = toolPartToItem(segment.part);
                       if (isTaskTool(item.toolName)) {
                         if (!taskWidgetRendered && liveTaskMap.size > 0) {

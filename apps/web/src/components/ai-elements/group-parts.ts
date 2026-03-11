@@ -17,10 +17,16 @@ export type ToolSegment = {
   partIndex: number;
 };
 
-export type MessageSegment = TextSegment | ToolSegment;
+export type FileSegment = {
+  type: "file";
+  part: { type: "file"; mediaType: string; url: string; filename?: string };
+  partIndex: number;
+};
+
+export type MessageSegment = TextSegment | ToolSegment | FileSegment;
 
 /**
- * Separates message parts into text and tool segments.
+ * Separates message parts into text, tool, and file segments.
  * Empty/whitespace-only text parts are skipped.
  */
 export function groupMessageParts(parts: Part[]): MessageSegment[] {
@@ -31,6 +37,15 @@ export function groupMessageParts(parts: Part[]): MessageSegment[] {
 
     if (isToolUIPart(part)) {
       segments.push({ type: "tool", part: part as ToolPart, partIndex: i });
+      continue;
+    }
+
+    if (part.type === "file") {
+      segments.push({
+        type: "file",
+        part: part as FileSegment["part"],
+        partIndex: i,
+      });
       continue;
     }
 
