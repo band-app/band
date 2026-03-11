@@ -2,6 +2,7 @@ use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 
 /// Resolve the user's full shell PATH once (includes nvm/volta/homebrew paths).
+#[allow(dead_code)]
 pub fn shell_path() -> &'static str {
     static PATH: OnceLock<String> = OnceLock::new();
     PATH.get_or_init(|| {

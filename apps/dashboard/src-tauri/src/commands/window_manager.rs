@@ -181,9 +181,7 @@ impl WindowManager {
         loop {
             let still_open: Vec<&str> = matching
                 .iter()
-                .filter(|(_key, entry)| {
-                    ax_windows::window_exists(entry.pid, entry.cg_window_id)
-                })
+                .filter(|(_key, entry)| ax_windows::window_exists(entry.pid, entry.cg_window_id))
                 .map(|(key, _)| key.as_str())
                 .collect();
 

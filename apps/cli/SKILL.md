@@ -177,3 +177,5 @@ band projects remove my-app
 | Auth token | `BAND_TOKEN` | from `~/.band/settings.json` |
 | Output format | `BAND_OUTPUT` | `text` |
 | Band home dir | `BAND_HOME` | `~/.band` |
+
+
