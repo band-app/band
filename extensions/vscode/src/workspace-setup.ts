@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import type { BandConfig, LayoutConfig } from "./config";
+import type { BandConfig, TerminalConfig } from "./config";
 
 export interface SetupResult {
   terminals: vscode.Terminal[];
@@ -8,16 +8,14 @@ export interface SetupResult {
 export async function setupWorkspace(config: BandConfig): Promise<SetupResult> {
   const terminals: vscode.Terminal[] = [];
 
-  // Set editor layout if config has layout
-  if (config.layout) {
-    await setupEditorLayout(config.layout);
-  }
+  // Extract terminal config from the VS Code app entry in the apps array
+  const terminalConfigs = getVsCodeTerminals(config);
 
   // Create terminals (skip if they already exist from a previous session)
-  if (config.terminals) {
+  if (terminalConfigs.length > 0) {
     const existingTerminals = vscode.window.terminals;
 
-    for (const termConfig of config.terminals) {
+    for (const termConfig of terminalConfigs) {
       const existing = existingTerminals.find((t) => t.name === termConfig.name);
       if (existing) {
         terminals.push(existing);
@@ -43,34 +41,15 @@ export async function setupWorkspace(config: BandConfig): Promise<SetupResult> {
   return { terminals };
 }
 
-async function setupEditorLayout(layout: LayoutConfig) {
-  const groups = layout.groups.map((g) => ({ size: g.size }));
-
-  if (layout.orientation === "horizontal") {
-    await vscode.commands.executeCommand("vscode.setEditorLayout", {
-      orientation: 0,
-      groups,
-    });
-  } else {
-    await vscode.commands.executeCommand("vscode.setEditorLayout", {
-      orientation: 1,
-      groups,
-    });
+function getVsCodeTerminals(config: BandConfig): TerminalConfig[] {
+  if (!config.apps) {
+    return [];
   }
 
-  for (let i = 0; i < layout.groups.length; i++) {
-    const group = layout.groups[i];
-    if (group.browser) {
-      await openBrowser(group.browser.url, i + 1, group.browser.pinned);
-    }
+  const vscodeApp = config.apps.find((app) => app.type === "vscode");
+  if (!vscodeApp || vscodeApp.type !== "vscode") {
+    return [];
   }
-}
 
-async function openBrowser(url: string, viewColumn: number, pinned?: boolean) {
-  await vscode.commands.executeCommand("simpleBrowser.api.open", vscode.Uri.parse(url), {
-    viewColumn: viewColumn,
-  });
-  if (pinned) {
-    await vscode.commands.executeCommand("workbench.action.pinEditor");
-  }
+  return vscodeApp.terminals ?? [];
 }

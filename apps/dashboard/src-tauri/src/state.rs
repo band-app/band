@@ -102,6 +102,7 @@ impl ActiveWorkspaceState {
 
 // --- Cached project state (refreshed from web server API) ---
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub struct CachedState {
     pub app_state: AppState,
 }
@@ -115,6 +116,7 @@ impl ProjectCache {
     }
 
     /// Get a copy of the current cached state, if available.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub fn get(&self) -> Option<AppState> {
         self.0.lock().ok()?.as_ref().map(|c| c.app_state.clone())
     }

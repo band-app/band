@@ -5,10 +5,7 @@ use crate::state::{ActiveWorkspaceState, ProjectCache};
 
 pub fn start_focus_polling(_app_handle: tauri::AppHandle) {}
 
-pub fn raise_vscode_window(_branch: &str) {}
-
-#[allow(dead_code)]
-pub fn align_vscode_window(_branch: &str) {}
+pub fn raise_workspace_windows(_workspace_id: &str, _cache: &ProjectCache) {}
 
 #[tauri::command]
 pub fn workspace_focus(

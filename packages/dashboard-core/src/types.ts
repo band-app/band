@@ -60,20 +60,44 @@ export interface WorkspaceBranchStatus {
   ci: CIStatus;
 }
 
-export interface BandConfig {
-  layout?: {
-    orientation: "horizontal" | "vertical";
-    groups: {
-      size: number;
-      browser?: { url: string; pinned?: boolean };
-    }[];
-  };
+export type AppType = "vscode" | "zed" | "iterm" | "chrome";
+
+export interface VsCodeAppConfig {
+  type: "vscode";
+  size?: number;
   terminals?: {
     name: string;
     command: string;
     split?: "horizontal" | "vertical";
     agentType?: "claude-code";
   }[];
+}
+
+export interface ZedAppConfig {
+  type: "zed";
+  size?: number;
+}
+
+export interface ITermAppConfig {
+  type: "iterm";
+  size?: number;
+  commands?: {
+    name?: string;
+    command: string;
+    split?: "horizontal" | "vertical";
+  }[];
+}
+
+export interface ChromeAppConfig {
+  type: "chrome";
+  size?: number;
+  url?: string;
+}
+
+export type AppConfig = VsCodeAppConfig | ZedAppConfig | ITermAppConfig | ChromeAppConfig;
+
+export interface BandConfig {
+  apps?: AppConfig[];
 }
 
 export type CodingAgentType = "claude-code";
