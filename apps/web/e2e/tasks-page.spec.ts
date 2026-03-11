@@ -192,7 +192,11 @@ test("back button navigates to dashboard", async ({ page }) => {
   await page.goto(`${server.url}/tasks?token=${TOKEN}`);
   await expect(page.locator("h1", { hasText: "Tasks" })).toBeVisible();
 
-  // Click the back arrow
-  const backLink = page.locator("a[href='/']");
-  await expect(backLink).toBeVisible();
+  // Click the back arrow button
+  const backButton = page.locator("header button").first();
+  await expect(backButton).toBeVisible();
+  await backButton.click();
+
+  // Should navigate to the dashboard
+  await page.waitForURL(`${server.url}/?token=${TOKEN}`);
 });
