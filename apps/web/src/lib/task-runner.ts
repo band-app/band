@@ -268,6 +268,16 @@ async function runTask(workspaceId: string, task: InternalTask) {
           break;
         }
 
+        case "file": {
+          endText();
+          emit(workspaceId, task, {
+            type: "file",
+            mediaType: event.mediaType,
+            url: event.url,
+          });
+          break;
+        }
+
         case "session-result": {
           endText();
 
