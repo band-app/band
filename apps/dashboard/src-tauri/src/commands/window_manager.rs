@@ -110,8 +110,7 @@ impl WindowManager {
         // 3. Snapshot + start watching + launch + wait + register
         let existing = ax_windows::snapshot_window_ids(bundle_id);
         let watcher_hint = handler.watcher_title_hint(folder_name);
-        let watcher =
-            ax_windows::start_watching(bundle_id, &existing, watcher_hint.as_deref());
+        let watcher = ax_windows::start_watching(bundle_id, &existing, watcher_hint.as_deref());
 
         handler.launch(worktree_path, folder_name, config)?;
 
@@ -160,7 +159,9 @@ impl WindowManager {
 // --- Persistence helpers ---
 
 fn registry_path() -> std::path::PathBuf {
-    state::band_home().join("status").join("window-registry.json")
+    state::band_home()
+        .join("status")
+        .join("window-registry.json")
 }
 
 fn load_from_disk() -> RegistryMap {

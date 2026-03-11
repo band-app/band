@@ -390,8 +390,7 @@ pub fn pid_for_bundle_id(bundle_id: &str) -> Option<i32> {
         type MsgSendStr =
             unsafe extern "C" fn(*const c_void, *const c_void, *const c_void) -> *const c_void;
         type MsgSendCount = unsafe extern "C" fn(*const c_void, *const c_void) -> u64;
-        type MsgSendIdx =
-            unsafe extern "C" fn(*const c_void, *const c_void, u64) -> *const c_void;
+        type MsgSendIdx = unsafe extern "C" fn(*const c_void, *const c_void, u64) -> *const c_void;
         type MsgSendPid = unsafe extern "C" fn(*const c_void, *const c_void) -> i32;
 
         let msg_str: MsgSendStr = std::mem::transmute(objc_msgSend as unsafe extern "C" fn());
@@ -405,8 +404,7 @@ pub fn pid_for_bundle_id(bundle_id: &str) -> Option<i32> {
         }
 
         let bid_cf = cfstr(bundle_id);
-        let sel =
-            sel_registerName(c"runningApplicationsWithBundleIdentifier:".as_ptr());
+        let sel = sel_registerName(c"runningApplicationsWithBundleIdentifier:".as_ptr());
         let apps = msg_str(cls, sel, bid_cf);
         CFRelease(bid_cf);
 
@@ -428,7 +426,11 @@ pub fn pid_for_bundle_id(bundle_id: &str) -> Option<i32> {
 
         let pid_sel = sel_registerName(c"processIdentifier".as_ptr());
         let pid = msg_pid(first_app, pid_sel);
-        if pid > 0 { Some(pid) } else { None }
+        if pid > 0 {
+            Some(pid)
+        } else {
+            None
+        }
     }
 }
 
@@ -771,12 +773,7 @@ fn run_observer(pid: i32, state: ObserverState, stop: Arc<AtomicBool>) {
         let refcon = Box::into_raw(Box::new(state));
 
         let notification = cfstr("AXWindowCreated");
-        let err = AXObserverAddNotification(
-            observer,
-            app,
-            notification,
-            refcon.cast::<c_void>(),
-        );
+        let err = AXObserverAddNotification(observer, app, notification, refcon.cast::<c_void>());
 
         if err != 0 {
             CFRelease(notification);
@@ -982,4 +979,3 @@ pub fn get_screen_size() -> Option<(i32, i32)> {
         }
     }
 }
-

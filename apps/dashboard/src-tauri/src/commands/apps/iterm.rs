@@ -38,9 +38,7 @@ impl AppHandler for ITermDriver {
             || is_iterm_process_running();
 
         if is_running {
-            run_applescript(
-                r#"tell application "iTerm2" to create window with default profile"#,
-            )?;
+            run_applescript(r#"tell application "iTerm2" to create window with default profile"#)?;
         } else {
             std::process::Command::new("open")
                 .args(["-a", "iTerm"])
