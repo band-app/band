@@ -3,7 +3,9 @@ import {
   HybridDashboardAdapter,
   NativeShellCapabilities,
 } from "@band/dashboard-core/adapters/hybrid";
-import { TooltipProvider } from "@band/ui";
+import { Button, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@band/ui";
+import { Link } from "@tanstack/react-router";
+import { ListTodo } from "lucide-react";
 import { TunnelToolbarButton } from "./TunnelToolbarButton";
 
 const adapter = new HybridDashboardAdapter();
@@ -13,7 +15,23 @@ export function DashboardView() {
   return (
     <DashboardProvider adapter={adapter} capabilities={capabilities}>
       <TooltipProvider>
-        <DashboardShell toolbarExtra={<TunnelToolbarButton />} />
+        <DashboardShell
+          toolbarExtra={
+            <>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button size="icon-sm" variant="ghost" asChild>
+                    <Link to="/tasks">
+                      <ListTodo className="size-5" />
+                    </Link>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Tasks</TooltipContent>
+              </Tooltip>
+              <TunnelToolbarButton />
+            </>
+          }
+        />
       </TooltipProvider>
     </DashboardProvider>
   );
