@@ -1,7 +1,9 @@
 ---
 name: band
 version: 0.1.0
-description: Programmatic workspace management for Band
+description: Programmatic workspace management for Band. Use when the user wants to create, list, or remove Band workspaces or projects, manage tasks, manage tunnels, or check settings via the Band CLI.
+allowed-tools: Bash
+argument-hint: [command] [args...]
 ---
 
 # Band CLI
@@ -71,7 +73,9 @@ JSON output: `{"workspaces": [{"project": "...", "branch": "...", "path": "..."}
 band workspaces create <project> <branch> [--base <branch>] [--prompt <text>]
 ```
 
-Returns the worktree path. Idempotent — creating an existing workspace returns its path. Runs `.band/config.json` `setup` script if present (non-fatal). With `--prompt`, also submits a task to the coding agent.
+Returns the worktree path. Idempotent — creating an existing workspace returns its path. Runs `.band/config.json` `setup` script if present (non-fatal).
+
+**Always use `--prompt` when the user wants work to begin immediately.** This submits a task to the coding agent right after workspace creation, so the agent starts working without a separate step. Only omit `--prompt` when the workspace is being created for manual/later use.
 
 ### Remove a workspace
 
@@ -113,6 +117,49 @@ band tunnel stop
 
 Stops the remote tunnel.
 
+### List tasks
+
+```sh
+band tasks list [--project <name>] [--status <running|completed|failed>]
+```
+
+Text output: `ID\tSTATUS\tWORKSPACE\tPROMPT` (tab-separated table).
+JSON output: `{"tasks": [{"id": "...", "status": "...", "project": "...", "branch": "...", "prompt": "..."}]}`
+
+### Create a task
+
+```sh
+band tasks create <workspace_id> --prompt <text>
+```
+
+Submits a new task to the coding agent. Returns the task ID.
+JSON output: `{"id": "...", "workspaceId": "..."}`
+
+### Cancel a task
+
+```sh
+band tasks cancel <task_id>
+```
+
+Cancels a running task.
+JSON output: `{"cancelled": true, "taskId": "..."}`
+
+### Re-run a task
+
+```sh
+band tasks rerun <task_id>
+```
+
+Re-runs a completed or failed task.
+
+### Watch a task
+
+```sh
+band tasks watch [<task_id>] [--workspace <workspace_id>]
+```
+
+Streams task output in real-time. Either provide a task ID or `--workspace` to watch the latest task for that workspace.
+
 ### Hook notifications
 
 ```sh
@@ -148,6 +195,25 @@ band workspaces create my-app feat/auth --prompt "Add JWT authentication to the 
 band workspaces list --output json | jq '.workspaces[] | select(.project == "my-app") | .branch'
 ```
 
+### Task management
+
+```sh
+# List running tasks
+band tasks list --status running
+
+# Submit a task to a workspace
+band tasks create ws_abc123 --prompt "Fix the failing tests"
+
+# Watch task output
+band tasks watch --workspace ws_abc123
+
+# Cancel a stuck task
+band tasks cancel tsk_1234567890
+
+# Re-run a failed task
+band tasks rerun tsk_1234567890
+```
+
 ### Project management
 
 ```sh
@@ -171,11 +237,9 @@ band projects remove my-app
 
 ## Configuration
 
-| Setting | Env var | Default |
-|---|---|---|
-| Server URL | `BAND_SERVER_URL` | `http://localhost:3456` |
-| Auth token | `BAND_TOKEN` | from `~/.band/settings.json` |
-| Output format | `BAND_OUTPUT` | `text` |
-| Band home dir | `BAND_HOME` | `~/.band` |
-
-
+| Setting       | Env var           | Default                      |
+| ------------- | ----------------- | ---------------------------- |
+| Server URL    | `BAND_SERVER_URL` | `http://localhost:3456`      |
+| Auth token    | `BAND_TOKEN`      | from `~/.band/settings.json` |
+| Output format | `BAND_OUTPUT`     | `text`                       |
+| Band home dir | `BAND_HOME`       | `~/.band`                    |
