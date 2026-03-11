@@ -75,6 +75,37 @@ export function listTasks(filters?: TaskFilters): TaskRecord[] {
   return tasks;
 }
 
+/**
+ * Mark all persisted "running" tasks as "failed".
+ * Called on server start before listening — no agent can be running if the server just started.
+ */
+export function cleanupStaleTasks(): number {
+  const staleTasks = listTasks({ status: "running" });
+  for (const task of staleTasks) {
+    task.status = "failed";
+    task.completedAt = Date.now();
+    saveTask(task);
+    log.info({ taskId: task.id, workspaceId: task.workspaceId }, "marked stale task as failed");
+  }
+  if (staleTasks.length > 0) {
+    log.info({ count: staleTasks.length }, "cleaned up stale tasks on startup");
+  }
+  return staleTasks.length;
+}
+
+/**
+ * Mark a persisted task as "failed" by ID.
+ * Returns the updated record, or null if not found or already not running.
+ */
+export function markTaskFailed(id: string): TaskRecord | null {
+  const task = loadTask(id);
+  if (!task || task.status !== "running") return null;
+  task.status = "failed";
+  task.completedAt = Date.now();
+  saveTask(task);
+  return task;
+}
+
 function matchesFilters(task: TaskRecord, filters?: TaskFilters): boolean {
   if (!filters) return true;
   if (filters.project && task.project !== filters.project) return false;

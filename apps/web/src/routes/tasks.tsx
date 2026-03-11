@@ -26,6 +26,8 @@ import {
   Loader2,
   Plus,
   RefreshCw,
+  RotateCcw,
+  XCircle,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { trpc } from "../lib/trpc-client";
@@ -224,7 +226,7 @@ function TasksPage() {
         {filteredTasks.length > 0 && (
           <div className="flex flex-col gap-2 p-4">
             {filteredTasks.map((task) => (
-              <TaskCard key={task.id} task={task} />
+              <TaskCard key={task.id} task={task} onAction={fetchData} />
             ))}
           </div>
         )}
@@ -266,8 +268,35 @@ function StatusBadge({ status }: { status: TaskRecord["status"] }) {
   }
 }
 
-function TaskCard({ task }: { task: TaskRecord }) {
+function TaskCard({ task, onAction }: { task: TaskRecord; onAction: () => void }) {
   const sessionHref = task.sessionId ? `/chat/${encodeURIComponent(task.workspaceId)}` : undefined;
+  const [acting, setActing] = useState(false);
+
+  const handleCancel = useCallback(async () => {
+    setActing(true);
+    try {
+      await trpc.tasks.cancel.mutate({ taskId: task.id });
+      onAction();
+    } catch {
+      // Ignore — task may have already finished
+      onAction();
+    } finally {
+      setActing(false);
+    }
+  }, [task.id, onAction]);
+
+  const handleRerun = useCallback(async () => {
+    setActing(true);
+    try {
+      await trpc.tasks.rerun.mutate({ taskId: task.id });
+      onAction();
+    } catch {
+      // Ignore — workspace may already have a running task
+      onAction();
+    } finally {
+      setActing(false);
+    }
+  }, [task.id, onAction]);
 
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-border/50 bg-card p-4 transition-colors hover:border-border">
@@ -275,7 +304,33 @@ function TaskCard({ task }: { task: TaskRecord }) {
         <p className="line-clamp-2 min-w-0 flex-1 text-sm font-medium text-foreground">
           {task.prompt}
         </p>
-        <StatusBadge status={task.status} />
+        <div className="flex items-center gap-2">
+          {task.status === "running" && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-7"
+              onClick={handleCancel}
+              disabled={acting}
+              title="Cancel task"
+            >
+              {acting ? <Loader2 className="size-3.5 animate-spin" /> : <XCircle className="size-3.5" />}
+            </Button>
+          )}
+          {(task.status === "completed" || task.status === "failed") && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-7"
+              onClick={handleRerun}
+              disabled={acting}
+              title="Re-run task"
+            >
+              {acting ? <Loader2 className="size-3.5 animate-spin" /> : <RotateCcw className="size-3.5" />}
+            </Button>
+          )}
+          <StatusBadge status={task.status} />
+        </div>
       </div>
 
       <div className="flex items-center gap-3 text-xs text-muted-foreground">

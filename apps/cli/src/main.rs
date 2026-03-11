@@ -31,6 +31,11 @@ enum Commands {
     },
     /// Show current settings
     Settings,
+    /// Manage tasks
+    Tasks {
+        #[command(subcommand)]
+        cmd: TasksCmd,
+    },
     /// Manage the remote tunnel
     Tunnel {
         #[command(subcommand)]
@@ -94,6 +99,29 @@ enum WorkspacesCmd {
 }
 
 #[derive(Subcommand)]
+enum TasksCmd {
+    /// List tasks
+    List {
+        /// Filter by project name
+        #[arg(long)]
+        project: Option<String>,
+        /// Filter by status (running, completed, failed)
+        #[arg(long)]
+        status: Option<String>,
+    },
+    /// Cancel a running task
+    Cancel {
+        /// Task ID (e.g. tsk_1234567890)
+        task_id: String,
+    },
+    /// Re-run a completed or failed task
+    Rerun {
+        /// Task ID (e.g. tsk_1234567890)
+        task_id: String,
+    },
+}
+
+#[derive(Subcommand)]
 enum TunnelCmd {
     /// Show tunnel status
     Status,
@@ -139,6 +167,13 @@ fn main() {
                 prompt,
             } => cmd_workspaces_create(&project, &branch, base.as_deref(), prompt.as_deref()),
             WorkspacesCmd::Remove { project, branch } => cmd_workspaces_remove(&project, &branch),
+        },
+        Commands::Tasks { cmd } => match cmd {
+            TasksCmd::List { project, status } => {
+                cmd_tasks_list(project.as_deref(), status.as_deref())
+            }
+            TasksCmd::Cancel { task_id } => cmd_tasks_cancel(&task_id),
+            TasksCmd::Rerun { task_id } => cmd_tasks_rerun(&task_id),
         },
         Commands::Settings => cmd_settings(json_output),
         Commands::Tunnel { cmd } => match cmd {
@@ -439,6 +474,87 @@ fn cmd_workspaces_remove(project: &str, branch: &str) -> Result<CommandResult, S
     })
 }
 
+// --- Tasks commands ---
+
+fn cmd_tasks_list(
+    project: Option<&str>,
+    status: Option<&str>,
+) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+
+    let mut input = serde_json::json!({});
+    if let Some(p) = project {
+        input["project"] = serde_json::json!(p);
+    }
+    if let Some(s) = status {
+        input["status"] = serde_json::json!(s);
+    }
+
+    let data = client.trpc_query("tasks.list", &input)?;
+    let tasks = data
+        .get("tasks")
+        .and_then(|t| t.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let mut rows: Vec<[String; 4]> = Vec::new();
+    let mut json_tasks = Vec::new();
+    for task in &tasks {
+        let id = task.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        let prompt = task.get("prompt").and_then(|v| v.as_str()).unwrap_or("");
+        let task_status = task.get("status").and_then(|v| v.as_str()).unwrap_or("");
+        let project_name = task.get("project").and_then(|v| v.as_str()).unwrap_or("");
+        let branch = task.get("branch").and_then(|v| v.as_str()).unwrap_or("");
+
+        let truncated_prompt = if prompt.len() > 60 {
+            format!("{}...", &prompt[..57])
+        } else {
+            prompt.to_string()
+        };
+
+        rows.push([
+            id.to_string(),
+            task_status.to_string(),
+            format!("{project_name}/{branch}"),
+            truncated_prompt,
+        ]);
+
+        json_tasks.push(task.clone());
+    }
+
+    let text = format_table(&["ID", "STATUS", "WORKSPACE", "PROMPT"], &rows);
+
+    Ok(CommandResult {
+        text,
+        json: serde_json::json!({"tasks": json_tasks}),
+    })
+}
+
+fn cmd_tasks_cancel(task_id: &str) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    client.trpc_mutate("tasks.cancel", &serde_json::json!({"taskId": task_id}))?;
+
+    Ok(CommandResult {
+        text: format!("Task {task_id} cancelled\n"),
+        json: serde_json::json!({"cancelled": true, "taskId": task_id}),
+    })
+}
+
+fn cmd_tasks_rerun(task_id: &str) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let data = client.trpc_mutate("tasks.rerun", &serde_json::json!({"taskId": task_id}))?;
+
+    let workspace_id = data
+        .get("workspaceId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    Ok(CommandResult {
+        text: format!("Task re-run started for workspace {workspace_id}\n"),
+        json: data,
+    })
+}
+
 // --- Settings command ---
 
 fn cmd_settings(json_output: bool) -> Result<CommandResult, String> {
@@ -706,6 +822,28 @@ fn build_schema(command: Option<&str>) -> Result<serde_json::Value, String> {
             "name": "tunnel stop",
             "description": "Stop the remote tunnel",
             "parameters": []
+        }),
+        serde_json::json!({
+            "name": "tasks list",
+            "description": "List tasks, optionally filtered by project or status",
+            "parameters": [
+                {"name": "--project", "type": "string", "required": false, "description": "Filter by project name"},
+                {"name": "--status", "type": "string", "required": false, "description": "Filter by status (running, completed, failed)"},
+            ]
+        }),
+        serde_json::json!({
+            "name": "tasks cancel",
+            "description": "Cancel a running task",
+            "parameters": [
+                {"name": "task_id", "type": "string", "required": true, "positional": true, "description": "Task ID (e.g. tsk_1234567890)"},
+            ]
+        }),
+        serde_json::json!({
+            "name": "tasks rerun",
+            "description": "Re-run a completed or failed task",
+            "parameters": [
+                {"name": "task_id", "type": "string", "required": true, "positional": true, "description": "Task ID (e.g. tsk_1234567890)"},
+            ]
         }),
         serde_json::json!({
             "name": "notify",

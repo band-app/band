@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -818,5 +818,384 @@ describe("Task submit + stream — AskUserQuestion", () => {
     // The stream completed successfully
     expect(eventTypes).toContain("data-result");
     expect(eventTypes).toContain("finish");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Helpers — task seeding
+// ---------------------------------------------------------------------------
+
+function seedTask(tmpHome: string, task: object & { id: string }): void {
+  const tasksDir = join(tmpHome, ".band", "tasks");
+  mkdirSync(tasksDir, { recursive: true });
+  writeFileSync(join(tasksDir, `${task.id}.json`), JSON.stringify(task));
+}
+
+function readTask(tmpHome: string, taskId: string): Record<string, unknown> {
+  const filePath = join(tmpHome, ".band", "tasks", `${taskId}.json`);
+  return JSON.parse(readFileSync(filePath, "utf-8"));
+}
+
+// ---------------------------------------------------------------------------
+// Stale task cleanup on server start
+// ---------------------------------------------------------------------------
+
+describe("stale task cleanup on server start", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    seedState(tmpHome, createDefaultState(tmpHome));
+    seedSettings(tmpHome, defaultSettings());
+
+    // Seed a "running" task before the server starts
+    seedTask(tmpHome, {
+      id: "tsk_stale_1",
+      workspaceId: "testproject-main",
+      project: "testproject",
+      branch: "main",
+      prompt: "stale task",
+      status: "running",
+      startedAt: Date.now() - 60_000,
+    });
+
+    // Seed a completed task that should NOT be changed
+    seedTask(tmpHome, {
+      id: "tsk_completed_1",
+      workspaceId: "testproject-main",
+      project: "testproject",
+      branch: "main",
+      prompt: "completed task",
+      status: "completed",
+      startedAt: Date.now() - 120_000,
+      completedAt: Date.now() - 60_000,
+    });
+
+    server = await startServer({ tmpHome });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("marks stale running tasks as failed on boot", async () => {
+    // The server should have cleaned up stale tasks during startup
+    const staleTask = readTask(tmpHome, "tsk_stale_1");
+    expect(staleTask.status).toBe("failed");
+    expect(staleTask.completedAt).toBeDefined();
+  });
+
+  it("does not modify non-running tasks", async () => {
+    const completedTask = readTask(tmpHome, "tsk_completed_1");
+    expect(completedTask.status).toBe("completed");
+  });
+
+  it("stale tasks appear as failed via tasks.list", async () => {
+    const res = await trpcQuery(server.url, "tasks.list", {});
+    const data = await trpcData<{ tasks: Array<{ id: string; status: string }> }>(res);
+    const staleTask = data.tasks.find((t) => t.id === "tsk_stale_1");
+    expect(staleTask).toBeDefined();
+    expect(staleTask!.status).toBe("failed");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// tasks.cancel — running task
+// ---------------------------------------------------------------------------
+
+describe("tasks.cancel — running task", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    seedState(tmpHome, createDefaultState(tmpHome));
+
+    // Use a scenario that blocks (waits for stdin) so the task stays running
+    const scenarioPath = writeScenario(tmpHome, [
+      {
+        type: "system",
+        subtype: "init",
+        session_id: "cancel-session",
+      },
+      {
+        type: "assistant",
+        message: {
+          content: [{ type: "text", text: "Working on it..." }],
+        },
+      },
+      {
+        type: "assistant",
+        message: {
+          content: [
+            {
+              type: "tool_use",
+              id: "tool-block-1",
+              name: "AskUserQuestion",
+              input: {
+                questions: [
+                  {
+                    question: "Continue?",
+                    header: "Confirm",
+                    options: [
+                      { label: "Yes", description: "Continue" },
+                      { label: "No", description: "Stop" },
+                    ],
+                    multiSelect: false,
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+      {
+        type: "control_request",
+        request_id: "req-cancel-1",
+        request: {
+          subtype: "can_use_tool",
+          tool_name: "AskUserQuestion",
+          input: {},
+          tool_use_id: "tool-block-1",
+        },
+      },
+      // Block forever — the task will stay running until cancelled
+      { _wait_for_stdin: true },
+      {
+        type: "result",
+        subtype: "success",
+        session_id: "cancel-session",
+        duration_ms: 1000,
+        num_turns: 1,
+        total_cost_usd: 0.01,
+      },
+    ]);
+
+    seedSettings(tmpHome, {
+      tokenSecret: DEFAULT_TOKEN,
+      codingAgent: { type: "claude-code", command: FAKE_AGENT_PATH },
+    });
+
+    server = await startServer({ tmpHome, scenarioPath });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("cancels a running task by task ID", async () => {
+    const workspaceId = "testproject-main";
+
+    // Submit a task that will block
+    const submitRes = await trpcMutate(server.url, "tasks.submit", {
+      workspaceId,
+      prompt: "cancel me",
+    });
+    expect(submitRes.status).toBe(200);
+
+    // Wait for the task to be running
+    await waitFor(async () => {
+      const res = await trpcQuery(server.url, "tasks.get", { workspaceId });
+      const data = await trpcData<{ task?: { status: string } }>(res);
+      return data.task?.status === "running";
+    });
+
+    // Get the task ID from tasks.list
+    const listRes = await trpcQuery(server.url, "tasks.list", {
+      workspaceId,
+      status: "running",
+    });
+    const listData = await trpcData<{ tasks: Array<{ id: string }> }>(listRes);
+    expect(listData.tasks.length).toBeGreaterThan(0);
+    const taskId = listData.tasks[0].id;
+
+    // Cancel the task
+    const cancelRes = await trpcMutate(server.url, "tasks.cancel", { taskId });
+    expect(cancelRes.status).toBe(200);
+
+    // Verify the task is now failed
+    await waitFor(async () => {
+      const res = await trpcQuery(server.url, "tasks.get", { workspaceId });
+      const data = await trpcData<{ task?: { status: string } }>(res);
+      return data.task?.status === "failed";
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// tasks.cancel — orphaned task
+// ---------------------------------------------------------------------------
+
+describe("tasks.cancel — orphaned task", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    seedState(tmpHome, createDefaultState(tmpHome));
+    seedSettings(tmpHome, defaultSettings());
+
+    // Seed an orphaned "running" task (no in-memory agent for it).
+    // This task was created while the stale cleanup was being run (before listen),
+    // but we seed it AFTER the tasks dir has the stale cleaned up.
+    // Actually, we need the server to start first, then we seed the orphaned task.
+    server = await startServer({ tmpHome });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("cancels an orphaned running task by updating the persisted file", async () => {
+    // Seed an orphaned task AFTER the server is already running
+    // (so cleanup already ran and won't touch this one)
+    seedTask(tmpHome, {
+      id: "tsk_orphaned_1",
+      workspaceId: "testproject-main",
+      project: "testproject",
+      branch: "main",
+      prompt: "orphaned task",
+      status: "running",
+      startedAt: Date.now() - 30_000,
+    });
+
+    // Cancel the orphaned task
+    const cancelRes = await trpcMutate(server.url, "tasks.cancel", {
+      taskId: "tsk_orphaned_1",
+    });
+    expect(cancelRes.status).toBe(200);
+
+    // Verify the persisted file is now "failed"
+    const task = readTask(tmpHome, "tsk_orphaned_1");
+    expect(task.status).toBe("failed");
+    expect(task.completedAt).toBeDefined();
+  });
+
+  it("returns 404 when cancelling a non-existent task", async () => {
+    const res = await trpcMutate(server.url, "tasks.cancel", {
+      taskId: "tsk_nonexistent",
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 404 when cancelling an already completed task", async () => {
+    seedTask(tmpHome, {
+      id: "tsk_already_done",
+      workspaceId: "testproject-main",
+      project: "testproject",
+      branch: "main",
+      prompt: "already done",
+      status: "completed",
+      startedAt: Date.now() - 60_000,
+      completedAt: Date.now() - 30_000,
+    });
+
+    const res = await trpcMutate(server.url, "tasks.cancel", {
+      taskId: "tsk_already_done",
+    });
+    expect(res.status).toBe(404);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// tasks.rerun
+// ---------------------------------------------------------------------------
+
+describe("tasks.rerun", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    seedState(tmpHome, createDefaultState(tmpHome));
+
+    const scenarioPath = writeScenario(tmpHome, [
+      {
+        type: "system",
+        subtype: "init",
+        session_id: "rerun-session",
+      },
+      {
+        type: "assistant",
+        message: {
+          content: [{ type: "text", text: "Done!" }],
+        },
+      },
+      {
+        type: "result",
+        subtype: "success",
+        session_id: "rerun-session",
+        duration_ms: 500,
+        num_turns: 1,
+        total_cost_usd: 0.01,
+      },
+    ]);
+
+    seedSettings(tmpHome, {
+      tokenSecret: DEFAULT_TOKEN,
+      codingAgent: { type: "claude-code", command: FAKE_AGENT_PATH },
+    });
+
+    server = await startServer({ tmpHome, scenarioPath });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("re-runs a completed task with the same prompt and workspace", async () => {
+    const workspaceId = "testproject-main";
+
+    // Submit and wait for the original task to complete
+    const submitRes = await trpcMutate(server.url, "tasks.submit", {
+      workspaceId,
+      prompt: "rerun me",
+    });
+    expect(submitRes.status).toBe(200);
+
+    await waitFor(async () => {
+      const res = await trpcQuery(server.url, "tasks.get", { workspaceId });
+      const data = await trpcData<{ task?: { status: string } }>(res);
+      return data.task?.status !== "running";
+    });
+
+    // Get the completed task's ID
+    const listRes = await trpcQuery(server.url, "tasks.list", { workspaceId });
+    const listData = await trpcData<{ tasks: Array<{ id: string; prompt: string }> }>(listRes);
+    const originalTask = listData.tasks.find((t) => t.prompt === "rerun me");
+    expect(originalTask).toBeDefined();
+
+    // Re-run the task
+    const rerunRes = await trpcMutate(server.url, "tasks.rerun", {
+      taskId: originalTask!.id,
+    });
+    expect(rerunRes.status).toBe(200);
+    const rerunData = await trpcData<{ workspaceId: string }>(rerunRes);
+    expect(rerunData.workspaceId).toBe(workspaceId);
+
+    // Wait for the re-run task to complete
+    await waitFor(async () => {
+      const res = await trpcQuery(server.url, "tasks.get", { workspaceId });
+      const data = await trpcData<{ task?: { status: string } }>(res);
+      return data.task?.status !== "running";
+    });
+
+    // Verify there are now 2 tasks for this workspace
+    const finalList = await trpcQuery(server.url, "tasks.list", { workspaceId });
+    const finalData = await trpcData<{ tasks: Array<{ id: string; prompt: string }> }>(finalList);
+    const matchingTasks = finalData.tasks.filter((t) => t.prompt === "rerun me");
+    expect(matchingTasks.length).toBe(2);
+  });
+
+  it("returns 404 when re-running a non-existent task", async () => {
+    const res = await trpcMutate(server.url, "tasks.rerun", {
+      taskId: "tsk_nonexistent",
+    });
+    expect(res.status).toBe(404);
   });
 });

@@ -2,7 +2,7 @@ import { createLogger } from "@band/logger";
 import type { UIMessageChunk } from "ai";
 import { getAgent, getOrCreateAgent } from "./agent-pool";
 import { createPendingInput } from "./pending-inputs";
-import { generateTaskId, saveTask } from "./task-store";
+import { generateTaskId, markTaskFailed, saveTask } from "./task-store";
 import { resolveWorkspace } from "./workspace";
 
 const log = createLogger("task-runner");
@@ -144,6 +144,37 @@ export function abortTask(workspaceId: string): boolean {
 
   log.info({ workspaceId }, "task aborted by user");
   return true;
+}
+
+export function cancelTask(taskId: string): { cancelled: boolean; workspaceId?: string } {
+  // Search in-memory tasks for a running task with this record ID
+  for (const [workspaceId, task] of tasks) {
+    if (task.taskRecordId === taskId && task.status === "running") {
+      const agent = getAgent(workspaceId);
+      if (agent?.abort) {
+        agent.abort();
+      }
+
+      task.status = "failed";
+      task.completedAt = Date.now();
+      persistTask(task);
+      emit(workspaceId, task, { type: "error", errorText: "Task cancelled" });
+      emit(workspaceId, task, { type: "finish" });
+      scheduleExpiry(workspaceId);
+
+      log.info({ workspaceId, taskId }, "task cancelled (was running in-memory)");
+      return { cancelled: true, workspaceId };
+    }
+  }
+
+  // Not found in memory — try marking the persisted record as failed (orphaned task)
+  const record = markTaskFailed(taskId);
+  if (record) {
+    log.info({ taskId, workspaceId: record.workspaceId }, "orphaned task cancelled");
+    return { cancelled: true, workspaceId: record.workspaceId };
+  }
+
+  return { cancelled: false };
 }
 
 async function runTask(workspaceId: string, task: InternalTask) {
