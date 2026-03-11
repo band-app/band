@@ -821,6 +821,12 @@ const tasksRouter = t.router({
             message: "Task already running for this workspace",
           });
         }
+        if (err instanceof Error && err.message.startsWith("Workspace not found")) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: err.message,
+          });
+        }
         throw err;
       }
     }),

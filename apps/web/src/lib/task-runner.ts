@@ -91,6 +91,11 @@ export function submitTask(
   sessionId?: string,
   agentPrompt?: string,
 ): TaskInfo {
+  const workspace = resolveWorkspace(workspaceId);
+  if (!workspace) {
+    throw new Error(`Workspace not found: ${workspaceId}`);
+  }
+
   const existing = tasks.get(workspaceId);
   if (existing?.status === "running") {
     throw new TaskConflictError(workspaceId);

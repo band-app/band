@@ -710,33 +710,18 @@ fn process_sse_data(
     task_succeeded: &mut bool,
     in_tool: &mut bool,
 ) -> Result<bool, String> {
-    let envelope: serde_json::Value =
+    let chunk: serde_json::Value =
         serde_json::from_str(data).map_err(|e| format!("Invalid JSON in SSE: {e}"))?;
 
-    let Some(result) = envelope.get("result") else {
-        return Ok(false);
-    };
+    let chunk_type = chunk.get("type").and_then(|t| t.as_str()).unwrap_or("");
 
-    let event_type = result.get("type").and_then(|t| t.as_str()).unwrap_or("");
-
-    match event_type {
-        "stopped" => Ok(true),
-        "data" => {
-            let Some(chunk) = result.get("data") else {
-                return Ok(false);
-            };
-
-            if json_output {
-                println!("{}", serde_json::to_string(chunk).unwrap_or_default());
-            } else {
-                render_text_chunk(chunk, task_succeeded, in_tool);
-            }
-
-            let chunk_type = chunk.get("type").and_then(|t| t.as_str()).unwrap_or("");
-            Ok(chunk_type == "finish")
-        }
-        _ => Ok(false),
+    if json_output {
+        println!("{}", serde_json::to_string(&chunk).unwrap_or_default());
+    } else {
+        render_text_chunk(&chunk, task_succeeded, in_tool);
     }
+
+    Ok(chunk_type == "finish")
 }
 
 #[allow(clippy::needless_pass_by_ref_mut)]
