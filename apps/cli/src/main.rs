@@ -111,12 +111,12 @@ enum TasksCmd {
     },
     /// Cancel a running task
     Cancel {
-        /// Task ID (e.g. tsk_1234567890)
+        /// Task ID (e.g. `tsk_1234567890`)
         task_id: String,
     },
     /// Re-run a completed or failed task
     Rerun {
-        /// Task ID (e.g. tsk_1234567890)
+        /// Task ID (e.g. `tsk_1234567890`)
         task_id: String,
     },
 }
@@ -754,6 +754,7 @@ fn format_table<const N: usize>(headers: &[&str; N], rows: &[[String; N]]) -> St
 
 // --- Schema ---
 
+#[allow(clippy::too_many_lines)]
 fn build_schema(command: Option<&str>) -> Result<serde_json::Value, String> {
     let commands = vec![
         serde_json::json!({
