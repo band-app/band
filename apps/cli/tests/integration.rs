@@ -157,10 +157,12 @@ fn stderr(output: &std::process::Output) -> String {
     String::from_utf8_lossy(&output.stderr).trim().to_string()
 }
 
+// --- Projects tests ---
+
 #[test]
-fn projects_lists_registered_project() {
+fn projects_list_shows_registered_project() {
     let env = TestEnv::new();
-    let output = env.band(&["projects"]);
+    let output = env.band(&["projects", "list"]);
 
     assert!(output.status.success(), "stderr: {}", stderr(&output));
     let out = stdout(&output);
@@ -168,9 +170,66 @@ fn projects_lists_registered_project() {
 }
 
 #[test]
-fn create_makes_worktree_and_returns_path() {
+fn projects_add_registers_new_project() {
     let env = TestEnv::new();
-    let output = env.band(&["create", "my-project", "feat/test"]);
+
+    // Create a new git repo to add
+    let new_repo = env._tmp.path().join("new-project");
+    fs::create_dir_all(&new_repo).unwrap();
+    git(&new_repo, &["init", "-b", "main"]);
+    git(&new_repo, &["commit", "--allow-empty", "-m", "init"]);
+
+    let output = env.band(&["projects", "add", new_repo.to_str().unwrap()]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let out = stdout(&output);
+    assert!(
+        out.contains("new-project"),
+        "expected project name in output: {out}"
+    );
+
+    // Verify it appears in projects list
+    let list_output = env.band(&["projects", "list"]);
+    assert!(list_output.status.success());
+    let list_out = stdout(&list_output);
+    assert!(
+        list_out.contains("new-project"),
+        "expected new-project in list: {list_out}"
+    );
+}
+
+#[test]
+fn projects_remove_unregisters_project() {
+    let env = TestEnv::new();
+
+    // First add a new project
+    let new_repo = env._tmp.path().join("to-remove");
+    fs::create_dir_all(&new_repo).unwrap();
+    git(&new_repo, &["init", "-b", "main"]);
+    git(&new_repo, &["commit", "--allow-empty", "-m", "init"]);
+
+    let add_output = env.band(&["projects", "add", new_repo.to_str().unwrap()]);
+    assert!(add_output.status.success());
+
+    // Now remove it
+    let output = env.band(&["projects", "remove", "to-remove"]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    // Verify it's gone from projects list
+    let list_output = env.band(&["projects", "list"]);
+    assert!(list_output.status.success());
+    let list_out = stdout(&list_output);
+    assert!(
+        !list_out.contains("to-remove"),
+        "expected to-remove to be gone: {list_out}"
+    );
+}
+
+// --- Workspaces tests ---
+
+#[test]
+fn workspaces_create_makes_worktree_and_registers_state() {
+    let env = TestEnv::new();
+    let output = env.band(&["workspaces", "create", "my-project", "feat/test"]);
 
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
@@ -191,13 +250,13 @@ fn create_makes_worktree_and_returns_path() {
 }
 
 #[test]
-fn create_is_idempotent() {
+fn workspaces_create_is_idempotent() {
     let env = TestEnv::new();
 
-    let out1 = env.band(&["create", "my-project", "feat/idem"]);
+    let out1 = env.band(&["workspaces", "create", "my-project", "feat/idem"]);
     assert!(out1.status.success(), "stderr: {}", stderr(&out1));
 
-    let out2 = env.band(&["create", "my-project", "feat/idem"]);
+    let out2 = env.band(&["workspaces", "create", "my-project", "feat/idem"]);
     assert!(out2.status.success(), "stderr: {}", stderr(&out2));
 
     // Both return the same path
@@ -205,7 +264,7 @@ fn create_is_idempotent() {
 }
 
 #[test]
-fn create_with_base_branch() {
+fn workspaces_create_with_base_branch() {
     let env = TestEnv::new();
 
     // Create a commit on main so there's something to branch from
@@ -214,11 +273,17 @@ fn create_with_base_branch() {
     git(&env.repo_path, &["add", "marker.txt"]);
     git(&env.repo_path, &["commit", "-m", "add marker"]);
 
-    let output = env.band(&["create", "my-project", "feat/from-main", "--base", "main"]);
+    let output = env.band(&[
+        "workspaces",
+        "create",
+        "my-project",
+        "feat/from-main",
+        "--base",
+        "main",
+    ]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
     let path = stdout(&output);
-    // The new worktree should contain the marker file
     assert!(
         Path::new(&path).join("marker.txt").exists(),
         "worktree should have marker.txt from main"
@@ -226,9 +291,9 @@ fn create_with_base_branch() {
 }
 
 #[test]
-fn create_unknown_project_fails() {
+fn workspaces_create_unknown_project_fails() {
     let env = TestEnv::new();
-    let output = env.band(&["create", "nonexistent", "feat/x"]);
+    let output = env.band(&["workspaces", "create", "nonexistent", "feat/x"]);
 
     assert!(!output.status.success());
     assert!(
@@ -239,12 +304,12 @@ fn create_unknown_project_fails() {
 }
 
 #[test]
-fn list_shows_created_worktrees() {
+fn workspaces_list_shows_created_worktrees() {
     let env = TestEnv::new();
-    env.band(&["create", "my-project", "feat/a"]);
-    env.band(&["create", "my-project", "feat/b"]);
+    env.band(&["workspaces", "create", "my-project", "feat/a"]);
+    env.band(&["workspaces", "create", "my-project", "feat/b"]);
 
-    let output = env.band(&["list"]);
+    let output = env.band(&["workspaces", "list"]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
     let out = stdout(&output);
     assert!(out.contains("feat/a"), "should list feat/a: {out}");
@@ -252,24 +317,24 @@ fn list_shows_created_worktrees() {
 }
 
 #[test]
-fn list_filters_by_project() {
+fn workspaces_list_filters_by_project() {
     let env = TestEnv::new();
-    env.band(&["create", "my-project", "feat/filtered"]);
+    env.band(&["workspaces", "create", "my-project", "feat/filtered"]);
 
-    let output = env.band(&["list", "my-project"]);
+    let output = env.band(&["workspaces", "list", "my-project"]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
     assert!(stdout(&output).contains("feat/filtered"));
 
-    let output = env.band(&["list", "nonexistent"]);
+    let output = env.band(&["workspaces", "list", "nonexistent"]);
     assert!(!output.status.success());
     assert!(stderr(&output).contains("not found"));
 }
 
 #[test]
-fn remove_cleans_up_worktree_and_state() {
+fn workspaces_remove_cleans_up_worktree_and_state() {
     let env = TestEnv::new();
 
-    let create_out = env.band(&["create", "my-project", "feat/rm"]);
+    let create_out = env.band(&["workspaces", "create", "my-project", "feat/rm"]);
     assert!(
         create_out.status.success(),
         "stderr: {}",
@@ -277,7 +342,7 @@ fn remove_cleans_up_worktree_and_state() {
     );
     let path = stdout(&create_out);
 
-    let output = env.band(&["remove", "my-project", "feat/rm"]);
+    let output = env.band(&["workspaces", "remove", "my-project", "feat/rm"]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
     // Worktree removed from state
@@ -290,9 +355,9 @@ fn remove_cleans_up_worktree_and_state() {
 }
 
 #[test]
-fn remove_unknown_branch_fails() {
+fn workspaces_remove_unknown_branch_fails() {
     let env = TestEnv::new();
-    let output = env.band(&["remove", "my-project", "nonexistent"]);
+    let output = env.band(&["workspaces", "remove", "my-project", "nonexistent"]);
 
     assert!(!output.status.success());
     assert!(
@@ -303,9 +368,9 @@ fn remove_unknown_branch_fails() {
 }
 
 #[test]
-fn remove_unknown_project_fails() {
+fn workspaces_remove_unknown_project_fails() {
     let env = TestEnv::new();
-    let output = env.band(&["remove", "nonexistent", "main"]);
+    let output = env.band(&["workspaces", "remove", "nonexistent", "main"]);
 
     assert!(!output.status.success());
     assert!(
@@ -319,7 +384,6 @@ fn remove_unknown_project_fails() {
 fn setup_script_runs_on_create() {
     let env = TestEnv::new();
 
-    // Write a .band/config.json in the repo with a setup script
     let band_dir = env.repo_path.join(".band");
     fs::create_dir_all(&band_dir).unwrap();
     fs::write(
@@ -330,7 +394,7 @@ fn setup_script_runs_on_create() {
     git(&env.repo_path, &["add", ".band/config.json"]);
     git(&env.repo_path, &["commit", "-m", "add config"]);
 
-    let output = env.band(&["create", "my-project", "feat/setup"]);
+    let output = env.band(&["workspaces", "create", "my-project", "feat/setup"]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
     let path = stdout(&output);
@@ -344,7 +408,6 @@ fn setup_script_runs_on_create() {
 fn teardown_script_runs_on_remove() {
     let env = TestEnv::new();
 
-    // Write a .band/config.json with a teardown that creates a marker in BAND_HOME
     let band_dir = env.repo_path.join(".band");
     fs::create_dir_all(&band_dir).unwrap();
     let marker_path = env.band_dir.join("teardown-ran.txt");
@@ -359,10 +422,10 @@ fn teardown_script_runs_on_remove() {
     git(&env.repo_path, &["add", ".band/config.json"]);
     git(&env.repo_path, &["commit", "-m", "add config"]);
 
-    let create_out = env.band(&["create", "my-project", "feat/teardown"]);
+    let create_out = env.band(&["workspaces", "create", "my-project", "feat/teardown"]);
     assert!(create_out.status.success());
 
-    let output = env.band(&["remove", "my-project", "feat/teardown"]);
+    let output = env.band(&["workspaces", "remove", "my-project", "feat/teardown"]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
     assert!(
@@ -372,17 +435,22 @@ fn teardown_script_runs_on_remove() {
 }
 
 #[test]
-fn run_creates_worktree_and_dispatches_task() {
+fn workspaces_create_with_prompt_submits_task() {
     let env = TestEnv::new();
-    let output = env.band(&["run", "my-project", "feat/run", "--prompt", "hello world"]);
+    let output = env.band(&[
+        "workspaces",
+        "create",
+        "my-project",
+        "feat/run",
+        "--prompt",
+        "hello world",
+    ]);
 
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
     let path = stdout(&output);
-    // Worktree directory exists on disk
     assert!(Path::new(&path).exists(), "worktree dir should exist");
 
-    // State was updated
     let state = env.state_json();
     let worktrees = &state["projects"][0]["worktrees"];
     assert!(
@@ -396,9 +464,44 @@ fn run_creates_worktree_and_dispatches_task() {
 }
 
 #[test]
-fn run_unknown_project_fails() {
+fn workspaces_create_with_prompt_and_base() {
     let env = TestEnv::new();
-    let output = env.band(&["run", "nonexistent", "feat/x", "--prompt", "hello"]);
+
+    let marker = env.repo_path.join("marker.txt");
+    fs::write(&marker, "hello").unwrap();
+    git(&env.repo_path, &["add", "marker.txt"]);
+    git(&env.repo_path, &["commit", "-m", "add marker"]);
+
+    let output = env.band(&[
+        "workspaces",
+        "create",
+        "my-project",
+        "feat/run-base",
+        "--prompt",
+        "do stuff",
+        "--base",
+        "main",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let path = stdout(&output);
+    assert!(
+        Path::new(&path).join("marker.txt").exists(),
+        "worktree should have marker.txt from main"
+    );
+}
+
+#[test]
+fn workspaces_create_unknown_project_with_prompt_fails() {
+    let env = TestEnv::new();
+    let output = env.band(&[
+        "workspaces",
+        "create",
+        "nonexistent",
+        "feat/x",
+        "--prompt",
+        "hello",
+    ]);
 
     assert!(!output.status.success());
     assert!(
@@ -418,18 +521,15 @@ fn setup_failure_is_non_fatal() {
     git(&env.repo_path, &["add", ".band/config.json"]);
     git(&env.repo_path, &["commit", "-m", "add failing setup"]);
 
-    let output = env.band(&["create", "my-project", "feat/fail-setup"]);
-    // Should still succeed — setup failure is non-fatal
+    let output = env.band(&["workspaces", "create", "my-project", "feat/fail-setup"]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
-    // Path still printed
     let path = stdout(&output);
     assert!(Path::new(&path).exists());
 }
 
 #[test]
 fn notify_silently_succeeds_when_server_unreachable() {
-    // Use a completely isolated env with wrong port so server is unreachable
     let tmp = tempfile::tempdir().expect("create tempdir");
     let band_home = tmp.path().join("band-home");
     fs::create_dir_all(&band_home).unwrap();
@@ -460,10 +560,243 @@ fn notify_silently_succeeds_when_server_unreachable() {
         })
         .expect("failed to execute band notify");
 
-    // Should succeed (exit 0) even when server is unreachable
     assert!(
         output.status.success(),
         "notify should not fail when server is down. stderr: {}",
         stderr(&output)
+    );
+}
+
+// --- Settings tests ---
+
+#[test]
+fn settings_shows_config() {
+    let env = TestEnv::new();
+    let output = env.band(&["settings", "--output", "json"]);
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output))
+        .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)));
+    assert!(
+        json.get("worktreesDir").is_some(),
+        "expected worktreesDir in settings: {json}"
+    );
+}
+
+// --- Tunnel tests ---
+
+#[test]
+fn tunnel_status_shows_not_running() {
+    let env = TestEnv::new();
+    let output = env.band(&["tunnel", "status"]);
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let out = stdout(&output);
+    assert!(
+        out.contains("running: no"),
+        "expected tunnel not running: {out}"
+    );
+}
+
+#[test]
+fn tunnel_status_json_output() {
+    let env = TestEnv::new();
+    let output = env.band(&["tunnel", "status", "--output", "json"]);
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output))
+        .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)));
+    assert_eq!(json["running"], false, "json: {json}");
+}
+
+// --- JSON output tests ---
+
+#[test]
+fn workspaces_create_json_output() {
+    let env = TestEnv::new();
+    let output = env.band(&[
+        "workspaces",
+        "create",
+        "my-project",
+        "feat/json",
+        "--output",
+        "json",
+    ]);
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output))
+        .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)));
+    assert!(
+        json["path"].as_str().unwrap().contains("feat/json"),
+        "json: {json}"
+    );
+}
+
+#[test]
+fn workspaces_list_json_output() {
+    let env = TestEnv::new();
+    env.band(&["workspaces", "create", "my-project", "feat/j1"]);
+
+    let output = env.band(&["workspaces", "list", "--output", "json"]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output))
+        .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)));
+    let workspaces = json["workspaces"].as_array().expect("workspaces array");
+    assert!(
+        workspaces.iter().any(|w| w["branch"] == "feat/j1"),
+        "should contain feat/j1: {json}"
+    );
+}
+
+#[test]
+fn projects_list_json_output() {
+    let env = TestEnv::new();
+    let output = env.band(&["projects", "list", "--output", "json"]);
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output))
+        .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)));
+    let projects = json["projects"].as_array().expect("projects array");
+    assert!(
+        projects.iter().any(|p| p["name"] == "my-project"),
+        "should contain my-project: {json}"
+    );
+}
+
+#[test]
+fn workspaces_remove_json_output() {
+    let env = TestEnv::new();
+    env.band(&["workspaces", "create", "my-project", "feat/rmjson"]);
+
+    let output = env.band(&[
+        "workspaces",
+        "remove",
+        "my-project",
+        "feat/rmjson",
+        "--output",
+        "json",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output))
+        .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)));
+    assert_eq!(json["ok"], true, "json: {json}");
+}
+
+#[test]
+fn error_json_output() {
+    let env = TestEnv::new();
+    let output = env.band(&[
+        "workspaces",
+        "create",
+        "nonexistent",
+        "feat/x",
+        "--output",
+        "json",
+    ]);
+
+    assert!(!output.status.success());
+    let json: serde_json::Value = serde_json::from_str(&stderr(&output))
+        .unwrap_or_else(|e| panic!("invalid JSON error: {e}\nstderr: {}", stderr(&output)));
+    assert!(json["error"].as_str().is_some(), "json: {json}");
+}
+
+// --- Input validation tests ---
+
+#[test]
+fn workspaces_create_rejects_path_traversal() {
+    let env = TestEnv::new();
+    let output = env.band(&["workspaces", "create", "my-project", "feat/../etc"]);
+
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("path traversal"),
+        "stderr: {}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn workspaces_create_rejects_control_chars() {
+    let env = TestEnv::new();
+    let output = env.band(&["workspaces", "create", "my-project", "feat/\x01test"]);
+
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("control character"),
+        "stderr: {}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn workspaces_create_rejects_empty_branch() {
+    let env = TestEnv::new();
+    let output = env.band(&["workspaces", "create", "my-project", ""]);
+
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("cannot be empty"),
+        "stderr: {}",
+        stderr(&output)
+    );
+}
+
+// --- Schema tests ---
+
+#[test]
+fn schema_lists_all_commands() {
+    let env = TestEnv::new();
+    let output = env.band(&["schema"]);
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output))
+        .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)));
+    let commands = json["commands"].as_array().expect("commands array");
+    let names: Vec<&str> = commands
+        .iter()
+        .map(|c| c["name"].as_str().unwrap())
+        .collect();
+    assert!(names.contains(&"projects list"), "missing: {names:?}");
+    assert!(names.contains(&"projects add"), "missing: {names:?}");
+    assert!(names.contains(&"projects remove"), "missing: {names:?}");
+    assert!(names.contains(&"workspaces list"), "missing: {names:?}");
+    assert!(names.contains(&"workspaces create"), "missing: {names:?}");
+    assert!(names.contains(&"workspaces remove"), "missing: {names:?}");
+    assert!(names.contains(&"settings"), "missing: {names:?}");
+    assert!(names.contains(&"tunnel status"), "missing: {names:?}");
+    assert!(names.contains(&"tunnel start"), "missing: {names:?}");
+    assert!(names.contains(&"tunnel stop"), "missing: {names:?}");
+    assert!(names.contains(&"notify"), "missing: {names:?}");
+    assert!(names.contains(&"schema"), "missing: {names:?}");
+}
+
+#[test]
+fn schema_shows_single_command() {
+    let env = TestEnv::new();
+    let output = env.band(&["schema", "workspaces create"]);
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output))
+        .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)));
+    assert_eq!(json["name"], "workspaces create");
+    let params = json["parameters"].as_array().expect("parameters array");
+    assert!(
+        params.iter().any(|p| p["name"] == "project"),
+        "json: {json}"
+    );
+    assert!(params.iter().any(|p| p["name"] == "branch"), "json: {json}");
+}
+
+#[test]
+fn schema_unknown_command_fails() {
+    let env = TestEnv::new();
+    let output = env.band(&["schema", "nonexistent"]);
+
+    assert!(!output.status.success());
+    let json: serde_json::Value = serde_json::from_str(&stderr(&output))
+        .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstderr: {}", stderr(&output)));
+    assert!(
+        json["error"].as_str().unwrap().contains("Unknown command"),
+        "json: {json}"
     );
 }

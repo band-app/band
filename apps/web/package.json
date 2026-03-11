@@ -7,6 +7,7 @@
     "dev": "vite dev --port 3456 --host 0.0.0.0",
     "build": "vite build && esbuild start-server.ts --bundle --platform=node --format=esm --outfile=dist/start-server.mjs --external:./server/server.js --banner:js=\"import{createRequire}from'module';import{fileURLToPath as __fu}from'url';import{dirname as __dn}from'path';const require=createRequire(import.meta.url);const __filename=__fu(import.meta.url);const __dirname=__dn(__filename);\"",
     "start": "node dist/start-server.mjs",
+    "build:test-server": "esbuild test-server.ts --bundle --platform=node --format=esm --outfile=dist/test-server.mjs --banner:js=\"import{createRequire}from'module';import{fileURLToPath as __fu}from'url';import{dirname as __dn}from'path';const require=createRequire(import.meta.url);const __filename=__fu(import.meta.url);const __dirname=__dn(__filename);\"",
     "pretest": "pnpm build",
     "test": "vitest run",
     "test:e2e": "playwright test",

@@ -1,0 +1,17 @@
+{
+  "name": "@band/cli",
+  "version": "0.1.0",
+  "private": true,
+  "bin": {
+    "band": "bin/band.sh"
+  },
+  "scripts": {
+    "build": "cargo build --release",
+    "build:dev": "cargo build",
+    "build:test-server": "pnpm --filter @band/web build:test-server",
+    "test": "pnpm build:test-server && cargo test",
+    "lint": "cargo clippy -- -D warnings",
+    "format": "cargo fmt -- --check",
+    "format:fix": "cargo fmt"
+  }
+}
