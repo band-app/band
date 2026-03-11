@@ -13,10 +13,20 @@ import { basename, extname, join, resolve } from "node:path";
 import { toWorkspaceId } from "@band/dashboard-core";
 import { createLogger } from "@band/logger";
 import { initTRPC, TRPCError } from "@trpc/server";
+import { Cron } from "croner";
 import { z } from "zod";
 import { getOrCreateAgent } from "../lib/agent-pool";
 import { getToken } from "../lib/auth-token";
 import { checkCli, installCli } from "../lib/cli";
+import { stopJobsForKey } from "../lib/cronjob-scheduler";
+import {
+  deleteCronjobFile,
+  generateCronjobId,
+  listAllCronjobs,
+  loadCronjobFile,
+  saveCronjobFile,
+} from "../lib/cronjob-store";
+import type { CronjobDefinition } from "../lib/cronjob-types";
 import { execGit, gitCmd, listWorktrees } from "../lib/git";
 import { checkHooks, installHooks } from "../lib/hooks";
 import { resolvePendingInput } from "../lib/pending-inputs";
@@ -161,6 +171,11 @@ const projectsRouter = t.router({
     const state = loadState();
     state.projects = state.projects.filter((p) => p.name !== input.name);
     saveState(state);
+
+    // Clean up project-scoped cronjobs
+    stopJobsForKey(input.name);
+    deleteCronjobFile(input.name);
+
     return { ok: true };
   }),
 
@@ -347,6 +362,11 @@ const workspacesRouter = t.router({
             } catch {
               // Status file may not exist
             }
+
+            // Clean up workspace-scoped cronjobs
+            stopJobsForKey(workspaceId);
+            deleteCronjobFile(workspaceId);
+
             return { ok: true };
           }
           currentPath = "";
@@ -1173,6 +1193,179 @@ const statusRouter = t.router({
 });
 
 // ---------------------------------------------------------------------------
+// Cronjobs
+// ---------------------------------------------------------------------------
+
+const cronjobsRouter = t.router({
+  list: publicProcedure
+    .input(
+      z
+        .object({
+          project: z.string().optional(),
+          workspaceId: z.string().optional(),
+        })
+        .optional(),
+    )
+    .query(({ input }) => {
+      if (input?.project) {
+        const file = loadCronjobFile(input.project);
+        return { jobs: file.jobs.map((j) => ({ ...j, fileKey: input.project! })) };
+      }
+      if (input?.workspaceId) {
+        const file = loadCronjobFile(input.workspaceId);
+        return { jobs: file.jobs.map((j) => ({ ...j, fileKey: input.workspaceId! })) };
+      }
+      return { jobs: listAllCronjobs() };
+    }),
+
+  get: publicProcedure.input(z.object({ key: z.string(), id: z.string() })).query(({ input }) => {
+    const file = loadCronjobFile(input.key);
+    const job = file.jobs.find((j) => j.id === input.id);
+    if (!job) {
+      throw new TRPCError({ code: "NOT_FOUND", message: "Cronjob not found" });
+    }
+    return { job };
+  }),
+
+  create: publicProcedure
+    .input(
+      z.object({
+        key: z.string().min(1),
+        name: z.string().min(1),
+        prompt: z.string().min(1),
+        cronExpression: z.string().min(1),
+        scope: z.enum(["project", "workspace"]),
+        workspaceId: z.string().optional(),
+        enabled: z.boolean().default(true),
+      }),
+    )
+    .mutation(({ input }) => {
+      // Validate cron expression
+      try {
+        // eslint-disable-next-line no-new
+        new Cron(input.cronExpression, { maxRuns: 0 });
+      } catch {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "Invalid cron expression",
+        });
+      }
+
+      if (input.scope === "workspace" && !input.workspaceId) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "workspaceId is required for workspace-scoped cronjobs",
+        });
+      }
+
+      const file = loadCronjobFile(input.key);
+      const job: CronjobDefinition = {
+        id: generateCronjobId(),
+        name: input.name,
+        prompt: input.prompt,
+        cronExpression: input.cronExpression,
+        scope: input.scope,
+        workspaceId: input.workspaceId,
+        enabled: input.enabled,
+        createdAt: new Date().toISOString(),
+      };
+      file.jobs.push(job);
+      saveCronjobFile(input.key, file);
+      return { job };
+    }),
+
+  update: publicProcedure
+    .input(
+      z.object({
+        key: z.string(),
+        id: z.string(),
+        name: z.string().min(1).optional(),
+        prompt: z.string().min(1).optional(),
+        cronExpression: z.string().min(1).optional(),
+        enabled: z.boolean().optional(),
+      }),
+    )
+    .mutation(({ input }) => {
+      if (input.cronExpression) {
+        try {
+          // eslint-disable-next-line no-new
+          new Cron(input.cronExpression, { maxRuns: 0 });
+        } catch {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Invalid cron expression",
+          });
+        }
+      }
+
+      const file = loadCronjobFile(input.key);
+      const job = file.jobs.find((j) => j.id === input.id);
+      if (!job) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Cronjob not found" });
+      }
+
+      if (input.name !== undefined) job.name = input.name;
+      if (input.prompt !== undefined) job.prompt = input.prompt;
+      if (input.cronExpression !== undefined) job.cronExpression = input.cronExpression;
+      if (input.enabled !== undefined) job.enabled = input.enabled;
+
+      saveCronjobFile(input.key, file);
+      return { job };
+    }),
+
+  delete: publicProcedure
+    .input(z.object({ key: z.string(), id: z.string() }))
+    .mutation(({ input }) => {
+      const file = loadCronjobFile(input.key);
+      const index = file.jobs.findIndex((j) => j.id === input.id);
+      if (index === -1) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Cronjob not found" });
+      }
+      file.jobs.splice(index, 1);
+      saveCronjobFile(input.key, file);
+      return { ok: true };
+    }),
+
+  trigger: publicProcedure
+    .input(z.object({ key: z.string(), id: z.string() }))
+    .mutation(({ input }) => {
+      const file = loadCronjobFile(input.key);
+      const job = file.jobs.find((j) => j.id === input.id);
+      if (!job) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Cronjob not found" });
+      }
+
+      let workspaceId: string;
+      if (job.scope === "workspace" && job.workspaceId) {
+        workspaceId = job.workspaceId;
+      } else {
+        const state = loadState();
+        const project = state.projects.find((p) => p.name === input.key);
+        if (!project) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Project not found",
+          });
+        }
+        workspaceId = toWorkspaceId(project.name, project.defaultBranch);
+      }
+
+      try {
+        const task = submitTask(workspaceId, job.prompt);
+        return { taskId: task.id, workspaceId };
+      } catch (err) {
+        if (err instanceof TaskConflictError) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "Task already running for this workspace",
+          });
+        }
+        throw err;
+      }
+    }),
+});
+
+// ---------------------------------------------------------------------------
 // App Router
 // ---------------------------------------------------------------------------
 
@@ -1191,6 +1384,7 @@ export const appRouter = t.router({
   chat: chatRouter,
   statuses: statusesRouter,
   status: statusRouter,
+  cronjobs: cronjobsRouter,
 });
 
 export type AppRouter = typeof appRouter;

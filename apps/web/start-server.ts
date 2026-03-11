@@ -4,6 +4,7 @@ import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import sirv from "sirv";
 import { createAuthMiddleware } from "./auth.ts";
 import { stopBranchStatusPoller } from "./src/lib/branch-status-poller.ts";
+import { startCronjobScheduler, stopCronjobScheduler } from "./src/lib/cronjob-scheduler.ts";
 import { checkPrereqs } from "./src/lib/process-utils.ts";
 import { getOrCreateToken, loadSettings } from "./src/lib/state.ts";
 import { cleanupStaleTasks } from "./src/lib/task-store.ts";
@@ -29,6 +30,9 @@ async function main() {
   // Mark any persisted "running" tasks as "failed" — no agent can be running
   // if the server just started.
   cleanupStaleTasks();
+
+  // Start cronjob scheduler — reads definitions and watches for changes
+  startCronjobScheduler();
 
   const mod = await import("./server/server.js");
   const server = mod.default as { fetch: (req: Request) => Promise<Response> };
@@ -151,6 +155,7 @@ async function main() {
   // Graceful shutdown
   const shutdown = async () => {
     stopBranchStatusPoller();
+    stopCronjobScheduler();
     await stopTunnel().catch(() => {});
     httpServer.close();
     process.exit(0);

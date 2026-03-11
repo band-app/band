@@ -35,6 +35,11 @@ enum Commands {
         #[command(subcommand)]
         cmd: TasksCmd,
     },
+    /// Manage scheduled cronjobs
+    Cronjobs {
+        #[command(subcommand)]
+        cmd: CronjobsCmd,
+    },
     /// Show current settings
     Settings,
     /// Manage the remote tunnel
@@ -139,6 +144,78 @@ enum TasksCmd {
 }
 
 #[derive(Subcommand)]
+enum CronjobsCmd {
+    /// List cronjobs
+    List {
+        /// Filter by project name
+        #[arg(long)]
+        project: Option<String>,
+        /// Filter by workspace ID
+        #[arg(long)]
+        workspace: Option<String>,
+    },
+    /// Create a new cronjob
+    Create {
+        /// Storage key: project name (for project-scoped) or workspace ID (for workspace-scoped)
+        key: String,
+        /// Human-readable name for the job
+        #[arg(long)]
+        name: String,
+        /// Prompt text to send to the coding agent
+        #[arg(long)]
+        prompt: String,
+        /// Cron expression (e.g. "0 */6 * * *")
+        #[arg(long)]
+        cron: String,
+        /// Scope: project or workspace
+        #[arg(long, default_value = "project")]
+        scope: String,
+        /// Workspace ID (required when scope is "workspace")
+        #[arg(long)]
+        workspace_id: Option<String>,
+        /// Start disabled
+        #[arg(long)]
+        disabled: bool,
+    },
+    /// Update an existing cronjob
+    Update {
+        /// Storage key (project name or workspace ID)
+        key: String,
+        /// Cronjob ID (e.g. `cj_1234567890`)
+        id: String,
+        /// New name
+        #[arg(long)]
+        name: Option<String>,
+        /// New prompt
+        #[arg(long)]
+        prompt: Option<String>,
+        /// New cron expression
+        #[arg(long)]
+        cron: Option<String>,
+        /// Enable the job
+        #[arg(long, conflicts_with = "disable")]
+        enable: bool,
+        /// Disable the job
+        #[arg(long, conflicts_with = "enable")]
+        disable: bool,
+    },
+    /// Delete a cronjob
+    Delete {
+        /// Storage key (project name or workspace ID)
+        key: String,
+        /// Cronjob ID (e.g. `cj_1234567890`)
+        id: String,
+    },
+    /// Manually trigger a cronjob now
+    Trigger {
+        /// Storage key (project name or workspace ID)
+        key: String,
+        /// Cronjob ID (e.g. `cj_1234567890`)
+        id: String,
+    },
+}
+
+#[derive(Subcommand)]
 enum TunnelCmd {
     /// Show tunnel status
     Status,
@@ -159,6 +236,7 @@ struct CommandResult {
     json: serde_json::Value,
 }
 
+#[allow(clippy::too_many_lines)]
 fn main() {
     let cli = Cli::parse();
     let json_output = cli.output == "json";
@@ -208,6 +286,47 @@ fn main() {
             TasksCmd::Cancel { task_id } => cmd_tasks_cancel(&task_id),
             TasksCmd::Rerun { task_id } => cmd_tasks_rerun(&task_id),
             TasksCmd::Watch { .. } => unreachable!(),
+        },
+        Commands::Cronjobs { cmd } => match cmd {
+            CronjobsCmd::List { project, workspace } => {
+                cmd_cronjobs_list(project.as_deref(), workspace.as_deref())
+            }
+            CronjobsCmd::Create {
+                key,
+                name,
+                prompt,
+                cron,
+                scope,
+                workspace_id,
+                disabled,
+            } => cmd_cronjobs_create(
+                &key,
+                &name,
+                &prompt,
+                &cron,
+                &scope,
+                workspace_id.as_deref(),
+                disabled,
+            ),
+            CronjobsCmd::Update {
+                key,
+                id,
+                name,
+                prompt,
+                cron,
+                enable,
+                disable,
+            } => cmd_cronjobs_update(
+                &key,
+                &id,
+                name.as_deref(),
+                prompt.as_deref(),
+                cron.as_deref(),
+                enable,
+                disable,
+            ),
+            CronjobsCmd::Delete { key, id } => cmd_cronjobs_delete(&key, &id),
+            CronjobsCmd::Trigger { key, id } => cmd_cronjobs_trigger(&key, &id),
         },
         Commands::Settings => cmd_settings(json_output),
         Commands::Tunnel { cmd } => match cmd {
@@ -612,6 +731,183 @@ fn cmd_tasks_rerun(task_id: &str) -> Result<CommandResult, String> {
     Ok(CommandResult {
         text: format!("Task re-run started for workspace {workspace_id}\n"),
         json: data,
+    })
+}
+
+// --- Cronjobs commands ---
+
+fn cmd_cronjobs_list(
+    project: Option<&str>,
+    workspace: Option<&str>,
+) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+
+    let mut input = serde_json::json!({});
+    if let Some(p) = project {
+        input["project"] = serde_json::json!(p);
+    }
+    if let Some(w) = workspace {
+        input["workspaceId"] = serde_json::json!(w);
+    }
+
+    let data = client.trpc_query("cronjobs.list", &input)?;
+    let jobs = data
+        .get("jobs")
+        .and_then(|j| j.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let mut rows: Vec<[String; 6]> = Vec::new();
+    let mut json_jobs = Vec::new();
+    for job in &jobs {
+        let id = job.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        let name = job.get("name").and_then(|v| v.as_str()).unwrap_or("");
+        let cron_expr = job
+            .get("cronExpression")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let scope = job.get("scope").and_then(|v| v.as_str()).unwrap_or("");
+        let enabled = job
+            .get("enabled")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let last_status = job
+            .get("lastRunStatus")
+            .and_then(|v| v.as_str())
+            .unwrap_or("-");
+
+        rows.push([
+            id.to_string(),
+            name.to_string(),
+            cron_expr.to_string(),
+            scope.to_string(),
+            if enabled {
+                "enabled".to_string()
+            } else {
+                "disabled".to_string()
+            },
+            last_status.to_string(),
+        ]);
+
+        json_jobs.push(job.clone());
+    }
+
+    let text = format_table(&["ID", "NAME", "CRON", "SCOPE", "STATE", "LAST RUN"], &rows);
+
+    Ok(CommandResult {
+        text,
+        json: serde_json::json!({"jobs": json_jobs}),
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn cmd_cronjobs_create(
+    key: &str,
+    name: &str,
+    prompt: &str,
+    cron: &str,
+    scope: &str,
+    workspace_id: Option<&str>,
+    disabled: bool,
+) -> Result<CommandResult, String> {
+    if scope != "project" && scope != "workspace" {
+        return Err("Scope must be 'project' or 'workspace'".to_string());
+    }
+    if scope == "workspace" && workspace_id.is_none() {
+        return Err("--workspace-id is required when scope is 'workspace'".to_string());
+    }
+
+    let client = api::ApiClient::from_settings()?;
+    let mut input = serde_json::json!({
+        "key": key,
+        "name": name,
+        "prompt": prompt,
+        "cronExpression": cron,
+        "scope": scope,
+        "enabled": !disabled,
+    });
+    if let Some(ws) = workspace_id {
+        input["workspaceId"] = serde_json::json!(ws);
+    }
+
+    let data = client.trpc_mutate("cronjobs.create", &input)?;
+    let job = data.get("job").cloned().unwrap_or(serde_json::Value::Null);
+    let id = job.get("id").and_then(|v| v.as_str()).unwrap_or("");
+
+    Ok(CommandResult {
+        text: format!("{id}\n"),
+        json: serde_json::json!({"job": job}),
+    })
+}
+
+fn cmd_cronjobs_update(
+    key: &str,
+    id: &str,
+    name: Option<&str>,
+    prompt: Option<&str>,
+    cron: Option<&str>,
+    enable: bool,
+    disable: bool,
+) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let mut input = serde_json::json!({
+        "key": key,
+        "id": id,
+    });
+    if let Some(n) = name {
+        input["name"] = serde_json::json!(n);
+    }
+    if let Some(p) = prompt {
+        input["prompt"] = serde_json::json!(p);
+    }
+    if let Some(c) = cron {
+        input["cronExpression"] = serde_json::json!(c);
+    }
+    if enable {
+        input["enabled"] = serde_json::json!(true);
+    }
+    if disable {
+        input["enabled"] = serde_json::json!(false);
+    }
+
+    let data = client.trpc_mutate("cronjobs.update", &input)?;
+    let job = data.get("job").cloned().unwrap_or(serde_json::Value::Null);
+
+    Ok(CommandResult {
+        text: format!("Cronjob {id} updated\n"),
+        json: serde_json::json!({"job": job}),
+    })
+}
+
+fn cmd_cronjobs_delete(key: &str, id: &str) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    client.trpc_mutate(
+        "cronjobs.delete",
+        &serde_json::json!({"key": key, "id": id}),
+    )?;
+
+    Ok(CommandResult {
+        text: format!("Cronjob {id} deleted\n"),
+        json: serde_json::json!({"ok": true}),
+    })
+}
+
+fn cmd_cronjobs_trigger(key: &str, id: &str) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let data = client.trpc_mutate(
+        "cronjobs.trigger",
+        &serde_json::json!({"key": key, "id": id}),
+    )?;
+
+    let task_id = data.get("taskId").and_then(|v| v.as_str()).unwrap_or("");
+    let workspace_id = data
+        .get("workspaceId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    Ok(CommandResult {
+        text: format!("{task_id}\n"),
+        json: serde_json::json!({"taskId": task_id, "workspaceId": workspace_id}),
     })
 }
 
@@ -1141,6 +1437,56 @@ fn build_schema(command: Option<&str>) -> Result<serde_json::Value, String> {
             "parameters": [
                 {"name": "id", "type": "string", "required": false, "positional": true, "description": "Task ID (optional if --workspace is provided)"},
                 {"name": "--workspace", "type": "string", "required": false, "description": "Watch the latest task for this workspace"},
+            ]
+        }),
+        serde_json::json!({
+            "name": "cronjobs list",
+            "description": "List cronjobs, optionally filtered by project or workspace",
+            "parameters": [
+                {"name": "--project", "type": "string", "required": false, "description": "Filter by project name"},
+                {"name": "--workspace", "type": "string", "required": false, "description": "Filter by workspace ID"},
+            ]
+        }),
+        serde_json::json!({
+            "name": "cronjobs create",
+            "description": "Create a new scheduled cronjob",
+            "parameters": [
+                {"name": "key", "type": "string", "required": true, "positional": true, "description": "Storage key: project name or workspace ID"},
+                {"name": "--name", "type": "string", "required": true, "description": "Human-readable name for the job"},
+                {"name": "--prompt", "type": "string", "required": true, "description": "Prompt text to send to the coding agent"},
+                {"name": "--cron", "type": "string", "required": true, "description": "Cron expression (e.g. \"0 */6 * * *\")"},
+                {"name": "--scope", "type": "string", "required": false, "description": "Scope: project (default) or workspace"},
+                {"name": "--workspace-id", "type": "string", "required": false, "description": "Workspace ID (required when scope is workspace)"},
+                {"name": "--disabled", "type": "boolean", "required": false, "description": "Create the job in disabled state"},
+            ]
+        }),
+        serde_json::json!({
+            "name": "cronjobs update",
+            "description": "Update an existing cronjob",
+            "parameters": [
+                {"name": "key", "type": "string", "required": true, "positional": true, "description": "Storage key (project name or workspace ID)"},
+                {"name": "id", "type": "string", "required": true, "positional": true, "description": "Cronjob ID (e.g. cj_1234567890)"},
+                {"name": "--name", "type": "string", "required": false, "description": "New name"},
+                {"name": "--prompt", "type": "string", "required": false, "description": "New prompt"},
+                {"name": "--cron", "type": "string", "required": false, "description": "New cron expression"},
+                {"name": "--enable", "type": "boolean", "required": false, "description": "Enable the job"},
+                {"name": "--disable", "type": "boolean", "required": false, "description": "Disable the job"},
+            ]
+        }),
+        serde_json::json!({
+            "name": "cronjobs delete",
+            "description": "Delete a cronjob",
+            "parameters": [
+                {"name": "key", "type": "string", "required": true, "positional": true, "description": "Storage key (project name or workspace ID)"},
+                {"name": "id", "type": "string", "required": true, "positional": true, "description": "Cronjob ID (e.g. cj_1234567890)"},
+            ]
+        }),
+        serde_json::json!({
+            "name": "cronjobs trigger",
+            "description": "Manually trigger a cronjob now",
+            "parameters": [
+                {"name": "key", "type": "string", "required": true, "positional": true, "description": "Storage key (project name or workspace ID)"},
+                {"name": "id", "type": "string", "required": true, "positional": true, "description": "Cronjob ID (e.g. cj_1234567890)"},
             ]
         }),
         serde_json::json!({

@@ -988,6 +988,303 @@ fn tasks_list_text_output() {
     assert!(out.contains("tsk_"), "expected task ID in output: {out}");
 }
 
+// --- Cronjobs tests ---
+
+#[test]
+fn cronjobs_list_empty() {
+    let env = TestEnv::new();
+    let output = env.band(&["cronjobs", "list"]);
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    // No cronjobs yet — should have empty output
+}
+
+#[test]
+fn cronjobs_list_json_empty() {
+    let env = TestEnv::new();
+    let output = env.band(&["cronjobs", "list", "--output", "json"]);
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output))
+        .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)));
+    let jobs = json["jobs"].as_array().expect("jobs array");
+    assert!(jobs.is_empty(), "expected no cronjobs: {json}");
+}
+
+#[test]
+fn cronjobs_create_and_list() {
+    let env = TestEnv::new();
+
+    let output = env.band(&[
+        "cronjobs",
+        "create",
+        "my-project",
+        "--name",
+        "Daily check",
+        "--prompt",
+        "Check for issues",
+        "--cron",
+        "0 9 * * *",
+        "--output",
+        "json",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output))
+        .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)));
+    let job_id = json["job"]["id"].as_str().unwrap();
+    assert!(job_id.starts_with("cj_"), "expected cj_ prefix: {job_id}");
+    assert_eq!(json["job"]["name"], "Daily check");
+    assert_eq!(json["job"]["scope"], "project");
+
+    // Verify it shows in list
+    let list_output = env.band(&["cronjobs", "list", "--output", "json"]);
+    assert!(list_output.status.success());
+    let list_json: serde_json::Value = serde_json::from_str(&stdout(&list_output)).unwrap();
+    let jobs = list_json["jobs"].as_array().expect("jobs array");
+    assert_eq!(jobs.len(), 1);
+    assert_eq!(jobs[0]["id"], job_id);
+}
+
+#[test]
+fn cronjobs_create_text_output() {
+    let env = TestEnv::new();
+    let output = env.band(&[
+        "cronjobs",
+        "create",
+        "my-project",
+        "--name",
+        "Test job",
+        "--prompt",
+        "Do something",
+        "--cron",
+        "0 * * * *",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let out = stdout(&output);
+    assert!(
+        out.starts_with("cj_"),
+        "expected cj_ ID in text output: {out}"
+    );
+}
+
+#[test]
+fn cronjobs_create_invalid_cron_fails() {
+    let env = TestEnv::new();
+    let output = env.band(&[
+        "cronjobs",
+        "create",
+        "my-project",
+        "--name",
+        "Bad cron",
+        "--prompt",
+        "something",
+        "--cron",
+        "not valid",
+    ]);
+    assert!(!output.status.success());
+}
+
+#[test]
+fn cronjobs_update_modifies_job() {
+    let env = TestEnv::new();
+
+    // Create a job first
+    let create_output = env.band(&[
+        "cronjobs",
+        "create",
+        "my-project",
+        "--name",
+        "Original",
+        "--prompt",
+        "original prompt",
+        "--cron",
+        "0 9 * * *",
+        "--output",
+        "json",
+    ]);
+    assert!(create_output.status.success());
+    let create_json: serde_json::Value = serde_json::from_str(&stdout(&create_output)).unwrap();
+    let job_id = create_json["job"]["id"].as_str().unwrap();
+
+    // Update the name
+    let output = env.band(&[
+        "cronjobs",
+        "update",
+        "my-project",
+        job_id,
+        "--name",
+        "Updated",
+        "--output",
+        "json",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(json["job"]["name"], "Updated");
+}
+
+#[test]
+fn cronjobs_update_enable_disable() {
+    let env = TestEnv::new();
+
+    let create_output = env.band(&[
+        "cronjobs",
+        "create",
+        "my-project",
+        "--name",
+        "Toggle test",
+        "--prompt",
+        "test",
+        "--cron",
+        "0 * * * *",
+        "--output",
+        "json",
+    ]);
+    assert!(create_output.status.success());
+    let create_json: serde_json::Value = serde_json::from_str(&stdout(&create_output)).unwrap();
+    let job_id = create_json["job"]["id"].as_str().unwrap();
+
+    // Disable
+    let output = env.band(&[
+        "cronjobs",
+        "update",
+        "my-project",
+        job_id,
+        "--disable",
+        "--output",
+        "json",
+    ]);
+    assert!(output.status.success());
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(json["job"]["enabled"], false);
+
+    // Enable
+    let output = env.band(&[
+        "cronjobs",
+        "update",
+        "my-project",
+        job_id,
+        "--enable",
+        "--output",
+        "json",
+    ]);
+    assert!(output.status.success());
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(json["job"]["enabled"], true);
+}
+
+#[test]
+fn cronjobs_delete_removes_job() {
+    let env = TestEnv::new();
+
+    let create_output = env.band(&[
+        "cronjobs",
+        "create",
+        "my-project",
+        "--name",
+        "Delete me",
+        "--prompt",
+        "test",
+        "--cron",
+        "0 * * * *",
+        "--output",
+        "json",
+    ]);
+    assert!(create_output.status.success());
+    let create_json: serde_json::Value = serde_json::from_str(&stdout(&create_output)).unwrap();
+    let job_id = create_json["job"]["id"].as_str().unwrap();
+
+    let output = env.band(&["cronjobs", "delete", "my-project", job_id]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    // Verify it's gone
+    let list_output = env.band(&["cronjobs", "list", "--output", "json"]);
+    let list_json: serde_json::Value = serde_json::from_str(&stdout(&list_output)).unwrap();
+    let jobs = list_json["jobs"].as_array().expect("jobs array");
+    assert!(
+        jobs.is_empty(),
+        "expected no cronjobs after delete: {list_json}"
+    );
+}
+
+#[test]
+fn cronjobs_delete_nonexistent_fails() {
+    let env = TestEnv::new();
+    let output = env.band(&["cronjobs", "delete", "my-project", "cj_nonexistent"]);
+    assert!(!output.status.success());
+}
+
+#[test]
+fn cronjobs_list_filter_by_project() {
+    let env = TestEnv::new();
+
+    env.band(&[
+        "cronjobs",
+        "create",
+        "my-project",
+        "--name",
+        "Proj job",
+        "--prompt",
+        "test",
+        "--cron",
+        "0 * * * *",
+    ]);
+
+    let output = env.band(&[
+        "cronjobs",
+        "list",
+        "--project",
+        "my-project",
+        "--output",
+        "json",
+    ]);
+    assert!(output.status.success());
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+    let jobs = json["jobs"].as_array().expect("jobs array");
+    assert_eq!(jobs.len(), 1);
+
+    // Filter by nonexistent project — should be empty
+    let output = env.band(&[
+        "cronjobs",
+        "list",
+        "--project",
+        "nonexistent",
+        "--output",
+        "json",
+    ]);
+    assert!(output.status.success());
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+    let jobs = json["jobs"].as_array().expect("jobs array");
+    assert!(jobs.is_empty());
+}
+
+#[test]
+fn cronjobs_list_text_output_shows_table() {
+    let env = TestEnv::new();
+
+    env.band(&[
+        "cronjobs",
+        "create",
+        "my-project",
+        "--name",
+        "My Job",
+        "--prompt",
+        "do stuff",
+        "--cron",
+        "0 9 * * 1",
+    ]);
+
+    let output = env.band(&["cronjobs", "list"]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let out = stdout(&output);
+    assert!(out.contains("cj_"), "expected cj_ ID: {out}");
+    assert!(out.contains("My Job"), "expected job name: {out}");
+    assert!(out.contains("0 9 * * 1"), "expected cron expr: {out}");
+}
+
 // --- Schema tests ---
 
 #[test]
@@ -1018,6 +1315,11 @@ fn schema_lists_all_commands() {
     assert!(names.contains(&"tunnel status"), "missing: {names:?}");
     assert!(names.contains(&"tunnel start"), "missing: {names:?}");
     assert!(names.contains(&"tunnel stop"), "missing: {names:?}");
+    assert!(names.contains(&"cronjobs list"), "missing: {names:?}");
+    assert!(names.contains(&"cronjobs create"), "missing: {names:?}");
+    assert!(names.contains(&"cronjobs update"), "missing: {names:?}");
+    assert!(names.contains(&"cronjobs delete"), "missing: {names:?}");
+    assert!(names.contains(&"cronjobs trigger"), "missing: {names:?}");
     assert!(names.contains(&"notify"), "missing: {names:?}");
     assert!(names.contains(&"schema"), "missing: {names:?}");
 }

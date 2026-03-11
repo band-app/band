@@ -5,7 +5,7 @@ import {
 } from "@band/dashboard-core/adapters/hybrid";
 import { Button, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@band/ui";
 import { Link } from "@tanstack/react-router";
-import { ListTodo } from "lucide-react";
+import { ListTodo, Timer } from "lucide-react";
 import { useCallback } from "react";
 import { TunnelToolbarButton } from "./TunnelToolbarButton";
 
@@ -55,6 +55,16 @@ export function DashboardView() {
           toolbarExtra={
             <>
               <TasksButton />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button size="icon-sm" variant="ghost" asChild>
+                    <Link to="/cronjobs">
+                      <Timer className="size-5" />
+                    </Link>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Cronjobs</TooltipContent>
+              </Tooltip>
               <TunnelToolbarButton />
             </>
           }

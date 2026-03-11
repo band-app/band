@@ -10,12 +10,18 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as TasksRouteImport } from './routes/tasks'
+import { Route as CronjobsRouteImport } from './routes/cronjobs'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ChatWorkspaceIdRouteImport } from './routes/chat.$workspaceId'
 
 const TasksRoute = TasksRouteImport.update({
   id: '/tasks',
   path: '/tasks',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CronjobsRoute = CronjobsRouteImport.update({
+  id: '/cronjobs',
+  path: '/cronjobs',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -31,30 +37,34 @@ const ChatWorkspaceIdRoute = ChatWorkspaceIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/cronjobs': typeof CronjobsRoute
   '/tasks': typeof TasksRoute
   '/chat/$workspaceId': typeof ChatWorkspaceIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/cronjobs': typeof CronjobsRoute
   '/tasks': typeof TasksRoute
   '/chat/$workspaceId': typeof ChatWorkspaceIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/cronjobs': typeof CronjobsRoute
   '/tasks': typeof TasksRoute
   '/chat/$workspaceId': typeof ChatWorkspaceIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/tasks' | '/chat/$workspaceId'
+  fullPaths: '/' | '/cronjobs' | '/tasks' | '/chat/$workspaceId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/tasks' | '/chat/$workspaceId'
-  id: '__root__' | '/' | '/tasks' | '/chat/$workspaceId'
+  to: '/' | '/cronjobs' | '/tasks' | '/chat/$workspaceId'
+  id: '__root__' | '/' | '/cronjobs' | '/tasks' | '/chat/$workspaceId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  CronjobsRoute: typeof CronjobsRoute
   TasksRoute: typeof TasksRoute
   ChatWorkspaceIdRoute: typeof ChatWorkspaceIdRoute
 }
@@ -66,6 +76,13 @@ declare module '@tanstack/react-router' {
       path: '/tasks'
       fullPath: '/tasks'
       preLoaderRoute: typeof TasksRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/cronjobs': {
+      id: '/cronjobs'
+      path: '/cronjobs'
+      fullPath: '/cronjobs'
+      preLoaderRoute: typeof CronjobsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -87,6 +104,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  CronjobsRoute: CronjobsRoute,
   TasksRoute: TasksRoute,
   ChatWorkspaceIdRoute: ChatWorkspaceIdRoute,
 }
