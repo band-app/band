@@ -563,6 +563,36 @@ pub fn workspace_focus(
     Ok(())
 }
 
+/// Close all windows associated with a workspace.
+#[tauri::command]
+pub fn workspace_close(
+    workspace_id: String,
+    project_cache: tauri::State<'_, ProjectCache>,
+) -> Result<(), String> {
+    let app_state = project_cache
+        .get()
+        .or_else(|| refresh_project_cache(&project_cache))
+        .ok_or("Project state not available yet")?;
+
+    let folder_name = if let Some((_path, folder)) = workspace_info(&workspace_id, &app_state) {
+        folder
+    } else {
+        // Workspace may already be removed from state; derive folder_name from workspace_id
+        // by taking everything after the first '-' (project-branch format).
+        workspace_id
+            .split_once('-')
+            .map(|(_, branch)| branch.to_string())
+            .unwrap_or_default()
+    };
+
+    if folder_name.is_empty() {
+        return Ok(());
+    }
+
+    let wm = WindowManager::global();
+    wm.close_all_for_folder(&folder_name)
+}
+
 /// Return the currently active workspace ID from in-memory state.
 #[tauri::command]
 pub fn get_active_workspace(

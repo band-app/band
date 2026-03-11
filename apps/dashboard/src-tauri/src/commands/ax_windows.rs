@@ -963,6 +963,49 @@ pub fn focus_window(pid: i32, cg_id: u32) -> bool {
     raised
 }
 
+/// Check if a window still exists (is reachable via AX APIs).
+pub fn window_exists(pid: i32, cg_id: u32) -> bool {
+    unsafe {
+        let result = find_ax_window(pid, cg_id);
+        if let Some(ax_win) = result {
+            CFRelease(ax_win);
+            true
+        } else {
+            false
+        }
+    }
+}
+
+/// Close a window by performing `AXPress` on its close button.
+pub fn close_window(pid: i32, cg_id: u32) -> bool {
+    if !check_accessibility() {
+        return false;
+    }
+
+    unsafe {
+        let Some(ax_win) = find_ax_window(pid, cg_id) else {
+            return false;
+        };
+
+        let attr = cfstr("AXCloseButton");
+        let mut close_btn: *const c_void = std::ptr::null();
+        let err = AXUIElementCopyAttributeValue(ax_win, attr, &raw mut close_btn);
+        CFRelease(attr);
+
+        if err != 0 || close_btn.is_null() {
+            CFRelease(ax_win);
+            return false;
+        }
+
+        let action = cfstr("AXPress");
+        let press_err = AXUIElementPerformAction(close_btn, action);
+        CFRelease(action);
+        CFRelease(close_btn);
+        CFRelease(ax_win);
+        press_err == 0
+    }
+}
+
 // --- Screen size ---
 
 /// Get screen size via `CGDisplayBounds`.
