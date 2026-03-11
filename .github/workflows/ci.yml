@@ -83,6 +83,12 @@ jobs:
       - name: Test (web)
         run: pnpm --filter @band/web test
 
+      - name: Install Playwright Chromium
+        run: pnpm --filter @band/web exec playwright install --with-deps chromium
+
+      - name: Test e2e (web)
+        run: pnpm --filter @band/web test:e2e
+
       - name: Test (CLI)
         run: |
           export PATH="/root/.cargo/bin:$PATH"

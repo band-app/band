@@ -8,7 +8,9 @@
     "build": "vite build && esbuild start-server.ts --bundle --platform=node --format=esm --outfile=dist/start-server.mjs --external:./server/server.js --banner:js=\"import{createRequire}from'module';import{fileURLToPath as __fu}from'url';import{dirname as __dn}from'path';const require=createRequire(import.meta.url);const __filename=__fu(import.meta.url);const __dirname=__dn(__filename);\"",
     "start": "node dist/start-server.mjs",
     "pretest": "pnpm build",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.0",
@@ -48,6 +50,7 @@
     "zod": "^3.25.67"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@tailwindcss/vite": "^4.0.0",
     "@tanstack/router-plugin": "^1.154.0",
     "@types/node": "^22.19.13",

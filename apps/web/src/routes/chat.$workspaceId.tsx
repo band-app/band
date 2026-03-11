@@ -10,6 +10,7 @@ import { ArrowLeft, Clock } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { ChatView } from "../components/ChatView";
 import { CodeBrowserView } from "../components/CodeBrowserView";
+import { trpc } from "../lib/trpc-client";
 
 const adapter = new WebDashboardAdapter();
 const capabilities = new WebCapabilities();
@@ -29,31 +30,18 @@ function ChatPage() {
   useEffect(() => {
     let cancelled = false;
 
-    fetch(`/api/sessions/${encodeURIComponent(decoded)}`)
-      .then((res) => {
-        if (!res.ok) {
-          console.error("[sessions] fetch failed:", res.status, res.statusText);
-          return null;
-        }
-        return res.json();
-      })
-      .then(
-        (
-          data: {
-            supported?: boolean;
-            sessions?: { sessionId: string; lastModified: number }[];
-          } | null,
-        ) => {
-          if (cancelled) return;
-          if (data?.supported) {
-            setSupportsSessionListing(true);
-            const latest = data.sessions?.sort((a, b) => b.lastModified - a.lastModified)[0];
-            if (latest) {
-              setInitialSessionId(latest.sessionId);
-            }
+    trpc.sessions.list
+      .query({ workspaceId: decoded })
+      .then((data) => {
+        if (cancelled) return;
+        if (data.supported) {
+          setSupportsSessionListing(true);
+          const latest = [...data.sessions].sort((a, b) => b.lastModified - a.lastModified)[0];
+          if (latest) {
+            setInitialSessionId(latest.sessionId);
           }
-        },
-      )
+        }
+      })
       .catch((err) => {
         console.error("[sessions] error:", err);
       });
