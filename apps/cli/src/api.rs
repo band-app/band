@@ -5,16 +5,14 @@ use ureq::Body;
 pub struct ApiClient {
     agent: ureq::Agent,
     base_url: String,
-    token: String,
+    token: Option<String>,
 }
 
 impl ApiClient {
     pub fn from_settings() -> Result<Self, String> {
         let settings = state::load_settings()?;
         let port = settings.web_server_port.unwrap_or(3456);
-        let token = settings
-            .token_secret
-            .ok_or("tokenSecret not found in settings.json — start the web server first")?;
+        let token = settings.token_secret;
         let agent = ureq::Agent::new_with_config(
             ureq::config::Config::builder()
                 .http_status_as_error(false)
@@ -40,15 +38,29 @@ impl ApiClient {
             urlencoded(&input_str),
         );
 
-        let cookie = format!("band_token={}", self.token);
-        let response = self
-            .agent
-            .get(&url)
-            .header("Cookie", &cookie)
-            .call()
-            .map_err(|e| {
-                format!("Cannot connect to Band web server. Make sure it's running.\n{e}")
-            })?;
+        let mut req = self.agent.get(&url);
+        if let Some(ref token) = self.token {
+            req = req.header("Cookie", &format!("band_token={token}"));
+        }
+
+        let response = req.call().map_err(|e| {
+            format!("Cannot connect to Band web server. Make sure it's running.\n{e}")
+        })?;
+
+        parse_trpc_body(response)
+    }
+
+    pub fn trpc_query_no_input(&self, procedure: &str) -> Result<serde_json::Value, String> {
+        let url = format!("{}/trpc/{procedure}", self.base_url);
+
+        let mut req = self.agent.get(&url);
+        if let Some(ref token) = self.token {
+            req = req.header("Cookie", &format!("band_token={token}"));
+        }
+
+        let response = req.call().map_err(|e| {
+            format!("Cannot connect to Band web server. Make sure it's running.\n{e}")
+        })?;
 
         parse_trpc_body(response)
     }
@@ -58,16 +70,17 @@ impl ApiClient {
         procedure: &str,
         input: &serde_json::Value,
     ) -> Result<serde_json::Value, String> {
-        let cookie = format!("band_token={}", self.token);
-        let response = self
+        let mut req = self
             .agent
             .post(&format!("{}/trpc/{procedure}", self.base_url))
-            .header("Content-Type", "application/json")
-            .header("Cookie", &cookie)
-            .send_json(input)
-            .map_err(|e| {
-                format!("Cannot connect to Band web server. Make sure it's running.\n{e}")
-            })?;
+            .header("Content-Type", "application/json");
+        if let Some(ref token) = self.token {
+            req = req.header("Cookie", &format!("band_token={token}"));
+        }
+
+        let response = req.send_json(input).map_err(|e| {
+            format!("Cannot connect to Band web server. Make sure it's running.\n{e}")
+        })?;
 
         parse_trpc_body(response)
     }
