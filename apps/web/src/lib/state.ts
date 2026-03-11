@@ -55,6 +55,7 @@ export interface Settings {
 }
 
 export function bandHome(): string {
+  if (process.env.BAND_HOME) return process.env.BAND_HOME;
   return join(homedir(), ".band");
 }
 
