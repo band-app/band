@@ -428,10 +428,7 @@ fn cmd_workspaces_list(project_filter: Option<&str>) -> Result<CommandResult, St
         for wt in &worktrees {
             let branch = wt.get("branch").and_then(|b| b.as_str()).unwrap_or("");
             let path = wt.get("path").and_then(|p| p.as_str()).unwrap_or("");
-            let workspace_id = wt
-                .get("workspaceId")
-                .and_then(|w| w.as_str())
-                .unwrap_or("");
+            let workspace_id = wt.get("workspaceId").and_then(|w| w.as_str()).unwrap_or("");
             rows.push([
                 name.to_string(),
                 branch.to_string(),
