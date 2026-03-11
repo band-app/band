@@ -71,7 +71,7 @@ export class ClaudeCodeAdapter implements CodingAgent {
 
     const canUseTool: CanUseTool = async (toolName, input, options) => {
       if (toolName !== "AskUserQuestion" || !this.onUserInputNeeded) {
-        return { behavior: "allow" };
+        return { behavior: "allow", updatedInput: input };
       }
 
       const approvalId = options.toolUseID;
@@ -96,7 +96,7 @@ export class ClaudeCodeAdapter implements CodingAgent {
         return { behavior: "deny", message: formatUserAnswer(answers) };
       } catch (err) {
         log.warn({ err, approvalId }, "AskUserQuestion timed out or errored, auto-allowing");
-        return { behavior: "allow" };
+        return { behavior: "allow", updatedInput: input };
       }
     };
 

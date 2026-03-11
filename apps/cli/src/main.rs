@@ -524,7 +524,7 @@ fn cmd_notify() -> Result<CommandResult, String> {
         .unwrap_or("");
 
     let agent_status = match hook_event {
-        "Stop" | "PermissionRequest" => "needs_attention",
+        "Stop" => "needs_attention",
         _ => "working",
     };
 
