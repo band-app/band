@@ -25,7 +25,7 @@ pub async fn open_tasks_window(app: AppHandle) -> Result<(), String> {
         format!("http://localhost:{port}/tasks?token={token}")
     };
 
-    let mut builder = WebviewWindowBuilder::new(
+    let builder = WebviewWindowBuilder::new(
         &app,
         "tasks",
         WebviewUrl::External(url.parse().map_err(|e| format!("Invalid URL: {e}"))?),
@@ -35,9 +35,7 @@ pub async fn open_tasks_window(app: AppHandle) -> Result<(), String> {
     .center();
 
     #[cfg(target_os = "macos")]
-    {
-        builder = builder.title_bar_style(tauri::TitleBarStyle::Transparent);
-    }
+    let builder = builder.title_bar_style(tauri::TitleBarStyle::Transparent);
 
     let _window = builder
         .build()
