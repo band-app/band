@@ -476,10 +476,7 @@ fn cmd_workspaces_remove(project: &str, branch: &str) -> Result<CommandResult, S
 
 // --- Tasks commands ---
 
-fn cmd_tasks_list(
-    project: Option<&str>,
-    status: Option<&str>,
-) -> Result<CommandResult, String> {
+fn cmd_tasks_list(project: Option<&str>, status: Option<&str>) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
 
     let mut input = serde_json::json!({});
