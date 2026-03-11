@@ -144,6 +144,12 @@ fn get_descendant_cwds(parent_pid: i32) -> Vec<PathBuf> {
 
 // --- Workspace matching ---
 
+/// Build a workspace ID from project name and branch, replacing `/` with `-`
+/// to match the canonical format used by the web server's `toWorkspaceId()`.
+fn to_workspace_id(project: &str, branch: &str) -> String {
+    format!("{}-{}", project, branch.replace('/', "-"))
+}
+
 fn match_cwds_to_workspace(cwds: &[PathBuf], app_state: &state::AppState) -> Option<String> {
     let mut matches = Vec::new();
 
@@ -152,7 +158,7 @@ fn match_cwds_to_workspace(cwds: &[PathBuf], app_state: &state::AppState) -> Opt
             let wt_path = PathBuf::from(&wt.path);
             for cwd in cwds {
                 if cwd == &wt_path || cwd.starts_with(&wt_path) {
-                    let ws_id = format!("{}-{}", proj.name, wt.branch);
+                    let ws_id = to_workspace_id(&proj.name, &wt.branch);
                     if !matches.contains(&ws_id) {
                         matches.push(ws_id);
                     }
@@ -185,7 +191,7 @@ fn folder_name_to_workspace_id(folder_name: &str, app_state: &state::AppState) -
                 .and_then(|n| n.to_str())
                 .unwrap_or("");
             if wt_folder == folder_name {
-                return Some(format!("{}-{}", proj.name, wt.branch));
+                return Some(to_workspace_id(&proj.name, &wt.branch));
             }
         }
     }
@@ -201,7 +207,7 @@ fn is_dashboard_frontmost() -> bool {
 fn workspace_info(workspace_id: &str, app_state: &state::AppState) -> Option<(String, String)> {
     for proj in &app_state.projects {
         for wt in &proj.worktrees {
-            let ws_id = format!("{}-{}", proj.name, wt.branch);
+            let ws_id = to_workspace_id(&proj.name, &wt.branch);
             if ws_id == workspace_id {
                 let folder_name = Path::new(&wt.path)
                     .file_name()
@@ -261,7 +267,7 @@ fn detect_frontmost_workspace(app_state: &state::AppState) -> Option<String> {
                                 if !folder_name.is_empty()
                                     && driver.matches_window_title(&title, folder_name)
                                 {
-                                    let ws_id = format!("{}-{}", proj.name, wt.branch);
+                                    let ws_id = to_workspace_id(&proj.name, &wt.branch);
                                     if best_match
                                         .as_ref()
                                         .is_none_or(|(_, len)| folder_name.len() > *len)
@@ -308,8 +314,7 @@ fn find_workspace<'a>(
 ) -> Option<(&'a state::ProjectState, &'a state::WorktreeState)> {
     for proj in &app_state.projects {
         for wt in &proj.worktrees {
-            let ws_id = format!("{}-{}", proj.name, wt.branch);
-            if ws_id == workspace_id {
+            if to_workspace_id(&proj.name, &wt.branch) == workspace_id {
                 return Some((proj, wt));
             }
         }
