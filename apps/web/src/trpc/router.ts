@@ -39,6 +39,7 @@ import {
   subscribe as subscribeTask,
   TaskConflictError,
 } from "../lib/task-runner";
+import { listTasks } from "../lib/task-store";
 import {
   checkTunnelAuth,
   checkTunnelHealth,
@@ -767,6 +768,20 @@ async function saveUploadedFiles(fileParts: FilePart[]): Promise<string[]> {
 }
 
 const tasksRouter = t.router({
+  list: publicProcedure
+    .input(
+      z
+        .object({
+          project: z.string().optional(),
+          workspaceId: z.string().optional(),
+          status: z.enum(["running", "completed", "failed"]).optional(),
+        })
+        .optional(),
+    )
+    .query(({ input }) => {
+      return { tasks: listTasks(input) };
+    }),
+
   submit: publicProcedure
     .input(
       z.object({
