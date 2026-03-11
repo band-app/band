@@ -1,4 +1,4 @@
-import { subscribeSSE, useSettingsQuery } from "@band/dashboard-core";
+import { useSettingsQuery } from "@band/dashboard-core";
 import { Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@band/ui";
 import { Loader2 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
@@ -100,22 +100,24 @@ export function TunnelDialog({ open, onOpenChange, onStopped, initialUrl, onTunn
 
     let cancelled = false;
 
-    // Subscribe to SSE tunnel events
-    const unsubscribe = subscribeSSE((event) => {
-      if (cancelled) return;
-      if (event.kind === "tunnel-url" && event.url) {
-        setTunnelUrl(event.url);
-        setStep("ready");
-        onTunnelUrl?.(event.url);
-      } else if (event.kind === "tunnel-error" && event.error) {
-        setError(event.error);
-        setStep("error");
-      } else if (event.kind === "tunnel-subdomain-taken") {
-        setStep("subdomain_taken");
-      } else if (event.kind === "tunnel-remote-host" && event.host) {
-        setRemoteHost(event.host);
-        setStep("remote_host");
-      }
+    // Subscribe to tRPC status stream for tunnel events
+    const subscription = trpc.status.stream.subscribe(undefined, {
+      onData: (event: { kind: string; url?: string; error?: string; host?: string }) => {
+        if (cancelled) return;
+        if (event.kind === "tunnel-url" && event.url) {
+          setTunnelUrl(event.url);
+          setStep("ready");
+          onTunnelUrl?.(event.url);
+        } else if (event.kind === "tunnel-error" && event.error) {
+          setError(event.error);
+          setStep("error");
+        } else if (event.kind === "tunnel-subdomain-taken") {
+          setStep("subdomain_taken");
+        } else if (event.kind === "tunnel-remote-host" && event.host) {
+          setRemoteHost(event.host);
+          setStep("remote_host");
+        }
+      },
     });
 
     if (!initialUrl) {
@@ -147,7 +149,7 @@ export function TunnelDialog({ open, onOpenChange, onStopped, initialUrl, onTunn
 
     return () => {
       cancelled = true;
-      unsubscribe();
+      subscription.unsubscribe();
     };
   }, [open, startConnection, initialUrl, onTunnelUrl]);
 

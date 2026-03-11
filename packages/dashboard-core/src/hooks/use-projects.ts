@@ -8,6 +8,7 @@ export function useProjects() {
   const { data, isLoading, error } = useQuery({
     queryKey: queryKeys.projects,
     queryFn: () => adapter.listProjects(),
+    refetchInterval: 30_000,
   });
   return {
     projects: data ?? ([] as ProjectInfo[]),

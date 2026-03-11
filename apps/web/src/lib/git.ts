@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 
 export interface WorktreeInfo {
@@ -104,22 +104,32 @@ export async function listWorktrees(repoPath: string): Promise<WorktreeInfo[]> {
  * the original branch name from git's rebase state files.
  */
 async function resolveDetachedBranch(worktreePath: string): Promise<string> {
-  try {
-    const gitContent = await readFile(join(worktreePath, ".git"), "utf-8");
-    const match = gitContent.match(/^gitdir:\s*(.+)/);
-    if (!match) return "";
-    const gitdir = match[1].trim();
+  const dotGit = join(worktreePath, ".git");
+  let gitdir: string;
 
-    // Check interactive rebase (rebase-merge) then regular rebase (rebase-apply)
-    for (const rebaseDir of ["rebase-merge", "rebase-apply"]) {
-      try {
-        const headName = await readFile(join(gitdir, rebaseDir, "head-name"), "utf-8");
-        const name = headName.trim();
-        return name.startsWith("refs/heads/") ? name.slice("refs/heads/".length) : name;
-      } catch {}
+  try {
+    const st = await stat(dotGit);
+    if (st.isDirectory()) {
+      // Main worktree — .git is a directory
+      gitdir = dotGit;
+    } else {
+      // Linked worktree — .git is a file with "gitdir: <path>"
+      const gitContent = await readFile(dotGit, "utf-8");
+      const match = gitContent.match(/^gitdir:\s*(.+)/);
+      if (!match) return "";
+      gitdir = match[1].trim();
     }
   } catch {
-    // .git file doesn't exist or isn't readable — not a worktree or main repo
+    return "";
+  }
+
+  // Check interactive rebase (rebase-merge) then regular rebase (rebase-apply)
+  for (const rebaseDir of ["rebase-merge", "rebase-apply"]) {
+    try {
+      const headName = await readFile(join(gitdir, rebaseDir, "head-name"), "utf-8");
+      const name = headName.trim();
+      return name.startsWith("refs/heads/") ? name.slice("refs/heads/".length) : name;
+    } catch {}
   }
   return "";
 }
