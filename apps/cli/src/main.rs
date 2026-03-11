@@ -411,7 +411,7 @@ fn cmd_workspaces_list(project_filter: Option<&str>) -> Result<CommandResult, St
         .unwrap_or_default();
 
     let mut found_any = false;
-    let mut rows: Vec<[String; 3]> = Vec::new();
+    let mut rows: Vec<[String; 4]> = Vec::new();
     let mut workspaces = Vec::new();
     for proj in &projects {
         let name = proj.get("name").and_then(|n| n.as_str()).unwrap_or("");
@@ -428,10 +428,20 @@ fn cmd_workspaces_list(project_filter: Option<&str>) -> Result<CommandResult, St
         for wt in &worktrees {
             let branch = wt.get("branch").and_then(|b| b.as_str()).unwrap_or("");
             let path = wt.get("path").and_then(|p| p.as_str()).unwrap_or("");
-            rows.push([name.to_string(), branch.to_string(), path.to_string()]);
+            let workspace_id = wt
+                .get("workspaceId")
+                .and_then(|w| w.as_str())
+                .unwrap_or("");
+            rows.push([
+                name.to_string(),
+                branch.to_string(),
+                workspace_id.to_string(),
+                path.to_string(),
+            ]);
             workspaces.push(serde_json::json!({
                 "project": name,
                 "branch": branch,
+                "workspaceId": workspace_id,
                 "path": path,
             }));
             found_any = true;
@@ -444,7 +454,7 @@ fn cmd_workspaces_list(project_filter: Option<&str>) -> Result<CommandResult, St
         }
     }
 
-    let text = format_table(&["PROJECT", "BRANCH", "PATH"], &rows);
+    let text = format_table(&["PROJECT", "BRANCH", "WORKSPACE ID", "PATH"], &rows);
 
     Ok(CommandResult {
         text,
