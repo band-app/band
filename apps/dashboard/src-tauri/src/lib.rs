@@ -28,6 +28,7 @@ pub fn run() {
             commands::ide::reveal_in_finder,
             commands::webserver::webserver_start,
             commands::webserver::webserver_stop,
+            commands::window::open_tasks_window,
         ])
         .setup(|app| {
             let window = app.get_webview_window("main").unwrap();
@@ -89,10 +90,15 @@ pub fn run() {
             // (handles projects without the Band VS Code extension)
             commands::ide::start_focus_polling(app.handle().clone());
 
-            // Kill web server on app exit
+            // Kill web server and close secondary windows on app exit
             let web_proc = app.state::<WebServerState>().inner().0.clone();
+            let app_handle_for_close = app.handle().clone();
             window.on_window_event(move |event| {
                 if let tauri::WindowEvent::CloseRequested { .. } = event {
+                    // Close the tasks window so the app can exit fully
+                    if let Some(tasks_win) = app_handle_for_close.get_webview_window("tasks") {
+                        let _ = tasks_win.destroy();
+                    }
                     web_proc.kill();
                     // Kill any server on the port (handles the detached process
                     // spawned by ensure_webserver_running in release builds)

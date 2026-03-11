@@ -376,13 +376,17 @@ unsafe fn raise_dashboard_windows() {
         return;
     }
 
+    type MsgSendBool = unsafe extern "C" fn(*const c_void, *const c_void) -> i8;
+    let msg_bool: MsgSendBool = std::mem::transmute(objc_msgSend as unsafe extern "C" fn());
+
     let count = msg_count(windows, sel_registerName(c"count".as_ptr()));
     let obj_at = sel_registerName(c"objectAtIndex:".as_ptr());
     let raise = sel_registerName(c"orderFrontRegardless".as_ptr());
+    let is_visible = sel_registerName(c"isVisible".as_ptr());
 
     for i in 0..count {
         let win = msg_idx(windows, obj_at, i);
-        if !win.is_null() {
+        if !win.is_null() && msg_bool(win, is_visible) != 0 {
             msg(win, raise);
         }
     }
