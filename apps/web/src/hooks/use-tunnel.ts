@@ -86,27 +86,6 @@ export function useTunnel() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Auto-start on app launch if enabled
-  useEffect(() => {
-    if (!settings.autoStartTunnel) return;
-
-    let cancelled = false;
-    (async () => {
-      try {
-        const status = await trpc.prereqs.check.query();
-        if (cancelled) return;
-        if (!status.node || !status.instatunnel || cancelled) return;
-        shouldBeRunningRef.current = true;
-      } catch {
-        // ignore — health poll will retry
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [settings.autoStartTunnel]);
-
   // Globe click → fresh health check, update state, then open prereq dialog
   const openDialog = useCallback(async () => {
     shouldBeRunningRef.current = true;
