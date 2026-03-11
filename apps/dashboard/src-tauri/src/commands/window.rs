@@ -25,17 +25,23 @@ pub async fn open_tasks_window(app: AppHandle) -> Result<(), String> {
         format!("http://localhost:{port}/tasks?token={token}")
     };
 
-    let window = WebviewWindowBuilder::new(
+    let mut builder = WebviewWindowBuilder::new(
         &app,
         "tasks",
         WebviewUrl::External(url.parse().map_err(|e| format!("Invalid URL: {e}"))?),
     )
     .title("Tasks - Band")
     .inner_size(900.0, 700.0)
-    .center()
-    .title_bar_style(tauri::TitleBarStyle::Transparent)
-    .build()
-    .map_err(|e| format!("Failed to create tasks window: {e}"))?;
+    .center();
+
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder.title_bar_style(tauri::TitleBarStyle::Transparent);
+    }
+
+    let _window = builder
+        .build()
+        .map_err(|e| format!("Failed to create tasks window: {e}"))?;
 
     // Set dark background color on macOS (same as main window)
     #[cfg(target_os = "macos")]
@@ -44,7 +50,7 @@ pub async fn open_tasks_window(app: AppHandle) -> Result<(), String> {
         use cocoa::appkit::NSColor;
         use cocoa::appkit::NSWindow;
         use cocoa::base::{id, nil};
-        let ns_window = window.ns_window().unwrap() as id;
+        let ns_window = _window.ns_window().unwrap() as id;
         unsafe {
             let color = NSColor::colorWithSRGBRed_green_blue_alpha_(nil, 0.0, 0.0, 0.0, 1.0);
             ns_window.setBackgroundColor_(color);
