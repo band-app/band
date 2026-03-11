@@ -11,8 +11,14 @@ pub struct ApiClient {
 impl ApiClient {
     pub fn from_settings() -> Result<Self, String> {
         let settings = state::load_settings()?;
-        let port = settings.web_server_port.unwrap_or(3456);
-        let token = settings.token_secret;
+        let base_url = match std::env::var("BAND_SERVER_URL") {
+            Ok(url) => url,
+            Err(_) => {
+                let port = settings.web_server_port.unwrap_or(3456);
+                format!("http://127.0.0.1:{port}")
+            }
+        };
+        let token = std::env::var("BAND_TOKEN").ok().or(settings.token_secret);
         let agent = ureq::Agent::new_with_config(
             ureq::config::Config::builder()
                 .http_status_as_error(false)
@@ -20,7 +26,7 @@ impl ApiClient {
         );
         Ok(Self {
             agent,
-            base_url: format!("http://127.0.0.1:{port}"),
+            base_url,
             token,
         })
     }
