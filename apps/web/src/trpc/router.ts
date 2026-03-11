@@ -826,20 +826,20 @@ const tasksRouter = t.router({
     .subscription(async function* (opts) {
       const workspaceId = opts.input.workspaceId;
       const task = getTask(workspaceId);
-      const buffered = getBufferedChunks(workspaceId);
 
-      // No task and no buffered chunks — nothing to stream
-      if (!task && buffered.length === 0) return;
-
-      // Replay buffered chunks
-      for (const chunk of buffered) {
-        yield chunk;
+      if (!task) {
+        // No active task — replay any buffered chunks (e.g. recently completed)
+        const buffered = getBufferedChunks(workspaceId);
+        for (const chunk of buffered) {
+          yield chunk;
+        }
+        return;
       }
 
-      // If task is already done, stop
-      if (!task || task.status !== "running") return;
-
-      // Stream live chunks
+      // Subscribe for live events FIRST, then snapshot the buffer.
+      // Both calls are synchronous, so no events can be emitted between
+      // them (single-threaded JS). This guarantees zero gap and zero
+      // overlap between the buffer snapshot and the live listener.
       type Chunk = Parameters<Parameters<typeof subscribeTask>[1]>[0];
       const queue: Chunk[] = [];
       let resolve: (() => void) | null = null;
@@ -847,11 +847,24 @@ const tasksRouter = t.router({
 
       const unsubscribe = subscribeTask(workspaceId, (chunk) => {
         queue.push(chunk);
-        if (chunk.type === "finish" || chunk.type === "error") {
+        if (chunk.type === "finish") {
           done = true;
         }
         resolve?.();
       });
+
+      const buffered = getBufferedChunks(workspaceId);
+
+      // Replay buffered chunks
+      for (const chunk of buffered) {
+        yield chunk;
+      }
+
+      // If task is already done and no live events queued, stop
+      if (task.status !== "running" && queue.length === 0) {
+        unsubscribe();
+        return;
+      }
 
       opts.signal.addEventListener("abort", () => {
         unsubscribe();
