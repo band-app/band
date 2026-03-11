@@ -41,7 +41,7 @@ const statusColors: Record<FileStatus, string> = {
 
 function FileStatusBadge({ status }: { status: FileStatus | undefined }) {
   if (!status) return null;
-  return <span className={`shrink-0 text-[10px] font-bold ${statusColors[status]}`}>{status}</span>;
+  return <span className={`shrink-0 text-xs font-bold ${statusColors[status]}`}>{status}</span>;
 }
 
 function DiffFileContent({ hunks }: { hunks: string }) {
@@ -165,7 +165,7 @@ export function DiffView({ workspaceId }: DiffViewProps) {
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <div className="shrink-0 border-b border-border/50 px-4 py-3">
-        <div className="text-xs text-muted-foreground">
+        <div className="text-sm text-muted-foreground">
           <span className="font-medium text-foreground">{data.stats.filesChanged}</span>{" "}
           {data.stats.filesChanged === 1 ? "file" : "files"} changed
           {data.stats.insertions > 0 && (
@@ -175,7 +175,7 @@ export function DiffView({ workspaceId }: DiffViewProps) {
             <span className="ml-1 text-red-400">-{data.stats.deletions}</span>
           )}
         </div>
-        <div className="mt-1 text-xs text-muted-foreground">
+        <div className="mt-1 text-sm text-muted-foreground">
           {data.baseBranch} ← {data.headBranch}
         </div>
       </div>
@@ -187,7 +187,7 @@ export function DiffView({ workspaceId }: DiffViewProps) {
               <button
                 type="button"
                 onClick={() => toggleFile(file.filename)}
-                className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs hover:bg-accent/50"
+                className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm hover:bg-accent/50"
               >
                 <span
                   className={`text-muted-foreground transition-transform ${isOpen ? "rotate-90" : ""}`}

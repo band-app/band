@@ -58,7 +58,7 @@ function ThinkingIndicator() {
   return (
     <div className="flex items-center gap-2 text-muted-foreground">
       <Loader2 className="size-4 animate-spin" />
-      <span className="text-sm">Thinking...</span>
+      <span className="text-base">Thinking...</span>
     </div>
   );
 }
@@ -256,7 +256,7 @@ export function ChatView({
           {hasHistory && hasLiveMessages && (
             <div className="flex items-center gap-3 py-2">
               <div className="h-px flex-1 bg-border/50" />
-              <span className="text-xs text-muted-foreground">new messages</span>
+              <span className="text-sm text-muted-foreground">new messages</span>
               <div className="h-px flex-1 bg-border/50" />
             </div>
           )}

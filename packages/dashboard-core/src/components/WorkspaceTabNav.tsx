@@ -24,13 +24,13 @@ export function WorkspaceTabNav({ activeTab, onTabChange }: WorkspaceTabNavProps
             key={tab.id}
             type="button"
             onClick={() => onTabChange(tab.id)}
-            className={`flex flex-1 items-center justify-center gap-1.5 py-2 text-xs font-medium transition-colors ${
+            className={`flex flex-1 items-center justify-center gap-2 py-2.5 text-sm font-medium transition-colors ${
               isActive
                 ? "border-b-2 border-foreground text-foreground"
                 : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            <Icon className="size-3.5" />
+            <Icon className="size-4" />
             {tab.label}
           </button>
         );

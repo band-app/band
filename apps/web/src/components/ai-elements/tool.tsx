@@ -63,8 +63,8 @@ export const ToolHeader = ({ className, title, type, state, toolName }: ToolHead
     >
       <div className="flex items-center gap-2">
         <WrenchIcon className="size-4 text-muted-foreground" />
-        <span className="font-medium text-sm">{title ?? derivedName}</span>
-        <Badge className="gap-1.5 rounded border-border/50 text-xs" variant="secondary">
+        <span className="font-medium text-base">{title ?? derivedName}</span>
+        <Badge className="gap-1.5 rounded border-border/50 text-sm" variant="secondary">
           {statusIcons[state]}
           {statusLabels[state]}
         </Badge>
@@ -89,11 +89,11 @@ export type ToolInputProps = ComponentProps<"div"> & {
 
 export const ToolInput = ({ className, input, ...props }: ToolInputProps) => (
   <div className={cn("space-y-2 overflow-hidden", className)} {...props}>
-    <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
+    <h4 className="font-medium text-muted-foreground text-sm uppercase tracking-wide">
       Parameters
     </h4>
     <div className="rounded-md bg-muted/50">
-      <pre className="overflow-auto p-3 text-xs">
+      <pre className="overflow-auto p-3 text-sm">
         <code>{JSON.stringify(input, null, 2)}</code>
       </pre>
     </div>
@@ -114,13 +114,13 @@ export const ToolOutput = ({ className, output, errorText, ...props }: ToolOutpu
 
   if (typeof output === "object" && !isValidElement(output)) {
     renderedOutput = (
-      <pre className="overflow-auto p-3 text-xs">
+      <pre className="overflow-auto p-3 text-sm">
         <code>{JSON.stringify(output, null, 2)}</code>
       </pre>
     );
   } else if (typeof output === "string") {
     renderedOutput = (
-      <pre className="overflow-auto p-3 text-xs">
+      <pre className="overflow-auto p-3 text-sm">
         <code>{output}</code>
       </pre>
     );
@@ -128,12 +128,12 @@ export const ToolOutput = ({ className, output, errorText, ...props }: ToolOutpu
 
   return (
     <div className={cn("space-y-2", className)} {...props}>
-      <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
+      <h4 className="font-medium text-muted-foreground text-sm uppercase tracking-wide">
         {errorText ? "Error" : "Result"}
       </h4>
       <div
         className={cn(
-          "overflow-x-auto rounded-md text-xs",
+          "overflow-x-auto rounded-md text-sm",
           errorText ? "bg-destructive/10 text-destructive" : "bg-muted/50 text-foreground",
         )}
       >

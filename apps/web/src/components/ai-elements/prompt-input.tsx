@@ -181,9 +181,9 @@ function FilePreview({ file, onRemove }: { file: File; onRemove: () => void }) {
         <FileIcon className="size-4 text-muted-foreground" />
       )}
       <div className="flex flex-col">
-        <span className="max-w-[150px] truncate text-xs">{file.name}</span>
+        <span className="max-w-[150px] truncate text-sm">{file.name}</span>
         {!isImage && (
-          <span className="text-xs text-muted-foreground">{formatFileSize(file.size)}</span>
+          <span className="text-sm text-muted-foreground">{formatFileSize(file.size)}</span>
         )}
       </div>
       <button
@@ -235,13 +235,13 @@ export const PromptInputAttach = ({ className, ...props }: PromptInputAttachProp
       <button
         type="button"
         className={cn(
-          "inline-flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+          "inline-flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
           className,
         )}
         onClick={() => fileInputRef.current?.click()}
         {...props}
       >
-        <Paperclip className="size-4" />
+        <Paperclip className="size-5" />
       </button>
     </>
   );
@@ -278,7 +278,7 @@ export const PromptInputTextarea = ({
       autoCorrect="off"
       spellCheck={false}
       className={cn(
-        "min-h-[44px] max-h-48 w-full resize-none bg-transparent px-2 py-2.5 text-sm outline-none placeholder:text-muted-foreground field-sizing-content",
+        "min-h-[44px] max-h-48 w-full resize-none bg-transparent px-2 py-2.5 text-base outline-none placeholder:text-muted-foreground field-sizing-content",
         className,
       )}
       name="message"
@@ -312,13 +312,13 @@ export const PromptInputSubmit = ({
       <button
         type="button"
         className={cn(
-          "inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-foreground/50 text-background transition-colors",
+          "inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-foreground/50 text-background transition-colors",
           className,
         )}
         disabled
         {...props}
       >
-        <Loader2 className="size-4 animate-spin" />
+        <Loader2 className="size-5 animate-spin" />
       </button>
     );
   }
@@ -328,13 +328,13 @@ export const PromptInputSubmit = ({
       <button
         type="button"
         className={cn(
-          "inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-foreground text-background transition-colors hover:bg-foreground/80",
+          "inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-foreground text-background transition-colors hover:bg-foreground/80",
           className,
         )}
         onClick={onStop}
         {...props}
       >
-        <SquareIcon className="size-3.5 fill-current" />
+        <SquareIcon className="size-4 fill-current" />
       </button>
     );
   }
@@ -344,7 +344,7 @@ export const PromptInputSubmit = ({
       type="submit"
       disabled={!hasContent}
       className={cn(
-        "inline-flex size-7 shrink-0 items-center justify-center rounded-full transition-colors",
+        "inline-flex size-8 shrink-0 items-center justify-center rounded-full transition-colors",
         hasContent
           ? "bg-foreground text-background hover:bg-foreground/80"
           : "bg-muted text-muted-foreground",
@@ -352,7 +352,7 @@ export const PromptInputSubmit = ({
       )}
       {...props}
     >
-      <ArrowUpIcon className="size-4" />
+      <ArrowUpIcon className="size-5" />
     </button>
   );
 };

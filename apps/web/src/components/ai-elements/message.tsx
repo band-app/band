@@ -29,7 +29,7 @@ export type MessageContentProps = HTMLAttributes<HTMLDivElement>;
 export const MessageContent = ({ children, className, ...props }: MessageContentProps) => (
   <div
     className={cn(
-      "is-user:dark flex min-w-0 max-w-full flex-col gap-2 break-words text-sm",
+      "is-user:dark flex min-w-0 max-w-full flex-col gap-2 break-words text-base",
       "group-[.is-assistant]:w-full group-[.is-user]:w-fit",
       "group-[.is-user]:ml-auto group-[.is-user]:rounded-md group-[.is-user]:bg-secondary group-[.is-user]:px-4 group-[.is-user]:py-3 group-[.is-user]:text-foreground",
       "group-[.is-assistant]:text-foreground",
@@ -77,8 +77,8 @@ export function MessageFilePart({ part }: { part: FilePartData }) {
   return (
     <div className="flex items-center gap-2 rounded-md border border-border/30 bg-muted/30 px-3 py-2">
       <FileIcon className="size-4 shrink-0 text-muted-foreground" />
-      <span className="truncate text-xs">{part.filename ?? "File"}</span>
-      <span className="text-xs text-muted-foreground">{part.mediaType}</span>
+      <span className="truncate text-base">{part.filename ?? "File"}</span>
+      <span className="text-sm text-muted-foreground">{part.mediaType}</span>
     </div>
   );
 }

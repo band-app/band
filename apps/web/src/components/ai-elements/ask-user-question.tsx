@@ -73,11 +73,11 @@ export function AskUserQuestion({ questions, approvalId, disabled }: AskUserQues
         return (
           <div key={q.question} className="space-y-2">
             {q.header && (
-              <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              <span className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
                 {q.header}
               </span>
             )}
-            <p className="text-sm font-medium">{q.question}</p>
+            <p className="text-base font-medium">{q.question}</p>
             <div className="flex flex-wrap gap-2">
               {q.options.map((opt) => {
                 const isSelected = selected.has(opt.label);
@@ -88,7 +88,7 @@ export function AskUserQuestion({ questions, approvalId, disabled }: AskUserQues
                     disabled={isDisabled}
                     onClick={() => toggleOption(q.question, opt.label, q.multiSelect ?? false)}
                     className={cn(
-                      "flex items-center gap-2 rounded-md border px-3 py-2 text-left text-sm transition-colors",
+                      "flex items-center gap-2 rounded-md border px-3 py-2 text-left text-base transition-colors",
                       isSelected
                         ? "border-primary bg-primary/10 text-primary"
                         : "border-border bg-background text-foreground hover:bg-muted/50",
@@ -99,7 +99,7 @@ export function AskUserQuestion({ questions, approvalId, disabled }: AskUserQues
                     <div>
                       <div className="font-medium">{opt.label}</div>
                       {opt.description && (
-                        <div className="text-xs text-muted-foreground">{opt.description}</div>
+                        <div className="text-sm text-muted-foreground">{opt.description}</div>
                       )}
                     </div>
                   </button>
@@ -114,7 +114,7 @@ export function AskUserQuestion({ questions, approvalId, disabled }: AskUserQues
           {submitting && <Loader2 className="mr-1.5 size-3.5 animate-spin" />}
           {submitted ? "Submitted" : "Submit"}
         </Button>
-        {submitted && <span className="text-xs text-muted-foreground">Answer sent to agent</span>}
+        {submitted && <span className="text-sm text-muted-foreground">Answer sent to agent</span>}
       </div>
     </div>
   );

@@ -83,7 +83,7 @@ export function ToolCall({ item }: { item: ToolCallItem }) {
         <CollapsibleTrigger className="flex w-full items-center justify-between gap-4 p-3">
           <div className="flex min-w-0 items-center gap-2">
             <StatusDot isError={item.isError} isInProgress={item.isInProgress} />
-            <span className="truncate font-medium text-sm">{title}</span>
+            <span className="truncate font-medium text-base">{title}</span>
           </div>
           <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
         </CollapsibleTrigger>

@@ -68,11 +68,11 @@ export function SessionList({
   if (error) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-4 p-8 text-center">
-        <p className="text-sm text-destructive">{error}</p>
+        <p className="text-base text-destructive">{error}</p>
         <button
           type="button"
           onClick={fetchSessions}
-          className="inline-flex items-center gap-2 rounded-md bg-secondary px-3 py-1.5 text-sm hover:bg-secondary/80"
+          className="inline-flex items-center gap-2 rounded-md bg-secondary px-3 py-1.5 text-base hover:bg-secondary/80"
         >
           <RefreshCw className="size-3.5" />
           Retry
@@ -87,7 +87,7 @@ export function SessionList({
         <button
           type="button"
           onClick={onNewSession}
-          className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 active:bg-primary/80"
+          className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-base font-medium text-primary-foreground transition-colors hover:bg-primary/90 active:bg-primary/80"
         >
           <Plus className="size-4" />
           New Session
@@ -99,7 +99,7 @@ export function SessionList({
           <MessageSquare className="size-10 text-muted-foreground" />
           <div>
             <p className="font-medium">No sessions yet</p>
-            <p className="text-sm text-muted-foreground">Start a new session to begin coding</p>
+            <p className="text-base text-muted-foreground">Start a new session to begin coding</p>
           </div>
         </div>
       ) : (
@@ -114,10 +114,10 @@ export function SessionList({
                   onClick={() => onSelectSession(session.sessionId)}
                   className={`flex flex-col gap-1 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-accent/50 active:bg-accent/50 ${isActive ? "bg-accent/50 ring-1 ring-primary/30" : ""}`}
                 >
-                  <span className="line-clamp-2 text-sm font-medium text-foreground">
+                  <span className="line-clamp-2 text-base font-medium text-foreground">
                     {session.summary}
                   </span>
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <span>{relativeTime(session.lastModified)}</span>
                     {session.gitBranch && (
                       <>
