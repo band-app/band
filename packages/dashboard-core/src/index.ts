@@ -37,10 +37,10 @@ export {
   useStatusWatcher,
 } from "./hooks/use-status";
 export { isServiceHealthy, type ServiceHealth } from "./lib/service-health";
-export { toWorkspaceId } from "./lib/workspace-id";
 // Lib
 export { playSound, SOUNDS, type SoundId } from "./lib/sounds";
 export type { SSEEvent } from "./lib/sse";
+export { toWorkspaceId } from "./lib/workspace-id";
 // Query
 export { queryClient, queryKeys } from "./query-client";
 export type { DashboardState, DashboardStore } from "./stores/dashboard-store";

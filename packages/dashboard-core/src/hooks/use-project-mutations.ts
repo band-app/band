@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAdapter } from "../context";
-import { queryKeys } from "../query-client";
 import { toWorkspaceId } from "../lib/workspace-id";
+import { queryKeys } from "../query-client";
 import { useDashboardStore } from "../stores/index";
 import type { ProjectInfo } from "../types";
 

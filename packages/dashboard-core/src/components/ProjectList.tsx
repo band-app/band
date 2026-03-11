@@ -49,8 +49,8 @@ import {
   useUpdateProjectLabel,
 } from "../hooks/use-project-mutations";
 import { useProjects } from "../hooks/use-projects";
-import { toWorkspaceId } from "../lib/workspace-id";
 import { useSettingsQuery } from "../hooks/use-settings-query";
+import { toWorkspaceId } from "../lib/workspace-id";
 import { useDashboardStore } from "../stores/index";
 import type {
   DeleteDialogInfo,
