@@ -6,6 +6,7 @@ import { createAuthMiddleware } from "./auth.ts";
 import { stopBranchStatusPoller } from "./src/lib/branch-status-poller.ts";
 import { checkPrereqs } from "./src/lib/process-utils.ts";
 import { getOrCreateToken, loadSettings } from "./src/lib/state.ts";
+import { cleanupStaleTasks } from "./src/lib/task-store.ts";
 import { startTunnel, stopTunnel } from "./src/lib/tunnel.ts";
 import { createContext } from "./src/trpc/context.ts";
 import { appRouter } from "./src/trpc/router.ts";
@@ -25,6 +26,10 @@ const assets = sirv(clientDir, {
 });
 
 async function main() {
+  // Mark any persisted "running" tasks as "failed" — no agent can be running
+  // if the server just started.
+  cleanupStaleTasks();
+
   const mod = await import("./server/server.js");
   const server = mod.default as { fetch: (req: Request) => Promise<Response> };
 

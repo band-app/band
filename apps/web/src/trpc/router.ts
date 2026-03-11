@@ -34,13 +34,14 @@ import {
 } from "../lib/state";
 import {
   abortTask,
+  cancelTask,
   getBufferedChunks,
   getTask,
   submitTask,
   subscribe as subscribeTask,
   TaskConflictError,
 } from "../lib/task-runner";
-import { listTasks } from "../lib/task-store";
+import { listTasks, loadTask } from "../lib/task-store";
 import {
   checkTunnelAuth,
   checkTunnelHealth,
@@ -835,6 +836,37 @@ const tasksRouter = t.router({
       throw new TRPCError({ code: "NOT_FOUND", message: "No running task found" });
     }
     return { aborted: true };
+  }),
+
+  cancel: publicProcedure.input(z.object({ taskId: z.string() })).mutation(({ input }) => {
+    const result = cancelTask(input.taskId);
+    if (!result.cancelled) {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "Task not found or not running",
+      });
+    }
+    return { cancelled: true };
+  }),
+
+  rerun: publicProcedure.input(z.object({ taskId: z.string() })).mutation(({ input }) => {
+    const record = loadTask(input.taskId);
+    if (!record) {
+      throw new TRPCError({ code: "NOT_FOUND", message: "Task not found" });
+    }
+
+    try {
+      const task = submitTask(record.workspaceId, record.prompt);
+      return { workspaceId: task.workspaceId, sessionId: task.sessionId };
+    } catch (err) {
+      if (err instanceof TaskConflictError) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "Task already running for this workspace",
+        });
+      }
+      throw err;
+    }
   }),
 
   stream: publicProcedure
