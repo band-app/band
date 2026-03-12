@@ -4,6 +4,9 @@ mod commands;
 mod git;
 mod state;
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
 use commands::webserver::{self as webserver, ManagedProcess, WebServerState};
 use state::{ActiveWorkspaceState, ProjectCache};
 use tauri::Manager;
@@ -33,6 +36,9 @@ pub fn run() {
         .setup(|app| {
             let window = app.get_webview_window("main").unwrap();
 
+            // Flag to stop the health monitor when the app closes
+            let health_stop = Arc::new(AtomicBool::new(false));
+
             // Auto-start the web server in release builds.
             // In dev mode, `beforeDevCommand` already starts the Vite dev server.
             if cfg!(not(debug_assertions)) {
@@ -47,6 +53,47 @@ pub fn run() {
                         eprintln!("Failed to start web server: {e}");
                     }
                 }
+
+                // Spawn a background health monitor that restarts the server
+                // if it crashes unexpectedly.
+                let stop = health_stop.clone();
+                tauri::async_runtime::spawn(async move {
+                    let mut interval = tokio::time::interval(std::time::Duration::from_secs(10));
+                    // The first tick fires immediately — skip it so we don't
+                    // check right after startup.
+                    interval.tick().await;
+
+                    loop {
+                        interval.tick().await;
+                        if stop.load(Ordering::Relaxed) {
+                            break;
+                        }
+
+                        let port = webserver::get_configured_port();
+                        let healthy = match webserver::get_token() {
+                            Ok(token) => webserver::check_local_health(port, &token).await,
+                            Err(_) => continue, // No token yet, skip this tick
+                        };
+
+                        if !healthy {
+                            eprintln!("[health-monitor] Server appears down, restarting…");
+                            let result =
+                                tokio::task::spawn_blocking(webserver::ensure_webserver_running)
+                                    .await;
+                            match result {
+                                Ok(Ok((p, _))) => {
+                                    eprintln!("[health-monitor] Server restarted on port {p}");
+                                }
+                                Ok(Err(e)) => {
+                                    eprintln!("[health-monitor] Restart failed: {e}");
+                                }
+                                Err(e) => {
+                                    eprintln!("[health-monitor] Restart task panicked: {e}");
+                                }
+                            }
+                        }
+                    }
+                });
             }
 
             // Set window title with git branch if available
@@ -93,8 +140,13 @@ pub fn run() {
             // Kill web server and close secondary windows on app exit
             let web_proc = app.state::<WebServerState>().inner().0.clone();
             let app_handle_for_close = app.handle().clone();
+            let health_stop_close = health_stop;
             window.on_window_event(move |event| {
                 if let tauri::WindowEvent::CloseRequested { .. } = event {
+                    // Stop the health monitor first so it doesn't try to
+                    // restart the server after we kill it.
+                    health_stop_close.store(true, Ordering::Relaxed);
+
                     // Close the tasks window so the app can exit fully
                     if let Some(tasks_win) = app_handle_for_close.get_webview_window("tasks") {
                         let _ = tasks_win.destroy();

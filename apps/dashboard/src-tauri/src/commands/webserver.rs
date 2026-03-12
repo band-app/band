@@ -1,9 +1,10 @@
+use std::fs::OpenOptions;
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex, OnceLock};
 use tauri::State;
 
-use crate::state::load_settings;
+use crate::state::{band_home, load_settings};
 
 const DEFAULT_WEB_SERVER_PORT: u16 = 3456;
 
@@ -66,7 +67,7 @@ pub(crate) fn shell_path() -> &'static str {
 }
 
 /// Read the token from settings.json (web server creates it).
-fn get_token() -> Result<String, String> {
+pub(crate) fn get_token() -> Result<String, String> {
     let settings = load_settings()?;
     settings.token_secret.ok_or_else(|| {
         "tokenSecret not found in settings.json — start the web server first".to_string()
@@ -95,6 +96,36 @@ fn set_process_group(cmd: &mut Command) -> &mut Command {
             Ok(())
         })
     }
+}
+
+/// Open (or create) `~/.band/server.log` in append mode and return two
+/// `Stdio` handles (one for stdout, one for stderr).  If the log file
+/// exceeds 5 MB it is rotated to `server.log.old` first.
+fn server_log_stdio() -> Result<(Stdio, Stdio), String> {
+    const MAX_LOG_BYTES: u64 = 5 * 1024 * 1024;
+
+    let log_dir = band_home();
+    std::fs::create_dir_all(&log_dir)
+        .map_err(|e| format!("Failed to create log directory: {e}"))?;
+
+    let log_path = log_dir.join("server.log");
+    if let Ok(meta) = std::fs::metadata(&log_path) {
+        if meta.len() > MAX_LOG_BYTES {
+            let _ = std::fs::rename(&log_path, log_dir.join("server.log.old"));
+        }
+    }
+
+    let file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .map_err(|e| format!("Failed to open server log: {e}"))?;
+
+    let file_clone = file
+        .try_clone()
+        .map_err(|e| format!("Failed to clone log file handle: {e}"))?;
+
+    Ok((Stdio::from(file), Stdio::from(file_clone)))
 }
 
 // ---------------------------------------------------------------------------
@@ -158,7 +189,7 @@ fn parse_local_health(body: &str) -> bool {
 }
 
 /// Check the local web server health endpoint.
-async fn check_local_health(port: u16, token: &str) -> bool {
+pub(crate) async fn check_local_health(port: u16, token: &str) -> bool {
     let output = tokio::process::Command::new("curl")
         .args([
             "-s",
@@ -223,13 +254,15 @@ pub(crate) fn ensure_webserver_running() -> Result<(u16, String), String> {
     let web_dir = resolve_web_dir()?;
     let start_script = web_dir.join("dist/start-server.mjs");
 
+    let (log_out, log_err) = server_log_stdio().unwrap_or_else(|_| (Stdio::null(), Stdio::null()));
+
     let mut cmd = Command::new("node");
     cmd.arg(&start_script)
         .current_dir(&web_dir)
         .env("PATH", shell_path())
         .env("PORT", port.to_string())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stdout(log_out)
+        .stderr(log_err);
     set_process_group(&mut cmd);
 
     let _child = cmd.spawn().map_err(|e| {
@@ -278,13 +311,15 @@ pub async fn webserver_start(state: State<'_, WebServerState>) -> Result<(), Str
     let web_dir = resolve_web_dir()?;
     let start_script = web_dir.join("dist/start-server.mjs");
 
+    let (log_out, log_err) = server_log_stdio().unwrap_or_else(|_| (Stdio::null(), Stdio::null()));
+
     let mut cmd = Command::new("node");
     cmd.arg(&start_script)
         .current_dir(&web_dir)
         .env("PATH", shell_path())
         .env("PORT", port.to_string())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stdout(log_out)
+        .stderr(log_err);
     set_process_group(&mut cmd);
 
     let child = cmd.spawn().map_err(|e| {

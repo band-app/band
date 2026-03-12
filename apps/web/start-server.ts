@@ -1,3 +1,4 @@
+import { appendFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { join } from "node:path";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
@@ -6,11 +7,38 @@ import { createAuthMiddleware } from "./auth.ts";
 import { stopBranchStatusPoller } from "./src/lib/branch-status-poller.ts";
 import { startCronjobScheduler, stopCronjobScheduler } from "./src/lib/cronjob-scheduler.ts";
 import { checkPrereqs } from "./src/lib/process-utils.ts";
-import { getOrCreateToken, loadSettings } from "./src/lib/state.ts";
+import { bandHome, ensureDirs, getOrCreateToken, loadSettings } from "./src/lib/state.ts";
 import { cleanupStaleTasks } from "./src/lib/task-store.ts";
 import { startTunnel, stopTunnel } from "./src/lib/tunnel.ts";
 import { createContext } from "./src/trpc/context.ts";
 import { appRouter } from "./src/trpc/router.ts";
+
+// ---------------------------------------------------------------------------
+// Crash handlers — log to file since stdout/stderr may be piped to a log file
+// that is only readable after the process exits.
+// ---------------------------------------------------------------------------
+
+function logCrash(message: string): void {
+  try {
+    ensureDirs();
+    appendFileSync(join(bandHome(), "server.log"), message, "utf-8");
+  } catch {
+    // Best-effort logging — nothing we can do if this fails
+  }
+}
+
+process.on("unhandledRejection", (reason: unknown) => {
+  const timestamp = new Date().toISOString();
+  const error = reason instanceof Error ? reason.stack || reason.message : String(reason);
+  logCrash(`[${timestamp}] Unhandled rejection:\n${error}\n\n`);
+  process.exit(1);
+});
+
+process.on("uncaughtException", (error: Error) => {
+  const timestamp = new Date().toISOString();
+  logCrash(`[${timestamp}] Uncaught exception:\n${error.stack || error.message}\n\n`);
+  process.exit(1);
+});
 
 // After bundling, this file lives at dist/start-server.mjs,
 // so paths are relative to dist/.
