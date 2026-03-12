@@ -350,7 +350,7 @@ export function ChatView({
         <ConversationScrollButton />
       </Conversation>
 
-      <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-2 pb-4">
+      <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))]">
         <PromptInput onSubmit={handleSubmit}>
           <PromptInputTextarea placeholder="Type a message..." />
           <PromptInputActions>

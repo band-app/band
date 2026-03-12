@@ -110,7 +110,7 @@ pub fn run() {
             };
             let _ = window.set_title(&title);
 
-            // Set window background to black so the overlay title bar area appears black
+            // Set window background to black so the transparent title bar appears black
             #[cfg(target_os = "macos")]
             #[allow(deprecated)] // cocoa crate deprecated in favor of objc2-app-kit
             {
