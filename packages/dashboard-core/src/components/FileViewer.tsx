@@ -10,6 +10,13 @@ interface FileViewerProps {
   onBack: () => void;
 }
 
+interface TokenSpan {
+  content: string;
+  color?: string;
+}
+
+type TokenLine = TokenSpan[];
+
 let highlighterPromise: Promise<typeof import("shiki")> | null = null;
 
 function getShiki() {
@@ -43,7 +50,7 @@ export function FileViewer({ workspaceId, filePath, onBack }: FileViewerProps) {
   const [data, setData] = useState<FileContentResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [highlightedHtml, setHighlightedHtml] = useState<string | null>(null);
+  const [highlightedLines, setHighlightedLines] = useState<TokenLine[] | null>(null);
 
   useEffect(() => {
     if (!adapter.getWorkspaceFile) {
@@ -55,7 +62,7 @@ export function FileViewer({ workspaceId, filePath, onBack }: FileViewerProps) {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    setHighlightedHtml(null);
+    setHighlightedLines(null);
 
     adapter
       .getWorkspaceFile(workspaceId, filePath)
@@ -67,11 +74,17 @@ export function FileViewer({ workspaceId, filePath, onBack }: FileViewerProps) {
           try {
             const lang = detectLanguage(filePath, result.language);
             const shiki = await getShiki();
-            const html = await shiki.codeToHtml(result.content, {
-              lang,
+            const result2 = await shiki.codeToTokens(result.content, {
+              lang: lang as never,
               theme: "github-dark",
             });
-            if (!cancelled) setHighlightedHtml(html);
+            if (!cancelled) {
+              setHighlightedLines(
+                result2.tokens.map((line) =>
+                  line.map((t) => ({ content: t.content, color: t.color })),
+                ),
+              );
+            }
           } catch {
             // Fall back to plain text rendering
           }
@@ -129,22 +142,69 @@ export function FileViewer({ workspaceId, filePath, onBack }: FileViewerProps) {
             File too large ({formatSize(data.size)})
           </div>
         )}
-        {data?.content && highlightedHtml && <HighlightedCode html={highlightedHtml} />}
-        {data?.content && !highlightedHtml && !loading && (
-          <pre className="overflow-x-auto p-4 text-xs leading-5">{data.content}</pre>
-        )}
+        {data?.content && highlightedLines && <HighlightedCode lines={highlightedLines} />}
+        {data?.content && !highlightedLines && !loading && <PlainCode content={data.content} />}
       </div>
     </div>
   );
 }
 
-function HighlightedCode({ html }: { html: string }) {
+function lineNumberWidth(totalLines: number): string {
+  const digits = String(totalLines).length;
+  // Minimum 2ch width, scale with digit count
+  const ch = Math.max(2, digits);
+  return `${ch}ch`;
+}
+
+function HighlightedCode({ lines }: { lines: TokenLine[] }) {
+  const gutterWidth = lineNumberWidth(lines.length);
   return (
-    <div
-      className="overflow-x-auto p-2 text-xs [&_pre]:!bg-transparent [&_code]:text-xs [&_code]:leading-5"
-      // biome-ignore lint/security/noDangerouslySetInnerHtml: Shiki generates trusted HTML from code
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
+    <div className="overflow-x-auto p-2">
+      <pre className="text-xs leading-5">
+        {lines.map((tokens, lineIdx) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: code lines have no stable id
+          <div key={lineIdx} className="flex">
+            <span
+              className="shrink-0 select-none pr-4 text-right text-muted-foreground/50"
+              style={{ width: gutterWidth }}
+            >
+              {lineIdx + 1}
+            </span>
+            <span className="flex-1">
+              {tokens.map((token, tIdx) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: tokens have no stable id
+                <span key={tIdx} style={token.color ? { color: token.color } : undefined}>
+                  {token.content}
+                </span>
+              ))}
+            </span>
+          </div>
+        ))}
+      </pre>
+    </div>
+  );
+}
+
+function PlainCode({ content }: { content: string }) {
+  const lines = content.split("\n");
+  const gutterWidth = lineNumberWidth(lines.length);
+  return (
+    <div className="overflow-x-auto p-2">
+      <pre className="text-xs leading-5">
+        {lines.map((line, lineIdx) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: code lines have no stable id
+          <div key={lineIdx} className="flex">
+            <span
+              className="shrink-0 select-none pr-4 text-right text-muted-foreground/50"
+              style={{ width: gutterWidth }}
+            >
+              {lineIdx + 1}
+            </span>
+            <span className="flex-1">{line}</span>
+          </div>
+        ))}
+      </pre>
+    </div>
   );
 }
 
