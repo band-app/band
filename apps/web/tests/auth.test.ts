@@ -67,8 +67,29 @@ describe("auth middleware (with token)", () => {
     expect(setCookie).toBeTruthy();
     expect(setCookie).toContain(`band_token=${TEST_TOKEN}`);
     expect(setCookie).toContain("HttpOnly");
-    expect(setCookie).toContain("SameSite=Strict");
+    expect(setCookie).toContain("SameSite=Lax");
     expect(setCookie).toContain("Max-Age=31536000");
+  });
+
+  it("sets Secure flag when behind HTTPS proxy", async () => {
+    const res = await fetch(`${server.url}/?token=${TEST_TOKEN}`, {
+      headers: { "X-Forwarded-Proto": "https" },
+    });
+    expect(res.status).toBe(200);
+
+    const setCookie = res.headers.get("set-cookie");
+    expect(setCookie).toBeTruthy();
+    expect(setCookie).toContain("Secure");
+    expect(setCookie).toContain("SameSite=Lax");
+  });
+
+  it("omits Secure flag for plain HTTP requests", async () => {
+    const res = await fetch(`${server.url}/?token=${TEST_TOKEN}`);
+    expect(res.status).toBe(200);
+
+    const setCookie = res.headers.get("set-cookie");
+    expect(setCookie).toBeTruthy();
+    expect(setCookie).not.toContain("Secure");
   });
 
   it("valid token on any path sets cookie and passes through", async () => {

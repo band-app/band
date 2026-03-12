@@ -20,6 +20,19 @@ function tokensEqual(a: string | undefined, b: string): boolean {
   return timingSafeEqual(bufA, bufB);
 }
 
+function isSecureRequest(req: IncomingMessage): boolean {
+  return (
+    req.headers["x-forwarded-proto"] === "https" ||
+    req.headers["cf-visitor"]?.includes('"scheme":"https"') === true
+  );
+}
+
+function buildCookieHeader(token: string, secure: boolean): string {
+  const parts = [`band_token=${token}`, "HttpOnly", "SameSite=Lax", "Path=/", "Max-Age=31536000"];
+  if (secure) parts.push("Secure");
+  return parts.join("; ");
+}
+
 export function createAuthMiddleware(token: string | undefined) {
   const expectedToken = token || null;
 
@@ -61,10 +74,7 @@ export function createAuthMiddleware(token: string | undefined) {
     if (queryToken && tokensEqual(queryToken, expectedToken)) {
       // Set cookie and continue to normal handler (no redirect — tunnel
       // proxies follow redirects internally and lose the Set-Cookie).
-      res.setHeader(
-        "Set-Cookie",
-        `band_token=${expectedToken}; HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000`,
-      );
+      res.setHeader("Set-Cookie", buildCookieHeader(expectedToken, isSecureRequest(req)));
       return false;
     }
 
