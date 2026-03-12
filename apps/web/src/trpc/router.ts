@@ -50,11 +50,7 @@ import {
   TaskConflictError,
 } from "../lib/task-runner";
 import { listTasks, loadTask } from "../lib/task-store";
-import {
-  getTunnelStatus,
-  startTunnel,
-  stopTunnel,
-} from "../lib/tunnel";
+import { getTunnelStatus, startTunnel, stopTunnel } from "../lib/tunnel";
 import { subscribe as subscribeStatus } from "../lib/watcher";
 import { resolveWorkspace } from "../lib/workspace";
 import type { Context } from "./context";
@@ -656,26 +652,24 @@ const tunnelRouter = t.router({
     return getTunnelStatus();
   }),
 
-  start: publicProcedure
-    .input(z.object({}).optional())
-    .mutation(async () => {
-      log.debug("tunnel.start called");
-      const port = parseInt(process.env.PORT || "3456", 10);
-      log.debug("tunnel.start: port=%d", port);
-      try {
-        await startTunnel({ port });
-      } catch (err) {
-        log.debug({ err }, "tunnel.start: startTunnel failed");
-        return { ok: true, url: null as string | null };
-      }
-      const status = getTunnelStatus();
-      log.debug({ status }, "tunnel.start: after startTunnel");
-      if (status.url) {
-        return { ok: true, url: status.url };
-      }
-      log.debug("tunnel.start: no URL available");
+  start: publicProcedure.input(z.object({}).optional()).mutation(async () => {
+    log.debug("tunnel.start called");
+    const port = parseInt(process.env.PORT || "3456", 10);
+    log.debug("tunnel.start: port=%d", port);
+    try {
+      await startTunnel({ port });
+    } catch (err) {
+      log.debug({ err }, "tunnel.start: startTunnel failed");
       return { ok: true, url: null as string | null };
-    }),
+    }
+    const status = getTunnelStatus();
+    log.debug({ status }, "tunnel.start: after startTunnel");
+    if (status.url) {
+      return { ok: true, url: status.url };
+    }
+    log.debug("tunnel.start: no URL available");
+    return { ok: true, url: null as string | null };
+  }),
 
   stop: publicProcedure.mutation(async () => {
     await stopTunnel();

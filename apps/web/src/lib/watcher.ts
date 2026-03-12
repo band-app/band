@@ -24,13 +24,7 @@ interface CIStatus {
 }
 
 export interface StatusEvent {
-  kind:
-    | "update"
-    | "remove"
-    | "snapshot"
-    | "branch-status"
-    | "tunnel-url"
-    | "tunnel-error";
+  kind: "update" | "remove" | "snapshot" | "branch-status" | "tunnel-url" | "tunnel-error";
   status?: WorkspaceStatus;
   statuses?: WorkspaceStatus[];
   workspaceId?: string;

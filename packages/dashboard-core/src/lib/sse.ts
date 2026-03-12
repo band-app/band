@@ -1,13 +1,7 @@
 import type { CIStatus, GitStatus, WorkspaceStatus } from "../types";
 
 export type SSEEvent = {
-  kind:
-    | "update"
-    | "remove"
-    | "snapshot"
-    | "branch-status"
-    | "tunnel-url"
-    | "tunnel-error";
+  kind: "update" | "remove" | "snapshot" | "branch-status" | "tunnel-url" | "tunnel-error";
   status?: WorkspaceStatus;
   statuses?: WorkspaceStatus[];
   workspaceId?: string;

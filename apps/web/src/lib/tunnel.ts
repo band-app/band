@@ -29,10 +29,7 @@ function appendToken(baseUrl: string, token: string): string {
   return `${baseUrl}${sep}token=${token}`;
 }
 
-function spawnTunnel(
-  options: { port: number },
-  resolvedPath: string,
-): Promise<void> {
+function spawnTunnel(options: { port: number }, resolvedPath: string): Promise<void> {
   const args = ["tunnel", "--url", `http://localhost:${options.port}`];
 
   log.debug("spawning cloudflared %s", args.join(" "));
@@ -104,7 +101,10 @@ function spawnTunnel(
         }
       } else if (wasRunning && code !== 0) {
         // Process died after tunnel was established — notify UI immediately
-        emit({ kind: "tunnel-error", error: `cloudflared exited unexpectedly (code ${code ?? -1})` });
+        emit({
+          kind: "tunnel-error",
+          error: `cloudflared exited unexpectedly (code ${code ?? -1})`,
+        });
       }
     });
 
@@ -119,9 +119,7 @@ function spawnTunnel(
   });
 }
 
-export async function startTunnel(options: {
-  port: number;
-}): Promise<void> {
+export async function startTunnel(options: { port: number }): Promise<void> {
   // If a start is already in progress, wait for it
   if (startInProgress) {
     log.debug("startTunnel: start already in progress, waiting...");

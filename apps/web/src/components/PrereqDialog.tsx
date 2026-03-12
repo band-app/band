@@ -90,7 +90,9 @@ export function PrereqDialog({ open, onOpenChange, onReady }: Props) {
               </Button>
               <p className="text-xs text-muted-foreground text-center">
                 Or install manually:{" "}
-                <code className="text-xs bg-muted px-1 py-0.5 rounded">brew install cloudflared</code>
+                <code className="text-xs bg-muted px-1 py-0.5 rounded">
+                  brew install cloudflared
+                </code>
               </p>
             </>
           )}

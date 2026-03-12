@@ -33,7 +33,11 @@ export function TunnelToolbarButton() {
           </Button>
         </TooltipTrigger>
         <TooltipContent>
-          {tunnelError ? `Tunnel error: ${tunnelError}` : webServerRunning ? "Mobile access" : "Start tunnel"}
+          {tunnelError
+            ? `Tunnel error: ${tunnelError}`
+            : webServerRunning
+              ? "Mobile access"
+              : "Start tunnel"}
         </TooltipContent>
       </Tooltip>
 
