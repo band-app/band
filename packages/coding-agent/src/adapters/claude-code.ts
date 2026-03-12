@@ -269,6 +269,16 @@ function* mapClaudeCodeEvent(
         | undefined;
       const content = msg?.content;
       if (Array.isArray(content)) {
+        // Pre-populate toolNames for all visible tool_use blocks so that
+        // tool_result events arriving later can always resolve the name,
+        // even when an earlier empty-text block causes the main loop to
+        // break before reaching the tool_use block.
+        for (const block of content) {
+          if (block.type === "tool_use" && block.id && block.name) {
+            state.toolNames.set(block.id, block.name);
+          }
+        }
+
         let startIdx = state.assistantContentIndex;
         if (content.length < startIdx) {
           startIdx = 0;
