@@ -220,11 +220,7 @@ enum TunnelCmd {
     /// Show tunnel status
     Status,
     /// Start the remote tunnel
-    Start {
-        /// Subdomain to use
-        #[arg(long)]
-        subdomain: Option<String>,
-    },
+    Start,
     /// Stop the remote tunnel
     Stop,
 }
@@ -331,7 +327,7 @@ fn main() {
         Commands::Settings => cmd_settings(json_output),
         Commands::Tunnel { cmd } => match cmd {
             TunnelCmd::Status => cmd_tunnel_status(),
-            TunnelCmd::Start { subdomain } => cmd_tunnel_start(subdomain.as_deref()),
+            TunnelCmd::Start => cmd_tunnel_start(),
             TunnelCmd::Stop => cmd_tunnel_stop(),
         },
         Commands::Notify => cmd_notify(),
@@ -1171,13 +1167,9 @@ fn cmd_tunnel_status() -> Result<CommandResult, String> {
     })
 }
 
-fn cmd_tunnel_start(subdomain: Option<&str>) -> Result<CommandResult, String> {
+fn cmd_tunnel_start() -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
-    let mut input = serde_json::json!({});
-    if let Some(s) = subdomain {
-        input["subdomain"] = serde_json::json!(s);
-    }
-    let data = client.trpc_mutate("tunnel.start", &input)?;
+    let data = client.trpc_mutate("tunnel.start", &serde_json::json!({}))?;
 
     let url = data.get("url").and_then(|v| v.as_str());
     let mut text = String::new();
@@ -1392,9 +1384,7 @@ fn build_schema(command: Option<&str>) -> Result<serde_json::Value, String> {
         serde_json::json!({
             "name": "tunnel start",
             "description": "Start the remote tunnel",
-            "parameters": [
-                {"name": "--subdomain", "type": "string", "required": false, "description": "Subdomain to use"},
-            ]
+            "parameters": []
         }),
         serde_json::json!({
             "name": "tunnel stop",

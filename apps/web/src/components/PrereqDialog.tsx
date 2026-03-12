@@ -20,8 +20,6 @@ interface Props {
 
 export function PrereqDialog({ open, onOpenChange, onReady }: Props) {
   const [step, setStep] = useState<PrereqStep>("checking");
-  const [needNode, setNeedNode] = useState(false);
-  const [needInstatunnel, setNeedInstatunnel] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -34,12 +32,10 @@ export function PrereqDialog({ open, onOpenChange, onReady }: Props) {
       try {
         const status = await trpc.prereqs.check.query();
         if (cancelled) return;
-        if (status.node && status.instatunnel) {
+        if (status.cloudflared) {
           onReady();
           return;
         }
-        setNeedNode(!status.node);
-        setNeedInstatunnel(!status.instatunnel);
         setStep("missing");
       } catch (e) {
         if (!cancelled) {
@@ -57,12 +53,7 @@ export function PrereqDialog({ open, onOpenChange, onReady }: Props) {
   const handleInstall = async () => {
     try {
       setStep("installing");
-      if (needNode) {
-        await trpc.prereqs.installNode.mutate();
-      }
-      if (needInstatunnel) {
-        await trpc.prereqs.installTunnel.mutate();
-      }
+      await trpc.prereqs.installTunnel.mutate();
       onReady();
     } catch (e) {
       setError(String(e));
@@ -70,23 +61,16 @@ export function PrereqDialog({ open, onOpenChange, onReady }: Props) {
     }
   };
 
-  const missingLabel =
-    needNode && needInstatunnel ? "Node.js & instatunnel" : needNode ? "Node.js" : "instatunnel";
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[320px]">
         <DialogHeader>
           <DialogTitle>
-            {step === "missing" ? `Install ${missingLabel}` : "Checking Requirements"}
+            {step === "missing" ? "Install cloudflared" : "Checking Requirements"}
           </DialogTitle>
           {step === "missing" && (
             <DialogDescription>
-              {needNode && needInstatunnel
-                ? "Node.js and instatunnel are required for mobile access."
-                : needNode
-                  ? "Node.js is required to run the web server."
-                  : "instatunnel is required to create a secure tunnel."}
+              cloudflared is required to create a secure tunnel for mobile access.
             </DialogDescription>
           )}
         </DialogHeader>
@@ -100,15 +84,21 @@ export function PrereqDialog({ open, onOpenChange, onReady }: Props) {
           )}
 
           {step === "missing" && (
-            <Button onClick={handleInstall} className="w-full">
-              Install {missingLabel}
-            </Button>
+            <>
+              <Button onClick={handleInstall} className="w-full">
+                Install cloudflared
+              </Button>
+              <p className="text-xs text-muted-foreground text-center">
+                Or install manually:{" "}
+                <code className="text-xs bg-muted px-1 py-0.5 rounded">brew install cloudflared</code>
+              </p>
+            </>
           )}
 
           {step === "installing" && (
             <>
               <Loader2 className="size-8 animate-spin text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">Installing {missingLabel}...</p>
+              <p className="text-sm text-muted-foreground">Installing cloudflared...</p>
             </>
           )}
 

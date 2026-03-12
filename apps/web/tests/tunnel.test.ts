@@ -61,37 +61,51 @@ function createDefaultState(tmpHome: string) {
 }
 
 /**
- * Create a fake instatunnel script that prints output matching the real CLI
- * format (with emoji prefixes) then sleeps so the process stays alive.
+ * Create a fake cloudflared script that prints output matching the real CLI
+ * format (URL printed to stderr) then sleeps so the process stays alive.
  */
-function createFakeInstatunnel(binDir: string, subdomain: string): void {
+function createFakeCloudflared(binDir: string, subdomain: string): void {
   const script = `#!/bin/sh
-PORT="$1"
-echo "Using config file: /tmp/fake.yaml"
-echo "🚀 Starting tunnel for localhost:$PORT..."
-echo "🚀 Your app is now live at https://${subdomain}.instatunnel.my"
-echo "📋 URL copied to clipboard!"
-echo "🔗 Forwarding https://${subdomain}.instatunnel.my -> localhost:$PORT"
-echo "⚡ Ready to receive requests! Press Ctrl+C to stop"
+# Simulate cloudflared tunnel startup output on stderr
+echo "2024-01-01T00:00:00Z INF Starting tunnel" >&2
+echo "2024-01-01T00:00:00Z INF +-------------------------------------------+" >&2
+echo "2024-01-01T00:00:00Z INF |  https://${subdomain}.trycloudflare.com    |" >&2
+echo "2024-01-01T00:00:00Z INF +-------------------------------------------+" >&2
 # Keep running until killed
 while true; do sleep 1; done
 `;
-  const scriptPath = join(binDir, "instatunnel");
+  const scriptPath = join(binDir, "cloudflared");
   writeFileSync(scriptPath, script);
   chmodSync(scriptPath, 0o755);
 }
 
 /**
- * Create a fake instatunnel that exits with "subdomain already taken" error.
+ * Create a fake cloudflared that exits with an error.
  */
-function createFakeInstatunnelSubdomainTaken(binDir: string): void {
+function createFakeCloudflaredError(binDir: string): void {
   const script = `#!/bin/sh
-echo "Using config file: /tmp/fake.yaml"
-echo "🚀 Starting tunnel for localhost:$1..."
-echo 'Error: failed to create tunnel: {"error":"subdomain already taken"}' >&2
+echo "failed to connect to edge" >&2
 exit 1
 `;
-  const scriptPath = join(binDir, "instatunnel");
+  const scriptPath = join(binDir, "cloudflared");
+  writeFileSync(scriptPath, script);
+  chmodSync(scriptPath, 0o755);
+}
+
+/**
+ * Create a fake cloudflared that prints a URL then crashes after a delay.
+ */
+function createFakeCloudflaredCrash(binDir: string, subdomain: string, delaySecs: number): void {
+  const script = `#!/bin/sh
+echo "2024-01-01T00:00:00Z INF Starting tunnel" >&2
+echo "2024-01-01T00:00:00Z INF +-------------------------------------------+" >&2
+echo "2024-01-01T00:00:00Z INF |  https://${subdomain}.trycloudflare.com    |" >&2
+echo "2024-01-01T00:00:00Z INF +-------------------------------------------+" >&2
+sleep ${delaySecs}
+echo "2024-01-01T00:00:00Z ERR connection lost" >&2
+exit 1
+`;
+  const scriptPath = join(binDir, "cloudflared");
   writeFileSync(scriptPath, script);
   chmodSync(scriptPath, 0o755);
 }
@@ -218,10 +232,10 @@ function authCookie(token: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Tests: tunnel URL parsing with emoji-prefixed output
+// Tests: tunnel URL parsing with cloudflared output
 // ---------------------------------------------------------------------------
 
-describe("tunnel.start — parses URL from emoji-prefixed instatunnel output", () => {
+describe("tunnel.start — parses URL from cloudflared stderr output", () => {
   let server: ServerHandle;
   let tmpHome: string;
 
@@ -232,7 +246,7 @@ describe("tunnel.start — parses URL from emoji-prefixed instatunnel output", (
 
     const binDir = join(tmpHome, "bin");
     mkdirSync(binDir, { recursive: true });
-    createFakeInstatunnel(binDir, "test123");
+    createFakeCloudflared(binDir, "test-abc-123");
 
     server = await startServer({
       tmpHome,
@@ -252,7 +266,7 @@ describe("tunnel.start — parses URL from emoji-prefixed instatunnel output", (
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  it("starts tunnel and extracts URL with subdomain", async () => {
+  it("starts tunnel and extracts trycloudflare.com URL", async () => {
     const res = await trpcMutate(
       server.url,
       "tunnel.start",
@@ -278,7 +292,7 @@ describe("tunnel.start — parses URL from emoji-prefixed instatunnel output", (
     const status = await trpcData<{ running: boolean; url: string | null }>(statusRes);
 
     expect(status.running).toBe(true);
-    expect(status.url).toContain("https://test123.instatunnel.my");
+    expect(status.url).toContain("https://test-abc-123.trycloudflare.com");
   });
 });
 
@@ -297,7 +311,7 @@ describe("tunnel.start — returns URL in mutation response", () => {
 
     const binDir = join(tmpHome, "bin");
     mkdirSync(binDir, { recursive: true });
-    createFakeInstatunnel(binDir, "directurl");
+    createFakeCloudflared(binDir, "directurl-test");
 
     server = await startServer({
       tmpHome,
@@ -328,15 +342,15 @@ describe("tunnel.start — returns URL in mutation response", () => {
     expect(res.status).toBe(200);
     const data = await trpcData<{ ok: boolean; url: string | null }>(res);
     expect(data.ok).toBe(true);
-    expect(data.url).toContain("https://directurl.instatunnel.my");
+    expect(data.url).toContain("https://directurl-test.trycloudflare.com");
   });
 });
 
 // ---------------------------------------------------------------------------
-// Tests: subdomain taken — resolves without error and returns null URL
+// Tests: cloudflared error — resolves without crashing
 // ---------------------------------------------------------------------------
 
-describe("tunnel.start — subdomain taken resolves without error", () => {
+describe("tunnel.start — cloudflared error returns null URL", () => {
   let server: ServerHandle;
   let tmpHome: string;
 
@@ -347,7 +361,7 @@ describe("tunnel.start — subdomain taken resolves without error", () => {
 
     const binDir = join(tmpHome, "bin");
     mkdirSync(binDir, { recursive: true });
-    createFakeInstatunnelSubdomainTaken(binDir);
+    createFakeCloudflaredError(binDir);
 
     server = await startServer({
       tmpHome,
@@ -363,11 +377,11 @@ describe("tunnel.start — subdomain taken resolves without error", () => {
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  it("returns 200 with null URL when subdomain is taken", async () => {
+  it("returns 200 with null URL when cloudflared fails", async () => {
     const res = await trpcMutate(
       server.url,
       "tunnel.start",
-      { subdomain: "taken-sub" },
+      {},
       {
         headers: { Cookie: authCookie(DEFAULT_TOKEN) },
       },
@@ -375,88 +389,12 @@ describe("tunnel.start — subdomain taken resolves without error", () => {
     expect(res.status).toBe(200);
     const data = await trpcData<{ ok: boolean; url: string | null }>(res);
     expect(data.ok).toBe(true);
-    // URL is null because the subdomain is taken and no remote tunnel is reachable
     expect(data.url).toBeNull();
   });
 });
 
 // ---------------------------------------------------------------------------
-// Tests: services.health — remote detection with configured subdomain
-// ---------------------------------------------------------------------------
-
-describe("services.health — configured subdomain, no tunnel running, remote unreachable", () => {
-  const TOKEN = "unreachable-test-token";
-  let server: ServerHandle;
-  let tmpHome: string;
-
-  beforeAll(async () => {
-    tmpHome = createTmpHome();
-    seedState(tmpHome, createDefaultState(tmpHome));
-    // Configure a subdomain that won't resolve to a real tunnel
-    seedSettings(tmpHome, { tunnelSubdomain: "nonexistent-test-sub", tokenSecret: TOKEN });
-    server = await startServer({ tmpHome });
-  });
-
-  afterAll(async () => {
-    await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
-  });
-
-  it("returns tunnel as not healthy when remote is unreachable", async () => {
-    const res = await trpcQuery(server.url, "services.health", undefined, {
-      headers: { Cookie: authCookie(TOKEN) },
-    });
-    expect(res.status).toBe(200);
-    const data = await trpcData<{
-      webserver: boolean;
-      tunnel: boolean;
-      tunnel_url: string | null;
-      tunnel_remote_host: string | null;
-    }>(res);
-    expect(data.webserver).toBe(true);
-    expect(data.tunnel).toBe(false);
-    expect(data.tunnel_url).toBeNull();
-    expect(data.tunnel_remote_host).toBeNull();
-  });
-});
-
-describe("services.health — configured subdomain, no tunnel, with token, remote unreachable", () => {
-  const TOKEN = "health-check-test-token";
-  let server: ServerHandle;
-  let tmpHome: string;
-
-  beforeAll(async () => {
-    tmpHome = createTmpHome();
-    seedState(tmpHome, createDefaultState(tmpHome));
-    seedSettings(tmpHome, { tunnelSubdomain: "nonexistent-test-sub", tokenSecret: TOKEN });
-    server = await startServer({ tmpHome });
-  });
-
-  afterAll(async () => {
-    await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
-  });
-
-  it("returns tunnel as not healthy when remote is unreachable (with token)", async () => {
-    const res = await trpcQuery(server.url, "services.health", undefined, {
-      headers: { Cookie: authCookie(TOKEN) },
-    });
-    expect(res.status).toBe(200);
-    const data = await trpcData<{
-      webserver: boolean;
-      tunnel: boolean;
-      tunnel_url: string | null;
-      tunnel_remote_host: string | null;
-    }>(res);
-    expect(data.webserver).toBe(true);
-    expect(data.tunnel).toBe(false);
-    expect(data.tunnel_url).toBeNull();
-    expect(data.tunnel_remote_host).toBeNull();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Tests: services.health — local tunnel process running
+// Tests: services.health — with running local tunnel process
 // ---------------------------------------------------------------------------
 
 describe("services.health — with running local tunnel process", () => {
@@ -470,7 +408,7 @@ describe("services.health — with running local tunnel process", () => {
 
     const binDir = join(tmpHome, "bin");
     mkdirSync(binDir, { recursive: true });
-    createFakeInstatunnel(binDir, "healthcheck");
+    createFakeCloudflared(binDir, "healthcheck-test");
 
     server = await startServer({
       tmpHome,
@@ -509,7 +447,7 @@ describe("services.health — with running local tunnel process", () => {
       return status.running && status.url !== null;
     });
 
-    // Now check services.health — it should report the tunnel URL
+    // Now check services.health — it should report the tunnel as running with URL
     const healthRes = await trpcQuery(server.url, "services.health", undefined, {
       headers: { Cookie: authCookie(DEFAULT_TOKEN) },
     });
@@ -518,34 +456,65 @@ describe("services.health — with running local tunnel process", () => {
       webserver: boolean;
       tunnel: boolean;
       tunnel_url: string | null;
-      tunnel_remote_host: string | null;
     }>(healthRes);
     expect(health.webserver).toBe(true);
-    // tunnel_url should be set (local process has it)
-    expect(health.tunnel_url).toContain("https://healthcheck.instatunnel.my");
-    // Note: tunnel may report as not healthy because the fake tunnel URL
-    // doesn't actually forward requests — but the URL should still be present
+    expect(health.tunnel).toBe(true);
+    expect(health.tunnel_url).toContain("https://healthcheck-test.trycloudflare.com");
   });
 });
 
 // ---------------------------------------------------------------------------
-// Tests: tunnel.start — subdomain taken with token triggers remote fallback
+// Tests: services.health — no tunnel running
 // ---------------------------------------------------------------------------
 
-describe("tunnel.start — subdomain taken attempts remote fallback", () => {
-  const TOKEN = "fallback-test-token";
+describe("services.health — no tunnel running", () => {
   let server: ServerHandle;
   let tmpHome: string;
 
   beforeAll(async () => {
     tmpHome = createTmpHome();
     seedState(tmpHome, createDefaultState(tmpHome));
-    // Configure a subdomain that will be "taken" by the fake script
-    seedSettings(tmpHome, { tunnelSubdomain: "taken-remote", tokenSecret: TOKEN });
+    seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
+    server = await startServer({ tmpHome });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("returns tunnel false when no tunnel is running", async () => {
+    const res = await trpcQuery(server.url, "services.health", undefined, {
+      headers: { Cookie: authCookie(DEFAULT_TOKEN) },
+    });
+    expect(res.status).toBe(200);
+    const data = await trpcData<{
+      webserver: boolean;
+      tunnel: boolean;
+      tunnel_url: string | null;
+    }>(res);
+    expect(data.webserver).toBe(true);
+    expect(data.tunnel).toBe(false);
+    expect(data.tunnel_url).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: tunnel crash — server detects cloudflared death
+// ---------------------------------------------------------------------------
+
+describe("tunnel crash — health reflects down state after cloudflared dies", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    seedState(tmpHome, createDefaultState(tmpHome));
+    seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
 
     const binDir = join(tmpHome, "bin");
     mkdirSync(binDir, { recursive: true });
-    createFakeInstatunnelSubdomainTaken(binDir);
+    createFakeCloudflaredCrash(binDir, "crash-test", 1);
 
     server = await startServer({
       tmpHome,
@@ -561,55 +530,54 @@ describe("tunnel.start — subdomain taken attempts remote fallback", () => {
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  it("returns null URL when subdomain is taken and remote is unreachable", async () => {
-    const res = await trpcMutate(
+  it("starts tunnel, cloudflared crashes, status and health reflect the crash", async () => {
+    // 1. Start tunnel — should get URL before crash
+    const startRes = await trpcMutate(
       server.url,
       "tunnel.start",
       {},
-      {
-        headers: { Cookie: authCookie(TOKEN) },
-      },
+      { headers: { Cookie: authCookie(DEFAULT_TOKEN) } },
     );
-    expect(res.status).toBe(200);
-    const data = await trpcData<{ ok: boolean; url: string | null }>(res);
-    expect(data.ok).toBe(true);
-    // Remote tunnel (taken-remote.instatunnel.my) doesn't exist, so fallback returns null
-    expect(data.url).toBeNull();
-  });
-});
+    expect(startRes.status).toBe(200);
+    const startData = await trpcData<{ ok: boolean; url: string | null }>(startRes);
+    expect(startData.ok).toBe(true);
+    expect(startData.url).toContain("https://crash-test.trycloudflare.com");
 
-// ---------------------------------------------------------------------------
-// Tests: services.health — no subdomain configured skips remote check
-// ---------------------------------------------------------------------------
-
-describe("services.health — no subdomain configured, no tunnel", () => {
-  let server: ServerHandle;
-  let tmpHome: string;
-
-  beforeAll(async () => {
-    tmpHome = createTmpHome();
-    seedState(tmpHome, createDefaultState(tmpHome));
-    seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN }); // No tunnelSubdomain
-    server = await startServer({ tmpHome });
-  });
-
-  afterAll(async () => {
-    await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
-  });
-
-  it("returns tunnel false without attempting remote check", async () => {
-    const res = await trpcQuery(server.url, "services.health", undefined, {
+    // 2. Verify tunnel is initially running
+    const statusRes = await trpcQuery(server.url, "tunnel.status", undefined, {
       headers: { Cookie: authCookie(DEFAULT_TOKEN) },
     });
-    expect(res.status).toBe(200);
-    const data = await trpcData<{
+    const status = await trpcData<{ running: boolean; url: string | null }>(statusRes);
+    expect(status.running).toBe(true);
+
+    // 3. Wait for cloudflared to crash (exits after 1s) and server to detect it
+    await waitFor(async () => {
+      const res = await trpcQuery(server.url, "tunnel.status", undefined, {
+        headers: { Cookie: authCookie(DEFAULT_TOKEN) },
+      });
+      const s = await trpcData<{ running: boolean; url: string | null }>(res);
+      return !s.running;
+    });
+
+    // 4. Verify tunnel.status shows not running
+    const afterCrashStatus = await trpcQuery(server.url, "tunnel.status", undefined, {
+      headers: { Cookie: authCookie(DEFAULT_TOKEN) },
+    });
+    const crashed = await trpcData<{ running: boolean; url: string | null }>(afterCrashStatus);
+    expect(crashed.running).toBe(false);
+    expect(crashed.url).toBeNull();
+
+    // 5. Verify services.health reflects tunnel is down
+    const healthRes = await trpcQuery(server.url, "services.health", undefined, {
+      headers: { Cookie: authCookie(DEFAULT_TOKEN) },
+    });
+    const health = await trpcData<{
       webserver: boolean;
       tunnel: boolean;
       tunnel_url: string | null;
-    }>(res);
-    expect(data.webserver).toBe(true);
-    expect(data.tunnel).toBe(false);
-    expect(data.tunnel_url).toBeNull();
+    }>(healthRes);
+    expect(health.webserver).toBe(true);
+    expect(health.tunnel).toBe(false);
+    expect(health.tunnel_url).toBeNull();
   });
 });

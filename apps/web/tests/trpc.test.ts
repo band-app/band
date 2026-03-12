@@ -334,7 +334,6 @@ describe("tRPC — settings CRUD", () => {
   it("settings.update persists settings", async () => {
     const settings = {
       worktreesDir: "/tmp/worktrees",
-      tunnelSubdomain: "my-sub",
       autoStartTunnel: true,
     };
     const res = await trpcMutate(server.url, "settings.update", settings);
@@ -344,7 +343,6 @@ describe("tRPC — settings CRUD", () => {
     const getRes = await trpcQuery(server.url, "settings.get");
     const data = await trpcData<Record<string, unknown>>(getRes);
     expect(data.worktreesDir).toBe("/tmp/worktrees");
-    expect(data.tunnelSubdomain).toBe("my-sub");
     expect(data.autoStartTunnel).toBe(true);
   });
 
@@ -356,7 +354,7 @@ describe("tRPC — settings CRUD", () => {
     const data = await trpcData<Record<string, unknown>>(getRes);
     expect(data.worktreesDir).toBeNull();
     // Previous keys should be gone since update replaces the whole file
-    expect(data.tunnelSubdomain).toBeUndefined();
+    expect(data.autoStartTunnel).toBeUndefined();
   });
 });
 

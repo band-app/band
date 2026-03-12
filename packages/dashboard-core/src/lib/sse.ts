@@ -7,9 +7,7 @@ export type SSEEvent = {
     | "snapshot"
     | "branch-status"
     | "tunnel-url"
-    | "tunnel-error"
-    | "tunnel-subdomain-taken"
-    | "tunnel-remote-host";
+    | "tunnel-error";
   status?: WorkspaceStatus;
   statuses?: WorkspaceStatus[];
   workspaceId?: string;
@@ -17,5 +15,4 @@ export type SSEEvent = {
   ci?: CIStatus;
   url?: string;
   error?: string;
-  host?: string;
 };
