@@ -59,11 +59,11 @@ export const ToolHeader = ({ className, title, type, state, toolName }: ToolHead
 
   return (
     <CollapsibleTrigger
-      className={cn("flex w-full items-center justify-between gap-4 p-3", className)}
+      className={cn("flex w-full items-center justify-between gap-4 p-2", className)}
     >
       <div className="flex items-center gap-2">
         <WrenchIcon className="size-4 text-muted-foreground" />
-        <span className="font-medium text-base">{title ?? derivedName}</span>
+        <span className="font-medium text-sm">{title ?? derivedName}</span>
         <Badge className="gap-1.5 rounded border-border/50 text-sm" variant="secondary">
           {statusIcons[state]}
           {statusLabels[state]}
