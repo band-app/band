@@ -47,7 +47,7 @@ export async function whichBinary(name: string): Promise<string | null> {
   }
 }
 
-export async function checkPrereqs(): Promise<{ node: boolean; instatunnel: boolean }> {
-  const [node, instatunnel] = await Promise.all([whichBinary("node"), whichBinary("instatunnel")]);
-  return { node: node !== null, instatunnel: instatunnel !== null };
+export async function checkPrereqs(): Promise<{ cloudflared: boolean }> {
+  const cloudflared = await whichBinary("cloudflared");
+  return { cloudflared: cloudflared !== null };
 }

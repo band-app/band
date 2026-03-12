@@ -18,8 +18,6 @@ pub struct Settings {
     pub labels: Option<serde_json::Value>,
     #[serde(rename = "tokenSecret", skip_serializing_if = "Option::is_none")]
     pub token_secret: Option<String>,
-    #[serde(rename = "tunnelSubdomain", skip_serializing_if = "Option::is_none")]
-    pub tunnel_subdomain: Option<String>,
     #[serde(rename = "autoStartTunnel", skip_serializing_if = "Option::is_none")]
     pub auto_start_tunnel: Option<bool>,
 }

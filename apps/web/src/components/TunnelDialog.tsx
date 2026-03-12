@@ -1,18 +1,10 @@
-import { useSettingsQuery } from "@band/dashboard-core";
 import { Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@band/ui";
 import { Loader2 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { trpc } from "../lib/trpc-client";
 
-type TunnelStep =
-  | "starting"
-  | "auth_required"
-  | "connecting"
-  | "ready"
-  | "subdomain_taken"
-  | "remote_host"
-  | "error";
+type TunnelStep = "starting" | "connecting" | "ready" | "error";
 
 interface Props {
   open: boolean;
@@ -26,150 +18,92 @@ export function TunnelDialog({ open, onOpenChange, onStopped, initialUrl, onTunn
   const [step, setStep] = useState<TunnelStep>("starting");
   const [tunnelUrl, setTunnelUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [remoteHost, setRemoteHost] = useState<string | null>(null);
-  const { settings } = useSettingsQuery();
 
-  const startConnection = useCallback(async () => {
-    try {
-      setStep("starting");
-
-      // Web server is always running — just check health for tunnel state
-      const health = await trpc.services.health.query();
-
-      // If tunnel is already running on a different host, show message
-      if (health.tunnel && health.tunnel_remote_host) {
-        setRemoteHost(health.tunnel_remote_host);
-        setStep("remote_host");
-        return;
-      }
-
-      // If tunnel is already healthy (same machine, e.g. after restart), show QR
-      if (health.tunnel && health.tunnel_url) {
-        setTunnelUrl(health.tunnel_url);
-        setStep("ready");
-        onTunnelUrl?.(health.tunnel_url);
-        return;
-      }
-
-      if (settings.tunnelSubdomain) {
-        const { authenticated } = await trpc.tunnel.authCheck.query();
-        if (!authenticated) {
-          setStep("auth_required");
-          return;
-        }
-      }
-
-      setStep("connecting");
-      const result = await trpc.tunnel.start.mutate({});
-      if (result.url) {
-        setTunnelUrl(result.url);
-        setStep("ready");
-        onTunnelUrl?.(result.url);
-      }
-    } catch (e) {
-      setError(String(e));
-      setStep("error");
-    }
-  }, [settings.tunnelSubdomain, onTunnelUrl]);
+  // Use refs for values that shouldn't trigger effect re-runs
+  const onTunnelUrlRef = useRef(onTunnelUrl);
+  onTunnelUrlRef.current = onTunnelUrl;
+  const initialUrlRef = useRef(initialUrl);
+  initialUrlRef.current = initialUrl;
 
   useEffect(() => {
     if (!open) return;
 
-    if (initialUrl) {
-      setTunnelUrl(initialUrl);
+    if (initialUrlRef.current) {
+      setTunnelUrl(initialUrlRef.current);
       setStep("ready");
       setError(null);
-      setRemoteHost(null);
-    } else {
-      setStep("starting");
-      setTunnelUrl(null);
-      setError(null);
-      setRemoteHost(null);
+      return;
     }
+
+    setStep("starting");
+    setTunnelUrl(null);
+    setError(null);
 
     let cancelled = false;
 
     // Subscribe to tRPC status stream for tunnel events
     const subscription = trpc.status.stream.subscribe(undefined, {
-      onData: (event: { kind: string; url?: string; error?: string; host?: string }) => {
+      onData: (event: { kind: string; url?: string; error?: string }) => {
         if (cancelled) return;
         if (event.kind === "tunnel-url" && event.url) {
           setTunnelUrl(event.url);
           setStep("ready");
-          onTunnelUrl?.(event.url);
+          onTunnelUrlRef.current?.(event.url);
         } else if (event.kind === "tunnel-error" && event.error) {
           setError(event.error);
           setStep("error");
-        } else if (event.kind === "tunnel-subdomain-taken") {
-          setStep("subdomain_taken");
-        } else if (event.kind === "tunnel-remote-host" && event.host) {
-          setRemoteHost(event.host);
-          setStep("remote_host");
         }
       },
     });
 
-    if (!initialUrl) {
-      // Check if services are already running
-      (async () => {
-        try {
-          const health = await trpc.services.health.query();
-          if (cancelled) return;
+    // Check if services are already running, otherwise start tunnel
+    (async () => {
+      try {
+        const health = await trpc.services.health.query();
+        if (cancelled) return;
 
-          if (health.tunnel && health.tunnel_url && !cancelled) {
-            if (health.tunnel_remote_host) {
-              setRemoteHost(health.tunnel_remote_host);
-              setStep("remote_host");
-            } else {
-              setTunnelUrl(health.tunnel_url);
-              setStep("ready");
-              onTunnelUrl?.(health.tunnel_url);
-            }
-            return;
-          }
-        } catch {}
-
-        if (!cancelled) {
-          await startConnection();
+        if (health.tunnel && health.tunnel_url) {
+          setTunnelUrl(health.tunnel_url);
+          setStep("ready");
+          onTunnelUrlRef.current?.(health.tunnel_url);
+          return;
         }
-      })();
-    }
+      } catch {}
+
+      if (cancelled) return;
+
+      try {
+        setStep("connecting");
+        const result = await trpc.tunnel.start.mutate({});
+        if (cancelled) return;
+        if (result.url) {
+          setTunnelUrl(result.url);
+          setStep("ready");
+          onTunnelUrlRef.current?.(result.url);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setError(String(e));
+          setStep("error");
+        }
+      }
+    })();
 
     return () => {
       cancelled = true;
       subscription.unsubscribe();
     };
-  }, [open, startConnection, initialUrl, onTunnelUrl]);
+  }, [open]);
 
-  const handleRetryAuth = async () => {
+  const handleRetry = async () => {
     try {
-      setStep("starting");
-      const { authenticated } = await trpc.tunnel.authCheck.query();
-      if (!authenticated) {
-        setStep("auth_required");
-        return;
-      }
       setStep("connecting");
+      setError(null);
       const result = await trpc.tunnel.start.mutate({});
       if (result.url) {
         setTunnelUrl(result.url);
         setStep("ready");
-        onTunnelUrl?.(result.url);
-      }
-    } catch (e) {
-      setError(String(e));
-      setStep("error");
-    }
-  };
-
-  const handleContinueRandom = async () => {
-    try {
-      setStep("connecting");
-      const result = await trpc.tunnel.start.mutate({ skipSubdomain: true });
-      if (result.url) {
-        setTunnelUrl(result.url);
-        setStep("ready");
-        onTunnelUrl?.(result.url);
+        onTunnelUrlRef.current?.(result.url);
       }
     } catch (e) {
       setError(String(e));
@@ -200,25 +134,6 @@ export function TunnelDialog({ open, onOpenChange, onStopped, initialUrl, onTunn
             </>
           )}
 
-          {step === "auth_required" && (
-            <>
-              <p className="text-sm text-muted-foreground text-center">
-                You need to log in to instatunnel to use the subdomain{" "}
-                <strong>{settings.tunnelSubdomain}</strong>.
-              </p>
-              <p className="text-xs text-muted-foreground text-center">Run in your terminal:</p>
-              <code className="text-xs bg-muted px-2 py-1 rounded select-all">
-                instatunnel auth login
-              </code>
-              <Button onClick={handleRetryAuth} className="w-full">
-                Try Again
-              </Button>
-              <Button variant="ghost" size="sm" onClick={handleContinueRandom}>
-                Continue without subdomain
-              </Button>
-            </>
-          )}
-
           {step === "ready" && tunnelUrl && (
             <>
               <a
@@ -235,43 +150,10 @@ export function TunnelDialog({ open, onOpenChange, onStopped, initialUrl, onTunn
             </>
           )}
 
-          {step === "subdomain_taken" && (
-            <>
-              <p className="text-sm text-muted-foreground text-center">
-                The subdomain <strong>{settings.tunnelSubdomain}</strong> is already in use by
-                another session.
-              </p>
-              <p className="text-xs text-muted-foreground text-center">
-                You can change it in Settings &gt; Web Server.
-              </p>
-              <Button onClick={handleContinueRandom} className="w-full">
-                Continue with Random URL
-              </Button>
-            </>
-          )}
-
-          {step === "remote_host" && (
-            <>
-              <p className="text-sm text-muted-foreground text-center">
-                Tunnel subdomain <strong>{settings.tunnelSubdomain}</strong> is currently in use on{" "}
-                <strong>{remoteHost}</strong>.
-              </p>
-              <p className="text-xs text-muted-foreground text-center">
-                Stop it on the other computer first, or use a different subdomain.
-              </p>
-              <Button onClick={handleContinueRandom} className="w-full">
-                Continue with Random URL
-              </Button>
-              <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
-                Close
-              </Button>
-            </>
-          )}
-
           {step === "error" && (
             <>
               <p className="text-sm text-destructive text-center">{error}</p>
-              <Button variant="outline" size="sm" onClick={startConnection}>
+              <Button variant="outline" size="sm" onClick={handleRetry}>
                 Retry
               </Button>
             </>

@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -194,7 +194,6 @@ describe("services.health", () => {
       webserver: boolean;
       tunnel: boolean;
       tunnel_url: string | null;
-      tunnel_remote_host: string | null;
     }>(res);
     expect(body.webserver).toBe(true);
     expect(typeof body.tunnel).toBe("boolean");
@@ -231,11 +230,9 @@ describe("tunnel.status", () => {
     const body = await trpcData<{
       running: boolean;
       url: string | null;
-      remoteHost: string | null;
     }>(res);
     expect(body.running).toBe(false);
     expect(body.url).toBeNull();
-    expect(body.remoteHost).toBeNull();
   });
 });
 
@@ -289,24 +286,21 @@ describe("prereqs.check", () => {
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  it("returns prerequisite status with node and instatunnel booleans", async () => {
+  it("returns prerequisite status with cloudflared boolean", async () => {
     const res = await trpcQuery(server.url, "prereqs.check", undefined, {
       headers: { Cookie: authCookie(DEFAULT_TOKEN) },
     });
     expect(res.status).toBe(200);
-    const body = await trpcData<{ node: boolean; instatunnel: boolean }>(res);
-    expect(typeof body.node).toBe("boolean");
-    expect(typeof body.instatunnel).toBe("boolean");
-    // Node.js is always available since we're running this test with it
-    expect(body.node).toBe(true);
+    const body = await trpcData<{ cloudflared: boolean }>(res);
+    expect(typeof body.cloudflared).toBe("boolean");
   });
 });
 
 // ---------------------------------------------------------------------------
-// tunnel.authCheck
+// prereqs.check — cloudflared not installed
 // ---------------------------------------------------------------------------
 
-describe("tunnel.authCheck", () => {
+describe("prereqs.check — cloudflared not installed", () => {
   let server: ServerHandle;
   let tmpHome: string;
 
@@ -314,7 +308,23 @@ describe("tunnel.authCheck", () => {
     tmpHome = createTmpHome();
     seedState(tmpHome, createDefaultState(tmpHome));
     seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
-    server = await startServer({ tmpHome });
+
+    // Create a bin dir containing only a symlink to node — cloudflared
+    // won't be found since it's not linked here.
+    const binDir = join(tmpHome, "bin");
+    mkdirSync(binDir, { recursive: true });
+    const nodePath = process.execPath;
+    symlinkSync(nodePath, join(binDir, "node"));
+    // which(1) is needed by checkPrereqs
+    symlinkSync("/usr/bin/which", join(binDir, "which"));
+
+    server = await startServer({
+      tmpHome,
+      env: {
+        PATH: binDir,
+        SHELL: "/bin/sh",
+      },
+    });
   });
 
   afterAll(async () => {
@@ -322,13 +332,26 @@ describe("tunnel.authCheck", () => {
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  it("returns an authenticated boolean", async () => {
-    const res = await trpcQuery(server.url, "tunnel.authCheck", undefined, {
+  it("returns cloudflared: false when not on PATH", async () => {
+    const res = await trpcQuery(server.url, "prereqs.check", undefined, {
       headers: { Cookie: authCookie(DEFAULT_TOKEN) },
     });
     expect(res.status).toBe(200);
-    const body = await trpcData<{ authenticated: boolean }>(res);
-    expect(typeof body.authenticated).toBe("boolean");
+    const body = await trpcData<{ cloudflared: boolean }>(res);
+    expect(body.cloudflared).toBe(false);
+  });
+
+  it("tunnel.start returns null URL when cloudflared is missing", async () => {
+    const res = await trpcMutate(
+      server.url,
+      "tunnel.start",
+      {},
+      { headers: { Cookie: authCookie(DEFAULT_TOKEN) } },
+    );
+    expect(res.status).toBe(200);
+    const data = await trpcData<{ ok: boolean; url: string | null }>(res);
+    expect(data.ok).toBe(true);
+    expect(data.url).toBeNull();
   });
 });
 
@@ -463,18 +486,6 @@ describe("Tunnel and service endpoints require auth when token is set", () => {
 
   it("returns 200 for prereqs.check with auth", async () => {
     const res = await trpcQuery(server.url, "prereqs.check", undefined, {
-      headers: { Cookie: authCookie(TOKEN) },
-    });
-    expect(res.status).toBe(200);
-  });
-
-  it("returns 401 for tunnel.authCheck without auth", async () => {
-    const res = await trpcQuery(server.url, "tunnel.authCheck");
-    expect(res.status).toBe(401);
-  });
-
-  it("returns 200 for tunnel.authCheck with auth", async () => {
-    const res = await trpcQuery(server.url, "tunnel.authCheck", undefined, {
       headers: { Cookie: authCookie(TOKEN) },
     });
     expect(res.status).toBe(200);

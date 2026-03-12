@@ -126,7 +126,6 @@ export interface Settings {
   notifications?: NotificationSettings;
   labels?: LabelDefinition[];
   tokenSecret?: string;
-  tunnelSubdomain?: string;
   autoStartTunnel?: boolean;
 }
 

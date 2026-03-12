@@ -8,7 +8,6 @@ import {
   writeFileSync,
 } from "node:fs";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
-import { hostname } from "node:os";
 import { basename, extname, join, resolve } from "node:path";
 import { toWorkspaceId } from "@band/dashboard-core";
 import { createLogger } from "@band/logger";
@@ -16,7 +15,6 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import { Cron } from "croner";
 import { z } from "zod";
 import { getOrCreateAgent } from "../lib/agent-pool";
-import { getToken } from "../lib/auth-token";
 import { checkCli, installCli } from "../lib/cli";
 import { stopJobsForKey } from "../lib/cronjob-scheduler";
 import {
@@ -52,13 +50,7 @@ import {
   TaskConflictError,
 } from "../lib/task-runner";
 import { listTasks, loadTask } from "../lib/task-store";
-import {
-  checkTunnelAuth,
-  checkTunnelHealth,
-  getTunnelStatus,
-  startTunnel,
-  stopTunnel,
-} from "../lib/tunnel";
+import { getTunnelStatus, startTunnel, stopTunnel } from "../lib/tunnel";
 import { subscribe as subscribeStatus } from "../lib/watcher";
 import { resolveWorkspace } from "../lib/workspace";
 import type { Context } from "./context";
@@ -660,51 +652,28 @@ const tunnelRouter = t.router({
     return getTunnelStatus();
   }),
 
-  start: publicProcedure
-    .input(z.object({ subdomain: z.string().optional(), skipSubdomain: z.boolean().optional() }))
-    .mutation(async ({ input }) => {
-      log.debug({ input }, "tunnel.start called");
-      const settings = loadSettings();
-      const port = parseInt(process.env.PORT || "3456", 10);
-      const subdomain = input.subdomain || (settings as Record<string, unknown>).tunnelSubdomain;
-      log.debug(
-        "tunnel.start: port=%d subdomain=%s skipSubdomain=%s",
-        port,
-        subdomain,
-        input.skipSubdomain,
-      );
-      await startTunnel({
-        port,
-        subdomain: subdomain as string | undefined,
-        skipSubdomain: input.skipSubdomain,
-      });
-      const status = getTunnelStatus();
-      log.debug({ status }, "tunnel.start: after startTunnel");
-      if (status.url) {
-        return { ok: true, url: status.url };
-      }
-      // No URL (e.g. subdomain taken) — check if tunnel is already alive remotely
-      const resolvedSubdomain = (subdomain as string | undefined) ?? undefined;
-      if (resolvedSubdomain) {
-        const token = getToken();
-        const health = await checkTunnelHealth(resolvedSubdomain, token);
-        log.debug({ health }, "tunnel.start: remote health check");
-        if (health.healthy) {
-          return { ok: true, url: `https://${resolvedSubdomain}.instatunnel.my?token=${token}` };
-        }
-      }
-      log.debug("tunnel.start: no URL available");
+  start: publicProcedure.input(z.object({}).optional()).mutation(async () => {
+    log.debug("tunnel.start called");
+    const port = parseInt(process.env.PORT || "3456", 10);
+    log.debug("tunnel.start: port=%d", port);
+    try {
+      await startTunnel({ port });
+    } catch (err) {
+      log.debug({ err }, "tunnel.start: startTunnel failed");
       return { ok: true, url: null as string | null };
-    }),
+    }
+    const status = getTunnelStatus();
+    log.debug({ status }, "tunnel.start: after startTunnel");
+    if (status.url) {
+      return { ok: true, url: status.url };
+    }
+    log.debug("tunnel.start: no URL available");
+    return { ok: true, url: null as string | null };
+  }),
 
   stop: publicProcedure.mutation(async () => {
     await stopTunnel();
     return { ok: true };
-  }),
-
-  authCheck: publicProcedure.query(async () => {
-    const authenticated = await checkTunnelAuth();
-    return { authenticated };
   }),
 });
 
@@ -717,31 +686,12 @@ const prereqsRouter = t.router({
     return await checkPrereqs();
   }),
 
-  installNode: publicProcedure.mutation(async () => {
-    const resolvedPath = await shellPath();
-    await new Promise<void>((resolve, reject) => {
-      execFile(
-        "brew",
-        ["install", "node"],
-        { env: { ...process.env, PATH: resolvedPath }, timeout: 120_000 },
-        (err, _stdout, stderr) => {
-          if (err) {
-            reject(new Error(stderr || err.message));
-            return;
-          }
-          resolve();
-        },
-      );
-    });
-    return { ok: true };
-  }),
-
   installTunnel: publicProcedure.mutation(async () => {
     const resolvedPath = await shellPath();
     await new Promise<void>((resolve, reject) => {
       execFile(
-        "npm",
-        ["install", "-g", "instatunnel"],
+        "brew",
+        ["install", "cloudflared"],
         { env: { ...process.env, PATH: resolvedPath }, timeout: 120_000 },
         (err, _stdout, stderr) => {
           if (err) {
@@ -1007,63 +957,15 @@ const sessionsRouter = t.router({
 // ---------------------------------------------------------------------------
 
 const servicesRouter = t.router({
-  health: publicProcedure.query(async () => {
+  health: publicProcedure.query(() => {
     log.debug("services.health called");
     const tunnel = getTunnelStatus();
     log.debug({ tunnel }, "services.health: tunnel status");
-    let tunnelHealthy = false;
-    let tunnelUrl = tunnel.url;
-    let tunnelRemoteHost: string | undefined;
-    const token = getToken();
-    const localHostname = hostname();
-
-    // Check local tunnel process first
-    if (tunnel.running && tunnel.url) {
-      const urlMatch = tunnel.url.match(/https:\/\/(.+)\.instatunnel\.my/);
-      if (urlMatch) {
-        log.debug("services.health: checking tunnel health for %s", urlMatch[1]);
-        const health = await checkTunnelHealth(urlMatch[1], token);
-        log.debug({ health }, "services.health: tunnel health");
-        tunnelHealthy = health.healthy;
-        // Only report as remote if it's a different machine
-        if (health.remoteHost && health.remoteHost !== localHostname) {
-          tunnelRemoteHost = health.remoteHost;
-        }
-      }
-    }
-
-    // If no local tunnel, check if the configured subdomain is alive remotely
-    // (handles app restart while tunnel is still active on the server)
-    if (!tunnelHealthy) {
-      const settings = loadSettings();
-      const subdomain = (settings as Record<string, unknown>).tunnelSubdomain as string | undefined;
-      log.debug(
-        "services.health: tunnelSubdomain=%s token=%s",
-        subdomain ?? "none",
-        token ? `${token.slice(0, 6)}...` : "null",
-      );
-      if (subdomain) {
-        log.debug("services.health: checking remote subdomain %s", subdomain);
-        const health = await checkTunnelHealth(subdomain, token);
-        log.debug({ health }, "services.health: remote health");
-        if (health.healthy) {
-          tunnelHealthy = true;
-          // Only report as remote if it's a different machine
-          if (health.remoteHost && health.remoteHost !== localHostname) {
-            tunnelRemoteHost = health.remoteHost;
-          }
-          tunnelUrl = `https://${subdomain}.instatunnel.my?token=${token}`;
-        }
-      } else {
-        log.debug("services.health: no tunnelSubdomain configured, skipping remote check");
-      }
-    }
 
     const result = {
       webserver: true,
-      tunnel: tunnelHealthy,
-      tunnel_url: tunnelUrl,
-      tunnel_remote_host: tunnelRemoteHost || tunnel.remoteHost,
+      tunnel: tunnel.running,
+      tunnel_url: tunnel.url,
     };
     log.debug({ result }, "services.health result");
     return result;

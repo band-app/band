@@ -23,7 +23,7 @@ import {
   Save,
   Trash2,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useCapabilities } from "../context";
 import { useUpdateSettings } from "../hooks/use-settings-mutations";
 import { useSettingsQuery } from "../hooks/use-settings-query";
@@ -107,8 +107,33 @@ export function SettingsPage({ onClose }: Props) {
     (settings.notifications?.sound as SoundId) ?? "chime",
   );
   const [labels, setLabels] = useState<LabelDefinition[]>(settings.labels ?? []);
-  const [tunnelSubdomain, setTunnelSubdomain] = useState(settings.tunnelSubdomain ?? "");
   const [autoStartTunnel, setAutoStartTunnel] = useState(settings.autoStartTunnel ?? false);
+
+  const isDirty = useMemo(() => {
+    if (worktreesDir !== (settings.worktreesDir ?? "")) return true;
+    const savedDefaults = settings.defaults ? JSON.stringify(settings.defaults, null, 2) : "";
+    if (defaultsJson !== savedDefaults) return true;
+    if (agentType !== (settings.codingAgent?.type ?? "")) return true;
+    if (agentCommand !== (settings.codingAgent?.command ?? "")) return true;
+    if (webServerPort !== (settings.webServerPort?.toString() ?? "")) return true;
+    if (soundOnNeedsAttention !== (settings.notifications?.soundOnNeedsAttention ?? false))
+      return true;
+    if (selectedSound !== ((settings.notifications?.sound as SoundId) ?? "chime")) return true;
+    if (JSON.stringify(labels) !== JSON.stringify(settings.labels ?? [])) return true;
+    if (autoStartTunnel !== (settings.autoStartTunnel ?? false)) return true;
+    return false;
+  }, [
+    worktreesDir,
+    defaultsJson,
+    agentType,
+    agentCommand,
+    webServerPort,
+    soundOnNeedsAttention,
+    selectedSound,
+    labels,
+    autoStartTunnel,
+    settings,
+  ]);
 
   useEffect(() => {
     setWorktreesDir(settings.worktreesDir ?? "");
@@ -119,7 +144,6 @@ export function SettingsPage({ onClose }: Props) {
     setSoundOnNeedsAttention(settings.notifications?.soundOnNeedsAttention ?? false);
     setSelectedSound((settings.notifications?.sound as SoundId) ?? "chime");
     setLabels(settings.labels ?? []);
-    setTunnelSubdomain(settings.tunnelSubdomain ?? "");
     setAutoStartTunnel(settings.autoStartTunnel ?? false);
   }, [
     settings.worktreesDir,
@@ -128,7 +152,6 @@ export function SettingsPage({ onClose }: Props) {
     settings.webServerPort,
     settings.notifications,
     settings.labels,
-    settings.tunnelSubdomain,
     settings.autoStartTunnel,
   ]);
 
@@ -192,7 +215,6 @@ export function SettingsPage({ onClose }: Props) {
       notifications: { soundOnNeedsAttention, sound: selectedSound },
       labels: labels.length > 0 ? labels : undefined,
       tokenSecret: settings.tokenSecret,
-      tunnelSubdomain: tunnelSubdomain.trim() || undefined,
       autoStartTunnel: autoStartTunnel || undefined,
     });
   };
@@ -200,9 +222,7 @@ export function SettingsPage({ onClose }: Props) {
   const worktreesDirPreview = worktreesDir || "Default";
   const agentPreview = agentType ? AGENT_LABEL[agentType] : "None";
   const defaultsPreview = defaultsJson.trim() ? "Configured" : "None";
-  const portPreview = tunnelSubdomain
-    ? `${tunnelSubdomain}.instatunnel.my`
-    : webServerPort || "3456";
+  const portPreview = webServerPort || "3456";
   const labelsPreview =
     labels.length > 0 ? `${labels.length} label${labels.length === 1 ? "" : "s"}` : "None";
   const notificationsPreview = soundOnNeedsAttention
@@ -231,8 +251,12 @@ export function SettingsPage({ onClose }: Props) {
                 size="icon-sm"
                 onClick={handleSave}
                 disabled={section === "defaults" && !!defaultsError}
+                className="relative"
               >
                 <Save className="size-5" />
+                {isDirty && (
+                  <span className="absolute top-0.5 right-0.5 size-2 rounded-full bg-blue-500" />
+                )}
               </Button>
             </TooltipTrigger>
             <TooltipContent>Save</TooltipContent>
@@ -489,20 +513,6 @@ export function SettingsPage({ onClose }: Props) {
               <p className="text-xs text-muted-foreground">
                 Port the web server listens on for mobile access. Leave empty for the default
                 (3456). Requires restart.
-              </p>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="tunnel-subdomain">Tunnel subdomain</Label>
-              <Input
-                id="tunnel-subdomain"
-                placeholder="e.g., myapp"
-                value={tunnelSubdomain}
-                onChange={(e) => setTunnelSubdomain(e.target.value)}
-              />
-              <p className="text-xs text-muted-foreground">
-                Fixed subdomain for your tunnel URL (e.g., <code className="text-xs">myapp</code>{" "}
-                becomes <code className="text-xs">myapp.instatunnel.my</code>). Requires instatunnel
-                authentication.
               </p>
             </div>
             <div className="space-y-2">

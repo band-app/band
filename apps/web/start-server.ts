@@ -167,11 +167,8 @@ async function main() {
     if (settings.autoStartTunnel) {
       checkPrereqs()
         .then((prereqs) => {
-          if (prereqs.instatunnel) {
-            return startTunnel({
-              port,
-              subdomain: settings.tunnelSubdomain as string | undefined,
-            });
+          if (prereqs.cloudflared) {
+            return startTunnel({ port });
           }
         })
         .catch((err) => {

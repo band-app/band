@@ -8,6 +8,7 @@ export function TunnelToolbarButton() {
   const {
     webServerRunning,
     tunnelUrl,
+    tunnelError,
     setTunnelUrl,
     showPrereq,
     setShowPrereq,
@@ -25,13 +26,19 @@ export function TunnelToolbarButton() {
           <Button
             size="icon-sm"
             variant="ghost"
-            className={webServerRunning ? "text-green-500" : ""}
+            className={tunnelError ? "text-red-500" : webServerRunning ? "text-green-500" : ""}
             onClick={openDialog}
           >
             <Globe className="size-5" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>{webServerRunning ? "Mobile access" : "Start tunnel"}</TooltipContent>
+        <TooltipContent>
+          {tunnelError
+            ? `Tunnel error: ${tunnelError}`
+            : webServerRunning
+              ? "Mobile access"
+              : "Start tunnel"}
+        </TooltipContent>
       </Tooltip>
 
       <PrereqDialog open={showPrereq} onOpenChange={setShowPrereq} onReady={onPrereqReady} />

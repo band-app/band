@@ -24,15 +24,7 @@ interface CIStatus {
 }
 
 export interface StatusEvent {
-  kind:
-    | "update"
-    | "remove"
-    | "snapshot"
-    | "branch-status"
-    | "tunnel-url"
-    | "tunnel-error"
-    | "tunnel-subdomain-taken"
-    | "tunnel-remote-host";
+  kind: "update" | "remove" | "snapshot" | "branch-status" | "tunnel-url" | "tunnel-error";
   status?: WorkspaceStatus;
   statuses?: WorkspaceStatus[];
   workspaceId?: string;
@@ -40,8 +32,6 @@ export interface StatusEvent {
   ci?: CIStatus;
   url?: string;
   error?: string;
-  subdomain?: string;
-  remoteHost?: string;
 }
 
 type StatusListener = (event: StatusEvent) => void;
