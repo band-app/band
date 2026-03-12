@@ -1199,3 +1199,101 @@ describe("tasks.rerun", () => {
     expect(res.status).toBe(404);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Task submit + stream — Tool name resolution with empty text block
+// ---------------------------------------------------------------------------
+
+describe("Task submit + stream — tool name with empty text before tool_use", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    seedState(tmpHome, createDefaultState(tmpHome));
+
+    // Simulate the streaming race condition: the assistant message contains
+    // an empty text block (not yet streamed) before a tool_use block.
+    // The empty text causes the processing loop to break early, so the
+    // tool_use block is never yielded as a tool-use event. The tool_result
+    // then arrives as an orphan. The fix ensures the tool name is still
+    // resolved from a pre-scan of the content array.
+    const scenarioPath = writeScenario(tmpHome, [
+      {
+        type: "system",
+        subtype: "init",
+        session_id: "empty-text-session",
+      },
+      {
+        type: "assistant",
+        message: {
+          content: [
+            { type: "text", text: "" },
+            {
+              type: "tool_use",
+              id: "tool-empty-1",
+              name: "Bash",
+              input: { command: "ls -la" },
+            },
+          ],
+        },
+      },
+      {
+        type: "user",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "tool-empty-1",
+              content: "file1.txt\nfile2.txt",
+              is_error: false,
+            },
+          ],
+        },
+      },
+      {
+        type: "assistant",
+        message: {
+          content: [{ type: "text", text: "Here are the files." }],
+        },
+      },
+      {
+        type: "result",
+        subtype: "success",
+        session_id: "empty-text-session",
+        duration_ms: 800,
+        num_turns: 1,
+        total_cost_usd: 0.02,
+      },
+    ]);
+
+    seedSettings(tmpHome, {
+      tokenSecret: DEFAULT_TOKEN,
+      codingAgent: { type: "claude-code", command: FAKE_AGENT_PATH },
+    });
+
+    server = await startServer({ tmpHome, scenarioPath });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("resolves tool name even when empty text block precedes tool_use", async () => {
+    const { submitRes, events } = await submitAndStream(
+      server.url,
+      "testproject-main",
+      "list files",
+    );
+    expect(submitRes.status).toBe(200);
+
+    const toolInputEvents = events.filter((e) => e.event === "tool-input-available");
+    expect(toolInputEvents.length).toBeGreaterThan(0);
+
+    // The tool name must be "Bash", not the fallback "tool"
+    const toolEvent = toolInputEvents[0].data as Record<string, unknown>;
+    expect(toolEvent.toolName).toBe("Bash");
+    expect(toolEvent.toolCallId).toBe("tool-empty-1");
+  });
+});
