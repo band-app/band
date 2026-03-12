@@ -13,12 +13,17 @@ const DEFAULT_WEB_SERVER_PORT: u16 = 3456;
 // ---------------------------------------------------------------------------
 
 fn resolve_web_dir() -> Result<std::path::PathBuf, String> {
-    // 1. Dev: CARGO_MANIFEST_DIR (compile-time)
-    let compile_time =
-        option_env!("CARGO_MANIFEST_DIR").map(|d| std::path::Path::new(d).join("../../web"));
-    if let Some(ref p) = compile_time {
-        if p.join("dist/server/server.js").exists() {
-            return Ok(p.clone());
+    // 1. Dev only: CARGO_MANIFEST_DIR (compile-time).
+    //    In release builds this is skipped so the DMG never accidentally
+    //    picks up the source repo's dist/ folder.
+    #[cfg(debug_assertions)]
+    {
+        let compile_time =
+            option_env!("CARGO_MANIFEST_DIR").map(|d| std::path::Path::new(d).join("../../web"));
+        if let Some(ref p) = compile_time {
+            if p.join("dist/server/server.js").exists() {
+                return Ok(p.clone());
+            }
         }
     }
 
