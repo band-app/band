@@ -219,11 +219,20 @@ fn detect_frontmost_workspace(app_state: &state::AppState) -> Option<String> {
     //    we know immediately which workspace it belongs to. This handles
     //    Cmd+` switching, iTerm (where title matching fails), and any app
     //    whose window we previously opened.
+    //
+    //    Cross-check against the window title to detect stale registry entries:
+    //    CGWindowIDs can be recycled after an app restart, so a persisted entry
+    //    might match a window that now belongs to a different workspace.
     if let Some(cg_id) = cg_id {
         if let Some((_app_type, workspace_id)) = WindowManager::global().find_by_cg_id(cg_id) {
-            // Verify the workspace still exists in current state
-            if find_workspace(&workspace_id, app_state).is_some() {
-                return Some(workspace_id);
+            if let Some((_proj, wt)) = find_workspace(&workspace_id, app_state) {
+                let folder_name = Path::new(&wt.path)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("");
+                if title.is_empty() || folder_name.is_empty() || title.contains(folder_name) {
+                    return Some(workspace_id);
+                }
             }
         }
     }
