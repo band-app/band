@@ -125,6 +125,13 @@ export function useRemoveWorkspace() {
     mutationFn: ({ project, branch }: { project: string; branch: string }) =>
       adapter.removeWorkspace(project, branch),
     onMutate: async ({ project, branch }) => {
+      // Capture whether the deleted workspace is currently active BEFORE the
+      // mutation runs. The Hybrid adapter closes IDE windows during
+      // removeWorkspace, which can trigger focus polling to update
+      // activeWorkspaceId to a different workspace before onSuccess fires.
+      const deletedWorkspaceId = toWorkspaceId(project, branch);
+      const wasActive = store.getState().activeWorkspaceId === deletedWorkspaceId;
+
       await queryClient.cancelQueries({ queryKey: queryKeys.projects });
       const previous = queryClient.getQueryData<ProjectInfo[]>(queryKeys.projects);
       if (previous) {
@@ -135,12 +142,10 @@ export function useRemoveWorkspace() {
         );
         queryClient.setQueryData(queryKeys.projects, updated);
       }
-      return { previous };
+      return { previous, wasActive };
     },
-    onSuccess: (_data, { project, branch }) => {
-      const activeWorkspaceId = store.getState().activeWorkspaceId;
-      const deletedWorkspaceId = toWorkspaceId(project, branch);
-      if (activeWorkspaceId === deletedWorkspaceId) {
+    onSuccess: (_data, { project }, context) => {
+      if (context?.wasActive) {
         const projects = queryClient.getQueryData<ProjectInfo[]>(queryKeys.projects);
         const projectInfo = projects?.find((p) => p.name === project);
         if (projectInfo) {
