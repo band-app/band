@@ -1297,3 +1297,97 @@ describe("Task submit + stream — tool name with empty text before tool_use", (
     expect(toolEvent.toolCallId).toBe("tool-empty-1");
   });
 });
+
+// ---------------------------------------------------------------------------
+// tasks.stream — Reconnect replays data-prompt for deduplication
+// ---------------------------------------------------------------------------
+
+describe("tasks.stream — reconnect replays data-prompt for deduplication", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    seedState(tmpHome, createDefaultState(tmpHome));
+
+    const scenarioPath = writeScenario(tmpHome, [
+      {
+        type: "system",
+        subtype: "init",
+        session_id: "reconnect-session",
+      },
+      {
+        type: "assistant",
+        message: {
+          content: [{ type: "text", text: "Working on the fix..." }],
+        },
+      },
+      {
+        type: "result",
+        subtype: "success",
+        session_id: "reconnect-session",
+        duration_ms: 500,
+        num_turns: 1,
+        total_cost_usd: 0.01,
+      },
+    ]);
+
+    seedSettings(tmpHome, {
+      tokenSecret: DEFAULT_TOKEN,
+      codingAgent: { type: "claude-code", command: FAKE_AGENT_PATH },
+    });
+
+    server = await startServer({ tmpHome, scenarioPath });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("replays data-prompt with the exact prompt text when reconnecting after task completes", async () => {
+    const workspaceId = "testproject-main";
+    const prompt = "fix the auth bug";
+
+    // Submit the task
+    const submitRes = await trpcMutate(server.url, "tasks.submit", { workspaceId, prompt });
+    expect(submitRes.status).toBe(200);
+
+    // Wait for the task to complete
+    await waitFor(async () => {
+      const res = await trpcQuery(server.url, "tasks.get", { workspaceId });
+      const data = await trpcData<{ task?: { status: string } }>(res);
+      return data.task?.status !== "running";
+    });
+
+    // Reconnect to the stream (simulates navigating back to the chat)
+    const streamRes = await trpcSubscription(server.url, "tasks.stream", { workspaceId });
+    expect(streamRes.status).toBe(200);
+    const events = await parseTrpcSSEStream(streamRes);
+
+    // The data-prompt chunk must be the first event and contain the exact prompt
+    // text. The client uses this to deduplicate with session history.
+    const dataPromptEvents = events.filter((e) => e.event === "data-prompt");
+    expect(dataPromptEvents.length).toBe(1);
+
+    const promptChunk = dataPromptEvents[0].data as Record<string, unknown>;
+    const promptData = promptChunk.data as Record<string, unknown>;
+    expect(promptData.text).toBe(prompt);
+
+    // The stream should also contain the assistant's response and finish
+    const eventTypes = events.map((e) => e.event).filter(Boolean) as string[];
+    expect(eventTypes).toContain("text-delta");
+    expect(eventTypes).toContain("finish");
+  });
+
+  it("does not duplicate data-prompt across buffer replay and live events", async () => {
+    // The task already completed above; reconnecting again should still
+    // yield exactly one data-prompt chunk (no accumulation).
+    const streamRes = await trpcSubscription(server.url, "tasks.stream", {
+      workspaceId: "testproject-main",
+    });
+    const events = await parseTrpcSSEStream(streamRes);
+    const dataPromptEvents = events.filter((e) => e.event === "data-prompt");
+    expect(dataPromptEvents.length).toBe(1);
+  });
+});
