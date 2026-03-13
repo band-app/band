@@ -215,17 +215,6 @@ export function ChatView({
     return map;
   }, [messages]);
 
-  if (supportsSessionListing && showSessionList) {
-    return (
-      <SessionList
-        workspaceId={workspaceId}
-        activeSessionId={activeSessionId ?? sessionIdRef.current}
-        onSelectSession={handleSelectSession}
-        onNewSession={handleNewSession}
-      />
-    );
-  }
-
   // When reconnecting to a stream, the buffered chunks replay the current
   // task's content which overlaps with the tail of the session history.
   // Strip the overlapping turn from history so each message appears once.
@@ -254,9 +243,19 @@ export function ChatView({
   const hasLiveMessages = messages.length > 0;
   // Show the reconnected prompt as a user message when the stream is
   // providing the current task (no user message in live stream).
-  const showReconnectedPrompt =
-    reconnectedPrompt && !messages.some((m) => m.role === "user");
+  const showReconnectedPrompt = reconnectedPrompt && !messages.some((m) => m.role === "user");
   const isEmpty = !hasHistory && !hasLiveMessages && !showReconnectedPrompt;
+
+  if (supportsSessionListing && showSessionList) {
+    return (
+      <SessionList
+        workspaceId={workspaceId}
+        activeSessionId={activeSessionId ?? sessionIdRef.current}
+        onSelectSession={handleSelectSession}
+        onNewSession={handleNewSession}
+      />
+    );
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
