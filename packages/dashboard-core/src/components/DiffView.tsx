@@ -5,6 +5,7 @@ import type { FileStatus, WorkspaceDiff } from "../types";
 
 interface DiffViewProps {
   workspaceId: string;
+  active?: boolean;
 }
 
 interface ParsedFile {
@@ -180,8 +181,8 @@ function DiffFileContent({ hunks, filename }: { hunks: string; filename: string 
     highlighted ?? diffLines.map((l) => ({ type: l.type, tokens: [{ content: l.text }] }));
 
   return (
-    <div className="overflow-x-auto">
-      <pre className="text-xs leading-5">
+    <pre className="overflow-x-auto text-xs leading-5">
+      <code className="block w-max min-w-full">
         {lines.map((line, lineIdx) => (
           <div
             // biome-ignore lint/suspicious/noArrayIndexKey: diff lines have no stable id
@@ -209,12 +210,12 @@ function DiffFileContent({ hunks, filename }: { hunks: string; filename: string 
                 ))}
           </div>
         ))}
-      </pre>
-    </div>
+      </code>
+    </pre>
   );
 }
 
-export function DiffView({ workspaceId }: DiffViewProps) {
+export function DiffView({ workspaceId, active = true }: DiffViewProps) {
   const adapter = useAdapter();
   const [data, setData] = useState<WorkspaceDiff | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -229,21 +230,31 @@ export function DiffView({ workspaceId }: DiffViewProps) {
     }
 
     let cancelled = false;
-    adapter
-      .getWorkspaceDiff(workspaceId)
-      .then((result) => {
-        if (!cancelled) setData(result);
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load diff");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+    const fetchDiff = () => {
+      adapter
+        .getWorkspaceDiff(workspaceId)
+        .then((result) => {
+          if (!cancelled) {
+            setData(result);
+            setError(null);
+          }
+        })
+        .catch((err) => {
+          if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load diff");
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+    };
+
+    fetchDiff();
+    const interval = active ? setInterval(fetchDiff, 15_000) : undefined;
+
     return () => {
       cancelled = true;
+      if (interval) clearInterval(interval);
     };
-  }, [adapter, workspaceId]);
+  }, [adapter, workspaceId, active]);
 
   if (loading) {
     return (
@@ -284,6 +295,18 @@ export function DiffView({ workspaceId }: DiffViewProps) {
     });
   };
 
+  const navigateToFile = (filename: string) => {
+    setOpenFiles((prev) => {
+      const next = new Set(prev);
+      next.add(filename);
+      return next;
+    });
+    setTimeout(() => {
+      const el = document.getElementById(`diff-file-${encodeURIComponent(filename)}`);
+      el?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 0);
+  };
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <div className="shrink-0 border-b border-border/50 px-4 py-3">
@@ -297,15 +320,32 @@ export function DiffView({ workspaceId }: DiffViewProps) {
             <span className="ml-1 text-red-400">-{data.stats.deletions}</span>
           )}
         </div>
-        <div className="mt-1 text-sm text-muted-foreground">
+        <div className="mt-1 text-xs text-muted-foreground">
           {data.baseBranch} ← {data.headBranch}
+        </div>
+        <div className="mt-2 flex max-h-28 flex-col gap-0.5 overflow-y-auto">
+          {files.map((file) => (
+            <button
+              key={file.filename}
+              type="button"
+              onClick={() => navigateToFile(file.filename)}
+              className="flex items-center gap-1.5 rounded px-1 py-0.5 text-left text-xs hover:bg-accent/50"
+            >
+              <FileStatusBadge status={fileStatuses[file.filename]} />
+              <span className="truncate font-mono text-muted-foreground">{file.filename}</span>
+            </button>
+          ))}
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {files.map((file) => {
           const isOpen = openFiles.has(file.filename);
           return (
-            <div key={file.filename} className="border-b border-border/30">
+            <div
+              key={file.filename}
+              id={`diff-file-${encodeURIComponent(file.filename)}`}
+              className="border-b border-border/30"
+            >
               <button
                 type="button"
                 onClick={() => toggleFile(file.filename)}

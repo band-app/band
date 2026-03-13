@@ -41,6 +41,7 @@ function ChatPage() {
   const [initialSessionId, setInitialSessionId] = useState<string | undefined>(undefined);
   const [showSessionList, setShowSessionList] = useState(false);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("chat");
+  const [diffFileCount, setDiffFileCount] = useState(0);
   const isTasksWindow = useRef<boolean | null>(null);
   const navigate = useNavigate();
   const appHeight = useAppHeight();
@@ -83,6 +84,24 @@ function ChatPage() {
     };
   }, [decoded]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const fetchCount = () => {
+      trpc.workspace.getDiff
+        .query({ workspaceId: decoded })
+        .then((result) => {
+          if (!cancelled) setDiffFileCount(result.stats?.filesChanged ?? 0);
+        })
+        .catch(() => {});
+    };
+    fetchCount();
+    const interval = setInterval(fetchCount, 15_000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [decoded]);
+
   const handleToggleSessionList = useCallback(() => {
     setShowSessionList((prev) => !prev);
   }, []);
@@ -113,7 +132,11 @@ function ChatPage() {
           </button>
         )}
       </header>
-      <WorkspaceTabNav activeTab={activeTab} onTabChange={setActiveTab} />
+      <WorkspaceTabNav
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        diffFileCount={diffFileCount}
+      />
       <main className="flex min-h-0 flex-1 flex-col">
         <div className={activeTab === "chat" ? "flex min-h-0 flex-1 flex-col" : "hidden"}>
           <ChatView
@@ -127,7 +150,7 @@ function ChatPage() {
         </div>
         <DashboardProvider adapter={adapter} capabilities={capabilities}>
           <div className={activeTab === "diff" ? "min-h-0 flex-1" : "hidden"}>
-            <DiffView workspaceId={decoded} />
+            <DiffView workspaceId={decoded} active={activeTab === "diff"} />
           </div>
           <div className={activeTab === "code" ? "min-h-0 flex-1" : "hidden"}>
             <CodeBrowserView workspaceId={decoded} />

@@ -5,6 +5,7 @@ export type WorkspaceTab = "chat" | "diff" | "code";
 interface WorkspaceTabNavProps {
   activeTab: WorkspaceTab;
   onTabChange: (tab: WorkspaceTab) => void;
+  diffFileCount?: number;
 }
 
 const tabs: { id: WorkspaceTab; label: string; icon: typeof MessageSquare }[] = [
@@ -13,12 +14,13 @@ const tabs: { id: WorkspaceTab; label: string; icon: typeof MessageSquare }[] = 
   { id: "code", label: "Code", icon: Code },
 ];
 
-export function WorkspaceTabNav({ activeTab, onTabChange }: WorkspaceTabNavProps) {
+export function WorkspaceTabNav({ activeTab, onTabChange, diffFileCount }: WorkspaceTabNavProps) {
   return (
     <div className="flex shrink-0 border-b border-border">
       {tabs.map((tab) => {
         const Icon = tab.icon;
         const isActive = activeTab === tab.id;
+        const badge = tab.id === "diff" && diffFileCount != null && diffFileCount > 0;
         return (
           <button
             key={tab.id}
@@ -32,6 +34,11 @@ export function WorkspaceTabNav({ activeTab, onTabChange }: WorkspaceTabNavProps
           >
             <Icon className="size-4" />
             {tab.label}
+            {badge && (
+              <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-muted px-1.5 text-xs font-medium">
+                {diffFileCount}
+              </span>
+            )}
           </button>
         );
       })}
