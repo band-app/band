@@ -1,7 +1,7 @@
 ---
 name: web-test
-description: Test the Band web application by starting the dev server, navigating pages, and taking screenshots using agent-browser. Use when the user asks to "test the web app", "take screenshots of the app", "check how the app looks", "visual test", "test the UI", or "screenshot the pages".
-allowed-tools: Bash(pnpm dev:web*), Bash(lsof *), Bash(kill *), Bash(npx agent-browser:*), Bash(agent-browser:*), Bash(curl *), Read
+description: Tests the Band web application by starting the dev server, navigating pages, and capturing screenshots using agent-browser. Use when asked to test the web app, take screenshots, check how the app looks, visual test, test the UI, screenshot pages, browser test, visual regression, or verify the layout. Does NOT run unit tests, integration tests, or modify application code.
+allowed-tools: Bash(pnpm dev:web*), Bash(lsof *), Bash(kill *), Bash(npx agent-browser *), Bash(agent-browser *), Bash(curl *), Read
 ---
 
 # Web App Testing with Screenshots

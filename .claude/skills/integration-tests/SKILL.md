@@ -1,6 +1,6 @@
 ---
 name: integration-tests
-description: Write integration tests that exercise the real system as a client or user would. Black-box only — never modify production code, never mock what you own, use real infrastructure (test containers for databases, real servers on random ports, real CLIs on temp filesystems) and MSW for external network boundaries.
+description: Writes black-box integration tests that exercise the real system through public interfaces. Covers HTTP APIs, CLIs, streaming endpoints, and file-based services using real infrastructure (test containers, real servers on random ports, temp filesystems) and MSW for external boundaries. Use when asked to write tests, add test coverage, create integration tests, add specs, or test an endpoint. Does NOT write unit tests with mocks or E2E browser tests.
 ---
 
 # Integration Tests
