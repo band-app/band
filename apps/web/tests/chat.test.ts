@@ -4,6 +4,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { WebSocket } from "ws";
 
 const PROJECT_ROOT = join(import.meta.dirname, "..");
 const FAKE_AGENT_PATH = join(import.meta.dirname, "fake-agent.mjs");
@@ -272,6 +273,100 @@ async function submitAndStream(
   const events = await parseTrpcSSEStream(streamRes);
 
   return { submitRes, streamRes, events };
+}
+
+// ---------------------------------------------------------------------------
+// WebSocket helpers (tRPC JSON-RPC over WebSocket)
+// ---------------------------------------------------------------------------
+
+interface WSMessage {
+  id: number;
+  jsonrpc: string;
+  result?: { type: string; data?: unknown };
+  error?: unknown;
+}
+
+/**
+ * Subscribe to a tRPC procedure over WebSocket and collect data messages.
+ * Returns collected data events once the subscription completes or times out.
+ */
+function wsSubscribe(
+  serverUrl: string,
+  procedure: string,
+  input: unknown,
+  opts?: { headers?: Record<string, string>; timeoutMs?: number },
+): Promise<{ messages: WSMessage[]; events: SSEEvent[] }> {
+  const wsUrl = `${serverUrl.replace(/^http/, "ws")}/trpc`;
+  const timeout = opts?.timeoutMs ?? 5000;
+
+  return new Promise((resolve) => {
+    const ws = new WebSocket(wsUrl, { headers: opts?.headers ?? defaultHeaders });
+    const messages: WSMessage[] = [];
+    const events: SSEEvent[] = [];
+    let timer: ReturnType<typeof setTimeout>;
+
+    function finish() {
+      clearTimeout(timer);
+      ws.close();
+      resolve({ messages, events });
+    }
+
+    ws.on("open", () => {
+      ws.send(
+        JSON.stringify({
+          id: 1,
+          jsonrpc: "2.0",
+          method: "subscription",
+          params: { path: procedure, input },
+        }),
+      );
+    });
+
+    ws.on("message", (raw: Buffer) => {
+      const msg = JSON.parse(raw.toString()) as WSMessage;
+      messages.push(msg);
+
+      if (msg.result?.type === "data" && msg.result.data !== undefined) {
+        const data = msg.result.data;
+        const event =
+          typeof data === "object" && data !== null
+            ? ((data as Record<string, unknown>).type as string)
+            : null;
+        if (event) {
+          events.push({ event, data });
+        }
+      }
+
+      // "stopped" means the subscription completed server-side
+      if (msg.result?.type === "stopped") {
+        finish();
+      }
+    });
+
+    ws.on("error", () => finish());
+    ws.on("close", () => finish());
+    timer = setTimeout(finish, timeout);
+  });
+}
+
+/**
+ * Submit a task and stream results over WebSocket.
+ */
+async function wsSubmitAndStream(
+  serverUrl: string,
+  workspaceId: string,
+  prompt: string,
+): Promise<{ submitRes: Response; events: SSEEvent[] }> {
+  const submitRes = await trpcMutate(serverUrl, "tasks.submit", { workspaceId, prompt });
+
+  if (!submitRes.ok) {
+    return { submitRes, events: [] };
+  }
+
+  await new Promise((r) => setTimeout(r, 100));
+
+  const { events } = await wsSubscribe(serverUrl, "tasks.stream", { workspaceId });
+  return { submitRes, events };
 }
 
 // ---------------------------------------------------------------------------
@@ -1389,5 +1484,86 @@ describe("tasks.stream — reconnect replays data-prompt for deduplication", () 
     const events = await parseTrpcSSEStream(streamRes);
     const dataPromptEvents = events.filter((e) => e.event === "data-prompt");
     expect(dataPromptEvents.length).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// WebSocket transport — tasks.stream
+// ---------------------------------------------------------------------------
+
+describe("tasks.stream via WebSocket — no active task", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    seedState(tmpHome, createDefaultState(tmpHome));
+    seedSettings(tmpHome, defaultSettings());
+    server = await startServer({ tmpHome });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("completes immediately with no data events when no task exists", async () => {
+    const { events } = await wsSubscribe(server.url, "tasks.stream", {
+      workspaceId: "testproject-main",
+    });
+    expect(events).toEqual([]);
+  });
+});
+
+describe("tasks.stream via WebSocket — streaming", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    seedState(tmpHome, createDefaultState(tmpHome));
+
+    const scenarioPath = writeScenario(tmpHome, [
+      {
+        type: "system",
+        subtype: "init",
+        session_id: "ws-test-session",
+      },
+      {
+        type: "assistant",
+        message: {
+          content: [{ type: "text", text: "Hello via WebSocket!" }],
+        },
+      },
+      {
+        type: "result",
+        subtype: "success",
+        session_id: "ws-test-session",
+        duration_ms: 100,
+        num_turns: 1,
+        total_cost_usd: 0.01,
+      },
+    ]);
+
+    seedSettings(tmpHome, {
+      tokenSecret: DEFAULT_TOKEN,
+      codingAgent: { type: "claude-code", command: FAKE_AGENT_PATH },
+    });
+
+    server = await startServer({ tmpHome, scenarioPath });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("streams UIMessageChunk events over WebSocket", async () => {
+    const { submitRes, events } = await wsSubmitAndStream(server.url, "testproject-main", "hello");
+    expect(submitRes.status).toBe(200);
+
+    const eventTypes = events.map((e) => e.event);
+    expect(eventTypes).toContain("text-delta");
+    expect(eventTypes).toContain("finish");
   });
 });

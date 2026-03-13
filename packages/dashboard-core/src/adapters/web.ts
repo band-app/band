@@ -1,4 +1,4 @@
-import { createTRPCClient, httpBatchLink, httpSubscriptionLink, splitLink } from "@trpc/client";
+import { createTRPCClient, createWSClient, httpBatchLink, splitLink, wsLink } from "@trpc/client";
 import type { DashboardAdapter, PlatformCapabilities, Unsubscribe } from "../adapter";
 import type { SSEEvent } from "../lib/sse";
 import type {
@@ -14,6 +14,13 @@ import type {
   WorkspaceStatus,
 } from "../types";
 
+const wsClient = createWSClient({
+  url: () => {
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    return `${proto}//${location.host}/trpc`;
+  },
+});
+
 export class WebDashboardAdapter implements DashboardAdapter {
   // The AppRouter type lives in apps/web which cannot be imported here
   // (circular dep). Type safety comes from the DashboardAdapter interface.
@@ -22,7 +29,7 @@ export class WebDashboardAdapter implements DashboardAdapter {
     links: [
       splitLink({
         condition: (op) => op.type === "subscription",
-        true: httpSubscriptionLink({ url: "/trpc" }),
+        true: wsLink({ client: wsClient }),
         false: httpBatchLink({ url: "/trpc" }),
       }),
     ],

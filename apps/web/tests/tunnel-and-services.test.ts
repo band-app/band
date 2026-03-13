@@ -4,6 +4,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { WebSocket } from "ws";
 
 const PROJECT_ROOT = join(import.meta.dirname, "..");
 const DEFAULT_TOKEN = "test-token-for-services";
@@ -489,5 +490,119 @@ describe("Tunnel and service endpoints require auth when token is set", () => {
       headers: { Cookie: authCookie(TOKEN) },
     });
     expect(res.status).toBe(200);
+  });
+
+  it("destroys WebSocket upgrade without auth cookie", async () => {
+    const wsUrl = `${server.url.replace(/^http/, "ws")}/trpc`;
+    const ws = new WebSocket(wsUrl);
+    const result = await new Promise<string>((resolve) => {
+      ws.on("open", () => resolve("open"));
+      ws.on("error", () => resolve("error"));
+      ws.on("close", () => resolve("closed"));
+      setTimeout(() => resolve("timeout"), 3000);
+    });
+    expect(result).not.toBe("open");
+  });
+
+  it("accepts WebSocket upgrade with valid auth cookie", async () => {
+    const wsUrl = `${server.url.replace(/^http/, "ws")}/trpc`;
+    const ws = new WebSocket(wsUrl, { headers: { Cookie: authCookie(TOKEN) } });
+    const result = await new Promise<string>((resolve) => {
+      ws.on("open", () => {
+        ws.close();
+        resolve("open");
+      });
+      ws.on("error", () => resolve("error"));
+      setTimeout(() => resolve("timeout"), 3000);
+    });
+    expect(result).toBe("open");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// WebSocket transport — status.stream subscription
+// ---------------------------------------------------------------------------
+
+describe("tRPC status.stream subscription via WebSocket", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    seedState(tmpHome, createDefaultState(tmpHome));
+    seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
+    server = await startServer({ tmpHome });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("connects and receives subscription data over WebSocket", async () => {
+    const wsUrl = `${server.url.replace(/^http/, "ws")}/trpc`;
+    const ws = new WebSocket(wsUrl, {
+      headers: { Cookie: authCookie(DEFAULT_TOKEN) },
+    });
+
+    interface WSMsg {
+      result?: { type: string; data?: { kind: string } };
+    }
+
+    const messages: WSMsg[] = [];
+    const result = await new Promise<{ status: string; messages: WSMsg[] }>((resolve) => {
+      ws.on("open", () => {
+        ws.send(
+          JSON.stringify({
+            id: 1,
+            jsonrpc: "2.0",
+            method: "subscription",
+            params: { path: "status.stream", input: null },
+          }),
+        );
+      });
+
+      ws.on("message", (raw: Buffer) => {
+        const msg = JSON.parse(raw.toString()) as WSMsg;
+        messages.push(msg);
+
+        // Collect a few data messages then stop
+        const dataMessages = messages.filter((m) => m.result?.type === "data");
+        if (dataMessages.length >= 2) {
+          ws.close();
+          resolve({ status: "success", messages });
+        }
+      });
+
+      ws.on("error", () => resolve({ status: "error", messages }));
+      setTimeout(() => {
+        ws.close();
+        resolve({ status: messages.length > 0 ? "success" : "timeout", messages });
+      }, 5000);
+    });
+
+    expect(result.status).toBe("success");
+    expect(result.messages.length).toBeGreaterThanOrEqual(2);
+
+    // First message should be "started"
+    expect(result.messages[0].result?.type).toBe("started");
+
+    // Remaining messages should be "data" with status events
+    const dataMessages = result.messages.slice(1).filter((m) => m.result?.type === "data");
+    expect(dataMessages.length).toBeGreaterThanOrEqual(1);
+
+    // Each data message should have a known status event kind
+    const kinds = dataMessages.map((m) => m.result?.data?.kind);
+    const validKinds = [
+      "snapshot",
+      "update",
+      "remove",
+      "branch-status",
+      "tunnel-url",
+      "tunnel-error",
+    ];
+    for (const kind of kinds) {
+      expect(validKinds).toContain(kind);
+    }
   });
 });

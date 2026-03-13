@@ -2,7 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { hostname } from "node:os";
 
-function parseCookies(req: IncomingMessage): Record<string, string> {
+export function parseCookies(req: IncomingMessage): Record<string, string> {
   const header = req.headers.cookie || "";
   const cookies: Record<string, string> = {};
   for (const pair of header.split(";")) {
@@ -12,7 +12,7 @@ function parseCookies(req: IncomingMessage): Record<string, string> {
   return cookies;
 }
 
-function tokensEqual(a: string | undefined, b: string): boolean {
+export function tokensEqual(a: string | undefined, b: string): boolean {
   if (!a || !b) return false;
   const bufA = Buffer.from(a);
   const bufB = Buffer.from(b);

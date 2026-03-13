@@ -2,8 +2,10 @@ import { appendFileSync, createReadStream, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { basename, extname, join } from "node:path";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
+import { applyWSSHandler } from "@trpc/server/adapters/ws";
 import sirv from "sirv";
-import { createAuthMiddleware } from "./auth.ts";
+import { WebSocketServer } from "ws";
+import { createAuthMiddleware, parseCookies, tokensEqual } from "./auth.ts";
 import { stopBranchStatusPoller } from "./src/lib/branch-status-poller.ts";
 import { startCronjobScheduler, stopCronjobScheduler } from "./src/lib/cronjob-scheduler.ts";
 import { checkPrereqs } from "./src/lib/process-utils.ts";
@@ -45,7 +47,7 @@ process.on("uncaughtException", (error: Error) => {
 const clientDir = join(import.meta.dirname, "client");
 const port = parseInt(process.env.PORT || "3456", 10);
 
-const { handleAuth } = createAuthMiddleware(getOrCreateToken());
+const { handleAuth, expectedToken } = createAuthMiddleware(getOrCreateToken());
 
 const assets = sirv(clientDir, {
   maxAge: 31536000,
@@ -194,11 +196,32 @@ async function main() {
     });
   });
 
+  // ---------------------------------------------------------------------------
+  // WebSocket server for tRPC subscriptions
+  // ---------------------------------------------------------------------------
+  const wss = new WebSocketServer({ noServer: true });
+  const wssHandler = applyWSSHandler({ wss, router: appRouter, createContext });
+
+  httpServer.on("upgrade", (req, socket, head) => {
+    // Auth check: validate band_token cookie (skip if no token configured)
+    if (expectedToken) {
+      const cookies = parseCookies(req);
+      if (!tokensEqual(cookies.band_token, expectedToken)) {
+        socket.destroy();
+        return;
+      }
+    }
+
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit("connection", ws, req);
+    });
+  });
+
   httpServer.listen(port, "0.0.0.0", () => {
     console.log(`Web server listening on http://0.0.0.0:${port}`);
 
     // Branch status poller is started lazily by the watcher
-    // when the first SSE subscriber connects.
+    // when the first subscriber connects.
 
     // Auto-start tunnel if configured
     const settings = loadSettings() as Record<string, unknown>;
@@ -220,6 +243,8 @@ async function main() {
     stopBranchStatusPoller();
     stopCronjobScheduler();
     await stopTunnel().catch(() => {});
+    wssHandler.broadcastReconnectNotification();
+    wss.close();
     httpServer.close();
     process.exit(0);
   };
