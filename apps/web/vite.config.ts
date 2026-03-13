@@ -4,6 +4,7 @@ import tailwindcss from "@tailwindcss/vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
+import { WebSocketServer } from "ws";
 
 const log = createLogger("vite-plugin");
 
@@ -29,6 +30,30 @@ function trpcDevPlugin(): Plugin {
         });
       });
 
+      // WebSocket server for tRPC subscriptions (no auth in dev mode)
+      const wss = new WebSocketServer({ noServer: true });
+      let wssHandlerInitialized = false;
+
+      server.httpServer?.on("upgrade", async (req, socket, head) => {
+        // Let Vite handle its own HMR WebSocket upgrades
+        if (req.headers["sec-websocket-protocol"]?.includes("vite-hmr")) return;
+
+        if (!wssHandlerInitialized) {
+          const [{ applyWSSHandler }, { createContext }, { appRouter }] = (await Promise.all([
+            server.ssrLoadModule("@trpc/server/adapters/ws"),
+            server.ssrLoadModule("./src/trpc/context"),
+            server.ssrLoadModule("./src/trpc/router"),
+            // biome-ignore lint/suspicious/noExplicitAny: ssrLoadModule returns untyped modules
+          ])) as [any, any, any];
+          applyWSSHandler({ wss, router: appRouter, createContext });
+          wssHandlerInitialized = true;
+        }
+
+        wss.handleUpgrade(req, socket, head, (ws) => {
+          wss.emit("connection", ws, req);
+        });
+      });
+
       // Auto-start tunnel if configured
       server.ssrLoadModule("./src/lib/state").then(async ({ loadSettings }) => {
         const settings = loadSettings() as Record<string, unknown>;
@@ -45,8 +70,9 @@ function trpcDevPlugin(): Plugin {
         });
       });
 
-      // Clean up tunnel on dev server shutdown
+      // Clean up tunnel and WebSocket server on dev server shutdown
       server.httpServer?.on("close", () => {
+        wss.close();
         server.ssrLoadModule("./src/lib/tunnel").then(({ stopTunnel }) => {
           stopTunnel().catch(() => {});
         });

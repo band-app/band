@@ -7,6 +7,8 @@
  */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
+import { applyWSSHandler } from "@trpc/server/adapters/ws";
+import { WebSocketServer } from "ws";
 import { createContext } from "./src/trpc/context.ts";
 import { appRouter } from "./src/trpc/router.ts";
 
@@ -61,6 +63,10 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
   res.end(text);
 });
 
+// WebSocket server for tRPC subscriptions (no auth — test server)
+const wss = new WebSocketServer({ server });
+const wssHandler = applyWSSHandler({ wss, router: appRouter, createContext });
+
 server.listen(port, "127.0.0.1", () => {
   const addr = server.address();
   if (addr && typeof addr === "object") {
@@ -70,6 +76,8 @@ server.listen(port, "127.0.0.1", () => {
 });
 
 process.on("SIGTERM", () => {
+  wssHandler.broadcastReconnectNotification();
+  wss.close();
   server.close();
   process.exit(0);
 });
