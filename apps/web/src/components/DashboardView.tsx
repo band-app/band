@@ -1,3 +1,4 @@
+import type { PlatformCapabilities } from "@band/dashboard-core";
 import { DashboardProvider, DashboardShell } from "@band/dashboard-core";
 import {
   HybridDashboardAdapter,
@@ -7,12 +8,29 @@ import { Button, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from
 import { Link } from "@tanstack/react-router";
 import { ListTodo, Timer } from "lucide-react";
 import { useCallback } from "react";
+import { useIsDesktop } from "../hooks/useIsDesktop";
+import { DesktopLayout } from "./DesktopLayout";
 import { TunnelToolbarButton } from "./TunnelToolbarButton";
 
 const adapter = new HybridDashboardAdapter();
 const capabilities = new NativeShellCapabilities();
 
 const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
+/**
+ * On desktop web (non-Tauri), getWorkspaceHref returns undefined so that
+ * WorkspaceCard uses onClick → openWorkspace (zustand) instead of <a> navigation.
+ * This enables the three-panel layout where workspace selection is inline.
+ */
+class DesktopWebCapabilities implements PlatformCapabilities {
+  copyPath = false;
+
+  getWorkspaceHref(_workspaceId: string): string | undefined {
+    return undefined;
+  }
+}
+
+const desktopCapabilities = new DesktopWebCapabilities();
 
 function TasksButton() {
   const handleClick = useCallback(async () => {
@@ -47,28 +65,37 @@ function TasksButton() {
   );
 }
 
-export function DashboardView() {
+function ToolbarButtons() {
   return (
-    <DashboardProvider adapter={adapter} capabilities={capabilities}>
+    <>
+      <TasksButton />
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button size="icon-sm" variant="ghost" asChild>
+            <Link to="/cronjobs">
+              <Timer className="size-5" />
+            </Link>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Cronjobs</TooltipContent>
+      </Tooltip>
+      <TunnelToolbarButton />
+    </>
+  );
+}
+
+export function DashboardView() {
+  const isDesktop = useIsDesktop() && !inTauri;
+  const activeCapabilities = isDesktop ? desktopCapabilities : capabilities;
+
+  return (
+    <DashboardProvider adapter={adapter} capabilities={activeCapabilities}>
       <TooltipProvider>
-        <DashboardShell
-          toolbarExtra={
-            <>
-              <TasksButton />
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button size="icon-sm" variant="ghost" asChild>
-                    <Link to="/cronjobs">
-                      <Timer className="size-5" />
-                    </Link>
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Cronjobs</TooltipContent>
-              </Tooltip>
-              <TunnelToolbarButton />
-            </>
-          }
-        />
+        {isDesktop ? (
+          <DesktopLayout toolbarExtra={<ToolbarButtons />} />
+        ) : (
+          <DashboardShell toolbarExtra={<ToolbarButtons />} />
+        )}
       </TooltipProvider>
     </DashboardProvider>
   );
