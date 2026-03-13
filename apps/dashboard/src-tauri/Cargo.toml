@@ -30,6 +30,7 @@ ureq = { version = "3", features = ["json"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 cocoa = "0.26"
+objc = "0.2"
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }

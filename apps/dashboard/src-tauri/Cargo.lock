@@ -89,6 +89,7 @@ dependencies = [
  "cocoa",
  "dirs",
  "libc",
+ "objc",
  "serde",
  "serde_json",
  "tauri",
