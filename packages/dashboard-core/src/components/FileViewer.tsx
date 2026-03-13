@@ -7,7 +7,7 @@ import type { FileContentResult } from "../types";
 interface FileViewerProps {
   workspaceId: string;
   filePath: string;
-  onBack: () => void;
+  onBack?: () => void;
 }
 
 interface TokenSpan {
@@ -101,19 +101,19 @@ export function FileViewer({ workspaceId, filePath, onBack }: FileViewerProps) {
     };
   }, [adapter, workspaceId, filePath]);
 
-  const filename = getFilename(filePath);
-
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <div className="flex shrink-0 items-center gap-2 border-b border-border/50 px-4 py-2">
-        <button
-          type="button"
-          onClick={onBack}
-          className="inline-flex size-7 items-center justify-center rounded-md hover:bg-accent"
-        >
-          <ArrowLeft className="size-3.5" />
-        </button>
-        <span className="min-w-0 flex-1 truncate font-mono text-xs">{filename}</span>
+        {onBack && (
+          <button
+            type="button"
+            onClick={onBack}
+            className="inline-flex size-7 items-center justify-center rounded-md hover:bg-accent"
+          >
+            <ArrowLeft className="size-3.5" />
+          </button>
+        )}
+        <span className="min-w-0 flex-1 truncate font-mono text-xs">{filePath}</span>
         {data && (
           <span className="shrink-0 text-xs text-muted-foreground">{formatSize(data.size)}</span>
         )}
@@ -151,8 +151,7 @@ export function FileViewer({ workspaceId, filePath, onBack }: FileViewerProps) {
 
 function lineNumberWidth(totalLines: number): string {
   const digits = String(totalLines).length;
-  // Minimum 2ch width, scale with digit count
-  const ch = Math.max(2, digits);
+  const ch = Math.max(3, digits);
   return `${ch}ch`;
 }
 
@@ -163,9 +162,9 @@ function HighlightedCode({ lines }: { lines: TokenLine[] }) {
       <pre className="text-xs leading-5">
         {lines.map((tokens, lineIdx) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: code lines have no stable id
-          <div key={lineIdx} className="flex">
+          <div key={lineIdx} className="flex gap-4">
             <span
-              className="shrink-0 select-none pr-4 text-right text-muted-foreground/50"
+              className="shrink-0 select-none text-right text-muted-foreground"
               style={{ width: gutterWidth }}
             >
               {lineIdx + 1}
@@ -193,9 +192,9 @@ function PlainCode({ content }: { content: string }) {
       <pre className="text-xs leading-5">
         {lines.map((line, lineIdx) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: code lines have no stable id
-          <div key={lineIdx} className="flex">
+          <div key={lineIdx} className="flex gap-4">
             <span
-              className="shrink-0 select-none pr-4 text-right text-muted-foreground/50"
+              className="shrink-0 select-none text-right text-muted-foreground"
               style={{ width: gutterWidth }}
             >
               {lineIdx + 1}

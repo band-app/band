@@ -59,8 +59,8 @@ function toolPartToItem(part: ToolPart): ToolCallItem {
 function ThinkingIndicator() {
   return (
     <div className="flex items-center gap-2 text-muted-foreground">
-      <Loader2 className="size-4 animate-spin" />
-      <span className="text-base">Thinking...</span>
+      <Loader2 className="size-4 lg:size-3.5 animate-spin" />
+      <span className="text-base lg:text-sm">Thinking...</span>
     </div>
   );
 }
@@ -436,7 +436,7 @@ export function ChatView({
         <ConversationScrollButton />
       </Conversation>
 
-      <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))]">
+      <div className="mx-auto w-full max-w-3xl shrink-0 px-4 lg:px-12 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))]">
         <PromptInput onSubmit={handleSubmit}>
           <SlashCommandSuggestions skills={skills} />
           <PromptInputTextarea placeholder="Type a message..." />

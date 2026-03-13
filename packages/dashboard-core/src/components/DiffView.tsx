@@ -3,9 +3,16 @@ import { useAdapter } from "../context";
 import { extensionToLanguage, filenameToLanguage } from "../lib/language-map";
 import type { FileStatus, WorkspaceDiff } from "../types";
 
+export interface DiffStats {
+  filesChanged: number;
+  insertions: number;
+  deletions: number;
+}
+
 interface DiffViewProps {
   workspaceId: string;
   active?: boolean;
+  onStatsChange?: (stats: DiffStats | null) => void;
 }
 
 interface ParsedFile {
@@ -197,7 +204,7 @@ function DiffFileContent({ hunks, filename }: { hunks: string; filename: string 
                     : ""
             }
           >
-            <span className="inline-block w-5 select-none text-center text-muted-foreground/50">
+            <span className="inline-block w-5 select-none text-center text-muted-foreground">
               {line.type === "add" ? "+" : line.type === "del" ? "-" : " "}
             </span>
             {line.type === "hunk"
@@ -215,7 +222,7 @@ function DiffFileContent({ hunks, filename }: { hunks: string; filename: string 
   );
 }
 
-export function DiffView({ workspaceId, active = true }: DiffViewProps) {
+export function DiffView({ workspaceId, active = true, onStatsChange }: DiffViewProps) {
   const adapter = useAdapter();
   const [data, setData] = useState<WorkspaceDiff | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -238,6 +245,7 @@ export function DiffView({ workspaceId, active = true }: DiffViewProps) {
           if (!cancelled) {
             setData(result);
             setError(null);
+            onStatsChange?.(result?.diff ? result.stats : null);
           }
         })
         .catch((err) => {
@@ -295,21 +303,10 @@ export function DiffView({ workspaceId, active = true }: DiffViewProps) {
     });
   };
 
-  const navigateToFile = (filename: string) => {
-    setOpenFiles((prev) => {
-      const next = new Set(prev);
-      next.add(filename);
-      return next;
-    });
-    setTimeout(() => {
-      const el = document.getElementById(`diff-file-${encodeURIComponent(filename)}`);
-      el?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 0);
-  };
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <div className="shrink-0 border-b border-border/50 px-4 py-3">
+      <div className="shrink-0 border-b border-white/20 px-4 py-2">
         <div className="text-sm text-muted-foreground">
           <span className="font-medium text-foreground">{data.stats.filesChanged}</span>{" "}
           {data.stats.filesChanged === 1 ? "file" : "files"} changed
@@ -320,21 +317,8 @@ export function DiffView({ workspaceId, active = true }: DiffViewProps) {
             <span className="ml-1 text-red-400">-{data.stats.deletions}</span>
           )}
         </div>
-        <div className="mt-1 text-xs text-muted-foreground">
+        <div className="mt-0.5 text-xs text-muted-foreground">
           {data.baseBranch} ← {data.headBranch}
-        </div>
-        <div className="mt-2 flex max-h-28 flex-col gap-0.5 overflow-y-auto">
-          {files.map((file) => (
-            <button
-              key={file.filename}
-              type="button"
-              onClick={() => navigateToFile(file.filename)}
-              className="flex items-center gap-1.5 rounded px-1 py-0.5 text-left text-xs hover:bg-accent/50"
-            >
-              <FileStatusBadge status={fileStatuses[file.filename]} />
-              <span className="truncate font-mono text-muted-foreground">{file.filename}</span>
-            </button>
-          ))}
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">

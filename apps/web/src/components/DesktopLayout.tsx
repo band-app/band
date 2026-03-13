@@ -25,27 +25,27 @@ export function DesktopLayout({ toolbarExtra }: DesktopLayoutProps) {
   return (
     <div className="flex h-dvh w-full overflow-hidden bg-background text-foreground">
       {/* Left Panel - Project List */}
-      <div className="w-72 shrink-0 border-r border-border overflow-hidden">
+      <div className="w-80 shrink-0 border-r border-white/20 overflow-hidden">
         <DashboardShell toolbarExtra={toolbarExtra} />
       </div>
 
-      {/* Middle Panel - Chat (narrower) */}
-      <div className="flex-[2] min-w-0 border-r border-border overflow-hidden">
-        {activeWorkspaceId ? (
-          <WorkspaceChatPanel key={activeWorkspaceId} workspaceId={activeWorkspaceId} />
-        ) : (
-          <EmptyStatePanel message="Select a workspace to start chatting" />
-        )}
-      </div>
+      {activeWorkspaceId ? (
+        <>
+          {/* Middle Panel - Changes & Code (takes remaining space) */}
+          <div className="flex-1 min-w-0 border-r border-white/20 overflow-hidden">
+            <WorkspaceDetailPanel key={activeWorkspaceId} workspaceId={activeWorkspaceId} />
+          </div>
 
-      {/* Right Panel - Changes & Code (wider for file diffs) */}
-      <div className="flex-[3] min-w-0 overflow-hidden">
-        {activeWorkspaceId ? (
-          <WorkspaceDetailPanel key={activeWorkspaceId} workspaceId={activeWorkspaceId} />
-        ) : (
-          <EmptyStatePanel message="Select a workspace to view changes" />
-        )}
-      </div>
+          {/* Right Panel - Chat (capped at 768px) */}
+          <div className="max-w-[768px] flex-1 min-w-0 overflow-hidden">
+            <WorkspaceChatPanel key={activeWorkspaceId} workspaceId={activeWorkspaceId} />
+          </div>
+        </>
+      ) : (
+        <div className="flex-1 min-w-0 overflow-hidden">
+          <EmptyStatePanel message="Select a workspace to get started" />
+        </div>
+      )}
     </div>
   );
 }

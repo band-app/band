@@ -140,7 +140,7 @@ export const PromptInput = ({ className, onSubmit, children, ...props }: PromptI
   return (
     <form
       className={cn(
-        "relative flex w-full flex-col rounded-md border border-border/50 bg-card p-2",
+        "relative flex w-full flex-col rounded-md border border-white/15 bg-white/10 p-2 shadow-[0_0_20px_rgba(255,255,255,0.06)]",
         isDragging && "border-primary/50 bg-primary/5",
         className,
       )}
@@ -283,13 +283,13 @@ export const PromptInputAttach = ({ className, ...props }: PromptInputAttachProp
       <button
         type="button"
         className={cn(
-          "inline-flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+          "inline-flex size-8 lg:size-7 shrink-0 items-center justify-center rounded text-white/40 transition-colors hover:bg-muted hover:text-foreground",
           className,
         )}
         onClick={() => fileInputRef.current?.click()}
         {...props}
       >
-        <Paperclip className="size-5" />
+        <Paperclip className="size-5 lg:size-4" />
       </button>
     </>
   );
@@ -381,7 +381,7 @@ export const PromptInputTextarea = ({
         autoCorrect="off"
         spellCheck={false}
         className={cn(
-          "min-h-[44px] max-h-48 w-full resize-none bg-transparent px-2 py-2.5 text-base outline-none placeholder:text-muted-foreground field-sizing-content",
+          "min-h-[44px] lg:min-h-[36px] max-h-48 w-full resize-none bg-transparent px-2 py-2.5 lg:py-2 text-base lg:text-sm outline-none placeholder:text-white/40 field-sizing-content",
           hasSlashCommand && "text-transparent caret-foreground",
           className,
         )}
@@ -395,7 +395,7 @@ export const PromptInputTextarea = ({
       />
       {hasSlashCommand && (
         <div
-          className="pointer-events-none absolute top-0 left-0 min-h-[44px] w-full whitespace-pre-wrap break-words px-2 py-2.5 text-base text-foreground"
+          className="pointer-events-none absolute top-0 left-0 min-h-[44px] lg:min-h-[36px] w-full whitespace-pre-wrap break-words px-2 py-2.5 lg:py-2 text-base lg:text-sm text-foreground"
           aria-hidden
         >
           {highlightSlashCommands(inputValue)}
@@ -435,40 +435,40 @@ export const PromptInputSubmit = ({
       {isStreaming && (
         <button
           type="button"
-          className="inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-foreground text-background transition-colors hover:bg-foreground/80"
+          className="inline-flex size-8 lg:size-7 shrink-0 items-center justify-center rounded-full bg-foreground text-background transition-colors hover:bg-foreground/80"
           onClick={onStop}
         >
-          <SquareIcon className="size-4 fill-current" />
+          <SquareIcon className="size-4 lg:size-3.5 fill-current" />
         </button>
       )}
       {isSubmitting && !hasContent ? (
         <button
           type="button"
           className={cn(
-            "inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-foreground/50 text-background transition-colors",
+            "inline-flex size-8 lg:size-7 shrink-0 items-center justify-center rounded-full bg-foreground/50 text-background transition-colors",
             className,
           )}
           disabled
           {...props}
         >
-          <Loader2 className="size-5 animate-spin" />
+          <Loader2 className="size-5 lg:size-4 animate-spin" />
         </button>
       ) : (
         <button
           type="submit"
           disabled={!hasContent}
           className={cn(
-            "inline-flex size-8 shrink-0 items-center justify-center rounded-full transition-colors",
+            "inline-flex size-8 lg:size-7 shrink-0 items-center justify-center rounded-full transition-colors",
             hasContent
               ? isBusy
                 ? "bg-primary text-primary-foreground hover:bg-primary/80"
                 : "bg-foreground text-background hover:bg-foreground/80"
-              : "bg-muted text-muted-foreground",
+              : "bg-white/15 text-white/40",
             className,
           )}
           {...props}
         >
-          <ArrowUpIcon className="size-5" />
+          <ArrowUpIcon className="size-5 lg:size-4" />
         </button>
       )}
     </div>

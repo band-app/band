@@ -1,4 +1,4 @@
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@band/ui";
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger, Tooltip, TooltipContent, TooltipTrigger } from "@band/ui";
 import { Clipboard, FolderOpen, GitBranch, Play, Square, Trash2 } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { useCapabilities } from "../context";
@@ -103,12 +103,17 @@ export function WorkspaceCard({
             <GitBranch
               className={`size-3.5 shrink-0 ${isActive ? "text-primary" : "text-muted-foreground"}`}
             />
-            <span
-              className={`text-sm truncate ${isActive ? "font-semibold text-foreground" : "font-medium"}`}
-              style={isActive ? undefined : { color: "oklch(0.7 0 0)" }}
-            >
-              {worktree.branch}
-            </span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span
+                  className={`text-sm truncate ${isActive ? "font-semibold text-foreground" : "font-medium"}`}
+                  style={isActive ? undefined : { color: "oklch(0.7 0 0)" }}
+                >
+                  {worktree.branch}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top">{worktree.branch}</TooltipContent>
+            </Tooltip>
             {!editMode && <AgentStatusBadge agent={status?.agent} />}
           </div>
           {!editMode && (

@@ -8,6 +8,10 @@ interface FileBrowserProps {
   currentPath: string;
   onNavigate: (path: string) => void;
   onOpenFile: (path: string) => void;
+  /** Compact mode for sidebar use — smaller items */
+  compact?: boolean;
+  /** Currently selected file path for highlighting */
+  selectedFile?: string;
 }
 
 export function FileBrowser({
@@ -15,6 +19,8 @@ export function FileBrowser({
   currentPath,
   onNavigate,
   onOpenFile,
+  compact,
+  selectedFile,
 }: FileBrowserProps) {
   const adapter = useAdapter();
   const [entries, setEntries] = useState<FileEntry[]>([]);
@@ -70,7 +76,7 @@ export function FileBrowser({
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Breadcrumbs */}
-      <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border/50 px-4 py-2 text-xs">
+      <div className={`flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border/50 text-xs ${compact ? "px-2 py-1.5" : "px-4 py-2"}`}>
         <button
           type="button"
           onClick={() => handleBreadcrumb(-1)}
@@ -115,24 +121,30 @@ export function FileBrowser({
         )}
         {!loading &&
           !error &&
-          entries.map((entry) => (
-            <button
-              key={entry.name}
-              type="button"
-              onClick={() => handleClick(entry)}
-              className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-accent/50"
-            >
-              {entry.type === "directory" ? (
-                <Folder className="size-4 shrink-0 text-blue-400" />
-              ) : (
-                <File className="size-4 shrink-0 text-muted-foreground" />
-              )}
-              <span className="min-w-0 flex-1 truncate">{entry.name}</span>
-              {entry.type === "directory" && (
-                <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/50" />
-              )}
-            </button>
-          ))}
+          entries.map((entry) => {
+            const entryPath = currentPath ? `${currentPath}/${entry.name}` : entry.name;
+            const isSelected = entry.type === "file" && selectedFile === entryPath;
+            return (
+              <button
+                key={entry.name}
+                type="button"
+                onClick={() => handleClick(entry)}
+                className={`flex w-full items-center text-left hover:bg-accent/50 ${
+                  compact ? "gap-2 px-3 py-2 text-sm" : "gap-3 px-4 py-2.5 text-sm"
+                } ${isSelected ? "bg-accent/50 text-foreground" : ""}`}
+              >
+                {entry.type === "directory" ? (
+                  <Folder className={`shrink-0 text-blue-400 ${compact ? "size-4" : "size-4"}`} />
+                ) : (
+                  <File className={`shrink-0 text-muted-foreground ${compact ? "size-4" : "size-4"}`} />
+                )}
+                <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+                {!compact && entry.type === "directory" && (
+                  <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/50" />
+                )}
+              </button>
+            );
+          })}
       </div>
     </div>
   );

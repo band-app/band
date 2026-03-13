@@ -115,7 +115,12 @@ function SortableProject({
             >
               {editMode && <GripVertical className="size-4 shrink-0 text-muted-foreground" />}
               <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
-              <h2 className="text-sm font-semibold text-foreground truncate">{project.name}</h2>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <h2 className="text-sm font-semibold text-foreground truncate">{project.name}</h2>
+                </TooltipTrigger>
+                <TooltipContent side="top">{project.name}</TooltipContent>
+              </Tooltip>
             </div>
             <div className="flex items-center gap-1">
               {editMode ? (

@@ -35,7 +35,7 @@ export function WorkspaceTabNav({ activeTab, onTabChange, diffFileCount }: Works
             <Icon className="size-4" />
             {tab.label}
             {badge && (
-              <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-muted px-1.5 text-xs font-medium">
+              <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-500/20 text-blue-400 px-1.5 text-xs font-medium">
                 {diffFileCount}
               </span>
             )}

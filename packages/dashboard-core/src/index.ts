@@ -7,7 +7,7 @@ export { AddProjectDialog } from "./components/AddProjectDialog";
 export { AgentStatusBadge } from "./components/AgentStatusBadge";
 export { CIStatusIndicator } from "./components/CIStatusIndicator";
 export { DashboardShell } from "./components/DashboardShell";
-export { DiffView } from "./components/DiffView";
+export { DiffView, type DiffStats } from "./components/DiffView";
 export { FileBrowser } from "./components/FileBrowser";
 export { FileViewer } from "./components/FileViewer";
 export { GitStatusIndicator } from "./components/GitStatusIndicator";

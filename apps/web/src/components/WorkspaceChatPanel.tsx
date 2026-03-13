@@ -42,7 +42,7 @@ export function WorkspaceChatPanel({ workspaceId }: WorkspaceChatPanelProps) {
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border px-4">
+      <header className="flex h-12 shrink-0 items-center gap-3 border-b border-white/20 px-4">
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-sm font-semibold">{workspaceId}</h1>
         </div>
