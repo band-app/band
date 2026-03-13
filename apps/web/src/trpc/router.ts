@@ -1268,6 +1268,27 @@ const cronjobsRouter = t.router({
 });
 
 // ---------------------------------------------------------------------------
+// Skills
+// ---------------------------------------------------------------------------
+
+const skillsRouter = t.router({
+  list: publicProcedure.input(z.object({ workspaceId: z.string() })).query(async ({ input }) => {
+    const workspace = resolveWorkspace(input.workspaceId);
+    if (!workspace) {
+      return { skills: [] };
+    }
+
+    const agent = await getOrCreateAgent(input.workspaceId, workspace.worktree.path);
+    if (agent.listSkills) {
+      const skills = await agent.listSkills();
+      return { skills };
+    }
+
+    return { skills: [] };
+  }),
+});
+
+// ---------------------------------------------------------------------------
 // App Router
 // ---------------------------------------------------------------------------
 
@@ -1287,6 +1308,7 @@ export const appRouter = t.router({
   statuses: statusesRouter,
   status: statusRouter,
   cronjobs: cronjobsRouter,
+  skills: skillsRouter,
 });
 
 export type AppRouter = typeof appRouter;

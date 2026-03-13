@@ -8,6 +8,8 @@ import type {
   FormEventHandler,
   HTMLAttributes,
   KeyboardEventHandler,
+  ReactNode,
+  RefObject,
 } from "react";
 import { createContext, useCallback, useContext, useRef, useState } from "react";
 
@@ -47,9 +49,12 @@ export type PromptInputProps = Omit<HTMLAttributes<HTMLFormElement>, "onSubmit">
 
 export const PromptInput = ({ className, onSubmit, children, ...props }: PromptInputProps) => {
   const formRef = useRef<HTMLFormElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [fileEntries, setFileEntries] = useState<FileEntry[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [hasText, setHasText] = useState(false);
+  const [inputValue, setInputValue] = useState("");
+  const [commandHint, setCommandHint] = useState<string | null>(null);
 
   const addFiles = useCallback((newFiles: FileList | File[]) => {
     const valid = Array.from(newFiles).filter((f) => f.size <= MAX_FILE_SIZE);
@@ -72,6 +77,8 @@ export const PromptInput = ({ className, onSubmit, children, ...props }: PromptI
       onSubmit({ text, files: files.length > 0 ? files : undefined }, event);
       setFileEntries([]);
       setHasText(false);
+      setInputValue("");
+      setCommandHint(null);
     },
     [onSubmit, fileEntries],
   );
@@ -110,10 +117,30 @@ export const PromptInput = ({ className, onSubmit, children, ...props }: PromptI
     [addFiles],
   );
 
+  const handleInputChange = useCallback((value: string) => {
+    setInputValue(value);
+    setHasText(value.trim().length > 0);
+  }, []);
+
+  const setTextareaValue = useCallback((value: string) => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    // Use native setter to trigger React's synthetic event system
+    const nativeSetter = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      "value",
+    )?.set;
+    nativeSetter?.call(textarea, value);
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    textarea.focus();
+    // Move cursor to end
+    textarea.selectionStart = textarea.selectionEnd = value.length;
+  }, []);
+
   return (
     <form
       className={cn(
-        "flex w-full flex-col rounded-md border border-border/50 bg-card p-2",
+        "relative flex w-full flex-col rounded-md border border-border/50 bg-card p-2",
         isDragging && "border-primary/50 bg-primary/5",
         className,
       )}
@@ -130,7 +157,12 @@ export const PromptInput = ({ className, onSubmit, children, ...props }: PromptI
         value={{
           addFiles,
           hasContent: hasText || fileEntries.length > 0,
-          onTextChange: setHasText,
+          onTextChange: handleInputChange,
+          inputValue,
+          textareaRef,
+          setTextareaValue,
+          commandHint,
+          setCommandHint,
         }}
       >
         {children}
@@ -139,15 +171,31 @@ export const PromptInput = ({ className, onSubmit, children, ...props }: PromptI
   );
 };
 
-const PromptInputContext = createContext<{
+interface PromptInputContextValue {
   addFiles: (files: FileList | File[]) => void;
   hasContent: boolean;
   onTextChange: (hasText: boolean) => void;
-}>({
+  inputValue: string;
+  textareaRef: RefObject<HTMLTextAreaElement | null>;
+  setTextareaValue: (value: string) => void;
+  commandHint: string | null;
+  setCommandHint: (hint: string | null) => void;
+}
+
+const PromptInputContext = createContext<PromptInputContextValue>({
   addFiles: () => {},
   hasContent: false,
   onTextChange: () => {},
+  inputValue: "",
+  textareaRef: { current: null },
+  setTextareaValue: () => {},
+  commandHint: null,
+  setCommandHint: () => {},
 });
+
+export function usePromptInputContext() {
+  return useContext(PromptInputContext);
+}
 
 // File preview chips
 function PromptInputFiles({
@@ -252,13 +300,63 @@ export type PromptInputTextareaProps = HTMLAttributes<HTMLTextAreaElement> & {
   disabled?: boolean;
 };
 
+/**
+ * Build highlighted segments from the input text, colouring any
+ * `/<command>` token blue. A command token is a `/` at position 0 or
+ * preceded by whitespace, followed by word-chars / colons / dots / hyphens.
+ */
+function highlightSlashCommands(text: string): ReactNode[] {
+  const segments: ReactNode[] = [];
+  const regex = /(?:^|\s)(\/[\w:.+-]+)/g;
+  let lastIndex = 0;
+  let match = regex.exec(text);
+
+  while (match !== null) {
+    const commandStr = match[1]; // the /command part
+    const commandStart = match.index + match[0].length - commandStr.length;
+
+    // Plain text before the command
+    if (commandStart > lastIndex) {
+      segments.push(text.slice(lastIndex, commandStart));
+    }
+
+    // Command in blue
+    segments.push(
+      <span key={commandStart} className="text-blue-400">
+        {commandStr}
+      </span>,
+    );
+    lastIndex = commandStart + commandStr.length;
+    match = regex.exec(text);
+  }
+
+  // Remaining plain text
+  if (lastIndex < text.length) {
+    segments.push(text.slice(lastIndex));
+  }
+
+  return segments;
+}
+
+/**
+ * Detect whether the ghost argument-hint should be shown.
+ * The hint appears when a slash command token is followed by exactly one
+ * trailing space with nothing typed after it — works for mid-text commands
+ * too (e.g. "please /band:start ").
+ */
+function shouldShowGhostHint(inputValue: string, commandHint: string | null): boolean {
+  if (!commandHint) return false;
+  // Match a command token (at start or after space) followed by a single trailing space
+  return /(?:^|\s)\/[\w:.+-]+ $/.test(inputValue);
+}
+
 export const PromptInputTextarea = ({
   className,
   placeholder = "Type a message...",
   ...props
 }: PromptInputTextareaProps) => {
   const [isComposing, setIsComposing] = useState(false);
-  const { onTextChange } = useContext(PromptInputContext);
+  const { onTextChange, textareaRef, commandHint, inputValue } = useContext(PromptInputContext);
 
   const handleKeyDown: KeyboardEventHandler<HTMLTextAreaElement> = useCallback(
     (e) => {
@@ -272,23 +370,39 @@ export const PromptInputTextarea = ({
     [isComposing],
   );
 
+  const hasSlashCommand = inputValue.includes("/");
+  const showGhostHint = shouldShowGhostHint(inputValue, commandHint);
+
   return (
-    <textarea
-      autoComplete="off"
-      autoCorrect="off"
-      spellCheck={false}
-      className={cn(
-        "min-h-[44px] max-h-48 w-full resize-none bg-transparent px-2 py-2.5 text-base outline-none placeholder:text-muted-foreground field-sizing-content",
-        className,
+    <div className="relative">
+      <textarea
+        ref={textareaRef}
+        autoComplete="off"
+        autoCorrect="off"
+        spellCheck={false}
+        className={cn(
+          "min-h-[44px] max-h-48 w-full resize-none bg-transparent px-2 py-2.5 text-base outline-none placeholder:text-muted-foreground field-sizing-content",
+          hasSlashCommand && "text-transparent caret-foreground",
+          className,
+        )}
+        name="message"
+        onCompositionEnd={() => setIsComposing(false)}
+        onCompositionStart={() => setIsComposing(true)}
+        onInput={(e) => onTextChange(e.currentTarget.value)}
+        onKeyDown={handleKeyDown}
+        placeholder={placeholder}
+        {...props}
+      />
+      {hasSlashCommand && (
+        <div
+          className="pointer-events-none absolute top-0 left-0 min-h-[44px] w-full whitespace-pre-wrap break-words px-2 py-2.5 text-base text-foreground"
+          aria-hidden
+        >
+          {highlightSlashCommands(inputValue)}
+          {showGhostHint && <span className="text-muted-foreground/50">{commandHint}</span>}
+        </div>
       )}
-      name="message"
-      onCompositionEnd={() => setIsComposing(false)}
-      onCompositionStart={() => setIsComposing(true)}
-      onInput={(e) => onTextChange(e.currentTarget.value.trim().length > 0)}
-      onKeyDown={handleKeyDown}
-      placeholder={placeholder}
-      {...props}
-    />
+    </div>
   );
 };
 

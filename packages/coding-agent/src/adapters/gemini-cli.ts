@@ -4,7 +4,8 @@ import { createInterface } from "node:readline";
 import { createLogger } from "@band/logger";
 import type { GeminiCliConfig } from "../config.js";
 import type { AgentEvent } from "../events.js";
-import type { CodingAgent } from "../types.js";
+import { discoverSkills } from "../skills.js";
+import type { CodingAgent, SkillInfo } from "../types.js";
 
 const log = createLogger("coding-agent:gemini-cli");
 
@@ -153,5 +154,9 @@ export class GeminiCliAdapter implements CodingAgent {
     } finally {
       this.activeChild = null;
     }
+  }
+
+  async listSkills(): Promise<SkillInfo[]> {
+    return discoverSkills(this.workspaceDir);
   }
 }

@@ -30,6 +30,12 @@ export interface SessionMessageItem {
   >;
 }
 
+export interface SkillInfo {
+  name: string;
+  description: string;
+  argumentHint?: string;
+}
+
 export interface CodingAgent {
   readonly name: string;
   readonly supportedFeatures: CodingAgentFeatures;
@@ -42,4 +48,5 @@ export interface CodingAgent {
     dir: string,
     options?: { limit?: number; offset?: number },
   ): Promise<SessionMessageItem[]>;
+  listSkills?(): Promise<SkillInfo[]>;
 }

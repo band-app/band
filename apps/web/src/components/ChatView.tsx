@@ -20,6 +20,7 @@ import {
   PromptInputSubmit,
   PromptInputTextarea,
 } from "./ai-elements/prompt-input";
+import { SlashCommandSuggestions } from "./ai-elements/slash-command-suggestions";
 import { TaskListWidget } from "./ai-elements/task-list-widget";
 import { applyTaskToolCall, isTaskTool, type TaskMap } from "./ai-elements/task-state";
 import type { ToolPart } from "./ai-elements/tool";
@@ -102,6 +103,16 @@ export function ChatView({
   const [historicalMessages, setHistoricalMessages] = useState<HistoryMessage[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const initialSessionLoadedRef = useRef(false);
+
+  const [skills, setSkills] = useState<
+    { name: string; description: string; argumentHint?: string }[]
+  >([]);
+  useEffect(() => {
+    trpc.skills.list
+      .query({ workspaceId })
+      .then((data) => setSkills(data.skills))
+      .catch(() => setSkills([]));
+  }, [workspaceId]);
 
   const transport = useMemo(
     () => new TaskChatTransport(workspaceId, () => sessionIdRef.current),
@@ -285,22 +296,6 @@ export function ChatView({
               return (
                 <Message key={message.id} from={message.role}>
                   <MessageContent>
-                    {message.role === "user" &&
-                      message.parts.map((part, partIdx) =>
-                        part.type === "file" ? (
-                          <MessageFilePart
-                            key={`${message.id}-file-${part.filename ?? partIdx}`}
-                            part={
-                              part as {
-                                type: "file";
-                                mediaType: string;
-                                url: string;
-                                filename?: string;
-                              }
-                            }
-                          />
-                        ) : null,
-                      )}
                     {groupMessageParts(message.parts).map((segment) => {
                       if (segment.type === "text") {
                         const { part, partIndex } = segment;
@@ -352,6 +347,7 @@ export function ChatView({
 
       <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))]">
         <PromptInput onSubmit={handleSubmit}>
+          <SlashCommandSuggestions skills={skills} />
           <PromptInputTextarea placeholder="Type a message..." />
           <PromptInputActions>
             <PromptInputAttach />
@@ -391,6 +387,41 @@ function buildHistoryTaskMap(
     }
   }
   return { taskMap: map, taskToolCallIds };
+}
+
+const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
+
+/**
+ * Parse the "I'm sharing these files with you:" prefix that the backend
+ * prepends to prompts with file attachments.  Returns the display text
+ * (without the prefix) and an array of file-part objects for rendering.
+ */
+function parseSharedFiles(text: string): {
+  displayText: string;
+  files: { type: "file"; mediaType: string; url: string; filename: string }[];
+} {
+  const match = text.match(/^I'm sharing these files with you:\n((?:- .+\n)+)\n([\s\S]*)$/);
+  if (!match) return { displayText: text, files: [] };
+
+  const fileLines = match[1].trim().split("\n");
+  const displayText = match[2].trim();
+
+  const files = fileLines.map((line) => {
+    const filePath = line.replace(/^- /, "").trim();
+    const filename = filePath.split("/").pop() ?? filePath;
+    const ext = filename.includes(".") ? `.${filename.split(".").pop()!.toLowerCase()}` : "";
+    const isImage = IMAGE_EXTENSIONS.has(ext);
+    return {
+      type: "file" as const,
+      mediaType: isImage
+        ? `image/${ext.slice(1).replace("jpg", "jpeg")}`
+        : "application/octet-stream",
+      url: `/api/uploads/${encodeURIComponent(filename)}`,
+      filename,
+    };
+  });
+
+  return { displayText, files };
 }
 
 function HistoryMessages({ messages }: { messages: HistoryMessage[] }) {
@@ -442,10 +473,14 @@ function HistoryMessageView({
   if (message.role === "user") {
     const userText = textBlocks.map((b) => b.text).join("\n");
     if (!userText) return null;
+    const { displayText, files } = parseSharedFiles(userText);
     return (
       <Message from="user">
         <MessageContent>
-          <MessageResponse>{userText}</MessageResponse>
+          {files.map((file) => (
+            <MessageFilePart key={file.url} part={file} />
+          ))}
+          {displayText && <MessageResponse>{displayText}</MessageResponse>}
         </MessageContent>
       </Message>
     );

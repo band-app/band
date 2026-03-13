@@ -1,7 +1,8 @@
 import { createLogger } from "@band/logger";
 import type { OpenAICodexConfig } from "../config.js";
 import type { AgentEvent } from "../events.js";
-import type { CodingAgent } from "../types.js";
+import { discoverSkills } from "../skills.js";
+import type { CodingAgent, SkillInfo } from "../types.js";
 
 const log = createLogger("coding-agent:openai-codex");
 
@@ -154,6 +155,10 @@ export class OpenAICodexAdapter implements CodingAgent {
     } finally {
       this.activeIterator = null;
     }
+  }
+
+  async listSkills(): Promise<SkillInfo[]> {
+    return discoverSkills(this.workspaceDir);
   }
 }
 

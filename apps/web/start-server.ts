@@ -1,6 +1,6 @@
-import { appendFileSync } from "node:fs";
+import { appendFileSync, createReadStream, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { join } from "node:path";
+import { basename, extname, join } from "node:path";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import sirv from "sirv";
 import { createAuthMiddleware } from "./auth.ts";
@@ -68,6 +68,44 @@ async function main() {
   const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     // Auth check runs first
     if (handleAuth(req, res)) return;
+
+    // Serve uploaded files (images, attachments)
+    if (req.url?.startsWith("/api/uploads/")) {
+      const filename = basename(decodeURIComponent(req.url.slice("/api/uploads/".length)));
+      if (!filename || filename.includes("..")) {
+        res.writeHead(400);
+        res.end("Bad request");
+        return;
+      }
+      const filePath = join(bandHome(), "uploads", filename);
+      try {
+        const fileStat = statSync(filePath);
+        const ext = extname(filename).toLowerCase();
+        const mimeTypes: Record<string, string> = {
+          ".png": "image/png",
+          ".jpg": "image/jpeg",
+          ".jpeg": "image/jpeg",
+          ".gif": "image/gif",
+          ".webp": "image/webp",
+          ".pdf": "application/pdf",
+          ".json": "application/json",
+          ".txt": "text/plain",
+          ".md": "text/markdown",
+          ".csv": "text/csv",
+        };
+        const contentType = mimeTypes[ext] || "application/octet-stream";
+        res.writeHead(200, {
+          "Content-Type": contentType,
+          "Content-Length": fileStat.size.toString(),
+          "Cache-Control": "private, max-age=86400",
+        });
+        createReadStream(filePath).pipe(res);
+      } catch {
+        res.writeHead(404);
+        res.end("Not found");
+      }
+      return;
+    }
 
     // Try serving static assets first (sirv calls next() if no match)
     assets(req, res, async () => {

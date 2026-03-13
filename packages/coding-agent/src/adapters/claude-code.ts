@@ -3,10 +3,12 @@ import { getSessionMessages, listSessions, query } from "@anthropic-ai/claude-ag
 import { createLogger } from "@band/logger";
 import type { ClaudeCodeConfig } from "../config.js";
 import type { AgentEvent } from "../events.js";
+import { discoverSkills } from "../skills.js";
 import type {
   CodingAgent,
   SessionListItem,
   SessionMessageItem,
+  SkillInfo,
   UserInputRequest,
 } from "../types.js";
 
@@ -166,6 +168,10 @@ export class ClaudeCodeAdapter implements CodingAgent {
       offset: options?.offset,
     });
     return messages.map(mapSessionMessage);
+  }
+
+  async listSkills(): Promise<SkillInfo[]> {
+    return discoverSkills(this.workspaceDir);
   }
 }
 
