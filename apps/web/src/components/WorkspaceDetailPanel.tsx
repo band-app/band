@@ -53,7 +53,7 @@ export function WorkspaceDetailPanel({ workspaceId }: WorkspaceDetailPanelProps)
       <DetailTabNav activeTab={activeTab} onTabChange={setActiveTab} />
       <div className="min-h-0 flex-1">
         <div className={activeTab === "diff" ? "h-full" : "hidden"}>
-          <DiffView workspaceId={workspaceId} />
+          <DiffView workspaceId={workspaceId} active={activeTab === "diff"} />
         </div>
         <div className={activeTab === "code" ? "h-full" : "hidden"}>
           <CodeBrowserView workspaceId={workspaceId} />
