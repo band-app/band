@@ -1,6 +1,7 @@
 import { useChat } from "@ai-sdk/react";
+import { Badge } from "@band/ui";
 import { getToolName, isToolUIPart } from "ai";
-import { Bot, Loader2 } from "lucide-react";
+import { Bot, Clock, Loader2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { TaskChatTransport } from "../lib/task-chat-transport";
 import { trpc } from "../lib/trpc-client";
@@ -79,6 +80,12 @@ interface HistoryMessage {
   content: HistoryMessageContent[];
 }
 
+interface QueuedMessage {
+  id: string;
+  message: PromptInputMessage;
+  queuedAt: number;
+}
+
 interface ChatViewProps {
   workspaceId: string;
   workspaceName: string;
@@ -133,12 +140,35 @@ export function ChatView({
     },
   });
 
+  const abortingRef = useRef(false);
+
   const handleStop = useCallback(() => {
-    transport.abort();
-    stop();
+    abortingRef.current = true;
+    transport.abort().finally(() => {
+      abortingRef.current = false;
+      stop();
+    });
   }, [transport, stop]);
 
   const isStreaming = status === "submitted" || status === "streaming";
+
+  const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
+  const sendingQueuedRef = useRef(false);
+
+  const doSendMessage = useCallback(
+    (message: PromptInputMessage) => {
+      if (message.files?.length) {
+        const dataTransfer = new DataTransfer();
+        for (const file of message.files) {
+          dataTransfer.items.add(file);
+        }
+        sendMessage({ text: message.text, files: dataTransfer.files });
+      } else {
+        sendMessage({ text: message.text });
+      }
+    },
+    [sendMessage],
+  );
 
   const loadMessages = useCallback(
     async (sessionId: string) => {
@@ -169,6 +199,7 @@ export function ChatView({
       setActiveSessionId(sessionId);
       setMessages([]);
       setHistoricalMessages([]);
+      setQueuedMessages([]);
       onShowSessionListChange(false);
       await loadMessages(sessionId);
     },
@@ -181,24 +212,50 @@ export function ChatView({
     setActiveSessionId(undefined);
     setHistoricalMessages([]);
     setMessages([]);
+    setQueuedMessages([]);
     onShowSessionListChange(false);
   }, [setMessages, onShowSessionListChange]);
 
   const handleSubmit = useCallback(
     (message: PromptInputMessage) => {
       if (!message.text.trim() && !message.files?.length) return;
-      if (message.files?.length) {
-        const dataTransfer = new DataTransfer();
-        for (const file of message.files) {
-          dataTransfer.items.add(file);
-        }
-        sendMessage({ text: message.text, files: dataTransfer.files });
-      } else {
-        sendMessage({ text: message.text });
+
+      if (isStreaming) {
+        // Agent is busy — queue the message instead of sending
+        setQueuedMessages((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            message,
+            queuedAt: Date.now(),
+          },
+        ]);
+        return;
       }
+
+      doSendMessage(message);
     },
-    [sendMessage],
+    [doSendMessage, isStreaming],
   );
+
+  // Auto-send queued messages when the agent becomes idle
+  useEffect(() => {
+    if (isStreaming) {
+      sendingQueuedRef.current = false;
+      return;
+    }
+    if (sendingQueuedRef.current) return;
+    if (queuedMessages.length === 0) return;
+
+    sendingQueuedRef.current = true;
+    const [next, ...rest] = queuedMessages;
+    setQueuedMessages(rest);
+    doSendMessage(next.message);
+  }, [isStreaming, queuedMessages, doSendMessage]);
+
+  const handleCancelQueued = useCallback((id: string) => {
+    setQueuedMessages((prev) => prev.filter((m) => m.id !== id));
+  }, []);
 
   const liveTaskMap: TaskMap = useMemo(() => {
     let map: TaskMap = new Map();
@@ -346,6 +403,14 @@ export function ChatView({
               </MessageContent>
             </Message>
           )}
+
+          {queuedMessages.map((qm) => (
+            <QueuedMessageBubble
+              key={qm.id}
+              queuedMessage={qm}
+              onCancel={() => handleCancelQueued(qm.id)}
+            />
+          ))}
         </ConversationContent>
         <ConversationScrollButton />
       </Conversation>
@@ -355,9 +420,43 @@ export function ChatView({
           <PromptInputTextarea placeholder="Type a message..." />
           <PromptInputActions>
             <PromptInputAttach />
-            <PromptInputSubmit status={status} onStop={handleStop} />
+            <PromptInputSubmit
+              status={status}
+              onStop={handleStop}
+              queueCount={queuedMessages.length}
+            />
           </PromptInputActions>
         </PromptInput>
+      </div>
+    </div>
+  );
+}
+
+function QueuedMessageBubble({
+  queuedMessage,
+  onCancel,
+}: {
+  queuedMessage: QueuedMessage;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="group is-user flex w-full max-w-[95%] flex-col gap-2 ml-auto justify-end opacity-60">
+      <div className="flex min-w-0 max-w-full flex-col gap-2 break-words text-base ml-auto w-fit rounded-md bg-secondary px-4 py-3 text-foreground">
+        <MessageResponse>{queuedMessage.message.text}</MessageResponse>
+        <div className="flex items-center justify-end gap-2 mt-1">
+          <Badge variant="outline" className="text-xs text-muted-foreground">
+            <Clock className="size-3" />
+            Queued
+          </Badge>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+          >
+            <X className="size-3" />
+            Cancel
+          </button>
+        </div>
       </div>
     </div>
   );

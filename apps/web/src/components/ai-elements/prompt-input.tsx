@@ -1,6 +1,6 @@
-import { cn } from "@band/ui";
+import { Badge, cn } from "@band/ui";
 import type { ChatStatus } from "ai";
-import { ArrowUpIcon, FileIcon, Loader2, Paperclip, SquareIcon, X } from "lucide-react";
+import { ArrowUpIcon, Clock, FileIcon, Loader2, Paperclip, SquareIcon, X } from "lucide-react";
 import type {
   ComponentProps,
   DragEvent,
@@ -295,64 +295,68 @@ export const PromptInputTextarea = ({
 export type PromptInputSubmitProps = ComponentProps<"button"> & {
   status?: ChatStatus;
   onStop?: () => void;
+  queueCount?: number;
 };
 
 export const PromptInputSubmit = ({
   className,
   status,
   onStop,
+  queueCount,
   ...props
 }: PromptInputSubmitProps) => {
   const { hasContent } = useContext(PromptInputContext);
   const isSubmitting = status === "submitted";
   const isStreaming = status === "streaming";
-
-  if (isSubmitting) {
-    return (
-      <button
-        type="button"
-        className={cn(
-          "inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-foreground/50 text-background transition-colors",
-          className,
-        )}
-        disabled
-        {...props}
-      >
-        <Loader2 className="size-5 animate-spin" />
-      </button>
-    );
-  }
-
-  if (isStreaming) {
-    return (
-      <button
-        type="button"
-        className={cn(
-          "inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-foreground text-background transition-colors hover:bg-foreground/80",
-          className,
-        )}
-        onClick={onStop}
-        {...props}
-      >
-        <SquareIcon className="size-4 fill-current" />
-      </button>
-    );
-  }
+  const isBusy = isSubmitting || isStreaming;
 
   return (
-    <button
-      type="submit"
-      disabled={!hasContent}
-      className={cn(
-        "inline-flex size-8 shrink-0 items-center justify-center rounded-full transition-colors",
-        hasContent
-          ? "bg-foreground text-background hover:bg-foreground/80"
-          : "bg-muted text-muted-foreground",
-        className,
+    <div className="flex items-center gap-1">
+      {queueCount != null && queueCount > 0 && (
+        <Badge variant="secondary" className="text-xs tabular-nums">
+          <Clock className="size-3" />
+          {queueCount}
+        </Badge>
       )}
-      {...props}
-    >
-      <ArrowUpIcon className="size-5" />
-    </button>
+      {isStreaming && (
+        <button
+          type="button"
+          className="inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-foreground text-background transition-colors hover:bg-foreground/80"
+          onClick={onStop}
+        >
+          <SquareIcon className="size-4 fill-current" />
+        </button>
+      )}
+      {isSubmitting && !hasContent ? (
+        <button
+          type="button"
+          className={cn(
+            "inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-foreground/50 text-background transition-colors",
+            className,
+          )}
+          disabled
+          {...props}
+        >
+          <Loader2 className="size-5 animate-spin" />
+        </button>
+      ) : (
+        <button
+          type="submit"
+          disabled={!hasContent}
+          className={cn(
+            "inline-flex size-8 shrink-0 items-center justify-center rounded-full transition-colors",
+            hasContent
+              ? isBusy
+                ? "bg-primary text-primary-foreground hover:bg-primary/80"
+                : "bg-foreground text-background hover:bg-foreground/80"
+              : "bg-muted text-muted-foreground",
+            className,
+          )}
+          {...props}
+        >
+          <ArrowUpIcon className="size-5" />
+        </button>
+      )}
+    </div>
   );
 };

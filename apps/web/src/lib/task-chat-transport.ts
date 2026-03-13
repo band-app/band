@@ -38,10 +38,11 @@ export class TaskChatTransport implements ChatTransport<UIMessage> {
     this.getSessionId = getSessionId;
   }
 
-  abort(): void {
-    trpc.tasks.abort.mutate({ workspaceId: this.workspaceId }).catch(() => {
-      // fire-and-forget
-    });
+  abort(): Promise<void> {
+    return trpc.tasks.abort.mutate({ workspaceId: this.workspaceId }).then(
+      () => {},
+      () => {},
+    );
   }
 
   async sendMessages({
