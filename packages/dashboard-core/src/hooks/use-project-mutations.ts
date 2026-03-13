@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAdapter } from "../context";
 import { toWorkspaceId } from "../lib/workspace-id";
 import { queryKeys } from "../query-client";
-import { useDashboardStore } from "../stores/index";
+import { useDashboardStore, useRawDashboardStore } from "../stores/index";
 import type { ProjectInfo } from "../types";
 
 export function useAddProject() {
@@ -119,6 +119,7 @@ export function useRemoveWorkspace() {
   const queryClient = useQueryClient();
   const setError = useDashboardStore((s) => s.setError);
   const openWorkspace = useDashboardStore((s) => s.openWorkspace);
+  const store = useRawDashboardStore();
 
   return useMutation({
     mutationFn: ({ project, branch }: { project: string; branch: string }) =>
@@ -137,7 +138,7 @@ export function useRemoveWorkspace() {
       return { previous };
     },
     onSuccess: (_data, { project, branch }) => {
-      const activeWorkspaceId = useDashboardStore.getState().activeWorkspaceId;
+      const activeWorkspaceId = store.getState().activeWorkspaceId;
       const deletedWorkspaceId = toWorkspaceId(project, branch);
       if (activeWorkspaceId === deletedWorkspaceId) {
         const projects = queryClient.getQueryData<ProjectInfo[]>(queryKeys.projects);
