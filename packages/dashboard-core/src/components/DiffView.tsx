@@ -262,7 +262,7 @@ export function DiffView({ workspaceId, active = true, onStatsChange }: DiffView
       cancelled = true;
       if (interval) clearInterval(interval);
     };
-  }, [adapter, workspaceId, active]);
+  }, [adapter, workspaceId, active, onStatsChange]);
 
   if (loading) {
     return (
@@ -302,7 +302,6 @@ export function DiffView({ workspaceId, active = true, onStatsChange }: DiffView
       return next;
     });
   };
-
 
   return (
     <div className="flex h-full flex-col overflow-hidden">

@@ -1,4 +1,12 @@
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger, Tooltip, TooltipContent, TooltipTrigger } from "@band/ui";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@band/ui";
 import { Clipboard, FolderOpen, GitBranch, Play, Square, Trash2 } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { useCapabilities } from "../context";

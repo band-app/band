@@ -76,7 +76,9 @@ export function FileBrowser({
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Breadcrumbs */}
-      <div className={`flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border/50 text-xs ${compact ? "px-2 py-1.5" : "px-4 py-2"}`}>
+      <div
+        className={`flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border/50 text-xs ${compact ? "px-2 py-1.5" : "px-4 py-2"}`}
+      >
         <button
           type="button"
           onClick={() => handleBreadcrumb(-1)}
@@ -136,7 +138,9 @@ export function FileBrowser({
                 {entry.type === "directory" ? (
                   <Folder className={`shrink-0 text-blue-400 ${compact ? "size-4" : "size-4"}`} />
                 ) : (
-                  <File className={`shrink-0 text-muted-foreground ${compact ? "size-4" : "size-4"}`} />
+                  <File
+                    className={`shrink-0 text-muted-foreground ${compact ? "size-4" : "size-4"}`}
+                  />
                 )}
                 <span className="min-w-0 flex-1 truncate">{entry.name}</span>
                 {!compact && entry.type === "directory" && (

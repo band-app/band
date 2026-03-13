@@ -1,4 +1,4 @@
-import { DiffView, type DiffStats } from "@band/dashboard-core";
+import { type DiffStats, DiffView } from "@band/dashboard-core";
 import { Code, GitCompare } from "lucide-react";
 import { useCallback, useState } from "react";
 import { CodeBrowserView } from "./CodeBrowserView";
@@ -64,7 +64,11 @@ export function WorkspaceDetailPanel({ workspaceId }: WorkspaceDetailPanelProps)
       <DetailTabNav activeTab={activeTab} onTabChange={setActiveTab} diffStats={diffStats} />
       <div className="min-h-0 flex-1">
         <div className={activeTab === "diff" ? "h-full" : "hidden"}>
-          <DiffView workspaceId={workspaceId} active={activeTab === "diff"} onStatsChange={handleStatsChange} />
+          <DiffView
+            workspaceId={workspaceId}
+            active={activeTab === "diff"}
+            onStatsChange={handleStatsChange}
+          />
         </div>
         <div className={activeTab === "code" ? "h-full" : "hidden"}>
           <CodeBrowserView workspaceId={workspaceId} />
