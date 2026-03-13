@@ -1,10 +1,10 @@
 import { cn } from "@band/ui";
 import { Download, X } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
 import { Dialog as DialogPrimitive } from "radix-ui";
+import { useCallback, useEffect, useState } from "react";
 
 import { detectLanguageFromFilename, downloadFile, isTextMediaType } from "./file-preview-utils";
-import { useSyntaxHighlight, type TokenLine } from "./use-syntax-highlight";
+import { type TokenLine, useSyntaxHighlight } from "./use-syntax-highlight";
 
 interface FilePreviewOverlayProps {
   open: boolean;

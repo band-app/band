@@ -121,19 +121,13 @@ export function MessageFilePart({ part }: { part: FilePartData }) {
         <FileIcon className="size-4 shrink-0 text-muted-foreground" />
         <span className="min-w-0 flex-1 truncate text-left text-base">{filename}</span>
         <span className="shrink-0 text-sm text-muted-foreground">{part.mediaType}</span>
-        <span
-          role="button"
-          tabIndex={0}
+        <button
+          type="button"
           onClick={handleDownload}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") {
-              handleDownload(e as unknown as React.MouseEvent);
-            }
-          }}
           className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           <Download className="size-3.5" />
-        </span>
+        </button>
       </button>
       {canPreview && (
         <FilePreviewOverlay open={overlayOpen} onOpenChange={setOverlayOpen} part={part} />

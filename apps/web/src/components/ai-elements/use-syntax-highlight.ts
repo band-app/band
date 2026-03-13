@@ -47,9 +47,7 @@ export function useSyntaxHighlight(
         });
         if (!cancelled) {
           setLines(
-            result.tokens.map((line) =>
-              line.map((t) => ({ content: t.content, color: t.color })),
-            ),
+            result.tokens.map((line) => line.map((t) => ({ content: t.content, color: t.color }))),
           );
         }
       } catch {

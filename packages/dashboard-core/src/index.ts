@@ -36,8 +36,8 @@ export {
   useBranchStatusWatcher,
   useStatusWatcher,
 } from "./hooks/use-status";
-export { isServiceHealthy, type ServiceHealth } from "./lib/service-health";
 export { extensionToLanguage, filenameToLanguage } from "./lib/language-map";
+export { isServiceHealthy, type ServiceHealth } from "./lib/service-health";
 // Lib
 export { playSound, SOUNDS, type SoundId } from "./lib/sounds";
 export type { SSEEvent } from "./lib/sse";
