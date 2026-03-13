@@ -76,6 +76,16 @@ export function WorkspaceCard({
         className,
         tabIndex: 0,
         onClick: handleClick,
+        // Accessibility: handle Enter/Space for direct card activation (e.g. user
+        // tabs to this card and presses Enter). stopPropagation prevents the
+        // ProjectList container's handleKeyDown from ALSO firing.
+        //
+        // NOTE: During arrow-key navigation, the ProjectList container keeps DOM
+        // focus on itself (via containerRef.current?.focus() in its arrow handlers).
+        // That means this card-level handler will NOT fire after arrow navigation —
+        // the container's Enter handler fires instead and uses focusedIndex to open
+        // the correct workspace. This division of responsibility is intentional.
+        // See the keyboard navigation comment block in ProjectList.tsx.
         onKeyDown: (e: React.KeyboardEvent) => {
           if (e.key === "Enter" || e.key === " ") {
             e.stopPropagation();
