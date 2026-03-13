@@ -69,26 +69,28 @@ export function DashboardShell({ toolbarExtra }: DashboardShellProps) {
         <>
           <div className="flex items-center justify-between px-4 py-2">
             <div className="flex items-center gap-1">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button size="icon-sm" variant="ghost" onClick={() => setView("settings")}>
-                    <Settings className="size-5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Settings</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    size="icon-sm"
-                    variant={editMode ? "secondary" : "ghost"}
-                    onClick={() => setEditMode((v) => !v)}
-                  >
-                    <Pencil className="size-5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>{editMode ? "Done editing" : "Edit projects"}</TooltipContent>
-              </Tooltip>
+              <DropdownMenu>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <DropdownMenuTrigger asChild>
+                      <Button size="icon-sm" variant="ghost">
+                        <Settings className="size-5" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                  </TooltipTrigger>
+                  <TooltipContent>Manage</TooltipContent>
+                </Tooltip>
+                <DropdownMenuContent align="start">
+                  <DropdownMenuItem onClick={() => setEditMode((v) => !v)}>
+                    <Pencil className="size-4" />
+                    {editMode ? "Done editing" : "Edit list"}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setView("settings")}>
+                    <Settings className="size-4" />
+                    Settings
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               {toolbarExtra}
               {labels.length > 0 && (
                 <DropdownMenu>

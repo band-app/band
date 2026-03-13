@@ -4,9 +4,19 @@ import {
   HybridDashboardAdapter,
   NativeShellCapabilities,
 } from "@band/dashboard-core/adapters/hybrid";
-import { Button, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@band/ui";
-import { Link } from "@tanstack/react-router";
-import { ListTodo, Timer } from "lucide-react";
+import {
+  Button,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@band/ui";
+import { useNavigate } from "@tanstack/react-router";
+import { ListTodo, Timer, Zap } from "lucide-react";
 import { useCallback } from "react";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { DesktopLayout } from "./DesktopLayout";
@@ -32,53 +42,42 @@ class DesktopWebCapabilities implements PlatformCapabilities {
 
 const desktopCapabilities = new DesktopWebCapabilities();
 
-function TasksButton() {
-  const handleClick = useCallback(async () => {
-    const { invoke } = await import("@tauri-apps/api/core");
-    await invoke("open_tasks_window");
-  }, []);
-
-  if (inTauri) {
-    return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button size="icon-sm" variant="ghost" onClick={handleClick}>
-            <ListTodo className="size-5" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>Tasks</TooltipContent>
-      </Tooltip>
-    );
-  }
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button size="icon-sm" variant="ghost" asChild>
-          <Link to="/tasks">
-            <ListTodo className="size-5" />
-          </Link>
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>Tasks</TooltipContent>
-    </Tooltip>
-  );
-}
-
 function ToolbarButtons() {
+  const navigate = useNavigate();
+
+  const handleTasksClick = useCallback(async () => {
+    if (inTauri) {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("open_tasks_window");
+    } else {
+      navigate({ to: "/tasks" });
+    }
+  }, [navigate]);
+
   return (
     <>
-      <TasksButton />
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button size="icon-sm" variant="ghost" asChild>
-            <Link to="/cronjobs">
-              <Timer className="size-5" />
-            </Link>
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>Cronjobs</TooltipContent>
-      </Tooltip>
+      <DropdownMenu>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <DropdownMenuTrigger asChild>
+              <Button size="icon-sm" variant="ghost">
+                <Zap className="size-5" />
+              </Button>
+            </DropdownMenuTrigger>
+          </TooltipTrigger>
+          <TooltipContent>Run agent</TooltipContent>
+        </Tooltip>
+        <DropdownMenuContent align="start">
+          <DropdownMenuItem onClick={handleTasksClick}>
+            <ListTodo className="size-4" />
+            Tasks
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => navigate({ to: "/cronjobs" })}>
+            <Timer className="size-4" />
+            Cronjobs
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
       <TunnelToolbarButton />
     </>
   );
