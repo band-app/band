@@ -222,15 +222,16 @@ export function DiffView({ workspaceId }: DiffViewProps) {
   const [openFiles, setOpenFiles] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    if (!adapter.getWorkspaceDiff) {
+    const getWorkspaceDiff = adapter.getWorkspaceDiff;
+    if (!getWorkspaceDiff) {
       setError("Diff viewing not supported");
       setLoading(false);
       return;
     }
 
     let cancelled = false;
-    adapter
-      .getWorkspaceDiff(workspaceId)
+    getWorkspaceDiff
+      .call(adapter, workspaceId)
       .then((result) => {
         if (!cancelled) setData(result);
       })
