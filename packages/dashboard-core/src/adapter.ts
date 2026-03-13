@@ -55,6 +55,9 @@ export interface DashboardAdapter {
   checkCli(): Promise<CliStatus>;
   installCli(): Promise<void>;
 
+  // Window management
+  closeWorkspaceWindows(workspaceId: string): Promise<void>;
+
   // Code browsing (optional)
   getWorkspaceDiff?(workspaceId: string): Promise<WorkspaceDiff>;
   listWorkspaceFiles?(workspaceId: string, path: string): Promise<FileListResult>;

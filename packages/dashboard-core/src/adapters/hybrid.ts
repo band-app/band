@@ -30,6 +30,12 @@ export class HybridDashboardAdapter extends WebDashboardAdapter {
     return super.removeWorkspace(project, branch);
   }
 
+  async closeWorkspaceWindows(workspaceId: string): Promise<void> {
+    if (isTauri()) {
+      await tauriInvoke("workspace_close", { workspaceId });
+    }
+  }
+
   async openWorkspace(workspaceId: string): Promise<void> {
     if (isTauri()) {
       await tauriInvoke("workspace_focus", { workspaceId });

@@ -37,6 +37,7 @@ export function useStatusWatcher() {
       (workspaceId) => {
         previousStatuses.current.delete(workspaceId);
         removeStatus(workspaceId);
+        adapter.closeWorkspaceWindows(workspaceId);
       },
     );
 

@@ -73,6 +73,10 @@ export class WebDashboardAdapter implements DashboardAdapter {
     // No-op: window management is handled by the desktop app
   }
 
+  async closeWorkspaceWindows(_workspaceId: string): Promise<void> {
+    // No-op: window management is handled by the desktop app
+  }
+
   async runScript(path: string, scriptType: string): Promise<void> {
     await this.trpc.workspaces.runScript.mutate({ path, scriptType });
   }

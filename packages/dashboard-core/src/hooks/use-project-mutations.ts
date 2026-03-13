@@ -118,6 +118,7 @@ export function useRemoveWorkspace() {
   const adapter = useAdapter();
   const queryClient = useQueryClient();
   const setError = useDashboardStore((s) => s.setError);
+  const openWorkspace = useDashboardStore((s) => s.openWorkspace);
 
   return useMutation({
     mutationFn: ({ project, branch }: { project: string; branch: string }) =>
@@ -134,6 +135,18 @@ export function useRemoveWorkspace() {
         queryClient.setQueryData(queryKeys.projects, updated);
       }
       return { previous };
+    },
+    onSuccess: (_data, { project, branch }) => {
+      const activeWorkspaceId = useDashboardStore.getState().activeWorkspaceId;
+      const deletedWorkspaceId = toWorkspaceId(project, branch);
+      if (activeWorkspaceId === deletedWorkspaceId) {
+        const projects = queryClient.getQueryData<ProjectInfo[]>(queryKeys.projects);
+        const projectInfo = projects?.find((p) => p.name === project);
+        if (projectInfo) {
+          const mainWorkspaceId = toWorkspaceId(project, projectInfo.defaultBranch);
+          openWorkspace(mainWorkspaceId);
+        }
+      }
     },
     onError: (err, _vars, context) => {
       if (context?.previous) {
