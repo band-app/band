@@ -347,10 +347,42 @@ export function ProjectList({ labelFilter, editMode }: ProjectListProps) {
     }
   }, [activeWorkspaceId, allWorkspaceIds]);
 
+  // Focus the container so keyboard navigation works immediately.
+  // Depends on hasProjects because the container div only renders when
+  // projects.length > 0 (see the early return below). On first mount with no
+  // projects, containerRef.current is null; re-running when hasProjects flips
+  // to true ensures we focus the container once it exists in the DOM.
+  const hasProjects = projects.length > 0;
   useEffect(() => {
-    containerRef.current?.focus();
-  }, []);
+    if (hasProjects) {
+      containerRef.current?.focus();
+    }
+  }, [hasProjects]);
 
+  // ──────────────────────────────────────────────────────────────────────────
+  // KEYBOARD NAVIGATION — READ BEFORE MODIFYING
+  //
+  // This handler is the backbone of keyboard workspace switching. It has
+  // regressed multiple times because the interaction between this container-
+  // level handler and the card-level onKeyDown (in WorkspaceCard) is subtle:
+  //
+  //  • Arrow keys update `focusedIndex` which controls the visual highlight
+  //    ring on WorkspaceCards. However, arrow events may originate on a *child*
+  //    card that has DOM focus (e.g. after the user clicked a card or tabbed
+  //    into the list). They bubble up here because cards don't handle arrows.
+  //
+  //  • Enter on a *card* is handled by the card's own onKeyDown, which calls
+  //    stopPropagation — so this container handler would NEVER see it.
+  //    The card opens *itself*, not necessarily the keyboard-highlighted card.
+  //
+  //  • To fix this, arrow handlers explicitly re-focus the container via
+  //    containerRef.current?.focus(). This guarantees the next Enter fires
+  //    HERE, where we use the correct focusedIndex to open the right workspace.
+  //
+  // DO NOT remove the containerRef.current?.focus() calls. Without them,
+  // pressing Enter after arrow-key navigation opens the wrong workspace (or
+  // no workspace at all, depending on the platform).
+  // ──────────────────────────────────────────────────────────────────────────
   function handleKeyDown(e: React.KeyboardEvent) {
     if (allWorkspaceIds.length === 0) return;
 
@@ -358,11 +390,17 @@ export function ProjectList({ labelFilter, editMode }: ProjectListProps) {
       e.preventDefault();
       keyboardNavRef.current = true;
       setFocusedIndex((prev) => (prev < allWorkspaceIds.length - 1 ? prev + 1 : prev));
+      // Keep DOM focus on the container so Enter fires here, not on a child card.
+      // See block comment above — removing this breaks keyboard Enter navigation.
+      containerRef.current?.focus();
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       keyboardNavRef.current = true;
       setFocusedIndex((prev) => (prev > 0 ? prev - 1 : prev));
+      // Keep DOM focus on the container — same reasoning as ArrowDown above.
+      containerRef.current?.focus();
     } else if (e.key === "Enter") {
+      e.preventDefault();
       if (focusedIndex >= 0 && focusedIndex < allWorkspaceIds.length) {
         keyboardNavRef.current = false;
         openWorkspace(allWorkspaceIds[focusedIndex]);
