@@ -7,6 +7,8 @@ interface CodeBrowserViewProps {
   workspaceId: string;
   /** When set, navigates the browser to this file path. */
   file?: string;
+  /** Called when the user selects a file or navigates back (null = no file). */
+  onSelectFile?: (filePath: string | null) => void;
   /** Externally triggered file to open (e.g. from Quick Open or Search) */
   openFilePath?: string | null;
   /** Called after the external file path has been consumed */
@@ -23,6 +25,7 @@ function directoryOf(filePath: string): string {
 export function CodeBrowserView({
   workspaceId,
   file,
+  onSelectFile,
   openFilePath,
   onFileOpened,
   onFindInFile,
@@ -70,9 +73,18 @@ export function CodeBrowserView({
     return () => onFindInFile?.(null);
   }, [onFindInFile]);
 
-  const handleBack = () => {
+  const handleSelectFile = useCallback(
+    (filePath: string) => {
+      setViewFilePath(filePath);
+      onSelectFile?.(filePath);
+    },
+    [onSelectFile],
+  );
+
+  const handleBack = useCallback(() => {
     setViewFilePath("");
-  };
+    onSelectFile?.(null);
+  }, [onSelectFile]);
 
   // Mobile: toggle between browse and view
   if (!isDesktop) {
@@ -84,7 +96,7 @@ export function CodeBrowserView({
         workspaceId={workspaceId}
         currentPath={currentPath}
         onNavigate={setCurrentPath}
-        onOpenFile={setViewFilePath}
+        onOpenFile={handleSelectFile}
       />
     );
   }
@@ -98,7 +110,7 @@ export function CodeBrowserView({
           workspaceId={workspaceId}
           currentPath={currentPath}
           onNavigate={setCurrentPath}
-          onOpenFile={setViewFilePath}
+          onOpenFile={handleSelectFile}
           compact
           selectedFile={viewFilePath}
         />
