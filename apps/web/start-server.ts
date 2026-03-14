@@ -11,6 +11,8 @@ import { startCronjobScheduler, stopCronjobScheduler } from "./src/lib/cronjob-s
 import { checkPrereqs } from "./src/lib/process-utils.ts";
 import { bandHome, ensureDirs, getOrCreateToken, loadSettings } from "./src/lib/state.ts";
 import { cleanupStaleTasks } from "./src/lib/task-store.ts";
+import { killAllTerminals } from "./src/lib/terminal-manager.ts";
+import { handleTerminalConnection } from "./src/lib/terminal-ws.ts";
 import { startTunnel, stopTunnel } from "./src/lib/tunnel.ts";
 import { createContext } from "./src/trpc/context.ts";
 import { appRouter } from "./src/trpc/router.ts";
@@ -202,6 +204,11 @@ async function main() {
   const wss = new WebSocketServer({ noServer: true });
   const wssHandler = applyWSSHandler({ wss, router: appRouter, createContext });
 
+  // ---------------------------------------------------------------------------
+  // WebSocket server for terminal connections
+  // ---------------------------------------------------------------------------
+  const terminalWss = new WebSocketServer({ noServer: true });
+
   httpServer.on("upgrade", (req, socket, head) => {
     // Auth check: validate band_token cookie (skip if no token configured)
     if (expectedToken) {
@@ -210,6 +217,15 @@ async function main() {
         socket.destroy();
         return;
       }
+    }
+
+    const url = new URL(req.url!, `http://${req.headers.host}`);
+
+    if (url.pathname === "/terminal") {
+      terminalWss.handleUpgrade(req, socket, head, (ws) => {
+        handleTerminalConnection(ws, req);
+      });
+      return;
     }
 
     wss.handleUpgrade(req, socket, head, (ws) => {
@@ -242,9 +258,11 @@ async function main() {
   const shutdown = async () => {
     stopBranchStatusPoller();
     stopCronjobScheduler();
+    killAllTerminals();
     await stopTunnel().catch(() => {});
     wssHandler.broadcastReconnectNotification();
     wss.close();
+    terminalWss.close();
     httpServer.close();
     process.exit(0);
   };

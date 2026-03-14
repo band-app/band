@@ -32,12 +32,34 @@ function trpcDevPlugin(): Plugin {
 
       // WebSocket server for tRPC subscriptions (no auth in dev mode)
       const wss = new WebSocketServer({ noServer: true });
+      const terminalWss = new WebSocketServer({ noServer: true });
       let wssHandlerInitialized = false;
 
       server.httpServer?.on("upgrade", async (req, socket, head) => {
         // Let Vite handle its own HMR WebSocket upgrades
         if (req.headers["sec-websocket-protocol"]?.includes("vite-hmr")) return;
 
+        const url = new URL(req.url!, `http://${req.headers.host}`);
+
+        // Terminal WebSocket
+        if (url.pathname === "/terminal") {
+          try {
+            const { handleTerminalConnection } = await server.ssrLoadModule(
+              "./src/lib/terminal-ws",
+            );
+            terminalWss.handleUpgrade(req, socket, head, (ws: any) => {
+              handleTerminalConnection(ws, req).catch((err: Error) => {
+                log.error("Terminal connection error: %s", err.message);
+              });
+            });
+          } catch (err) {
+            log.error("Failed to load terminal module: %s", err);
+            socket.destroy();
+          }
+          return;
+        }
+
+        // tRPC WebSocket
         if (!wssHandlerInitialized) {
           const [{ applyWSSHandler }, { createContext }, { appRouter }] = (await Promise.all([
             server.ssrLoadModule("@trpc/server/adapters/ws"),
@@ -70,9 +92,13 @@ function trpcDevPlugin(): Plugin {
         });
       });
 
-      // Clean up tunnel and WebSocket server on dev server shutdown
+      // Clean up tunnel, terminals, and WebSocket servers on dev server shutdown
       server.httpServer?.on("close", () => {
         wss.close();
+        terminalWss.close();
+        server.ssrLoadModule("./src/lib/terminal-manager").then(({ killAllTerminals }) => {
+          killAllTerminals();
+        });
         server.ssrLoadModule("./src/lib/tunnel").then(({ stopTunnel }) => {
           stopTunnel().catch(() => {});
         });
@@ -97,6 +123,11 @@ export default defineConfig(({ command }) => ({
           // Bundle all dependencies into server.js so the Tauri DMG
           // doesn't need node_modules at runtime.
           noExternal: true,
+          // node-pty is a native addon that cannot be bundled
+          external: ["node-pty"],
         }
-      : undefined,
+      : {
+          // node-pty is a native addon that cannot be bundled
+          external: ["node-pty"],
+        },
 }));
