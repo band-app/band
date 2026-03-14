@@ -1,48 +1,8 @@
 #[cfg(target_os = "macos")]
-#[macro_use]
-extern crate objc;
-
-#[cfg(target_os = "macos")]
 mod api;
 mod commands;
 mod git;
 mod state;
-
-/// Recursively find and remove all `NSVisualEffectView` instances from a view hierarchy.
-/// This prevents macOS from crashing in `NSViewUpdateVibrancyForSubtree` when using
-/// a transparent title bar style with `WebKit` content.
-#[cfg(target_os = "macos")]
-unsafe fn remove_visual_effect_views(view: cocoa::base::id) {
-    use cocoa::base::{id, nil};
-    use objc::runtime::Class;
-
-    let subviews: id = msg_send![view, subviews];
-    let count: usize = msg_send![subviews, count];
-
-    // Collect views to remove first (can't mutate while iterating)
-    let mut to_remove: Vec<id> = Vec::new();
-    let visual_effect_class = Class::get("NSVisualEffectView");
-
-    for i in (0..count).rev() {
-        let subview: id = msg_send![subviews, objectAtIndex: i];
-        if subview == nil {
-            continue;
-        }
-        if let Some(cls) = visual_effect_class {
-            let is_kind: bool = msg_send![subview, isKindOfClass: cls];
-            if is_kind {
-                to_remove.push(subview);
-                continue;
-            }
-        }
-        // Recurse into non-matching subviews
-        remove_visual_effect_views(subview);
-    }
-
-    for v in to_remove {
-        let () = msg_send![v, removeFromSuperview];
-    }
-}
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -78,6 +38,7 @@ pub fn run() {
             commands::webserver::webserver_start,
             commands::webserver::webserver_stop,
             commands::window::open_tasks_window,
+            commands::window::get_app_title,
         ])
         .setup(move |app| {
             let window = app.get_webview_window("main").unwrap();
@@ -143,17 +104,8 @@ pub fn run() {
                 });
             }
 
-            // Set window title with git branch if available
-            let title = match git::get_current_branch() {
-                Some(branch) => format!("Band - {branch}"),
-                None => "Band".to_string(),
-            };
-            let _ = window.set_title(&title);
-
-            // Set window background to black so the transparent title bar appears black,
-            // and remove any NSVisualEffectView that macOS creates for the transparent
-            // title bar — it causes crashes in NSViewUpdateVibrancyForSubtree during
-            // WebKit content updates.
+            // Set window background to black so the area behind macOS traffic
+            // light buttons matches the dark UI.
             #[cfg(target_os = "macos")]
             #[allow(deprecated)] // cocoa crate deprecated in favor of objc2-app-kit
             {
@@ -165,18 +117,6 @@ pub fn run() {
                     let color =
                         NSColor::colorWithSRGBRed_green_blue_alpha_(nil, 0.0, 0.0, 0.0, 1.0);
                     ns_window.setBackgroundColor_(color);
-
-                    // Remove NSVisualEffectView from the title bar to prevent
-                    // NSViewUpdateVibrancyForSubtree crashes. The transparent
-                    // title bar style causes macOS to insert a vibrancy layer
-                    // that can crash when WebKit updates its view hierarchy.
-                    let content_view: id = cocoa::appkit::NSWindow::contentView(ns_window);
-                    if content_view != nil {
-                        let superview: id = msg_send![content_view, superview];
-                        if superview != nil {
-                            remove_visual_effect_views(superview);
-                        }
-                    }
                 }
             }
 
