@@ -38,6 +38,10 @@ class DesktopWebCapabilities implements PlatformCapabilities {
   getWorkspaceHref(_workspaceId: string): string | undefined {
     return undefined;
   }
+
+  async openUrl(url: string): Promise<void> {
+    window.open(url, "_blank");
+  }
 }
 
 const desktopCapabilities = new DesktopWebCapabilities();
