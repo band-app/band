@@ -145,10 +145,7 @@ impl Renderer {
     /// Main dispatch: render a single SSE chunk.
     /// Returns `true` if this was a `"finish"` chunk (caller should exit).
     pub fn render_chunk(&mut self, chunk: &serde_json::Value) -> bool {
-        let chunk_type = chunk
-            .get("type")
-            .and_then(|t| t.as_str())
-            .unwrap_or("");
+        let chunk_type = chunk.get("type").and_then(|t| t.as_str()).unwrap_or("");
 
         match chunk_type {
             "text-delta" => self.on_text_delta(chunk),
@@ -169,10 +166,7 @@ impl Renderer {
 
     fn on_text_delta(&mut self, chunk: &serde_json::Value) {
         self.in_text = true;
-        let delta = chunk
-            .get("delta")
-            .and_then(|d| d.as_str())
-            .unwrap_or("");
+        let delta = chunk.get("delta").and_then(|d| d.as_str()).unwrap_or("");
         print!("{delta}");
         std::io::stdout().flush().ok();
         self.needs_newline = !delta.ends_with('\n');
@@ -203,9 +197,7 @@ impl Renderer {
             .get("toolCallId")
             .and_then(|n| n.as_str())
             .unwrap_or("");
-        let input = chunk
-            .get("input")
-            .unwrap_or(&serde_json::Value::Null);
+        let input = chunk.get("input").unwrap_or(&serde_json::Value::Null);
         let summary = tool_summary(tool_name, input);
 
         // Store for later correlation with output.
@@ -254,16 +246,11 @@ impl Renderer {
             .get("toolCallId")
             .and_then(|n| n.as_str())
             .unwrap_or("");
-        let output = chunk
-            .get("output")
-            .and_then(|o| o.as_str())
-            .unwrap_or("");
+        let output = chunk.get("output").and_then(|o| o.as_str()).unwrap_or("");
 
         // Look up the tool name from our pending map.
         let info = self.pending_tools.remove(tool_call_id);
-        let summary = info
-            .as_ref()
-            .map_or("tool", |i| i.summary.as_str());
+        let summary = info.as_ref().map_or("tool", |i| i.summary.as_str());
 
         let a = &self.ansi;
         eprintln!(
@@ -308,12 +295,7 @@ impl Renderer {
             .and_then(|t| t.as_str())
             .unwrap_or("Unknown error");
         let a = &self.ansi;
-        eprintln!(
-            "\n{}{}Error:{} {text}",
-            a.red(),
-            a.bold(),
-            a.reset(),
-        );
+        eprintln!("\n{}{}Error:{} {text}", a.red(), a.bold(), a.reset(),);
         self.task_succeeded = false;
     }
 
@@ -365,12 +347,7 @@ impl Renderer {
                 a.reset(),
             );
         } else {
-            eprintln!(
-                "\n{}{}Task completed.{}",
-                a.green(),
-                a.bold(),
-                a.reset(),
-            );
+            eprintln!("\n{}{}Task completed.{}", a.green(), a.bold(), a.reset(),);
         }
     }
 }

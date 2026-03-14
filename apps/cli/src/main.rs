@@ -252,12 +252,13 @@ fn main() {
 
     // Watch streams output directly, handle separately
     if let Commands::Tasks {
-        cmd: TasksCmd::Watch {
-            ref id,
-            ref workspace,
-            verbose,
-            ref tools,
-        },
+        cmd:
+            TasksCmd::Watch {
+                ref id,
+                ref workspace,
+                verbose,
+                ref tools,
+            },
     } = cli.command
     {
         let tool_display = match tools.as_str() {
@@ -1005,8 +1006,7 @@ fn stream_sse_events(
 
         if line.is_empty() {
             if !data_buf.is_empty() {
-                let should_exit =
-                    process_sse_data(&data_buf, json_output, &mut renderer)?;
+                let should_exit = process_sse_data(&data_buf, json_output, &mut renderer)?;
                 data_buf.clear();
                 if should_exit {
                     return Ok(renderer.task_succeeded);
@@ -1043,7 +1043,6 @@ fn process_sse_data(
         Ok(renderer.render_chunk(&chunk))
     }
 }
-
 
 /// Resolve a task ID (tsk_*) or workspace ID to a workspace ID.
 /// When neither `id` nor `workspace` is given, auto-detects from the current
@@ -1090,9 +1089,7 @@ fn detect_workspace_from_cwd(client: &api::ApiClient) -> Result<String, String> 
         .map_err(|e| format!("Failed to run git: {e}"))?;
 
     if !git_output.status.success() {
-        return Err(
-            "Not in a git repository. Specify a task ID or --workspace.".to_string(),
-        );
+        return Err("Not in a git repository. Specify a task ID or --workspace.".to_string());
     }
 
     let toplevel = String::from_utf8_lossy(&git_output.stdout)
