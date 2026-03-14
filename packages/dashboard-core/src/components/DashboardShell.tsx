@@ -17,7 +17,7 @@ import {
   TooltipTrigger,
 } from "@band/ui";
 import { Check, FolderPlus, Pencil, Plus, Settings, Tag, X } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useCliSetup } from "../hooks/use-cli-setup";
 import { useHooksSetup } from "../hooks/use-hooks-setup";
 import { useProjects } from "../hooks/use-projects";
@@ -37,6 +37,8 @@ interface DashboardShellProps {
   toolbarExtra?: ReactNode;
 }
 
+const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
 export function DashboardShell({ toolbarExtra }: DashboardShellProps) {
   const { projects, isLoading: loading } = useProjects();
   const { settings } = useSettingsQuery();
@@ -51,13 +53,56 @@ export function DashboardShell({ toolbarExtra }: DashboardShellProps) {
   const { state: hooksState, install: installHooks } = useHooksSetup();
   const { state: cliState, install: installCli } = useCliSetup();
 
+  const [appTitle, setAppTitle] = useState("Band");
+  const titleBarRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isTauri) return;
+    import("@tauri-apps/api/core").then(({ invoke }) => {
+      invoke<string>("get_app_title").then(setAppTitle);
+    });
+  }, []);
+
+  // Attach native mousedown listener for window dragging.
+  // Uses the official Tauri pattern: startDragging() on primary button press.
+  useEffect(() => {
+    const el = titleBarRef.current;
+    if (!isTauri || !el) return;
+
+    let appWindow: { startDragging: () => Promise<void> } | null = null;
+    import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
+      appWindow = getCurrentWindow();
+    });
+
+    const onMouseDown = (e: MouseEvent) => {
+      if (e.buttons === 1 && appWindow) {
+        appWindow.startDragging();
+      }
+    };
+    el.addEventListener("mousedown", onMouseDown);
+    return () => el.removeEventListener("mousedown", onMouseDown);
+  }, []);
+
   useStatusWatcher();
   useActiveWorkspaceWatcher();
   useBranchStatusWatcher();
   useSetupStatusWatcher();
 
   return (
-    <div className="h-dvh w-full overflow-hidden flex flex-col bg-background text-foreground p-0 pt-[env(safe-area-inset-top)]">
+    <div
+      className={`h-dvh w-full overflow-hidden flex flex-col bg-background text-foreground p-0 ${isTauri ? "" : "pt-[env(safe-area-inset-top)]"}`}
+    >
+      {isTauri && (
+        <div
+          ref={titleBarRef}
+          data-tauri-drag-region
+          className="h-[28px] shrink-0 flex items-center justify-center"
+        >
+          <span className="text-xs font-medium text-muted-foreground select-none pointer-events-none">
+            {appTitle}
+          </span>
+        </div>
+      )}
       {view === "settings" ? (
         <ScrollArea className="flex-1 overflow-hidden">
           <div className="px-2 py-2">

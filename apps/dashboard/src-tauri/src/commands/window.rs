@@ -35,7 +35,9 @@ pub async fn open_tasks_window(app: AppHandle) -> Result<(), String> {
     .center();
 
     #[cfg(target_os = "macos")]
-    let builder = builder.title_bar_style(tauri::TitleBarStyle::Transparent);
+    let builder = builder
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .hidden_title(true);
 
     let window = builder
         .build()
@@ -56,4 +58,12 @@ pub async fn open_tasks_window(app: AppHandle) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+#[tauri::command]
+pub fn get_app_title() -> String {
+    match crate::git::get_current_branch() {
+        Some(branch) => format!("Band - {branch}"),
+        None => "Band".to_string(),
+    }
 }
