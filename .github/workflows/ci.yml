@@ -28,6 +28,7 @@ jobs:
           server_type: cax21
           image: ubuntu-24.04
           location: nbg1
+          runner_wait: 120
           pre_runner_script: |
             apt-get update
             apt-get install -y build-essential curl wget pkg-config libssl-dev \
