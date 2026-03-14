@@ -44,9 +44,9 @@ function trpcDevPlugin(): Plugin {
         // Terminal WebSocket
         if (url.pathname === "/terminal") {
           try {
-            const { handleTerminalConnection } = await server.ssrLoadModule(
-              "./src/lib/terminal-ws",
-            );
+            const { handleTerminalConnection } =
+              await server.ssrLoadModule("./src/lib/terminal-ws");
+            // biome-ignore lint/suspicious/noExplicitAny: ssrLoadModule returns untyped modules
             terminalWss.handleUpgrade(req, socket, head, (ws: any) => {
               handleTerminalConnection(ws, req).catch((err: Error) => {
                 log.error("Terminal connection error: %s", err.message);

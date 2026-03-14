@@ -104,7 +104,5 @@ export function TerminalPanel({ workspaceId, visible }: TerminalPanelProps) {
     }
   }, [visible]);
 
-  return (
-    <div ref={containerRef} className="h-full w-full overflow-hidden" />
-  );
+  return <div ref={containerRef} className="h-full w-full overflow-hidden" />;
 }

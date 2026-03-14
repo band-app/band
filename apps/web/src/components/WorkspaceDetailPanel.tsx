@@ -1,12 +1,6 @@
 import { type DiffStats, DiffView } from "@band/dashboard-core";
-import {
-  ChevronDown,
-  ChevronUp,
-  Code,
-  GitCompare,
-  Terminal as TerminalIcon,
-} from "lucide-react";
-import { Suspense, lazy, useCallback, useRef, useState } from "react";
+import { ChevronDown, ChevronUp, Code, GitCompare, Terminal as TerminalIcon } from "lucide-react";
+import { lazy, Suspense, useCallback, useRef, useState } from "react";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { CodeBrowserView } from "./CodeBrowserView";
 

@@ -17,9 +17,7 @@ const terminals = new Map<string, TerminalSession>();
 /**
  * Returns an existing terminal session for the workspace, or spawns a new one.
  */
-export async function getOrSpawnTerminal(
-  workspaceId: string,
-): Promise<TerminalSession> {
+export async function getOrSpawnTerminal(workspaceId: string): Promise<TerminalSession> {
   const existing = terminals.get(workspaceId);
   if (existing) {
     return existing;
@@ -76,11 +74,7 @@ export function getTerminal(workspaceId: string): TerminalSession | undefined {
   return terminals.get(workspaceId);
 }
 
-export function resizeTerminal(
-  workspaceId: string,
-  cols: number,
-  rows: number,
-): void {
+export function resizeTerminal(workspaceId: string, cols: number, rows: number): void {
   const session = terminals.get(workspaceId);
   if (session) {
     session.pty.resize(cols, rows);

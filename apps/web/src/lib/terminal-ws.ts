@@ -5,10 +5,7 @@ import { getOrSpawnTerminal, resizeTerminal } from "./terminal-manager";
 
 const log = createLogger("terminal-ws");
 
-export async function handleTerminalConnection(
-  ws: WebSocket,
-  req: IncomingMessage,
-): Promise<void> {
+export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessage): Promise<void> {
   const url = new URL(req.url!, `http://${req.headers.host}`);
   const workspaceId = url.searchParams.get("workspaceId");
 
@@ -17,7 +14,7 @@ export async function handleTerminalConnection(
     return;
   }
 
-  let session;
+  let session: Awaited<ReturnType<typeof getOrSpawnTerminal>>;
   try {
     session = await getOrSpawnTerminal(workspaceId);
   } catch (err) {
@@ -43,11 +40,7 @@ export async function handleTerminalConnection(
 
   // PTY exit -> close WebSocket
   const exitDisposable = session.pty.onExit(({ exitCode }) => {
-    log.debug(
-      "PTY exited with code %d for workspace %s",
-      exitCode,
-      workspaceId,
-    );
+    log.debug("PTY exited with code %d for workspace %s", exitCode, workspaceId);
     if (ws.readyState === ws.OPEN) {
       ws.close(1000, "Terminal exited");
     }
