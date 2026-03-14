@@ -1039,10 +1039,7 @@ fn tasks_watch_verbose_flag_accepted() {
 
     // Should not crash — verbose flag is accepted
     let err = stderr(&output);
-    assert!(
-        err.contains("[watching task"),
-        "expected banner: {err}"
-    );
+    assert!(err.contains("[watching task"), "expected banner: {err}");
 }
 
 #[test]
@@ -1082,7 +1079,11 @@ fn tasks_watch_auto_detect_workspace_from_cwd() {
     let env = TestEnv::new();
 
     let create_out = env.band(&["workspaces", "create", "my-project", "feat/watch-cwd"]);
-    assert!(create_out.status.success(), "stderr: {}", stderr(&create_out));
+    assert!(
+        create_out.status.success(),
+        "stderr: {}",
+        stderr(&create_out)
+    );
     let worktree_path = stdout(&create_out);
 
     env.band(&[
@@ -1122,7 +1123,10 @@ fn tasks_watch_auto_detect_fails_outside_workspace() {
 
     let output = env.band_in(&unrelated, &["tasks", "watch"]);
 
-    assert!(!output.status.success(), "expected failure when not in a workspace");
+    assert!(
+        !output.status.success(),
+        "expected failure when not in a workspace"
+    );
     let err = stderr(&output);
     assert!(
         err.contains("No workspace found"),
@@ -1562,7 +1566,10 @@ impl MockSseServer {
 fn build_sse(chunks: &[serde_json::Value]) -> String {
     let mut buf = String::new();
     for chunk in chunks {
-        buf.push_str(&format!("data: {}\n\n", serde_json::to_string(chunk).unwrap()));
+        buf.push_str(&format!(
+            "data: {}\n\n",
+            serde_json::to_string(chunk).unwrap()
+        ));
     }
     buf
 }
@@ -1604,9 +1611,7 @@ fn watch_render_text_deltas() {
     let mock = MockSseServer::new(build_sse(&chunks));
     let tmp = tempfile::tempdir().unwrap();
 
-    let output = band_with_mock(&tmp, &mock, &[
-        "tasks", "watch", "--workspace", "ws-1",
-    ]);
+    let output = band_with_mock(&tmp, &mock, &["tasks", "watch", "--workspace", "ws-1"]);
 
     assert!(output.status.success(), "stderr: {}", stderr(&output));
     let out = stdout(&output);
@@ -1627,14 +1632,18 @@ fn watch_render_tool_input_shows_marker() {
     let mock = MockSseServer::new(build_sse(&chunks));
     let tmp = tempfile::tempdir().unwrap();
 
-    let output = band_with_mock(&tmp, &mock, &[
-        "tasks", "watch", "--workspace", "ws-1",
-    ]);
+    let output = band_with_mock(&tmp, &mock, &["tasks", "watch", "--workspace", "ws-1"]);
 
     let err = stderr(&output);
     // Should have the tool marker and tool summary
-    assert!(err.contains("\u{25b8}"), "expected tool marker in stderr: {err}");
-    assert!(err.contains("Read: /src/main.rs"), "expected tool summary: {err}");
+    assert!(
+        err.contains("\u{25b8}"),
+        "expected tool marker in stderr: {err}"
+    );
+    assert!(
+        err.contains("Read: /src/main.rs"),
+        "expected tool summary: {err}"
+    );
 }
 
 #[test]
@@ -1651,13 +1660,21 @@ fn watch_render_tool_input_hidden_with_tools_off() {
     let mock = MockSseServer::new(build_sse(&chunks));
     let tmp = tempfile::tempdir().unwrap();
 
-    let output = band_with_mock(&tmp, &mock, &[
-        "tasks", "watch", "--workspace", "ws-1", "--tools", "off",
-    ]);
+    let output = band_with_mock(
+        &tmp,
+        &mock,
+        &["tasks", "watch", "--workspace", "ws-1", "--tools", "off"],
+    );
 
     let err = stderr(&output);
-    assert!(!err.contains("\u{25b8}"), "tool marker should be hidden: {err}");
-    assert!(!err.contains("Read:"), "tool summary should be hidden: {err}");
+    assert!(
+        !err.contains("\u{25b8}"),
+        "tool marker should be hidden: {err}"
+    );
+    assert!(
+        !err.contains("Read:"),
+        "tool summary should be hidden: {err}"
+    );
 }
 
 #[test]
@@ -1679,9 +1696,11 @@ fn watch_render_tool_output_shown_in_verbose() {
     let mock = MockSseServer::new(build_sse(&chunks));
     let tmp = tempfile::tempdir().unwrap();
 
-    let output = band_with_mock(&tmp, &mock, &[
-        "tasks", "watch", "--workspace", "ws-1", "--verbose",
-    ]);
+    let output = band_with_mock(
+        &tmp,
+        &mock,
+        &["tasks", "watch", "--workspace", "ws-1", "--verbose"],
+    );
 
     let err = stderr(&output);
     // Verbose mode should show the start marker
@@ -1689,7 +1708,10 @@ fn watch_render_tool_output_shown_in_verbose() {
     // Verbose mode should show input JSON
     assert!(err.contains("echo hi"), "expected input in verbose: {err}");
     // Verbose mode should show completion marker
-    assert!(err.contains("\u{2713}"), "expected completion marker: {err}");
+    assert!(
+        err.contains("\u{2713}"),
+        "expected completion marker: {err}"
+    );
     // Verbose mode should show tool output
     assert!(err.contains("hi"), "expected tool output in verbose: {err}");
 }
@@ -1713,15 +1735,19 @@ fn watch_render_tool_output_hidden_in_default() {
     let mock = MockSseServer::new(build_sse(&chunks));
     let tmp = tempfile::tempdir().unwrap();
 
-    let output = band_with_mock(&tmp, &mock, &[
-        "tasks", "watch", "--workspace", "ws-1",
-    ]);
+    let output = band_with_mock(&tmp, &mock, &["tasks", "watch", "--workspace", "ws-1"]);
 
     let err = stderr(&output);
     // Default mode should show start marker but NOT completion marker
     assert!(err.contains("\u{25b8}"), "expected start marker: {err}");
-    assert!(!err.contains("\u{2713}"), "completion marker should be hidden in default: {err}");
-    assert!(!err.contains("fn main()"), "tool output should be hidden in default: {err}");
+    assert!(
+        !err.contains("\u{2713}"),
+        "completion marker should be hidden in default: {err}"
+    );
+    assert!(
+        !err.contains("fn main()"),
+        "tool output should be hidden in default: {err}"
+    );
 }
 
 #[test]
@@ -1735,9 +1761,7 @@ fn watch_render_error_chunk() {
     let mock = MockSseServer::new(build_sse(&chunks));
     let tmp = tempfile::tempdir().unwrap();
 
-    let output = band_with_mock(&tmp, &mock, &[
-        "tasks", "watch", "--workspace", "ws-1",
-    ]);
+    let output = band_with_mock(&tmp, &mock, &["tasks", "watch", "--workspace", "ws-1"]);
 
     // Error should cause non-zero exit
     assert!(!output.status.success(), "expected failure exit code");
@@ -1767,13 +1791,14 @@ fn watch_render_data_result_with_duration_and_cost() {
     let mock = MockSseServer::new(build_sse(&chunks));
     let tmp = tempfile::tempdir().unwrap();
 
-    let output = band_with_mock(&tmp, &mock, &[
-        "tasks", "watch", "--workspace", "ws-1",
-    ]);
+    let output = band_with_mock(&tmp, &mock, &["tasks", "watch", "--workspace", "ws-1"]);
 
     assert!(output.status.success(), "stderr: {}", stderr(&output));
     let err = stderr(&output);
-    assert!(err.contains("Task completed in 2m 5s"), "expected duration: {err}");
+    assert!(
+        err.contains("Task completed in 2m 5s"),
+        "expected duration: {err}"
+    );
     assert!(err.contains("$0.42"), "expected cost: {err}");
     assert!(err.contains("12 turns"), "expected turns: {err}");
 }
@@ -1816,19 +1841,29 @@ fn watch_render_full_conversation() {
     let mock = MockSseServer::new(build_sse(&chunks));
     let tmp = tempfile::tempdir().unwrap();
 
-    let output = band_with_mock(&tmp, &mock, &[
-        "tasks", "watch", "--workspace", "ws-1",
-    ]);
+    let output = band_with_mock(&tmp, &mock, &["tasks", "watch", "--workspace", "ws-1"]);
 
     assert!(output.status.success(), "stderr: {}", stderr(&output));
     let out = stdout(&output);
-    assert!(out.contains("Let me fix that bug."), "expected first text: {out}");
+    assert!(
+        out.contains("Let me fix that bug."),
+        "expected first text: {out}"
+    );
     assert!(out.contains("Fixed it."), "expected second text: {out}");
 
     let err = stderr(&output);
-    assert!(err.contains("Read: /src/app.rs"), "expected Read tool: {err}");
-    assert!(err.contains("Edit: /src/app.rs"), "expected Edit tool: {err}");
-    assert!(err.contains("Task completed in 5s"), "expected completion: {err}");
+    assert!(
+        err.contains("Read: /src/app.rs"),
+        "expected Read tool: {err}"
+    );
+    assert!(
+        err.contains("Edit: /src/app.rs"),
+        "expected Edit tool: {err}"
+    );
+    assert!(
+        err.contains("Task completed in 5s"),
+        "expected completion: {err}"
+    );
 }
 
 #[test]
@@ -1846,9 +1881,11 @@ fn watch_render_json_mode_outputs_ndjson() {
     let mock = MockSseServer::new(build_sse(&chunks));
     let tmp = tempfile::tempdir().unwrap();
 
-    let output = band_with_mock(&tmp, &mock, &[
-        "tasks", "watch", "--workspace", "ws-1", "--output", "json",
-    ]);
+    let output = band_with_mock(
+        &tmp,
+        &mock,
+        &["tasks", "watch", "--workspace", "ws-1", "--output", "json"],
+    );
 
     let out = stdout(&output);
     let lines: Vec<&str> = out.lines().collect();
@@ -1860,7 +1897,10 @@ fn watch_render_json_mode_outputs_ndjson() {
     }
     // JSON mode should NOT have tool markers or banners on stderr
     let err = stderr(&output);
-    assert!(!err.contains("[watching task"), "no banner in json mode: {err}");
+    assert!(
+        !err.contains("[watching task"),
+        "no banner in json mode: {err}"
+    );
 }
 
 #[test]
@@ -1882,9 +1922,7 @@ fn watch_render_no_ansi_when_piped() {
     let mock = MockSseServer::new(build_sse(&chunks));
     let tmp = tempfile::tempdir().unwrap();
 
-    let output = band_with_mock(&tmp, &mock, &[
-        "tasks", "watch", "--workspace", "ws-1",
-    ]);
+    let output = band_with_mock(&tmp, &mock, &["tasks", "watch", "--workspace", "ws-1"]);
 
     let err = stderr(&output);
     // CLI is piped in tests, so no ANSI escape codes should appear
@@ -1893,9 +1931,15 @@ fn watch_render_no_ansi_when_piped() {
         "expected no ANSI codes when piped: {err}"
     );
     // But content should still be present
-    assert!(err.contains("Read: /src/main.rs"), "expected tool text: {err}");
+    assert!(
+        err.contains("Read: /src/main.rs"),
+        "expected tool text: {err}"
+    );
     assert!(err.contains("Error:"), "expected error text: {err}");
-    assert!(err.contains("Task completed"), "expected completion text: {err}");
+    assert!(
+        err.contains("Task completed"),
+        "expected completion text: {err}"
+    );
 }
 
 #[test]
@@ -1912,13 +1956,18 @@ fn watch_render_verbose_shows_tool_input_json() {
     let mock = MockSseServer::new(build_sse(&chunks));
     let tmp = tempfile::tempdir().unwrap();
 
-    let output = band_with_mock(&tmp, &mock, &[
-        "tasks", "watch", "--workspace", "ws-1", "--verbose",
-    ]);
+    let output = band_with_mock(
+        &tmp,
+        &mock,
+        &["tasks", "watch", "--workspace", "ws-1", "--verbose"],
+    );
 
     let err = stderr(&output);
     // Verbose should show the formatted JSON input
-    assert!(err.contains("\"pattern\""), "expected 'pattern' key in verbose output: {err}");
+    assert!(
+        err.contains("\"pattern\""),
+        "expected 'pattern' key in verbose output: {err}"
+    );
     assert!(err.contains("\"TODO\""), "expected pattern value: {err}");
     assert!(err.contains("\"path\""), "expected 'path' key: {err}");
 }
@@ -1943,14 +1992,22 @@ fn watch_render_tools_full_shows_completion_and_output() {
     let tmp = tempfile::tempdir().unwrap();
 
     // Use --tools=full (same as --verbose for tool display)
-    let output = band_with_mock(&tmp, &mock, &[
-        "tasks", "watch", "--workspace", "ws-1", "--tools", "full",
-    ]);
+    let output = band_with_mock(
+        &tmp,
+        &mock,
+        &["tasks", "watch", "--workspace", "ws-1", "--tools", "full"],
+    );
 
     let err = stderr(&output);
     assert!(err.contains("\u{25b8}"), "expected start marker: {err}");
-    assert!(err.contains("\u{2713}"), "expected completion marker: {err}");
-    assert!(err.contains("PASS all 5 tests"), "expected tool output: {err}");
+    assert!(
+        err.contains("\u{2713}"),
+        "expected completion marker: {err}"
+    );
+    assert!(
+        err.contains("PASS all 5 tests"),
+        "expected tool output: {err}"
+    );
 }
 
 #[test]
@@ -1978,9 +2035,7 @@ fn watch_render_text_then_tools_then_text() {
     let mock = MockSseServer::new(build_sse(&chunks));
     let tmp = tempfile::tempdir().unwrap();
 
-    let output = band_with_mock(&tmp, &mock, &[
-        "tasks", "watch", "--workspace", "ws-1",
-    ]);
+    let output = band_with_mock(&tmp, &mock, &["tasks", "watch", "--workspace", "ws-1"]);
 
     let out = stdout(&output);
     assert!(out.contains("First message"), "expected first msg: {out}");
@@ -2003,13 +2058,14 @@ fn watch_render_data_result_without_optional_fields() {
     let mock = MockSseServer::new(build_sse(&chunks));
     let tmp = tempfile::tempdir().unwrap();
 
-    let output = band_with_mock(&tmp, &mock, &[
-        "tasks", "watch", "--workspace", "ws-1",
-    ]);
+    let output = band_with_mock(&tmp, &mock, &["tasks", "watch", "--workspace", "ws-1"]);
 
     assert!(output.status.success());
     let err = stderr(&output);
-    assert!(err.contains("Task completed in 3s"), "expected duration only: {err}");
+    assert!(
+        err.contains("Task completed in 3s"),
+        "expected duration only: {err}"
+    );
     // Should NOT contain cost or turns when not provided
     assert!(!err.contains("$"), "no cost expected: {err}");
     assert!(!err.contains("turns"), "no turns expected: {err}");
@@ -2041,14 +2097,18 @@ fn watch_render_multiple_tool_calls_with_summaries() {
     let mock = MockSseServer::new(build_sse(&chunks));
     let tmp = tempfile::tempdir().unwrap();
 
-    let output = band_with_mock(&tmp, &mock, &[
-        "tasks", "watch", "--workspace", "ws-1",
-    ]);
+    let output = band_with_mock(&tmp, &mock, &["tasks", "watch", "--workspace", "ws-1"]);
 
     let err = stderr(&output);
-    assert!(err.contains("Bash: cargo build"), "expected Bash summary: {err}");
+    assert!(
+        err.contains("Bash: cargo build"),
+        "expected Bash summary: {err}"
+    );
     assert!(err.contains("Grep: /src"), "expected Grep summary: {err}");
-    assert!(err.contains("Glob: **/*.rs"), "expected Glob summary: {err}");
+    assert!(
+        err.contains("Glob: **/*.rs"),
+        "expected Glob summary: {err}"
+    );
 }
 
 #[test]
@@ -2066,14 +2126,15 @@ fn watch_render_tool_with_no_matching_summary_key() {
     let mock = MockSseServer::new(build_sse(&chunks));
     let tmp = tempfile::tempdir().unwrap();
 
-    let output = band_with_mock(&tmp, &mock, &[
-        "tasks", "watch", "--workspace", "ws-1",
-    ]);
+    let output = band_with_mock(&tmp, &mock, &["tasks", "watch", "--workspace", "ws-1"]);
 
     let err = stderr(&output);
     assert!(err.contains("CustomTool"), "expected tool name: {err}");
     // Should NOT have "CustomTool:" (with colon) since no summary value
-    assert!(!err.contains("CustomTool:"), "no colon when no summary key: {err}");
+    assert!(
+        !err.contains("CustomTool:"),
+        "no colon when no summary key: {err}"
+    );
 }
 
 #[test]
@@ -2095,9 +2156,7 @@ fn watch_render_tool_not_inline_with_text() {
     let mock = MockSseServer::new(build_sse(&chunks));
     let tmp = tempfile::tempdir().unwrap();
 
-    let output = band_with_mock(&tmp, &mock, &[
-        "tasks", "watch", "--workspace", "ws-1",
-    ]);
+    let output = band_with_mock(&tmp, &mock, &["tasks", "watch", "--workspace", "ws-1"]);
 
     // stdout should end with a newline (the renderer adds one before the tool line)
     let raw_stdout = String::from_utf8_lossy(&output.stdout);
@@ -2107,7 +2166,10 @@ fn watch_render_tool_not_inline_with_text() {
     );
     // Tool line should be on its own line in stderr, not mixed into stdout
     let err = stderr(&output);
-    assert!(err.contains("Read: /src/main.rs"), "tool line present: {err}");
+    assert!(
+        err.contains("Read: /src/main.rs"),
+        "tool line present: {err}"
+    );
 }
 
 #[test]
@@ -2130,12 +2192,17 @@ fn watch_render_verbose_truncates_long_output() {
     let mock = MockSseServer::new(build_sse(&chunks));
     let tmp = tempfile::tempdir().unwrap();
 
-    let output = band_with_mock(&tmp, &mock, &[
-        "tasks", "watch", "--workspace", "ws-1", "--verbose",
-    ]);
+    let output = band_with_mock(
+        &tmp,
+        &mock,
+        &["tasks", "watch", "--workspace", "ws-1", "--verbose"],
+    );
 
     let err = stderr(&output);
-    assert!(err.contains("[...truncated]"), "expected truncation marker: {err}");
+    assert!(
+        err.contains("[...truncated]"),
+        "expected truncation marker: {err}"
+    );
     // Full 3000-char output should not appear
     assert!(
         !err.contains(&"x".repeat(3000)),
