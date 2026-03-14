@@ -58,6 +58,7 @@ export function FileBrowser({
   const breadcrumbs = currentPath ? currentPath.split("/") : [];
 
   // Scroll breadcrumbs to the end so the current folder is visible
+  // biome-ignore lint/correctness/useExhaustiveDependencies: scroll when path changes
   useEffect(() => {
     const el = breadcrumbsRef.current;
     if (el) {
@@ -97,7 +98,10 @@ export function FileBrowser({
           root
         </button>
         {breadcrumbs.map((segment, i) => (
-          <span key={breadcrumbs.slice(0, i + 1).join("/")} className="flex shrink-0 items-center gap-1">
+          <span
+            key={breadcrumbs.slice(0, i + 1).join("/")}
+            className="flex shrink-0 items-center gap-1"
+          >
             <ChevronRight className="size-3 text-muted-foreground/50" />
             <button
               type="button"

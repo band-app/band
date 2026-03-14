@@ -1,11 +1,11 @@
+import { MergeView, unifiedMergeView } from "@codemirror/merge";
 import { EditorState, Text } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import { MergeView, unifiedMergeView } from "@codemirror/merge";
 import { Columns2, Rows2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useAdapter } from "../context";
-import { extensionToLanguage, filenameToLanguage } from "../lib/language-map";
 import { baseViewerExtensions, loadLanguage } from "../lib/codemirror-setup";
+import { extensionToLanguage, filenameToLanguage } from "../lib/language-map";
 import type { FileStatus, WorkspaceDiff } from "../types";
 
 export interface DiffStats {
@@ -119,7 +119,11 @@ function DiffFileContent({
   hunks,
   filename,
   viewMode,
-}: { hunks: string; filename: string; viewMode: ViewMode }) {
+}: {
+  hunks: string;
+  filename: string;
+  viewMode: ViewMode;
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | MergeView | null>(null);
 

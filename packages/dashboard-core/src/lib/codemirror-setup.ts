@@ -1,15 +1,15 @@
-import { type Extension, EditorState } from "@codemirror/state";
-import { EditorView, keymap, lineNumbers } from "@codemirror/view";
 import { defaultKeymap } from "@codemirror/commands";
-import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
 import {
+  bracketMatching,
+  defaultHighlightStyle,
   LanguageSupport,
   StreamLanguage,
   syntaxHighlighting,
-  defaultHighlightStyle,
-  bracketMatching,
 } from "@codemirror/language";
+import { highlightSelectionMatches, searchKeymap } from "@codemirror/search";
+import { EditorState, type Extension } from "@codemirror/state";
 import { oneDarkHighlightStyle } from "@codemirror/theme-one-dark";
+import { EditorView, keymap, lineNumbers } from "@codemirror/view";
 
 /**
  * Lazy-loads a CodeMirror LanguageSupport for the given language name.
@@ -143,8 +143,9 @@ export function baseViewerExtensions(): Extension[] {
         ".cm-activeLineGutter": { backgroundColor: "transparent" },
         ".cm-activeLine": { backgroundColor: "transparent" },
         "&.cm-focused .cm-cursor": { borderLeftColor: "#fff" },
-        "&.cm-focused .cm-selectionBackground, .cm-selectionBackground":
-          { backgroundColor: "rgba(255, 255, 255, 0.1)" },
+        "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
+          backgroundColor: "rgba(255, 255, 255, 0.1)",
+        },
         ".cm-line": { color: "#abb2bf" },
       },
       { dark: true },
