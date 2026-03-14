@@ -83,4 +83,6 @@ export interface PlatformCapabilities {
   pickFolder?(): Promise<string | null>;
   openUrl?(url: string): Promise<void>;
   getWorkspaceHref?(workspaceId: string): string | undefined;
+  /** Optional navigate function for client-side routing (avoids full page reload). */
+  navigate?(href: string): void;
 }

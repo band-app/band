@@ -67,36 +67,27 @@ export function WorkspaceCard({
   const href = capabilities.getWorkspaceHref?.(workspaceId);
 
   const handleClick = () => {
-    if (!href) openWorkspace(workspaceId);
+    if (href && capabilities.navigate) {
+      capabilities.navigate(href);
+    } else if (!href) {
+      openWorkspace(workspaceId);
+    }
   };
 
   const className = `flex flex-row items-center justify-between px-3 py-2.5 min-w-0 overflow-hidden cursor-pointer transition-colors hover:bg-accent/50 ${isActive ? "bg-accent/50 border-l-2 border-l-primary" : ""} ${isFocused ? "ring-2 ring-inset ring-ring" : ""} ${href ? "no-underline text-inherit" : ""}`;
 
-  const Container = href ? "a" : "div";
-  const containerProps = href
-    ? { href, ref: cardRef as React.Ref<HTMLAnchorElement>, className, tabIndex: 0 }
-    : {
-        ref: cardRef,
-        className,
-        tabIndex: 0,
-        onClick: handleClick,
-        // Accessibility: handle Enter/Space for direct card activation (e.g. user
-        // tabs to this card and presses Enter). stopPropagation prevents the
-        // ProjectList container's handleKeyDown from ALSO firing.
-        //
-        // NOTE: During arrow-key navigation, the ProjectList container keeps DOM
-        // focus on itself (via containerRef.current?.focus() in its arrow handlers).
-        // That means this card-level handler will NOT fire after arrow navigation —
-        // the container's Enter handler fires instead and uses focusedIndex to open
-        // the correct workspace. This division of responsibility is intentional.
-        // See the keyboard navigation comment block in ProjectList.tsx.
-        onKeyDown: (e: React.KeyboardEvent) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.stopPropagation();
-            handleClick();
-          }
-        },
-      };
+  const containerProps = {
+    ref: cardRef,
+    className,
+    tabIndex: 0,
+    onClick: handleClick,
+    onKeyDown: (e: React.KeyboardEvent) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.stopPropagation();
+        handleClick();
+      }
+    },
+  };
 
   const ciState = branchStatus?.ci.state;
   const hasUnmergedPR = ciState !== undefined && ciState !== "none" && ciState !== "merged";
@@ -120,7 +111,7 @@ export function WorkspaceCard({
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <Container {...(containerProps as React.HTMLAttributes<HTMLElement>)}>
+        <div {...containerProps}>
           <div className="flex flex-1 items-center gap-3 min-w-0 overflow-hidden">
             <GitBranch
               className={`size-3.5 shrink-0 ${isActive ? "text-primary" : "text-muted-foreground"}`}
@@ -145,7 +136,7 @@ export function WorkspaceCard({
               {branchStatus && <CIStatusIndicator ci={branchStatus.ci} />}
             </div>
           )}
-        </Container>
+        </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
         {capabilities.copyPath && (

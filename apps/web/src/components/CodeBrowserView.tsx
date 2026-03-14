@@ -5,6 +5,8 @@ import { useIsDesktop } from "../hooks/useIsDesktop";
 
 interface CodeBrowserViewProps {
   workspaceId: string;
+  /** When set, navigates the browser to this file path. */
+  file?: string;
   /** Externally triggered file to open (e.g. from Quick Open or Search) */
   openFilePath?: string | null;
   /** Called after the external file path has been consumed */
@@ -13,15 +15,29 @@ interface CodeBrowserViewProps {
   onFindInFile?: (fn: (() => void) | null) => void;
 }
 
+function directoryOf(filePath: string): string {
+  const idx = filePath.lastIndexOf("/");
+  return idx > 0 ? filePath.slice(0, idx) : "";
+}
+
 export function CodeBrowserView({
   workspaceId,
+  file,
   openFilePath,
   onFileOpened,
   onFindInFile,
 }: CodeBrowserViewProps) {
   const isDesktop = useIsDesktop();
-  const [currentPath, setCurrentPath] = useState("");
-  const [viewFilePath, setViewFilePath] = useState("");
+  const [currentPath, setCurrentPath] = useState(() => (file ? directoryOf(file) : ""));
+  const [viewFilePath, setViewFilePath] = useState(file ?? "");
+
+  // Sync when the file prop changes (e.g. navigating from diff view)
+  useEffect(() => {
+    if (file) {
+      setViewFilePath(file);
+      setCurrentPath(directoryOf(file));
+    }
+  }, [file]);
 
   // Handle externally triggered file open
   useEffect(() => {
