@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useAdapter } from "../context";
 import { playSound, type SoundId } from "../lib/sounds";
+import type { SSEEvent } from "../lib/sse";
 import { queryClient, queryKeys } from "../query-client";
 import { useDashboardStore } from "../stores/index";
 import type { AgentStatusType, Settings } from "../types";
@@ -75,4 +76,30 @@ export function useBranchStatusWatcher() {
 
     return unsubscribe;
   }, [adapter, updateGitStatus, updateCIStatus]);
+}
+
+export function useSetupStatusWatcher() {
+  const adapter = useAdapter();
+  const updateSetupStatus = useDashboardStore((s) => s.updateSetupStatus);
+  const removeSetupStatus = useDashboardStore((s) => s.removeSetupStatus);
+
+  useEffect(() => {
+    const unsubscribe = adapter.subscribeStatusEvents((event) => {
+      const data = event as SSEEvent;
+      if (data.kind !== "setup-status" || !data.workspaceId) return;
+
+      if (data.setupState === "running") {
+        updateSetupStatus(data.workspaceId, { state: "running" });
+      } else if (data.setupState === "completed") {
+        removeSetupStatus(data.workspaceId);
+      } else if (data.setupState === "failed") {
+        updateSetupStatus(data.workspaceId, {
+          state: "failed",
+          error: data.setupError,
+        });
+      }
+    });
+
+    return unsubscribe;
+  }, [adapter, updateSetupStatus, removeSetupStatus]);
 }

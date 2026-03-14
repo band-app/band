@@ -17,6 +17,7 @@ export { ProjectList } from "./components/ProjectList";
 export { QuickOpenDialog } from "./components/QuickOpenDialog";
 export { SearchFilesDialog } from "./components/SearchFilesDialog";
 export { SettingsPage } from "./components/SettingsPage";
+export { SetupStatusIndicator } from "./components/SetupStatusIndicator";
 export { WorkspaceCard } from "./components/WorkspaceCard";
 export { type WorkspaceTab, WorkspaceTabNav } from "./components/WorkspaceTabNav";
 // Context
@@ -37,6 +38,7 @@ export { useSettingsQuery } from "./hooks/use-settings-query";
 export {
   useActiveWorkspaceWatcher,
   useBranchStatusWatcher,
+  useSetupStatusWatcher,
   useStatusWatcher,
 } from "./hooks/use-status";
 export { openFileSearchPanel } from "./lib/codemirror-setup";
@@ -75,6 +77,8 @@ export type {
   NotificationSettings,
   ProjectInfo,
   Settings,
+  SetupState,
+  SetupStatus,
   WorkspaceBranchStatus,
   WorkspaceDiff,
   WorkspaceStatus,

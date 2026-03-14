@@ -60,6 +60,13 @@ export interface WorkspaceBranchStatus {
   ci: CIStatus;
 }
 
+export type SetupState = "running" | "completed" | "failed";
+
+export interface SetupStatus {
+  state: SetupState;
+  error?: string;
+}
+
 export type AppType = "vscode" | "zed" | "iterm" | "chrome";
 
 export interface VsCodeAppConfig {

@@ -1,12 +1,19 @@
 import { create, type StoreApi, type UseBoundStore } from "zustand";
 import type { DashboardAdapter } from "../adapter";
-import type { CIStatus, GitStatus, WorkspaceBranchStatus, WorkspaceStatus } from "../types";
+import type {
+  CIStatus,
+  GitStatus,
+  SetupStatus,
+  WorkspaceBranchStatus,
+  WorkspaceStatus,
+} from "../types";
 
 export interface DashboardState {
   statuses: Map<string, WorkspaceStatus>;
   activeWorkspaceId: string | null;
   error: string | null;
   branchStatuses: Map<string, WorkspaceBranchStatus>;
+  setupStatuses: Map<string, SetupStatus>;
   _openingWorkspace: boolean;
 
   openWorkspace: (workspaceId: string) => void;
@@ -18,6 +25,8 @@ export interface DashboardState {
   runScript: (path: string, scriptType: string) => Promise<void>;
   updateGitStatus: (workspaceId: string, git: GitStatus) => void;
   updateCIStatus: (workspaceId: string, ci: CIStatus) => void;
+  updateSetupStatus: (workspaceId: string, status: SetupStatus) => void;
+  removeSetupStatus: (workspaceId: string) => void;
 }
 
 export type DashboardStore = UseBoundStore<StoreApi<DashboardState>>;
@@ -26,6 +35,7 @@ export function createDashboardStore(adapter: DashboardAdapter): DashboardStore 
   return create<DashboardState>((set, get) => ({
     statuses: new Map(),
     branchStatuses: new Map(),
+    setupStatuses: new Map(),
     activeWorkspaceId: null,
     error: null,
     _openingWorkspace: false,
@@ -120,6 +130,22 @@ export function createDashboardStore(adapter: DashboardAdapter): DashboardStore 
           ci,
         });
         return { branchStatuses };
+      });
+    },
+
+    updateSetupStatus: (workspaceId: string, status: SetupStatus) => {
+      set((state) => {
+        const setupStatuses = new Map(state.setupStatuses);
+        setupStatuses.set(workspaceId, status);
+        return { setupStatuses };
+      });
+    },
+
+    removeSetupStatus: (workspaceId: string) => {
+      set((state) => {
+        const setupStatuses = new Map(state.setupStatuses);
+        setupStatuses.delete(workspaceId);
+        return { setupStatuses };
       });
     },
   }));

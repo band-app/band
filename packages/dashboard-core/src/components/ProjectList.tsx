@@ -56,6 +56,7 @@ import type {
   DeleteDialogInfo,
   LabelDefinition,
   ProjectInfo,
+  SetupStatus,
   WorkspaceBranchStatus,
   WorkspaceStatus,
 } from "../types";
@@ -67,6 +68,7 @@ interface SortableProjectProps {
   project: ProjectInfo;
   statuses: Map<string, WorkspaceStatus>;
   branchStatuses: Map<string, WorkspaceBranchStatus>;
+  setupStatuses: Map<string, SetupStatus>;
   removeProject: (name: string) => void;
   updateProjectLabel: (name: string, label: string | null) => void;
   labels: LabelDefinition[];
@@ -81,6 +83,7 @@ function SortableProject({
   project,
   statuses,
   branchStatuses,
+  setupStatuses,
   removeProject,
   updateProjectLabel,
   labels,
@@ -218,6 +221,7 @@ function SortableProject({
                 defaultBranch={project.defaultBranch}
                 status={statuses.get(wsId)}
                 branchStatus={branchStatuses.get(wsId)}
+                setupStatus={setupStatuses.get(wsId)}
                 isFocused={currentIndex === focusedIndex}
                 onShowDeleteDialog={onShowDeleteDialog}
                 editMode={editMode}
@@ -266,6 +270,7 @@ export function ProjectList({ labelFilter, editMode }: ProjectListProps) {
   const labels = settings.labels ?? [];
   const statuses = useDashboardStore((s) => s.statuses);
   const branchStatuses = useDashboardStore((s) => s.branchStatuses);
+  const setupStatuses = useDashboardStore((s) => s.setupStatuses);
   const openWorkspace = useDashboardStore((s) => s.openWorkspace);
   const activeWorkspaceId = useDashboardStore((s) => s.activeWorkspaceId);
 
@@ -490,6 +495,7 @@ export function ProjectList({ labelFilter, editMode }: ProjectListProps) {
                       project={project}
                       statuses={statuses}
                       branchStatuses={branchStatuses}
+                      setupStatuses={setupStatuses}
                       removeProject={(name) => removeProjectMutation.mutate(name)}
                       updateProjectLabel={(name, label) =>
                         updateProjectLabelMutation.mutate({ name, label })

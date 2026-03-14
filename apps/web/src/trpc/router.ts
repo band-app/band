@@ -29,6 +29,7 @@ import { execGit, gitCmd, listWorktrees } from "../lib/git";
 import { checkHooks, installHooks } from "../lib/hooks";
 import { resolvePendingInput } from "../lib/pending-inputs";
 import { checkPrereqs, shellPath } from "../lib/process-utils";
+import { runSetup } from "../lib/setup-runner";
 import {
   bandHome,
   ensureDirs,
@@ -248,28 +249,20 @@ const workspacesRouter = t.router({
       proj.worktrees.push({ branch: input.branch, path: worktreePath });
       saveState(state);
 
-      // Run setup script if configured
-      const configPath = join(worktreePath, ".band", "config.json");
-      try {
-        if (existsSync(configPath)) {
-          const config = JSON.parse(readFileSync(configPath, "utf-8"));
-          if (config.setup) {
-            execFileSync("bash", ["-c", config.setup], {
-              cwd: worktreePath,
-              env: { ...process.env, PATH: `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH}` },
-              encoding: "utf-8",
-              timeout: 60_000,
-            });
-          }
-        }
-      } catch {
-        // Setup script failure is non-fatal
-      }
+      const workspaceId = toWorkspaceId(input.project, input.branch);
 
-      if (input.prompt) {
-        const workspaceId = toWorkspaceId(input.project, input.branch);
-        submitTask(workspaceId, input.prompt);
-      }
+      // Run setup script in the background (non-blocking).
+      // If a prompt is provided, defer task submission until setup completes
+      // so the agent has dependencies installed.
+      const onSetupComplete = input.prompt
+        ? () => submitTask(workspaceId, input.prompt!)
+        : undefined;
+
+      runSetup(workspaceId, worktreePath, onSetupComplete);
+
+      // If there's no setup command, runSetup calls onComplete synchronously,
+      // so the task is submitted immediately. If there IS a setup command,
+      // the task will be submitted when setup finishes.
 
       return { ok: true, path: worktreePath };
     }),
