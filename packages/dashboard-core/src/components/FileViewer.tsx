@@ -1,3 +1,4 @@
+import type { EditorView } from "@codemirror/view";
 import { ArrowLeft, FileWarning } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useAdapter } from "../context";
@@ -9,6 +10,8 @@ interface FileViewerProps {
   workspaceId: string;
   filePath: string;
   onBack?: () => void;
+  /** Called when the CodeMirror EditorView is created or destroyed */
+  onEditorView?: (view: EditorView | null) => void;
 }
 
 function getFilename(path: string): string {
@@ -30,7 +33,7 @@ function detectLanguage(filePath: string, serverHint?: string): string {
   return fromName || "plaintext";
 }
 
-export function FileViewer({ workspaceId, filePath, onBack }: FileViewerProps) {
+export function FileViewer({ workspaceId, filePath, onBack, onEditorView }: FileViewerProps) {
   const adapter = useAdapter();
   const [data, setData] = useState<FileContentResult | null>(null);
   const [loading, setLoading] = useState(true);
@@ -107,7 +110,12 @@ export function FileViewer({ workspaceId, filePath, onBack }: FileViewerProps) {
           </div>
         )}
         {data?.content && (
-          <CodeMirrorViewer content={data.content} language={lang} className="h-full" />
+          <CodeMirrorViewer
+            content={data.content}
+            language={lang}
+            className="h-full"
+            onEditorView={onEditorView}
+          />
         )}
       </div>
     </div>

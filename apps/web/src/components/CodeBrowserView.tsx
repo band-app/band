@@ -1,16 +1,58 @@
-import { FileBrowser, FileViewer } from "@band/dashboard-core";
+import { FileBrowser, FileViewer, openFileSearchPanel } from "@band/dashboard-core";
 import { File } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 
 interface CodeBrowserViewProps {
   workspaceId: string;
+  /** Externally triggered file to open (e.g. from Quick Open or Search) */
+  openFilePath?: string | null;
+  /** Called after the external file path has been consumed */
+  onFileOpened?: () => void;
+  /** Reports a callback that triggers find-in-file search (null when unavailable) */
+  onFindInFile?: (fn: (() => void) | null) => void;
 }
 
-export function CodeBrowserView({ workspaceId }: CodeBrowserViewProps) {
+export function CodeBrowserView({
+  workspaceId,
+  openFilePath,
+  onFileOpened,
+  onFindInFile,
+}: CodeBrowserViewProps) {
   const isDesktop = useIsDesktop();
   const [currentPath, setCurrentPath] = useState("");
   const [viewFilePath, setViewFilePath] = useState("");
+
+  // Handle externally triggered file open
+  useEffect(() => {
+    if (openFilePath) {
+      setViewFilePath(openFilePath);
+      // Navigate the file browser to the file's parent directory
+      const lastSlash = openFilePath.lastIndexOf("/");
+      setCurrentPath(lastSlash > 0 ? openFilePath.slice(0, lastSlash) : "");
+      onFileOpened?.();
+    }
+  }, [openFilePath, onFileOpened]);
+
+  const handleEditorView = useCallback(
+    // EditorView type from @codemirror/view — kept untyped to avoid cross-package dependency
+    (view: { focus: () => void } | null) => {
+      if (view) {
+        onFindInFile?.(() => {
+          view.focus();
+          openFileSearchPanel(view);
+        });
+      } else {
+        onFindInFile?.(null);
+      }
+    },
+    [onFindInFile],
+  );
+
+  // Clean up on unmount
+  useEffect(() => {
+    return () => onFindInFile?.(null);
+  }, [onFindInFile]);
 
   const handleBack = () => {
     setViewFilePath("");
@@ -49,7 +91,11 @@ export function CodeBrowserView({ workspaceId }: CodeBrowserViewProps) {
       {/* Right panel - file content */}
       <div className="flex-1 min-w-0 overflow-hidden">
         {viewFilePath ? (
-          <FileViewer workspaceId={workspaceId} filePath={viewFilePath} />
+          <FileViewer
+            workspaceId={workspaceId}
+            filePath={viewFilePath}
+            onEditorView={handleEditorView}
+          />
         ) : (
           <div className="flex h-full items-center justify-center">
             <div className="flex flex-col items-center gap-3 text-center px-8">

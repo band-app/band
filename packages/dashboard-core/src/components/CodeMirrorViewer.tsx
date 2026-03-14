@@ -7,11 +7,20 @@ interface CodeMirrorViewerProps {
   content: string;
   language: string;
   className?: string;
+  /** Called when the EditorView is created or destroyed */
+  onEditorView?: (view: EditorView | null) => void;
 }
 
-export function CodeMirrorViewer({ content, language, className }: CodeMirrorViewerProps) {
+export function CodeMirrorViewer({
+  content,
+  language,
+  className,
+  onEditorView,
+}: CodeMirrorViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
+  const onEditorViewRef = useRef(onEditorView);
+  onEditorViewRef.current = onEditorView;
 
   // Create/recreate the editor when content or language changes
   useEffect(() => {
@@ -28,6 +37,7 @@ export function CodeMirrorViewer({ content, language, className }: CodeMirrorVie
       if (viewRef.current) {
         viewRef.current.destroy();
         viewRef.current = null;
+        onEditorViewRef.current?.(null);
       }
 
       const extensions = [...baseViewerExtensions()];
@@ -44,6 +54,8 @@ export function CodeMirrorViewer({ content, language, className }: CodeMirrorVie
         state,
         parent: container,
       });
+
+      onEditorViewRef.current?.(viewRef.current);
     };
 
     setup();
@@ -53,6 +65,7 @@ export function CodeMirrorViewer({ content, language, className }: CodeMirrorVie
       if (viewRef.current) {
         viewRef.current.destroy();
         viewRef.current = null;
+        onEditorViewRef.current?.(null);
       }
     };
   }, [content, language]);

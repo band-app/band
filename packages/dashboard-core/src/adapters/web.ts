@@ -4,6 +4,7 @@ import type { SSEEvent } from "../lib/sse";
 import type {
   CIStatus,
   CliStatus,
+  ContentSearchMatch,
   FileContentResult,
   FileListResult,
   GitStatus,
@@ -179,6 +180,31 @@ export class WebDashboardAdapter implements DashboardAdapter {
 
   async getWorkspaceFile(workspaceId: string, path: string): Promise<FileContentResult> {
     return (await this.trpc.workspace.getFile.query({ workspaceId, path })) as FileContentResult;
+  }
+
+  async searchWorkspaceFiles(
+    workspaceId: string,
+    query: string,
+    limit?: number,
+  ): Promise<{ files: string[] }> {
+    return (await this.trpc.workspace.searchFiles.query({
+      workspaceId,
+      query,
+      limit,
+    })) as { files: string[] };
+  }
+
+  async searchWorkspaceContent(
+    workspaceId: string,
+    query: string,
+    options?: { caseSensitive?: boolean; limit?: number },
+  ): Promise<{ results: ContentSearchMatch[] }> {
+    return (await this.trpc.workspace.searchContent.query({
+      workspaceId,
+      query,
+      caseSensitive: options?.caseSensitive,
+      limit: options?.limit,
+    })) as { results: ContentSearchMatch[] };
   }
 }
 

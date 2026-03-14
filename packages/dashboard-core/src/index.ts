@@ -14,6 +14,8 @@ export { FileViewer } from "./components/FileViewer";
 export { GitStatusIndicator } from "./components/GitStatusIndicator";
 export { NewWorkspaceDialog } from "./components/NewWorkspaceForm";
 export { ProjectList } from "./components/ProjectList";
+export { QuickOpenDialog } from "./components/QuickOpenDialog";
+export { SearchFilesDialog } from "./components/SearchFilesDialog";
 export { SettingsPage } from "./components/SettingsPage";
 export { WorkspaceCard } from "./components/WorkspaceCard";
 export { type WorkspaceTab, WorkspaceTabNav } from "./components/WorkspaceTabNav";
@@ -37,6 +39,7 @@ export {
   useBranchStatusWatcher,
   useStatusWatcher,
 } from "./hooks/use-status";
+export { openFileSearchPanel } from "./lib/codemirror-setup";
 export { extensionToLanguage, filenameToLanguage } from "./lib/language-map";
 export { isServiceHealthy, type ServiceHealth } from "./lib/service-health";
 // Lib
@@ -60,6 +63,7 @@ export type {
   CIStatus,
   CodingAgentConfig,
   CodingAgentType,
+  ContentSearchMatch,
   FileContentResult,
   FileEntry,
   FileListResult,

@@ -641,6 +641,82 @@ const workspaceRouter = t.router({
         language,
       };
     }),
+
+  searchFiles: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        query: z.string().default(""),
+        limit: z.number().default(50),
+      }),
+    )
+    .query(async ({ input }) => {
+      const workspace = resolveWorkspace(input.workspaceId);
+      if (!workspace) {
+        throw new Error("Workspace not found");
+      }
+
+      const cwd = workspace.worktree.path;
+      const output = await execGit(["ls-files", "--cached", "--others", "--exclude-standard"], cwd);
+
+      let files = output.trim().split("\n").filter(Boolean);
+
+      if (input.query) {
+        const chars = input.query.split("").map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+        const pattern = new RegExp(chars.join(".*"), "i");
+        files = files.filter((f) => pattern.test(f));
+      }
+
+      return { files: files.slice(0, input.limit) };
+    }),
+
+  searchContent: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        query: z.string().min(1),
+        caseSensitive: z.boolean().default(false),
+        limit: z.number().default(100),
+      }),
+    )
+    .query(async ({ input }) => {
+      const workspace = resolveWorkspace(input.workspaceId);
+      if (!workspace) {
+        throw new Error("Workspace not found");
+      }
+
+      const cwd = workspace.worktree.path;
+      const args = ["grep", "-n", "--no-color", "-I", "-F"];
+      if (!input.caseSensitive) args.push("-i");
+      args.push("--", input.query);
+
+      let output: string;
+      try {
+        output = await execGit(args, cwd);
+      } catch {
+        // git grep exits with status 1 when no matches found
+        return { results: [] };
+      }
+
+      const lines = output.trim().split("\n").filter(Boolean);
+      const results: Array<{ file: string; line: number; content: string }> = [];
+
+      for (const raw of lines) {
+        if (results.length >= input.limit) break;
+        const colonIdx1 = raw.indexOf(":");
+        if (colonIdx1 === -1) continue;
+        const colonIdx2 = raw.indexOf(":", colonIdx1 + 1);
+        if (colonIdx2 === -1) continue;
+
+        const file = raw.slice(0, colonIdx1);
+        const line = Number.parseInt(raw.slice(colonIdx1 + 1, colonIdx2), 10);
+        const content = raw.slice(colonIdx2 + 1);
+
+        results.push({ file, line, content });
+      }
+
+      return { results };
+    }),
 });
 
 // ---------------------------------------------------------------------------

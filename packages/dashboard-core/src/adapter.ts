@@ -1,6 +1,7 @@
 import type {
   CIStatus,
   CliStatus,
+  ContentSearchMatch,
   FileContentResult,
   FileListResult,
   GitStatus,
@@ -62,6 +63,18 @@ export interface DashboardAdapter {
   getWorkspaceDiff?(workspaceId: string): Promise<WorkspaceDiff>;
   listWorkspaceFiles?(workspaceId: string, path: string): Promise<FileListResult>;
   getWorkspaceFile?(workspaceId: string, path: string): Promise<FileContentResult>;
+
+  // Search (optional)
+  searchWorkspaceFiles?(
+    workspaceId: string,
+    query: string,
+    limit?: number,
+  ): Promise<{ files: string[] }>;
+  searchWorkspaceContent?(
+    workspaceId: string,
+    query: string,
+    options?: { caseSensitive?: boolean; limit?: number },
+  ): Promise<{ results: ContentSearchMatch[] }>;
 }
 
 export interface PlatformCapabilities {

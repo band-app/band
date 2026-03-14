@@ -6,7 +6,7 @@ import {
   StreamLanguage,
   syntaxHighlighting,
 } from "@codemirror/language";
-import { highlightSelectionMatches, searchKeymap } from "@codemirror/search";
+import { highlightSelectionMatches, openSearchPanel, searchKeymap } from "@codemirror/search";
 import { EditorState, type Extension } from "@codemirror/state";
 import { oneDarkHighlightStyle } from "@codemirror/theme-one-dark";
 import { EditorView, keymap, lineNumbers } from "@codemirror/view";
@@ -151,4 +151,13 @@ export function baseViewerExtensions(): Extension[] {
       { dark: true },
     ),
   ];
+}
+
+/**
+ * Opens the CodeMirror search panel for find-in-file.
+ * Accepts a loose type so consumers don't need a direct @codemirror dependency.
+ */
+// biome-ignore lint/suspicious/noExplicitAny: EditorView type from @codemirror/view — kept untyped for cross-package use
+export function openFileSearchPanel(view: any): boolean {
+  return openSearchPanel(view as EditorView);
 }

@@ -1,6 +1,6 @@
-import { type DiffStats, DiffView } from "@band/dashboard-core";
+import { type DiffStats, DiffView, QuickOpenDialog, SearchFilesDialog } from "@band/dashboard-core";
 import { ChevronDown, ChevronUp, Code, GitCompare, Terminal as TerminalIcon } from "lucide-react";
-import { lazy, Suspense, useCallback, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { CodeBrowserView } from "./CodeBrowserView";
 
@@ -63,9 +63,64 @@ export function WorkspaceDetailPanel({ workspaceId }: WorkspaceDetailPanelProps)
   const [terminalOpen, setTerminalOpen] = useState(false);
   const terminalMounted = useRef(false);
   if (terminalOpen) terminalMounted.current = true;
+  const [quickOpenOpen, setQuickOpenOpen] = useState(false);
+  const [searchFilesOpen, setSearchFilesOpen] = useState(false);
+  const [pendingFilePath, setPendingFilePath] = useState<string | null>(null);
+  const findInFileRef = useRef<(() => void) | null>(null);
 
   const handleStatsChange = useCallback((stats: DiffStats | null) => {
     setDiffStats(stats);
+  }, []);
+
+  const handleFindInFileReady = useCallback((fn: (() => void) | null) => {
+    findInFileRef.current = fn;
+  }, []);
+
+  // Global keyboard shortcuts — register on window in capture phase
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      const key = e.key.toLowerCase();
+
+      // Cmd+P / Ctrl+P → Quick Open
+      if (mod && key === "p" && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        setQuickOpenOpen(true);
+        return;
+      }
+
+      // Cmd+Shift+F / Ctrl+Shift+F → Search in Files
+      if (mod && e.shiftKey && key === "f" && !e.altKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        setSearchFilesOpen(true);
+        return;
+      }
+
+      // Cmd+F / Ctrl+F → Find in current file (CodeMirror search)
+      if (mod && key === "f" && !e.shiftKey && !e.altKey && findInFileRef.current) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        findInFileRef.current();
+        return;
+      }
+    };
+
+    window.addEventListener("keydown", handler, true);
+    return () => window.removeEventListener("keydown", handler, true);
+  }, []);
+
+  const handleOpenFile = useCallback((path: string) => {
+    setActiveTab("code");
+    setPendingFilePath(path);
+  }, []);
+
+  const handleFileOpened = useCallback(() => {
+    setPendingFilePath(null);
   }, []);
 
   return (
@@ -80,7 +135,12 @@ export function WorkspaceDetailPanel({ workspaceId }: WorkspaceDetailPanelProps)
           />
         </div>
         <div className={activeTab === "code" ? "h-full" : "hidden"}>
-          <CodeBrowserView workspaceId={workspaceId} />
+          <CodeBrowserView
+            workspaceId={workspaceId}
+            openFilePath={pendingFilePath}
+            onFileOpened={handleFileOpened}
+            onFindInFile={handleFindInFileReady}
+          />
         </div>
       </div>
 
@@ -115,6 +175,19 @@ export function WorkspaceDetailPanel({ workspaceId }: WorkspaceDetailPanelProps)
           )}
         </div>
       )}
+
+      <QuickOpenDialog
+        workspaceId={workspaceId}
+        open={quickOpenOpen}
+        onOpenChange={setQuickOpenOpen}
+        onOpenFile={handleOpenFile}
+      />
+      <SearchFilesDialog
+        workspaceId={workspaceId}
+        open={searchFilesOpen}
+        onOpenChange={setSearchFilesOpen}
+        onOpenFile={handleOpenFile}
+      />
     </div>
   );
 }

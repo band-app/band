@@ -177,3 +177,9 @@ export interface FileContentResult {
   size: number;
   language?: string;
 }
+
+export interface ContentSearchMatch {
+  file: string;
+  line: number;
+  content: string;
+}
