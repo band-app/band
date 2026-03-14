@@ -15,6 +15,7 @@ import { toWorkspaceId } from "../lib/workspace-id";
 import { useDashboardStore } from "../stores/index";
 import type {
   DeleteDialogInfo,
+  SetupStatus,
   WorkspaceBranchStatus,
   WorkspaceStatus,
   WorktreeInfo,
@@ -22,6 +23,7 @@ import type {
 import { AgentStatusBadge } from "./AgentStatusBadge";
 import { CIStatusIndicator } from "./CIStatusIndicator";
 import { GitStatusIndicator } from "./GitStatusIndicator";
+import { SetupStatusIndicator } from "./SetupStatusIndicator";
 
 interface Props {
   worktree: WorktreeInfo;
@@ -29,6 +31,7 @@ interface Props {
   defaultBranch: string;
   status?: WorkspaceStatus;
   branchStatus?: WorkspaceBranchStatus;
+  setupStatus?: SetupStatus;
   isFocused?: boolean;
   onShowDeleteDialog: (info: DeleteDialogInfo) => void;
   editMode?: boolean;
@@ -40,6 +43,7 @@ export function WorkspaceCard({
   defaultBranch,
   status,
   branchStatus,
+  setupStatus,
   isFocused,
   onShowDeleteDialog,
   editMode,
@@ -133,6 +137,7 @@ export function WorkspaceCard({
               <TooltipContent side="top">{worktree.branch}</TooltipContent>
             </Tooltip>
             {!editMode && <AgentStatusBadge agent={status?.agent} />}
+            {!editMode && <SetupStatusIndicator setup={setupStatus} />}
           </div>
           {!editMode && (
             <div className="flex items-center gap-2 shrink-0">

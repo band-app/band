@@ -25,6 +25,7 @@ import { useSettingsQuery } from "../hooks/use-settings-query";
 import {
   useActiveWorkspaceWatcher,
   useBranchStatusWatcher,
+  useSetupStatusWatcher,
   useStatusWatcher,
 } from "../hooks/use-status";
 import { useDashboardStore } from "../stores/index";
@@ -53,6 +54,7 @@ export function DashboardShell({ toolbarExtra }: DashboardShellProps) {
   useStatusWatcher();
   useActiveWorkspaceWatcher();
   useBranchStatusWatcher();
+  useSetupStatusWatcher();
 
   return (
     <div className="h-dvh w-full overflow-hidden flex flex-col bg-background text-foreground p-0 pt-[env(safe-area-inset-top)]">

@@ -6,6 +6,7 @@ export type { DashboardAdapter, PlatformCapabilities, Unsubscribe } from "./adap
 export { AddProjectDialog } from "./components/AddProjectDialog";
 export { AgentStatusBadge } from "./components/AgentStatusBadge";
 export { CIStatusIndicator } from "./components/CIStatusIndicator";
+export { SetupStatusIndicator } from "./components/SetupStatusIndicator";
 export { CodeMirrorViewer } from "./components/CodeMirrorViewer";
 export { DashboardShell } from "./components/DashboardShell";
 export { type DiffStats, DiffView } from "./components/DiffView";
@@ -35,6 +36,7 @@ export { useSettingsQuery } from "./hooks/use-settings-query";
 export {
   useActiveWorkspaceWatcher,
   useBranchStatusWatcher,
+  useSetupStatusWatcher,
   useStatusWatcher,
 } from "./hooks/use-status";
 export { extensionToLanguage, filenameToLanguage } from "./lib/language-map";
@@ -70,6 +72,8 @@ export type {
   LabelDefinition,
   NotificationSettings,
   ProjectInfo,
+  SetupState,
+  SetupStatus,
   Settings,
   WorkspaceBranchStatus,
   WorkspaceDiff,

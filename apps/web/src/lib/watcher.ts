@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { watch } from "chokidar";
 import { startBranchStatusPoller, stopBranchStatusPoller } from "./branch-status-poller";
+import { getRunningSetups } from "./setup-runner";
 import {
   bandHome,
   loadCurrentStatuses,
@@ -24,7 +25,14 @@ interface CIStatus {
 }
 
 export interface StatusEvent {
-  kind: "update" | "remove" | "snapshot" | "branch-status" | "tunnel-url" | "tunnel-error";
+  kind:
+    | "update"
+    | "remove"
+    | "snapshot"
+    | "branch-status"
+    | "tunnel-url"
+    | "tunnel-error"
+    | "setup-status";
   status?: WorkspaceStatus;
   statuses?: WorkspaceStatus[];
   workspaceId?: string;
@@ -32,6 +40,8 @@ export interface StatusEvent {
   ci?: CIStatus;
   url?: string;
   error?: string;
+  setupState?: "running" | "completed" | "failed";
+  setupError?: string;
 }
 
 type StatusListener = (event: StatusEvent) => void;
@@ -148,6 +158,11 @@ export function subscribe(listener: StatusListener): () => void {
   // Send current branch status snapshots
   for (const event of loadCurrentBranchStatuses()) {
     listener(event);
+  }
+
+  // Send current setup status snapshots
+  for (const workspaceId of getRunningSetups()) {
+    listener({ kind: "setup-status", workspaceId, setupState: "running" });
   }
 
   return () => {
