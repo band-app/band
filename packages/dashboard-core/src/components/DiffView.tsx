@@ -1,7 +1,7 @@
 import { MergeView, unifiedMergeView } from "@codemirror/merge";
 import { EditorState, Text } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import { Columns2, Rows2 } from "lucide-react";
+import { Columns2, Rows2, SquareArrowOutUpRight } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useAdapter } from "../context";
 import { baseViewerExtensions, loadLanguage } from "../lib/codemirror-setup";
@@ -20,6 +20,7 @@ interface DiffViewProps {
   workspaceId: string;
   active?: boolean;
   onStatsChange?: (stats: DiffStats | null) => void;
+  onOpenFile?: (filename: string) => void;
 }
 
 interface ParsedFile {
@@ -207,7 +208,7 @@ function DiffFileContent({
   return <div ref={containerRef} />;
 }
 
-export function DiffView({ workspaceId, active = true, onStatsChange }: DiffViewProps) {
+export function DiffView({ workspaceId, active = true, onStatsChange, onOpenFile }: DiffViewProps) {
   const adapter = useAdapter();
   const [data, setData] = useState<WorkspaceDiff | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -349,13 +350,32 @@ export function DiffView({ workspaceId, active = true, onStatsChange }: DiffView
                 className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm hover:bg-accent/50"
               >
                 <span
-                  className={`text-muted-foreground transition-transform ${isOpen ? "rotate-90" : ""}`}
+                  className={`shrink-0 text-muted-foreground transition-transform ${isOpen ? "rotate-90" : ""}`}
                 >
                   ▶
                 </span>
                 <span className="min-w-0 flex-1 truncate font-mono">
                   {file.filename} <FileStatusBadge status={fileStatuses[file.filename]} />
                 </span>
+                {onOpenFile && (
+                  <span
+                    title="Open in code browser"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onOpenFile(file.filename);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.stopPropagation();
+                        onOpenFile(file.filename);
+                      }
+                    }}
+                    className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                  >
+                    <SquareArrowOutUpRight className="size-3.5" />
+                  </span>
+                )}
               </button>
               {isOpen && (
                 <div className="border-t border-border/20 bg-muted/30">

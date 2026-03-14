@@ -1,5 +1,28 @@
-import { createRootRoute, HeadContent, Link, Outlet, Scripts } from "@tanstack/react-router";
+import { DashboardProvider, DashboardShell } from "@band/dashboard-core";
+import {
+  HybridDashboardAdapter,
+  NativeShellCapabilities,
+} from "@band/dashboard-core/adapters/hybrid";
+import { WebCapabilities, WebDashboardAdapter } from "@band/dashboard-core/adapters/web";
+import { TooltipProvider } from "@band/ui";
+import {
+  createRootRoute,
+  HeadContent,
+  Link,
+  Outlet,
+  Scripts,
+  useRouter,
+} from "@tanstack/react-router";
+import { useEffect } from "react";
+import { useIsDesktop } from "../hooks/useIsDesktop";
 import "../styles/globals.css";
+
+const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
+const adapter = inTauri ? new HybridDashboardAdapter() : new WebDashboardAdapter();
+const capabilities = inTauri ? new NativeShellCapabilities() : new WebCapabilities();
+
+export { adapter, capabilities, inTauri };
 
 export const Route = createRootRoute({
   head: () => ({
@@ -32,6 +55,36 @@ function NotFound() {
   );
 }
 
+function AppShell() {
+  const isDesktop = useIsDesktop() && !inTauri;
+  const router = useRouter();
+
+  // Wire up client-side navigation for WebCapabilities
+  useEffect(() => {
+    if (capabilities.navigate) return;
+    (capabilities as import("@band/dashboard-core/adapters/web").WebCapabilities).navigate = (
+      href: string,
+    ) => {
+      router.navigate({ to: href });
+    };
+  }, [router]);
+
+  if (!isDesktop) {
+    return <Outlet />;
+  }
+
+  return (
+    <div className="flex h-dvh w-full overflow-hidden bg-background text-foreground">
+      <div className="w-80 shrink-0 border-r border-white/20 overflow-hidden">
+        <DashboardShell />
+      </div>
+      <div className="flex-1 min-w-0 overflow-hidden">
+        <Outlet />
+      </div>
+    </div>
+  );
+}
+
 function RootLayout() {
   return (
     <html lang="en" className="dark">
@@ -39,7 +92,11 @@ function RootLayout() {
         <HeadContent />
       </head>
       <body>
-        <Outlet />
+        <DashboardProvider adapter={adapter} capabilities={capabilities}>
+          <TooltipProvider>
+            <AppShell />
+          </TooltipProvider>
+        </DashboardProvider>
         <Scripts />
       </body>
     </html>

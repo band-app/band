@@ -4,7 +4,9 @@ export type WorkspaceTab = "chat" | "diff" | "code";
 
 interface WorkspaceTabNavProps {
   activeTab: WorkspaceTab;
-  onTabChange: (tab: WorkspaceTab) => void;
+  onTabChange?: (tab: WorkspaceTab) => void;
+  /** When provided, tabs render as `<a>` links instead of buttons. */
+  tabHrefs?: Partial<Record<WorkspaceTab, string>>;
   diffFileCount?: number;
 }
 
@@ -14,24 +16,28 @@ const tabs: { id: WorkspaceTab; label: string; icon: typeof MessageSquare }[] = 
   { id: "code", label: "Code", icon: Code },
 ];
 
-export function WorkspaceTabNav({ activeTab, onTabChange, diffFileCount }: WorkspaceTabNavProps) {
+export function WorkspaceTabNav({
+  activeTab,
+  onTabChange,
+  tabHrefs,
+  diffFileCount,
+}: WorkspaceTabNavProps) {
   return (
     <div className="flex shrink-0 border-b border-border">
       {tabs.map((tab) => {
         const Icon = tab.icon;
         const isActive = activeTab === tab.id;
         const badge = tab.id === "diff" && diffFileCount != null && diffFileCount > 0;
-        return (
-          <button
-            key={tab.id}
-            type="button"
-            onClick={() => onTabChange(tab.id)}
-            className={`flex flex-1 items-center justify-center gap-2 py-2.5 text-sm font-medium transition-colors ${
-              isActive
-                ? "border-b-2 border-foreground text-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
+        const href = tabHrefs?.[tab.id];
+
+        const className = `flex flex-1 items-center justify-center gap-2 py-2.5 text-sm font-medium transition-colors ${
+          isActive
+            ? "border-b-2 border-foreground text-foreground"
+            : "text-muted-foreground hover:text-foreground"
+        }`;
+
+        const content = (
+          <>
             <Icon className="size-4" />
             {tab.label}
             {badge && (
@@ -39,6 +45,25 @@ export function WorkspaceTabNav({ activeTab, onTabChange, diffFileCount }: Works
                 {diffFileCount}
               </span>
             )}
+          </>
+        );
+
+        if (href) {
+          return (
+            <a key={tab.id} href={href} className={className}>
+              {content}
+            </a>
+          );
+        }
+
+        return (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => onTabChange?.(tab.id)}
+            className={className}
+          >
+            {content}
           </button>
         );
       })}

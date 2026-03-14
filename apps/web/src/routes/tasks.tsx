@@ -295,7 +295,9 @@ function StatusBadge({ status }: { status: TaskRecord["status"] }) {
 }
 
 function TaskCard({ task, onAction }: { task: TaskRecord; onAction: () => void }) {
-  const sessionHref = task.sessionId ? `/chat/${encodeURIComponent(task.workspaceId)}` : undefined;
+  const sessionHref = task.sessionId
+    ? `/workspace/${encodeURIComponent(task.workspaceId)}`
+    : undefined;
   const [acting, setActing] = useState(false);
 
   const handleCancel = useCallback(async () => {

@@ -210,8 +210,9 @@ export class WebDashboardAdapter implements DashboardAdapter {
 
 export class WebCapabilities implements PlatformCapabilities {
   copyPath = false;
+  navigate?: (href: string) => void;
 
   getWorkspaceHref(workspaceId: string): string {
-    return `/chat/${encodeURIComponent(workspaceId)}`;
+    return `/workspace/${encodeURIComponent(workspaceId)}/changes`;
   }
 }
