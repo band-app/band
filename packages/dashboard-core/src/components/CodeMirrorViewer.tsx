@@ -1,0 +1,61 @@
+import { EditorState } from "@codemirror/state";
+import { EditorView } from "@codemirror/view";
+import { useEffect, useRef } from "react";
+import { baseViewerExtensions, loadLanguage } from "../lib/codemirror-setup";
+
+interface CodeMirrorViewerProps {
+  content: string;
+  language: string;
+  className?: string;
+}
+
+export function CodeMirrorViewer({ content, language, className }: CodeMirrorViewerProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const viewRef = useRef<EditorView | null>(null);
+
+  // Create/recreate the editor when content or language changes
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    let cancelled = false;
+
+    const setup = async () => {
+      const langSupport = await loadLanguage(language);
+      if (cancelled) return;
+
+      // Destroy previous instance
+      if (viewRef.current) {
+        viewRef.current.destroy();
+        viewRef.current = null;
+      }
+
+      const extensions = [...baseViewerExtensions()];
+      if (langSupport) {
+        extensions.push(langSupport);
+      }
+
+      const state = EditorState.create({
+        doc: content,
+        extensions,
+      });
+
+      viewRef.current = new EditorView({
+        state,
+        parent: container,
+      });
+    };
+
+    setup();
+
+    return () => {
+      cancelled = true;
+      if (viewRef.current) {
+        viewRef.current.destroy();
+        viewRef.current = null;
+      }
+    };
+  }, [content, language]);
+
+  return <div ref={containerRef} className={className} />;
+}
