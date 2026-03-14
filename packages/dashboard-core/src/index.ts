@@ -6,7 +6,6 @@ export type { DashboardAdapter, PlatformCapabilities, Unsubscribe } from "./adap
 export { AddProjectDialog } from "./components/AddProjectDialog";
 export { AgentStatusBadge } from "./components/AgentStatusBadge";
 export { CIStatusIndicator } from "./components/CIStatusIndicator";
-export { SetupStatusIndicator } from "./components/SetupStatusIndicator";
 export { CodeMirrorViewer } from "./components/CodeMirrorViewer";
 export { DashboardShell } from "./components/DashboardShell";
 export { type DiffStats, DiffView } from "./components/DiffView";
@@ -16,6 +15,7 @@ export { GitStatusIndicator } from "./components/GitStatusIndicator";
 export { NewWorkspaceDialog } from "./components/NewWorkspaceForm";
 export { ProjectList } from "./components/ProjectList";
 export { SettingsPage } from "./components/SettingsPage";
+export { SetupStatusIndicator } from "./components/SetupStatusIndicator";
 export { WorkspaceCard } from "./components/WorkspaceCard";
 export { type WorkspaceTab, WorkspaceTabNav } from "./components/WorkspaceTabNav";
 // Context
@@ -72,9 +72,9 @@ export type {
   LabelDefinition,
   NotificationSettings,
   ProjectInfo,
+  Settings,
   SetupState,
   SetupStatus,
-  Settings,
   WorkspaceBranchStatus,
   WorkspaceDiff,
   WorkspaceStatus,

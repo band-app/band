@@ -28,8 +28,8 @@ import type { CronjobDefinition } from "../lib/cronjob-types";
 import { execGit, gitCmd, listWorktrees } from "../lib/git";
 import { checkHooks, installHooks } from "../lib/hooks";
 import { resolvePendingInput } from "../lib/pending-inputs";
-import { runSetup } from "../lib/setup-runner";
 import { checkPrereqs, shellPath } from "../lib/process-utils";
+import { runSetup } from "../lib/setup-runner";
 import {
   bandHome,
   ensureDirs,

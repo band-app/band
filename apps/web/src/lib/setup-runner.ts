@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { emit } from "./watcher";
@@ -15,11 +15,7 @@ export function getRunningSetups(): string[] {
   return Array.from(setups.keys());
 }
 
-export function runSetup(
-  workspaceId: string,
-  worktreePath: string,
-  onComplete?: () => void,
-): void {
+export function runSetup(workspaceId: string, worktreePath: string, onComplete?: () => void): void {
   // Guard against concurrent setups on same workspace
   if (setups.has(workspaceId)) return;
 
