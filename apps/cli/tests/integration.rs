@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -115,6 +115,16 @@ impl TestEnv {
         Command::new(env!("CARGO_BIN_EXE_band"))
             .args(args)
             .env("BAND_HOME", &self.band_dir)
+            .output()
+            .expect("failed to execute band")
+    }
+
+    /// Run the `band` binary with a specific working directory.
+    fn band_in(&self, dir: &Path, args: &[&str]) -> std::process::Output {
+        Command::new(env!("CARGO_BIN_EXE_band"))
+            .args(args)
+            .env("BAND_HOME", &self.band_dir)
+            .current_dir(dir)
             .output()
             .expect("failed to execute band")
     }
@@ -969,6 +979,158 @@ fn tasks_watch_json_streams_events() {
 }
 
 #[test]
+fn tasks_watch_text_no_ansi_when_piped() {
+    let env = TestEnv::new();
+
+    env.band(&["workspaces", "create", "my-project", "feat/watch-ansi"]);
+    env.band(&[
+        "tasks",
+        "create",
+        "my-project-feat-watch-ansi",
+        "--prompt",
+        "hello world",
+    ]);
+
+    std::thread::sleep(std::time::Duration::from_millis(2000));
+
+    // Watch in text mode (default) — piped, so no ANSI expected
+    let output = env.band(&[
+        "tasks",
+        "watch",
+        "--workspace",
+        "my-project-feat-watch-ansi",
+    ]);
+
+    let err = stderr(&output);
+    // Should show the watching banner
+    assert!(
+        err.contains("[watching task"),
+        "expected banner in stderr: {err}"
+    );
+    // When piped (as in tests), no ANSI escape codes should be present
+    assert!(
+        !err.contains("\x1b["),
+        "expected no ANSI codes when piped: {err}"
+    );
+}
+
+#[test]
+fn tasks_watch_verbose_flag_accepted() {
+    let env = TestEnv::new();
+
+    env.band(&["workspaces", "create", "my-project", "feat/watch-verbose"]);
+    env.band(&[
+        "tasks",
+        "create",
+        "my-project-feat-watch-verbose",
+        "--prompt",
+        "hello",
+    ]);
+
+    std::thread::sleep(std::time::Duration::from_millis(2000));
+
+    let output = env.band(&[
+        "tasks",
+        "watch",
+        "--workspace",
+        "my-project-feat-watch-verbose",
+        "--verbose",
+    ]);
+
+    // Should not crash — verbose flag is accepted
+    let err = stderr(&output);
+    assert!(
+        err.contains("[watching task"),
+        "expected banner: {err}"
+    );
+}
+
+#[test]
+fn tasks_watch_tools_off_hides_tools() {
+    let env = TestEnv::new();
+
+    env.band(&["workspaces", "create", "my-project", "feat/watch-tools-off"]);
+    env.band(&[
+        "tasks",
+        "create",
+        "my-project-feat-watch-tools-off",
+        "--prompt",
+        "hello",
+    ]);
+
+    std::thread::sleep(std::time::Duration::from_millis(2000));
+
+    let output = env.band(&[
+        "tasks",
+        "watch",
+        "--workspace",
+        "my-project-feat-watch-tools-off",
+        "--tools",
+        "off",
+    ]);
+
+    let err = stderr(&output);
+    // Tool indicator symbols should not appear
+    assert!(
+        !err.contains("\u{25b8}"),
+        "expected no tool markers with --tools=off: {err}"
+    );
+}
+
+#[test]
+fn tasks_watch_auto_detect_workspace_from_cwd() {
+    let env = TestEnv::new();
+
+    let create_out = env.band(&["workspaces", "create", "my-project", "feat/watch-cwd"]);
+    assert!(create_out.status.success(), "stderr: {}", stderr(&create_out));
+    let worktree_path = stdout(&create_out);
+
+    env.band(&[
+        "tasks",
+        "create",
+        "my-project-feat-watch-cwd",
+        "--prompt",
+        "hello",
+    ]);
+
+    std::thread::sleep(std::time::Duration::from_millis(2000));
+
+    // Run `band tasks watch` with NO --workspace, but from inside the worktree directory
+    let output = env.band_in(Path::new(&worktree_path), &["tasks", "watch"]);
+
+    let err = stderr(&output);
+    // Should auto-detect and show the watching banner with the workspace ID
+    assert!(
+        err.contains("[watching task"),
+        "expected auto-detected watch banner: {err}"
+    );
+    assert!(
+        err.contains("my-project-feat-watch-cwd"),
+        "expected workspace ID in banner: {err}"
+    );
+}
+
+#[test]
+fn tasks_watch_auto_detect_fails_outside_workspace() {
+    let env = TestEnv::new();
+
+    // Create a git repo that is NOT a registered workspace
+    let unrelated = env._tmp.path().join("unrelated-repo");
+    fs::create_dir_all(&unrelated).unwrap();
+    git(&unrelated, &["init", "-b", "main"]);
+    git(&unrelated, &["commit", "--allow-empty", "-m", "init"]);
+
+    let output = env.band_in(&unrelated, &["tasks", "watch"]);
+
+    assert!(!output.status.success(), "expected failure when not in a workspace");
+    let err = stderr(&output);
+    assert!(
+        err.contains("No workspace found"),
+        "expected helpful error message: {err}"
+    );
+}
+
+#[test]
 fn tasks_list_text_output() {
     let env = TestEnv::new();
 
@@ -1352,5 +1514,631 @@ fn schema_unknown_command_fails() {
     assert!(
         json["error"].as_str().unwrap().contains("Unknown command"),
         "json: {json}"
+    );
+}
+
+// --- Watch rendering tests (mock SSE server) ---
+
+/// A lightweight mock server that accepts one connection and writes canned SSE data.
+struct MockSseServer {
+    port: u16,
+    _handle: std::thread::JoinHandle<()>,
+}
+
+impl MockSseServer {
+    /// Start a mock server that will serve `sse_body` as the response to the first GET request.
+    fn new(sse_body: String) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        let handle = std::thread::spawn(move || {
+            use std::io::Write;
+            // Accept a single connection
+            let (mut stream, _) = listener.accept().unwrap();
+            // Read the request (drain it so the client doesn't hang)
+            let mut buf = [0u8; 4096];
+            let _ = stream.read(&mut buf);
+            // Write HTTP response with SSE body
+            let response = format!(
+                "HTTP/1.1 200 OK\r\n\
+                 Content-Type: text/event-stream\r\n\
+                 Connection: close\r\n\
+                 \r\n\
+                 {sse_body}"
+            );
+            let _ = stream.write_all(response.as_bytes());
+            let _ = stream.flush();
+            // Close triggers EOF for the client
+        });
+
+        Self {
+            port,
+            _handle: handle,
+        }
+    }
+}
+
+/// Build SSE data from a list of JSON chunks.
+fn build_sse(chunks: &[serde_json::Value]) -> String {
+    let mut buf = String::new();
+    for chunk in chunks {
+        buf.push_str(&format!("data: {}\n\n", serde_json::to_string(chunk).unwrap()));
+    }
+    buf
+}
+
+/// Run the band CLI against a mock SSE server instead of the real web server.
+fn band_with_mock(
+    tmp: &tempfile::TempDir,
+    mock: &MockSseServer,
+    args: &[&str],
+) -> std::process::Output {
+    let band_dir = tmp.path().join(".band");
+    fs::create_dir_all(&band_dir).ok();
+    // Write a minimal settings.json so ApiClient::from_settings works
+    fs::write(
+        band_dir.join("settings.json"),
+        serde_json::to_string(&serde_json::json!({
+            "tokenSecret": "mock-token"
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    Command::new(env!("CARGO_BIN_EXE_band"))
+        .args(args)
+        .env("BAND_HOME", &band_dir)
+        .env("BAND_SERVER_URL", format!("http://127.0.0.1:{}", mock.port))
+        .output()
+        .expect("failed to execute band")
+}
+
+#[test]
+fn watch_render_text_deltas() {
+    let chunks = vec![
+        serde_json::json!({"type": "text-delta", "delta": "Hello "}),
+        serde_json::json!({"type": "text-delta", "delta": "world!"}),
+        serde_json::json!({"type": "text-end"}),
+        serde_json::json!({"type": "finish"}),
+    ];
+    let mock = MockSseServer::new(build_sse(&chunks));
+    let tmp = tempfile::tempdir().unwrap();
+
+    let output = band_with_mock(&tmp, &mock, &[
+        "tasks", "watch", "--workspace", "ws-1",
+    ]);
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let out = stdout(&output);
+    assert_eq!(out, "Hello world!", "stdout: {out}");
+}
+
+#[test]
+fn watch_render_tool_input_shows_marker() {
+    let chunks = vec![
+        serde_json::json!({
+            "type": "tool-input-available",
+            "toolCallId": "tc_1",
+            "toolName": "Read",
+            "input": {"file_path": "/src/main.rs"}
+        }),
+        serde_json::json!({"type": "finish"}),
+    ];
+    let mock = MockSseServer::new(build_sse(&chunks));
+    let tmp = tempfile::tempdir().unwrap();
+
+    let output = band_with_mock(&tmp, &mock, &[
+        "tasks", "watch", "--workspace", "ws-1",
+    ]);
+
+    let err = stderr(&output);
+    // Should have the tool marker and tool summary
+    assert!(err.contains("\u{25b8}"), "expected tool marker in stderr: {err}");
+    assert!(err.contains("Read: /src/main.rs"), "expected tool summary: {err}");
+}
+
+#[test]
+fn watch_render_tool_input_hidden_with_tools_off() {
+    let chunks = vec![
+        serde_json::json!({
+            "type": "tool-input-available",
+            "toolCallId": "tc_1",
+            "toolName": "Read",
+            "input": {"file_path": "/src/main.rs"}
+        }),
+        serde_json::json!({"type": "finish"}),
+    ];
+    let mock = MockSseServer::new(build_sse(&chunks));
+    let tmp = tempfile::tempdir().unwrap();
+
+    let output = band_with_mock(&tmp, &mock, &[
+        "tasks", "watch", "--workspace", "ws-1", "--tools", "off",
+    ]);
+
+    let err = stderr(&output);
+    assert!(!err.contains("\u{25b8}"), "tool marker should be hidden: {err}");
+    assert!(!err.contains("Read:"), "tool summary should be hidden: {err}");
+}
+
+#[test]
+fn watch_render_tool_output_shown_in_verbose() {
+    let chunks = vec![
+        serde_json::json!({
+            "type": "tool-input-available",
+            "toolCallId": "tc_1",
+            "toolName": "Bash",
+            "input": {"command": "echo hi"}
+        }),
+        serde_json::json!({
+            "type": "tool-output-available",
+            "toolCallId": "tc_1",
+            "output": "hi\n"
+        }),
+        serde_json::json!({"type": "finish"}),
+    ];
+    let mock = MockSseServer::new(build_sse(&chunks));
+    let tmp = tempfile::tempdir().unwrap();
+
+    let output = band_with_mock(&tmp, &mock, &[
+        "tasks", "watch", "--workspace", "ws-1", "--verbose",
+    ]);
+
+    let err = stderr(&output);
+    // Verbose mode should show the start marker
+    assert!(err.contains("\u{25b8}"), "expected start marker: {err}");
+    // Verbose mode should show input JSON
+    assert!(err.contains("echo hi"), "expected input in verbose: {err}");
+    // Verbose mode should show completion marker
+    assert!(err.contains("\u{2713}"), "expected completion marker: {err}");
+    // Verbose mode should show tool output
+    assert!(err.contains("hi"), "expected tool output in verbose: {err}");
+}
+
+#[test]
+fn watch_render_tool_output_hidden_in_default() {
+    let chunks = vec![
+        serde_json::json!({
+            "type": "tool-input-available",
+            "toolCallId": "tc_1",
+            "toolName": "Read",
+            "input": {"file_path": "/src/lib.rs"}
+        }),
+        serde_json::json!({
+            "type": "tool-output-available",
+            "toolCallId": "tc_1",
+            "output": "fn main() {}"
+        }),
+        serde_json::json!({"type": "finish"}),
+    ];
+    let mock = MockSseServer::new(build_sse(&chunks));
+    let tmp = tempfile::tempdir().unwrap();
+
+    let output = band_with_mock(&tmp, &mock, &[
+        "tasks", "watch", "--workspace", "ws-1",
+    ]);
+
+    let err = stderr(&output);
+    // Default mode should show start marker but NOT completion marker
+    assert!(err.contains("\u{25b8}"), "expected start marker: {err}");
+    assert!(!err.contains("\u{2713}"), "completion marker should be hidden in default: {err}");
+    assert!(!err.contains("fn main()"), "tool output should be hidden in default: {err}");
+}
+
+#[test]
+fn watch_render_error_chunk() {
+    let chunks = vec![
+        serde_json::json!({"type": "text-delta", "delta": "Working..."}),
+        serde_json::json!({"type": "text-end"}),
+        serde_json::json!({"type": "error", "errorText": "Agent crashed unexpectedly"}),
+        serde_json::json!({"type": "finish"}),
+    ];
+    let mock = MockSseServer::new(build_sse(&chunks));
+    let tmp = tempfile::tempdir().unwrap();
+
+    let output = band_with_mock(&tmp, &mock, &[
+        "tasks", "watch", "--workspace", "ws-1",
+    ]);
+
+    // Error should cause non-zero exit
+    assert!(!output.status.success(), "expected failure exit code");
+    let err = stderr(&output);
+    assert!(err.contains("Error:"), "expected 'Error:' in stderr: {err}");
+    assert!(
+        err.contains("Agent crashed unexpectedly"),
+        "expected error text: {err}"
+    );
+}
+
+#[test]
+fn watch_render_data_result_with_duration_and_cost() {
+    let chunks = vec![
+        serde_json::json!({"type": "text-delta", "delta": "Done."}),
+        serde_json::json!({"type": "text-end"}),
+        serde_json::json!({
+            "type": "data-result",
+            "data": {
+                "durationMs": 125000,
+                "costUsd": 0.42,
+                "numTurns": 12
+            }
+        }),
+        serde_json::json!({"type": "finish"}),
+    ];
+    let mock = MockSseServer::new(build_sse(&chunks));
+    let tmp = tempfile::tempdir().unwrap();
+
+    let output = band_with_mock(&tmp, &mock, &[
+        "tasks", "watch", "--workspace", "ws-1",
+    ]);
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let err = stderr(&output);
+    assert!(err.contains("Task completed in 2m 5s"), "expected duration: {err}");
+    assert!(err.contains("$0.42"), "expected cost: {err}");
+    assert!(err.contains("12 turns"), "expected turns: {err}");
+}
+
+#[test]
+fn watch_render_full_conversation() {
+    let chunks = vec![
+        serde_json::json!({"type": "text-delta", "delta": "Let me fix that bug.\n"}),
+        serde_json::json!({"type": "text-end"}),
+        serde_json::json!({
+            "type": "tool-input-available",
+            "toolCallId": "tc_1",
+            "toolName": "Read",
+            "input": {"file_path": "/src/app.rs"}
+        }),
+        serde_json::json!({
+            "type": "tool-output-available",
+            "toolCallId": "tc_1",
+            "output": "fn main() { println!(\"hello\"); }"
+        }),
+        serde_json::json!({
+            "type": "tool-input-available",
+            "toolCallId": "tc_2",
+            "toolName": "Edit",
+            "input": {"file_path": "/src/app.rs"}
+        }),
+        serde_json::json!({
+            "type": "tool-output-available",
+            "toolCallId": "tc_2",
+            "output": "OK"
+        }),
+        serde_json::json!({"type": "text-delta", "delta": "Fixed it.\n"}),
+        serde_json::json!({"type": "text-end"}),
+        serde_json::json!({
+            "type": "data-result",
+            "data": {"durationMs": 5000}
+        }),
+        serde_json::json!({"type": "finish"}),
+    ];
+    let mock = MockSseServer::new(build_sse(&chunks));
+    let tmp = tempfile::tempdir().unwrap();
+
+    let output = band_with_mock(&tmp, &mock, &[
+        "tasks", "watch", "--workspace", "ws-1",
+    ]);
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let out = stdout(&output);
+    assert!(out.contains("Let me fix that bug."), "expected first text: {out}");
+    assert!(out.contains("Fixed it."), "expected second text: {out}");
+
+    let err = stderr(&output);
+    assert!(err.contains("Read: /src/app.rs"), "expected Read tool: {err}");
+    assert!(err.contains("Edit: /src/app.rs"), "expected Edit tool: {err}");
+    assert!(err.contains("Task completed in 5s"), "expected completion: {err}");
+}
+
+#[test]
+fn watch_render_json_mode_outputs_ndjson() {
+    let chunks = vec![
+        serde_json::json!({"type": "text-delta", "delta": "hi"}),
+        serde_json::json!({
+            "type": "tool-input-available",
+            "toolCallId": "tc_1",
+            "toolName": "Bash",
+            "input": {"command": "ls"}
+        }),
+        serde_json::json!({"type": "finish"}),
+    ];
+    let mock = MockSseServer::new(build_sse(&chunks));
+    let tmp = tempfile::tempdir().unwrap();
+
+    let output = band_with_mock(&tmp, &mock, &[
+        "tasks", "watch", "--workspace", "ws-1", "--output", "json",
+    ]);
+
+    let out = stdout(&output);
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(lines.len(), 3, "expected 3 NDJSON lines: {out}");
+    for line in &lines {
+        let v: serde_json::Value = serde_json::from_str(line)
+            .unwrap_or_else(|e| panic!("invalid NDJSON: {e}\nline: {line}"));
+        assert!(v.get("type").is_some(), "expected 'type' field: {v}");
+    }
+    // JSON mode should NOT have tool markers or banners on stderr
+    let err = stderr(&output);
+    assert!(!err.contains("[watching task"), "no banner in json mode: {err}");
+}
+
+#[test]
+fn watch_render_no_ansi_when_piped() {
+    let chunks = vec![
+        serde_json::json!({
+            "type": "tool-input-available",
+            "toolCallId": "tc_1",
+            "toolName": "Read",
+            "input": {"file_path": "/src/main.rs"}
+        }),
+        serde_json::json!({"type": "error", "errorText": "something failed"}),
+        serde_json::json!({
+            "type": "data-result",
+            "data": {"durationMs": 1000}
+        }),
+        serde_json::json!({"type": "finish"}),
+    ];
+    let mock = MockSseServer::new(build_sse(&chunks));
+    let tmp = tempfile::tempdir().unwrap();
+
+    let output = band_with_mock(&tmp, &mock, &[
+        "tasks", "watch", "--workspace", "ws-1",
+    ]);
+
+    let err = stderr(&output);
+    // CLI is piped in tests, so no ANSI escape codes should appear
+    assert!(
+        !err.contains("\x1b["),
+        "expected no ANSI codes when piped: {err}"
+    );
+    // But content should still be present
+    assert!(err.contains("Read: /src/main.rs"), "expected tool text: {err}");
+    assert!(err.contains("Error:"), "expected error text: {err}");
+    assert!(err.contains("Task completed"), "expected completion text: {err}");
+}
+
+#[test]
+fn watch_render_verbose_shows_tool_input_json() {
+    let chunks = vec![
+        serde_json::json!({
+            "type": "tool-input-available",
+            "toolCallId": "tc_1",
+            "toolName": "Grep",
+            "input": {"pattern": "TODO", "path": "/src"}
+        }),
+        serde_json::json!({"type": "finish"}),
+    ];
+    let mock = MockSseServer::new(build_sse(&chunks));
+    let tmp = tempfile::tempdir().unwrap();
+
+    let output = band_with_mock(&tmp, &mock, &[
+        "tasks", "watch", "--workspace", "ws-1", "--verbose",
+    ]);
+
+    let err = stderr(&output);
+    // Verbose should show the formatted JSON input
+    assert!(err.contains("\"pattern\""), "expected 'pattern' key in verbose output: {err}");
+    assert!(err.contains("\"TODO\""), "expected pattern value: {err}");
+    assert!(err.contains("\"path\""), "expected 'path' key: {err}");
+}
+
+#[test]
+fn watch_render_tools_full_shows_completion_and_output() {
+    let chunks = vec![
+        serde_json::json!({
+            "type": "tool-input-available",
+            "toolCallId": "tc_1",
+            "toolName": "Bash",
+            "input": {"command": "npm test"}
+        }),
+        serde_json::json!({
+            "type": "tool-output-available",
+            "toolCallId": "tc_1",
+            "output": "PASS all 5 tests"
+        }),
+        serde_json::json!({"type": "finish"}),
+    ];
+    let mock = MockSseServer::new(build_sse(&chunks));
+    let tmp = tempfile::tempdir().unwrap();
+
+    // Use --tools=full (same as --verbose for tool display)
+    let output = band_with_mock(&tmp, &mock, &[
+        "tasks", "watch", "--workspace", "ws-1", "--tools", "full",
+    ]);
+
+    let err = stderr(&output);
+    assert!(err.contains("\u{25b8}"), "expected start marker: {err}");
+    assert!(err.contains("\u{2713}"), "expected completion marker: {err}");
+    assert!(err.contains("PASS all 5 tests"), "expected tool output: {err}");
+}
+
+#[test]
+fn watch_render_text_then_tools_then_text() {
+    // Verify spacing when text and tools interleave
+    let chunks = vec![
+        serde_json::json!({"type": "text-delta", "delta": "First message\n"}),
+        serde_json::json!({"type": "text-end"}),
+        serde_json::json!({
+            "type": "tool-input-available",
+            "toolCallId": "tc_1",
+            "toolName": "Read",
+            "input": {"file_path": "/a.rs"}
+        }),
+        serde_json::json!({
+            "type": "tool-input-available",
+            "toolCallId": "tc_2",
+            "toolName": "Read",
+            "input": {"file_path": "/b.rs"}
+        }),
+        serde_json::json!({"type": "text-delta", "delta": "Second message"}),
+        serde_json::json!({"type": "text-end"}),
+        serde_json::json!({"type": "finish"}),
+    ];
+    let mock = MockSseServer::new(build_sse(&chunks));
+    let tmp = tempfile::tempdir().unwrap();
+
+    let output = band_with_mock(&tmp, &mock, &[
+        "tasks", "watch", "--workspace", "ws-1",
+    ]);
+
+    let out = stdout(&output);
+    assert!(out.contains("First message"), "expected first msg: {out}");
+    assert!(out.contains("Second message"), "expected second msg: {out}");
+
+    let err = stderr(&output);
+    assert!(err.contains("Read: /a.rs"), "expected first tool: {err}");
+    assert!(err.contains("Read: /b.rs"), "expected second tool: {err}");
+}
+
+#[test]
+fn watch_render_data_result_without_optional_fields() {
+    let chunks = vec![
+        serde_json::json!({
+            "type": "data-result",
+            "data": {"durationMs": 3000}
+        }),
+        serde_json::json!({"type": "finish"}),
+    ];
+    let mock = MockSseServer::new(build_sse(&chunks));
+    let tmp = tempfile::tempdir().unwrap();
+
+    let output = band_with_mock(&tmp, &mock, &[
+        "tasks", "watch", "--workspace", "ws-1",
+    ]);
+
+    assert!(output.status.success());
+    let err = stderr(&output);
+    assert!(err.contains("Task completed in 3s"), "expected duration only: {err}");
+    // Should NOT contain cost or turns when not provided
+    assert!(!err.contains("$"), "no cost expected: {err}");
+    assert!(!err.contains("turns"), "no turns expected: {err}");
+}
+
+#[test]
+fn watch_render_multiple_tool_calls_with_summaries() {
+    let chunks = vec![
+        serde_json::json!({
+            "type": "tool-input-available",
+            "toolCallId": "tc_1",
+            "toolName": "Bash",
+            "input": {"command": "cargo build"}
+        }),
+        serde_json::json!({
+            "type": "tool-input-available",
+            "toolCallId": "tc_2",
+            "toolName": "Grep",
+            "input": {"pattern": "fn main", "path": "/src"}
+        }),
+        serde_json::json!({
+            "type": "tool-input-available",
+            "toolCallId": "tc_3",
+            "toolName": "Glob",
+            "input": {"pattern": "**/*.rs"}
+        }),
+        serde_json::json!({"type": "finish"}),
+    ];
+    let mock = MockSseServer::new(build_sse(&chunks));
+    let tmp = tempfile::tempdir().unwrap();
+
+    let output = band_with_mock(&tmp, &mock, &[
+        "tasks", "watch", "--workspace", "ws-1",
+    ]);
+
+    let err = stderr(&output);
+    assert!(err.contains("Bash: cargo build"), "expected Bash summary: {err}");
+    assert!(err.contains("Grep: /src"), "expected Grep summary: {err}");
+    assert!(err.contains("Glob: **/*.rs"), "expected Glob summary: {err}");
+}
+
+#[test]
+fn watch_render_tool_with_no_matching_summary_key() {
+    // When tool input has no recognized key, just show tool name
+    let chunks = vec![
+        serde_json::json!({
+            "type": "tool-input-available",
+            "toolCallId": "tc_1",
+            "toolName": "CustomTool",
+            "input": {"foo": "bar"}
+        }),
+        serde_json::json!({"type": "finish"}),
+    ];
+    let mock = MockSseServer::new(build_sse(&chunks));
+    let tmp = tempfile::tempdir().unwrap();
+
+    let output = band_with_mock(&tmp, &mock, &[
+        "tasks", "watch", "--workspace", "ws-1",
+    ]);
+
+    let err = stderr(&output);
+    assert!(err.contains("CustomTool"), "expected tool name: {err}");
+    // Should NOT have "CustomTool:" (with colon) since no summary value
+    assert!(!err.contains("CustomTool:"), "no colon when no summary key: {err}");
+}
+
+#[test]
+fn watch_render_tool_not_inline_with_text() {
+    // Regression: tool calls must not appear on the same line as text output.
+    // The text-end chunk resets in_text, but if the last delta didn't end with \n,
+    // the tool line would appear visually inline on the terminal.
+    let chunks = vec![
+        serde_json::json!({"type": "text-delta", "delta": "Analyzing code:"}),
+        serde_json::json!({"type": "text-end"}),
+        serde_json::json!({
+            "type": "tool-input-available",
+            "toolCallId": "tc_1",
+            "toolName": "Read",
+            "input": {"file_path": "/src/main.rs"}
+        }),
+        serde_json::json!({"type": "finish"}),
+    ];
+    let mock = MockSseServer::new(build_sse(&chunks));
+    let tmp = tempfile::tempdir().unwrap();
+
+    let output = band_with_mock(&tmp, &mock, &[
+        "tasks", "watch", "--workspace", "ws-1",
+    ]);
+
+    // stdout should end with a newline (the renderer adds one before the tool line)
+    let raw_stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        raw_stdout.ends_with('\n'),
+        "stdout should end with newline when tool follows non-newline text: {raw_stdout:?}"
+    );
+    // Tool line should be on its own line in stderr, not mixed into stdout
+    let err = stderr(&output);
+    assert!(err.contains("Read: /src/main.rs"), "tool line present: {err}");
+}
+
+#[test]
+fn watch_render_verbose_truncates_long_output() {
+    let long_output = "x".repeat(3000);
+    let chunks = vec![
+        serde_json::json!({
+            "type": "tool-input-available",
+            "toolCallId": "tc_1",
+            "toolName": "Bash",
+            "input": {"command": "cat bigfile"}
+        }),
+        serde_json::json!({
+            "type": "tool-output-available",
+            "toolCallId": "tc_1",
+            "output": long_output
+        }),
+        serde_json::json!({"type": "finish"}),
+    ];
+    let mock = MockSseServer::new(build_sse(&chunks));
+    let tmp = tempfile::tempdir().unwrap();
+
+    let output = band_with_mock(&tmp, &mock, &[
+        "tasks", "watch", "--workspace", "ws-1", "--verbose",
+    ]);
+
+    let err = stderr(&output);
+    assert!(err.contains("[...truncated]"), "expected truncation marker: {err}");
+    // Full 3000-char output should not appear
+    assert!(
+        !err.contains(&"x".repeat(3000)),
+        "should not contain full output"
     );
 }

@@ -1,11 +1,12 @@
 mod api;
+mod render;
 mod shell;
 mod state;
 mod validate;
 
 use clap::{Parser, Subcommand};
 use std::fmt::Write;
-use std::io::{BufRead, Write as IoWrite};
+use std::io::BufRead;
 use std::process;
 
 #[derive(Parser)]
@@ -140,6 +141,12 @@ enum TasksCmd {
         /// Watch the latest task for this workspace
         #[arg(long)]
         workspace: Option<String>,
+        /// Show full tool inputs and outputs
+        #[arg(long, short = 'v')]
+        verbose: bool,
+        /// Tool call visibility: auto (default), off, full
+        #[arg(long, default_value = "auto")]
+        tools: String,
     },
 }
 
@@ -248,10 +255,18 @@ fn main() {
         cmd: TasksCmd::Watch {
             ref id,
             ref workspace,
+            verbose,
+            ref tools,
         },
     } = cli.command
     {
-        let exit_code = handle_watch(id.as_deref(), workspace.as_deref(), json_output);
+        let tool_display = match tools.as_str() {
+            "off" => render::ToolDisplay::Off,
+            "full" => render::ToolDisplay::Full,
+            _ => render::ToolDisplay::Auto,
+        };
+        let config = render::RenderConfig::new(verbose, tool_display);
+        let exit_code = handle_watch(id.as_deref(), workspace.as_deref(), json_output, config);
         process::exit(exit_code);
     }
 
@@ -907,8 +922,13 @@ fn cmd_cronjobs_trigger(key: &str, id: &str) -> Result<CommandResult, String> {
     })
 }
 
-fn handle_watch(id: Option<&str>, workspace: Option<&str>, json_output: bool) -> i32 {
-    match cmd_tasks_watch(id, workspace, json_output) {
+fn handle_watch(
+    id: Option<&str>,
+    workspace: Option<&str>,
+    json_output: bool,
+    config: render::RenderConfig,
+) -> i32 {
+    match cmd_tasks_watch(id, workspace, json_output, config) {
         Ok(success) => i32::from(!success),
         Err(e) => {
             if json_output {
@@ -925,6 +945,7 @@ fn cmd_tasks_watch(
     id: Option<&str>,
     workspace: Option<&str>,
     json_output: bool,
+    config: render::RenderConfig,
 ) -> Result<bool, String> {
     let client = api::ApiClient::from_settings()?;
     let workspace_id = resolve_workspace_id(&client, id, workspace)?;
@@ -959,14 +980,17 @@ fn cmd_tasks_watch(
 
     let mut body = response.into_body();
     let reader = std::io::BufReader::new(body.as_reader());
-    stream_sse_events(reader, json_output)
+    stream_sse_events(reader, json_output, config)
 }
 
-fn stream_sse_events(reader: impl BufRead, json_output: bool) -> Result<bool, String> {
+fn stream_sse_events(
+    reader: impl BufRead,
+    json_output: bool,
+    config: render::RenderConfig,
+) -> Result<bool, String> {
     let mut line_buf = String::new();
     let mut data_buf = String::new();
-    let mut task_succeeded = true;
-    let mut in_tool = false;
+    let mut renderer = render::Renderer::new(config);
     let mut reader = reader;
 
     loop {
@@ -982,10 +1006,10 @@ fn stream_sse_events(reader: impl BufRead, json_output: bool) -> Result<bool, St
         if line.is_empty() {
             if !data_buf.is_empty() {
                 let should_exit =
-                    process_sse_data(&data_buf, json_output, &mut task_succeeded, &mut in_tool)?;
+                    process_sse_data(&data_buf, json_output, &mut renderer)?;
                 data_buf.clear();
                 if should_exit {
-                    return Ok(task_succeeded);
+                    return Ok(renderer.task_succeeded);
                 }
             }
             continue;
@@ -1000,103 +1024,30 @@ fn stream_sse_events(reader: impl BufRead, json_output: bool) -> Result<bool, St
         // Ignore id:, event:, and comment lines
     }
 
-    Ok(task_succeeded)
+    Ok(renderer.task_succeeded)
 }
 
 fn process_sse_data(
     data: &str,
     json_output: bool,
-    task_succeeded: &mut bool,
-    in_tool: &mut bool,
+    renderer: &mut render::Renderer,
 ) -> Result<bool, String> {
     let chunk: serde_json::Value =
         serde_json::from_str(data).map_err(|e| format!("Invalid JSON in SSE: {e}"))?;
 
-    let chunk_type = chunk.get("type").and_then(|t| t.as_str()).unwrap_or("");
-
     if json_output {
+        let chunk_type = chunk.get("type").and_then(|t| t.as_str()).unwrap_or("");
         println!("{}", serde_json::to_string(&chunk).unwrap_or_default());
+        Ok(chunk_type == "finish")
     } else {
-        render_text_chunk(&chunk, task_succeeded, in_tool);
-    }
-
-    Ok(chunk_type == "finish")
-}
-
-#[allow(clippy::needless_pass_by_ref_mut)]
-fn render_text_chunk(chunk: &serde_json::Value, task_succeeded: &mut bool, in_tool: &mut bool) {
-    let chunk_type = chunk.get("type").and_then(|t| t.as_str()).unwrap_or("");
-
-    match chunk_type {
-        "text-delta" => {
-            if *in_tool {
-                println!();
-                *in_tool = false;
-            }
-            let delta = chunk.get("delta").and_then(|d| d.as_str()).unwrap_or("");
-            print!("{delta}");
-            std::io::stdout().flush().ok();
-        }
-        "tool-input-available" => {
-            let tool_name = chunk
-                .get("toolName")
-                .and_then(|n| n.as_str())
-                .unwrap_or("tool");
-            let args = chunk.get("input").unwrap_or(&serde_json::Value::Null);
-            let summary = tool_summary(tool_name, args);
-            eprintln!("> {summary}");
-            *in_tool = true;
-        }
-        "error" => {
-            let text = chunk
-                .get("errorText")
-                .and_then(|t| t.as_str())
-                .unwrap_or("Unknown error");
-            eprintln!("\nError: {text}");
-            *task_succeeded = false;
-        }
-        "data-result" => {
-            if let Some(data) = chunk.get("data") {
-                if let Some(ms) = data.get("durationMs").and_then(serde_json::Value::as_f64) {
-                    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-                    let total_secs = (ms / 1000.0) as u64;
-                    let mins = total_secs / 60;
-                    let secs = total_secs % 60;
-                    if mins > 0 {
-                        eprintln!("\nTask completed in {mins}m {secs}s.");
-                    } else {
-                        eprintln!("\nTask completed in {secs}s.");
-                    }
-                } else {
-                    eprintln!("\nTask completed.");
-                }
-            }
-        }
-        // "finish", "text-start", "text-end", etc. — no text rendering needed
-        _ => {}
+        Ok(renderer.render_chunk(&chunk))
     }
 }
 
-fn tool_summary(name: &str, args: &serde_json::Value) -> String {
-    if let Some(obj) = args.as_object() {
-        for key in &[
-            "file_path",
-            "file",
-            "path",
-            "command",
-            "query",
-            "pattern",
-            "url",
-        ] {
-            if let Some(val) = obj.get(*key).and_then(|v| v.as_str()) {
-                return format!("{name}: {val}");
-            }
-        }
-    }
-    name.to_string()
-}
 
 /// Resolve a task ID (tsk_*) or workspace ID to a workspace ID.
+/// When neither `id` nor `workspace` is given, auto-detects from the current
+/// working directory by matching the git toplevel against registered workspace paths.
 fn resolve_workspace_id(
     client: &api::ApiClient,
     id: Option<&str>,
@@ -1106,26 +1057,75 @@ fn resolve_workspace_id(
         return Ok(ws.to_string());
     }
 
-    let id = id.ok_or("Either a task ID or --workspace must be specified")?;
-
-    if id.starts_with("tsk_") {
-        let data = client.trpc_query("tasks.list", &serde_json::json!({}))?;
-        let tasks = data
-            .get("tasks")
-            .and_then(|t| t.as_array())
-            .ok_or("Failed to list tasks")?;
-        let task = tasks
-            .iter()
-            .find(|t| t.get("id").and_then(|i| i.as_str()) == Some(id))
-            .ok_or(format!("Task '{id}' not found"))?;
-        let workspace_id = task
-            .get("workspaceId")
-            .and_then(|w| w.as_str())
-            .ok_or("Task has no workspace ID")?;
-        Ok(workspace_id.to_string())
-    } else {
-        Ok(id.to_string())
+    if let Some(id) = id {
+        if id.starts_with("tsk_") {
+            let data = client.trpc_query("tasks.list", &serde_json::json!({}))?;
+            let tasks = data
+                .get("tasks")
+                .and_then(|t| t.as_array())
+                .ok_or("Failed to list tasks")?;
+            let task = tasks
+                .iter()
+                .find(|t| t.get("id").and_then(|i| i.as_str()) == Some(id))
+                .ok_or(format!("Task '{id}' not found"))?;
+            let workspace_id = task
+                .get("workspaceId")
+                .and_then(|w| w.as_str())
+                .ok_or("Task has no workspace ID")?;
+            return Ok(workspace_id.to_string());
+        }
+        return Ok(id.to_string());
     }
+
+    // Auto-detect: match current git toplevel against registered workspace paths.
+    detect_workspace_from_cwd(client)
+}
+
+/// Detect the current workspace by matching `git rev-parse --show-toplevel`
+/// against the `path` field of all registered workspaces.
+fn detect_workspace_from_cwd(client: &api::ApiClient) -> Result<String, String> {
+    let git_output = std::process::Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .map_err(|e| format!("Failed to run git: {e}"))?;
+
+    if !git_output.status.success() {
+        return Err(
+            "Not in a git repository. Specify a task ID or --workspace.".to_string(),
+        );
+    }
+
+    let toplevel = String::from_utf8_lossy(&git_output.stdout)
+        .trim()
+        .to_string();
+
+    let data = client.trpc_query_no_input("projects.list")?;
+    let projects = data
+        .get("projects")
+        .and_then(|p| p.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    for proj in &projects {
+        let worktrees = proj
+            .get("worktrees")
+            .and_then(|w| w.as_array())
+            .cloned()
+            .unwrap_or_default();
+        for wt in &worktrees {
+            let path = wt.get("path").and_then(|p| p.as_str()).unwrap_or("");
+            if path == toplevel {
+                let ws_id = wt.get("workspaceId").and_then(|w| w.as_str()).unwrap_or("");
+                if !ws_id.is_empty() {
+                    return Ok(ws_id.to_string());
+                }
+            }
+        }
+    }
+
+    Err(format!(
+        "No workspace found for '{toplevel}'. Specify a task ID or --workspace."
+    ))
 }
 
 // --- Settings command ---
