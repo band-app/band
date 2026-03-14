@@ -6,6 +6,7 @@ export type { DashboardAdapter, PlatformCapabilities, Unsubscribe } from "./adap
 export { AddProjectDialog } from "./components/AddProjectDialog";
 export { AgentStatusBadge } from "./components/AgentStatusBadge";
 export { CIStatusIndicator } from "./components/CIStatusIndicator";
+export { CodeMirrorViewer } from "./components/CodeMirrorViewer";
 export { DashboardShell } from "./components/DashboardShell";
 export { type DiffStats, DiffView } from "./components/DiffView";
 export { FileBrowser } from "./components/FileBrowser";

@@ -1,5 +1,10 @@
-import { useEffect, useState } from "react";
+import { MergeView, unifiedMergeView } from "@codemirror/merge";
+import { EditorState, Text } from "@codemirror/state";
+import { EditorView } from "@codemirror/view";
+import { Columns2, Rows2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { useAdapter } from "../context";
+import { baseViewerExtensions, loadLanguage } from "../lib/codemirror-setup";
 import { extensionToLanguage, filenameToLanguage } from "../lib/language-map";
 import type { FileStatus, WorkspaceDiff } from "../types";
 
@@ -8,6 +13,8 @@ export interface DiffStats {
   insertions: number;
   deletions: number;
 }
+
+type ViewMode = "unified" | "split";
 
 interface DiffViewProps {
   workspaceId: string;
@@ -26,7 +33,6 @@ function parseDiffFiles(diff: string): ParsedFile[] {
 
   for (const fileDiff of fileDiffs) {
     const lines = fileDiff.split("\n");
-    // Extract filename from the first line: "a/path b/path"
     const firstLine = lines[0] || "";
     const match = firstLine.match(/ b\/(.+)$/);
     const filename = match ? match[1] : firstLine;
@@ -53,15 +59,6 @@ function FileStatusBadge({ status }: { status: FileStatus | undefined }) {
   return <span className={`shrink-0 text-xs font-bold ${statusColors[status]}`}>{status}</span>;
 }
 
-// Lazy Shiki loading
-let shikiPromise: Promise<typeof import("shiki")> | null = null;
-function getShiki() {
-  if (!shikiPromise) {
-    shikiPromise = import("shiki");
-  }
-  return shikiPromise;
-}
-
 function detectLanguage(filePath: string): string {
   const name = filePath.split("/").pop() || filePath;
   const dot = name.lastIndexOf(".");
@@ -70,16 +67,9 @@ function detectLanguage(filePath: string): string {
 }
 
 interface DiffLine {
-  type: "add" | "del" | "context" | "hunk";
+  type: "add" | "del" | "context";
   text: string;
 }
-
-interface TokenSpan {
-  content: string;
-  color?: string;
-}
-
-type HighlightedLine = { type: DiffLine["type"]; tokens: TokenSpan[] };
 
 function parseDiffLines(hunks: string): DiffLine[] {
   const lines = hunks.split("\n");
@@ -88,7 +78,7 @@ function parseDiffLines(hunks: string): DiffLine[] {
   for (const line of lines) {
     if (line.startsWith("@@")) {
       inHunk = true;
-      result.push({ type: "hunk", text: line });
+      // Skip hunk headers — the merge view shows its own markers
     } else if (inHunk) {
       if (line.startsWith("+")) {
         result.push({ type: "add", text: line.slice(1) });
@@ -102,124 +92,119 @@ function parseDiffLines(hunks: string): DiffLine[] {
   return result;
 }
 
-async function highlightDiffLines(diffLines: DiffLine[], lang: string): Promise<HighlightedLine[]> {
-  const shiki = await getShiki();
-
-  // Build separate old (context+del) and new (context+add) versions
-  // so each is valid code for the highlighter.
+function buildOldNew(diffLines: DiffLine[]): { oldText: string; newText: string } {
   const oldLines: string[] = [];
   const newLines: string[] = [];
-  const mapping: { type: DiffLine["type"]; source: "old" | "new"; idx: number }[] = [];
 
   for (const line of diffLines) {
     if (line.type === "context") {
-      mapping.push({ type: "context", source: "new", idx: newLines.length });
       oldLines.push(line.text);
       newLines.push(line.text);
     } else if (line.type === "add") {
-      mapping.push({ type: "add", source: "new", idx: newLines.length });
       newLines.push(line.text);
     } else if (line.type === "del") {
-      mapping.push({ type: "del", source: "old", idx: oldLines.length });
       oldLines.push(line.text);
-    } else {
-      mapping.push({ type: "hunk", source: "new", idx: -1 });
     }
   }
 
-  type TokenLine = TokenSpan[];
-  let oldTokenLines: TokenLine[] = [];
-  let newTokenLines: TokenLine[] = [];
-
-  try {
-    const [oldResult, newResult] = await Promise.all([
-      oldLines.length > 0
-        ? shiki.codeToTokens(oldLines.join("\n"), { lang: lang as never, theme: "github-dark" })
-        : null,
-      newLines.length > 0
-        ? shiki.codeToTokens(newLines.join("\n"), { lang: lang as never, theme: "github-dark" })
-        : null,
-    ]);
-    if (oldResult) {
-      oldTokenLines = oldResult.tokens.map((line) =>
-        line.map((t) => ({ content: t.content, color: t.color })),
-      );
-    }
-    if (newResult) {
-      newTokenLines = newResult.tokens.map((line) =>
-        line.map((t) => ({ content: t.content, color: t.color })),
-      );
-    }
-  } catch {
-    // Fallback: no syntax colors
-    return diffLines.map((line) => ({ type: line.type, tokens: [{ content: line.text }] }));
-  }
-
-  return mapping.map((m, i) => {
-    if (m.type === "hunk") {
-      return { type: "hunk" as const, tokens: [{ content: diffLines[i].text }] };
-    }
-    const tokenLine = m.source === "old" ? oldTokenLines[m.idx] : newTokenLines[m.idx];
-    return {
-      type: m.type,
-      tokens: tokenLine ?? [{ content: diffLines[i].text }],
-    };
-  });
+  return { oldText: oldLines.join("\n"), newText: newLines.join("\n") };
 }
 
-function DiffFileContent({ hunks, filename }: { hunks: string; filename: string }) {
-  const [highlighted, setHighlighted] = useState<HighlightedLine[] | null>(null);
+const diffTheme = EditorView.theme({
+  ".cm-insertedLine": { backgroundColor: "rgba(34, 197, 94, 0.1)" },
+  ".cm-deletedLine": { backgroundColor: "rgba(239, 68, 68, 0.1)" },
+});
+
+function DiffFileContent({
+  hunks,
+  filename,
+  viewMode,
+}: {
+  hunks: string;
+  filename: string;
+  viewMode: ViewMode;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const viewRef = useRef<EditorView | MergeView | null>(null);
 
   useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
     let cancelled = false;
-    const diffLines = parseDiffLines(hunks);
-    const lang = detectLanguage(filename);
-    highlightDiffLines(diffLines, lang).then((result) => {
-      if (!cancelled) setHighlighted(result);
-    });
+
+    const setup = async () => {
+      const lang = detectLanguage(filename);
+      const langSupport = await loadLanguage(lang);
+      if (cancelled) return;
+
+      // Destroy previous instance
+      if (viewRef.current) {
+        viewRef.current.destroy();
+        viewRef.current = null;
+      }
+
+      const diffLines = parseDiffLines(hunks);
+      const { oldText, newText } = buildOldNew(diffLines);
+
+      if (viewMode === "split") {
+        const sharedExtensions = [...baseViewerExtensions(), diffTheme];
+        if (langSupport) {
+          sharedExtensions.push(langSupport);
+        }
+
+        viewRef.current = new MergeView({
+          a: {
+            doc: oldText,
+            extensions: sharedExtensions,
+          },
+          b: {
+            doc: newText,
+            extensions: sharedExtensions,
+          },
+          parent: container,
+          highlightChanges: false,
+          gutter: true,
+        });
+      } else {
+        const extensions = [
+          ...baseViewerExtensions(),
+          unifiedMergeView({
+            original: Text.of(oldText.split("\n")),
+            mergeControls: false,
+            syntaxHighlightDeletions: true,
+            highlightChanges: false,
+          }),
+          diffTheme,
+        ];
+        if (langSupport) {
+          extensions.push(langSupport);
+        }
+
+        const state = EditorState.create({
+          doc: newText,
+          extensions,
+        });
+
+        viewRef.current = new EditorView({
+          state,
+          parent: container,
+        });
+      }
+    };
+
+    setup();
+
     return () => {
       cancelled = true;
+      if (viewRef.current) {
+        viewRef.current.destroy();
+        viewRef.current = null;
+      }
     };
-  }, [hunks, filename]);
+  }, [hunks, filename, viewMode]);
 
-  // Render plain diff while highlighting loads
-  const diffLines = parseDiffLines(hunks);
-  const lines: HighlightedLine[] =
-    highlighted ?? diffLines.map((l) => ({ type: l.type, tokens: [{ content: l.text }] }));
-
-  return (
-    <pre className="overflow-x-auto text-xs leading-5">
-      <code className="block w-max min-w-full">
-        {lines.map((line, lineIdx) => (
-          <div
-            // biome-ignore lint/suspicious/noArrayIndexKey: diff lines have no stable id
-            key={lineIdx}
-            className={
-              line.type === "add"
-                ? "bg-green-500/10"
-                : line.type === "del"
-                  ? "bg-red-500/10"
-                  : line.type === "hunk"
-                    ? "bg-blue-500/10 text-blue-400"
-                    : ""
-            }
-          >
-            <span className="inline-block w-5 select-none text-center text-muted-foreground">
-              {line.type === "add" ? "+" : line.type === "del" ? "-" : " "}
-            </span>
-            {line.type === "hunk"
-              ? line.tokens[0]?.content
-              : line.tokens.map((token, tIdx) => (
-                  // biome-ignore lint/suspicious/noArrayIndexKey: tokens have no stable id
-                  <span key={tIdx} style={token.color ? { color: token.color } : undefined}>
-                    {token.content}
-                  </span>
-                ))}
-          </div>
-        ))}
-      </code>
-    </pre>
-  );
+  return <div ref={containerRef} />;
 }
 
 export function DiffView({ workspaceId, active = true, onStatsChange }: DiffViewProps) {
@@ -228,6 +213,7 @@ export function DiffView({ workspaceId, active = true, onStatsChange }: DiffView
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [openFiles, setOpenFiles] = useState<Set<string>>(new Set());
+  const [viewMode, setViewMode] = useState<ViewMode>("unified");
 
   useEffect(() => {
     const getWorkspaceDiff = adapter.getWorkspaceDiff;
@@ -305,19 +291,47 @@ export function DiffView({ workspaceId, active = true, onStatsChange }: DiffView
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <div className="shrink-0 border-b border-white/20 px-4 py-2">
-        <div className="text-sm text-muted-foreground">
-          <span className="font-medium text-foreground">{data.stats.filesChanged}</span>{" "}
-          {data.stats.filesChanged === 1 ? "file" : "files"} changed
-          {data.stats.insertions > 0 && (
-            <span className="ml-2 text-green-400">+{data.stats.insertions}</span>
-          )}
-          {data.stats.deletions > 0 && (
-            <span className="ml-1 text-red-400">-{data.stats.deletions}</span>
-          )}
+      <div className="flex shrink-0 items-center justify-between border-b border-white/20 px-4 py-2">
+        <div>
+          <div className="text-sm text-muted-foreground">
+            <span className="font-medium text-foreground">{data.stats.filesChanged}</span>{" "}
+            {data.stats.filesChanged === 1 ? "file" : "files"} changed
+            {data.stats.insertions > 0 && (
+              <span className="ml-2 text-green-400">+{data.stats.insertions}</span>
+            )}
+            {data.stats.deletions > 0 && (
+              <span className="ml-1 text-red-400">-{data.stats.deletions}</span>
+            )}
+          </div>
+          <div className="mt-0.5 text-xs text-muted-foreground">
+            {data.baseBranch} ← {data.headBranch}
+          </div>
         </div>
-        <div className="mt-0.5 text-xs text-muted-foreground">
-          {data.baseBranch} ← {data.headBranch}
+        <div className="hidden items-center rounded-md border border-border/50 bg-muted/50 md:flex">
+          <button
+            type="button"
+            onClick={() => setViewMode("unified")}
+            className={`inline-flex items-center gap-1 rounded-l-md px-2 py-1 text-xs transition-colors ${
+              viewMode === "unified"
+                ? "bg-accent text-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+            title="Unified view"
+          >
+            <Rows2 className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode("split")}
+            className={`inline-flex items-center gap-1 rounded-r-md px-2 py-1 text-xs transition-colors ${
+              viewMode === "split"
+                ? "bg-accent text-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+            title="Split view"
+          >
+            <Columns2 className="size-3.5" />
+          </button>
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
@@ -344,8 +358,12 @@ export function DiffView({ workspaceId, active = true, onStatsChange }: DiffView
                 </span>
               </button>
               {isOpen && (
-                <div className="border-t border-border/20 bg-muted/30 px-2 py-1">
-                  <DiffFileContent hunks={file.hunks} filename={file.filename} />
+                <div className="border-t border-border/20 bg-muted/30">
+                  <DiffFileContent
+                    hunks={file.hunks}
+                    filename={file.filename}
+                    viewMode={viewMode}
+                  />
                 </div>
               )}
             </div>

@@ -1,10 +1,10 @@
+import { CodeMirrorViewer } from "@band/dashboard-core";
 import { cn } from "@band/ui";
 import { Download, X } from "lucide-react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import { useCallback, useEffect, useState } from "react";
 
 import { detectLanguageFromFilename, downloadFile, isTextMediaType } from "./file-preview-utils";
-import { type TokenLine, useSyntaxHighlight } from "./use-syntax-highlight";
 
 interface FilePreviewOverlayProps {
   open: boolean;
@@ -48,7 +48,7 @@ export function FilePreviewOverlay({ open, onOpenChange, part }: FilePreviewOver
           <DialogPrimitive.Title className="sr-only">{filename}</DialogPrimitive.Title>
 
           {/* Top bar */}
-          <div className="flex shrink-0 items-center justify-between px-4 py-3">
+          <div className="flex shrink-0 items-center justify-between px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
             <span className="min-w-0 truncate font-mono text-sm text-white/90">{filename}</span>
             <div className="flex items-center gap-1">
               <button
@@ -69,7 +69,7 @@ export function FilePreviewOverlay({ open, onOpenChange, part }: FilePreviewOver
           </div>
 
           {/* Content area */}
-          <div className="min-h-0 flex-1 overflow-auto">
+          <div className="min-h-0 flex-1 overflow-hidden">
             {isImage && <ImagePreview url={part.url} alt={filename} />}
             {isText && <TextPreview url={part.url} filename={filename} />}
             {!isImage && !isText && (
@@ -96,7 +96,6 @@ function TextPreview({ url, filename }: { url: string; filename: string }) {
   const [content, setContent] = useState<string | null>(null);
   const [error, setError] = useState(false);
   const language = detectLanguageFromFilename(filename);
-  const { lines } = useSyntaxHighlight(content, language);
 
   useEffect(() => {
     let cancelled = false;
@@ -127,66 +126,5 @@ function TextPreview({ url, filename }: { url: string; filename: string }) {
     );
   }
 
-  if (lines) {
-    return <HighlightedCode lines={lines} />;
-  }
-
-  return <PlainCode content={content} />;
-}
-
-function lineNumberWidth(totalLines: number): string {
-  const digits = String(totalLines).length;
-  return `${Math.max(2, digits)}ch`;
-}
-
-function HighlightedCode({ lines }: { lines: TokenLine[] }) {
-  const gutterWidth = lineNumberWidth(lines.length);
-  return (
-    <div className="overflow-x-auto p-4">
-      <pre className="text-xs leading-5">
-        {lines.map((tokens, lineIdx) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: code lines have no stable id
-          <div key={lineIdx} className="flex">
-            <span
-              className="shrink-0 select-none pr-4 text-right text-white/25"
-              style={{ width: gutterWidth }}
-            >
-              {lineIdx + 1}
-            </span>
-            <span className="flex-1">
-              {tokens.map((token, tIdx) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: tokens have no stable id
-                <span key={tIdx} style={token.color ? { color: token.color } : undefined}>
-                  {token.content}
-                </span>
-              ))}
-            </span>
-          </div>
-        ))}
-      </pre>
-    </div>
-  );
-}
-
-function PlainCode({ content }: { content: string }) {
-  const lines = content.split("\n");
-  const gutterWidth = lineNumberWidth(lines.length);
-  return (
-    <div className="overflow-x-auto p-4">
-      <pre className="text-xs leading-5 text-white/80">
-        {lines.map((line, lineIdx) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: code lines have no stable id
-          <div key={lineIdx} className="flex">
-            <span
-              className="shrink-0 select-none pr-4 text-right text-white/25"
-              style={{ width: gutterWidth }}
-            >
-              {lineIdx + 1}
-            </span>
-            <span className="flex-1">{line}</span>
-          </div>
-        ))}
-      </pre>
-    </div>
-  );
+  return <CodeMirrorViewer content={content} language={language} className="h-full" />;
 }

@@ -1,7 +1,7 @@
 import { extensionToLanguage, filenameToLanguage } from "@band/dashboard-core";
 
 /**
- * Detect the Shiki language identifier from a filename.
+ * Detect the language identifier from a filename.
  * Tries filename-based match (e.g. "Dockerfile"), then extension-based.
  */
 export function detectLanguageFromFilename(filename: string): string {

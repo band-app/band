@@ -1,5 +1,5 @@
 import { ChevronRight, File, Folder } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAdapter } from "../context";
 import type { FileEntry } from "../types";
 
@@ -23,6 +23,7 @@ export function FileBrowser({
   selectedFile,
 }: FileBrowserProps) {
   const adapter = useAdapter();
+  const breadcrumbsRef = useRef<HTMLDivElement>(null);
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -56,6 +57,15 @@ export function FileBrowser({
 
   const breadcrumbs = currentPath ? currentPath.split("/") : [];
 
+  // Scroll breadcrumbs to the end so the current folder is visible
+  // biome-ignore lint/correctness/useExhaustiveDependencies: scroll when path changes
+  useEffect(() => {
+    const el = breadcrumbsRef.current;
+    if (el) {
+      el.scrollLeft = el.scrollWidth;
+    }
+  }, [currentPath]);
+
   const handleBreadcrumb = (index: number) => {
     if (index < 0) {
       onNavigate("");
@@ -77,7 +87,8 @@ export function FileBrowser({
     <div className="flex h-full flex-col overflow-hidden">
       {/* Breadcrumbs */}
       <div
-        className={`flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border/50 text-xs ${compact ? "px-2 py-1.5" : "px-4 py-2"}`}
+        ref={breadcrumbsRef}
+        className={`flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border/50 text-xs [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${compact ? "h-9 px-2" : "px-4 py-2"}`}
       >
         <button
           type="button"
@@ -87,7 +98,10 @@ export function FileBrowser({
           root
         </button>
         {breadcrumbs.map((segment, i) => (
-          <span key={breadcrumbs.slice(0, i + 1).join("/")} className="flex items-center gap-1">
+          <span
+            key={breadcrumbs.slice(0, i + 1).join("/")}
+            className="flex shrink-0 items-center gap-1"
+          >
             <ChevronRight className="size-3 text-muted-foreground/50" />
             <button
               type="button"

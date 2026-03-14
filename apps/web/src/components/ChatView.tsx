@@ -436,7 +436,7 @@ export function ChatView({
         <ConversationScrollButton />
       </Conversation>
 
-      <div className="mx-auto w-full max-w-3xl shrink-0 px-4 lg:px-12 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))]">
+      <div className="mx-auto w-full max-w-3xl shrink-0 px-3 lg:px-4 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))]">
         <PromptInput onSubmit={handleSubmit}>
           <SlashCommandSuggestions skills={skills} />
           <PromptInputTextarea placeholder="Type a message..." />
