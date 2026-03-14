@@ -418,6 +418,12 @@ pub fn start_focus_polling(app_handle: tauri::AppHandle) {
             .checked_sub(Duration::from_secs(10))
             .unwrap_or_else(std::time::Instant::now);
         let mut api: Option<ApiClient> = None;
+        // After workspace_focus changes the active workspace, suppress
+        // frontmost-window detection for a short period so the spawned
+        // window-management threads have time to actually raise the new
+        // windows.  Without this, polling can detect the *old* frontmost
+        // window and immediately emit an event that reverts the selection.
+        let mut suppress_detection_until: Option<std::time::Instant> = None;
 
         loop {
             std::thread::sleep(Duration::from_millis(500));
@@ -441,8 +447,16 @@ pub fn start_focus_polling(app_handle: tauri::AppHandle) {
                 if *guard != last_active {
                     last_active.clone_from(&guard);
                     apps_raised = false;
+                    suppress_detection_until =
+                        Some(std::time::Instant::now() + Duration::from_secs(2));
                 }
             }
+
+            // While suppressed, skip frontmost-window detection entirely.
+            if suppress_detection_until.is_some_and(|t| std::time::Instant::now() < t) {
+                continue;
+            }
+            suppress_detection_until = None;
 
             if let Some(ws_id) = detect_frontmost_workspace(&cached) {
                 if let Some(ref client) = api {

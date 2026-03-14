@@ -31,7 +31,9 @@ export function createDashboardStore(adapter: DashboardAdapter): DashboardStore 
     _openingWorkspace: false,
 
     openWorkspace: (workspaceId: string) => {
-      if (get()._openingWorkspace) return;
+      // Block duplicate clicks on the same workspace while it's opening,
+      // but allow switching to a different workspace.
+      if (get()._openingWorkspace && get().activeWorkspaceId === workspaceId) return;
       set({ activeWorkspaceId: workspaceId, _openingWorkspace: true });
       adapter
         .openWorkspace(workspaceId)
@@ -39,7 +41,17 @@ export function createDashboardStore(adapter: DashboardAdapter): DashboardStore 
           set({ error: String(e) });
         })
         .finally(() => {
-          set({ _openingWorkspace: false });
+          // Delay clearing the flag so focus-polling events that arrive
+          // before the new windows are fully raised get ignored.  The
+          // Rust side also suppresses detection, but this provides
+          // defense in depth on the JS side.
+          setTimeout(() => {
+            // Only clear if this workspace is still the one being opened
+            // (a newer openWorkspace call may have overridden it).
+            if (get().activeWorkspaceId === workspaceId) {
+              set({ _openingWorkspace: false });
+            }
+          }, 2000);
         });
     },
 
