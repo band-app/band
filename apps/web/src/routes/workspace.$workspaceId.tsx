@@ -167,11 +167,7 @@ function DesktopDetailTabNav({
           </span>
         )}
       </Link>
-      <Link
-        to="/workspace/$workspaceId/code"
-        params={{ workspaceId }}
-        className={tabClass(isCode)}
-      >
+      <Link to="/workspace/$workspaceId/code" params={{ workspaceId }} className={tabClass(isCode)}>
         <Code className="size-4" />
         Code
       </Link>

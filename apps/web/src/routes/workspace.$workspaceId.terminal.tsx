@@ -16,10 +16,7 @@ function WorkspaceTerminal() {
   const { workspaceId } = Route.useParams();
   return (
     <Suspense fallback={null}>
-      <TerminalPanel
-        workspaceId={decodeURIComponent(workspaceId)}
-        visible={true}
-      />
+      <TerminalPanel workspaceId={decodeURIComponent(workspaceId)} visible={true} />
     </Suspense>
   );
 }
