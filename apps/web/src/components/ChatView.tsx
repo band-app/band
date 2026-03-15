@@ -648,11 +648,7 @@ function HistoryMessageView({
   return (
     <Message from="assistant">
       <MessageContent>
-        {renderHistoryContent(
-          message,
-          toolResultMap,
-          taskToolCallIds,
-        )}
+        {renderHistoryContent(message, toolResultMap, taskToolCallIds)}
       </MessageContent>
     </Message>
   );
