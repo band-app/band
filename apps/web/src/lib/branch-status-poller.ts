@@ -175,7 +175,7 @@ async function getCIStatus(worktreePath: string, branch: string): Promise<CIStat
       }
 
       const priority = statePriority(runState);
-      if (priority > statePriority(aggregatedState)) {
+      if (priority >= statePriority(aggregatedState)) {
         aggregatedState = runState;
         aggregatedUrl = run.url;
       }

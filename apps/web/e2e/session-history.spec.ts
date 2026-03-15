@@ -50,7 +50,7 @@ test("sessions load and display in the session list", async ({ page }) => {
   });
   await mock.install(page);
 
-  await page.goto(`${server.url}/chat/test-workspace?token=${TOKEN}`);
+  await page.goto(`${server.url}/workspace/test-workspace?token=${TOKEN}`);
 
   // The clock button should be visible since sessions are supported
   const clockButton = page.locator("button").filter({ has: page.locator("svg.lucide-clock") });
@@ -76,7 +76,7 @@ test("empty state shows 'No sessions yet' message", async ({ page }) => {
   mock.query("sessions.list", { sessions: [], supported: true });
   await mock.install(page);
 
-  await page.goto(`${server.url}/chat/test-workspace?token=${TOKEN}`);
+  await page.goto(`${server.url}/workspace/test-workspace?token=${TOKEN}`);
 
   // Open session list
   const clockButton = page.locator("button").filter({ has: page.locator("svg.lucide-clock") });
@@ -91,7 +91,7 @@ test("session toggle is hidden when not supported", async ({ page }) => {
   mock.query("sessions.list", { sessions: [], supported: false });
   await mock.install(page);
 
-  await page.goto(`${server.url}/chat/test-workspace?token=${TOKEN}`);
+  await page.goto(`${server.url}/workspace/test-workspace?token=${TOKEN}`);
 
   // Wait for the page to settle — the header with the workspace name should be visible
   await expect(page.locator("h1", { hasText: "test-workspace" })).toBeVisible();
@@ -129,7 +129,7 @@ test("selecting a session loads its messages", async ({ page }) => {
   }));
   await mock.install(page);
 
-  await page.goto(`${server.url}/chat/test-workspace?token=${TOKEN}`);
+  await page.goto(`${server.url}/workspace/test-workspace?token=${TOKEN}`);
 
   // Open session list
   const clockButton = page.locator("button").filter({ has: page.locator("svg.lucide-clock") });

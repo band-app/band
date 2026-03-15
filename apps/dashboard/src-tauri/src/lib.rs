@@ -4,6 +4,8 @@ mod commands;
 mod git;
 mod state;
 
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -12,9 +14,48 @@ use state::{ActiveWorkspaceState, ProjectCache};
 use tauri::Manager;
 
 const DASHBOARD_WIDTH: u32 = 400;
+const MAX_LOG_SIZE: u64 = 5 * 1024 * 1024; // 5 MB
+
+fn log_to_file(msg: &str) {
+    let Some(home) = dirs::home_dir() else {
+        return;
+    };
+    let log_path = home.join(".band").join("dashboard.log");
+    if let Ok(meta) = std::fs::metadata(&log_path) {
+        if meta.len() > MAX_LOG_SIZE {
+            let _ = std::fs::rename(&log_path, log_path.with_extension("log.old"));
+        }
+    }
+    if let Ok(mut f) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+    {
+        let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+        let _ = writeln!(f, "[{now}] {msg}");
+    }
+}
+
+macro_rules! dash_log {
+    ($($arg:tt)*) => {{
+        let msg = format!($($arg)*);
+        eprintln!("{}", msg);
+        crate::log_to_file(&msg);
+    }};
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Install panic hook that writes to dashboard.log
+    std::panic::set_hook(Box::new(|info| {
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        let msg = format!("PANIC: {info}\n{backtrace}");
+        eprintln!("{msg}");
+        log_to_file(&msg);
+    }));
+
+    log_to_file("dashboard starting");
+
     // Shared flags accessible from both setup() and the run-event callback
     let health_stop = Arc::new(AtomicBool::new(false));
     let health_stop_setup = health_stop.clone();
@@ -58,7 +99,7 @@ pub fn run() {
                         }
                     }
                     Err(e) => {
-                        eprintln!("Failed to start web server: {e}");
+                        dash_log!("Failed to start web server: {e}");
                     }
                 }
 
@@ -84,19 +125,19 @@ pub fn run() {
                         };
 
                         if !healthy {
-                            eprintln!("[health-monitor] Server appears down, restarting…");
+                            dash_log!("[health-monitor] Server appears down, restarting…");
                             let result =
                                 tokio::task::spawn_blocking(webserver::ensure_webserver_running)
                                     .await;
                             match result {
                                 Ok(Ok((p, _))) => {
-                                    eprintln!("[health-monitor] Server restarted on port {p}");
+                                    dash_log!("[health-monitor] Server restarted on port {p}");
                                 }
                                 Ok(Err(e)) => {
-                                    eprintln!("[health-monitor] Restart failed: {e}");
+                                    dash_log!("[health-monitor] Restart failed: {e}");
                                 }
                                 Err(e) => {
-                                    eprintln!("[health-monitor] Restart task panicked: {e}");
+                                    dash_log!("[health-monitor] Restart task panicked: {e}");
                                 }
                             }
                         }

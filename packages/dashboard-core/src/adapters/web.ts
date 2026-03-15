@@ -213,6 +213,10 @@ export class WebCapabilities implements PlatformCapabilities {
   navigate?: (href: string) => void;
 
   getWorkspaceHref(workspaceId: string): string {
-    return `/workspace/${encodeURIComponent(workspaceId)}/changes`;
+    return `/workspace/${encodeURIComponent(workspaceId)}`;
+  }
+
+  async openUrl(url: string): Promise<void> {
+    window.open(url, "_blank");
   }
 }

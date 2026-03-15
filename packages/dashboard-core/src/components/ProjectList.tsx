@@ -111,7 +111,7 @@ function SortableProject({
     <div ref={setNodeRef} style={style} className="min-w-0 px-2">
       <ContextMenu>
         <ContextMenuTrigger asChild>
-          <div className="flex items-center justify-between mb-1 px-1">
+          <div className="flex items-center justify-between mb-1 px-1 select-none">
             <div
               className={`flex items-center gap-2 min-w-0 ${editMode ? "cursor-grab touch-none" : ""}`}
               {...(editMode ? { ...attributes, ...listeners } : {})}

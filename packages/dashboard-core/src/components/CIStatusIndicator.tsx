@@ -1,5 +1,5 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@band/ui";
-import { CircleAlert, CircleCheck, GitMerge, Loader } from "lucide-react";
+import { Ban, CircleAlert, CircleCheck, GitMerge, Loader } from "lucide-react";
 import { useCapabilities } from "../context";
 import type { CIStatus } from "../types";
 
@@ -70,6 +70,20 @@ export function CIStatusIndicator({ ci }: Props) {
           />
         </TooltipTrigger>
         <TooltipContent>{ci.state === "running" ? "CI running" : "CI pending"}</TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  if (ci.state === "cancelled") {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Ban
+            className={`size-3.5 shrink-0 text-gray-400 ${cursorClass}`}
+            onClick={(e) => handleOpenUrl(ci.url, e)}
+          />
+        </TooltipTrigger>
+        <TooltipContent>CI cancelled</TooltipContent>
       </Tooltip>
     );
   }

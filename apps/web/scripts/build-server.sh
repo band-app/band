@@ -16,9 +16,8 @@ esbuild start-server.ts \
 mkdir -p dist/node_modules/node-pty/prebuilds
 cp node_modules/node-pty/package.json dist/node_modules/node-pty/
 cp -R node_modules/node-pty/lib dist/node_modules/node-pty/
-cp -RL node_modules/node-pty/prebuilds/darwin-arm64 dist/node_modules/node-pty/prebuilds/
-cp -RL node_modules/node-pty/prebuilds/darwin-x64 dist/node_modules/node-pty/prebuilds/
-chmod +x dist/node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null || true
+cp -RL node_modules/node-pty/prebuilds/* dist/node_modules/node-pty/prebuilds/
+chmod +x dist/node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true
 
 # Copy better-sqlite3 native module
 mkdir -p dist/node_modules/better-sqlite3/build/Release

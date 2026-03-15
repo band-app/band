@@ -136,6 +136,13 @@ function TasksPage() {
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden pb-[env(safe-area-inset-bottom)]">
+      {isTauri() && (
+        <div data-tauri-drag-region className="h-[28px] shrink-0 flex items-center justify-center">
+          <span className="text-xs font-medium text-muted-foreground select-none pointer-events-none">
+            Tasks
+          </span>
+        </div>
+      )}
       <header className="flex shrink-0 items-center gap-3 border-b border-border/50 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
         <div className="min-w-0 flex-1">
           <h1 className="text-sm font-semibold">Tasks</h1>

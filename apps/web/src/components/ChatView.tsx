@@ -313,6 +313,17 @@ export function ChatView({
     return historicalMessages;
   }, [historicalMessages, reconnectedPrompt]);
 
+  const historyToolResultMap = useMemo(
+    () => buildToolResultMap(filteredHistoricalMessages),
+    [filteredHistoricalMessages],
+  );
+  const { taskMap: historyTaskMap } = useMemo(
+    () => buildHistoryTaskMap(filteredHistoricalMessages, historyToolResultMap),
+    [filteredHistoricalMessages, historyToolResultMap],
+  );
+
+  const displayTaskMap = liveTaskMap.size > 0 ? liveTaskMap : historyTaskMap;
+
   const getLastUserMessage = useCallback((): string | undefined => {
     // Check live messages first (most recent)
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -398,7 +409,6 @@ export function ChatView({
           )}
 
           {(() => {
-            let taskWidgetRendered = false;
             return messages.map((message, messageIndex) => {
               const isLastMessage = messageIndex === messages.length - 1;
               const isLastAssistant = message.role === "assistant" && isLastMessage;
@@ -435,10 +445,6 @@ export function ChatView({
                       }
                       const item = toolPartToItem(segment.part);
                       if (isTaskTool(item.toolName)) {
-                        if (!taskWidgetRendered && liveTaskMap.size > 0) {
-                          taskWidgetRendered = true;
-                          return <TaskListWidget key="task-list-widget" tasks={liveTaskMap} />;
-                        }
                         return null;
                       }
                       return (
@@ -471,6 +477,7 @@ export function ChatView({
       </Conversation>
 
       <div className="mx-auto w-full max-w-3xl shrink-0 px-3 lg:px-4 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))]">
+        <TaskListWidget tasks={displayTaskMap} />
         <PromptInput onSubmit={handleSubmit}>
           <SlashCommandSuggestions skills={skills} />
           <PromptInputTextarea
@@ -589,12 +596,10 @@ function parseSharedFiles(text: string): {
 
 function HistoryMessages({ messages }: { messages: HistoryMessage[] }) {
   const toolResultMap = useMemo(() => buildToolResultMap(messages), [messages]);
-  const { taskMap, taskToolCallIds } = useMemo(
+  const { taskToolCallIds } = useMemo(
     () => buildHistoryTaskMap(messages, toolResultMap),
     [messages, toolResultMap],
   );
-
-  let taskWidgetRendered = false;
 
   return (
     <>
@@ -603,12 +608,7 @@ function HistoryMessages({ messages }: { messages: HistoryMessage[] }) {
           key={msg.id}
           message={msg}
           toolResultMap={toolResultMap}
-          taskMap={taskMap}
           taskToolCallIds={taskToolCallIds}
-          taskWidgetRendered={taskWidgetRendered}
-          onTaskWidgetRendered={() => {
-            taskWidgetRendered = true;
-          }}
         />
       ))}
     </>
@@ -618,17 +618,11 @@ function HistoryMessages({ messages }: { messages: HistoryMessage[] }) {
 function HistoryMessageView({
   message,
   toolResultMap,
-  taskMap,
   taskToolCallIds,
-  taskWidgetRendered,
-  onTaskWidgetRendered,
 }: {
   message: HistoryMessage;
   toolResultMap: Map<string, HistoryMessageContent>;
-  taskMap: TaskMap;
   taskToolCallIds: Set<string>;
-  taskWidgetRendered: boolean;
-  onTaskWidgetRendered: () => void;
 }) {
   const textBlocks = message.content.filter((b) => b.type === "text" && b.text?.trim());
   const toolUseBlocks = message.content.filter((b) => b.type === "tool_use");
@@ -654,14 +648,7 @@ function HistoryMessageView({
   return (
     <Message from="assistant">
       <MessageContent>
-        {renderHistoryContent(
-          message,
-          toolResultMap,
-          taskMap,
-          taskToolCallIds,
-          taskWidgetRendered,
-          onTaskWidgetRendered,
-        )}
+        {renderHistoryContent(message, toolResultMap, taskToolCallIds)}
       </MessageContent>
     </Message>
   );
@@ -685,10 +672,7 @@ function historyToolToItem(
 function renderHistoryContent(
   message: HistoryMessage,
   toolResultMap: Map<string, HistoryMessageContent>,
-  taskMap: TaskMap,
   taskToolCallIds: Set<string>,
-  taskWidgetRendered: boolean,
-  onTaskWidgetRendered: () => void,
 ) {
   const elements: React.ReactNode[] = [];
 
@@ -700,11 +684,6 @@ function renderHistoryContent(
     } else if (block.type === "tool_use") {
       const callId = block.toolCallId ?? "";
       if (taskToolCallIds.has(callId)) {
-        if (!taskWidgetRendered && taskMap.size > 0) {
-          taskWidgetRendered = true;
-          onTaskWidgetRendered();
-          elements.push(<TaskListWidget key="task-list-widget" tasks={taskMap} />);
-        }
         continue;
       }
       const item = historyToolToItem(block, toolResultMap.get(callId));
