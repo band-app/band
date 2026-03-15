@@ -64,7 +64,6 @@ function relativeTime(iso: string): string {
 
 function CronjobsPage() {
   const [cronjobs, setCronjobs] = useState<CronjobRecord[]>([]);
-  const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [projectFilter, setProjectFilter] = useState<string>("all");
@@ -75,12 +74,8 @@ function CronjobsPage() {
     setLoading(true);
     setError(null);
     try {
-      const [cronjobsData, projectsData] = await Promise.all([
-        trpc.cronjobs.list.query(),
-        trpc.projects.list.query(),
-      ]);
+      const cronjobsData = await trpc.cronjobs.list.query();
       setCronjobs(cronjobsData.jobs as CronjobRecord[]);
-      setProjects(projectsData.projects as ProjectInfo[]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load cronjobs");
     } finally {
@@ -90,24 +85,29 @@ function CronjobsPage() {
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(() => {
-      if (!showDialog) fetchData();
-    }, 5_000);
+    const interval = setInterval(fetchData, 5_000);
     return () => clearInterval(interval);
-  }, [fetchData, showDialog]);
+  }, [fetchData]);
 
   const filteredCronjobs = useMemo(() => {
     if (projectFilter === "all") return cronjobs;
     return cronjobs.filter((job) => {
       if (job.scope === "project") return job.fileKey === projectFilter;
-      // For workspace-scoped, check if the workspace belongs to this project
       return job.workspaceId?.startsWith(`${projectFilter}-`);
     });
   }, [cronjobs, projectFilter]);
 
   const projectNames = useMemo(() => {
-    return projects.map((p) => p.name).sort();
-  }, [projects]);
+    const names = new Set<string>();
+    for (const job of cronjobs) {
+      if (job.scope === "project") names.add(job.fileKey);
+      else if (job.workspaceId) {
+        const dash = job.workspaceId.indexOf("-");
+        if (dash > 0) names.add(job.workspaceId.slice(0, dash));
+      }
+    }
+    return Array.from(names).sort();
+  }, [cronjobs]);
 
   const handleEdit = useCallback((job: CronjobRecord) => {
     setEditingJob(job);
@@ -212,7 +212,6 @@ function CronjobsPage() {
       <CronjobDialog
         open={showDialog}
         onOpenChange={handleDialogClose}
-        projects={projects}
         editingJob={editingJob}
         onSaved={fetchData}
       />
@@ -372,16 +371,15 @@ function CronjobCard({
 function CronjobDialog({
   open,
   onOpenChange,
-  projects,
   editingJob,
   onSaved,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  projects: ProjectInfo[];
   editingJob: CronjobRecord | null;
   onSaved: () => void;
 }) {
+  const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [name, setName] = useState("");
   const [prompt, setPrompt] = useState("");
   const [cronExpression, setCronExpression] = useState("");
@@ -392,18 +390,14 @@ function CronjobDialog({
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Infer project name from workspaceId for editing workspace-scoped jobs
-  const editingProjectName = useMemo(() => {
-    if (!editingJob || editingJob.scope !== "workspace") return "";
-    return (
-      projects.find((p) => p.worktrees.some((w) => w.workspaceId === editingJob.workspaceId))
-        ?.name ?? ""
-    );
-  }, [editingJob, projects]);
-
-  // Reset form when dialog opens
+  // Reset form and fetch projects when dialog opens
   useEffect(() => {
-    if (open) {
+    if (!open) return;
+    setSubmitError(null);
+    trpc.projects.list.query().then((data) => {
+      const loadedProjects = data.projects as ProjectInfo[];
+      setProjects(loadedProjects);
+
       if (editingJob) {
         setName(editingJob.name);
         setPrompt(editingJob.prompt);
@@ -415,7 +409,10 @@ function CronjobDialog({
           setSelectedWorkspaceId("");
         } else {
           setSelectedWorkspaceId(editingJob.workspaceId ?? "");
-          setSelectedProject(editingProjectName);
+          const proj = loadedProjects.find((p) =>
+            p.worktrees.some((w) => w.workspaceId === editingJob.workspaceId),
+          );
+          setSelectedProject(proj?.name ?? "");
         }
       } else {
         setName("");
@@ -426,9 +423,8 @@ function CronjobDialog({
         setSelectedWorkspaceId("");
         setEnabled(true);
       }
-      setSubmitError(null);
-    }
-  }, [open, editingJob, editingProjectName]);
+    });
+  }, [open, editingJob]);
 
   const workspaces = useMemo(() => {
     const project = projects.find((p) => p.name === selectedProject);

@@ -83,7 +83,6 @@ type StatusFilter = "all" | "running" | "completed" | "failed";
 
 function TasksPage() {
   const [tasks, setTasks] = useState<TaskRecord[]>([]);
-  const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [projectFilter, setProjectFilter] = useState<string>("all");
@@ -94,12 +93,8 @@ function TasksPage() {
     setLoading(true);
     setError(null);
     try {
-      const [tasksData, projectsData] = await Promise.all([
-        trpc.tasks.list.query({}),
-        trpc.projects.list.query(),
-      ]);
+      const tasksData = await trpc.tasks.list.query({});
       setTasks(tasksData.tasks as TaskRecord[]);
-      setProjects(projectsData.projects as ProjectInfo[]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load tasks");
     } finally {
@@ -109,11 +104,9 @@ function TasksPage() {
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(() => {
-      if (!showNewTask) fetchData();
-    }, 5_000);
+    const interval = setInterval(fetchData, 5_000);
     return () => clearInterval(interval);
-  }, [fetchData, showNewTask]);
+  }, [fetchData]);
 
   const filteredTasks = useMemo(() => {
     return tasks.filter((task) => {
@@ -124,9 +117,9 @@ function TasksPage() {
   }, [tasks, projectFilter, statusFilter]);
 
   const projectNames = useMemo(() => {
-    const names = new Set(projects.map((p) => p.name));
+    const names = new Set(tasks.map((t) => t.project));
     return Array.from(names).sort();
-  }, [projects]);
+  }, [tasks]);
 
   const handleNewTaskSubmit = useCallback(
     async (workspaceId: string, prompt: string) => {
@@ -236,7 +229,6 @@ function TasksPage() {
       <NewTaskDialog
         open={showNewTask}
         onOpenChange={setShowNewTask}
-        projects={projects}
         onSubmit={handleNewTaskSubmit}
       />
     </div>
@@ -375,19 +367,30 @@ function TaskCard({ task, onAction }: { task: TaskRecord; onAction: () => void }
 function NewTaskDialog({
   open,
   onOpenChange,
-  projects,
   onSubmit,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  projects: ProjectInfo[];
   onSubmit: (workspaceId: string, prompt: string) => Promise<void>;
 }) {
+  const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [selectedProject, setSelectedProject] = useState<string>("");
   const [selectedBranch, setSelectedBranch] = useState<string>("");
   const [prompt, setPrompt] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (open) {
+      setSelectedProject("");
+      setSelectedBranch("");
+      setPrompt("");
+      setSubmitError(null);
+      trpc.projects.list.query().then((data) => {
+        setProjects(data.projects as ProjectInfo[]);
+      });
+    }
+  }, [open]);
 
   const branches = useMemo(() => {
     const project = projects.find((p) => p.name === selectedProject);
