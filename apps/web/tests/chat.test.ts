@@ -4,6 +4,9 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { WebSocket } from "ws";
 
 const PROJECT_ROOT = join(import.meta.dirname, "..");
@@ -920,15 +923,54 @@ describe("Task submit + stream — AskUserQuestion", () => {
 // Helpers — task seeding
 // ---------------------------------------------------------------------------
 
+const MIGRATIONS_FOLDER = join(import.meta.dirname, "..", "src", "lib", "db", "migrations");
+
+function openTasksDb(tmpHome: string): InstanceType<typeof Database> {
+  const dbPath = join(tmpHome, ".band", "band.db");
+  mkdirSync(join(tmpHome, ".band"), { recursive: true });
+  const sqlite = new Database(dbPath);
+  sqlite.pragma("journal_mode = WAL");
+  migrate(drizzle(sqlite), { migrationsFolder: MIGRATIONS_FOLDER });
+  return sqlite;
+}
+
 function seedTask(tmpHome: string, task: object & { id: string }): void {
-  const tasksDir = join(tmpHome, ".band", "tasks");
-  mkdirSync(tasksDir, { recursive: true });
-  writeFileSync(join(tasksDir, `${task.id}.json`), JSON.stringify(task));
+  const sqlite = openTasksDb(tmpHome);
+  const t = task as Record<string, unknown>;
+  sqlite
+    .prepare(
+      `INSERT OR REPLACE INTO tasks (id, workspace_id, project, branch, prompt, status, session_id, started_at, completed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      t.id,
+      t.workspaceId,
+      t.project,
+      t.branch,
+      t.prompt,
+      t.status,
+      t.sessionId ?? null,
+      t.startedAt,
+      t.completedAt ?? null,
+    );
+  sqlite.close();
 }
 
 function readTask(tmpHome: string, taskId: string): Record<string, unknown> {
-  const filePath = join(tmpHome, ".band", "tasks", `${taskId}.json`);
-  return JSON.parse(readFileSync(filePath, "utf-8"));
+  const sqlite = openTasksDb(tmpHome);
+  const row = sqlite.prepare("SELECT * FROM tasks WHERE id = ?").get(taskId) as Record<string, unknown>;
+  sqlite.close();
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    project: row.project,
+    branch: row.branch,
+    prompt: row.prompt,
+    status: row.status,
+    sessionId: row.session_id,
+    startedAt: row.started_at,
+    completedAt: row.completed_at,
+  };
 }
 
 // ---------------------------------------------------------------------------

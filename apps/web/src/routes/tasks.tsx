@@ -192,22 +192,18 @@ function TasksPage() {
           </SelectContent>
         </Select>
 
-        <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
-          {(["all", "running", "completed", "failed"] as const).map((status) => (
-            <button
-              key={status}
-              type="button"
-              onClick={() => setStatusFilter(status)}
-              className={`rounded px-2.5 py-1 text-xs font-medium capitalize transition-colors ${
-                statusFilter === status
-                  ? "bg-accent text-accent-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {status}
-            </button>
-          ))}
-        </div>
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger className="h-8 w-40 text-xs">
+            <SelectValue placeholder="All Statuses" />
+          </SelectTrigger>
+          <SelectContent>
+            {(["all", "running", "completed", "failed"] as const).map((status) => (
+              <SelectItem key={status} value={status} className="capitalize">
+                {status === "all" ? "All Statuses" : status}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
 
         <button
           type="button"

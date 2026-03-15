@@ -1,80 +1,69 @@
-import {
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  renameSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
-import { join } from "node:path";
-import { createLogger } from "@band/logger";
+import { eq } from "drizzle-orm";
+import { getDb } from "./db/connection";
+import { cronjobs } from "./db/schema";
 import type { CronjobDefinition, CronjobFile } from "./cronjob-types";
-import { bandHome } from "./state";
-
-const log = createLogger("cronjob-store");
-
-export function cronjobsDir(): string {
-  return join(bandHome(), "cronjobs");
-}
-
-export function ensureCronjobsDir(): void {
-  mkdirSync(cronjobsDir(), { recursive: true });
-}
 
 export function generateCronjobId(): string {
   return `cj_${Date.now()}`;
 }
 
-/** Load all jobs from a specific file (project or workspace key) */
+/** Load all jobs for a specific key (project or workspace). */
 export function loadCronjobFile(key: string): CronjobFile {
-  try {
-    const filePath = join(cronjobsDir(), `${key}.json`);
-    const data = readFileSync(filePath, "utf-8");
-    return JSON.parse(data) as CronjobFile;
-  } catch {
-    return { jobs: [] };
-  }
+  const db = getDb();
+  const rows = db.select().from(cronjobs).where(eq(cronjobs.fileKey, key)).all();
+  return { jobs: rows.map(rowToDefinition) };
 }
 
-/** Save jobs for a specific key, using atomic write (temp + rename) */
+/** Save jobs for a specific key — upserts each job and removes stale ones. */
 export function saveCronjobFile(key: string, file: CronjobFile): void {
-  ensureCronjobsDir();
-  const filePath = join(cronjobsDir(), `${key}.json`);
-  const tmpPath = join(cronjobsDir(), `.${key}.json.tmp`);
-  writeFileSync(tmpPath, JSON.stringify(file, null, 2), "utf-8");
-  renameSync(tmpPath, filePath);
+  const db = getDb();
+
+  // Delete all existing jobs for this key, then insert fresh
+  db.delete(cronjobs).where(eq(cronjobs.fileKey, key)).run();
+
+  for (const job of file.jobs) {
+    db.insert(cronjobs)
+      .values({
+        id: job.id,
+        fileKey: key,
+        name: job.name,
+        prompt: job.prompt,
+        cronExpression: job.cronExpression,
+        scope: job.scope,
+        workspaceId: job.workspaceId ?? null,
+        enabled: job.enabled,
+        createdAt: job.createdAt,
+        lastRunAt: job.lastRunAt ?? null,
+        lastRunStatus: job.lastRunStatus ?? null,
+      })
+      .run();
+  }
 }
 
-/** List all cronjob files, returning all jobs across all files with their file keys */
+/** List all cronjobs across all keys. */
 export function listAllCronjobs(): (CronjobDefinition & { fileKey: string })[] {
-  const dir = cronjobsDir();
-  const allJobs: (CronjobDefinition & { fileKey: string })[] = [];
-  try {
-    for (const file of readdirSync(dir)) {
-      if (!file.endsWith(".json")) continue;
-      const key = file.replace(".json", "");
-      try {
-        const data = readFileSync(join(dir, file), "utf-8");
-        const parsed = JSON.parse(data) as CronjobFile;
-        for (const job of parsed.jobs) {
-          allJobs.push({ ...job, fileKey: key });
-        }
-      } catch (err) {
-        log.warn({ file, err }, "skipping invalid cronjob file");
-      }
-    }
-  } catch {
-    // Dir may not exist yet
-  }
-  return allJobs;
+  const db = getDb();
+  const rows = db.select().from(cronjobs).all();
+  return rows.map((row) => ({ ...rowToDefinition(row), fileKey: row.fileKey }));
 }
 
-/** Delete all jobs for a key (used during workspace/project removal) */
+/** Delete all jobs for a key (used during workspace/project removal). */
 export function deleteCronjobFile(key: string): void {
-  try {
-    const filePath = join(cronjobsDir(), `${key}.json`);
-    unlinkSync(filePath);
-  } catch {
-    // File may not exist
-  }
+  const db = getDb();
+  db.delete(cronjobs).where(eq(cronjobs.fileKey, key)).run();
+}
+
+function rowToDefinition(row: typeof cronjobs.$inferSelect): CronjobDefinition {
+  return {
+    id: row.id,
+    name: row.name,
+    prompt: row.prompt,
+    cronExpression: row.cronExpression,
+    scope: row.scope as CronjobDefinition["scope"],
+    workspaceId: row.workspaceId ?? undefined,
+    enabled: row.enabled,
+    createdAt: row.createdAt,
+    lastRunAt: row.lastRunAt ?? undefined,
+    lastRunStatus: row.lastRunStatus as CronjobDefinition["lastRunStatus"],
+  };
 }

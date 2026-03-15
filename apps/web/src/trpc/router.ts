@@ -16,7 +16,7 @@ import { Cron } from "croner";
 import { z } from "zod";
 import { getOrCreateAgent } from "../lib/agent-pool";
 import { checkCli, installCli } from "../lib/cli";
-import { stopJobsForKey } from "../lib/cronjob-scheduler";
+import { reloadSchedules, stopJobsForKey } from "../lib/cronjob-scheduler";
 import {
   deleteCronjobFile,
   generateCronjobId,
@@ -1242,6 +1242,7 @@ const cronjobsRouter = t.router({
       };
       file.jobs.push(job);
       saveCronjobFile(input.key, file);
+      reloadSchedules();
       return { job };
     }),
 
@@ -1281,6 +1282,7 @@ const cronjobsRouter = t.router({
       if (input.enabled !== undefined) job.enabled = input.enabled;
 
       saveCronjobFile(input.key, file);
+      reloadSchedules();
       return { job };
     }),
 
@@ -1294,6 +1296,7 @@ const cronjobsRouter = t.router({
       }
       file.jobs.splice(index, 1);
       saveCronjobFile(input.key, file);
+      reloadSchedules();
       return { ok: true };
     }),
 

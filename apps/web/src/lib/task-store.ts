@@ -1,7 +1,7 @@
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { and, desc, eq } from "drizzle-orm";
 import { createLogger } from "@band/logger";
-import { tasksDir } from "./state";
+import { getDb } from "./db/connection";
+import { tasks } from "./db/schema";
 
 const log = createLogger("task-store");
 
@@ -29,50 +29,63 @@ export function generateTaskId(): string {
   return `tsk_${Date.now()}`;
 }
 
-export function ensureTasksDir(): void {
-  mkdirSync(tasksDir(), { recursive: true });
-}
-
 export function saveTask(task: TaskRecord): void {
-  ensureTasksDir();
-  const filePath = join(tasksDir(), `${task.id}.json`);
-  writeFileSync(filePath, JSON.stringify(task, null, 2), "utf-8");
+  const db = getDb();
+  db.insert(tasks)
+    .values({
+      id: task.id,
+      workspaceId: task.workspaceId,
+      project: task.project,
+      branch: task.branch,
+      prompt: task.prompt,
+      status: task.status,
+      sessionId: task.sessionId ?? null,
+      startedAt: task.startedAt,
+      completedAt: task.completedAt ?? null,
+    })
+    .onConflictDoUpdate({
+      target: tasks.id,
+      set: {
+        workspaceId: task.workspaceId,
+        project: task.project,
+        branch: task.branch,
+        prompt: task.prompt,
+        status: task.status,
+        sessionId: task.sessionId ?? null,
+        startedAt: task.startedAt,
+        completedAt: task.completedAt ?? null,
+      },
+    })
+    .run();
 }
 
 export function loadTask(id: string): TaskRecord | null {
-  try {
-    const filePath = join(tasksDir(), `${id}.json`);
-    const data = readFileSync(filePath, "utf-8");
-    return JSON.parse(data) as TaskRecord;
-  } catch {
-    return null;
-  }
+  const db = getDb();
+  const row = db.select().from(tasks).where(eq(tasks.id, id)).get();
+  if (!row) return null;
+  return rowToRecord(row);
 }
 
 export function listTasks(filters?: TaskFilters): TaskRecord[] {
-  const dir = tasksDir();
-  const tasks: TaskRecord[] = [];
+  const db = getDb();
+  const conditions = [];
 
-  try {
-    for (const file of readdirSync(dir)) {
-      if (!file.endsWith(".json")) continue;
-      try {
-        const data = readFileSync(join(dir, file), "utf-8");
-        const task = JSON.parse(data) as TaskRecord;
-        if (matchesFilters(task, filters)) {
-          tasks.push(task);
-        }
-      } catch (err) {
-        log.warn({ file, err }, "skipping invalid task file");
-      }
-    }
-  } catch {
-    // Tasks dir may not exist yet
+  if (filters?.project) {
+    conditions.push(eq(tasks.project, filters.project));
+  }
+  if (filters?.workspaceId) {
+    conditions.push(eq(tasks.workspaceId, filters.workspaceId));
+  }
+  if (filters?.status) {
+    conditions.push(eq(tasks.status, filters.status));
   }
 
-  // Newest first
-  tasks.sort((a, b) => b.startedAt - a.startedAt);
-  return tasks;
+  const query =
+    conditions.length > 0
+      ? db.select().from(tasks).where(and(...conditions)).orderBy(desc(tasks.startedAt))
+      : db.select().from(tasks).orderBy(desc(tasks.startedAt));
+
+  return query.all().map(rowToRecord);
 }
 
 /**
@@ -80,17 +93,19 @@ export function listTasks(filters?: TaskFilters): TaskRecord[] {
  * Called on server start before listening — no agent can be running if the server just started.
  */
 export function cleanupStaleTasks(): number {
-  const staleTasks = listTasks({ status: "running" });
-  for (const task of staleTasks) {
-    task.status = "failed";
-    task.completedAt = Date.now();
-    saveTask(task);
-    log.info({ taskId: task.id, workspaceId: task.workspaceId }, "marked stale task as failed");
+  const db = getDb();
+  const now = Date.now();
+  const result = db
+    .update(tasks)
+    .set({ status: "failed", completedAt: now })
+    .where(eq(tasks.status, "running"))
+    .run();
+
+  const count = result.changes;
+  if (count > 0) {
+    log.info({ count }, "cleaned up stale tasks on startup");
   }
-  if (staleTasks.length > 0) {
-    log.info({ count: staleTasks.length }, "cleaned up stale tasks on startup");
-  }
-  return staleTasks.length;
+  return count;
 }
 
 /**
@@ -100,16 +115,29 @@ export function cleanupStaleTasks(): number {
 export function markTaskFailed(id: string): TaskRecord | null {
   const task = loadTask(id);
   if (!task || task.status !== "running") return null;
+
+  const now = Date.now();
+  const db = getDb();
+  db.update(tasks)
+    .set({ status: "failed", completedAt: now })
+    .where(eq(tasks.id, id))
+    .run();
+
   task.status = "failed";
-  task.completedAt = Date.now();
-  saveTask(task);
+  task.completedAt = now;
   return task;
 }
 
-function matchesFilters(task: TaskRecord, filters?: TaskFilters): boolean {
-  if (!filters) return true;
-  if (filters.project && task.project !== filters.project) return false;
-  if (filters.workspaceId && task.workspaceId !== filters.workspaceId) return false;
-  if (filters.status && task.status !== filters.status) return false;
-  return true;
+function rowToRecord(row: typeof tasks.$inferSelect): TaskRecord {
+  return {
+    id: row.id,
+    workspaceId: row.workspaceId,
+    project: row.project,
+    branch: row.branch,
+    prompt: row.prompt,
+    status: row.status as TaskStatus,
+    sessionId: row.sessionId ?? undefined,
+    startedAt: row.startedAt,
+    completedAt: row.completedAt ?? undefined,
+  };
 }

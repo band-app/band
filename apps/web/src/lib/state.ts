@@ -63,14 +63,6 @@ export function statusDir(): string {
   return join(bandHome(), "status");
 }
 
-export function tasksDir(): string {
-  return join(bandHome(), "tasks");
-}
-
-export function cronjobsDir(): string {
-  return join(bandHome(), "cronjobs");
-}
-
 export function stateFile(): string {
   return join(bandHome(), "state.json");
 }
@@ -82,8 +74,6 @@ export function settingsFile(): string {
 export function ensureDirs(): void {
   mkdirSync(bandHome(), { recursive: true });
   mkdirSync(statusDir(), { recursive: true });
-  mkdirSync(tasksDir(), { recursive: true });
-  mkdirSync(cronjobsDir(), { recursive: true });
 }
 
 export function loadState(): AppState {

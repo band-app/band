@@ -10,6 +10,8 @@ import { stopBranchStatusPoller } from "./src/lib/branch-status-poller.ts";
 import { startCronjobScheduler, stopCronjobScheduler } from "./src/lib/cronjob-scheduler.ts";
 import { checkPrereqs } from "./src/lib/process-utils.ts";
 import { bandHome, ensureDirs, getOrCreateToken, loadSettings } from "./src/lib/state.ts";
+import { closeDb } from "./src/lib/db/connection.ts";
+import { runMigrations } from "./src/lib/db/migrate.ts";
 import { cleanupStaleTasks } from "./src/lib/task-store.ts";
 import { killAllTerminals } from "./src/lib/terminal-manager.ts";
 import { handleTerminalConnection } from "./src/lib/terminal-ws.ts";
@@ -59,6 +61,9 @@ const assets = sirv(clientDir, {
 });
 
 async function main() {
+  // Run database migrations before anything else
+  runMigrations();
+
   // Mark any persisted "running" tasks as "failed" — no agent can be running
   // if the server just started.
   cleanupStaleTasks();
@@ -264,6 +269,7 @@ async function main() {
     wss.close();
     terminalWss.close();
     httpServer.close();
+    closeDb();
     process.exit(0);
   };
 

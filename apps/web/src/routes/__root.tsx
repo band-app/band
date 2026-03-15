@@ -14,6 +14,7 @@ import {
   useRouter,
 } from "@tanstack/react-router";
 import { useEffect } from "react";
+import { ToolbarButtons } from "../components/ToolbarButtons";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import "../styles/globals.css";
 
@@ -76,7 +77,7 @@ function AppShell() {
   return (
     <div className="flex h-dvh w-full overflow-hidden bg-background text-foreground">
       <div className="w-80 shrink-0 border-r border-white/20 overflow-hidden">
-        <DashboardShell />
+        <DashboardShell toolbarExtra={<ToolbarButtons />} />
       </div>
       <div className="flex-1 min-w-0 overflow-hidden">
         <Outlet />

@@ -1,11 +1,11 @@
-import { mkdirSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { eq } from "drizzle-orm";
 import { toWorkspaceId } from "@band/dashboard-core";
 import { createLogger } from "@band/logger";
-import { watch } from "chokidar";
 import { Cron } from "croner";
-import { cronjobsDir, loadCronjobFile, saveCronjobFile } from "./cronjob-store";
-import type { CronjobDefinition, CronjobFile } from "./cronjob-types";
+import { getDb } from "./db/connection";
+import { cronjobs } from "./db/schema";
+import { listAllCronjobs, loadCronjobFile, saveCronjobFile } from "./cronjob-store";
+import type { CronjobDefinition } from "./cronjob-types";
 import { loadState } from "./state";
 import { submitTask, TaskConflictError } from "./task-runner";
 
@@ -21,8 +21,6 @@ const g = globalThis as unknown as Record<symbol, unknown>;
 interface SchedulerState {
   /** Map of cronjob id → active Cron instance */
   jobs: Map<string, Cron>;
-  /** Chokidar watcher on ~/.band/cronjobs/ */
-  watcher: ReturnType<typeof watch> | null;
   /** Whether the scheduler has been started */
   started: boolean;
 }
@@ -30,7 +28,6 @@ interface SchedulerState {
 if (!g[SCHEDULER_KEY]) {
   g[SCHEDULER_KEY] = {
     jobs: new Map<string, Cron>(),
-    watcher: null,
     started: false,
   } satisfies SchedulerState;
 }
@@ -82,7 +79,7 @@ async function executeCronjob(job: CronjobDefinition, fileKey: string): Promise<
     const project = appState.projects.find((p) => p.name === fileKey);
     if (!project) {
       log.warn({ jobId: job.id, fileKey }, "project not found for cronjob, skipping");
-      updateLastRun(job.id, fileKey, "failed");
+      updateLastRun(job.id, "failed");
       return;
     }
     workspaceId = toWorkspaceId(project.name, project.defaultBranch);
@@ -92,33 +89,27 @@ async function executeCronjob(job: CronjobDefinition, fileKey: string): Promise<
 
   try {
     submitTask(workspaceId, job.prompt);
-    updateLastRun(job.id, fileKey, "completed");
+    updateLastRun(job.id, "completed");
   } catch (err) {
     if (err instanceof TaskConflictError) {
       log.info({ jobId: job.id, workspaceId }, "task already running, skipping cronjob execution");
-      updateLastRun(job.id, fileKey, "skipped");
+      updateLastRun(job.id, "skipped");
       return;
     }
     log.error({ jobId: job.id, err }, "cronjob execution failed");
-    updateLastRun(job.id, fileKey, "failed");
+    updateLastRun(job.id, "failed");
   }
 }
 
-function updateLastRun(
-  jobId: string,
-  fileKey: string,
-  status: "completed" | "failed" | "skipped",
-): void {
+function updateLastRun(jobId: string, status: "completed" | "failed" | "skipped"): void {
   try {
-    const file = loadCronjobFile(fileKey);
-    const job = file.jobs.find((j) => j.id === jobId);
-    if (job) {
-      job.lastRunAt = new Date().toISOString();
-      job.lastRunStatus = status;
-      saveCronjobFile(fileKey, file);
-    }
+    const db = getDb();
+    db.update(cronjobs)
+      .set({ lastRunAt: new Date().toISOString(), lastRunStatus: status })
+      .where(eq(cronjobs.id, jobId))
+      .run();
   } catch (err) {
-    log.warn({ jobId, fileKey, err }, "failed to update lastRun on cronjob");
+    log.warn({ jobId, err }, "failed to update lastRun on cronjob");
   }
 }
 
@@ -129,23 +120,8 @@ function loadAndScheduleAll(): void {
   }
   state.jobs.clear();
 
-  const dir = cronjobsDir();
-  try {
-    for (const file of readdirSync(dir)) {
-      if (!file.endsWith(".json")) continue;
-      const key = file.replace(".json", "");
-      try {
-        const data = readFileSync(join(dir, file), "utf-8");
-        const cronjobFile = JSON.parse(data) as CronjobFile;
-        for (const job of cronjobFile.jobs) {
-          scheduleJob(job, key);
-        }
-      } catch (err) {
-        log.warn({ file, err }, "skipping invalid cronjob file");
-      }
-    }
-  } catch {
-    // Dir may not exist yet
+  for (const job of listAllCronjobs()) {
+    scheduleJob(job, job.fileKey);
   }
 
   log.info({ count: state.jobs.size }, "loaded cronjob schedules");
@@ -160,20 +136,7 @@ export function startCronjobScheduler(): void {
   if (state.started) return;
   state.started = true;
 
-  const dir = cronjobsDir();
-  mkdirSync(dir, { recursive: true });
-
   loadAndScheduleAll();
-
-  // Watch for file changes in cronjobs dir
-  state.watcher = watch(dir, {
-    ignoreInitial: true,
-    awaitWriteFinish: { stabilityThreshold: 100, pollInterval: 50 },
-  });
-
-  state.watcher.on("add", () => loadAndScheduleAll());
-  state.watcher.on("change", () => loadAndScheduleAll());
-  state.watcher.on("unlink", () => loadAndScheduleAll());
 
   log.info("cronjob scheduler started");
 }
@@ -185,13 +148,14 @@ export function stopCronjobScheduler(): void {
   }
   state.jobs.clear();
 
-  if (state.watcher) {
-    state.watcher.close();
-    state.watcher = null;
-  }
-
   state.started = false;
   log.info("cronjob scheduler stopped");
+}
+
+/** Reload all schedules from the database. Call after cronjob mutations. */
+export function reloadSchedules(): void {
+  if (!state.started) return;
+  loadAndScheduleAll();
 }
 
 /** Stop all scheduled jobs for a specific file key (workspace or project removal). */

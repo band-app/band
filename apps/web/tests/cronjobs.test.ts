@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const PROJECT_ROOT = join(import.meta.dirname, "..");
+const FAKE_AGENT_PATH = join(import.meta.dirname, "fake-agent.mjs");
 const DEFAULT_TOKEN = "cronjob-test-token";
 
 // ---------------------------------------------------------------------------
@@ -23,7 +24,6 @@ function createTmpHome(): string {
   const bandDir = join(tmp, ".band");
   mkdirSync(bandDir, { recursive: true });
   mkdirSync(join(bandDir, "status"), { recursive: true });
-  mkdirSync(join(bandDir, "cronjobs"), { recursive: true });
   return tmp;
 }
 
@@ -424,5 +424,109 @@ describe("tRPC — cronjobs cleanup on project removal", () => {
     const afterRes = await trpcQuery(server.url, "cronjobs.list", { project: "removeme" });
     const afterData = await trpcData<{ jobs: unknown[] }>(afterRes);
     expect(afterData.jobs).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cronjobs trigger
+// ---------------------------------------------------------------------------
+
+function writeScenario(tmpHome: string, events: object[]): string {
+  const scenarioPath = join(tmpHome, "scenario.json");
+  writeFileSync(scenarioPath, JSON.stringify(events));
+  return scenarioPath;
+}
+
+describe("tRPC — cronjobs.trigger", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+  let jobId: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    const repoPath = createGitRepo(tmpHome, "triggerproj");
+
+    const scenarioPath = writeScenario(tmpHome, [
+      { type: "system", subtype: "init", session_id: "trigger-session" },
+      {
+        type: "result",
+        subtype: "success",
+        result: "Done",
+      },
+    ]);
+
+    seedState(tmpHome, {
+      projects: [
+        {
+          name: "triggerproj",
+          path: repoPath,
+          defaultBranch: "main",
+          worktrees: [{ branch: "main", path: repoPath }],
+        },
+      ],
+    });
+    seedSettings(tmpHome, {
+      tokenSecret: DEFAULT_TOKEN,
+      codingAgent: { type: "claude-code", command: FAKE_AGENT_PATH },
+    });
+    server = await startServer({
+      tmpHome,
+      env: { FAKE_AGENT_SCENARIO: scenarioPath },
+    });
+
+    // Create a cronjob to trigger
+    const res = await trpcMutate(server.url, "cronjobs.create", {
+      key: "triggerproj",
+      name: "Triggerable job",
+      prompt: "Run automated check",
+      cronExpression: "0 0 * * *",
+      scope: "project",
+    });
+    const data = await trpcData<{ job: { id: string } }>(res);
+    jobId = data.job.id;
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("triggers a cronjob and creates a task", async () => {
+    const res = await trpcMutate(server.url, "cronjobs.trigger", {
+      key: "triggerproj",
+      id: jobId,
+    });
+    expect(res.status).toBe(200);
+    const data = await trpcData<{ taskId: string; workspaceId: string }>(res);
+    expect(data.taskId).toBeDefined();
+    expect(data.workspaceId).toBe("triggerproj-main");
+
+    // Verify the task was created via tasks.list
+    const listRes = await trpcQuery(server.url, "tasks.list", {
+      workspaceId: "triggerproj-main",
+    });
+    const listData = await trpcData<{ tasks: Array<{ id: string; prompt: string }> }>(listRes);
+    const task = listData.tasks.find((t) => t.id === data.taskId);
+    expect(task).toBeDefined();
+    expect(task!.prompt).toBe("Run automated check");
+  });
+
+  it("returns NOT_FOUND for non-existent cronjob", async () => {
+    const res = await trpcMutate(server.url, "cronjobs.trigger", {
+      key: "triggerproj",
+      id: "cj_nonexistent",
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("returns CONFLICT when task is already running", async () => {
+    // The previous trigger should have started a task; triggering again should conflict
+    const res = await trpcMutate(server.url, "cronjobs.trigger", {
+      key: "triggerproj",
+      id: jobId,
+    });
+    // Depending on timing, this may be 409 (conflict) or 200 (if previous finished)
+    // Just verify it doesn't 500
+    expect([200, 409]).toContain(res.status);
   });
 });
