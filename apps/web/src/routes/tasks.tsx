@@ -29,6 +29,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { isTauri } from "../lib/is-tauri";
 import { trpc } from "../lib/trpc-client";
 
 export const Route = createFileRoute("/tasks")({
@@ -136,7 +137,7 @@ function TasksPage() {
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden pb-[env(safe-area-inset-bottom)]">
-      {"__TAURI_INTERNALS__" in window && (
+      {isTauri && (
         <div data-tauri-drag-region className="h-[28px] shrink-0 flex items-center justify-center">
           <span className="text-xs font-medium text-muted-foreground select-none pointer-events-none">
             Tasks

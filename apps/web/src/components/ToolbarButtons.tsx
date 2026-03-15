@@ -11,19 +11,27 @@ import {
 import { useNavigate } from "@tanstack/react-router";
 import { ListTodo, Timer, Zap } from "lucide-react";
 import { useCallback } from "react";
+import { isTauri } from "../lib/is-tauri";
 import { TunnelToolbarButton } from "./TunnelToolbarButton";
-
-const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 export function ToolbarButtons() {
   const navigate = useNavigate();
 
   const handleTasksClick = useCallback(async () => {
-    if (inTauri) {
+    if (isTauri) {
       const { invoke } = await import("@tauri-apps/api/core");
       await invoke("open_tasks_window");
     } else {
       navigate({ to: "/tasks" });
+    }
+  }, [navigate]);
+
+  const handleCronjobsClick = useCallback(async () => {
+    if (isTauri) {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("open_cronjobs_window");
+    } else {
+      navigate({ to: "/cronjobs" });
     }
   }, [navigate]);
 
@@ -45,7 +53,7 @@ export function ToolbarButtons() {
             <ListTodo className="size-4" />
             Tasks
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => navigate({ to: "/cronjobs" })}>
+          <DropdownMenuItem onClick={handleCronjobsClick}>
             <Timer className="size-4" />
             Cronjobs
           </DropdownMenuItem>

@@ -3,8 +3,8 @@ import { useEffect, useState } from "react";
 import { ChatView } from "../components/ChatView";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useSessionListContext } from "../hooks/useSessionListContext";
+import { isTauri } from "../lib/is-tauri";
 import { trpc } from "../lib/trpc-client";
-import { inTauri } from "./__root";
 
 export const Route = createFileRoute("/workspace/$workspaceId/")({
   component: WorkspaceIndex,
@@ -13,7 +13,7 @@ export const Route = createFileRoute("/workspace/$workspaceId/")({
 function WorkspaceIndex() {
   const { workspaceId } = Route.useParams();
   const decoded = decodeURIComponent(workspaceId);
-  const isDesktop = useIsDesktop() && !inTauri;
+  const isDesktop = useIsDesktop() && !isTauri;
 
   // Desktop: chat is always visible in the right panel — redirect to changes tab
   if (isDesktop) {

@@ -21,6 +21,7 @@ import {
 import { createFileRoute } from "@tanstack/react-router";
 import { Clock, Loader2, Pencil, Play, Plus, RefreshCw, Timer, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { isTauri } from "../lib/is-tauri";
 import { trpc } from "../lib/trpc-client";
 
 export const Route = createFileRoute("/cronjobs")({
@@ -125,6 +126,13 @@ function CronjobsPage() {
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden pb-[env(safe-area-inset-bottom)]">
+      {isTauri && (
+        <div data-tauri-drag-region className="h-[28px] shrink-0 flex items-center justify-center">
+          <span className="text-xs font-medium text-muted-foreground select-none pointer-events-none">
+            Cronjobs
+          </span>
+        </div>
+      )}
       <header className="flex shrink-0 items-center gap-3 border-b border-border/50 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
         <div className="min-w-0 flex-1">
           <h1 className="text-sm font-semibold">Cronjobs</h1>

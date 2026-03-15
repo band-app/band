@@ -62,6 +62,59 @@ pub async fn open_tasks_window(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub async fn open_cronjobs_window(app: AppHandle) -> Result<(), String> {
+    if let Some(existing) = app.get_webview_window("cronjobs") {
+        let _ = existing.set_focus();
+        return Ok(());
+    }
+
+    let url = if cfg!(debug_assertions) {
+        format!("http://localhost:{DEV_PORT}/cronjobs")
+    } else {
+        let port = webserver::get_configured_port();
+        let settings = load_settings()?;
+        let token = settings.token_secret.ok_or_else(|| {
+            "tokenSecret not found in settings.json — start the web server first".to_string()
+        })?;
+        format!("http://localhost:{port}/cronjobs?token={token}")
+    };
+
+    let builder = WebviewWindowBuilder::new(
+        &app,
+        "cronjobs",
+        WebviewUrl::External(url.parse().map_err(|e| format!("Invalid URL: {e}"))?),
+    )
+    .title("Cronjobs - Band")
+    .inner_size(900.0, 700.0)
+    .center();
+
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .hidden_title(true);
+
+    #[allow(unused_variables)]
+    let window = builder
+        .build()
+        .map_err(|e| format!("Failed to create cronjobs window: {e}"))?;
+
+    #[cfg(target_os = "macos")]
+    #[allow(deprecated)]
+    {
+        use cocoa::appkit::NSColor;
+        use cocoa::appkit::NSWindow;
+        use cocoa::base::{id, nil};
+        let ns_window = window.ns_window().unwrap() as id;
+        unsafe {
+            let color = NSColor::colorWithSRGBRed_green_blue_alpha_(nil, 0.0, 0.0, 0.0, 1.0);
+            ns_window.setBackgroundColor_(color);
+        }
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
 pub fn get_app_title() -> String {
     match crate::git::get_current_branch() {
         Some(branch) => format!("Band - {branch}"),

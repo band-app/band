@@ -16,14 +16,13 @@ import {
 import { useEffect } from "react";
 import { ToolbarButtons } from "../components/ToolbarButtons";
 import { useIsDesktop } from "../hooks/useIsDesktop";
+import { isTauri } from "../lib/is-tauri";
 import "../styles/globals.css";
 
-const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+const adapter = isTauri ? new HybridDashboardAdapter() : new WebDashboardAdapter();
+const capabilities = isTauri ? new NativeShellCapabilities() : new WebCapabilities();
 
-const adapter = inTauri ? new HybridDashboardAdapter() : new WebDashboardAdapter();
-const capabilities = inTauri ? new NativeShellCapabilities() : new WebCapabilities();
-
-export { adapter, capabilities, inTauri };
+export { adapter, capabilities };
 
 export const Route = createRootRoute({
   head: () => ({
@@ -57,7 +56,7 @@ function NotFound() {
 }
 
 function AppShell() {
-  const isDesktop = useIsDesktop() && !inTauri;
+  const isDesktop = useIsDesktop() && !isTauri;
   const router = useRouter();
 
   // Wire up client-side navigation for WebCapabilities

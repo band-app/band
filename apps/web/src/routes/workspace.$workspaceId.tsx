@@ -20,8 +20,8 @@ import {
 import { WorkspaceChatPanel } from "../components/WorkspaceChatPanel";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { SessionListContext } from "../hooks/useSessionListContext";
+import { isTauri } from "../lib/is-tauri";
 import { trpc } from "../lib/trpc-client";
-import { inTauri } from "./__root";
 
 export const Route = createFileRoute("/workspace/$workspaceId")({
   component: WorkspaceLayout,
@@ -107,7 +107,7 @@ function useDiffFileCount(workspaceId: string): number {
 function WorkspaceLayout() {
   const { workspaceId } = Route.useParams();
   const decoded = decodeURIComponent(workspaceId);
-  const isDesktop = useIsDesktop() && !inTauri;
+  const isDesktop = useIsDesktop() && !isTauri;
   const [diffStats, setDiffStats] = useState<DiffStats | null>(null);
 
   // Sync zustand active workspace from URL
@@ -294,7 +294,7 @@ function MobileWorkspaceLayout({
   const [showSessionList, setShowSessionList] = useState(false);
 
   useEffect(() => {
-    if (!inTauri) {
+    if (!isTauri) {
       isTasksWindow.current = false;
       return;
     }

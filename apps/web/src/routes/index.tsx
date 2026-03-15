@@ -2,14 +2,14 @@ import { createFileRoute } from "@tanstack/react-router";
 import { MessageSquare } from "lucide-react";
 import { DashboardView } from "../components/DashboardView";
 import { useIsDesktop } from "../hooks/useIsDesktop";
-import { inTauri } from "./__root";
+import { isTauri } from "../lib/is-tauri";
 
 export const Route = createFileRoute("/")({
   component: DashboardPage,
 });
 
 function DashboardPage() {
-  const isDesktop = useIsDesktop() && !inTauri;
+  const isDesktop = useIsDesktop() && !isTauri;
 
   // Desktop: sidebar is rendered by root layout, just show empty state
   if (isDesktop) {
