@@ -39,6 +39,7 @@ pub async fn open_tasks_window(app: AppHandle) -> Result<(), String> {
         .title_bar_style(tauri::TitleBarStyle::Overlay)
         .hidden_title(true);
 
+    #[allow(unused_variables)]
     let window = builder
         .build()
         .map_err(|e| format!("Failed to create tasks window: {e}"))?;
