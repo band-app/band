@@ -3,10 +3,10 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const PROJECT_ROOT = join(import.meta.dirname, "..");
 const DEFAULT_TOKEN = "tasks-crud-test-token";
@@ -127,14 +127,6 @@ async function trpcQuery(serverUrl: string, procedure: string, input?: unknown) 
       ? `${serverUrl}/trpc/${procedure}?input=${encodeURIComponent(JSON.stringify(input))}`
       : `${serverUrl}/trpc/${procedure}`;
   return fetch(url, { headers: defaultHeaders });
-}
-
-async function trpcMutate(serverUrl: string, procedure: string, input?: unknown) {
-  return fetch(`${serverUrl}/trpc/${procedure}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...defaultHeaders },
-    body: input !== undefined ? JSON.stringify(input) : "{}",
-  });
 }
 
 async function trpcData<T>(res: Response): Promise<T> {

@@ -1,9 +1,9 @@
 import { rmSync } from "node:fs";
 import { join } from "node:path";
+import { expect, test } from "@playwright/test";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
-import { expect, test } from "@playwright/test";
 import {
   createTmpHome,
   type ServerHandle,
@@ -36,13 +36,22 @@ function seedTask(
   sqlite.pragma("journal_mode = WAL");
   const db = drizzle(sqlite);
   migrate(db, { migrationsFolder: join(import.meta.dirname, "../src/lib/db/migrations") });
-  sqlite.prepare(
-    `INSERT OR REPLACE INTO tasks (id, workspace_id, project, branch, prompt, status, session_id, started_at, completed_at)
+  sqlite
+    .prepare(
+      `INSERT OR REPLACE INTO tasks (id, workspace_id, project, branch, prompt, status, session_id, started_at, completed_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    task.id, task.workspaceId, task.project, task.branch, task.prompt,
-    task.status, task.sessionId ?? null, task.startedAt, task.completedAt ?? null,
-  );
+    )
+    .run(
+      task.id,
+      task.workspaceId,
+      task.project,
+      task.branch,
+      task.prompt,
+      task.status,
+      task.sessionId ?? null,
+      task.startedAt,
+      task.completedAt ?? null,
+    );
   sqlite.close();
 }
 

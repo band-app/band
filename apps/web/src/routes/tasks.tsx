@@ -88,7 +88,6 @@ function TasksPage() {
   const [projectFilter, setProjectFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [showNewTask, setShowNewTask] = useState(false);
-  const navigate = Route.useNavigate();
 
   const fetchData = useCallback(async () => {
     setLoading(true);

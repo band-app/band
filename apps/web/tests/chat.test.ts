@@ -1,12 +1,12 @@
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 
 const PROJECT_ROOT = join(import.meta.dirname, "..");
@@ -958,7 +958,10 @@ function seedTask(tmpHome: string, task: object & { id: string }): void {
 
 function readTask(tmpHome: string, taskId: string): Record<string, unknown> {
   const sqlite = openTasksDb(tmpHome);
-  const row = sqlite.prepare("SELECT * FROM tasks WHERE id = ?").get(taskId) as Record<string, unknown>;
+  const row = sqlite.prepare("SELECT * FROM tasks WHERE id = ?").get(taskId) as Record<
+    string,
+    unknown
+  >;
   sqlite.close();
   return {
     id: row.id,
