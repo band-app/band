@@ -18,7 +18,6 @@ import {
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
   AlertCircle,
-  ArrowLeft,
   CheckCircle2,
   Clock,
   ExternalLink,
@@ -29,12 +28,8 @@ import {
   RotateCcw,
   XCircle,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { trpc } from "../lib/trpc-client";
-
-function isTauri(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-}
 
 export const Route = createFileRoute("/tasks")({
   component: TasksPage,
@@ -93,27 +88,7 @@ function TasksPage() {
   const [projectFilter, setProjectFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [showNewTask, setShowNewTask] = useState(false);
-  const isTasksWindow = useRef<boolean | null>(null);
   const navigate = Route.useNavigate();
-
-  useEffect(() => {
-    if (!isTauri()) {
-      isTasksWindow.current = false;
-      return;
-    }
-    import("@tauri-apps/api/webviewWindow").then(({ getCurrentWebviewWindow }) => {
-      isTasksWindow.current = getCurrentWebviewWindow().label === "tasks";
-    });
-  }, []);
-
-  const handleBack = useCallback(async () => {
-    if (isTasksWindow.current) {
-      const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-      getCurrentWebviewWindow().close();
-    } else {
-      navigate({ to: "/" });
-    }
-  }, [navigate]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -134,6 +109,8 @@ function TasksPage() {
 
   useEffect(() => {
     fetchData();
+    const interval = setInterval(fetchData, 5_000);
+    return () => clearInterval(interval);
   }, [fetchData]);
 
   const filteredTasks = useMemo(() => {
@@ -161,13 +138,6 @@ function TasksPage() {
   return (
     <div className="flex h-dvh flex-col overflow-hidden pb-[env(safe-area-inset-bottom)]">
       <header className="flex shrink-0 items-center gap-3 border-b border-border/50 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
-        <button
-          type="button"
-          onClick={handleBack}
-          className="inline-flex size-8 items-center justify-center rounded-md hover:bg-accent"
-        >
-          <ArrowLeft className="size-4" />
-        </button>
         <div className="min-w-0 flex-1">
           <h1 className="text-sm font-semibold">Tasks</h1>
         </div>
