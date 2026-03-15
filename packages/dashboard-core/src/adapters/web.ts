@@ -215,4 +215,8 @@ export class WebCapabilities implements PlatformCapabilities {
   getWorkspaceHref(workspaceId: string): string {
     return `/workspace/${encodeURIComponent(workspaceId)}/changes`;
   }
+
+  async openUrl(url: string): Promise<void> {
+    window.open(url, "_blank");
+  }
 }
