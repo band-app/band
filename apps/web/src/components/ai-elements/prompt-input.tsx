@@ -298,6 +298,10 @@ export const PromptInputAttach = ({ className, ...props }: PromptInputAttachProp
 export type PromptInputTextareaProps = HTMLAttributes<HTMLTextAreaElement> & {
   placeholder?: string;
   disabled?: boolean;
+  /** Called when Escape is pressed (e.g. to stop streaming). */
+  onEscape?: () => void;
+  /** Called when ArrowUp is pressed on an empty input. Return the previous message text to load it, or undefined to do nothing. */
+  onPreviousMessage?: () => string | undefined;
 };
 
 /**
@@ -353,10 +357,13 @@ function shouldShowGhostHint(inputValue: string, commandHint: string | null): bo
 export const PromptInputTextarea = ({
   className,
   placeholder = "Type a message...",
+  onEscape,
+  onPreviousMessage,
   ...props
 }: PromptInputTextareaProps) => {
   const [isComposing, setIsComposing] = useState(false);
-  const { onTextChange, textareaRef, commandHint, inputValue } = useContext(PromptInputContext);
+  const { onTextChange, textareaRef, setTextareaValue, commandHint, inputValue } =
+    useContext(PromptInputContext);
 
   const handleKeyDown: KeyboardEventHandler<HTMLTextAreaElement> = useCallback(
     (e) => {
@@ -365,9 +372,20 @@ export const PromptInputTextarea = ({
         if (e.shiftKey) return;
         e.preventDefault();
         e.currentTarget.form?.requestSubmit();
+      } else if (e.key === "Escape") {
+        onEscape?.();
+      } else if (e.key === "ArrowUp" && onPreviousMessage) {
+        const textarea = e.currentTarget;
+        if (textarea.value === "") {
+          const prevText = onPreviousMessage();
+          if (prevText) {
+            e.preventDefault();
+            setTextareaValue(prevText);
+          }
+        }
       }
     },
-    [isComposing],
+    [isComposing, onEscape, onPreviousMessage, setTextareaValue],
   );
 
   const hasSlashCommand = inputValue.includes("/");

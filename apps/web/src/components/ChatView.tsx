@@ -163,6 +163,12 @@ export function ChatView({
 
   const isStreaming = status === "submitted" || status === "streaming";
 
+  const handleEscape = useCallback(() => {
+    if (isStreaming) {
+      handleStop();
+    }
+  }, [isStreaming, handleStop]);
+
   const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
   const sendingQueuedRef = useRef(false);
 
@@ -307,6 +313,34 @@ export function ChatView({
     return historicalMessages;
   }, [historicalMessages, reconnectedPrompt]);
 
+  const getLastUserMessage = useCallback((): string | undefined => {
+    // Check live messages first (most recent)
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === "user") {
+        const text = messages[i].parts
+          .filter((p): p is { type: "text"; text: string } => p.type === "text")
+          .map((p) => p.text)
+          .join("\n")
+          .trim();
+        if (text) return text;
+      }
+    }
+    // Fall back to reconnected prompt
+    if (reconnectedPrompt) return reconnectedPrompt;
+    // Fall back to historical messages
+    for (let i = filteredHistoricalMessages.length - 1; i >= 0; i--) {
+      if (filteredHistoricalMessages[i].role === "user") {
+        const text = filteredHistoricalMessages[i].content
+          .filter((b) => b.type === "text")
+          .map((b) => b.text ?? "")
+          .join("\n")
+          .trim();
+        if (text) return text;
+      }
+    }
+    return undefined;
+  }, [messages, reconnectedPrompt, filteredHistoricalMessages]);
+
   const hasHistory = filteredHistoricalMessages.length > 0;
   const hasLiveMessages = messages.length > 0;
   // Show the reconnected prompt as a user message when the stream is
@@ -439,7 +473,11 @@ export function ChatView({
       <div className="mx-auto w-full max-w-3xl shrink-0 px-3 lg:px-4 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))]">
         <PromptInput onSubmit={handleSubmit}>
           <SlashCommandSuggestions skills={skills} />
-          <PromptInputTextarea placeholder="Type a message..." />
+          <PromptInputTextarea
+            placeholder="Type a message..."
+            onEscape={handleEscape}
+            onPreviousMessage={getLastUserMessage}
+          />
           <PromptInputActions>
             <PromptInputAttach />
             <PromptInputSubmit

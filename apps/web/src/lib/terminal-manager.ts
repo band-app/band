@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { createLogger } from "@band/logger";
 import pty from "node-pty";
 import { shellPath } from "./process-utils";
@@ -41,15 +42,30 @@ export async function getOrSpawnTerminal(workspaceId: string): Promise<TerminalS
   env.PATH = resolvedPath;
   env.TERM = "xterm-256color";
 
-  log.debug("Spawning shell %s in %s", shell, workspace.worktree.path);
+  const cwd = workspace.worktree.path;
+  if (!existsSync(cwd)) {
+    throw new Error(`Workspace directory does not exist: ${cwd}`);
+  }
+  if (!existsSync(shell)) {
+    throw new Error(`Shell not found: ${shell}`);
+  }
 
-  const ptyProcess = pty.spawn(shell, [], {
-    name: "xterm-256color",
-    cols: 80,
-    rows: 24,
-    cwd: workspace.worktree.path,
-    env,
-  });
+  log.debug("Spawning shell %s in %s (PATH=%s)", shell, cwd, resolvedPath.slice(0, 200));
+
+  let ptyProcess: pty.IPty;
+  try {
+    ptyProcess = pty.spawn(shell, [], {
+      name: "xterm-256color",
+      cols: 80,
+      rows: 24,
+      cwd,
+      env,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log.error("pty.spawn failed: %s (shell=%s, cwd=%s)", msg, shell, cwd);
+    throw err;
+  }
 
   const session: TerminalSession = { pty: ptyProcess, scrollback: "" };
   terminals.set(workspaceId, session);
