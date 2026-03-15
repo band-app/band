@@ -1,11 +1,13 @@
 import {
   type DiffStats,
+  QuickOpenDialog,
+  SearchFilesDialog,
   useDashboardStore,
   type WorkspaceTab,
   WorkspaceTabNav,
 } from "@band/dashboard-core";
 import { createFileRoute, Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
-import { ArrowLeft, Clock, Code, GitCompare } from "lucide-react";
+import { ArrowLeft, Clock, Code, GitCompare, Terminal } from "lucide-react";
 import {
   createContext,
   useCallback,
@@ -38,6 +40,19 @@ const DiffStatsContext = createContext<DiffStatsContextValue>({
 
 export function useDiffStatsContext() {
   return useContext(DiffStatsContext);
+}
+
+// Context for child routes to register a find-in-file callback with the layout
+interface FindInFileContextValue {
+  setFindInFile: (fn: (() => void) | null) => void;
+}
+
+const FindInFileContext = createContext<FindInFileContextValue>({
+  setFindInFile: () => {},
+});
+
+export function useFindInFileContext() {
+  return useContext(FindInFileContext);
 }
 
 // ---------------------------------------------------------------------------
@@ -128,8 +143,9 @@ function DesktopDetailTabNav({
   const prefix = `/workspace/${workspaceId}`;
   const isChanges = pathname.startsWith(`${prefix}/changes`);
   const isCode = pathname.startsWith(`${prefix}/code`);
+  const isTerminal = pathname.startsWith(`${prefix}/terminal`);
 
-  const linkClass = (active: boolean) =>
+  const tabClass = (active: boolean) =>
     `flex h-full flex-1 items-center justify-center gap-2 text-sm font-medium transition-colors ${
       active
         ? "border-b border-foreground text-foreground"
@@ -141,7 +157,7 @@ function DesktopDetailTabNav({
       <Link
         to="/workspace/$workspaceId/changes"
         params={{ workspaceId }}
-        className={linkClass(isChanges)}
+        className={tabClass(isChanges)}
       >
         <GitCompare className="size-4" />
         Changes
@@ -154,10 +170,18 @@ function DesktopDetailTabNav({
       <Link
         to="/workspace/$workspaceId/code"
         params={{ workspaceId }}
-        className={linkClass(isCode)}
+        className={tabClass(isCode)}
       >
         <Code className="size-4" />
         Code
+      </Link>
+      <Link
+        to="/workspace/$workspaceId/terminal"
+        params={{ workspaceId }}
+        className={tabClass(isTerminal)}
+      >
+        <Terminal className="size-4" />
+        Terminal
       </Link>
     </div>
   );
@@ -171,15 +195,63 @@ function DesktopWorkspaceLayout({
   encodedId: string;
 }) {
   const { diffStats } = useDiffStatsContext();
+  const navigate = useNavigate();
+
+  // Dialog state
+  const [quickOpenOpen, setQuickOpenOpen] = useState(false);
+  const [searchFilesOpen, setSearchFilesOpen] = useState(false);
+
+  // Find-in-file: child code routes register a callback here
+  const findInFileRef = useRef<(() => void) | null>(null);
+  const setFindInFile = useCallback((fn: (() => void) | null) => {
+    findInFileRef.current = fn;
+  }, []);
+
+  // Global keyboard shortcuts (capture phase to beat browser defaults)
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (!mod) return;
+
+      const key = e.key.toLowerCase();
+      if (key === "p" && !e.shiftKey) {
+        e.preventDefault();
+        setQuickOpenOpen(true);
+      } else if (key === "f" && e.shiftKey) {
+        e.preventDefault();
+        setSearchFilesOpen(true);
+      } else if (key === "f" && !e.shiftKey) {
+        if (findInFileRef.current) {
+          e.preventDefault();
+          findInFileRef.current();
+        }
+      }
+    };
+    window.addEventListener("keydown", handler, true);
+    return () => window.removeEventListener("keydown", handler, true);
+  }, []);
+
+  // Open file from Quick Open / Search dialogs → navigate to code route
+  const handleOpenFile = useCallback(
+    (path: string) => {
+      navigate({
+        to: "/workspace/$workspaceId/code/$",
+        params: { workspaceId: encodedId, _splat: path },
+      });
+    },
+    [navigate, encodedId],
+  );
 
   return (
     <div className="flex h-full overflow-hidden">
-      {/* Middle Panel — Changes / Code */}
+      {/* Middle Panel — Changes / Code / Terminal */}
       <div className="flex-1 min-w-0 border-r border-white/20 overflow-hidden">
         <div className="flex h-full flex-col overflow-hidden">
           <DesktopDetailTabNav workspaceId={encodedId} diffStats={diffStats} />
-          <div className="min-h-0 flex-1">
-            <Outlet />
+          <div className="min-h-0 flex-1 overflow-hidden">
+            <FindInFileContext.Provider value={{ setFindInFile }}>
+              <Outlet />
+            </FindInFileContext.Provider>
           </div>
         </div>
       </div>
@@ -188,6 +260,20 @@ function DesktopWorkspaceLayout({
       <div className="max-w-[768px] flex-1 min-w-0 overflow-hidden">
         <WorkspaceChatPanel key={workspaceId} workspaceId={workspaceId} />
       </div>
+
+      {/* Dialogs */}
+      <QuickOpenDialog
+        workspaceId={workspaceId}
+        open={quickOpenOpen}
+        onOpenChange={setQuickOpenOpen}
+        onOpenFile={handleOpenFile}
+      />
+      <SearchFilesDialog
+        workspaceId={workspaceId}
+        open={searchFilesOpen}
+        onOpenChange={setSearchFilesOpen}
+        onOpenFile={handleOpenFile}
+      />
     </div>
   );
 }

@@ -14,6 +14,7 @@ import { Route as CronjobsRouteImport } from './routes/cronjobs'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as WorkspaceWorkspaceIdRouteImport } from './routes/workspace.$workspaceId'
 import { Route as WorkspaceWorkspaceIdIndexRouteImport } from './routes/workspace.$workspaceId.index'
+import { Route as WorkspaceWorkspaceIdTerminalRouteImport } from './routes/workspace.$workspaceId.terminal'
 import { Route as WorkspaceWorkspaceIdCodeRouteImport } from './routes/workspace.$workspaceId.code'
 import { Route as WorkspaceWorkspaceIdChangesRouteImport } from './routes/workspace.$workspaceId.changes'
 import { Route as WorkspaceWorkspaceIdCodeIndexRouteImport } from './routes/workspace.$workspaceId.code.index'
@@ -43,6 +44,12 @@ const WorkspaceWorkspaceIdIndexRoute =
   WorkspaceWorkspaceIdIndexRouteImport.update({
     id: '/',
     path: '/',
+    getParentRoute: () => WorkspaceWorkspaceIdRoute,
+  } as any)
+const WorkspaceWorkspaceIdTerminalRoute =
+  WorkspaceWorkspaceIdTerminalRouteImport.update({
+    id: '/terminal',
+    path: '/terminal',
     getParentRoute: () => WorkspaceWorkspaceIdRoute,
   } as any)
 const WorkspaceWorkspaceIdCodeRoute =
@@ -77,6 +84,7 @@ export interface FileRoutesByFullPath {
   '/workspace/$workspaceId': typeof WorkspaceWorkspaceIdRouteWithChildren
   '/workspace/$workspaceId/changes': typeof WorkspaceWorkspaceIdChangesRoute
   '/workspace/$workspaceId/code': typeof WorkspaceWorkspaceIdCodeRouteWithChildren
+  '/workspace/$workspaceId/terminal': typeof WorkspaceWorkspaceIdTerminalRoute
   '/workspace/$workspaceId/': typeof WorkspaceWorkspaceIdIndexRoute
   '/workspace/$workspaceId/code/$': typeof WorkspaceWorkspaceIdCodeSplatRoute
   '/workspace/$workspaceId/code/': typeof WorkspaceWorkspaceIdCodeIndexRoute
@@ -86,6 +94,7 @@ export interface FileRoutesByTo {
   '/cronjobs': typeof CronjobsRoute
   '/tasks': typeof TasksRoute
   '/workspace/$workspaceId/changes': typeof WorkspaceWorkspaceIdChangesRoute
+  '/workspace/$workspaceId/terminal': typeof WorkspaceWorkspaceIdTerminalRoute
   '/workspace/$workspaceId': typeof WorkspaceWorkspaceIdIndexRoute
   '/workspace/$workspaceId/code/$': typeof WorkspaceWorkspaceIdCodeSplatRoute
   '/workspace/$workspaceId/code': typeof WorkspaceWorkspaceIdCodeIndexRoute
@@ -98,6 +107,7 @@ export interface FileRoutesById {
   '/workspace/$workspaceId': typeof WorkspaceWorkspaceIdRouteWithChildren
   '/workspace/$workspaceId/changes': typeof WorkspaceWorkspaceIdChangesRoute
   '/workspace/$workspaceId/code': typeof WorkspaceWorkspaceIdCodeRouteWithChildren
+  '/workspace/$workspaceId/terminal': typeof WorkspaceWorkspaceIdTerminalRoute
   '/workspace/$workspaceId/': typeof WorkspaceWorkspaceIdIndexRoute
   '/workspace/$workspaceId/code/$': typeof WorkspaceWorkspaceIdCodeSplatRoute
   '/workspace/$workspaceId/code/': typeof WorkspaceWorkspaceIdCodeIndexRoute
@@ -111,6 +121,7 @@ export interface FileRouteTypes {
     | '/workspace/$workspaceId'
     | '/workspace/$workspaceId/changes'
     | '/workspace/$workspaceId/code'
+    | '/workspace/$workspaceId/terminal'
     | '/workspace/$workspaceId/'
     | '/workspace/$workspaceId/code/$'
     | '/workspace/$workspaceId/code/'
@@ -120,6 +131,7 @@ export interface FileRouteTypes {
     | '/cronjobs'
     | '/tasks'
     | '/workspace/$workspaceId/changes'
+    | '/workspace/$workspaceId/terminal'
     | '/workspace/$workspaceId'
     | '/workspace/$workspaceId/code/$'
     | '/workspace/$workspaceId/code'
@@ -131,6 +143,7 @@ export interface FileRouteTypes {
     | '/workspace/$workspaceId'
     | '/workspace/$workspaceId/changes'
     | '/workspace/$workspaceId/code'
+    | '/workspace/$workspaceId/terminal'
     | '/workspace/$workspaceId/'
     | '/workspace/$workspaceId/code/$'
     | '/workspace/$workspaceId/code/'
@@ -178,6 +191,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/workspace/$workspaceId/'
       preLoaderRoute: typeof WorkspaceWorkspaceIdIndexRouteImport
+      parentRoute: typeof WorkspaceWorkspaceIdRoute
+    }
+    '/workspace/$workspaceId/terminal': {
+      id: '/workspace/$workspaceId/terminal'
+      path: '/terminal'
+      fullPath: '/workspace/$workspaceId/terminal'
+      preLoaderRoute: typeof WorkspaceWorkspaceIdTerminalRouteImport
       parentRoute: typeof WorkspaceWorkspaceIdRoute
     }
     '/workspace/$workspaceId/code': {
@@ -230,12 +250,14 @@ const WorkspaceWorkspaceIdCodeRouteWithChildren =
 interface WorkspaceWorkspaceIdRouteChildren {
   WorkspaceWorkspaceIdChangesRoute: typeof WorkspaceWorkspaceIdChangesRoute
   WorkspaceWorkspaceIdCodeRoute: typeof WorkspaceWorkspaceIdCodeRouteWithChildren
+  WorkspaceWorkspaceIdTerminalRoute: typeof WorkspaceWorkspaceIdTerminalRoute
   WorkspaceWorkspaceIdIndexRoute: typeof WorkspaceWorkspaceIdIndexRoute
 }
 
 const WorkspaceWorkspaceIdRouteChildren: WorkspaceWorkspaceIdRouteChildren = {
   WorkspaceWorkspaceIdChangesRoute: WorkspaceWorkspaceIdChangesRoute,
   WorkspaceWorkspaceIdCodeRoute: WorkspaceWorkspaceIdCodeRouteWithChildren,
+  WorkspaceWorkspaceIdTerminalRoute: WorkspaceWorkspaceIdTerminalRoute,
   WorkspaceWorkspaceIdIndexRoute: WorkspaceWorkspaceIdIndexRoute,
 }
 
