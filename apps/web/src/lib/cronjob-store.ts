@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
+import type { CronjobDefinition, CronjobFile } from "./cronjob-types";
 import { getDb } from "./db/connection";
 import { cronjobs } from "./db/schema";
-import type { CronjobDefinition, CronjobFile } from "./cronjob-types";
 
 export function generateCronjobId(): string {
   return `cj_${Date.now()}`;

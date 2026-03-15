@@ -1,5 +1,5 @@
-import { and, desc, eq } from "drizzle-orm";
 import { createLogger } from "@band/logger";
+import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "./db/connection";
 import { tasks } from "./db/schema";
 
@@ -82,7 +82,11 @@ export function listTasks(filters?: TaskFilters): TaskRecord[] {
 
   const query =
     conditions.length > 0
-      ? db.select().from(tasks).where(and(...conditions)).orderBy(desc(tasks.startedAt))
+      ? db
+          .select()
+          .from(tasks)
+          .where(and(...conditions))
+          .orderBy(desc(tasks.startedAt))
       : db.select().from(tasks).orderBy(desc(tasks.startedAt));
 
   return query.all().map(rowToRecord);
@@ -118,10 +122,7 @@ export function markTaskFailed(id: string): TaskRecord | null {
 
   const now = Date.now();
   const db = getDb();
-  db.update(tasks)
-    .set({ status: "failed", completedAt: now })
-    .where(eq(tasks.id, id))
-    .run();
+  db.update(tasks).set({ status: "failed", completedAt: now }).where(eq(tasks.id, id)).run();
 
   task.status = "failed";
   task.completedAt = now;
