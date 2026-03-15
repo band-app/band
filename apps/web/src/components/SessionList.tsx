@@ -82,8 +82,8 @@ export function SessionList({
   }
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="shrink-0 p-3">
+    <div className="mx-auto flex h-full w-full max-w-2xl flex-col">
+      <div className="shrink-0 p-3 pb-1">
         <button
           type="button"
           onClick={onNewSession}
@@ -104,7 +104,7 @@ export function SessionList({
         </div>
       ) : (
         <div className="flex-1 overflow-y-auto">
-          <div className="flex flex-col gap-1 p-2 pt-0">
+          <div className="flex flex-col gap-1 p-2">
             {sessions.map((session) => {
               const isActive = session.sessionId === activeSessionId;
               return (
