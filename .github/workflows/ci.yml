@@ -70,6 +70,8 @@ jobs:
 
       - name: Build web (needed by tests)
         run: pnpm build:web
+        env:
+          NODE_OPTIONS: "--max-old-space-size=6144"
 
       - name: Test (web)
         run: pnpm --filter @band/web test
