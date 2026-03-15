@@ -26,11 +26,7 @@ fn log_to_file(msg: &str) {
             let _ = std::fs::rename(&log_path, log_path.with_extension("log.old"));
         }
     }
-    if let Ok(mut f) = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_path)
-    {
+    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&log_path) {
         let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
         let _ = writeln!(f, "[{now}] {msg}");
     }
