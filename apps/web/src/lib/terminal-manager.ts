@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { createLogger } from "@band/logger";
-import pty from "node-pty";
+import type { IPty } from "node-pty";
 import { shellPath } from "./process-utils";
 import { resolveWorkspace } from "./workspace";
 
@@ -9,7 +9,7 @@ const log = createLogger("terminal");
 const MAX_SCROLLBACK_SIZE = 100_000;
 
 interface TerminalSession {
-  pty: pty.IPty;
+  pty: IPty;
   scrollback: string;
 }
 
@@ -52,9 +52,10 @@ export async function getOrSpawnTerminal(workspaceId: string): Promise<TerminalS
 
   log.debug("Spawning shell %s in %s (PATH=%s)", shell, cwd, resolvedPath.slice(0, 200));
 
-  let ptyProcess: pty.IPty;
+  const nodePty = (await import("node-pty")).default;
+  let ptyProcess: IPty;
   try {
-    ptyProcess = pty.spawn(shell, [], {
+    ptyProcess = nodePty.spawn(shell, [], {
       name: "xterm-256color",
       cols: 80,
       rows: 24,
