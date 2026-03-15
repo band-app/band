@@ -109,9 +109,11 @@ function TasksPage() {
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 5_000);
+    const interval = setInterval(() => {
+      if (!showNewTask) fetchData();
+    }, 5_000);
     return () => clearInterval(interval);
-  }, [fetchData]);
+  }, [fetchData, showNewTask]);
 
   const filteredTasks = useMemo(() => {
     return tasks.filter((task) => {

@@ -90,9 +90,11 @@ function CronjobsPage() {
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 5_000);
+    const interval = setInterval(() => {
+      if (!showDialog) fetchData();
+    }, 5_000);
     return () => clearInterval(interval);
-  }, [fetchData]);
+  }, [fetchData, showDialog]);
 
   const filteredCronjobs = useMemo(() => {
     if (projectFilter === "all") return cronjobs;
@@ -390,6 +392,15 @@ function CronjobDialog({
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
+  // Infer project name from workspaceId for editing workspace-scoped jobs
+  const editingProjectName = useMemo(() => {
+    if (!editingJob || editingJob.scope !== "workspace") return "";
+    return (
+      projects.find((p) => p.worktrees.some((w) => w.workspaceId === editingJob.workspaceId))
+        ?.name ?? ""
+    );
+  }, [editingJob, projects]);
+
   // Reset form when dialog opens
   useEffect(() => {
     if (open) {
@@ -404,11 +415,7 @@ function CronjobDialog({
           setSelectedWorkspaceId("");
         } else {
           setSelectedWorkspaceId(editingJob.workspaceId ?? "");
-          // Try to infer project from workspaceId
-          const proj = projects.find((p) =>
-            p.worktrees.some((w) => w.workspaceId === editingJob.workspaceId),
-          );
-          setSelectedProject(proj?.name ?? "");
+          setSelectedProject(editingProjectName);
         }
       } else {
         setName("");
@@ -421,7 +428,7 @@ function CronjobDialog({
       }
       setSubmitError(null);
     }
-  }, [open, editingJob, projects]);
+  }, [open, editingJob, editingProjectName]);
 
   const workspaces = useMemo(() => {
     const project = projects.find((p) => p.name === selectedProject);
