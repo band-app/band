@@ -30,7 +30,7 @@ function appendToken(baseUrl: string, token: string): string {
 }
 
 function spawnTunnel(options: { port: number }, resolvedPath: string): Promise<void> {
-  const args = ["tunnel", "--url", `http://localhost:${options.port}`];
+  const args = ["tunnel", "--config", "/dev/null", "--url", `http://localhost:${options.port}`];
 
   log.debug("spawning cloudflared %s", args.join(" "));
 
