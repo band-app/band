@@ -67,6 +67,7 @@ export type {
   CodingAgentType,
   ContentSearchMatch,
   FileContentResult,
+  FileDiffResult,
   FileEntry,
   FileListResult,
   FileStatus,
@@ -81,6 +82,7 @@ export type {
   SetupStatus,
   WorkspaceBranchStatus,
   WorkspaceDiff,
+  WorkspaceDiffSummary,
   WorkspaceStatus,
   WorktreeInfo,
 } from "./types";

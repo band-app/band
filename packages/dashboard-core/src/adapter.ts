@@ -3,12 +3,14 @@ import type {
   CliStatus,
   ContentSearchMatch,
   FileContentResult,
+  FileDiffResult,
   FileListResult,
   GitStatus,
   HooksStatus,
   ProjectInfo,
   Settings,
   WorkspaceDiff,
+  WorkspaceDiffSummary,
   WorkspaceStatus,
 } from "./types";
 
@@ -61,6 +63,8 @@ export interface DashboardAdapter {
 
   // Code browsing (optional)
   getWorkspaceDiff?(workspaceId: string): Promise<WorkspaceDiff>;
+  getWorkspaceDiffSummary?(workspaceId: string): Promise<WorkspaceDiffSummary>;
+  getFileDiff?(workspaceId: string, filePath: string, mergeBase: string): Promise<FileDiffResult>;
   listWorkspaceFiles?(workspaceId: string, path: string): Promise<FileListResult>;
   getWorkspaceFile?(workspaceId: string, path: string): Promise<FileContentResult>;
 

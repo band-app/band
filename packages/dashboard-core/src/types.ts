@@ -184,6 +184,18 @@ export interface FileContentResult {
   language?: string;
 }
 
+export interface WorkspaceDiffSummary {
+  stats: { filesChanged: number; insertions: number; deletions: number };
+  baseBranch: string;
+  headBranch: string;
+  fileStatuses: Record<string, FileStatus>;
+  mergeBase: string;
+}
+
+export interface FileDiffResult {
+  diff: string;
+}
+
 export interface ContentSearchMatch {
   file: string;
   line: number;

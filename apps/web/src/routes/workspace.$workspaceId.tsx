@@ -83,7 +83,7 @@ function useDiffFileCount(workspaceId: string): number {
   useEffect(() => {
     let cancelled = false;
     const fetchCount = () => {
-      trpc.workspace.getDiff
+      trpc.workspace.getDiffSummary
         .query({ workspaceId })
         .then((result) => {
           if (!cancelled) setCount(result.stats?.filesChanged ?? 0);

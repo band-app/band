@@ -6,12 +6,14 @@ import type {
   CliStatus,
   ContentSearchMatch,
   FileContentResult,
+  FileDiffResult,
   FileListResult,
   GitStatus,
   HooksStatus,
   ProjectInfo,
   Settings,
   WorkspaceDiff,
+  WorkspaceDiffSummary,
   WorkspaceStatus,
 } from "../types";
 
@@ -172,6 +174,24 @@ export class WebDashboardAdapter implements DashboardAdapter {
 
   async getWorkspaceDiff(workspaceId: string): Promise<WorkspaceDiff> {
     return (await this.trpc.workspace.getDiff.query({ workspaceId })) as WorkspaceDiff;
+  }
+
+  async getWorkspaceDiffSummary(workspaceId: string): Promise<WorkspaceDiffSummary> {
+    return (await this.trpc.workspace.getDiffSummary.query({
+      workspaceId,
+    })) as WorkspaceDiffSummary;
+  }
+
+  async getFileDiff(
+    workspaceId: string,
+    filePath: string,
+    mergeBase: string,
+  ): Promise<FileDiffResult> {
+    return (await this.trpc.workspace.getFileDiff.query({
+      workspaceId,
+      filePath,
+      mergeBase,
+    })) as FileDiffResult;
   }
 
   async listWorkspaceFiles(workspaceId: string, path: string): Promise<FileListResult> {
