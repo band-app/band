@@ -24,6 +24,7 @@ import { toWorkspaceId } from "../lib/workspace-id";
 import { useDashboardStore } from "../stores/index";
 import type {
   DeleteDialogInfo,
+  LoopStatusInfo,
   SetupStatus,
   WorkspaceBranchStatus,
   WorkspaceStatus,
@@ -32,6 +33,7 @@ import type {
 import { AgentStatusBadge } from "./AgentStatusBadge";
 import { CIStatusIndicator } from "./CIStatusIndicator";
 import { GitStatusIndicator } from "./GitStatusIndicator";
+import { LoopStatusIndicator } from "./LoopStatusIndicator";
 import { SetupStatusIndicator } from "./SetupStatusIndicator";
 
 interface Props {
@@ -41,6 +43,7 @@ interface Props {
   status?: WorkspaceStatus;
   branchStatus?: WorkspaceBranchStatus;
   setupStatus?: SetupStatus;
+  loopStatus?: LoopStatusInfo;
   isFocused?: boolean;
   onShowDeleteDialog: (info: DeleteDialogInfo) => void;
   editMode?: boolean;
@@ -53,6 +56,7 @@ export function WorkspaceCard({
   status,
   branchStatus,
   setupStatus,
+  loopStatus,
   isFocused,
   onShowDeleteDialog,
   editMode,
@@ -140,6 +144,7 @@ export function WorkspaceCard({
             </Tooltip>
             {!editMode && <AgentStatusBadge agent={status?.agent} />}
             {!editMode && <SetupStatusIndicator setup={setupStatus} />}
+            {!editMode && <LoopStatusIndicator loop={loopStatus} />}
           </div>
           {!editMode && (
             <div className="flex items-center gap-2 shrink-0">

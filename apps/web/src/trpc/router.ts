@@ -51,6 +51,17 @@ import {
   TaskConflictError,
 } from "../lib/task-runner";
 import { listTasks, loadTask } from "../lib/task-store";
+import {
+  getBufferedEvents as getBufferedLoopEvents,
+  getLoop,
+  type LoopEvent,
+  pauseLoop,
+  resumeLoop,
+  stopLoop,
+  submitLoop,
+  subscribe as subscribeLoop,
+} from "../lib/loop-runner";
+import { listIterations, listLoops } from "../lib/loop-store";
 import { getTunnelStatus, startTunnel, stopTunnel } from "../lib/tunnel";
 import { subscribe as subscribeStatus } from "../lib/watcher";
 import { resolveWorkspace } from "../lib/workspace";
@@ -1486,6 +1497,173 @@ const cronjobsRouter = t.router({
 });
 
 // ---------------------------------------------------------------------------
+// Loops
+// ---------------------------------------------------------------------------
+
+const loopsRouter = t.router({
+  list: publicProcedure
+    .input(
+      z
+        .object({
+          workspaceId: z.string().optional(),
+          project: z.string().optional(),
+          status: z
+            .enum(["running", "paused", "completed", "failed", "stopped"])
+            .optional(),
+        })
+        .optional(),
+    )
+    .query(({ input }) => {
+      return { loops: listLoops(input) };
+    }),
+
+  create: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        prompt: z.string().min(1),
+        completionPromise: z.string().min(1),
+        maxIterations: z.number().int().positive().optional(),
+      }),
+    )
+    .mutation(({ input }) => {
+      try {
+        const loop = submitLoop(
+          input.workspaceId,
+          input.prompt,
+          input.completionPromise,
+          input.maxIterations,
+        );
+        return { id: loop.id, workspaceId: loop.workspaceId };
+      } catch (err) {
+        if (err instanceof Error && err.name === "LoopConflictError") {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "Loop or task already running for this workspace",
+          });
+        }
+        if (err instanceof Error && err.message.startsWith("Workspace not found")) {
+          throw new TRPCError({ code: "NOT_FOUND", message: err.message });
+        }
+        throw err;
+      }
+    }),
+
+  get: publicProcedure
+    .input(z.object({ workspaceId: z.string() }))
+    .query(({ input }) => {
+      const loop = getLoop(input.workspaceId);
+      return { loop };
+    }),
+
+  pause: publicProcedure
+    .input(z.object({ workspaceId: z.string() }))
+    .mutation(({ input }) => {
+      const paused = pauseLoop(input.workspaceId);
+      if (!paused) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "No running loop found for this workspace",
+        });
+      }
+      return { paused: true };
+    }),
+
+  resume: publicProcedure
+    .input(z.object({ workspaceId: z.string() }))
+    .mutation(({ input }) => {
+      const resumed = resumeLoop(input.workspaceId);
+      if (!resumed) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "No paused loop found for this workspace",
+        });
+      }
+      return { resumed: true };
+    }),
+
+  stop: publicProcedure
+    .input(z.object({ workspaceId: z.string() }))
+    .mutation(({ input }) => {
+      const stopped = stopLoop(input.workspaceId);
+      if (!stopped) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "No active loop found for this workspace",
+        });
+      }
+      return { stopped: true };
+    }),
+
+  iterations: publicProcedure
+    .input(z.object({ loopId: z.string() }))
+    .query(({ input }) => {
+      return { iterations: listIterations(input.loopId) };
+    }),
+
+  stream: publicProcedure
+    .input(z.object({ workspaceId: z.string() }))
+    .subscription(async function* (opts) {
+      const workspaceId = opts.input.workspaceId;
+      const loop = getLoop(workspaceId);
+
+      // If no active loop, replay any buffered events and return
+      if (!loop) {
+        const buffered = getBufferedLoopEvents(workspaceId);
+        for (const event of buffered) yield event;
+        return;
+      }
+
+      const queue: LoopEvent[] = [];
+      let resolve: (() => void) | null = null;
+      let done = false;
+
+      // Subscribe for live events FIRST (before snapshotting buffer)
+      const unsubscribe = subscribeLoop(workspaceId, (event) => {
+        queue.push(event);
+        if (event.type === "loop-end") {
+          done = true;
+        }
+        resolve?.();
+      });
+
+      // Replay buffered events
+      const buffered = getBufferedLoopEvents(workspaceId);
+      for (const event of buffered) yield event;
+
+      // If loop is already done and no live events queued, stop
+      if (
+        loop.status !== "running" &&
+        loop.status !== "paused" &&
+        queue.length === 0
+      ) {
+        unsubscribe();
+        return;
+      }
+
+      opts.signal.addEventListener("abort", () => {
+        unsubscribe();
+        resolve?.();
+      });
+
+      try {
+        while (!opts.signal.aborted) {
+          while (queue.length > 0) {
+            yield queue.shift()!;
+          }
+          if (done) return;
+          await new Promise<void>((r) => {
+            resolve = r;
+          });
+          resolve = null;
+        }
+      } finally {
+        unsubscribe();
+      }
+    }),
+});
+
+// ---------------------------------------------------------------------------
 // Skills
 // ---------------------------------------------------------------------------
 
@@ -1526,6 +1704,7 @@ export const appRouter = t.router({
   statuses: statusesRouter,
   status: statusRouter,
   cronjobs: cronjobsRouter,
+  loops: loopsRouter,
   skills: skillsRouter,
 });
 

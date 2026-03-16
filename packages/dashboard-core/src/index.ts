@@ -12,6 +12,7 @@ export { type DiffStats, DiffView } from "./components/DiffView";
 export { FileBrowser } from "./components/FileBrowser";
 export { FileViewer } from "./components/FileViewer";
 export { GitStatusIndicator } from "./components/GitStatusIndicator";
+export { LoopStatusIndicator } from "./components/LoopStatusIndicator";
 export { NewWorkspaceDialog } from "./components/NewWorkspaceForm";
 export { ProjectList } from "./components/ProjectList";
 export { QuickOpenDialog } from "./components/QuickOpenDialog";

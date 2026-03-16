@@ -25,3 +25,31 @@ export const cronjobs = sqliteTable("cronjobs", {
   lastRunAt: text("last_run_at"),
   lastRunStatus: text("last_run_status", { enum: ["completed", "failed", "skipped"] }),
 });
+
+export const loops = sqliteTable("loops", {
+  id: text("id").primaryKey(),
+  workspaceId: text("workspace_id").notNull(),
+  project: text("project").notNull(),
+  branch: text("branch").notNull(),
+  prompt: text("prompt").notNull(),
+  completionPromise: text("completion_promise").notNull(),
+  maxIterations: integer("max_iterations").notNull(),
+  currentIteration: integer("current_iteration").notNull().default(0),
+  status: text("status", {
+    enum: ["running", "paused", "completed", "failed", "stopped"],
+  }).notNull(),
+  startedAt: integer("started_at").notNull(),
+  completedAt: integer("completed_at"),
+});
+
+export const loopIterations = sqliteTable("loop_iterations", {
+  id: text("id").primaryKey(),
+  loopId: text("loop_id").notNull(),
+  iteration: integer("iteration").notNull(),
+  status: text("status", { enum: ["running", "completed", "failed"] }).notNull(),
+  output: text("output"),
+  exitCode: integer("exit_code"),
+  promiseDetected: integer("promise_detected", { mode: "boolean" }).notNull().default(false),
+  startedAt: integer("started_at").notNull(),
+  completedAt: integer("completed_at"),
+});

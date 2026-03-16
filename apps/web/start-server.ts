@@ -12,6 +12,7 @@ import { closeDb } from "./src/lib/db/connection.ts";
 import { runMigrations } from "./src/lib/db/migrate.ts";
 import { checkPrereqs } from "./src/lib/process-utils.ts";
 import { bandHome, ensureDirs, getOrCreateToken, loadSettings } from "./src/lib/state.ts";
+import { cleanupStaleLoops } from "./src/lib/loop-store.ts";
 import { cleanupStaleTasks } from "./src/lib/task-store.ts";
 import { killAllTerminals } from "./src/lib/terminal-manager.ts";
 import { handleTerminalConnection } from "./src/lib/terminal-ws.ts";
@@ -64,9 +65,10 @@ async function main() {
   // Run database migrations before anything else
   runMigrations();
 
-  // Mark any persisted "running" tasks as "failed" — no agent can be running
-  // if the server just started.
+  // Mark any persisted "running" tasks/loops as "failed" — no agent can be
+  // running if the server just started.
   cleanupStaleTasks();
+  cleanupStaleLoops();
 
   // Start cronjob scheduler — reads definitions and watches for changes
   startCronjobScheduler();

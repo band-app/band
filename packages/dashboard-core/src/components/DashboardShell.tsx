@@ -25,6 +25,7 @@ import { useSettingsQuery } from "../hooks/use-settings-query";
 import {
   useActiveWorkspaceWatcher,
   useBranchStatusWatcher,
+  useLoopStatusWatcher,
   useSetupStatusWatcher,
   useStatusWatcher,
 } from "../hooks/use-status";
@@ -87,6 +88,7 @@ export function DashboardShell({ toolbarExtra }: DashboardShellProps) {
   useActiveWorkspaceWatcher();
   useBranchStatusWatcher();
   useSetupStatusWatcher();
+  useLoopStatusWatcher();
 
   return (
     <div

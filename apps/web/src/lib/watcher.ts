@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { watch } from "chokidar";
 import { startBranchStatusPoller, stopBranchStatusPoller } from "./branch-status-poller";
+import { getLoop, type LoopInfo } from "./loop-runner";
 import { getRunningSetups } from "./setup-runner";
 import {
   bandHome,
@@ -24,6 +25,13 @@ interface CIStatus {
   url?: string | null;
 }
 
+export interface LoopStatusInfo {
+  loopId: string;
+  currentIteration: number;
+  maxIterations: number;
+  status: "running" | "paused" | "completed" | "failed" | "stopped";
+}
+
 export interface StatusEvent {
   kind:
     | "update"
@@ -32,7 +40,8 @@ export interface StatusEvent {
     | "branch-status"
     | "tunnel-url"
     | "tunnel-error"
-    | "setup-status";
+    | "setup-status"
+    | "loop-status";
   status?: WorkspaceStatus;
   statuses?: WorkspaceStatus[];
   workspaceId?: string;
@@ -42,6 +51,7 @@ export interface StatusEvent {
   error?: string;
   setupState?: "running" | "completed" | "failed";
   setupError?: string;
+  loopStatus?: LoopStatusInfo;
 }
 
 type StatusListener = (event: StatusEvent) => void;
@@ -163,6 +173,23 @@ export function subscribe(listener: StatusListener): () => void {
   // Send current setup status snapshots
   for (const workspaceId of getRunningSetups()) {
     listener({ kind: "setup-status", workspaceId, setupState: "running" });
+  }
+
+  // Send current loop status snapshots
+  for (const status of statuses) {
+    const loop = getLoop(status.workspaceId);
+    if (loop && (loop.status === "running" || loop.status === "paused")) {
+      listener({
+        kind: "loop-status",
+        workspaceId: status.workspaceId,
+        loopStatus: {
+          loopId: loop.id,
+          currentIteration: loop.currentIteration,
+          maxIterations: loop.maxIterations,
+          status: loop.status,
+        },
+      });
+    }
   }
 
   return () => {

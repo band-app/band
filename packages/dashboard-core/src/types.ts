@@ -67,6 +67,15 @@ export interface SetupStatus {
   error?: string;
 }
 
+export type LoopState = "running" | "paused" | "completed" | "failed" | "stopped";
+
+export interface LoopStatusInfo {
+  loopId: string;
+  currentIteration: number;
+  maxIterations: number;
+  status: LoopState;
+}
+
 export type AppType = "vscode" | "zed" | "iterm" | "chrome";
 
 export interface VsCodeAppConfig {

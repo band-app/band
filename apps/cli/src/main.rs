@@ -36,6 +36,11 @@ enum Commands {
         #[command(subcommand)]
         cmd: TasksCmd,
     },
+    /// Manage task loops
+    Loops {
+        #[command(subcommand)]
+        cmd: LoopsCmd,
+    },
     /// Manage scheduled cronjobs
     Cronjobs {
         #[command(subcommand)]
@@ -95,6 +100,15 @@ enum WorkspacesCmd {
         /// Prompt to pass to the coding agent
         #[arg(long)]
         prompt: Option<String>,
+        /// Start a loop instead of a one-shot task (requires --prompt and --completion-promise)
+        #[arg(long, name = "loop")]
+        is_loop: bool,
+        /// String that signals loop completion (required with --loop)
+        #[arg(long, requires = "loop")]
+        completion_promise: Option<String>,
+        /// Maximum number of iterations for the loop
+        #[arg(long, requires = "loop")]
+        max_iterations: Option<u32>,
     },
     /// Remove a workspace (git worktree + state cleanup)
     Remove {
@@ -223,6 +237,48 @@ enum CronjobsCmd {
 }
 
 #[derive(Subcommand)]
+enum LoopsCmd {
+    /// List loops
+    List {
+        /// Filter by workspace ID
+        #[arg(long)]
+        workspace: Option<String>,
+        /// Filter by status (running, paused, completed, failed, stopped)
+        #[arg(long)]
+        status: Option<String>,
+    },
+    /// Create a new loop
+    Create {
+        /// Workspace ID
+        workspace_id: String,
+        /// Prompt text (or path to a .md file)
+        #[arg(long)]
+        prompt: String,
+        /// String that signals loop completion
+        #[arg(long)]
+        completion_promise: String,
+        /// Maximum number of iterations
+        #[arg(long)]
+        max_iterations: Option<u32>,
+    },
+    /// Pause a running loop (waits for current iteration to finish)
+    Pause {
+        /// Workspace ID
+        workspace_id: String,
+    },
+    /// Resume a paused loop
+    Resume {
+        /// Workspace ID
+        workspace_id: String,
+    },
+    /// Stop a running or paused loop
+    Stop {
+        /// Workspace ID
+        workspace_id: String,
+    },
+}
+
+#[derive(Subcommand)]
 enum TunnelCmd {
     /// Show tunnel status
     Status,
@@ -284,7 +340,18 @@ fn main() {
                 branch,
                 base,
                 prompt,
-            } => cmd_workspaces_create(&project, &branch, base.as_deref(), prompt.as_deref()),
+                is_loop,
+                completion_promise,
+                max_iterations,
+            } => cmd_workspaces_create(
+                &project,
+                &branch,
+                base.as_deref(),
+                prompt.as_deref(),
+                is_loop,
+                completion_promise.as_deref(),
+                max_iterations,
+            ),
             WorkspacesCmd::Remove { project, branch } => cmd_workspaces_remove(&project, &branch),
         },
         Commands::Tasks { cmd } => match cmd {
@@ -298,6 +365,20 @@ fn main() {
             TasksCmd::Cancel { task_id } => cmd_tasks_cancel(&task_id),
             TasksCmd::Rerun { task_id } => cmd_tasks_rerun(&task_id),
             TasksCmd::Watch { .. } => unreachable!(),
+        },
+        Commands::Loops { cmd } => match cmd {
+            LoopsCmd::List { workspace, status } => {
+                cmd_loops_list(workspace.as_deref(), status.as_deref())
+            }
+            LoopsCmd::Create {
+                workspace_id,
+                prompt,
+                completion_promise,
+                max_iterations,
+            } => cmd_loops_create(&workspace_id, &prompt, &completion_promise, max_iterations),
+            LoopsCmd::Pause { workspace_id } => cmd_loops_pause(&workspace_id),
+            LoopsCmd::Resume { workspace_id } => cmd_loops_resume(&workspace_id),
+            LoopsCmd::Stop { workspace_id } => cmd_loops_stop(&workspace_id),
         },
         Commands::Cronjobs { cmd } => match cmd {
             CronjobsCmd::List { project, workspace } => {
@@ -595,11 +676,59 @@ fn cmd_workspaces_create(
     branch: &str,
     base: Option<&str>,
     prompt: Option<&str>,
+    is_loop: bool,
+    completion_promise: Option<&str>,
+    max_iterations: Option<u32>,
 ) -> Result<CommandResult, String> {
     validate::validate_name(project, "Project name")?;
     validate::validate_name(branch, "Branch name")?;
     if let Some(b) = base {
         validate::validate_name(b, "Base branch")?;
+    }
+
+    if is_loop {
+        let Some(prompt) = prompt else {
+            return Err("--prompt is required with --loop".to_string());
+        };
+        let Some(cp) = completion_promise else {
+            return Err("--completion-promise is required with --loop".to_string());
+        };
+
+        // Create workspace without prompt (don't start a task)
+        let client = api::ApiClient::from_settings()?;
+        let ws_input = serde_json::json!({
+            "project": project,
+            "branch": branch,
+        });
+        let data = client.trpc_mutate("workspaces.create", &ws_input)?;
+        let path = data.get("path").and_then(|p| p.as_str()).unwrap_or("");
+
+        // Resolve workspace ID
+        let default_ws_id = format!("{project}/{branch}");
+        let workspace_id = data
+            .get("workspaceId")
+            .and_then(|w| w.as_str())
+            .unwrap_or(&default_ws_id);
+
+        // Resolve prompt from file if it looks like a .md path
+        let resolved_prompt = resolve_prompt_text(prompt)?;
+
+        // Start the loop
+        let mut loop_input = serde_json::json!({
+            "workspaceId": workspace_id,
+            "prompt": resolved_prompt,
+            "completionPromise": cp,
+        });
+        if let Some(max) = max_iterations {
+            loop_input["maxIterations"] = serde_json::json!(max);
+        }
+        let loop_data = client.trpc_mutate("loops.create", &loop_input)?;
+        let loop_id = loop_data.get("id").and_then(|i| i.as_str()).unwrap_or("");
+
+        return Ok(CommandResult {
+            text: format!("{path}\n"),
+            json: serde_json::json!({"path": path, "loopId": loop_id}),
+        });
     }
 
     let client = api::ApiClient::from_settings()?;
@@ -744,6 +873,149 @@ fn cmd_tasks_rerun(task_id: &str) -> Result<CommandResult, String> {
         text: format!("Task re-run started for workspace {workspace_id}\n"),
         json: data,
     })
+}
+
+// --- Loops commands ---
+
+fn cmd_loops_list(workspace: Option<&str>, status: Option<&str>) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+
+    let mut input = serde_json::json!({});
+    if let Some(w) = workspace {
+        input["workspaceId"] = serde_json::json!(w);
+    }
+    if let Some(s) = status {
+        input["status"] = serde_json::json!(s);
+    }
+
+    let data = client.trpc_query("loops.list", &input)?;
+    let items = data
+        .get("loops")
+        .and_then(|l| l.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let mut rows: Vec<[String; 5]> = Vec::new();
+    let mut json_loops = Vec::new();
+    for item in &items {
+        let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        let loop_status = item.get("status").and_then(|v| v.as_str()).unwrap_or("");
+        let current = item
+            .get("currentIteration")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+        let max = item
+            .get("maxIterations")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+        let ws_id = item
+            .get("workspaceId")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let prompt = item.get("prompt").and_then(|v| v.as_str()).unwrap_or("");
+
+        let truncated_prompt = if prompt.len() > 50 {
+            format!("{}...", &prompt[..47])
+        } else {
+            prompt.to_string()
+        };
+
+        rows.push([
+            id.to_string(),
+            loop_status.to_string(),
+            format!("{current}/{max}"),
+            ws_id.to_string(),
+            truncated_prompt,
+        ]);
+
+        json_loops.push(item.clone());
+    }
+
+    let text = format_table(&["ID", "STATUS", "ITERATION", "WORKSPACE", "PROMPT"], &rows);
+
+    Ok(CommandResult {
+        text,
+        json: serde_json::json!({"loops": json_loops}),
+    })
+}
+
+fn cmd_loops_create(
+    workspace_id: &str,
+    prompt: &str,
+    completion_promise: &str,
+    max_iterations: Option<u32>,
+) -> Result<CommandResult, String> {
+    let resolved_prompt = resolve_prompt_text(prompt)?;
+
+    let client = api::ApiClient::from_settings()?;
+    let mut input = serde_json::json!({
+        "workspaceId": workspace_id,
+        "prompt": resolved_prompt,
+        "completionPromise": completion_promise,
+    });
+    if let Some(max) = max_iterations {
+        input["maxIterations"] = serde_json::json!(max);
+    }
+
+    let data = client.trpc_mutate("loops.create", &input)?;
+    let id = data.get("id").and_then(|i| i.as_str()).unwrap_or("");
+
+    Ok(CommandResult {
+        text: format!("{id}\n"),
+        json: serde_json::json!({"id": id, "workspaceId": workspace_id}),
+    })
+}
+
+fn cmd_loops_pause(workspace_id: &str) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    client.trpc_mutate(
+        "loops.pause",
+        &serde_json::json!({"workspaceId": workspace_id}),
+    )?;
+
+    Ok(CommandResult {
+        text: format!("Loop paused for {workspace_id}\n"),
+        json: serde_json::json!({"paused": true, "workspaceId": workspace_id}),
+    })
+}
+
+fn cmd_loops_resume(workspace_id: &str) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    client.trpc_mutate(
+        "loops.resume",
+        &serde_json::json!({"workspaceId": workspace_id}),
+    )?;
+
+    Ok(CommandResult {
+        text: format!("Loop resumed for {workspace_id}\n"),
+        json: serde_json::json!({"resumed": true, "workspaceId": workspace_id}),
+    })
+}
+
+fn cmd_loops_stop(workspace_id: &str) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    client.trpc_mutate(
+        "loops.stop",
+        &serde_json::json!({"workspaceId": workspace_id}),
+    )?;
+
+    Ok(CommandResult {
+        text: format!("Loop stopped for {workspace_id}\n"),
+        json: serde_json::json!({"stopped": true, "workspaceId": workspace_id}),
+    })
+}
+
+/// Resolve prompt text: if it looks like a .md file path and exists, read its contents.
+fn resolve_prompt_text(prompt: &str) -> Result<String, String> {
+    if std::path::Path::new(prompt)
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+        && std::path::Path::new(prompt).exists()
+    {
+        std::fs::read_to_string(prompt).map_err(|e| format!("Failed to read prompt file: {e}"))
+    } else {
+        Ok(prompt.to_string())
+    }
 }
 
 // --- Cronjobs commands ---
@@ -1358,6 +1630,9 @@ fn build_schema(command: Option<&str>) -> Result<serde_json::Value, String> {
                 {"name": "branch", "type": "string", "required": true, "positional": true, "description": "Branch name"},
                 {"name": "--base", "type": "string", "required": false, "description": "Base branch to create from (defaults to project's default branch)"},
                 {"name": "--prompt", "type": "string", "required": false, "description": "Prompt to pass to the coding agent"},
+                {"name": "--loop", "type": "boolean", "required": false, "description": "Start a loop instead of a one-shot task (requires --prompt and --completion-promise)"},
+                {"name": "--completion-promise", "type": "string", "required": false, "description": "String that signals loop completion (required with --loop)"},
+                {"name": "--max-iterations", "type": "integer", "required": false, "description": "Maximum number of iterations for the loop"},
             ]
         }),
         serde_json::json!({
@@ -1474,6 +1749,45 @@ fn build_schema(command: Option<&str>) -> Result<serde_json::Value, String> {
             "parameters": [
                 {"name": "key", "type": "string", "required": true, "positional": true, "description": "Storage key (project name or workspace ID)"},
                 {"name": "id", "type": "string", "required": true, "positional": true, "description": "Cronjob ID (e.g. cj_1234567890)"},
+            ]
+        }),
+        serde_json::json!({
+            "name": "loops list",
+            "description": "List task loops, optionally filtered by workspace or status",
+            "parameters": [
+                {"name": "--workspace", "type": "string", "required": false, "description": "Filter by workspace ID"},
+                {"name": "--status", "type": "string", "required": false, "description": "Filter by status (running, paused, completed, failed, stopped)"},
+            ]
+        }),
+        serde_json::json!({
+            "name": "loops create",
+            "description": "Create a new task loop that runs a prompt repeatedly until a completion promise is detected",
+            "parameters": [
+                {"name": "workspace_id", "type": "string", "required": true, "positional": true, "description": "Workspace ID"},
+                {"name": "--prompt", "type": "string", "required": true, "description": "Prompt text (or path to a .md file)"},
+                {"name": "--completion-promise", "type": "string", "required": true, "description": "String that signals loop completion"},
+                {"name": "--max-iterations", "type": "integer", "required": false, "description": "Maximum number of iterations (default: 25)"},
+            ]
+        }),
+        serde_json::json!({
+            "name": "loops pause",
+            "description": "Pause a running loop (waits for current iteration to finish)",
+            "parameters": [
+                {"name": "workspace_id", "type": "string", "required": true, "positional": true, "description": "Workspace ID"},
+            ]
+        }),
+        serde_json::json!({
+            "name": "loops resume",
+            "description": "Resume a paused loop",
+            "parameters": [
+                {"name": "workspace_id", "type": "string", "required": true, "positional": true, "description": "Workspace ID"},
+            ]
+        }),
+        serde_json::json!({
+            "name": "loops stop",
+            "description": "Stop a running or paused loop",
+            "parameters": [
+                {"name": "workspace_id", "type": "string", "required": true, "positional": true, "description": "Workspace ID"},
             ]
         }),
         serde_json::json!({

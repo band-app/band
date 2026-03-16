@@ -55,6 +55,7 @@ import { useDashboardStore } from "../stores/index";
 import type {
   DeleteDialogInfo,
   LabelDefinition,
+  LoopStatusInfo,
   ProjectInfo,
   SetupStatus,
   WorkspaceBranchStatus,
@@ -69,6 +70,7 @@ interface SortableProjectProps {
   statuses: Map<string, WorkspaceStatus>;
   branchStatuses: Map<string, WorkspaceBranchStatus>;
   setupStatuses: Map<string, SetupStatus>;
+  loopStatuses: Map<string, LoopStatusInfo>;
   removeProject: (name: string) => void;
   updateProjectLabel: (name: string, label: string | null) => void;
   labels: LabelDefinition[];
@@ -84,6 +86,7 @@ function SortableProject({
   statuses,
   branchStatuses,
   setupStatuses,
+  loopStatuses,
   removeProject,
   updateProjectLabel,
   labels,
@@ -222,6 +225,7 @@ function SortableProject({
                 status={statuses.get(wsId)}
                 branchStatus={branchStatuses.get(wsId)}
                 setupStatus={setupStatuses.get(wsId)}
+                loopStatus={loopStatuses.get(wsId)}
                 isFocused={currentIndex === focusedIndex}
                 onShowDeleteDialog={onShowDeleteDialog}
                 editMode={editMode}
@@ -271,6 +275,7 @@ export function ProjectList({ labelFilter, editMode }: ProjectListProps) {
   const statuses = useDashboardStore((s) => s.statuses);
   const branchStatuses = useDashboardStore((s) => s.branchStatuses);
   const setupStatuses = useDashboardStore((s) => s.setupStatuses);
+  const loopStatuses = useDashboardStore((s) => s.loopStatuses);
   const openWorkspace = useDashboardStore((s) => s.openWorkspace);
   const activeWorkspaceId = useDashboardStore((s) => s.activeWorkspaceId);
 
@@ -496,6 +501,7 @@ export function ProjectList({ labelFilter, editMode }: ProjectListProps) {
                       statuses={statuses}
                       branchStatuses={branchStatuses}
                       setupStatuses={setupStatuses}
+                      loopStatuses={loopStatuses}
                       removeProject={(name) => removeProjectMutation.mutate(name)}
                       updateProjectLabel={(name, label) =>
                         updateProjectLabelMutation.mutate({ name, label })

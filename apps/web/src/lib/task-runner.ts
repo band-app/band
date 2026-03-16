@@ -101,6 +101,17 @@ export function submitTask(
     throw new TaskConflictError(workspaceId);
   }
 
+  // Check for running/paused loop — workspace can only have one active agent.
+  // Access the loop map via globalThis symbol to avoid circular dependency
+  // with loop-runner.ts (which imports getTask from this module).
+  const loopsMap = (globalThis as unknown as Record<symbol, unknown>)[
+    Symbol.for("band.loop-runner.loops")
+  ] as Map<string, { status: string }> | undefined;
+  const activeLoop = loopsMap?.get(workspaceId);
+  if (activeLoop && (activeLoop.status === "running" || activeLoop.status === "paused")) {
+    throw new TaskConflictError(workspaceId);
+  }
+
   // Clear any previous expiration timer
   if (existing?.expireTimer) {
     clearTimeout(existing.expireTimer);

@@ -4,7 +4,7 @@ import { playSound, type SoundId } from "../lib/sounds";
 import type { SSEEvent } from "../lib/sse";
 import { queryClient, queryKeys } from "../query-client";
 import { useDashboardStore } from "../stores/index";
-import type { AgentStatusType, Settings } from "../types";
+import type { AgentStatusType, LoopStatusInfo, Settings } from "../types";
 
 export function useStatusWatcher() {
   const adapter = useAdapter();
@@ -102,4 +102,27 @@ export function useSetupStatusWatcher() {
 
     return unsubscribe;
   }, [adapter, updateSetupStatus, removeSetupStatus]);
+}
+
+export function useLoopStatusWatcher() {
+  const adapter = useAdapter();
+  const updateLoopStatus = useDashboardStore((s) => s.updateLoopStatus);
+  const removeLoopStatus = useDashboardStore((s) => s.removeLoopStatus);
+
+  useEffect(() => {
+    const unsubscribe = adapter.subscribeStatusEvents((event) => {
+      const data = event as SSEEvent;
+      if (data.kind !== "loop-status" || !data.workspaceId || !data.loopStatus) return;
+
+      const { status } = data.loopStatus;
+      if (status === "running" || status === "paused") {
+        updateLoopStatus(data.workspaceId, data.loopStatus as LoopStatusInfo);
+      } else {
+        // Terminal states: completed, failed, stopped — remove from active display
+        removeLoopStatus(data.workspaceId);
+      }
+    });
+
+    return unsubscribe;
+  }, [adapter, updateLoopStatus, removeLoopStatus]);
 }
