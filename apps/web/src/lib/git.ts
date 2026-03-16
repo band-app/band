@@ -36,13 +36,9 @@ export function parseGitRemoteUrl(url: string): RepoInfo | null {
 /**
  * Get the GitHub host, owner, and repo for a git worktree by reading its origin remote URL.
  */
-export async function getRepoInfo(
-  worktreePath: string,
-): Promise<RepoInfo | null> {
+export async function getRepoInfo(worktreePath: string): Promise<RepoInfo | null> {
   try {
-    const remoteUrl = (
-      await execGit(["remote", "get-url", "origin"], worktreePath)
-    ).trim();
+    const remoteUrl = (await execGit(["remote", "get-url", "origin"], worktreePath)).trim();
     return parseGitRemoteUrl(remoteUrl);
   } catch {
     return null;

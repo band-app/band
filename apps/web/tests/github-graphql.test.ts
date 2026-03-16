@@ -66,9 +66,7 @@ describe("parseGitRemoteUrl", () => {
   });
 
   it("parses GitHub Enterprise HTTPS URL", () => {
-    const result = parseGitRemoteUrl(
-      "https://github.acme.com/team/project.git",
-    );
+    const result = parseGitRemoteUrl("https://github.acme.com/team/project.git");
     expect(result).toEqual({
       host: "github.acme.com",
       owner: "team",
@@ -83,9 +81,7 @@ describe("parseGitRemoteUrl", () => {
   });
 
   it("handles repo names with hyphens and dots", () => {
-    const result = parseGitRemoteUrl(
-      "git@github.com:my-org/my-repo.name.git",
-    );
+    const result = parseGitRemoteUrl("git@github.com:my-org/my-repo.name.git");
     expect(result).toEqual({
       host: "github.com",
       owner: "my-org",
@@ -113,9 +109,7 @@ describe("buildBatchedCIQuery", () => {
     expect(query).toContain(
       'pullRequests(headRefName: "feature-branch", first: 1, states: [OPEN, MERGED]',
     );
-    expect(query).toContain(
-      'ref(qualifiedName: "refs/heads/feature-branch")',
-    );
+    expect(query).toContain('ref(qualifiedName: "refs/heads/feature-branch")');
     expect(query).toContain("checkSuites(first: 20)");
     expect(query).toContain("workflowRun {");
   });
@@ -159,30 +153,20 @@ describe("buildBatchedCIQuery", () => {
 
 describe("statePriority", () => {
   it("ranks failure highest", () => {
-    expect(statePriority("failure")).toBeGreaterThan(
-      statePriority("running"),
-    );
-    expect(statePriority("failure")).toBeGreaterThan(
-      statePriority("success"),
-    );
+    expect(statePriority("failure")).toBeGreaterThan(statePriority("running"));
+    expect(statePriority("failure")).toBeGreaterThan(statePriority("success"));
   });
 
   it("ranks running above pending", () => {
-    expect(statePriority("running")).toBeGreaterThan(
-      statePriority("pending"),
-    );
+    expect(statePriority("running")).toBeGreaterThan(statePriority("pending"));
   });
 
   it("ranks pending above cancelled", () => {
-    expect(statePriority("pending")).toBeGreaterThan(
-      statePriority("cancelled"),
-    );
+    expect(statePriority("pending")).toBeGreaterThan(statePriority("cancelled"));
   });
 
   it("ranks cancelled above success", () => {
-    expect(statePriority("cancelled")).toBeGreaterThan(
-      statePriority("success"),
-    );
+    expect(statePriority("cancelled")).toBeGreaterThan(statePriority("success"));
   });
 
   it("returns -1 for unknown states", () => {
@@ -237,9 +221,7 @@ describe("parseBatchedCIResponse", () => {
     const data = {
       ws_0: {
         pullRequests: {
-          nodes: [
-            { state: "OPEN", url: "https://github.com/o/r/pull/1" },
-          ],
+          nodes: [{ state: "OPEN", url: "https://github.com/o/r/pull/1" }],
         },
         ref: {
           target: {
@@ -412,9 +394,7 @@ describe("parseBatchedCIResponse", () => {
     const data = {
       ws_0: {
         pullRequests: {
-          nodes: [
-            { state: "OPEN", url: "https://github.com/o/r/pull/42" },
-          ],
+          nodes: [{ state: "OPEN", url: "https://github.com/o/r/pull/42" }],
         },
         ref: {
           target: {
@@ -437,9 +417,7 @@ describe("parseBatchedCIResponse", () => {
     };
 
     const result = parseBatchedCIResponse(data, ["ws_0"]);
-    expect(result.get("ws_0")?.url).toBe(
-      "https://github.com/o/r/pull/42",
-    );
+    expect(result.get("ws_0")?.url).toBe("https://github.com/o/r/pull/42");
   });
 
   it("deduplicates workflows by name keeping the latest", () => {
@@ -537,11 +515,7 @@ describe("parseBatchedCIResponse", () => {
       },
     };
 
-    const result = parseBatchedCIResponse(data, [
-      "ws_0",
-      "ws_1",
-      "ws_2",
-    ]);
+    const result = parseBatchedCIResponse(data, ["ws_0", "ws_1", "ws_2"]);
     expect(result.get("ws_0")?.state).toBe("success");
     expect(result.get("ws_1")?.state).toBe("merged");
     expect(result.get("ws_2")?.state).toBe("failure");

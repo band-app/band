@@ -2,11 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { toWorkspaceId } from "@band/dashboard-core";
 import { execGh, execGit, getRepoInfo, type RepoInfo } from "./git";
-import {
-  buildBatchedCIQuery,
-  parseBatchedCIResponse,
-  type CIStatus,
-} from "./github-graphql";
+import { buildBatchedCIQuery, type CIStatus, parseBatchedCIResponse } from "./github-graphql";
 import { bandHome, loadState } from "./state";
 import { syncWorktrees } from "./sync-state";
 
@@ -111,9 +107,7 @@ async function getGitStatus(worktreePath: string): Promise<GitStatus> {
 /**
  * Resolve repo info for a project path, with caching.
  */
-async function resolveRepoInfo(
-  projectPath: string,
-): Promise<RepoInfo | null> {
+async function resolveRepoInfo(projectPath: string): Promise<RepoInfo | null> {
   const cached = repoInfoCache.get(projectPath);
   if (cached !== undefined) return cached;
   const info = await getRepoInfo(projectPath);
@@ -128,9 +122,7 @@ async function resolveRepoInfo(
  * fetching PR status and check suite results for all branches in a single request.
  * Falls back to individual gh CLI calls if the GraphQL query fails.
  */
-async function getBatchedCIStatuses(
-  workspaces: WorkspaceInfo[],
-): Promise<Map<string, CIStatus>> {
+async function getBatchedCIStatuses(workspaces: WorkspaceInfo[]): Promise<Map<string, CIStatus>> {
   // Resolve repo info for all workspaces in parallel
   const resolved: Array<{
     ws: WorkspaceInfo;
@@ -179,10 +171,7 @@ async function getBatchedCIStatuses(
     const cwd = group[0].ws.worktreePath;
 
     try {
-      const output = await execGh(
-        ["api", "graphql", "-f", `query=${query}`],
-        cwd,
-      );
+      const output = await execGh(["api", "graphql", "-f", `query=${query}`], cwd);
       const response = JSON.parse(output) as {
         data: Record<string, unknown>;
       };
@@ -218,9 +207,7 @@ async function pollTick() {
   const isCITick = tickCount % CI_POLL_TICKS === 0;
 
   if (tickCount === 1 || isCITick) {
-    await syncWorktrees().catch((err) =>
-      console.error("syncWorktrees error:", err),
-    );
+    await syncWorktrees().catch((err) => console.error("syncWorktrees error:", err));
   }
 
   const workspaces = getWorkspaces();
@@ -229,9 +216,7 @@ async function pollTick() {
 
   // On CI ticks, do git fetch in parallel per unique project path
   if (isCITick) {
-    const uniqueProjectPaths = [
-      ...new Set(workspaces.map((w) => w.projectPath)),
-    ];
+    const uniqueProjectPaths = [...new Set(workspaces.map((w) => w.projectPath))];
     await Promise.allSettled(
       uniqueProjectPaths.map((projectPath) =>
         execGit(["fetch", "--quiet", "--all"], projectPath).catch(() => {}),
