@@ -1,7 +1,12 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { toWorkspaceId } from "@band/dashboard-core";
-import { execGh, execGit } from "./git";
+import { execGh, execGit, getRepoInfo, type RepoInfo } from "./git";
+import {
+  buildBatchedCIQuery,
+  parseBatchedCIResponse,
+  type CIStatus,
+} from "./github-graphql";
 import { bandHome, loadState } from "./state";
 import { syncWorktrees } from "./sync-state";
 
@@ -11,11 +16,6 @@ interface GitStatus {
   ahead: number;
   behind: number;
   sync_state: string;
-}
-
-interface CIStatus {
-  state: string;
-  url?: string | null;
 }
 
 interface WorkspaceInfo {
@@ -31,6 +31,9 @@ const CI_POLL_TICKS = 6; // every 6th tick = 30s
 
 let pollerTimer: ReturnType<typeof setInterval> | null = null;
 let tickCount = 0;
+
+// Cache repo info per project path (doesn't change during runtime)
+const repoInfoCache = new Map<string, RepoInfo | null>();
 
 function branchStatusDir(): string {
   return join(bandHome(), "branch-status");
@@ -105,103 +108,109 @@ async function getGitStatus(worktreePath: string): Promise<GitStatus> {
   return status;
 }
 
-async function getCIStatus(worktreePath: string, branch: string): Promise<CIStatus> {
-  // Check PR status
-  let prUrl: string | null = null;
-  try {
-    const prOutput = await execGh(["pr", "view", branch, "--json", "state,url"], worktreePath);
-    const pr = JSON.parse(prOutput) as { state: string; url: string };
-    if (pr.state === "MERGED") {
-      return { state: "merged", url: pr.url };
-    }
-    prUrl = pr.url;
-  } catch {
-    // No PR or gh not available
-  }
-
-  // Check workflow runs
-  try {
-    const runsOutput = await execGh(
-      [
-        "run",
-        "list",
-        "--branch",
-        branch,
-        "--limit",
-        "20",
-        "--json",
-        "status,conclusion,url,updatedAt,workflowName",
-      ],
-      worktreePath,
-    );
-    const runs = JSON.parse(runsOutput) as Array<{
-      status: string;
-      conclusion: string | null;
-      url: string;
-      updatedAt: string;
-      workflowName: string;
-    }>;
-
-    if (runs.length === 0) {
-      return { state: "none" };
-    }
-
-    // Deduplicate: keep only the latest run per workflow
-    const latestByWorkflow = new Map<
-      string,
-      { status: string; conclusion: string | null; url: string; updatedAt: string }
-    >();
-    for (const run of runs) {
-      const existing = latestByWorkflow.get(run.workflowName);
-      if (!existing || run.updatedAt > existing.updatedAt) {
-        latestByWorkflow.set(run.workflowName, run);
-      }
-    }
-
-    // Aggregate status with priority: failure > running > pending > cancelled > success
-    let aggregatedState = "success";
-    let aggregatedUrl: string | null = null;
-
-    for (const run of latestByWorkflow.values()) {
-      let runState: string;
-      if (run.status === "in_progress" || run.status === "queued") {
-        runState = run.status === "queued" ? "pending" : "running";
-      } else if (run.conclusion === "failure") {
-        runState = "failure";
-      } else if (run.conclusion === "cancelled") {
-        runState = "cancelled";
-      } else {
-        runState = "success";
-      }
-
-      const priority = statePriority(runState);
-      if (priority >= statePriority(aggregatedState)) {
-        aggregatedState = runState;
-        aggregatedUrl = run.url;
-      }
-    }
-
-    return { state: aggregatedState, url: prUrl ?? aggregatedUrl };
-  } catch {
-    return { state: "none" };
-  }
+/**
+ * Resolve repo info for a project path, with caching.
+ */
+async function resolveRepoInfo(
+  projectPath: string,
+): Promise<RepoInfo | null> {
+  const cached = repoInfoCache.get(projectPath);
+  if (cached !== undefined) return cached;
+  const info = await getRepoInfo(projectPath);
+  repoInfoCache.set(projectPath, info);
+  return info;
 }
 
-function statePriority(state: string): number {
-  switch (state) {
-    case "failure":
-      return 4;
-    case "running":
-      return 3;
-    case "pending":
-      return 2;
-    case "cancelled":
-      return 1;
-    case "success":
-      return 0;
-    default:
-      return -1;
+/**
+ * Fetch CI status for all workspaces using batched GraphQL queries.
+ *
+ * Groups workspaces by GitHub host and executes one GraphQL query per host,
+ * fetching PR status and check suite results for all branches in a single request.
+ * Falls back to individual gh CLI calls if the GraphQL query fails.
+ */
+async function getBatchedCIStatuses(
+  workspaces: WorkspaceInfo[],
+): Promise<Map<string, CIStatus>> {
+  // Resolve repo info for all workspaces in parallel
+  const resolved: Array<{
+    ws: WorkspaceInfo;
+    repoInfo: RepoInfo;
+    alias: string;
+  }> = [];
+  await Promise.allSettled(
+    workspaces.map(async (ws, index) => {
+      const repoInfo = await resolveRepoInfo(ws.projectPath);
+      if (repoInfo) {
+        resolved.push({ ws, repoInfo, alias: `ws_${index}` });
+      }
+    }),
+  );
+
+  // If no workspaces have repo info, return empty
+  if (resolved.length === 0) {
+    const results = new Map<string, CIStatus>();
+    for (const ws of workspaces) {
+      results.set(ws.workspaceId, { state: "none" });
+    }
+    return results;
   }
+
+  // Group by GitHub host (one query per host for correct auth)
+  const byHost = new Map<string, typeof resolved>();
+  for (const entry of resolved) {
+    const host = entry.repoInfo.host;
+    const group = byHost.get(host) ?? [];
+    group.push(entry);
+    byHost.set(host, group);
+  }
+
+  const allResults = new Map<string, CIStatus>();
+
+  // Execute one batched GraphQL query per host
+  for (const [, group] of byHost) {
+    const inputs = group.map((g) => ({
+      alias: g.alias,
+      branch: g.ws.branch,
+      repoInfo: g.repoInfo,
+    }));
+
+    const query = buildBatchedCIQuery(inputs);
+    // Use any workspace's worktreePath for cwd (gh auth is per-host)
+    const cwd = group[0].ws.worktreePath;
+
+    try {
+      const output = await execGh(
+        ["api", "graphql", "-f", `query=${query}`],
+        cwd,
+      );
+      const response = JSON.parse(output) as {
+        data: Record<string, unknown>;
+      };
+      const parsed = parseBatchedCIResponse(
+        response.data as Record<string, never>,
+        inputs.map((i) => i.alias),
+      );
+
+      // Map aliases back to workspace IDs
+      for (const g of group) {
+        const status = parsed.get(g.alias);
+        if (status) {
+          allResults.set(g.ws.workspaceId, status);
+        }
+      }
+    } catch {
+      // GraphQL failed for this host — leave workspaces as "none"
+    }
+  }
+
+  // Fill in "none" for workspaces that couldn't resolve repo info
+  for (const ws of workspaces) {
+    if (!allResults.has(ws.workspaceId)) {
+      allResults.set(ws.workspaceId, { state: "none" });
+    }
+  }
+
+  return allResults;
 }
 
 async function pollTick() {
@@ -209,7 +218,9 @@ async function pollTick() {
   const isCITick = tickCount % CI_POLL_TICKS === 0;
 
   if (tickCount === 1 || isCITick) {
-    await syncWorktrees().catch((err) => console.error("syncWorktrees error:", err));
+    await syncWorktrees().catch((err) =>
+      console.error("syncWorktrees error:", err),
+    );
   }
 
   const workspaces = getWorkspaces();
@@ -218,7 +229,9 @@ async function pollTick() {
 
   // On CI ticks, do git fetch in parallel per unique project path
   if (isCITick) {
-    const uniqueProjectPaths = [...new Set(workspaces.map((w) => w.projectPath))];
+    const uniqueProjectPaths = [
+      ...new Set(workspaces.map((w) => w.projectPath)),
+    ];
     await Promise.allSettled(
       uniqueProjectPaths.map((projectPath) =>
         execGit(["fetch", "--quiet", "--all"], projectPath).catch(() => {}),
@@ -229,13 +242,19 @@ async function pollTick() {
   const dir = branchStatusDir();
   mkdirSync(dir, { recursive: true });
 
+  // Fetch CI statuses in batch on CI ticks
+  let ciStatuses = new Map<string, CIStatus>();
+  if (isCITick) {
+    ciStatuses = await getBatchedCIStatuses(workspaces);
+  }
+
   await Promise.allSettled(
     workspaces.map(async (ws) => {
       const git = await getGitStatus(ws.worktreePath);
 
       let ci: CIStatus = { state: "none" };
       if (isCITick) {
-        ci = await getCIStatus(ws.worktreePath, ws.branch);
+        ci = ciStatuses.get(ws.workspaceId) ?? { state: "none" };
       } else {
         // Preserve existing CI status from file on non-CI ticks
         const filePath = join(dir, `${ws.workspaceId}.json`);

@@ -9,6 +9,46 @@ export interface WorktreeInfo {
   isBare: boolean;
 }
 
+export interface RepoInfo {
+  host: string;
+  owner: string;
+  repo: string;
+}
+
+/**
+ * Parse a git remote URL into host, owner, and repo components.
+ * Supports SSH (git@host:owner/repo.git) and HTTPS (https://host/owner/repo.git) formats.
+ */
+export function parseGitRemoteUrl(url: string): RepoInfo | null {
+  // SSH: git@github.com:owner/repo.git (or ssh://git@github.com/owner/repo.git)
+  const sshMatch = url.match(/^[\w.-]+@([^:]+):([^/]+)\/(.+?)(?:\.git)?$/);
+  if (sshMatch) {
+    return { host: sshMatch[1], owner: sshMatch[2], repo: sshMatch[3] };
+  }
+  // HTTPS: https://github.com/owner/repo.git
+  const httpsMatch = url.match(/^https?:\/\/([^/]+)\/([^/]+)\/(.+?)(?:\.git)?$/);
+  if (httpsMatch) {
+    return { host: httpsMatch[1], owner: httpsMatch[2], repo: httpsMatch[3] };
+  }
+  return null;
+}
+
+/**
+ * Get the GitHub host, owner, and repo for a git worktree by reading its origin remote URL.
+ */
+export async function getRepoInfo(
+  worktreePath: string,
+): Promise<RepoInfo | null> {
+  try {
+    const remoteUrl = (
+      await execGit(["remote", "get-url", "origin"], worktreePath)
+    ).trim();
+    return parseGitRemoteUrl(remoteUrl);
+  } catch {
+    return null;
+  }
+}
+
 export function gitCmd(): { command: string; env: NodeJS.ProcessEnv } {
   const env = { ...process.env };
   if (env.PATH) {
