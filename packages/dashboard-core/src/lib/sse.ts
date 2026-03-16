@@ -1,4 +1,4 @@
-import type { CIStatus, GitStatus, WorkspaceStatus } from "../types";
+import type { CIStatus, GitStatus, TaskRunnerState, WorkspaceStatus } from "../types";
 
 export type SSEEvent = {
   kind:
@@ -8,7 +8,8 @@ export type SSEEvent = {
     | "branch-status"
     | "tunnel-url"
     | "tunnel-error"
-    | "setup-status";
+    | "setup-status"
+    | "task-status";
   status?: WorkspaceStatus;
   statuses?: WorkspaceStatus[];
   workspaceId?: string;
@@ -18,4 +19,5 @@ export type SSEEvent = {
   error?: string;
   setupState?: "running" | "completed" | "failed";
   setupError?: string;
+  taskState?: TaskRunnerState;
 };

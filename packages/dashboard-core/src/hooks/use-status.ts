@@ -103,3 +103,24 @@ export function useSetupStatusWatcher() {
     return unsubscribe;
   }, [adapter, updateSetupStatus, removeSetupStatus]);
 }
+
+export function useTaskStatusWatcher() {
+  const adapter = useAdapter();
+  const updateTaskStatus = useDashboardStore((s) => s.updateTaskStatus);
+  const removeTaskStatus = useDashboardStore((s) => s.removeTaskStatus);
+
+  useEffect(() => {
+    const unsubscribe = adapter.subscribeStatusEvents((event) => {
+      const data = event as SSEEvent;
+      if (data.kind !== "task-status" || !data.workspaceId) return;
+
+      if (data.taskState === "running") {
+        updateTaskStatus(data.workspaceId, { state: "running" });
+      } else {
+        removeTaskStatus(data.workspaceId);
+      }
+    });
+
+    return unsubscribe;
+  }, [adapter, updateTaskStatus, removeTaskStatus]);
+}

@@ -67,6 +67,12 @@ export interface SetupStatus {
   error?: string;
 }
 
+export type TaskRunnerState = "running" | "completed" | "failed";
+
+export interface TaskRunnerStatus {
+  state: TaskRunnerState;
+}
+
 export type AppType = "vscode" | "zed" | "iterm" | "chrome";
 
 export interface VsCodeAppConfig {

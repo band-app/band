@@ -3,6 +3,7 @@ import { basename, extname, join } from "node:path";
 import { watch } from "chokidar";
 import { startBranchStatusPoller, stopBranchStatusPoller } from "./branch-status-poller";
 import { getRunningSetups } from "./setup-runner";
+import { getRunningTaskWorkspaceIds } from "./task-runner";
 import {
   bandHome,
   loadCurrentStatuses,
@@ -32,7 +33,8 @@ export interface StatusEvent {
     | "branch-status"
     | "tunnel-url"
     | "tunnel-error"
-    | "setup-status";
+    | "setup-status"
+    | "task-status";
   status?: WorkspaceStatus;
   statuses?: WorkspaceStatus[];
   workspaceId?: string;
@@ -42,6 +44,7 @@ export interface StatusEvent {
   error?: string;
   setupState?: "running" | "completed" | "failed";
   setupError?: string;
+  taskState?: "running" | "completed" | "failed";
 }
 
 type StatusListener = (event: StatusEvent) => void;
@@ -163,6 +166,11 @@ export function subscribe(listener: StatusListener): () => void {
   // Send current setup status snapshots
   for (const workspaceId of getRunningSetups()) {
     listener({ kind: "setup-status", workspaceId, setupState: "running" });
+  }
+
+  // Send current task runner status snapshots
+  for (const workspaceId of getRunningTaskWorkspaceIds()) {
+    listener({ kind: "task-status", workspaceId, taskState: "running" });
   }
 
   return () => {

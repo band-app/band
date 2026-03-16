@@ -3,6 +3,7 @@ import type { UIMessageChunk } from "ai";
 import { getAgent, getOrCreateAgent } from "./agent-pool";
 import { createPendingInput } from "./pending-inputs";
 import { generateTaskId, markTaskFailed, saveTask } from "./task-store";
+import { emit as emitStatus } from "./watcher";
 import { resolveWorkspace } from "./workspace";
 
 const log = createLogger("task-runner");
@@ -121,6 +122,7 @@ export function submitTask(
   };
   tasks.set(workspaceId, task);
   persistTask(task);
+  emitStatus({ kind: "task-status", workspaceId, taskState: "running" });
 
   // Fire-and-forget async execution
   runTask(workspaceId, task).catch((err) => {
@@ -144,6 +146,7 @@ export function abortTask(workspaceId: string): boolean {
   task.status = "failed";
   task.completedAt = Date.now();
   persistTask(task);
+  emitStatus({ kind: "task-status", workspaceId, taskState: "failed" });
   emit(workspaceId, task, { type: "error", errorText: "Task aborted by user" });
   emit(workspaceId, task, { type: "finish" });
   scheduleExpiry(workspaceId);
@@ -164,6 +167,7 @@ export function cancelTask(taskId: string): { cancelled: boolean; workspaceId?: 
       task.status = "failed";
       task.completedAt = Date.now();
       persistTask(task);
+      emitStatus({ kind: "task-status", workspaceId, taskState: "failed" });
       emit(workspaceId, task, { type: "error", errorText: "Task cancelled" });
       emit(workspaceId, task, { type: "finish" });
       scheduleExpiry(workspaceId);
@@ -189,6 +193,7 @@ async function runTask(workspaceId: string, task: InternalTask) {
     task.status = "failed";
     task.completedAt = Date.now();
     persistTask(task);
+    emitStatus({ kind: "task-status", workspaceId, taskState: "failed" });
     emit(workspaceId, task, { type: "error", errorText: "Workspace not found" });
     scheduleExpiry(workspaceId);
     return;
@@ -290,6 +295,7 @@ async function runTask(workspaceId: string, task: InternalTask) {
             task.status = "completed";
             task.completedAt = Date.now();
             persistTask(task);
+            emitStatus({ kind: "task-status", workspaceId, taskState: "completed" });
             emit(workspaceId, task, {
               type: "data-result" as UIMessageChunk["type"],
               data: {
@@ -308,6 +314,7 @@ async function runTask(workspaceId: string, task: InternalTask) {
             task.status = "failed";
             task.completedAt = Date.now();
             persistTask(task);
+            emitStatus({ kind: "task-status", workspaceId, taskState: "failed" });
             emit(workspaceId, task, {
               type: "error",
               errorText: `Agent error: ${event.errors.join(", ") || "unknown error"}`,
@@ -335,6 +342,7 @@ async function runTask(workspaceId: string, task: InternalTask) {
         task.completedAt = Date.now();
       }
       persistTask(task);
+      emitStatus({ kind: "task-status", workspaceId, taskState: task.status });
       emit(workspaceId, task, {
         type: "error",
         errorText: "Agent session ended without producing a result",
@@ -344,6 +352,7 @@ async function runTask(workspaceId: string, task: InternalTask) {
     task.status = "failed";
     task.completedAt = Date.now();
     persistTask(task);
+    emitStatus({ kind: "task-status", workspaceId, taskState: "failed" });
     emit(workspaceId, task, {
       type: "error",
       errorText: err instanceof Error ? err.message : "Unknown error",
@@ -402,6 +411,16 @@ function toTaskInfo(task: InternalTask): TaskInfo {
     completedAt: task.completedAt,
     prompt: task.prompt,
   };
+}
+
+export function getRunningTaskWorkspaceIds(): string[] {
+  const ids: string[] = [];
+  for (const [workspaceId, task] of tasks) {
+    if (task.status === "running") {
+      ids.push(workspaceId);
+    }
+  }
+  return ids;
 }
 
 export class TaskConflictError extends Error {

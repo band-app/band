@@ -4,6 +4,7 @@ import type {
   CIStatus,
   GitStatus,
   SetupStatus,
+  TaskRunnerStatus,
   WorkspaceBranchStatus,
   WorkspaceStatus,
 } from "../types";
@@ -14,6 +15,7 @@ export interface DashboardState {
   error: string | null;
   branchStatuses: Map<string, WorkspaceBranchStatus>;
   setupStatuses: Map<string, SetupStatus>;
+  taskStatuses: Map<string, TaskRunnerStatus>;
   _openingWorkspace: boolean;
 
   openWorkspace: (workspaceId: string) => void;
@@ -29,6 +31,8 @@ export interface DashboardState {
   updateCIStatus: (workspaceId: string, ci: CIStatus) => void;
   updateSetupStatus: (workspaceId: string, status: SetupStatus) => void;
   removeSetupStatus: (workspaceId: string) => void;
+  updateTaskStatus: (workspaceId: string, status: TaskRunnerStatus) => void;
+  removeTaskStatus: (workspaceId: string) => void;
 }
 
 export type DashboardStore = UseBoundStore<StoreApi<DashboardState>>;
@@ -38,6 +42,7 @@ export function createDashboardStore(adapter: DashboardAdapter): DashboardStore 
     statuses: new Map(),
     branchStatuses: new Map(),
     setupStatuses: new Map(),
+    taskStatuses: new Map(),
     activeWorkspaceId: null,
     error: null,
     _openingWorkspace: false,
@@ -164,6 +169,22 @@ export function createDashboardStore(adapter: DashboardAdapter): DashboardStore 
         const setupStatuses = new Map(state.setupStatuses);
         setupStatuses.delete(workspaceId);
         return { setupStatuses };
+      });
+    },
+
+    updateTaskStatus: (workspaceId: string, status: TaskRunnerStatus) => {
+      set((state) => {
+        const taskStatuses = new Map(state.taskStatuses);
+        taskStatuses.set(workspaceId, status);
+        return { taskStatuses };
+      });
+    },
+
+    removeTaskStatus: (workspaceId: string) => {
+      set((state) => {
+        const taskStatuses = new Map(state.taskStatuses);
+        taskStatuses.delete(workspaceId);
+        return { taskStatuses };
       });
     },
   }));

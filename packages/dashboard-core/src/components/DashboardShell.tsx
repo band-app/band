@@ -27,6 +27,7 @@ import {
   useBranchStatusWatcher,
   useSetupStatusWatcher,
   useStatusWatcher,
+  useTaskStatusWatcher,
 } from "../hooks/use-status";
 import { useDashboardStore } from "../stores/index";
 import { AddProjectDialog } from "./AddProjectDialog";
@@ -87,6 +88,7 @@ export function DashboardShell({ toolbarExtra }: DashboardShellProps) {
   useActiveWorkspaceWatcher();
   useBranchStatusWatcher();
   useSetupStatusWatcher();
+  useTaskStatusWatcher();
 
   return (
     <div

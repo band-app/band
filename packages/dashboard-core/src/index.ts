@@ -18,6 +18,7 @@ export { QuickOpenDialog } from "./components/QuickOpenDialog";
 export { SearchFilesDialog } from "./components/SearchFilesDialog";
 export { SettingsPage } from "./components/SettingsPage";
 export { SetupStatusIndicator } from "./components/SetupStatusIndicator";
+export { TaskRunningIndicator } from "./components/TaskRunningIndicator";
 export { WorkspaceCard } from "./components/WorkspaceCard";
 export { type WorkspaceTab, WorkspaceTabNav } from "./components/WorkspaceTabNav";
 // Context
@@ -40,6 +41,7 @@ export {
   useBranchStatusWatcher,
   useSetupStatusWatcher,
   useStatusWatcher,
+  useTaskStatusWatcher,
 } from "./hooks/use-status";
 export { openFileSearchPanel } from "./lib/codemirror-setup";
 export { extensionToLanguage, filenameToLanguage } from "./lib/language-map";
@@ -80,6 +82,8 @@ export type {
   Settings,
   SetupState,
   SetupStatus,
+  TaskRunnerState,
+  TaskRunnerStatus,
   WorkspaceBranchStatus,
   WorkspaceDiff,
   WorkspaceDiffSummary,
