@@ -3,7 +3,6 @@ import { basename, extname, join } from "node:path";
 import { watch } from "chokidar";
 import { startBranchStatusPoller, stopBranchStatusPoller } from "./branch-status-poller";
 import { getRunningSetups } from "./setup-runner";
-import { getRunningTaskWorkspaceIds } from "./task-runner";
 import {
   bandHome,
   loadCurrentStatuses,
@@ -11,6 +10,7 @@ import {
   statusDir,
   type WorkspaceStatus,
 } from "./state";
+import { getRunningTaskWorkspaceIds } from "./task-runner";
 
 interface GitStatus {
   dirty: boolean;
