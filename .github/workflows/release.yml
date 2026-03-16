@@ -155,7 +155,16 @@ jobs:
         run: cargo clippy --manifest-path apps/cli/Cargo.toml -- -D warnings
 
       - name: Build CLI
-        run: pnpm build:cli
+        shell: bash
+        run: |
+          pnpm --filter @band/cli build
+          mkdir -p apps/dashboard/src-tauri/binaries
+          TARGET=$(rustc -vV | sed -n 's/host: //p')
+          EXT=""
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            EXT=".exe"
+          fi
+          cp "apps/cli/target/release/band${EXT}" "apps/dashboard/src-tauri/binaries/band-${TARGET}${EXT}"
 
       - name: Lint (cargo clippy — Dashboard)
         shell: bash

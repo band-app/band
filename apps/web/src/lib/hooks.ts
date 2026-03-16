@@ -105,9 +105,9 @@ export async function installHooks(): Promise<void> {
       return !e.hooks.some((h) => h.type === "command" && h.command && isBandHook(h.command));
     });
 
-    // Add fresh band hook
+    // Add fresh band hook (quote path for Windows paths that may contain spaces)
     filtered.push({
-      hooks: [{ type: "command", command: `${bandPath} notify` }],
+      hooks: [{ type: "command", command: `"${bandPath}" notify` }],
     });
 
     hooks[event] = filtered;

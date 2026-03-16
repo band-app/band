@@ -6,8 +6,8 @@ $ErrorActionPreference = "Stop"
 
 # Read hook input from stdin (Claude Code passes JSON with hook_event_name)
 try {
-    $input = $input | Out-String
-    $parsed = $input | ConvertFrom-Json
+    $stdinText = @($input) -join "`n"
+    $parsed = $stdinText | ConvertFrom-Json
     $hookEvent = $parsed.hook_event_name
 } catch {
     exit 0
