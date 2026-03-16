@@ -27,6 +27,8 @@ export interface DashboardAdapter {
   removeWorkspace(project: string, branch: string): Promise<void>;
   openWorkspace(workspaceId: string): Promise<void>;
   runScript(path: string, scriptType: string): Promise<void>;
+  gitPull(project: string, branch: string): Promise<void>;
+  gitPush(project: string, branch: string): Promise<void>;
 
   // Settings
   getSettings(): Promise<Settings>;

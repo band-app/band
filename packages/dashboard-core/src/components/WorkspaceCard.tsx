@@ -7,7 +7,16 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@band/ui";
-import { Clipboard, FolderOpen, GitBranch, Play, Square, Trash2 } from "lucide-react";
+import {
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  Clipboard,
+  FolderOpen,
+  GitBranch,
+  Play,
+  Square,
+  Trash2,
+} from "lucide-react";
 import { useEffect, useRef } from "react";
 import { useCapabilities } from "../context";
 import { useRemoveWorkspace } from "../hooks/use-project-mutations";
@@ -59,6 +68,8 @@ export function WorkspaceCard({
 
   const openWorkspace = useDashboardStore((s) => s.openWorkspace);
   const runScript = useDashboardStore((s) => s.runScript);
+  const gitPull = useDashboardStore((s) => s.gitPull);
+  const gitPush = useDashboardStore((s) => s.gitPush);
   const activeWorkspaceId = useDashboardStore((s) => s.activeWorkspaceId);
   const removeWorkspaceMutation = useRemoveWorkspace();
 
@@ -163,6 +174,14 @@ export function WorkspaceCard({
             Run teardown
           </ContextMenuItem>
         )}
+        <ContextMenuItem onClick={() => gitPull(projectName, worktree.branch)}>
+          <ArrowDownToLine />
+          Git pull
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => gitPush(projectName, worktree.branch)}>
+          <ArrowUpFromLine />
+          Git push
+        </ContextMenuItem>
         {worktree.branch !== defaultBranch && (
           <ContextMenuItem variant="destructive" onClick={handleDelete}>
             <Trash2 />

@@ -362,6 +362,37 @@ const workspacesRouter = t.router({
       throw new Error(`Workspace "${input.branch}" not found`);
     }),
 
+  gitPull: publicProcedure
+    .input(z.object({ project: z.string(), branch: z.string() }))
+    .mutation(async ({ input }) => {
+      const workspaceId = toWorkspaceId(input.project, input.branch);
+      const workspace = resolveWorkspace(workspaceId);
+      if (!workspace) {
+        throw new Error("Workspace not found");
+      }
+      const cwd = workspace.worktree.path;
+      await execGit(["pull"], cwd);
+      return { ok: true };
+    }),
+
+  gitPush: publicProcedure
+    .input(z.object({ project: z.string(), branch: z.string() }))
+    .mutation(async ({ input }) => {
+      const workspaceId = toWorkspaceId(input.project, input.branch);
+      const workspace = resolveWorkspace(workspaceId);
+      if (!workspace) {
+        throw new Error("Workspace not found");
+      }
+      const cwd = workspace.worktree.path;
+      try {
+        await execGit(["push"], cwd);
+      } catch {
+        // First push may need to set upstream
+        await execGit(["push", "--set-upstream", "origin", input.branch], cwd);
+      }
+      return { ok: true };
+    }),
+
   runScript: publicProcedure
     .input(z.object({ path: z.string(), scriptType: z.string() }))
     .mutation(({ input }) => {

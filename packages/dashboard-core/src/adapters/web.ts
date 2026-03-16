@@ -82,6 +82,14 @@ export class WebDashboardAdapter implements DashboardAdapter {
     await this.trpc.workspaces.runScript.mutate({ path, scriptType });
   }
 
+  async gitPull(project: string, branch: string): Promise<void> {
+    await this.trpc.workspaces.gitPull.mutate({ project, branch });
+  }
+
+  async gitPush(project: string, branch: string): Promise<void> {
+    await this.trpc.workspaces.gitPush.mutate({ project, branch });
+  }
+
   async getSettings(): Promise<Settings> {
     return (await this.trpc.settings.get.query()) as Settings;
   }
