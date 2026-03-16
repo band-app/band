@@ -341,7 +341,10 @@ fn schema_works_without_settings() {
         stderr(&output)
     );
     let out = stdout(&output);
-    assert!(out.contains("init"), "schema should list init command: {out}");
+    assert!(
+        out.contains("init"),
+        "schema should list init command: {out}"
+    );
 }
 
 // --- Projects tests ---

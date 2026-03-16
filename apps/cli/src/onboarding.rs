@@ -38,10 +38,7 @@ pub fn run_onboarding() -> Result<(), String> {
     state::save_settings(&settings)?;
 
     println!();
-    println!(
-        "Settings saved to {}",
-        state::settings_file().display()
-    );
+    println!("Settings saved to {}", state::settings_file().display());
     println!("You're all set! Run `band projects add <path>` to register your first project.");
 
     Ok(())
@@ -60,7 +57,10 @@ fn prompt_coding_agent(reader: &mut impl BufRead) -> Result<CodingAgent, String>
     match choice {
         1 => Ok(CodingAgent::ClaudeCode),
         2 => {
-            let cmd = read_line_prompt(reader, "Enter the agent command (e.g. /usr/local/bin/my-agent)")?;
+            let cmd = read_line_prompt(
+                reader,
+                "Enter the agent command (e.g. /usr/local/bin/my-agent)",
+            )?;
             if cmd.is_empty() {
                 return Err("Custom command cannot be empty".to_string());
             }

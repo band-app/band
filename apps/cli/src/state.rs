@@ -50,9 +50,10 @@ pub fn settings_exist() -> bool {
 
 pub fn save_settings(settings: &Settings) -> Result<(), String> {
     let home = band_home();
-    fs::create_dir_all(&home).map_err(|e| format!("Failed to create directory {}: {e}", home.display()))?;
+    fs::create_dir_all(&home)
+        .map_err(|e| format!("Failed to create directory {}: {e}", home.display()))?;
     let path = settings_file();
-    let json =
-        serde_json::to_string_pretty(settings).map_err(|e| format!("Failed to serialize settings: {e}"))?;
+    let json = serde_json::to_string_pretty(settings)
+        .map_err(|e| format!("Failed to serialize settings: {e}"))?;
     fs::write(&path, json).map_err(|e| format!("Failed to write settings: {e}"))
 }
