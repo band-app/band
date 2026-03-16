@@ -52,9 +52,6 @@ pub fn run() {
 
     log_to_file("dashboard starting");
 
-    // Shared flags accessible from both setup() and the run-event callback
-    let health_stop = Arc::new(AtomicBool::new(false));
-    let health_stop_setup = health_stop.clone();
     let cleaned_up = Arc::new(AtomicBool::new(false));
     let cleaned_up_setup = cleaned_up.clone();
 
@@ -81,8 +78,6 @@ pub fn run() {
         .setup(move |app| {
             let window = app.get_webview_window("main").unwrap();
 
-            // Flag to stop the health monitor when the app closes
-            let health_stop = health_stop_setup;
             let cleaned_up = cleaned_up_setup;
 
             // Auto-start the web server in release builds.
@@ -99,47 +94,6 @@ pub fn run() {
                         dash_log!("Failed to start web server: {e}");
                     }
                 }
-
-                // Spawn a background health monitor that restarts the server
-                // if it crashes unexpectedly.
-                let stop = health_stop.clone();
-                tauri::async_runtime::spawn(async move {
-                    let mut interval = tokio::time::interval(std::time::Duration::from_secs(10));
-                    // The first tick fires immediately — skip it so we don't
-                    // check right after startup.
-                    interval.tick().await;
-
-                    loop {
-                        interval.tick().await;
-                        if stop.load(Ordering::Relaxed) {
-                            break;
-                        }
-
-                        let port = webserver::get_configured_port();
-                        let healthy = match webserver::get_token() {
-                            Ok(token) => webserver::check_local_health(port, &token).await,
-                            Err(_) => continue, // No token yet, skip this tick
-                        };
-
-                        if !healthy {
-                            dash_log!("[health-monitor] Server appears down, restarting…");
-                            let result =
-                                tokio::task::spawn_blocking(webserver::ensure_webserver_running)
-                                    .await;
-                            match result {
-                                Ok(Ok((p, _))) => {
-                                    dash_log!("[health-monitor] Server restarted on port {p}");
-                                }
-                                Ok(Err(e)) => {
-                                    dash_log!("[health-monitor] Restart failed: {e}");
-                                }
-                                Err(e) => {
-                                    dash_log!("[health-monitor] Restart task panicked: {e}");
-                                }
-                            }
-                        }
-                    }
-                });
             }
 
             // Set window background to black so the area behind macOS traffic
@@ -182,7 +136,6 @@ pub fn run() {
             // CloseRequested (close button) and ExitRequested (Cmd+Q) fire.
             let web_proc = app.state::<WebServerState>().inner().0.clone();
             let app_handle_for_close = app.handle().clone();
-            let health_stop_close = health_stop;
             let cleaned_up_close = cleaned_up;
             window.on_window_event(move |event| {
                 if let tauri::WindowEvent::CloseRequested { .. } = event {
@@ -192,7 +145,6 @@ pub fn run() {
                     {
                         return;
                     }
-                    health_stop_close.store(true, Ordering::Relaxed);
 
                     if let Some(tasks_win) = app_handle_for_close.get_webview_window("tasks") {
                         let _ = tasks_win.destroy();
@@ -234,7 +186,6 @@ pub fn run() {
             {
                 return;
             }
-            health_stop.store(true, Ordering::Relaxed);
 
             let web_proc = &app_handle.state::<WebServerState>().0;
             if let Some(tasks_win) = app_handle.get_webview_window("tasks") {
