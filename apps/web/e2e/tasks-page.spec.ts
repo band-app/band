@@ -101,6 +101,10 @@ test.beforeAll(async () => {
     completedAt: Date.now() - 7100_000,
   });
 
+  server = await startServer({ tmpHome });
+
+  // Seed the running task AFTER the server starts so that cleanupStaleTasks()
+  // (which marks all running tasks as failed on startup) doesn't clobber it.
   seedTask(tmpHome, {
     id: "tsk_3000",
     workspaceId: "backend-main",
@@ -110,8 +114,6 @@ test.beforeAll(async () => {
     status: "running",
     startedAt: Date.now() - 60_000,
   });
-
-  server = await startServer({ tmpHome });
 });
 
 test.afterAll(async () => {
