@@ -30,6 +30,11 @@ export function getAgent(workspaceId: string): CodingAgent | undefined {
   return pool.get(workspaceId);
 }
 
+export function removeAgent(workspaceId: string): boolean {
+  log.info({ workspaceId }, "removing agent from pool");
+  return pool.delete(workspaceId);
+}
+
 export async function getOrCreateAgent(
   workspaceId: string,
   worktreePath: string,

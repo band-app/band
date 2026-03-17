@@ -14,7 +14,7 @@ import { createLogger } from "@band/logger";
 import { initTRPC, TRPCError } from "@trpc/server";
 import { Cron } from "croner";
 import { z } from "zod";
-import { getOrCreateAgent } from "../lib/agent-pool";
+import { getOrCreateAgent, removeAgent } from "../lib/agent-pool";
 import { checkCli, installCli } from "../lib/cli";
 import { reloadSchedules, stopJobsForKey } from "../lib/cronjob-scheduler";
 import {
@@ -358,6 +358,9 @@ const workspacesRouter = t.router({
             } catch {
               // Status file may not exist
             }
+
+            // Clean up cached agent from pool
+            removeAgent(workspaceId);
 
             // Clean up workspace-scoped cronjobs
             stopJobsForKey(workspaceId);
