@@ -17,7 +17,7 @@ import {
   Square,
   Trash2,
 } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
 import { useCapabilities } from "../context";
 import { useRemoveWorkspace } from "../hooks/use-project-mutations";
 import { toWorkspaceId } from "../lib/workspace-id";
@@ -46,7 +46,7 @@ interface Props {
   editMode?: boolean;
 }
 
-export function WorkspaceCard({
+export const WorkspaceCard = memo(function WorkspaceCard({
   worktree,
   projectName,
   defaultBranch,
@@ -70,11 +70,10 @@ export function WorkspaceCard({
   const runScript = useDashboardStore((s) => s.runScript);
   const gitPull = useDashboardStore((s) => s.gitPull);
   const gitPush = useDashboardStore((s) => s.gitPush);
-  const activeWorkspaceId = useDashboardStore((s) => s.activeWorkspaceId);
   const removeWorkspaceMutation = useRemoveWorkspace();
 
   const workspaceId = toWorkspaceId(projectName, worktree.branch);
-  const isActive = activeWorkspaceId === workspaceId;
+  const isActive = useDashboardStore((s) => s.activeWorkspaceId === workspaceId);
   const href = capabilities.getWorkspaceHref?.(workspaceId);
 
   const handleClick = () => {
@@ -91,7 +90,10 @@ export function WorkspaceCard({
     ref: cardRef,
     className,
     tabIndex: 0,
-    onClick: handleClick,
+    onClick: (e: React.MouseEvent) => {
+      e.stopPropagation();
+      handleClick();
+    },
     onKeyDown: (e: React.KeyboardEvent) => {
       if (e.key === "Enter" || e.key === " ") {
         e.stopPropagation();
@@ -191,4 +193,4 @@ export function WorkspaceCard({
       </ContextMenuContent>
     </ContextMenu>
   );
-}
+});
