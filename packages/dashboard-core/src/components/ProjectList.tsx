@@ -360,7 +360,7 @@ export function ProjectList({ labelFilter, editMode }: ProjectListProps) {
   const hasProjects = projects.length > 0;
   useEffect(() => {
     if (hasProjects) {
-      containerRef.current?.focus();
+      containerRef.current?.focus({ preventScroll: true });
     }
   }, [hasProjects]);
 
@@ -397,13 +397,13 @@ export function ProjectList({ labelFilter, editMode }: ProjectListProps) {
       setFocusedIndex((prev) => (prev < allWorkspaceIds.length - 1 ? prev + 1 : prev));
       // Keep DOM focus on the container so Enter fires here, not on a child card.
       // See block comment above — removing this breaks keyboard Enter navigation.
-      containerRef.current?.focus();
+      containerRef.current?.focus({ preventScroll: true });
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       keyboardNavRef.current = true;
       setFocusedIndex((prev) => (prev > 0 ? prev - 1 : prev));
       // Keep DOM focus on the container — same reasoning as ArrowDown above.
-      containerRef.current?.focus();
+      containerRef.current?.focus({ preventScroll: true });
     } else if (e.key === "Enter") {
       e.preventDefault();
       if (focusedIndex >= 0 && focusedIndex < allWorkspaceIds.length) {

@@ -195,11 +195,11 @@ export function DashboardShell({ toolbarExtra }: DashboardShellProps) {
             className="flex-1 overflow-hidden"
             onClick={(e: React.MouseEvent<HTMLDivElement>) => {
               const target = e.target as HTMLElement;
-              if (target.closest("button, a, input, select, textarea")) return;
+              if (target.closest("button, a, input, select, textarea, [tabindex]")) return;
               const list = (e.currentTarget as HTMLElement).querySelector<HTMLElement>(
-                '[tabindex="0"]',
+                '[tabindex="-1"]',
               );
-              list?.focus();
+              list?.focus({ preventScroll: true });
             }}
           >
             <main className="px-2 py-2 overflow-hidden">
