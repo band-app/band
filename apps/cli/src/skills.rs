@@ -21,8 +21,7 @@ pub fn generate_skills(output_dir: &str, filter: Option<&str>) -> Result<Command
     // Generate service skill
     let svc_name =
         parse_frontmatter_field(BAND_CLI_TEMPLATE, "name").unwrap_or("band-cli".to_string());
-    let svc_desc =
-        parse_frontmatter_field(BAND_CLI_TEMPLATE, "description").unwrap_or_default();
+    let svc_desc = parse_frontmatter_field(BAND_CLI_TEMPLATE, "description").unwrap_or_default();
     if matches_filter(&svc_name, filter) {
         let content = generate_service_skill(commands);
         let dir_path = output_path.join(&svc_name);
@@ -39,7 +38,11 @@ pub fn generate_skills(output_dir: &str, filter: Option<&str>) -> Result<Command
     }
 
     let mut text = String::new();
-    let _ = writeln!(text, "Generated {} skill(s) in {output_dir}/", generated.len());
+    let _ = writeln!(
+        text,
+        "Generated {} skill(s) in {output_dir}/",
+        generated.len()
+    );
     for entry in &generated {
         let _ = writeln!(
             text,
