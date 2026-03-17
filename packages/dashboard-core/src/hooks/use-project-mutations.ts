@@ -85,6 +85,18 @@ export function useUpdateProjectLabel() {
   });
 }
 
+export function useGitInit() {
+  const adapter = useAdapter();
+  const setError = useDashboardStore((s) => s.setError);
+
+  return useMutation({
+    mutationFn: (path: string) => adapter.gitInit(path),
+    onError: (err) => {
+      setError(String(err));
+    },
+  });
+}
+
 export function useCreateWorkspace() {
   const adapter = useAdapter();
   const queryClient = useQueryClient();

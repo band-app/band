@@ -23,6 +23,8 @@ export interface DashboardAdapter {
   removeProject(name: string): Promise<void>;
   reorderProjects(names: string[]): Promise<void>;
   updateProjectLabel(name: string, label: string | null): Promise<void>;
+  checkPath(path: string): Promise<{ isGitRepo: boolean }>;
+  gitInit(path: string): Promise<void>;
 
   // Workspaces
   createWorkspace(project: string, branch: string, base?: string, prompt?: string): Promise<void>;
