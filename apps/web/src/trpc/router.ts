@@ -110,6 +110,17 @@ const projectsRouter = t.router({
     return { projects, labels: settings.labels ?? [] };
   }),
 
+  checkPath: publicProcedure.input(z.object({ path: z.string() })).query(({ input }) => {
+    const resolvedPath = resolve(input.path);
+    const isGitRepo = existsSync(join(resolvedPath, ".git"));
+    return { isGitRepo };
+  }),
+
+  gitInit: publicProcedure.input(z.object({ path: z.string() })).mutation(async ({ input }) => {
+    const resolvedPath = resolve(input.path);
+    await execGit(["init"], resolvedPath);
+  }),
+
   add: publicProcedure
     .input(z.object({ path: z.string(), label: z.string().optional() }))
     .mutation(async ({ input }) => {

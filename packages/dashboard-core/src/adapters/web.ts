@@ -59,6 +59,14 @@ export class WebDashboardAdapter implements DashboardAdapter {
     await this.trpc.projects.updateLabel.mutate({ name, label });
   }
 
+  async checkPath(path: string): Promise<{ isGitRepo: boolean }> {
+    return await this.trpc.projects.checkPath.query({ path });
+  }
+
+  async gitInit(path: string): Promise<void> {
+    await this.trpc.projects.gitInit.mutate({ path });
+  }
+
   async createWorkspace(
     project: string,
     branch: string,
