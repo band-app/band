@@ -130,8 +130,7 @@ export function AddProjectDialog({ open, onOpenChange, defaultLabel }: Props) {
                 <AlertTriangle className="size-4 shrink-0 text-yellow-500 mt-0.5" />
                 <span>
                   This folder is not a git repository. Initialize it with{" "}
-                  <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">git init</code>
-                  ?
+                  <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">git init</code>?
                 </span>
               </div>
             )}
