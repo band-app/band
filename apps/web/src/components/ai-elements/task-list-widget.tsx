@@ -10,6 +10,8 @@ export function TaskListWidget({ tasks }: { tasks: TaskMap }) {
   if (tasks.size === 0) return null;
 
   const taskList = Array.from(tasks.values());
+  const allDone = taskList.every((t) => t.status === "completed");
+  if (allDone) return null;
   const completedCount = taskList.filter((t) => t.status === "completed").length;
 
   return (
