@@ -292,6 +292,55 @@ test("multiple TodoWrite calls in same message collapse into one widget showing 
   await expect(page.getByText("Write tests")).toBeVisible();
 });
 
+test("task list is hidden when all todos are completed", async ({ page }) => {
+  const mock = createTrpcMock();
+  installSessionMock(mock, [
+    {
+      role: "user",
+      id: "m1",
+      content: [{ type: "text", text: "Finish everything" }],
+    },
+    {
+      role: "assistant",
+      id: "m2",
+      content: [
+        {
+          type: "tool_use",
+          toolCallId: "tc1",
+          toolName: "TodoWrite",
+          input: {
+            todos: [
+              { content: "Setup project", status: "completed" },
+              { content: "Write tests", status: "completed" },
+              { content: "Deploy to prod", status: "completed" },
+            ],
+          },
+        },
+      ],
+    },
+    {
+      role: "user",
+      id: "m3",
+      content: [{ type: "tool_result", toolCallId: "tc1", output: "ok", isError: false }],
+    },
+    {
+      role: "assistant",
+      id: "m4",
+      content: [{ type: "text", text: "All done!" }],
+    },
+  ]);
+  await mock.install(page);
+
+  await page.goto(`${server.url}/workspace/test-workspace?token=${TOKEN}`);
+  await loadSession(page);
+
+  // The assistant text should be visible
+  await expect(page.getByText("All done!")).toBeVisible();
+
+  // The TaskListWidget should NOT be rendered since all tasks are completed
+  await expect(page.getByText("Todos")).not.toBeVisible();
+});
+
 test("TodoWrite mixed with regular tool calls renders both correctly", async ({ page }) => {
   const mock = createTrpcMock();
   installSessionMock(mock, [
