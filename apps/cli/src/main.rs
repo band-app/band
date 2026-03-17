@@ -1,6 +1,7 @@
 mod api;
 mod render;
 mod shell;
+mod skills;
 mod state;
 mod validate;
 
@@ -54,6 +55,15 @@ enum Commands {
     Schema {
         /// Command name (omit to list all commands)
         command: Option<String>,
+    },
+    /// Generate SKILL.md files from schema and registry
+    GenerateSkills {
+        /// Output directory for generated skills (default: skills/)
+        #[arg(long, default_value = "skills")]
+        output_dir: String,
+        /// Filter skills by name (substring match)
+        #[arg(long)]
+        filter: Option<String>,
     },
 }
 
@@ -234,9 +244,9 @@ enum TunnelCmd {
 
 // --- Output types ---
 
-struct CommandResult {
-    text: String,
-    json: serde_json::Value,
+pub(crate) struct CommandResult {
+    pub(crate) text: String,
+    pub(crate) json: serde_json::Value,
 }
 
 #[allow(clippy::too_many_lines)]
@@ -348,6 +358,9 @@ fn main() {
         },
         Commands::Notify => cmd_notify(),
         Commands::Schema { .. } => unreachable!(),
+        Commands::GenerateSkills { output_dir, filter } => {
+            skills::generate_skills(&output_dir, filter.as_deref())
+        }
     };
 
     match result {
@@ -1321,12 +1334,13 @@ fn format_table<const N: usize>(headers: &[&str; N], rows: &[[String; N]]) -> St
 // --- Schema ---
 
 #[allow(clippy::too_many_lines)]
-fn build_schema(command: Option<&str>) -> Result<serde_json::Value, String> {
+pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, String> {
     let commands = vec![
         serde_json::json!({
             "name": "projects list",
             "description": "List registered projects",
-            "parameters": []
+            "parameters": [],
+            "notes": "Text output: `name\\tpath\\tN worktree(s)` (tab-separated).\nJSON output: `{\"projects\": [{\"name\": \"...\", \"path\": \"...\", \"worktreeCount\": N}]}`"
         }),
         serde_json::json!({
             "name": "projects add",
@@ -1334,21 +1348,24 @@ fn build_schema(command: Option<&str>) -> Result<serde_json::Value, String> {
             "parameters": [
                 {"name": "path", "type": "string", "required": true, "positional": true, "description": "Path to the git repository"},
                 {"name": "--label", "type": "string", "required": false, "description": "Label for the project"},
-            ]
+            ],
+            "notes": "Registers an existing git repository. Detects the default branch automatically. Returns the project name."
         }),
         serde_json::json!({
             "name": "projects remove",
             "description": "Unregister a project",
             "parameters": [
                 {"name": "name", "type": "string", "required": true, "positional": true, "description": "Project name"},
-            ]
+            ],
+            "notes": "Removes the project from Band's registry (does not delete the repository)."
         }),
         serde_json::json!({
             "name": "workspaces list",
             "description": "List workspaces, optionally filtered by project",
             "parameters": [
                 {"name": "project", "type": "string", "required": false, "positional": true, "description": "Project name (optional filter)"},
-            ]
+            ],
+            "notes": "Text output: `project\\tbranch\\tpath` (tab-separated, one per line).\nJSON output: `{\"workspaces\": [{\"project\": \"...\", \"branch\": \"...\", \"path\": \"...\"}]}`"
         }),
         serde_json::json!({
             "name": "workspaces create",
@@ -1358,7 +1375,8 @@ fn build_schema(command: Option<&str>) -> Result<serde_json::Value, String> {
                 {"name": "branch", "type": "string", "required": true, "positional": true, "description": "Branch name"},
                 {"name": "--base", "type": "string", "required": false, "description": "Base branch to create from (defaults to project's default branch)"},
                 {"name": "--prompt", "type": "string", "required": false, "description": "Prompt to pass to the coding agent"},
-            ]
+            ],
+            "notes": "Returns the worktree path. Idempotent — creating an existing workspace returns its path. Runs `.band/config.json` `setup` script if present (non-fatal).\n\n**Always use `--prompt` when the user wants work to begin immediately.** This submits a task to the coding agent right after workspace creation, so the agent starts working without a separate step. Only omit `--prompt` when the user explicitly wants to create the workspace for manual/later use.\n\nWhen to use `--prompt` (most cases):\n```sh\n# User says \"create a workspace and implement X\" or \"start working on X\"\nband workspaces create my-app feat/auth --prompt \"Implement GitHub issue #42: Add JWT authentication\"\n\n# User says \"create a workspace for issue #99 and start implementing\"\nband workspaces create my-app fix/bug-99 --prompt \"Fix issue #99: login redirect loop. See https://github.com/org/repo/issues/99\"\n```\n\nWhen to omit `--prompt` (rare — user explicitly wants no task):\n```sh\n# User says \"just create a workspace, I'll work on it myself\"\nband workspaces create my-app feat/experiment\n```\n\n**Do NOT create a workspace without `--prompt` and then separately run `band tasks create`.** That is two steps for what `--prompt` does in one."
         }),
         serde_json::json!({
             "name": "workspaces remove",
@@ -1366,27 +1384,32 @@ fn build_schema(command: Option<&str>) -> Result<serde_json::Value, String> {
             "parameters": [
                 {"name": "project", "type": "string", "required": true, "positional": true, "description": "Project name"},
                 {"name": "branch", "type": "string", "required": true, "positional": true, "description": "Branch name"},
-            ]
+            ],
+            "notes": "Runs `.band/config.json` `teardown` script before removal (non-fatal). Cleans up all associated files."
         }),
         serde_json::json!({
             "name": "settings",
             "description": "Show current settings",
-            "parameters": []
+            "parameters": [],
+            "notes": "Pretty-prints the current settings as JSON. With `--output json`, outputs compact JSON."
         }),
         serde_json::json!({
             "name": "tunnel status",
             "description": "Show tunnel status",
-            "parameters": []
+            "parameters": [],
+            "notes": "Shows whether the tunnel is running and its URL."
         }),
         serde_json::json!({
             "name": "tunnel start",
             "description": "Start the remote tunnel",
-            "parameters": []
+            "parameters": [],
+            "notes": "Starts the remote tunnel. Returns the tunnel URL."
         }),
         serde_json::json!({
             "name": "tunnel stop",
             "description": "Stop the remote tunnel",
-            "parameters": []
+            "parameters": [],
+            "notes": "Stops the remote tunnel."
         }),
         serde_json::json!({
             "name": "tasks list",
@@ -1394,7 +1417,8 @@ fn build_schema(command: Option<&str>) -> Result<serde_json::Value, String> {
             "parameters": [
                 {"name": "--project", "type": "string", "required": false, "description": "Filter by project name"},
                 {"name": "--status", "type": "string", "required": false, "description": "Filter by status (running, completed, failed)"},
-            ]
+            ],
+            "notes": "Text output: `ID\\tSTATUS\\tWORKSPACE\\tPROMPT` (tab-separated table).\nJSON output: `{\"tasks\": [{\"id\": \"...\", \"status\": \"...\", \"project\": \"...\", \"branch\": \"...\", \"prompt\": \"...\"}]}`"
         }),
         serde_json::json!({
             "name": "tasks create",
@@ -1402,21 +1426,24 @@ fn build_schema(command: Option<&str>) -> Result<serde_json::Value, String> {
             "parameters": [
                 {"name": "workspace_id", "type": "string", "required": true, "positional": true, "description": "Workspace ID"},
                 {"name": "--prompt", "type": "string", "required": true, "description": "Prompt text to send to the agent"},
-            ]
+            ],
+            "notes": "Submits a new task to the coding agent. Returns the task ID.\nJSON output: `{\"id\": \"...\", \"workspaceId\": \"...\"}`"
         }),
         serde_json::json!({
             "name": "tasks cancel",
             "description": "Cancel a running task",
             "parameters": [
                 {"name": "task_id", "type": "string", "required": true, "positional": true, "description": "Task ID (e.g. tsk_1234567890)"},
-            ]
+            ],
+            "notes": "Cancels a running task.\nJSON output: `{\"cancelled\": true, \"taskId\": \"...\"}`"
         }),
         serde_json::json!({
             "name": "tasks rerun",
             "description": "Re-run a completed or failed task",
             "parameters": [
                 {"name": "task_id", "type": "string", "required": true, "positional": true, "description": "Task ID (e.g. tsk_1234567890)"},
-            ]
+            ],
+            "notes": "Re-runs a completed or failed task."
         }),
         serde_json::json!({
             "name": "tasks watch",
@@ -1424,7 +1451,8 @@ fn build_schema(command: Option<&str>) -> Result<serde_json::Value, String> {
             "parameters": [
                 {"name": "id", "type": "string", "required": false, "positional": true, "description": "Task ID (optional if --workspace is provided)"},
                 {"name": "--workspace", "type": "string", "required": false, "description": "Watch the latest task for this workspace"},
-            ]
+            ],
+            "notes": "Streams task output in real-time. Either provide a task ID or `--workspace` to watch the latest task for that workspace."
         }),
         serde_json::json!({
             "name": "cronjobs list",
@@ -1479,13 +1507,22 @@ fn build_schema(command: Option<&str>) -> Result<serde_json::Value, String> {
         serde_json::json!({
             "name": "notify",
             "description": "Receive hook notifications from Claude Code (reads JSON from stdin)",
-            "parameters": []
+            "parameters": [],
+            "notes": "Not called directly — registered as a Claude Code hook by the Band dashboard."
         }),
         serde_json::json!({
             "name": "schema",
             "description": "Show command schemas as JSON",
             "parameters": [
                 {"name": "command", "type": "string", "required": false, "positional": true, "description": "Command name (omit to list all commands)"},
+            ]
+        }),
+        serde_json::json!({
+            "name": "generate-skills",
+            "description": "Generate SKILL.md files from schema and registry",
+            "parameters": [
+                {"name": "--output-dir", "type": "string", "required": false, "description": "Output directory for generated skills (default: skills/)"},
+                {"name": "--filter", "type": "string", "required": false, "description": "Filter skills by name (substring match)"},
             ]
         }),
     ];
@@ -1502,7 +1539,7 @@ fn build_schema(command: Option<&str>) -> Result<serde_json::Value, String> {
 }
 
 /// Simple Unix timestamp without pulling in chrono crate.
-fn chrono_now() -> String {
+pub(crate) fn chrono_now() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let dur = SystemTime::now()
         .duration_since(UNIX_EPOCH)
