@@ -110,25 +110,55 @@ export class WebDashboardAdapter implements DashboardAdapter {
 
   private statusHandlers = new Set<(data: SSEEvent) => void>();
   private statusSubscription: { unsubscribe: () => void } | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private createStatusSubscription() {
+    this.statusSubscription = this.trpc.status.stream.subscribe(undefined, {
+      onData: (data: SSEEvent) => {
+        for (const h of this.statusHandlers) {
+          h(data);
+        }
+      },
+      onError: () => {
+        this.statusSubscription = null;
+        this.scheduleReconnect();
+      },
+      onComplete: () => {
+        this.statusSubscription = null;
+        this.scheduleReconnect();
+      },
+    });
+  }
+
+  private scheduleReconnect() {
+    if (this.reconnectTimer) return;
+    if (this.statusHandlers.size === 0) return;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (this.statusHandlers.size > 0 && !this.statusSubscription) {
+        this.createStatusSubscription();
+      }
+    }, 2000);
+  }
 
   private subscribeStatusStream(handler: (data: SSEEvent) => void): Unsubscribe {
     this.statusHandlers.add(handler);
 
     if (!this.statusSubscription) {
-      this.statusSubscription = this.trpc.status.stream.subscribe(undefined, {
-        onData: (data: SSEEvent) => {
-          for (const h of this.statusHandlers) {
-            h(data);
-          }
-        },
-      });
+      this.createStatusSubscription();
     }
 
     return () => {
       this.statusHandlers.delete(handler);
-      if (this.statusHandlers.size === 0 && this.statusSubscription) {
-        this.statusSubscription.unsubscribe();
-        this.statusSubscription = null;
+      if (this.statusHandlers.size === 0) {
+        if (this.statusSubscription) {
+          this.statusSubscription.unsubscribe();
+          this.statusSubscription = null;
+        }
+        if (this.reconnectTimer) {
+          clearTimeout(this.reconnectTimer);
+          this.reconnectTimer = null;
+        }
       }
     };
   }
