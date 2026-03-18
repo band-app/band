@@ -7,7 +7,6 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
-import { createTrpcMock } from "./helpers/trpc-mock";
 
 const TOKEN = "e2e-queue-test-token";
 
@@ -27,15 +26,39 @@ test.afterAll(async () => {
 });
 
 // ---------------------------------------------------------------------------
+// Helpers — call the real server's queue store via tRPC HTTP API
+// ---------------------------------------------------------------------------
+
+async function trpcMutate(procedure: string, input: unknown): Promise<void> {
+  const res = await fetch(`${server.url}/trpc/${procedure}?token=${TOKEN}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`trpcMutate(${procedure}) failed: ${res.status} ${text}`);
+  }
+}
+
+async function pushQueue(workspaceId: string, text: string): Promise<void> {
+  await trpcMutate("queue.push", { workspaceId, text });
+}
+
+async function clearQueue(workspaceId: string): Promise<void> {
+  await trpcMutate("queue.clear", { workspaceId });
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 test("queued messages render with text, Queued badge, and Cancel button", async ({ page }) => {
-  const mock = createTrpcMock();
-  mock.query("queue.get", { messages: ["fix the bug", "add tests"] });
-  await mock.install(page);
+  const wsId = "test-ws-render";
+  await pushQueue(wsId, "fix the bug");
+  await pushQueue(wsId, "add tests");
 
-  await page.goto(`${server.url}/workspace/test-workspace?token=${TOKEN}`);
+  await page.goto(`${server.url}/workspace/${wsId}?token=${TOKEN}`);
 
   // Both queued message texts should be visible
   await expect(page.getByText("fix the bug")).toBeVisible();
@@ -48,14 +71,14 @@ test("queued messages render with text, Queued badge, and Cancel button", async 
   // Both should have a Cancel button
   const cancelButtons = page.getByRole("button", { name: "Cancel" });
   await expect(cancelButtons).toHaveCount(2);
+
+  await clearQueue(wsId);
 });
 
 test("empty queue renders no queued message bubbles", async ({ page }) => {
-  const mock = createTrpcMock();
-  mock.query("queue.get", { messages: [] });
-  await mock.install(page);
+  const wsId = "test-ws-empty";
 
-  await page.goto(`${server.url}/workspace/test-workspace?token=${TOKEN}`);
+  await page.goto(`${server.url}/workspace/${wsId}?token=${TOKEN}`);
 
   // Wait for the page to load — the prompt input should be visible
   await expect(page.getByPlaceholder("Type a message")).toBeVisible();
@@ -65,24 +88,11 @@ test("empty queue renders no queued message bubbles", async ({ page }) => {
 });
 
 test("cancel button calls queue.remove and bubble disappears", async ({ page }) => {
-  const removedTexts: string[] = [];
-  const queue = ["first message", "second message"];
+  const wsId = "test-ws-cancel";
+  await pushQueue(wsId, "first message");
+  await pushQueue(wsId, "second message");
 
-  const mock = createTrpcMock();
-
-  mock.query("queue.get", () => ({ messages: [...queue] }));
-
-  mock.mutation("queue.remove", (input) => {
-    const { text } = input as { workspaceId: string; text: string };
-    removedTexts.push(text);
-    const idx = queue.indexOf(text);
-    if (idx !== -1) queue.splice(idx, 1);
-    return { ok: true as const, messages: [...queue] };
-  });
-
-  await mock.install(page);
-
-  await page.goto(`${server.url}/workspace/test-workspace?token=${TOKEN}`);
+  await page.goto(`${server.url}/workspace/${wsId}?token=${TOKEN}`);
 
   // Both messages should be visible initially
   await expect(page.getByText("first message")).toBeVisible();
@@ -101,16 +111,16 @@ test("cancel button calls queue.remove and bubble disappears", async ({ page }) 
   // Only one "Queued" badge should remain
   await expect(page.getByText("Queued")).toHaveCount(1);
 
-  // The queue.remove mutation should have been called with the correct text
-  expect(removedTexts).toContain("first message");
+  await clearQueue(wsId);
 });
 
 test("multiple queued messages render in array order", async ({ page }) => {
-  const mock = createTrpcMock();
-  mock.query("queue.get", { messages: ["alpha", "beta", "gamma"] });
-  await mock.install(page);
+  const wsId = "test-ws-order";
+  await pushQueue(wsId, "alpha");
+  await pushQueue(wsId, "beta");
+  await pushQueue(wsId, "gamma");
 
-  await page.goto(`${server.url}/workspace/test-workspace?token=${TOKEN}`);
+  await page.goto(`${server.url}/workspace/${wsId}?token=${TOKEN}`);
 
   // All three messages should be visible
   await expect(page.getByText("alpha")).toBeVisible();
@@ -132,4 +142,6 @@ test("multiple queued messages render in array order", async ({ page }) => {
 
   expect(alphaIdx).toBeLessThan(betaIdx);
   expect(betaIdx).toBeLessThan(gammaIdx);
+
+  await clearQueue(wsId);
 });
