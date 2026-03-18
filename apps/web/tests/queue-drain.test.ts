@@ -357,12 +357,11 @@ describe("queue auto-drain — single queued message", () => {
       text: "second task from queue",
     });
 
-    // 3. Wait for the first task to complete AND the auto-started second task to complete
+    // 3. Wait for the auto-started second task to complete
     await waitFor(async () => {
       const res = await trpcQuery(server.url, "tasks.get", { workspaceId });
       const data = await trpcData<{ task?: { status: string; prompt: string } }>(res);
-      // The auto-started task should eventually finish too
-      return data.task?.status !== "running";
+      return data.task?.prompt === "second task from queue" && data.task?.status === "completed";
     });
 
     // 4. Verify the queue is now empty (message was consumed)
