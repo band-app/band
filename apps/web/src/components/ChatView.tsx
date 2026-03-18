@@ -2,7 +2,7 @@ import { useChat } from "@ai-sdk/react";
 import { Badge } from "@band/ui";
 import { getToolName, isToolUIPart } from "ai";
 import { Bot, Clock, Loader2, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { TaskChatTransport } from "../lib/task-chat-transport";
 import { trpc } from "../lib/trpc-client";
 import {
@@ -81,10 +81,53 @@ interface HistoryMessage {
   content: HistoryMessageContent[];
 }
 
-interface QueuedMessage {
-  id: string;
-  message: PromptInputMessage;
-  queuedAt: number;
+type UIMessageParts = ReturnType<
+  typeof import("@ai-sdk/react").useChat
+>["messages"][number]["parts"];
+
+type QueueSegment = {
+  userPrompt: string | null;
+  parts: UIMessageParts;
+};
+
+/**
+ * Splits an assistant message's parts at `data-prompt` boundaries so each
+ * queued task renders as a separate user→assistant pair.
+ *
+ * When `skipFirstPrompt` is true, the first `data-prompt` is not turned into
+ * a user bubble (because a real user message already precedes the assistant
+ * message in the messages array).
+ */
+function splitMessageAtQueueBoundaries(
+  parts: UIMessageParts,
+  skipFirstPrompt: boolean,
+): QueueSegment[] {
+  const segments: QueueSegment[] = [];
+  let current: QueueSegment = { userPrompt: null, parts: [] };
+  let seenFirst = false;
+
+  for (const part of parts) {
+    if (part.type === "data-prompt") {
+      if (!seenFirst) {
+        seenFirst = true;
+        if (skipFirstPrompt) continue; // user message already in messages array
+      }
+      // Finish current segment and start a new one
+      if (current.parts.length > 0 || segments.length > 0 || !skipFirstPrompt) {
+        segments.push(current);
+      }
+      current = {
+        userPrompt: (part as { type: string; data: { text: string } }).data.text,
+        parts: [],
+      };
+      continue;
+    }
+    // Skip other data-* parts (data-result, data-session) from rendering
+    if (typeof part.type === "string" && part.type.startsWith("data-")) continue;
+    current.parts.push(part);
+  }
+  segments.push(current);
+  return segments;
 }
 
 interface ChatViewProps {
@@ -105,7 +148,6 @@ export function ChatView({
   onShowSessionListChange,
 }: ChatViewProps) {
   const sessionIdRef = useRef<string | undefined>(undefined);
-  const [reconnectedPrompt, setReconnectedPrompt] = useState<string | undefined>(undefined);
   const [activeSessionId, setActiveSessionId] = useState<string | undefined>(undefined);
   const [historicalMessages, setHistoricalMessages] = useState<HistoryMessage[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
@@ -119,6 +161,24 @@ export function ChatView({
       .query({ workspaceId })
       .then((data) => setSkills(data.skills))
       .catch(() => setSkills([]));
+  }, [workspaceId]);
+
+  const [queuedMessages, setQueuedMessages] = useState<string[]>([]);
+
+  // Subscribe to queue state changes via a dedicated tRPC subscription.
+  // The backend pushes the full queue array on every change (push, shift,
+  // remove, clear) so the frontend always has the authoritative state.
+  useEffect(() => {
+    const subscription = trpc.queue.stream.subscribe(
+      { workspaceId },
+      {
+        onData(data: { messages: string[] }) {
+          console.log("subscribe", data.messages);
+          setQueuedMessages(data.messages);
+        },
+      },
+    );
+    return () => subscription.unsubscribe();
   }, [workspaceId]);
 
   const transport = useMemo(
@@ -138,15 +198,6 @@ export function ChatView({
         "sessionId" in (dataPart.data as Record<string, unknown>)
       ) {
         sessionIdRef.current = (dataPart.data as { sessionId: string }).sessionId;
-      }
-      // Store reconnected prompt for rendering (don't inject into useChat state)
-      if (
-        dataPart.type === "data-prompt" &&
-        dataPart.data != null &&
-        typeof dataPart.data === "object" &&
-        "text" in (dataPart.data as Record<string, unknown>)
-      ) {
-        setReconnectedPrompt((dataPart.data as { text: string }).text);
       }
     },
   });
@@ -169,9 +220,6 @@ export function ChatView({
     }
   }, [isStreaming, handleStop]);
 
-  const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
-  const sendingQueuedRef = useRef(false);
-
   const doSendMessage = useCallback(
     (message: PromptInputMessage) => {
       if (message.files?.length) {
@@ -191,7 +239,10 @@ export function ChatView({
     async (sessionId: string) => {
       setLoadingHistory(true);
       try {
-        const data = await trpc.sessions.messages.query({ workspaceId, sessionId });
+        const data = await trpc.sessions.messages.query({
+          workspaceId,
+          sessionId,
+        });
         setHistoricalMessages(data.messages as HistoryMessage[]);
       } finally {
         setLoadingHistory(false);
@@ -212,67 +263,60 @@ export function ChatView({
   const handleSelectSession = useCallback(
     async (sessionId: string) => {
       sessionIdRef.current = sessionId;
-      setReconnectedPrompt(undefined);
       setActiveSessionId(sessionId);
       setMessages([]);
       setHistoricalMessages([]);
       setQueuedMessages([]);
+      trpc.queue.clear.mutate({ workspaceId }).catch(() => {});
       onShowSessionListChange(false);
       await loadMessages(sessionId);
     },
-    [loadMessages, setMessages, onShowSessionListChange],
+    [loadMessages, setMessages, onShowSessionListChange, workspaceId],
   );
 
   const handleNewSession = useCallback(() => {
     sessionIdRef.current = undefined;
-    setReconnectedPrompt(undefined);
     setActiveSessionId(undefined);
     setHistoricalMessages([]);
     setMessages([]);
     setQueuedMessages([]);
+    trpc.queue.clear.mutate({ workspaceId }).catch(() => {});
     onShowSessionListChange(false);
-  }, [setMessages, onShowSessionListChange]);
+  }, [setMessages, onShowSessionListChange, workspaceId]);
 
   const handleSubmit = useCallback(
     (message: PromptInputMessage) => {
       if (!message.text.trim() && !message.files?.length) return;
 
       if (isStreaming) {
-        // Agent is busy — queue the message instead of sending
-        setQueuedMessages((prev) => [
-          ...prev,
-          {
-            id: crypto.randomUUID(),
-            message,
-            queuedAt: Date.now(),
-          },
-        ]);
+        // Agent is busy — queue the message on the backend.
+        // Optimistic update for instant feedback; subscription corrects if needed.
+        setQueuedMessages((prev) => [...prev, message.text]);
+        trpc.queue.push.mutate({ workspaceId, text: message.text }).catch(() => {});
         return;
       }
 
       doSendMessage(message);
     },
-    [doSendMessage, isStreaming],
+    [doSendMessage, isStreaming, workspaceId],
   );
 
-  // Auto-send queued messages when the agent becomes idle
-  useEffect(() => {
-    if (isStreaming) {
-      sendingQueuedRef.current = false;
-      return;
-    }
-    if (sendingQueuedRef.current) return;
-    if (queuedMessages.length === 0) return;
+  const handleCancelQueued = useCallback(
+    (text: string) => {
+      // Optimistic update for instant feedback; subscription corrects if needed.
+      setQueuedMessages((prev) => {
+        const idx = prev.indexOf(text);
+        if (idx === -1) return prev;
+        const messages = [...prev.slice(0, idx), ...prev.slice(idx + 1)];
 
-    sendingQueuedRef.current = true;
-    const [next, ...rest] = queuedMessages;
-    setQueuedMessages(rest);
-    doSendMessage(next.message);
-  }, [isStreaming, queuedMessages, doSendMessage]);
+        console.log("cancel", text, messages);
 
-  const handleCancelQueued = useCallback((id: string) => {
-    setQueuedMessages((prev) => prev.filter((m) => m.id !== id));
-  }, []);
+        return messages;
+      });
+      trpc.queue.remove.mutate({ workspaceId, text }).catch(() => {});
+    },
+    [workspaceId],
+  );
 
   const liveTaskMap: TaskMap = useMemo(() => {
     let map: TaskMap = new Map();
@@ -293,10 +337,15 @@ export function ChatView({
   // task's content which overlaps with the tail of the session history.
   // Strip the overlapping turn from history so each message appears once.
   const filteredHistoricalMessages = useMemo(() => {
-    if (!reconnectedPrompt || historicalMessages.length === 0) {
-      return historicalMessages;
-    }
-    const promptText = reconnectedPrompt.trim();
+    if (historicalMessages.length === 0) return historicalMessages;
+    // Find current prompt from data-prompt parts in the last assistant message
+    const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+    const dataPromptPart = lastAssistant?.parts.find((p) => p.type === "data-prompt");
+    const currentPrompt = dataPromptPart
+      ? (dataPromptPart as { type: string; data: { text: string } }).data.text.trim()
+      : undefined;
+    if (!currentPrompt) return historicalMessages;
+    // Strip overlapping turn from history
     for (let i = historicalMessages.length - 1; i >= 0; i--) {
       if (historicalMessages[i].role === "user") {
         const text = historicalMessages[i].content
@@ -304,14 +353,12 @@ export function ChatView({
           .map((b) => b.text)
           .join("\n")
           .trim();
-        if (text === promptText) {
-          return historicalMessages.slice(0, i);
-        }
+        if (text === currentPrompt) return historicalMessages.slice(0, i);
         break;
       }
     }
     return historicalMessages;
-  }, [historicalMessages, reconnectedPrompt]);
+  }, [historicalMessages, messages]);
 
   const historyToolResultMap = useMemo(
     () => buildToolResultMap(filteredHistoricalMessages),
@@ -325,7 +372,7 @@ export function ChatView({
   const displayTaskMap = liveTaskMap.size > 0 ? liveTaskMap : historyTaskMap;
 
   const getLastUserMessage = useCallback((): string | undefined => {
-    // Check live messages first (most recent)
+    // Check live messages: user messages first, then data-prompt parts in assistant messages
     for (let i = messages.length - 1; i >= 0; i--) {
       if (messages[i].role === "user") {
         const text = messages[i].parts
@@ -335,9 +382,13 @@ export function ChatView({
           .trim();
         if (text) return text;
       }
+      if (messages[i].role === "assistant") {
+        // Find the last data-prompt in this message
+        const prompts = messages[i].parts.filter((p) => p.type === "data-prompt");
+        const last = prompts[prompts.length - 1];
+        if (last) return (last as { type: string; data: { text: string } }).data.text;
+      }
     }
-    // Fall back to reconnected prompt
-    if (reconnectedPrompt) return reconnectedPrompt;
     // Fall back to historical messages
     for (let i = filteredHistoricalMessages.length - 1; i >= 0; i--) {
       if (filteredHistoricalMessages[i].role === "user") {
@@ -350,14 +401,16 @@ export function ChatView({
       }
     }
     return undefined;
-  }, [messages, reconnectedPrompt, filteredHistoricalMessages]);
+  }, [messages, filteredHistoricalMessages]);
 
   const hasHistory = filteredHistoricalMessages.length > 0;
   const hasLiveMessages = messages.length > 0;
-  // Show the reconnected prompt as a user message when the stream is
-  // providing the current task (no user message in live stream).
-  const showReconnectedPrompt = reconnectedPrompt && !messages.some((m) => m.role === "user");
-  const isEmpty = !hasHistory && !hasLiveMessages && !showReconnectedPrompt;
+  // Detect reconnected/queued prompt: assistant message has data-prompt parts
+  // but no user message exists in the live messages array.
+  const hasReconnectedPrompt =
+    messages.some((m) => m.role === "assistant" && m.parts.some((p) => p.type === "data-prompt")) &&
+    !messages.some((m) => m.role === "user");
+  const isEmpty = !hasHistory && !hasLiveMessages && !hasReconnectedPrompt;
 
   if (supportsSessionListing && showSessionList) {
     return (
@@ -392,20 +445,12 @@ export function ChatView({
             <HistoryMessages messages={filteredHistoricalMessages} />
           )}
 
-          {hasHistory && (hasLiveMessages || showReconnectedPrompt) && (
+          {hasHistory && (hasLiveMessages || hasReconnectedPrompt) && (
             <div className="flex items-center gap-3 py-2">
               <div className="h-px flex-1 bg-border/50" />
               <span className="text-sm text-muted-foreground">new messages</span>
               <div className="h-px flex-1 bg-border/50" />
             </div>
-          )}
-
-          {showReconnectedPrompt && (
-            <Message from="user">
-              <MessageContent>
-                <MessageResponse>{reconnectedPrompt}</MessageResponse>
-              </MessageContent>
-            </Message>
           )}
 
           {(() => {
@@ -414,47 +459,145 @@ export function ChatView({
               const isLastAssistant = message.role === "assistant" && isLastMessage;
               const showThinking = isLastAssistant && isStreaming;
 
-              const visibleParts = message.parts.filter(
-                (p) => (p.type === "text" && p.text.trim()) || p.type === "file" || isToolUIPart(p),
-              );
-              if (message.role === "assistant" && visibleParts.length === 0 && !showThinking) {
-                return null;
-              }
-              return (
-                <Message key={message.id} from={message.role}>
-                  <MessageContent>
-                    {groupMessageParts(message.parts).map((segment) => {
-                      if (segment.type === "text") {
-                        const { part, partIndex } = segment;
-                        if (part.type === "text" && part.text.trim()) {
+              if (message.role !== "assistant") {
+                // User messages render normally
+                const userParts = groupMessageParts(message.parts);
+                if (userParts.length === 0) return null;
+                return (
+                  <Message key={message.id} from="user">
+                    <MessageContent>
+                      {userParts.map((segment) => {
+                        if (
+                          segment.type === "text" &&
+                          segment.part.type === "text" &&
+                          segment.part.text.trim()
+                        ) {
                           return (
-                            <MessageResponse key={`${message.id}-text-${partIndex}`}>
-                              {part.text}
+                            <MessageResponse key={`${message.id}-text-${segment.partIndex}`}>
+                              {segment.part.text}
                             </MessageResponse>
                           );
                         }
+                        if (segment.type === "file") {
+                          return (
+                            <MessageFilePart
+                              key={`${message.id}-file-${segment.partIndex}`}
+                              part={segment.part}
+                            />
+                          );
+                        }
                         return null;
-                      }
-                      if (segment.type === "file") {
+                      })}
+                    </MessageContent>
+                  </Message>
+                );
+              }
+
+              // Assistant message
+              const hasPrecedingUserMsg =
+                messageIndex > 0 && messages[messageIndex - 1]?.role === "user";
+              const hasDataPrompts = message.parts.some((p) => p.type === "data-prompt");
+
+              if (!hasDataPrompts) {
+                // No queue boundaries — render as before
+                const visibleParts = message.parts.filter(
+                  (p) =>
+                    (p.type === "text" && p.text.trim()) || p.type === "file" || isToolUIPart(p),
+                );
+                if (visibleParts.length === 0 && !showThinking) return null;
+                return (
+                  <Message key={message.id} from="assistant">
+                    <MessageContent>
+                      {groupMessageParts(message.parts).map((segment) => {
+                        if (segment.type === "text") {
+                          const { part, partIndex } = segment;
+                          if (part.type === "text" && part.text.trim()) {
+                            return (
+                              <MessageResponse key={`${message.id}-text-${partIndex}`}>
+                                {part.text}
+                              </MessageResponse>
+                            );
+                          }
+                          return null;
+                        }
+                        if (segment.type === "file") {
+                          return (
+                            <MessageFilePart
+                              key={`${message.id}-file-${segment.partIndex}`}
+                              part={segment.part}
+                            />
+                          );
+                        }
+                        const item = toolPartToItem(segment.part);
+                        if (isTaskTool(item.toolName)) return null;
                         return (
-                          <MessageFilePart
-                            key={`${message.id}-file-${segment.partIndex}`}
-                            part={segment.part}
-                          />
+                          <ToolCall key={`${message.id}-tool-${segment.partIndex}`} item={item} />
                         );
-                      }
-                      const item = toolPartToItem(segment.part);
-                      if (isTaskTool(item.toolName)) {
-                        return null;
-                      }
-                      return (
-                        <ToolCall key={`${message.id}-tool-${segment.partIndex}`} item={item} />
-                      );
-                    })}
-                    {showThinking && <ThinkingIndicator />}
-                  </MessageContent>
-                </Message>
-              );
+                      })}
+                      {showThinking && <ThinkingIndicator />}
+                    </MessageContent>
+                  </Message>
+                );
+              }
+
+              // Split at data-prompt boundaries
+              const segments = splitMessageAtQueueBoundaries(message.parts, hasPrecedingUserMsg);
+
+              return segments.map((segment, segIdx) => {
+                const visibleParts = groupMessageParts(segment.parts);
+                const isLastSegment = segIdx === segments.length - 1;
+                const segKey = segment.userPrompt ?? "initial";
+
+                return (
+                  <Fragment key={`${message.id}-seg-${segKey}`}>
+                    {segment.userPrompt && (
+                      <Message from="user">
+                        <MessageContent>
+                          <MessageResponse>{segment.userPrompt}</MessageResponse>
+                        </MessageContent>
+                      </Message>
+                    )}
+                    {(visibleParts.length > 0 || (isLastSegment && showThinking)) && (
+                      <Message from="assistant">
+                        <MessageContent>
+                          {visibleParts.map((seg) => {
+                            if (seg.type === "text") {
+                              const { part, partIndex } = seg;
+                              if (part.type === "text" && part.text.trim()) {
+                                return (
+                                  <MessageResponse
+                                    key={`${message.id}-${segKey}-text-${partIndex}`}
+                                  >
+                                    {part.text}
+                                  </MessageResponse>
+                                );
+                              }
+                              return null;
+                            }
+                            if (seg.type === "file") {
+                              return (
+                                <MessageFilePart
+                                  key={`${message.id}-${segKey}-file-${seg.partIndex}`}
+                                  part={seg.part}
+                                />
+                              );
+                            }
+                            const item = toolPartToItem(seg.part);
+                            if (isTaskTool(item.toolName)) return null;
+                            return (
+                              <ToolCall
+                                key={`${message.id}-${segKey}-tool-${seg.partIndex}`}
+                                item={item}
+                              />
+                            );
+                          })}
+                          {isLastSegment && showThinking && <ThinkingIndicator />}
+                        </MessageContent>
+                      </Message>
+                    )}
+                  </Fragment>
+                );
+              });
             });
           })()}
           {isStreaming && (!messages.length || messages[messages.length - 1].role === "user") && (
@@ -465,12 +608,8 @@ export function ChatView({
             </Message>
           )}
 
-          {queuedMessages.map((qm) => (
-            <QueuedMessageBubble
-              key={qm.id}
-              queuedMessage={qm}
-              onCancel={() => handleCancelQueued(qm.id)}
-            />
+          {queuedMessages.map((text) => (
+            <QueuedMessageBubble key={text} text={text} onCancel={() => handleCancelQueued(text)} />
           ))}
         </ConversationContent>
         <ConversationScrollButton />
@@ -499,17 +638,11 @@ export function ChatView({
   );
 }
 
-function QueuedMessageBubble({
-  queuedMessage,
-  onCancel,
-}: {
-  queuedMessage: QueuedMessage;
-  onCancel: () => void;
-}) {
+function QueuedMessageBubble({ text, onCancel }: { text: string; onCancel: () => void }) {
   return (
     <div className="group is-user flex w-full max-w-[95%] flex-col gap-2 ml-auto justify-end opacity-60">
       <div className="flex min-w-0 max-w-full flex-col gap-2 break-words text-base ml-auto w-fit rounded-md bg-secondary px-4 py-3 text-foreground">
-        <MessageResponse>{queuedMessage.message.text}</MessageResponse>
+        <MessageResponse>{text}</MessageResponse>
         <div className="flex items-center justify-end gap-2 mt-1">
           <Badge variant="outline" className="text-xs text-muted-foreground">
             <Clock className="size-3" />

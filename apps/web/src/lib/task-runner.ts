@@ -2,6 +2,7 @@ import { createLogger } from "@band/logger";
 import type { UIMessageChunk } from "ai";
 import { getAgent, getOrCreateAgent } from "./agent-pool";
 import { createPendingInput } from "./pending-inputs";
+import { shiftQueuedMessage } from "./queued-message-store";
 import { generateTaskId, markTaskFailed, saveTask } from "./task-store";
 import { resolveWorkspace } from "./workspace";
 
@@ -121,6 +122,10 @@ export function submitTask(
   };
   tasks.set(workspaceId, task);
   persistTask(task);
+
+  // Broadcast to any live subscribers (auto-started tasks).
+  // For the initial task this is a no-op — no subscribers exist yet.
+  broadcast(workspaceId, task.chunks[0]);
 
   // Fire-and-forget async execution
   runTask(workspaceId, task).catch((err) => {
@@ -351,6 +356,18 @@ async function runTask(workspaceId: string, task: InternalTask) {
   }
 
   scheduleExpiry(workspaceId);
+
+  // Auto-start a new task if there's a queued message and the task succeeded
+  if (task.status === "completed") {
+    const queued = shiftQueuedMessage(workspaceId);
+    if (queued) {
+      try {
+        submitTask(workspaceId, queued, task.sessionId);
+      } catch (err) {
+        log.warn({ workspaceId, err }, "failed to auto-start queued task");
+      }
+    }
+  }
 }
 
 function scheduleExpiry(workspaceId: string) {
