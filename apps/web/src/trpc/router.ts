@@ -29,6 +29,15 @@ import { execGit, gitCmd, listWorktrees } from "../lib/git";
 import { checkHooks, installHooks } from "../lib/hooks";
 import { resolvePendingInput } from "../lib/pending-inputs";
 import { checkPrereqs, shellPath } from "../lib/process-utils";
+import {
+  clearQueuedMessages,
+  getQueuedMessages,
+  pushQueuedMessage,
+  removeQueuedMessage,
+  setQueuedMessages,
+  shiftQueuedMessage,
+  subscribeQueue,
+} from "../lib/queued-message-store";
 import { runSetup } from "../lib/setup-runner";
 import {
   bandHome,
@@ -1082,13 +1091,9 @@ const tasksRouter = t.router({
       type Chunk = Parameters<Parameters<typeof subscribeTask>[1]>[0];
       const queue: Chunk[] = [];
       let resolve: (() => void) | null = null;
-      let done = false;
 
       const unsubscribe = subscribeTask(workspaceId, (chunk) => {
         queue.push(chunk);
-        if (chunk.type === "finish") {
-          done = true;
-        }
         resolve?.();
       });
 
@@ -1113,9 +1118,16 @@ const tasksRouter = t.router({
       try {
         while (!opts.signal.aborted) {
           while (queue.length > 0) {
-            yield queue.shift()!;
+            const chunk = queue.shift()!;
+            yield chunk;
+            // When a task finishes and no queued follow-ups remain,
+            // end the subscription. Otherwise keep it alive — the
+            // backend auto-starts the next queued task and its events
+            // flow through the same listener.
+            if (chunk.type === "finish" && getQueuedMessages(workspaceId).length === 0) {
+              return;
+            }
           }
-          if (done) return;
           await new Promise<void>((r) => {
             resolve = r;
           });
@@ -1507,6 +1519,90 @@ const skillsRouter = t.router({
 });
 
 // ---------------------------------------------------------------------------
+// Queue (persisted queued messages)
+// ---------------------------------------------------------------------------
+
+const queueRouter = t.router({
+  push: publicProcedure
+    .input(z.object({ workspaceId: z.string(), text: z.string() }))
+    .mutation(({ input }) => {
+      pushQueuedMessage(input.workspaceId, input.text);
+      return { ok: true, messages: getQueuedMessages(input.workspaceId) };
+    }),
+
+  set: publicProcedure
+    .input(z.object({ workspaceId: z.string(), messages: z.array(z.string()) }))
+    .mutation(({ input }) => {
+      setQueuedMessages(input.workspaceId, input.messages);
+      return { ok: true };
+    }),
+
+  get: publicProcedure.input(z.object({ workspaceId: z.string() })).query(({ input }) => {
+    const messages = getQueuedMessages(input.workspaceId);
+    return { messages };
+  }),
+
+  remove: publicProcedure
+    .input(z.object({ workspaceId: z.string(), text: z.string() }))
+    .mutation(({ input }) => {
+      removeQueuedMessage(input.workspaceId, input.text);
+      return { ok: true, messages: getQueuedMessages(input.workspaceId) };
+    }),
+
+  shift: publicProcedure.input(z.object({ workspaceId: z.string() })).mutation(({ input }) => {
+    const text = shiftQueuedMessage(input.workspaceId);
+    return { text };
+  }),
+
+  clear: publicProcedure.input(z.object({ workspaceId: z.string() })).mutation(({ input }) => {
+    clearQueuedMessages(input.workspaceId);
+    return { ok: true };
+  }),
+
+  stream: publicProcedure
+    .input(z.object({ workspaceId: z.string() }))
+    .subscription(async function* (opts) {
+      const { workspaceId } = opts.input;
+
+      type Update = { messages: string[] };
+      const queue: Update[] = [];
+      let resolve: (() => void) | null = null;
+
+      const unsubscribe = subscribeQueue((wsId, messages) => {
+        if (wsId !== workspaceId) return;
+        queue.push({ messages });
+        resolve?.();
+      });
+
+      opts.signal?.addEventListener("abort", () => {
+        unsubscribe();
+        resolve?.();
+      });
+
+      // Emit current state immediately so the client is in sync
+      yield { messages: getQueuedMessages(workspaceId) };
+
+      // Discard notifications that arrived between listener registration
+      // and the initial yield — the initial yield already covers them.
+      queue.length = 0;
+
+      try {
+        while (!opts.signal?.aborted) {
+          while (queue.length > 0) {
+            yield queue.shift()!;
+          }
+          await new Promise<void>((r) => {
+            resolve = r;
+          });
+          resolve = null;
+        }
+      } finally {
+        unsubscribe();
+      }
+    }),
+});
+
+// ---------------------------------------------------------------------------
 // App Router
 // ---------------------------------------------------------------------------
 
@@ -1527,6 +1623,7 @@ export const appRouter = t.router({
   status: statusRouter,
   cronjobs: cronjobsRouter,
   skills: skillsRouter,
+  queue: queueRouter,
 });
 
 export type AppRouter = typeof appRouter;

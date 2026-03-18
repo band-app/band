@@ -113,5 +113,12 @@ export function createTrpcMock() {
     });
   }
 
-  return { query, install };
+  // mutation is the same internally — both queries and mutations go through
+  // the same handler map keyed by procedure path. This alias exists for
+  // clarity and correct typing at call sites.
+  function mutation<P extends ProcedurePath>(path: P, handler: Handler<P>): void {
+    query(path, handler);
+  }
+
+  return { query, mutation, install };
 }
