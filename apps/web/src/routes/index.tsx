@@ -25,7 +25,7 @@ function DashboardPage() {
 
   // Mobile: full-screen dashboard shell
   return (
-    <div className="h-dvh pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+    <div className="h-dvh pb-4 standalone:pb-[env(safe-area-inset-bottom)]">
       <DashboardView />
     </div>
   );
