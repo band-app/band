@@ -62,10 +62,19 @@ export function useFindInFileContext() {
 function useAppHeight() {
   const [height, setHeight] = useState<number | null>(null);
   useLayoutEffect(() => {
-    const update = () => setHeight(window.innerHeight);
+    const vv = window.visualViewport;
+    const update = () => setHeight(vv ? vv.height : window.innerHeight);
     update();
+    if (vv) {
+      vv.addEventListener("resize", update);
+    }
     window.addEventListener("resize", update);
-    return () => window.removeEventListener("resize", update);
+    return () => {
+      if (vv) {
+        vv.removeEventListener("resize", update);
+      }
+      window.removeEventListener("resize", update);
+    };
   }, []);
   return height;
 }
