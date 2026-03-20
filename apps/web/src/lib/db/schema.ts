@@ -1,5 +1,23 @@
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
+export const projects = sqliteTable("projects", {
+  name: text("name").primaryKey(),
+  path: text("path").notNull(),
+  defaultBranch: text("default_branch").notNull(),
+  label: text("label"),
+  sortOrder: integer("sort_order").notNull(),
+});
+
+export const worktrees = sqliteTable("worktrees", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  projectName: text("project_name")
+    .notNull()
+    .references(() => projects.name, { onDelete: "cascade" }),
+  branch: text("branch").notNull(),
+  path: text("path").notNull(),
+  head: text("head"),
+});
+
 export const tasks = sqliteTable("tasks", {
   id: text("id").primaryKey(),
   workspaceId: text("workspace_id").notNull(),

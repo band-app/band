@@ -2,6 +2,8 @@ import { randomBytes } from "node:crypto";
 import { mkdirSync, readdirSync, readFile, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { getDb } from "./db/connection";
+import { projects as projectsTable, worktrees as worktreesTable } from "./db/schema";
 
 export interface ProjectState {
   name: string;
@@ -77,17 +79,68 @@ export function ensureDirs(): void {
 }
 
 export function loadState(): AppState {
-  try {
-    const data = readFileSync(stateFile(), "utf-8");
-    return JSON.parse(data) as AppState;
-  } catch {
-    return { projects: [] };
+  const db = getDb();
+  const projectRows = db
+    .select()
+    .from(projectsTable)
+    .orderBy(projectsTable.sortOrder)
+    .all();
+
+  const worktreeRows = db.select().from(worktreesTable).all();
+
+  const wtByProject = new Map<string, WorktreeState[]>();
+  for (const row of worktreeRows) {
+    const list = wtByProject.get(row.projectName) ?? [];
+    list.push({
+      branch: row.branch,
+      path: row.path,
+      head: row.head ?? undefined,
+    });
+    wtByProject.set(row.projectName, list);
   }
+
+  return {
+    projects: projectRows.map((row) => ({
+      name: row.name,
+      path: row.path,
+      defaultBranch: row.defaultBranch,
+      label: row.label ?? undefined,
+      worktrees: wtByProject.get(row.name) ?? [],
+    })),
+  };
 }
 
 export function saveState(state: AppState): void {
-  ensureDirs();
-  writeFileSync(stateFile(), JSON.stringify(state, null, 2), "utf-8");
+  const db = getDb();
+
+  db.transaction((tx) => {
+    tx.delete(worktreesTable).run();
+    tx.delete(projectsTable).run();
+
+    for (let i = 0; i < state.projects.length; i++) {
+      const project = state.projects[i];
+      tx.insert(projectsTable)
+        .values({
+          name: project.name,
+          path: project.path,
+          defaultBranch: project.defaultBranch,
+          label: project.label ?? null,
+          sortOrder: i,
+        })
+        .run();
+
+      for (const wt of project.worktrees) {
+        tx.insert(worktreesTable)
+          .values({
+            projectName: project.name,
+            branch: wt.branch,
+            path: wt.path,
+            head: wt.head ?? null,
+          })
+          .run();
+      }
+    }
+  });
 }
 
 export function loadSettings(): Settings {
