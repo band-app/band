@@ -7,6 +7,7 @@ import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { seedState } from "./helpers/seed-state";
 
 const PROJECT_ROOT = join(import.meta.dirname, "..");
 const DEFAULT_TOKEN = "tasks-crud-test-token";
@@ -28,10 +29,6 @@ function createTmpHome(): string {
   mkdirSync(bandDir, { recursive: true });
   mkdirSync(join(bandDir, "status"), { recursive: true });
   return tmp;
-}
-
-function seedState(tmpHome: string, state: object): void {
-  writeFileSync(join(tmpHome, ".band", "state.json"), JSON.stringify(state));
 }
 
 function seedSettings(tmpHome: string, settings: object): void {

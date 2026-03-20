@@ -65,10 +65,6 @@ export function statusDir(): string {
   return join(bandHome(), "status");
 }
 
-export function stateFile(): string {
-  return join(bandHome(), "state.json");
-}
-
 export function settingsFile(): string {
   return join(bandHome(), "settings.json");
 }
@@ -80,11 +76,7 @@ export function ensureDirs(): void {
 
 export function loadState(): AppState {
   const db = getDb();
-  const projectRows = db
-    .select()
-    .from(projectsTable)
-    .orderBy(projectsTable.sortOrder)
-    .all();
+  const projectRows = db.select().from(projectsTable).orderBy(projectsTable.sortOrder).all();
 
   const worktreeRows = db.select().from(worktreesTable).all();
 
