@@ -21,10 +21,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
       - name: Build CLI
-        run: |
-          export PATH="$HOME/.cargo/bin:$PATH"
-          cargo build --release --manifest-path apps/cli/Cargo.toml
+        run: cargo build --release --manifest-path apps/cli/Cargo.toml
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -34,18 +46,14 @@ jobs:
 
       - name: Lint (cargo fmt)
         run: |
-          export PATH="$HOME/.cargo/bin:$PATH"
           cargo fmt --manifest-path apps/cli/Cargo.toml -- --check
           cargo fmt --manifest-path apps/dashboard/src-tauri/Cargo.toml -- --check
 
       - name: Lint (cargo clippy — CLI)
-        run: |
-          export PATH="$HOME/.cargo/bin:$PATH"
-          cargo clippy --manifest-path apps/cli/Cargo.toml -- -D warnings
+        run: cargo clippy --manifest-path apps/cli/Cargo.toml -- -D warnings
 
       - name: Lint (cargo clippy — Dashboard)
         run: |
-          export PATH="$HOME/.cargo/bin:$PATH"
           mkdir -p apps/web/dist apps/dashboard/src-tauri/binaries
           touch apps/web/dist/start-server.mjs
           cp apps/cli/target/release/band "apps/dashboard/src-tauri/binaries/band-$(rustc -vV | sed -n 's/host: //p')"
@@ -64,14 +72,10 @@ jobs:
         run: pnpm --filter @band/web test:e2e
 
       - name: Test (CLI)
-        run: |
-          export PATH="$HOME/.cargo/bin:$PATH"
-          cargo test --manifest-path apps/cli/Cargo.toml
+        run: cargo test --manifest-path apps/cli/Cargo.toml
 
       - name: Test (Dashboard)
-        run: |
-          export PATH="$HOME/.cargo/bin:$PATH"
-          cargo test --manifest-path apps/dashboard/src-tauri/Cargo.toml
+        run: cargo test --manifest-path apps/dashboard/src-tauri/Cargo.toml
 
       - name: Build frontend
         run: pnpm --filter @band/dashboard build
