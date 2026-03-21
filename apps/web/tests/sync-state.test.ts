@@ -1,17 +1,10 @@
 import { execFileSync } from "node:child_process";
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { AppState } from "../src/lib/state";
+import { closeDb } from "../src/lib/db/connection";
+import { loadState, saveState } from "../src/lib/state";
 import { syncWorktrees } from "../src/lib/sync-state";
 
 const gitEnv = {
@@ -36,30 +29,22 @@ function createRepo(tmp: string, name = "repo"): string {
   return repoPath;
 }
 
-function writeState(bandHome: string, state: AppState): void {
-  mkdirSync(bandHome, { recursive: true });
-  writeFileSync(join(bandHome, "state.json"), JSON.stringify(state, null, 2));
-}
-
-function readState(bandHome: string): AppState {
-  return JSON.parse(readFileSync(join(bandHome, "state.json"), "utf-8"));
-}
-
 describe("syncWorktrees", () => {
   let tmp: string;
-  let originalHome: string | undefined;
+  let originalBandHome: string | undefined;
 
   beforeEach(() => {
     tmp = realpathSync(mkdtempSync(join(tmpdir(), "band-sync-test-")));
-    originalHome = process.env.HOME;
-    process.env.HOME = tmp;
+    originalBandHome = process.env.BAND_HOME;
+    process.env.BAND_HOME = join(tmp, ".band");
   });
 
   afterEach(() => {
-    if (originalHome !== undefined) {
-      process.env.HOME = originalHome;
+    closeDb();
+    if (originalBandHome !== undefined) {
+      process.env.BAND_HOME = originalBandHome;
     } else {
-      delete process.env.HOME;
+      delete process.env.BAND_HOME;
     }
     rmSync(tmp, { recursive: true, force: true });
   });
@@ -69,8 +54,7 @@ describe("syncWorktrees", () => {
     const wtPath = join(tmp, "wt-feature");
     git(repoPath, ["worktree", "add", "-b", "feature", wtPath]);
 
-    const bandHome = join(tmp, ".band");
-    writeState(bandHome, {
+    saveState({
       projects: [
         {
           name: "test-project",
@@ -83,7 +67,7 @@ describe("syncWorktrees", () => {
 
     await syncWorktrees();
 
-    const state = readState(bandHome);
+    const state = loadState();
     expect(state.projects[0].worktrees.length).toBe(2);
 
     const mainWt = state.projects[0].worktrees.find((wt) => wt.branch === "main");
@@ -98,8 +82,7 @@ describe("syncWorktrees", () => {
   it("removes stale worktree from state", async () => {
     const repoPath = createRepo(tmp);
 
-    const bandHome = join(tmp, ".band");
-    writeState(bandHome, {
+    saveState({
       projects: [
         {
           name: "test-project",
@@ -115,7 +98,7 @@ describe("syncWorktrees", () => {
 
     await syncWorktrees();
 
-    const state = readState(bandHome);
+    const state = loadState();
     expect(state.projects[0].worktrees.length).toBe(1);
     expect(state.projects[0].worktrees[0].branch).toBe("main");
     expect(state.projects[0].worktrees[0].path).toBe(repoPath);
@@ -125,8 +108,7 @@ describe("syncWorktrees", () => {
     const repoPath = createRepo(tmp);
     const head = git(repoPath, ["rev-parse", "HEAD"]).trim();
 
-    const bandHome = join(tmp, ".band");
-    writeState(bandHome, {
+    saveState({
       projects: [
         {
           name: "test-project",
@@ -137,16 +119,13 @@ describe("syncWorktrees", () => {
       ],
     });
 
-    const stateFilePath = join(bandHome, "state.json");
-    const mtimeBefore = statSync(stateFilePath).mtimeMs;
-
-    // Small delay to ensure mtime would differ if file were rewritten
-    await new Promise((r) => setTimeout(r, 50));
+    const stateBefore = loadState();
 
     await syncWorktrees();
 
-    const mtimeAfter = statSync(stateFilePath).mtimeMs;
-    expect(mtimeAfter).toBe(mtimeBefore);
+    const stateAfter = loadState();
+    // Data should be identical — syncWorktrees should not have written
+    expect(stateAfter).toEqual(stateBefore);
   });
 
   it("skips projects where git fails", async () => {
@@ -154,8 +133,7 @@ describe("syncWorktrees", () => {
     const wtPath = join(tmp, "wt-feature");
     git(repoPath, ["worktree", "add", "-b", "feature", wtPath]);
 
-    const bandHome = join(tmp, ".band");
-    writeState(bandHome, {
+    saveState({
       projects: [
         {
           name: "broken-project",
@@ -174,7 +152,7 @@ describe("syncWorktrees", () => {
 
     await syncWorktrees();
 
-    const state = readState(bandHome);
+    const state = loadState();
 
     // Broken project keeps its stale worktrees (skipped)
     expect(state.projects[0].worktrees.length).toBe(1);

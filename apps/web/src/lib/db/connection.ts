@@ -20,6 +20,7 @@ export function getDb() {
 
   _sqlite = new Database(dbPath);
   _sqlite.pragma("journal_mode = WAL");
+  _sqlite.pragma("foreign_keys = ON");
 
   _db = drizzle(_sqlite, { schema });
   migrate(_db, { migrationsFolder });
