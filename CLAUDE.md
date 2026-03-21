@@ -22,7 +22,7 @@ See `.claude/skills/integration-tests.md` for the full set of rules and examples
 
 ## Project Tracking
 
-All issues are created in the `amirilovic/band` GitHub repo and tracked on the project board: https://github.com/users/amirilovic/projects/5
+All issues are created in the `topdev1de/band` GitHub repo.
 
 ## Architecture: Web Server vs Tauri App
 
