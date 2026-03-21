@@ -23,7 +23,7 @@ jobs:
 
       - name: Build CLI
         run: |
-          export PATH="/root/.cargo/bin:$PATH"
+          export PATH="$HOME/.cargo/bin:$PATH"
           cargo build --release --manifest-path apps/cli/Cargo.toml
 
       - name: Install dependencies
@@ -34,18 +34,18 @@ jobs:
 
       - name: Lint (cargo fmt)
         run: |
-          export PATH="/root/.cargo/bin:$PATH"
+          export PATH="$HOME/.cargo/bin:$PATH"
           cargo fmt --manifest-path apps/cli/Cargo.toml -- --check
           cargo fmt --manifest-path apps/dashboard/src-tauri/Cargo.toml -- --check
 
       - name: Lint (cargo clippy — CLI)
         run: |
-          export PATH="/root/.cargo/bin:$PATH"
+          export PATH="$HOME/.cargo/bin:$PATH"
           cargo clippy --manifest-path apps/cli/Cargo.toml -- -D warnings
 
       - name: Lint (cargo clippy — Dashboard)
         run: |
-          export PATH="/root/.cargo/bin:$PATH"
+          export PATH="$HOME/.cargo/bin:$PATH"
           mkdir -p apps/web/dist apps/dashboard/src-tauri/binaries
           touch apps/web/dist/start-server.mjs
           cp apps/cli/target/release/band "apps/dashboard/src-tauri/binaries/band-$(rustc -vV | sed -n 's/host: //p')"
@@ -65,12 +65,12 @@ jobs:
 
       - name: Test (CLI)
         run: |
-          export PATH="/root/.cargo/bin:$PATH"
+          export PATH="$HOME/.cargo/bin:$PATH"
           cargo test --manifest-path apps/cli/Cargo.toml
 
       - name: Test (Dashboard)
         run: |
-          export PATH="/root/.cargo/bin:$PATH"
+          export PATH="$HOME/.cargo/bin:$PATH"
           cargo test --manifest-path apps/dashboard/src-tauri/Cargo.toml
 
       - name: Build frontend
