@@ -28,8 +28,9 @@ const CI_POLL_TICKS = 6; // every 6th tick = 30s
 let pollerTimer: ReturnType<typeof setInterval> | null = null;
 let tickCount = 0;
 
-// Cache repo info per project path (doesn't change during runtime)
-const repoInfoCache = new Map<string, RepoInfo | null>();
+// Cache repo info per project path within a single CI poll tick.
+// Cleared on each CI tick so transferred repos or new remotes are picked up.
+const repoInfoCache = new Map<string, RepoInfo>();
 
 function branchStatusDir(): string {
   return join(bandHome(), "branch-status");
@@ -111,7 +112,11 @@ async function resolveRepoInfo(projectPath: string): Promise<RepoInfo | null> {
   const cached = repoInfoCache.get(projectPath);
   if (cached !== undefined) return cached;
   const info = await getRepoInfo(projectPath);
-  repoInfoCache.set(projectPath, info);
+  // Only cache successful lookups — null means the remote wasn't available yet
+  // (e.g. project added before git remote was configured) and should be retried.
+  if (info) {
+    repoInfoCache.set(projectPath, info);
+  }
   return info;
 }
 
@@ -123,6 +128,9 @@ async function resolveRepoInfo(projectPath: string): Promise<RepoInfo | null> {
  * Falls back to individual gh CLI calls if the GraphQL query fails.
  */
 async function getBatchedCIStatuses(workspaces: WorkspaceInfo[]): Promise<Map<string, CIStatus>> {
+  // Clear cache so transferred repos or newly configured remotes are picked up
+  repoInfoCache.clear();
+
   // Resolve repo info for all workspaces in parallel
   const resolved: Array<{
     ws: WorkspaceInfo;
