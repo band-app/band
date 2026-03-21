@@ -35,7 +35,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
 
       - name: Build CLI
         run: cargo build --release --manifest-path apps/cli/Cargo.toml
