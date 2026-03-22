@@ -275,7 +275,5 @@ export function deleteWorkspaceStatus(workspaceId: string): void {
 
 export function deleteBranchStatus(workspaceId: string): void {
   const db = getDb();
-  db.delete(branchStatusesTable)
-    .where(eq(branchStatusesTable.workspaceId, workspaceId))
-    .run();
+  db.delete(branchStatusesTable).where(eq(branchStatusesTable.workspaceId, workspaceId)).run();
 }
