@@ -1,5 +1,30 @@
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
+export const workspaceStatuses = sqliteTable("workspace_statuses", {
+  workspaceId: text("workspace_id").primaryKey(),
+  project: text("project").notNull(),
+  branch: text("branch").notNull(),
+  worktreePath: text("worktree_path").notNull(),
+  ide: text("ide").notNull(),
+  agentName: text("agent_name"),
+  agentStatus: text("agent_status"),
+  agentLastActivity: text("agent_last_activity"),
+  agentSummary: text("agent_summary"),
+  updatedAt: integer("updated_at").notNull(),
+});
+
+export const branchStatuses = sqliteTable("branch_statuses", {
+  workspaceId: text("workspace_id").primaryKey(),
+  gitDirty: integer("git_dirty", { mode: "boolean" }).notNull(),
+  gitConflict: integer("git_conflict", { mode: "boolean" }).notNull(),
+  gitAhead: integer("git_ahead").notNull(),
+  gitBehind: integer("git_behind").notNull(),
+  gitSyncState: text("git_sync_state").notNull(),
+  ciState: text("ci_state").notNull(),
+  ciUrl: text("ci_url"),
+  updatedAt: integer("updated_at").notNull(),
+});
+
 export const projects = sqliteTable("projects", {
   name: text("name").primaryKey(),
   path: text("path").notNull(),

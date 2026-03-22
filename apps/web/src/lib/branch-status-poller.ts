@@ -1,10 +1,12 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { toWorkspaceId } from "@band/dashboard-core";
+import { eq } from "drizzle-orm";
+import { getDb } from "./db/connection";
+import { branchStatuses as branchStatusesTable } from "./db/schema";
 import { execGh, execGit, getRepoInfo, type RepoInfo } from "./git";
 import { buildBatchedCIQuery, type CIStatus, parseBatchedCIResponse } from "./github-graphql";
-import { bandHome, loadState } from "./state";
+import { loadState } from "./state";
 import { syncWorktrees } from "./sync-state";
+import { emit } from "./watcher";
 
 interface GitStatus {
   dirty: boolean;
@@ -31,10 +33,6 @@ let tickCount = 0;
 // Cache repo info per project path within a single CI poll tick.
 // Cleared on each CI tick so transferred repos or new remotes are picked up.
 const repoInfoCache = new Map<string, RepoInfo>();
-
-function branchStatusDir(): string {
-  return join(bandHome(), "branch-status");
-}
 
 function getWorkspaces(): WorkspaceInfo[] {
   const state = loadState();
@@ -239,8 +237,7 @@ async function pollTick() {
     );
   }
 
-  const dir = branchStatusDir();
-  mkdirSync(dir, { recursive: true });
+  const db = getDb();
 
   // Fetch CI statuses in batch on CI ticks
   let ciStatuses = new Map<string, CIStatus>();
@@ -256,26 +253,54 @@ async function pollTick() {
       if (isCITick) {
         ci = ciStatuses.get(ws.workspaceId) ?? { state: "none" };
       } else {
-        // Preserve existing CI status from file on non-CI ticks
-        const filePath = join(dir, `${ws.workspaceId}.json`);
-        try {
-          const existing = JSON.parse(readFileSync(filePath, "utf-8")) as {
-            ci?: CIStatus;
-          };
-          if (existing.ci) ci = existing.ci;
-        } catch {
-          // File may not exist yet
+        // Preserve existing CI status from DB on non-CI ticks
+        const existing = db
+          .select({ ciState: branchStatusesTable.ciState, ciUrl: branchStatusesTable.ciUrl })
+          .from(branchStatusesTable)
+          .where(eq(branchStatusesTable.workspaceId, ws.workspaceId))
+          .get();
+        if (existing) {
+          ci = { state: existing.ciState, url: existing.ciUrl };
         }
       }
 
-      const data = {
+      const now = Date.now();
+
+      // Upsert branch status into DB
+      db.insert(branchStatusesTable)
+        .values({
+          workspaceId: ws.workspaceId,
+          gitDirty: git.dirty,
+          gitConflict: git.conflict,
+          gitAhead: git.ahead,
+          gitBehind: git.behind,
+          gitSyncState: git.sync_state,
+          ciState: ci.state,
+          ciUrl: ci.url ?? null,
+          updatedAt: now,
+        })
+        .onConflictDoUpdate({
+          target: branchStatusesTable.workspaceId,
+          set: {
+            gitDirty: git.dirty,
+            gitConflict: git.conflict,
+            gitAhead: git.ahead,
+            gitBehind: git.behind,
+            gitSyncState: git.sync_state,
+            ciState: ci.state,
+            ciUrl: ci.url ?? null,
+            updatedAt: now,
+          },
+        })
+        .run();
+
+      // Emit directly to SSE listeners
+      emit({
+        kind: "branch-status",
         workspaceId: ws.workspaceId,
         git,
         ci,
-      };
-
-      const filePath = join(dir, `${ws.workspaceId}.json`);
-      writeFileSync(filePath, JSON.stringify(data), "utf-8");
+      });
     }),
   );
 }

@@ -1,15 +1,8 @@
-import { readdirSync, readFileSync } from "node:fs";
-import { basename, extname, join } from "node:path";
-import { watch } from "chokidar";
 import { startBranchStatusPoller, stopBranchStatusPoller } from "./branch-status-poller";
+import { getDb } from "./db/connection";
+import { branchStatuses as branchStatusesTable } from "./db/schema";
 import { getRunningSetups } from "./setup-runner";
-import {
-  bandHome,
-  loadCurrentStatuses,
-  loadStatusFile,
-  statusDir,
-  type WorkspaceStatus,
-} from "./state";
+import { loadCurrentStatuses, type WorkspaceStatus } from "./state";
 
 interface GitStatus {
   dirty: boolean;
@@ -47,95 +40,25 @@ export interface StatusEvent {
 type StatusListener = (event: StatusEvent) => void;
 
 const listeners: Set<StatusListener> = new Set();
-let agentWatcher: ReturnType<typeof watch> | null = null;
-let branchWatcher: ReturnType<typeof watch> | null = null;
-
-function branchStatusDir(): string {
-  return join(bandHome(), "branch-status");
-}
-
-function startWatchers() {
-  if (!agentWatcher) {
-    const dir = statusDir();
-    agentWatcher = watch(dir, {
-      ignoreInitial: true,
-      awaitWriteFinish: { stabilityThreshold: 100, pollInterval: 50 },
-    });
-
-    agentWatcher.on("add", handleAgentFileChange);
-    agentWatcher.on("change", handleAgentFileChange);
-    agentWatcher.on("unlink", handleAgentFileRemove);
-  }
-
-  if (!branchWatcher) {
-    const dir = branchStatusDir();
-    branchWatcher = watch(dir, {
-      ignoreInitial: true,
-      awaitWriteFinish: { stabilityThreshold: 100, pollInterval: 50 },
-    });
-
-    branchWatcher.on("add", handleBranchFileChange);
-    branchWatcher.on("change", handleBranchFileChange);
-  }
-}
-
-async function handleAgentFileChange(filePath: string) {
-  if (extname(filePath) !== ".json") return;
-  const name = basename(filePath, ".json");
-  if (name === "active") return; // Skip active workspace marker
-
-  const status = await loadStatusFile(filePath);
-  if (status) {
-    emit({ kind: "update", status });
-  }
-}
-
-function handleAgentFileRemove(filePath: string) {
-  if (extname(filePath) !== ".json") return;
-  const workspaceId = basename(filePath, ".json");
-  if (workspaceId === "active") return;
-  emit({ kind: "remove", workspaceId });
-}
-
-function handleBranchFileChange(filePath: string) {
-  if (extname(filePath) !== ".json") return;
-  try {
-    const data = readFileSync(filePath, "utf-8");
-    const parsed = JSON.parse(data) as { workspaceId: string; git: GitStatus; ci: CIStatus };
-    emit({
-      kind: "branch-status",
-      workspaceId: parsed.workspaceId,
-      git: parsed.git,
-      ci: parsed.ci,
-    });
-  } catch {
-    // Skip invalid files
-  }
-}
 
 function loadCurrentBranchStatuses(): StatusEvent[] {
-  const dir = branchStatusDir();
-  const events: StatusEvent[] = [];
-  try {
-    for (const file of readdirSync(dir)) {
-      if (!file.endsWith(".json")) continue;
-      try {
-        const data = readFileSync(join(dir, file), "utf-8");
-        const parsed = JSON.parse(data) as { workspaceId: string; git: GitStatus; ci: CIStatus };
-        events.push({
-          kind: "branch-status",
-          workspaceId: parsed.workspaceId,
-          git: parsed.git,
-          ci: parsed.ci,
-        });
-      } catch {
-        // Skip invalid files
-      }
-    }
-  } catch {
-    // Dir may not exist
-  }
-  return events;
+  const db = getDb();
+  const rows = db.select().from(branchStatusesTable).all();
+  return rows.map((row) => ({
+    kind: "branch-status" as const,
+    workspaceId: row.workspaceId,
+    git: {
+      dirty: row.gitDirty,
+      conflict: row.gitConflict,
+      ahead: row.gitAhead,
+      behind: row.gitBehind,
+      sync_state: row.gitSyncState,
+    },
+    ci: {
+      state: row.ciState,
+      url: row.ciUrl,
+    },
+  }));
 }
 
 export function emit(event: StatusEvent) {
@@ -146,7 +69,6 @@ export function emit(event: StatusEvent) {
 
 export function subscribe(listener: StatusListener): () => void {
   listeners.add(listener);
-  startWatchers();
   startBranchStatusPoller();
 
   // Send current agent status snapshot
@@ -169,14 +91,6 @@ export function subscribe(listener: StatusListener): () => void {
     listeners.delete(listener);
     if (listeners.size === 0) {
       stopBranchStatusPoller();
-      if (agentWatcher) {
-        agentWatcher.close();
-        agentWatcher = null;
-      }
-      if (branchWatcher) {
-        branchWatcher.close();
-        branchWatcher = null;
-      }
     }
   };
 }

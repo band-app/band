@@ -24,7 +24,6 @@ function createTmpHome(): string {
   const tmp = mkdtempSync(join(tmpdir(), "band-test-"));
   const bandDir = join(tmp, ".band");
   mkdirSync(bandDir, { recursive: true });
-  mkdirSync(join(bandDir, "status"), { recursive: true });
   return tmp;
 }
 

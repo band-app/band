@@ -28,7 +28,6 @@ function createTmpHome(): string {
   const tmp = realpathSync(mkdtempSync(join(tmpdir(), "band-session-test-")));
   const bandDir = join(tmp, ".band");
   mkdirSync(bandDir, { recursive: true });
-  mkdirSync(join(bandDir, "status"), { recursive: true });
   return tmp;
 }
 
