@@ -1,9 +1,16 @@
 import { randomBytes } from "node:crypto";
-import { mkdirSync, readdirSync, readFile, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { toWorkspaceId } from "@band/dashboard-core";
+import { eq } from "drizzle-orm";
 import { getDb } from "./db/connection";
-import { projects as projectsTable, worktrees as worktreesTable } from "./db/schema";
+import {
+  branchStatuses as branchStatusesTable,
+  projects as projectsTable,
+  workspaceStatuses as workspaceStatusesTable,
+  worktrees as worktreesTable,
+} from "./db/schema";
 
 export interface ProjectState {
   name: string;
@@ -61,17 +68,12 @@ export function bandHome(): string {
   return join(homedir(), ".band");
 }
 
-export function statusDir(): string {
-  return join(bandHome(), "status");
-}
-
 export function settingsFile(): string {
   return join(bandHome(), "settings.json");
 }
 
 export function ensureDirs(): void {
   mkdirSync(bandHome(), { recursive: true });
-  mkdirSync(statusDir(), { recursive: true });
 }
 
 export function loadState(): AppState {
@@ -161,36 +163,119 @@ export function worktreesDir(): string {
 }
 
 export function loadCurrentStatuses(): WorkspaceStatus[] {
-  const dir = statusDir();
-  const statuses: WorkspaceStatus[] = [];
-  try {
-    for (const file of readdirSync(dir)) {
-      if (!file.endsWith(".json") || file === "active.json") continue;
-      try {
-        const data = readFileSync(join(dir, file), "utf-8");
-        statuses.push(JSON.parse(data) as WorkspaceStatus);
-      } catch {
-        // Skip invalid files
-      }
-    }
-  } catch {
-    // Status dir may not exist
-  }
-  return statuses;
+  const db = getDb();
+  const rows = db.select().from(workspaceStatusesTable).all();
+  return rows.map((row) => ({
+    workspaceId: row.workspaceId,
+    project: row.project,
+    branch: row.branch,
+    worktreePath: row.worktreePath,
+    ide: row.ide,
+    agent: row.agentName
+      ? {
+          name: row.agentName,
+          status: row.agentStatus ?? "unknown",
+          lastActivity: row.agentLastActivity ?? "",
+          summary: row.agentSummary ?? undefined,
+        }
+      : undefined,
+  }));
 }
 
-export function loadStatusFile(filePath: string): Promise<WorkspaceStatus | null> {
-  return new Promise((resolve) => {
-    readFile(filePath, "utf-8", (err, data) => {
-      if (err) {
-        resolve(null);
-        return;
+export function getWorkspaceStatus(workspaceId: string): WorkspaceStatus | null {
+  const db = getDb();
+  const row = db
+    .select()
+    .from(workspaceStatusesTable)
+    .where(eq(workspaceStatusesTable.workspaceId, workspaceId))
+    .get();
+  if (!row) return null;
+  return {
+    workspaceId: row.workspaceId,
+    project: row.project,
+    branch: row.branch,
+    worktreePath: row.worktreePath,
+    ide: row.ide,
+    agent: row.agentName
+      ? {
+          name: row.agentName,
+          status: row.agentStatus ?? "unknown",
+          lastActivity: row.agentLastActivity ?? "",
+          summary: row.agentSummary ?? undefined,
+        }
+      : undefined,
+  };
+}
+
+export function upsertWorkspaceStatus(
+  workspaceId: string,
+  agent: { status: string; lastActivity?: string },
+): WorkspaceStatus {
+  const db = getDb();
+
+  // Read existing row to preserve fields
+  const existing = db
+    .select()
+    .from(workspaceStatusesTable)
+    .where(eq(workspaceStatusesTable.workspaceId, workspaceId))
+    .get();
+
+  const now = Date.now();
+  const mergedAgent = {
+    agentName: existing?.agentName ?? "claude-code",
+    agentStatus: agent.status,
+    agentLastActivity: agent.lastActivity ?? existing?.agentLastActivity ?? "",
+    agentSummary: existing?.agentSummary ?? null,
+  };
+
+  if (existing) {
+    db.update(workspaceStatusesTable)
+      .set({ ...mergedAgent, updatedAt: now })
+      .where(eq(workspaceStatusesTable.workspaceId, workspaceId))
+      .run();
+  } else {
+    // For new rows, resolve workspace identity from the worktrees DB
+    const ws = resolveWorkspaceIdentity(workspaceId);
+    db.insert(workspaceStatusesTable)
+      .values({
+        workspaceId,
+        project: ws?.project ?? "",
+        branch: ws?.branch ?? "",
+        worktreePath: ws?.worktreePath ?? "",
+        ide: "vscode",
+        ...mergedAgent,
+        updatedAt: now,
+      })
+      .run();
+  }
+
+  return getWorkspaceStatus(workspaceId)!;
+}
+
+function resolveWorkspaceIdentity(
+  workspaceId: string,
+): { project: string; branch: string; worktreePath: string } | null {
+  const state = loadState();
+  for (const proj of state.projects) {
+    for (const wt of proj.worktrees) {
+      if (toWorkspaceId(proj.name, wt.branch) === workspaceId) {
+        return { project: proj.name, branch: wt.branch, worktreePath: wt.path };
       }
-      try {
-        resolve(JSON.parse(data) as WorkspaceStatus);
-      } catch {
-        resolve(null);
-      }
-    });
-  });
+    }
+  }
+  return null;
+}
+
+export function deleteWorkspaceStatus(workspaceId: string): void {
+  const db = getDb();
+  db.delete(workspaceStatusesTable)
+    .where(eq(workspaceStatusesTable.workspaceId, workspaceId))
+    .run();
+}
+
+export function deleteBranchStatus(workspaceId: string): void {
+  const db = getDb();
+  db.delete(branchStatusesTable)
+    .where(eq(branchStatusesTable.workspaceId, workspaceId))
+    .run();
 }

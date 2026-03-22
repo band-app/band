@@ -3,7 +3,6 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
-  renameSync,
   rmSync,
   unlinkSync,
   writeFileSync,
@@ -42,13 +41,16 @@ import {
 import { runSetup } from "../lib/setup-runner";
 import {
   bandHome,
+  deleteBranchStatus,
+  deleteWorkspaceStatus,
   ensureDirs,
+  getWorkspaceStatus,
   loadCurrentStatuses,
   loadSettings,
   loadState,
   saveState,
   settingsFile,
-  statusDir,
+  upsertWorkspaceStatus,
   worktreesDir,
 } from "../lib/state";
 import {
@@ -62,7 +64,7 @@ import {
 } from "../lib/task-runner";
 import { listTasks, loadTask } from "../lib/task-store";
 import { getTunnelStatus, startTunnel, stopTunnel } from "../lib/tunnel";
-import { subscribe as subscribeStatus } from "../lib/watcher";
+import { emit, subscribe as subscribeStatus } from "../lib/watcher";
 import { resolveWorkspace } from "../lib/workspace";
 import type { Context } from "./context";
 
@@ -374,11 +376,8 @@ const workspacesRouter = t.router({
             } catch {
               // Prompt file may not exist
             }
-            try {
-              unlinkSync(join(statusDir(), `${workspaceId}.json`));
-            } catch {
-              // Status file may not exist
-            }
+            deleteWorkspaceStatus(workspaceId);
+            deleteBranchStatus(workspaceId);
 
             // Clean up cached agent from pool
             removeAgent(workspaceId);
@@ -1249,13 +1248,7 @@ const chatRouter = t.router({
 
 const statusesRouter = t.router({
   get: publicProcedure.input(z.object({ workspaceId: z.string() })).query(({ input }) => {
-    const filePath = join(statusDir(), `${input.workspaceId}.json`);
-    try {
-      const data = readFileSync(filePath, "utf-8");
-      return JSON.parse(data);
-    } catch {
-      return null;
-    }
+    return getWorkspaceStatus(input.workspaceId);
   }),
 
   update: publicProcedure
@@ -1269,30 +1262,10 @@ const statusesRouter = t.router({
       }),
     )
     .mutation(({ input }) => {
-      ensureDirs();
-      const filePath = join(statusDir(), `${input.workspaceId}.json`);
+      const status = upsertWorkspaceStatus(input.workspaceId, input.agent);
 
-      // Read existing status file to preserve fields
-      let status: Record<string, unknown> = {};
-      try {
-        const data = readFileSync(filePath, "utf-8");
-        status = JSON.parse(data);
-      } catch {
-        // File doesn't exist or is invalid — start fresh
-      }
-
-      status.workspaceId = input.workspaceId;
-
-      // Merge agent fields
-      const existing = (status.agent as Record<string, unknown>) ?? {};
-      status.agent = { ...existing, ...input.agent };
-
-      const json = JSON.stringify(status, null, 2);
-
-      // Atomic write: write to temp file then rename
-      const tmpPath = join(statusDir(), `.${input.workspaceId}.json.tmp`);
-      writeFileSync(tmpPath, json, "utf-8");
-      renameSync(tmpPath, filePath);
+      // Emit update directly to SSE listeners
+      emit({ kind: "update", status });
 
       return { ok: true };
     }),
