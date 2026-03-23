@@ -179,7 +179,7 @@ describe("statePriority", () => {
 // ---------------------------------------------------------------------------
 
 describe("parseBatchedCIResponse", () => {
-  it("returns merged status when PR is merged", () => {
+  it("returns merged status when PR is merged on a feature branch", () => {
     const data = {
       ws_0: {
         pullRequests: {
@@ -199,6 +199,42 @@ describe("parseBatchedCIResponse", () => {
       state: "merged",
       url: "https://github.com/o/r/pull/1",
     });
+  });
+
+  it("ignores merged PR on default branch", () => {
+    const data = {
+      ws_0: {
+        pullRequests: {
+          nodes: [
+            {
+              state: "MERGED",
+              url: "https://github.com/o/r/pull/1",
+            },
+          ],
+        },
+        ref: {
+          target: {
+            checkSuites: {
+              nodes: [
+                {
+                  status: "COMPLETED",
+                  conclusion: "SUCCESS",
+                  updatedAt: "2024-01-01T00:00:00Z",
+                  workflowRun: {
+                    workflow: { name: "CI" },
+                    url: "https://github.com/o/r/actions/runs/1",
+                  },
+                },
+              ],
+            },
+          },
+        },
+      },
+    };
+
+    const defaultBranches = new Map([["ws_0", "main"]]);
+    const result = parseBatchedCIResponse(data, ["ws_0"], defaultBranches);
+    expect(result.get("ws_0")?.state).toBe("success");
   });
 
   it("returns none when no PR and no check suites", () => {

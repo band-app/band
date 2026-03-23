@@ -105,6 +105,7 @@ export function statePriority(state: string): number {
 export function parseBatchedCIResponse(
   data: Record<string, GraphQLRepoResponse | null>,
   aliases: string[],
+  defaultBranches?: Map<string, string>,
 ): Map<string, CIStatus> {
   const results = new Map<string, CIStatus>();
 
@@ -117,14 +118,19 @@ export function parseBatchedCIResponse(
 
     // Check PR status
     let prUrl: string | null = null;
+    const isDefaultBranch = defaultBranches?.get(alias) !== undefined;
     const prNodes = repo.pullRequests?.nodes ?? [];
     if (prNodes.length > 0) {
       const pr = prNodes[0];
-      if (pr.state === "MERGED") {
+      // Only show "merged" for feature branches, not the default branch.
+      // A merged PR on main just means someone merged main into another branch.
+      if (pr.state === "MERGED" && !isDefaultBranch) {
         results.set(alias, { state: "merged", url: pr.url });
         continue;
       }
-      prUrl = pr.url;
+      if (pr.state !== "MERGED") {
+        prUrl = pr.url;
+      }
     }
 
     // Check CI status from check suites

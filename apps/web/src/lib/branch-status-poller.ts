@@ -20,6 +20,7 @@ interface WorkspaceInfo {
   workspaceId: string;
   project: string;
   branch: string;
+  defaultBranch: string;
   worktreePath: string;
   projectPath: string;
 }
@@ -43,6 +44,7 @@ function getWorkspaces(): WorkspaceInfo[] {
         workspaceId: toWorkspaceId(project.name, wt.branch),
         project: project.name,
         branch: wt.branch,
+        defaultBranch: project.defaultBranch,
         worktreePath: wt.path,
         projectPath: project.path,
       });
@@ -190,9 +192,18 @@ async function getBatchedCIStatuses(workspaces: WorkspaceInfo[]): Promise<Map<st
       const response = JSON.parse(output) as {
         data: Record<string, unknown>;
       };
+      // Build map of alias -> defaultBranch for aliases that are on the default branch
+      const defaultBranches = new Map<string, string>();
+      for (const g of group) {
+        if (g.ws.branch === g.ws.defaultBranch) {
+          defaultBranches.set(g.alias, g.ws.defaultBranch);
+        }
+      }
+
       const parsed = parseBatchedCIResponse(
         response.data as Record<string, never>,
         inputs.map((i) => i.alias),
+        defaultBranches,
       );
 
       // Map aliases back to workspace IDs
