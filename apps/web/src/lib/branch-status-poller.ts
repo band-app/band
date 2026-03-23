@@ -169,7 +169,7 @@ async function getBatchedCIStatuses(workspaces: WorkspaceInfo[]): Promise<Map<st
   const allResults = new Map<string, CIStatus>();
 
   // Execute one batched GraphQL query per host
-  for (const [, group] of byHost) {
+  for (const [host, group] of byHost) {
     const inputs = group.map((g) => ({
       alias: g.alias,
       branch: g.ws.branch,
@@ -180,8 +180,13 @@ async function getBatchedCIStatuses(workspaces: WorkspaceInfo[]): Promise<Map<st
     // Use any workspace's worktreePath for cwd (gh auth is per-host)
     const cwd = group[0].ws.worktreePath;
 
+    const ghArgs = ["api", "graphql", "-f", `query=${query}`];
+    if (host !== "github.com") {
+      ghArgs.push("--hostname", host);
+    }
+
     try {
-      const output = await execGh(["api", "graphql", "-f", `query=${query}`], cwd);
+      const output = await execGh(ghArgs, cwd);
       const response = JSON.parse(output) as {
         data: Record<string, unknown>;
       };
