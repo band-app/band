@@ -126,6 +126,15 @@ function WorkspaceLayout() {
     return () => setActiveWorkspace(null);
   }, [decoded, setActiveWorkspace]);
 
+  // Clear needs_attention status when viewing this workspace
+  const agentStatus = useDashboardStore((s) => s.statuses.get(decoded)?.agent?.status);
+  useEffect(() => {
+    if (agentStatus !== "needs_attention") return;
+    trpc.statuses.update
+      .mutate({ workspaceId: decoded, agent: { status: "waiting" } })
+      .catch(() => {});
+  }, [decoded, agentStatus]);
+
   return (
     <DiffStatsContext.Provider value={{ diffStats, setDiffStats }}>
       {isDesktop ? (
