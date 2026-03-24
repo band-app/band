@@ -3,6 +3,12 @@ import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import * as schema from "../../src/lib/db/schema";
+
+const migrationsFolder = join(import.meta.dirname, "../../src/lib/db/migrations");
 
 const PROJECT_ROOT = join(import.meta.dirname, "../..");
 
@@ -25,7 +31,22 @@ export function seedState(tmpHome: string, state: object): void {
 }
 
 export function seedSettings(tmpHome: string, settings: object): void {
-  writeFileSync(join(tmpHome, ".band", "settings.json"), JSON.stringify(settings));
+  const bandDir = join(tmpHome, ".band");
+  mkdirSync(bandDir, { recursive: true });
+
+  const sqlite = new Database(join(bandDir, "band.db"));
+  sqlite.pragma("journal_mode = WAL");
+  sqlite.pragma("foreign_keys = ON");
+
+  const db = drizzle(sqlite, { schema });
+  migrate(db, { migrationsFolder });
+
+  db.insert(schema.settings)
+    .values({ id: 1, data: JSON.stringify(settings) })
+    .onConflictDoUpdate({ target: schema.settings.id, set: { data: JSON.stringify(settings) } })
+    .run();
+
+  sqlite.close();
 }
 
 export function getRandomPort(): Promise<number> {
