@@ -1649,9 +1649,12 @@ fn band_with_mock(
     let band_dir = tmp.path().join(".band");
     fs::create_dir_all(&band_dir).ok();
     // Seed settings in DB so ApiClient::from_settings works
-    seed_settings_only(&band_dir, &serde_json::json!({
-        "tokenSecret": "mock-token"
-    }));
+    seed_settings_only(
+        &band_dir,
+        &serde_json::json!({
+            "tokenSecret": "mock-token"
+        }),
+    );
 
     Command::new(env!("CARGO_BIN_EXE_band"))
         .args(args)
