@@ -36,26 +36,20 @@ impl TestEnv {
         git(&repo_path, &["init", "-b", "main"]);
         git(&repo_path, &["commit", "--allow-empty", "-m", "init"]);
 
-        // Seed SQLite database with migrations and project data
-        seed_db(&band_dir, &repo_path);
-
         // Find a free port
         let port = {
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
             listener.local_addr().unwrap().port()
         };
 
-        // Seed settings.json with token and port
         let settings = serde_json::json!({
             "tokenSecret": token,
             "webServerPort": port,
             "worktreesDir": band_dir.join("worktrees").to_string_lossy(),
         });
-        fs::write(
-            band_dir.join("settings.json"),
-            serde_json::to_string_pretty(&settings).unwrap(),
-        )
-        .unwrap();
+
+        // Seed SQLite database with migrations, project data, and settings
+        seed_db(&band_dir, &repo_path, &settings);
 
         // Start the web server
         let web_dist =
@@ -128,11 +122,11 @@ impl Drop for TestEnv {
     }
 }
 
-/// Seed the `SQLite` database with Drizzle migrations and a test project.
+/// Seed the `SQLite` database with Drizzle migrations, a test project, and settings.
 ///
 /// Runs a Node.js script that uses `better-sqlite3` (from the web app's
 /// `node_modules`) to apply migrations and insert seed data.
-fn seed_db(band_dir: &Path, repo_path: &Path) {
+fn seed_db(band_dir: &Path, repo_path: &Path, settings: &serde_json::Value) {
     let seed_script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seed-db.mjs");
     let output = Command::new("node")
         .arg(&seed_script)
@@ -140,12 +134,31 @@ fn seed_db(band_dir: &Path, repo_path: &Path) {
         .arg("my-project")
         .arg(repo_path)
         .arg("main")
+        .arg(settings.to_string())
         .output()
         .expect("seed-db.mjs failed to execute");
 
     assert!(
         output.status.success(),
         "seed-db.mjs failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// Seed only settings into the database (no project data).
+/// Used by tests that don't need a full `TestEnv` but need a valid settings row.
+fn seed_settings_only(band_dir: &Path, settings: &serde_json::Value) {
+    let seed_script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seed-settings.mjs");
+    let output = Command::new("node")
+        .arg(&seed_script)
+        .arg(band_dir)
+        .arg(settings.to_string())
+        .output()
+        .expect("seed-settings.mjs failed to execute");
+
+    assert!(
+        output.status.success(),
+        "seed-settings.mjs failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 }
@@ -607,11 +620,7 @@ fn notify_silently_succeeds_when_server_unreachable() {
         "tokenSecret": "fake-token",
         "webServerPort": 19999,
     });
-    fs::write(
-        band_home.join("settings.json"),
-        serde_json::to_string_pretty(&settings).unwrap(),
-    )
-    .unwrap();
+    seed_settings_only(&band_home, &settings);
 
     let output = Command::new(env!("CARGO_BIN_EXE_band"))
         .args(["notify"])
@@ -1639,15 +1648,10 @@ fn band_with_mock(
 ) -> std::process::Output {
     let band_dir = tmp.path().join(".band");
     fs::create_dir_all(&band_dir).ok();
-    // Write a minimal settings.json so ApiClient::from_settings works
-    fs::write(
-        band_dir.join("settings.json"),
-        serde_json::to_string(&serde_json::json!({
-            "tokenSecret": "mock-token"
-        }))
-        .unwrap(),
-    )
-    .unwrap();
+    // Seed settings in DB so ApiClient::from_settings works
+    seed_settings_only(&band_dir, &serde_json::json!({
+        "tokenSecret": "mock-token"
+    }));
 
     Command::new(env!("CARGO_BIN_EXE_band"))
         .args(args)

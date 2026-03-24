@@ -1,20 +1,16 @@
 #!/usr/bin/env node
-// Seed the SQLite database for CLI integration tests.
-// Usage: node seed-db.mjs <band_dir> <project_name> <project_path> <default_branch> [settings_json]
+// Seed only settings into the SQLite database.
+// Usage: node seed-settings.mjs <band_dir> <settings_json>
 //
-// Creates band.db with Drizzle migrations applied, a single project row,
-// and optionally a settings row.
+// Creates band.db with Drizzle migrations applied and a settings row.
 
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-const [bandDir, projectName, projectPath, defaultBranch, settingsJson] =
-  process.argv.slice(2);
-if (!bandDir || !projectName || !projectPath || !defaultBranch) {
-  console.error(
-    "Usage: node seed-db.mjs <band_dir> <project_name> <project_path> <default_branch> [settings_json]"
-  );
+const [bandDir, settingsJson] = process.argv.slice(2);
+if (!bandDir || !settingsJson) {
+  console.error("Usage: node seed-settings.mjs <band_dir> <settings_json>");
   process.exit(1);
 }
 
@@ -28,7 +24,10 @@ const migrationsDir = resolve(
 // Use better-sqlite3 from the web app's node_modules
 const Database = (
   await import(
-    resolve(import.meta.dirname, "../../web/node_modules/better-sqlite3/lib/index.js")
+    resolve(
+      import.meta.dirname,
+      "../../web/node_modules/better-sqlite3/lib/index.js"
+    )
   )
 ).default;
 
@@ -71,16 +70,9 @@ for (const file of sqlFiles) {
   }
 }
 
-// Seed the test project
-db.prepare(
-  "INSERT INTO projects (name, path, default_branch, sort_order) VALUES (?, ?, ?, 0)"
-).run(projectName, projectPath, defaultBranch);
-
-// Seed settings if provided
-if (settingsJson) {
-  db.prepare(
-    "INSERT OR REPLACE INTO settings (id, data) VALUES (1, ?)"
-  ).run(settingsJson);
-}
+// Seed settings
+db.prepare("INSERT OR REPLACE INTO settings (id, data) VALUES (1, ?)").run(
+  settingsJson
+);
 
 db.close();

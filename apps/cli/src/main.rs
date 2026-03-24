@@ -382,7 +382,7 @@ fn main() {
     }
 }
 
-/// Open the editor configured in .band/config.json or settings.json defaults.
+/// Open the editor configured in .band/config.json or settings defaults.
 /// Only opens editor-type apps (vscode, zed) — iTerm/Chrome are managed by the dashboard.
 fn open_configured_editor(worktree_path: &str) {
     // Try to load apps config from project config, then fall back to settings defaults
@@ -424,7 +424,7 @@ fn open_configured_editor(worktree_path: &str) {
     }
 }
 
-/// Load the apps config from project .band/config.json, falling back to settings.json defaults.
+/// Load the apps config from project .band/config.json, falling back to settings defaults.
 fn load_apps_config(worktree_path: &str) -> Vec<serde_json::Value> {
     // Try project .band/config.json first
     let config_path = std::path::PathBuf::from(worktree_path)
@@ -441,7 +441,7 @@ fn load_apps_config(worktree_path: &str) -> Vec<serde_json::Value> {
         }
     }
 
-    // Fall back to settings.json defaults
+    // Fall back to settings defaults
     if let Ok(settings) = state::load_settings() {
         if let Some(defaults) = settings.defaults {
             if let Some(apps) = defaults.get("apps").and_then(|v| v.as_array()) {
@@ -977,7 +977,7 @@ fn cmd_tasks_watch(
     let status = response.status().as_u16();
 
     if status == 401 {
-        return Err("Authentication failed. Check tokenSecret in settings.json".to_string());
+        return Err("Authentication failed. Check tokenSecret in settings".to_string());
     }
     if status >= 400 {
         let body: serde_json::Value = response
