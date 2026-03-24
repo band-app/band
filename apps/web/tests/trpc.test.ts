@@ -4,7 +4,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { seedState } from "./helpers/seed-state";
+import { seedSettings, seedState } from "./helpers/seed-state";
 
 const PROJECT_ROOT = join(import.meta.dirname, "..");
 const DEFAULT_TOKEN = "trpc-default-token";
@@ -24,10 +24,6 @@ function createTmpHome(): string {
   const bandDir = join(tmp, ".band");
   mkdirSync(bandDir, { recursive: true });
   return tmp;
-}
-
-function seedSettings(tmpHome: string, settings: object): void {
-  writeFileSync(join(tmpHome, ".band", "settings.json"), JSON.stringify(settings));
 }
 
 function getRandomPort(): Promise<number> {

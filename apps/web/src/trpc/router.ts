@@ -1,5 +1,5 @@
 import { execFile, execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, unlinkSync } from "node:fs";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, extname, join, resolve } from "node:path";
 import { toWorkspaceId } from "@band/dashboard-core";
@@ -36,13 +36,12 @@ import {
   bandHome,
   deleteBranchStatus,
   deleteWorkspaceStatus,
-  ensureDirs,
   getWorkspaceStatus,
   loadCurrentStatuses,
   loadSettings,
   loadState,
+  saveSettings,
   saveState,
-  settingsFile,
   upsertWorkspaceStatus,
   worktreesDir,
 } from "../lib/state";
@@ -456,17 +455,11 @@ const workspacesRouter = t.router({
 
 const settingsRouter = t.router({
   get: publicProcedure.query(() => {
-    try {
-      const data = readFileSync(settingsFile(), "utf-8");
-      return JSON.parse(data);
-    } catch {
-      return { worktreesDir: null };
-    }
+    return loadSettings();
   }),
 
   update: publicProcedure.input(z.record(z.string(), z.unknown())).mutation(({ input }) => {
-    ensureDirs();
-    writeFileSync(settingsFile(), JSON.stringify(input, null, 2), "utf-8");
+    saveSettings(input);
     return { ok: true };
   }),
 });

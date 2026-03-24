@@ -29,6 +29,13 @@
       "when": 1774134086815,
       "tag": "0003_busy_cyclops",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1774340938871,
+      "tag": "0004_handy_ricochet",
+      "breakpoints": true
     }
   ]
 }

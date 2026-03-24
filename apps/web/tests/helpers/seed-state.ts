@@ -64,3 +64,22 @@ export function seedState(tmpHome: string, state: StateData): void {
 
   sqlite.close();
 }
+
+export function seedSettings(tmpHome: string, settings: object): void {
+  const bandDir = join(tmpHome, ".band");
+  mkdirSync(bandDir, { recursive: true });
+
+  const sqlite = new Database(join(bandDir, "band.db"));
+  sqlite.pragma("journal_mode = WAL");
+  sqlite.pragma("foreign_keys = ON");
+
+  const db = drizzle(sqlite, { schema });
+  migrate(db, { migrationsFolder });
+
+  db.insert(schema.settings)
+    .values({ id: 1, data: JSON.stringify(settings) })
+    .onConflictDoUpdate({ target: schema.settings.id, set: { data: JSON.stringify(settings) } })
+    .run();
+
+  sqlite.close();
+}

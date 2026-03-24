@@ -1,5 +1,4 @@
 import { randomBytes } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { toWorkspaceId } from "@band/dashboard-core";
@@ -8,6 +7,7 @@ import { getDb } from "./db/connection";
 import {
   branchStatuses as branchStatusesTable,
   projects as projectsTable,
+  settings as settingsTable,
   workspaceStatuses as workspaceStatusesTable,
   worktrees as worktreesTable,
 } from "./db/schema";
@@ -66,14 +66,6 @@ export interface Settings {
 export function bandHome(): string {
   if (process.env.BAND_HOME) return process.env.BAND_HOME;
   return join(homedir(), ".band");
-}
-
-export function settingsFile(): string {
-  return join(bandHome(), "settings.json");
-}
-
-export function ensureDirs(): void {
-  mkdirSync(bandHome(), { recursive: true });
 }
 
 export function loadState(): AppState {
@@ -138,22 +130,29 @@ export function saveState(state: AppState): void {
 }
 
 export function loadSettings(): Settings {
-  try {
-    const data = readFileSync(settingsFile(), "utf-8");
-    return JSON.parse(data) as Settings;
-  } catch {
-    return {};
+  const db = getDb();
+  const row = db.select().from(settingsTable).where(eq(settingsTable.id, 1)).get();
+  if (row) {
+    return JSON.parse(row.data) as Settings;
   }
+  return {};
+}
+
+export function saveSettings(settings: Settings): void {
+  const db = getDb();
+  db.insert(settingsTable)
+    .values({ id: 1, data: JSON.stringify(settings) })
+    .onConflictDoUpdate({ target: settingsTable.id, set: { data: JSON.stringify(settings) } })
+    .run();
 }
 
 export function getOrCreateToken(): string {
   const settings = loadSettings();
   if (settings.tokenSecret) return settings.tokenSecret;
   const token = randomBytes(32).toString("hex");
-  ensureDirs();
   const current = loadSettings();
   current.tokenSecret = token;
-  writeFileSync(settingsFile(), JSON.stringify(current, null, 2), "utf-8");
+  saveSettings(current);
   return token;
 }
 

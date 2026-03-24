@@ -1,4 +1,4 @@
-import { appendFileSync, createReadStream, statSync } from "node:fs";
+import { appendFileSync, createReadStream, mkdirSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { basename, extname, join } from "node:path";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
@@ -11,7 +11,7 @@ import { startCronjobScheduler, stopCronjobScheduler } from "./src/lib/cronjob-s
 import { closeDb } from "./src/lib/db/connection.ts";
 import { runMigrations } from "./src/lib/db/migrate.ts";
 import { checkPrereqs } from "./src/lib/process-utils.ts";
-import { bandHome, ensureDirs, getOrCreateToken, loadSettings } from "./src/lib/state.ts";
+import { bandHome, getOrCreateToken, loadSettings } from "./src/lib/state.ts";
 import { cleanupStaleTasks } from "./src/lib/task-store.ts";
 import { killAllTerminals } from "./src/lib/terminal-manager.ts";
 import { handleTerminalConnection } from "./src/lib/terminal-ws.ts";
@@ -26,7 +26,7 @@ import { appRouter } from "./src/trpc/router.ts";
 
 function logCrash(message: string): void {
   try {
-    ensureDirs();
+    mkdirSync(bandHome(), { recursive: true });
     appendFileSync(join(bandHome(), "server.log"), message, "utf-8");
   } catch {
     // Best-effort logging — nothing we can do if this fails
