@@ -120,7 +120,7 @@ fn parse_trpc_body(mut response: http::Response<Body>) -> Result<serde_json::Val
 
     // Auth failure
     if status == 401 {
-        return Err("Authentication failed. Check tokenSecret in settings.json".to_string());
+        return Err("Authentication failed. Check tokenSecret in settings".to_string());
     }
 
     let body: serde_json::Value = response
