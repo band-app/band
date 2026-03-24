@@ -408,7 +408,7 @@ const workspacesRouter = t.router({
         throw new Error("Workspace not found");
       }
       const cwd = workspace.worktree.path;
-      await execGit(["pull"], cwd);
+      await execGit(["pull", "--rebase"], cwd);
       return { ok: true };
     }),
 
