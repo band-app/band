@@ -578,8 +578,7 @@ fn ax_window_titles(pid: i32) -> std::collections::HashMap<u32, String> {
 
             let title_attr = cfstr("AXTitle");
             let mut title_ref: *const c_void = std::ptr::null();
-            let title_err =
-                AXUIElementCopyAttributeValue(ax_win, title_attr, &raw mut title_ref);
+            let title_err = AXUIElementCopyAttributeValue(ax_win, title_attr, &raw mut title_ref);
             CFRelease(title_attr);
 
             if title_err == 0 && !title_ref.is_null() {
