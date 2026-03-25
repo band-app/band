@@ -34,5 +34,12 @@
     "bundleId": "com.google.Chrome",
     "displayName": "Google Chrome",
     "launchCommand": "$HOME/.band/scripts/chrome-launch.py"
+  },
+  {
+    "type": "xcode",
+    "bundleId": "com.apple.dt.Xcode",
+    "displayName": "Xcode",
+    "launchCommand": "$HOME/.band/scripts/xcode-launch.py \"{{path}}\"",
+    "titleHint": "{{folder}}"
   }
 ]

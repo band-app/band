@@ -3,6 +3,7 @@ dist/
 band
 *.tgz
 .DS_Store
+__pycache__/
 target/
 *.vsix
 apps/dashboard/src-tauri/icons/android/
