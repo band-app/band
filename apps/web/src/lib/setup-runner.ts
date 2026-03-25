@@ -14,7 +14,12 @@ export function getRunningSetups(): string[] {
   return Array.from(setups.keys());
 }
 
-export function runSetup(workspaceId: string, worktreePath: string, projectPath: string, onComplete?: () => void): void {
+export function runSetup(
+  workspaceId: string,
+  worktreePath: string,
+  projectPath: string,
+  onComplete?: () => void,
+): void {
   // Guard against concurrent setups on same workspace
   if (setups.has(workspaceId)) return;
 

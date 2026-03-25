@@ -22,6 +22,7 @@ import { execGit, gitCmd, listWorktrees } from "../lib/git";
 import { checkHooks, installHooks } from "../lib/hooks";
 import { resolvePendingInput } from "../lib/pending-inputs";
 import { checkPrereqs, shellPath } from "../lib/process-utils";
+import { loadProjectConfig } from "../lib/project-config";
 import {
   clearQueuedMessages,
   getQueuedMessages,
@@ -31,7 +32,6 @@ import {
   shiftQueuedMessage,
   subscribeQueue,
 } from "../lib/queued-message-store";
-import { loadProjectConfig } from "../lib/project-config";
 import { runSetup } from "../lib/setup-runner";
 import {
   bandHome,
