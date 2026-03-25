@@ -115,7 +115,7 @@ impl WindowManager {
 
         handler.launch(worktree_path, folder_name, config)?;
 
-        if let Some(win) = watcher.wait(5000) {
+        if let Some(win) = watcher.wait(handler.wait_timeout()) {
             self.register(app_type, workspace_id, win.pid, win.cg_window_id);
         }
 

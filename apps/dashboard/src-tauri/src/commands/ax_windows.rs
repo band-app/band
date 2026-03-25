@@ -538,7 +538,90 @@ pub fn list_windows_for_bundle(bundle_id: &str) -> Vec<WindowInfo> {
         CFRelease(list);
     }
 
+    // Fall back to AXTitle for apps that don't set kCGWindowName (e.g. JetBrains IDEs).
+    enrich_empty_titles(&mut results);
+
     results
+}
+
+/// Get AXTitle for each AX window of a process, keyed by CGWindowID.
+/// Used as a fallback for apps that don't set `kCGWindowName` (e.g. JetBrains IDEs).
+fn ax_window_titles(pid: i32) -> std::collections::HashMap<u32, String> {
+    let mut map = std::collections::HashMap::new();
+    unsafe {
+        let app = AXUIElementCreateApplication(pid);
+        if app.is_null() {
+            return map;
+        }
+
+        let attr = cfstr("AXWindows");
+        let mut windows: *const c_void = std::ptr::null();
+        let err = AXUIElementCopyAttributeValue(app, attr, &raw mut windows);
+        CFRelease(attr);
+
+        if err != 0 || windows.is_null() {
+            CFRelease(app);
+            return map;
+        }
+
+        let count = CFArrayGetCount(windows);
+        for i in 0..count {
+            let ax_win = CFArrayGetValueAtIndex(windows, i);
+            if ax_win.is_null() {
+                continue;
+            }
+
+            let mut cg_id: u32 = 0;
+            if _AXUIElementGetWindow(ax_win, &raw mut cg_id) != 0 || cg_id == 0 {
+                continue;
+            }
+
+            let title_attr = cfstr("AXTitle");
+            let mut title_ref: *const c_void = std::ptr::null();
+            let title_err =
+                AXUIElementCopyAttributeValue(ax_win, title_attr, &raw mut title_ref);
+            CFRelease(title_attr);
+
+            if title_err == 0 && !title_ref.is_null() {
+                if let Some(t) = cfstring_to_string(title_ref) {
+                    if !t.is_empty() {
+                        map.insert(cg_id, t);
+                    }
+                }
+                CFRelease(title_ref);
+            }
+        }
+
+        CFRelease(windows);
+        CFRelease(app);
+    }
+    map
+}
+
+/// Enrich windows that have empty `kCGWindowName` with their `AXTitle`.
+/// Only queries the AX API when at least one window has an empty title.
+fn enrich_empty_titles(windows: &mut [WindowInfo]) {
+    if windows.iter().all(|w| !w.title.is_empty()) {
+        return;
+    }
+
+    let mut seen_pids = std::collections::HashSet::new();
+    for w in windows.iter() {
+        if w.title.is_empty() {
+            seen_pids.insert(w.pid);
+        }
+    }
+
+    for pid in seen_pids {
+        let titles = ax_window_titles(pid);
+        for w in windows.iter_mut() {
+            if w.pid == pid && w.title.is_empty() {
+                if let Some(title) = titles.get(&w.cg_window_id) {
+                    w.title.clone_from(title);
+                }
+            }
+        }
+    }
 }
 
 /// Find the first window whose title contains the given substring.

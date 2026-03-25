@@ -34,5 +34,69 @@
     "bundleId": "com.google.Chrome",
     "displayName": "Google Chrome",
     "launchCommand": "$HOME/.band/scripts/chrome-launch.py"
+  },
+  {
+    "type": "intellij",
+    "bundleId": "com.jetbrains.intellij",
+    "displayName": "IntelliJ IDEA",
+    "launchCommand": "open -a \"IntelliJ IDEA\" \"{{path}}\"",
+    "titleHint": "{{folder}}",
+    "waitTimeout": 30000
+  },
+  {
+    "type": "webstorm",
+    "bundleId": "com.jetbrains.WebStorm",
+    "displayName": "WebStorm",
+    "launchCommand": "open -a \"WebStorm\" \"{{path}}\"",
+    "titleHint": "{{folder}}",
+    "waitTimeout": 30000
+  },
+  {
+    "type": "pycharm",
+    "bundleId": "com.jetbrains.pycharm",
+    "displayName": "PyCharm",
+    "launchCommand": "open -a \"PyCharm\" \"{{path}}\"",
+    "titleHint": "{{folder}}",
+    "waitTimeout": 30000
+  },
+  {
+    "type": "goland",
+    "bundleId": "com.jetbrains.goland",
+    "displayName": "GoLand",
+    "launchCommand": "open -a \"GoLand\" \"{{path}}\"",
+    "titleHint": "{{folder}}",
+    "waitTimeout": 30000
+  },
+  {
+    "type": "rider",
+    "bundleId": "com.jetbrains.rider",
+    "displayName": "Rider",
+    "launchCommand": "open -a \"Rider\" \"{{path}}\"",
+    "titleHint": "{{folder}}",
+    "waitTimeout": 30000
+  },
+  {
+    "type": "clion",
+    "bundleId": "com.jetbrains.CLion",
+    "displayName": "CLion",
+    "launchCommand": "open -a \"CLion\" \"{{path}}\"",
+    "titleHint": "{{folder}}",
+    "waitTimeout": 30000
+  },
+  {
+    "type": "rustrover",
+    "bundleId": "com.jetbrains.rustrover",
+    "displayName": "RustRover",
+    "launchCommand": "open -a \"RustRover\" \"{{path}}\"",
+    "titleHint": "{{folder}}",
+    "waitTimeout": 30000
+  },
+  {
+    "type": "phpstorm",
+    "bundleId": "com.jetbrains.PhpStorm",
+    "displayName": "PhpStorm",
+    "launchCommand": "open -a \"PhpStorm\" \"{{path}}\"",
+    "titleHint": "{{folder}}",
+    "waitTimeout": 30000
   }
 ]

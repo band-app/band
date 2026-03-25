@@ -56,6 +56,11 @@ pub trait AppHandler: Send + Sync {
         self.window_title_hint(folder_name)
             .is_some_and(|hint| title.contains(&hint))
     }
+
+    /// How long (ms) to wait for the window to appear after launch. Default: 5000.
+    fn wait_timeout(&self) -> u64 {
+        5000
+    }
 }
 
 // --- Data-driven app definition ---
@@ -82,6 +87,10 @@ pub struct AppDef {
     /// Set to explicit null to disable watching.
     #[serde(default)]
     pub watcher_hint: Option<String>,
+    /// How long (ms) to wait for the window to appear after launch.
+    /// Defaults to 5000. Slow-starting apps (e.g. JetBrains IDEs) should use a higher value.
+    #[serde(default)]
+    pub wait_timeout: Option<u64>,
 }
 
 impl AppHandler for AppDef {
@@ -156,6 +165,10 @@ impl AppHandler for AppDef {
         } else {
             self.window_title_hint(folder_name)
         }
+    }
+
+    fn wait_timeout(&self) -> u64 {
+        self.wait_timeout.unwrap_or(5000)
     }
 }
 
