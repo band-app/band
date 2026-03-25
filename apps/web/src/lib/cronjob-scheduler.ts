@@ -1,5 +1,5 @@
-import { toWorkspaceId } from "@band/dashboard-core";
-import { createLogger } from "@band/logger";
+import { toWorkspaceId } from "@band-app/dashboard-core";
+import { createLogger } from "@band-app/logger";
 import { Cron } from "croner";
 import { eq } from "drizzle-orm";
 import { listAllCronjobs, loadCronjobFile } from "./cronjob-store";

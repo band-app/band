@@ -1,4 +1,4 @@
-import { Tooltip, TooltipContent, TooltipTrigger } from "@band/ui";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@band-app/ui";
 import type { GitStatus } from "../types";
 
 interface Props {

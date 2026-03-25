@@ -7,7 +7,7 @@ import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@band/ui";
+} from "@band-app/ui";
 import { useNavigate } from "@tanstack/react-router";
 import { ListTodo, Timer, Zap } from "lucide-react";
 import { useCallback } from "react";

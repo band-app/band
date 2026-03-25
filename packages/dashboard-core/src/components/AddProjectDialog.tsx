@@ -8,7 +8,7 @@ import {
   DialogTitle,
   Input,
   Label,
-} from "@band/ui";
+} from "@band-app/ui";
 import { AlertTriangle, FolderOpen } from "lucide-react";
 import { useState } from "react";
 import { useAdapter, useCapabilities } from "../context";

@@ -10,7 +10,7 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from "@band/ui";
+} from "@band-app/ui";
 import { File } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAdapter } from "../context";

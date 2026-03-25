@@ -1,4 +1,4 @@
-import { cn } from "@band/ui";
+import { cn } from "@band-app/ui";
 import { CheckCircle2, ChevronDown, ChevronRight, Circle, Loader2 } from "lucide-react";
 import { useState } from "react";
 

@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import { createLogger } from "@band/logger";
+import { createLogger } from "@band-app/logger";
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import react from "@vitejs/plugin-react";

@@ -1,8 +1,8 @@
-import { DashboardProvider, DashboardShell } from "@band/dashboard-core";
+import { DashboardProvider, DashboardShell } from "@band-app/dashboard-core";
 import {
   HybridDashboardAdapter,
   NativeShellCapabilities,
-} from "@band/dashboard-core/adapters/hybrid";
+} from "@band-app/dashboard-core/adapters/hybrid";
 
 const adapter = new HybridDashboardAdapter();
 const capabilities = new NativeShellCapabilities();

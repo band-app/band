@@ -6,7 +6,7 @@ import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@band/ui";
+} from "@band-app/ui";
 import {
   ArrowDownToLine,
   ArrowUpFromLine,

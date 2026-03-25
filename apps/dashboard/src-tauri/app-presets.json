@@ -36,6 +36,13 @@
     "launchCommand": "$HOME/.band/scripts/chrome-launch.py"
   },
   {
+    "type": "xcode",
+    "bundleId": "com.apple.dt.Xcode",
+    "displayName": "Xcode",
+    "launchCommand": "$HOME/.band/scripts/xcode-launch.py \"{{path}}\"",
+    "titleHint": "{{folder}}"
+  },
+  {
     "type": "intellij",
     "bundleId": "com.jetbrains.intellij",
     "displayName": "IntelliJ IDEA",

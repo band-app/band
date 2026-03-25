@@ -1,4 +1,4 @@
-import { createLogger } from "@band/logger";
+import { createLogger } from "@band-app/logger";
 import type { UIMessageChunk } from "ai";
 import { getAgent, getOrCreateAgent } from "./agent-pool";
 import { createPendingInput } from "./pending-inputs";

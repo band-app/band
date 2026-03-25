@@ -1,6 +1,10 @@
 import { join } from "node:path";
-import { type CodingAgent, type CodingAgentConfig, createCodingAgent } from "@band/coding-agent";
-import { createLogger } from "@band/logger";
+import {
+  type CodingAgent,
+  type CodingAgentConfig,
+  createCodingAgent,
+} from "@band-app/coding-agent";
+import { createLogger } from "@band-app/logger";
 import { bandHome, loadSettings } from "./state";
 
 const log = createLogger("agent-pool");

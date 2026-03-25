@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { toWorkspaceId } from "@band/dashboard-core";
+import { toWorkspaceId } from "@band-app/dashboard-core";
 import { eq } from "drizzle-orm";
 import { getDb } from "./db/connection";
 import {

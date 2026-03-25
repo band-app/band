@@ -1,4 +1,4 @@
-import { createLogger } from "@band/logger";
+import { createLogger } from "@band-app/logger";
 import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "./db/connection";
 import { tasks } from "./db/schema";

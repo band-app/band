@@ -1,4 +1,4 @@
-import { Tooltip, TooltipContent, TooltipTrigger } from "@band/ui";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@band-app/ui";
 import { Ban, CircleAlert, CircleCheck, GitMerge, Loader } from "lucide-react";
 import { useCapabilities } from "../context";
 import type { CIStatus } from "../types";

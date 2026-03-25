@@ -1,4 +1,4 @@
-import { toWorkspaceId } from "@band/dashboard-core";
+import { toWorkspaceId } from "@band-app/dashboard-core";
 import { loadState } from "./state";
 
 export function resolveWorkspace(workspaceId: string) {

@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { createLogger } from "@band/logger";
+import { createLogger } from "@band-app/logger";
 import type { IPty } from "node-pty";
 import { shellPath } from "./process-utils";
 import { resolveWorkspace } from "./workspace";

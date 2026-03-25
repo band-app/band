@@ -1,4 +1,4 @@
-import { createLogger } from "@band/logger";
+import { createLogger } from "@band-app/logger";
 import type { OpenAICodexConfig } from "../config.js";
 import type { AgentEvent } from "../events.js";
 import { discoverSkills } from "../skills.js";

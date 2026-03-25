@@ -1,4 +1,4 @@
-import { DashboardShell } from "@band/dashboard-core";
+import { DashboardShell } from "@band-app/dashboard-core";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { isTauri } from "../lib/is-tauri";
 import { DesktopLayout } from "./DesktopLayout";

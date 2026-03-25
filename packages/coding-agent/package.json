@@ -1,5 +1,5 @@
 {
-  "name": "@band/coding-agent",
+  "name": "@band-app/coding-agent",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -9,7 +9,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@band/logger": "workspace:^",
+    "@band-app/logger": "workspace:^",
     "zod": "^3.25.67"
   },
   "peerDependencies": {

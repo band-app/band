@@ -64,13 +64,13 @@ jobs:
         run: pnpm build:web
 
       - name: Test (web)
-        run: pnpm --filter @band/web test
+        run: pnpm --filter @band-app/server test
 
       - name: Install Playwright Chromium
-        run: pnpm --filter @band/web exec playwright install --with-deps chromium
+        run: pnpm --filter @band-app/server exec playwright install --with-deps chromium
 
       - name: Test e2e (web)
-        run: pnpm --filter @band/web test:e2e
+        run: pnpm --filter @band-app/server test:e2e
 
       - name: Test (CLI)
         run: cargo test --manifest-path apps/cli/Cargo.toml
@@ -79,4 +79,4 @@ jobs:
         run: cargo test --manifest-path apps/dashboard/src-tauri/Cargo.toml
 
       - name: Build frontend
-        run: pnpm --filter @band/dashboard build
+        run: pnpm --filter @band-app/dashboard build

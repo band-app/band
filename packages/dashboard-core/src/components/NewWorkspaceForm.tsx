@@ -9,7 +9,7 @@ import {
   Input,
   Label,
   Textarea,
-} from "@band/ui";
+} from "@band-app/ui";
 import { useState } from "react";
 import { useCreateWorkspace } from "../hooks/use-project-mutations";
 

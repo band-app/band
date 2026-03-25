@@ -5,7 +5,7 @@ import {
   useDashboardStore,
   type WorkspaceTab,
   WorkspaceTabNav,
-} from "@band/dashboard-core";
+} from "@band-app/dashboard-core";
 import { createFileRoute, Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { ArrowLeft, Clock, Code, GitCompare, Terminal } from "lucide-react";
 import {

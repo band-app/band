@@ -1,4 +1,4 @@
-import { DashboardShell } from "@band/dashboard-core";
+import { DashboardShell } from "@band-app/dashboard-core";
 import { MessageSquare } from "lucide-react";
 import type { ReactNode } from "react";
 

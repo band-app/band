@@ -1,4 +1,4 @@
-import { createLogger } from "@band/logger";
+import { createLogger } from "@band-app/logger";
 import { CursorAgent } from "@nothumanwork/cursor-agents-sdk";
 import type { CursorCliConfig } from "../config.js";
 import type { AgentEvent } from "../events.js";
