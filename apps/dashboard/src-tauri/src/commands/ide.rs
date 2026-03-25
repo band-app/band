@@ -188,7 +188,10 @@ fn is_dashboard_frontmost() -> bool {
 }
 
 /// Look up the worktree path and folder name for a given workspace ID.
-fn workspace_info(workspace_id: &str, app_state: &state::AppState) -> Option<(String, String, String)> {
+fn workspace_info(
+    workspace_id: &str,
+    app_state: &state::AppState,
+) -> Option<(String, String, String)> {
     for proj in &app_state.projects {
         for wt in &proj.worktrees {
             let ws_id = to_workspace_id(&proj.name, &wt.branch);
@@ -381,7 +384,8 @@ pub fn raise_workspace_windows(workspace_id: &str, cache: &ProjectCache) {
     let Some(app_state) = cache.get() else {
         return;
     };
-    let Some((worktree_path, _folder_name, proj_path)) = workspace_info(workspace_id, &app_state) else {
+    let Some((worktree_path, _folder_name, proj_path)) = workspace_info(workspace_id, &app_state)
+    else {
         return;
     };
 
@@ -519,17 +523,18 @@ pub fn workspace_focus(
         .or_else(|| refresh_project_cache(&project_cache))
         .ok_or("Project state not available yet")?;
 
-    let (wt_path, proj_path, ws_id) = if let Some((proj, wt)) = find_workspace(&workspace_id, &app_state) {
-        (wt.path.clone(), proj.path.clone(), workspace_id.clone())
-    } else {
-        let fresh = refresh_project_cache(&project_cache)
-            .ok_or(format!("Workspace '{workspace_id}' not found"))?;
-        if let Some((proj, wt)) = find_workspace(&workspace_id, &fresh) {
+    let (wt_path, proj_path, ws_id) =
+        if let Some((proj, wt)) = find_workspace(&workspace_id, &app_state) {
             (wt.path.clone(), proj.path.clone(), workspace_id.clone())
         } else {
-            return Err(format!("Workspace '{workspace_id}' not found"));
-        }
-    };
+            let fresh = refresh_project_cache(&project_cache)
+                .ok_or(format!("Workspace '{workspace_id}' not found"))?;
+            if let Some((proj, wt)) = find_workspace(&workspace_id, &fresh) {
+                (wt.path.clone(), proj.path.clone(), workspace_id.clone())
+            } else {
+                return Err(format!("Workspace '{workspace_id}' not found"));
+            }
+        };
 
     let folder_name = Path::new(&wt_path)
         .file_name()
