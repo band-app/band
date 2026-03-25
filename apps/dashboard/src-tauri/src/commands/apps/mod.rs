@@ -361,17 +361,20 @@ pub fn compute_layout(
 
 // --- Config loading ---
 
-pub fn load_apps_config(worktree_path: &str) -> Vec<AppConfig> {
-    // Try project .band/config.json first
-    let project_config_path = std::path::PathBuf::from(worktree_path)
-        .join(".band")
-        .join("config.json");
+pub fn load_apps_config(worktree_path: &str, project_path: &str) -> Vec<AppConfig> {
+    // Try .band/config.json — worktree first, then project root (fallback for
+    // .gitignored configs that don't appear in new worktrees).
+    for base in [worktree_path, project_path] {
+        let config_path = std::path::PathBuf::from(base)
+            .join(".band")
+            .join("config.json");
 
-    if let Ok(data) = std::fs::read_to_string(&project_config_path) {
-        if let Ok(config) = serde_json::from_str::<BandAppsConfig>(&data) {
-            if let Some(apps) = config.apps {
-                if !apps.is_empty() {
-                    return apps;
+        if let Ok(data) = std::fs::read_to_string(&config_path) {
+            if let Ok(config) = serde_json::from_str::<BandAppsConfig>(&data) {
+                if let Some(apps) = config.apps {
+                    if !apps.is_empty() {
+                        return apps;
+                    }
                 }
             }
         }

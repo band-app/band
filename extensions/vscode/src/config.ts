@@ -1,3 +1,4 @@
+import { execFile } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -79,8 +80,16 @@ export function mergeConfigs(
   };
 }
 
-export async function loadEffectiveConfig(workspacePath: string): Promise<BandConfig | null> {
-  const projectConfig = await loadConfig(workspacePath);
+export async function loadEffectiveConfig(
+  workspacePath: string,
+  projectPath?: string,
+): Promise<BandConfig | null> {
+  let projectConfig = await loadConfig(workspacePath);
+  // Fall back to the main repo path when the worktree has no config
+  // (e.g. .band/config.json is .gitignored so new worktrees don't contain it)
+  if (!projectConfig && projectPath && projectPath !== workspacePath) {
+    projectConfig = await loadConfig(projectPath);
+  }
   const defaults = await loadUserDefaults();
   return mergeConfigs(defaults, projectConfig);
 }
@@ -89,6 +98,7 @@ export interface WorkspaceIdentity {
   project: string;
   branch: string;
   workspaceId: string;
+  projectPath: string;
 }
 
 export async function getBandWorktreeIdentity(
@@ -110,6 +120,7 @@ export async function getBandWorktreeIdentity(
                 project: project.name,
                 branch: wt.branch,
                 workspaceId: `${project.name}-${wt.branch.replaceAll("/", "-")}`,
+                projectPath: project.path,
               };
             }
           }
@@ -120,6 +131,32 @@ export async function getBandWorktreeIdentity(
     return null;
   } catch (err) {
     console.log(`[Band] Failed to read state.json:`, err);
+    return null;
+  }
+}
+
+/**
+ * Use git to find the main worktree (project root) for the given workspace.
+ * Returns null if the workspace is not inside a git repo or is itself the main worktree.
+ */
+export async function getGitMainWorktreePath(workspacePath: string): Promise<string | null> {
+  try {
+    const gitCommonDir = await new Promise<string>((resolve, reject) => {
+      execFile(
+        "git",
+        ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+        { cwd: workspacePath, encoding: "utf-8" },
+        (err, stdout) => (err ? reject(err) : resolve(stdout.trim())),
+      );
+    });
+
+    // git-common-dir returns <main-repo>/.git for both main and worktrees
+    const mainRepo = path.dirname(gitCommonDir);
+    if (mainRepo === workspacePath) {
+      return null; // already the main worktree
+    }
+    return mainRepo;
+  } catch {
     return null;
   }
 }

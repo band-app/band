@@ -1,5 +1,5 @@
 import { execFile, execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, unlinkSync } from "node:fs";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, extname, join, resolve } from "node:path";
 import { toWorkspaceId } from "@band/dashboard-core";
@@ -31,6 +31,7 @@ import {
   shiftQueuedMessage,
   subscribeQueue,
 } from "../lib/queued-message-store";
+import { loadProjectConfig } from "../lib/project-config";
 import { runSetup } from "../lib/setup-runner";
 import {
   bandHome,
@@ -283,7 +284,7 @@ const workspacesRouter = t.router({
         ? () => submitTask(workspaceId, input.prompt!)
         : undefined;
 
-      runSetup(workspaceId, worktreePath, onSetupComplete);
+      runSetup(workspaceId, worktreePath, proj.path, onSetupComplete);
 
       // If there's no setup command, runSetup calls onComplete synchronously,
       // so the task is submitted immediately. If there IS a setup command,
@@ -324,21 +325,18 @@ const workspacesRouter = t.router({
             const worktreePath = currentPath;
 
             // Run teardown script before removing worktree so it can access project files
-            const configPath = join(worktreePath, ".band", "config.json");
             try {
-              if (existsSync(configPath)) {
-                const config = JSON.parse(readFileSync(configPath, "utf-8"));
-                if (config.teardown) {
-                  execFileSync("bash", ["-c", config.teardown], {
-                    cwd: worktreePath,
-                    env: {
-                      ...process.env,
-                      PATH: `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH}`,
-                    },
-                    encoding: "utf-8",
-                    timeout: 60_000,
-                  });
-                }
+              const config = loadProjectConfig(worktreePath, proj.path);
+              if (config?.teardown && typeof config.teardown === "string") {
+                execFileSync("bash", ["-c", config.teardown], {
+                  cwd: worktreePath,
+                  env: {
+                    ...process.env,
+                    PATH: `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH}`,
+                  },
+                  encoding: "utf-8",
+                  timeout: 60_000,
+                });
               }
             } catch {
               // Teardown script failure is non-fatal

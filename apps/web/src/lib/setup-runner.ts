@@ -1,6 +1,5 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { loadProjectConfig } from "./project-config";
 import { emit } from "./watcher";
 
 interface SetupInfo {
@@ -15,24 +14,12 @@ export function getRunningSetups(): string[] {
   return Array.from(setups.keys());
 }
 
-export function runSetup(workspaceId: string, worktreePath: string, onComplete?: () => void): void {
+export function runSetup(workspaceId: string, worktreePath: string, projectPath: string, onComplete?: () => void): void {
   // Guard against concurrent setups on same workspace
   if (setups.has(workspaceId)) return;
 
-  const configPath = join(worktreePath, ".band", "config.json");
-  if (!existsSync(configPath)) {
-    onComplete?.();
-    return;
-  }
-
-  let setupCommand: string | undefined;
-  try {
-    const config = JSON.parse(readFileSync(configPath, "utf-8"));
-    setupCommand = config.setup;
-  } catch {
-    onComplete?.();
-    return;
-  }
+  const config = loadProjectConfig(worktreePath, projectPath);
+  const setupCommand = typeof config?.setup === "string" ? config.setup : undefined;
 
   if (!setupCommand) {
     onComplete?.();

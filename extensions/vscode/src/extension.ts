@@ -1,5 +1,10 @@
 import * as vscode from "vscode";
-import { getBandWorktreeIdentity, loadConfig, loadEffectiveConfig } from "./config";
+import {
+  getBandWorktreeIdentity,
+  getGitMainWorktreePath,
+  loadConfig,
+  loadEffectiveConfig,
+} from "./config";
 import { setupWorkspace } from "./workspace-setup";
 
 let log: vscode.OutputChannel;
@@ -22,8 +27,11 @@ export async function activate(context: vscode.ExtensionContext) {
     const hasProjectConfig = (await loadConfig(workspacePath)) !== null;
     const identity = await getBandWorktreeIdentity(workspacePath);
 
-    if (hasProjectConfig || identity) {
-      const effective = await loadEffectiveConfig(workspacePath);
+    // Resolve the project root: from Band state, or by asking git for the main worktree
+    const projectPath = identity?.projectPath ?? (await getGitMainWorktreePath(workspacePath));
+
+    if (hasProjectConfig || identity || projectPath) {
+      const effective = await loadEffectiveConfig(workspacePath, projectPath ?? undefined);
       if (effective) {
         log.appendLine("Effective config loaded, setting up workspace...");
         await setupWorkspace(effective);
@@ -50,32 +58,18 @@ async function runSetup() {
     return;
   }
 
-  for (const folder of workspaceFolders) {
-    const config = await loadConfig(folder.uri.fsPath);
-    if (config) {
-      const effective = await loadEffectiveConfig(folder.uri.fsPath);
-      if (effective) {
-        await setupWorkspace(effective);
-        vscode.window.showInformationMessage("Band workspace setup complete");
-      }
-      return;
-    }
-  }
-
-  // No project config found — try user defaults if it's a Band worktree
   const workspacePath = workspaceFolders[0].uri.fsPath;
   const identity = await getBandWorktreeIdentity(workspacePath);
-  if (identity) {
-    const effective = await loadEffectiveConfig(workspacePath);
-    if (effective) {
-      await setupWorkspace(effective);
-      vscode.window.showInformationMessage("Band workspace setup complete");
-      return;
-    }
+  const projectPath = identity?.projectPath ?? (await getGitMainWorktreePath(workspacePath));
+  const effective = await loadEffectiveConfig(workspacePath, projectPath ?? undefined);
+  if (effective) {
+    await setupWorkspace(effective);
+    vscode.window.showInformationMessage("Band workspace setup complete");
+    return;
   }
 
   vscode.window.showErrorMessage(
-    `No .band/config.json found. Checked: ${workspacePath}/.band/config.json`,
+    `No .band/config.json found. Checked: ${workspacePath}/.band/config.json${projectPath ? ` and ${projectPath}/.band/config.json` : ""}`,
   );
 }
 
