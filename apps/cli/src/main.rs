@@ -1,6 +1,5 @@
 mod api;
 mod render;
-mod shell;
 mod skills;
 mod state;
 mod validate;
@@ -382,77 +381,6 @@ fn main() {
     }
 }
 
-/// Open the editor configured in .band/config.json or settings defaults.
-/// Only opens editor-type apps (vscode, zed) — iTerm/Chrome are managed by the dashboard.
-fn open_configured_editor(worktree_path: &str) {
-    // Try to load apps config from project config, then fall back to settings defaults
-    let apps = load_apps_config(worktree_path);
-
-    // Find the first editor-type app
-    let editor = apps.iter().find(|app| {
-        let app_type = app.get("type").and_then(|v| v.as_str()).unwrap_or("");
-        app_type == "vscode" || app_type == "zed"
-    });
-
-    let (app_name, cli_name) = if let Some(app) = editor {
-        match app.get("type").and_then(|v| v.as_str()).unwrap_or("vscode") {
-            "zed" => ("Zed", "zed"),
-            _ => ("Visual Studio Code", "code"),
-        }
-    } else {
-        if apps.is_empty() {
-            eprintln!("Warning: IDE not configured, skipping editor launch");
-        }
-        // No editor-type app found — skip editor launch
-        return;
-    };
-
-    // Try macOS `open -g` first (opens without stealing focus), fall back to CLI
-    let opened = std::process::Command::new("open")
-        .args(["-g", "-a", app_name, "--args", worktree_path])
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
-    if !opened {
-        let open_result = std::process::Command::new(cli_name)
-            .arg(worktree_path)
-            .env("PATH", shell::shell_path())
-            .output();
-        if let Err(e) = open_result {
-            eprintln!("Warning: failed to open {app_name}: {e}");
-        }
-    }
-}
-
-/// Load the apps config from project .band/config.json, falling back to settings defaults.
-fn load_apps_config(worktree_path: &str) -> Vec<serde_json::Value> {
-    // Try project .band/config.json first
-    let config_path = std::path::PathBuf::from(worktree_path)
-        .join(".band")
-        .join("config.json");
-
-    if let Ok(data) = std::fs::read_to_string(&config_path) {
-        if let Ok(config) = serde_json::from_str::<serde_json::Value>(&data) {
-            if let Some(apps) = config.get("apps").and_then(|v| v.as_array()) {
-                if !apps.is_empty() {
-                    return apps.clone();
-                }
-            }
-        }
-    }
-
-    // Fall back to settings defaults
-    if let Ok(settings) = state::load_settings() {
-        if let Some(defaults) = settings.defaults {
-            if let Some(apps) = defaults.get("apps").and_then(|v| v.as_array()) {
-                return apps.clone();
-            }
-        }
-    }
-
-    Vec::new()
-}
-
 fn handle_schema(command: Option<&str>) {
     match build_schema(command) {
         Ok(schema) => println!("{}", serde_json::to_string_pretty(&schema).unwrap()),
@@ -628,11 +556,6 @@ fn cmd_workspaces_create(
     }
     let data = client.trpc_mutate("workspaces.create", &input)?;
     let path = data.get("path").and_then(|p| p.as_str()).unwrap_or("");
-
-    // When a prompt is provided, open the editor so the extension picks up the task
-    if prompt.is_some() && !path.is_empty() {
-        open_configured_editor(path);
-    }
 
     Ok(CommandResult {
         text: format!("{path}\n"),

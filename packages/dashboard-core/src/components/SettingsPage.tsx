@@ -428,7 +428,7 @@ export function SettingsPage({ onClose }: Props) {
               <p className="text-xs text-muted-foreground">
                 Default apps configuration applied to Band worktrees that don't have a project-level{" "}
                 <code className="text-xs">.band/config.json</code>. Defines which apps (VS Code,
-                Zed, iTerm, Chrome) to open and their layout. Leave empty to disable.
+                Cursor, Zed, iTerm, Chrome) to open and their layout. Leave empty to disable.
               </p>
             </div>
           </div>

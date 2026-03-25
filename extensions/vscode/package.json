@@ -26,7 +26,7 @@
   "scripts": {
     "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node && npm run deploy",
     "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch",
-    "deploy": "cp dist/extension.js ~/.vscode/extensions/band.band-vscode-0.1.0/dist/extension.js && cp package.json ~/.vscode/extensions/band.band-vscode-0.1.0/package.json",
+    "deploy": "cp dist/extension.js ~/.vscode/extensions/band.band-vscode-0.1.0/dist/extension.js && cp package.json ~/.vscode/extensions/band.band-vscode-0.1.0/package.json && mkdir -p ~/.cursor/extensions/band.band-vscode-0.1.0/dist && cp dist/extension.js ~/.cursor/extensions/band.band-vscode-0.1.0/dist/extension.js && cp package.json ~/.cursor/extensions/band.band-vscode-0.1.0/package.json",
     "package": "vsce package"
   },
   "devDependencies": {
