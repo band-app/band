@@ -105,5 +105,56 @@
     "launchCommand": "open -a \"PhpStorm\" \"{{path}}\"",
     "titleHint": "{{folder}}",
     "waitTimeout": 30000
+  },
+  {
+    "type": "android-studio",
+    "bundleId": "com.google.android.studio",
+    "displayName": "Android Studio",
+    "launchCommand": "open -a \"Android Studio\" \"{{path}}\"",
+    "titleHint": "{{folder}}",
+    "waitTimeout": 30000
+  },
+  {
+    "type": "safari",
+    "bundleId": "com.apple.Safari",
+    "displayName": "Safari",
+    "launchCommand": "$HOME/.band/scripts/safari-launch.py"
+  },
+  {
+    "type": "firefox",
+    "bundleId": "org.mozilla.firefox",
+    "displayName": "Firefox",
+    "launchCommand": "$HOME/.band/scripts/firefox-launch.py"
+  },
+  {
+    "type": "ghostty",
+    "bundleId": "com.mitchellh.ghostty",
+    "displayName": "Ghostty",
+    "launchCommand": "open -a \"Ghostty\"",
+    "newWindowCommand": "osascript -e 'tell application \"Ghostty\"' -e 'set cfg to new surface configuration' -e 'new window with configuration cfg' -e 'end tell'",
+    "setupCommand": "$HOME/.band/scripts/ghostty-setup.py \"{{path}}\" \"{{folder}}\"",
+    "titleHint": "band:{{folder}}"
+  },
+  {
+    "type": "windsurf",
+    "bundleId": "com.exafunction.windsurf",
+    "displayName": "Windsurf",
+    "launchCommand": "open -a \"Windsurf\" \"{{path}}\"",
+    "titleHint": "{{folder}}"
+  },
+  {
+    "type": "warp",
+    "bundleId": "dev.warp.Warp-Stable",
+    "displayName": "Warp",
+    "launchCommand": "open -a \"Warp\"",
+    "setupCommand": "$HOME/.band/scripts/warp-setup.py \"{{path}}\" \"{{folder}}\"",
+    "titleHint": "band:{{folder}}"
+  },
+  {
+    "type": "kiro",
+    "bundleId": "dev.kiro.desktop",
+    "displayName": "Kiro",
+    "launchCommand": "open -a \"Kiro\" \"{{path}}\"",
+    "titleHint": "{{folder}}"
   }
 ]
