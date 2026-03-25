@@ -1,4 +1,4 @@
-import { extensionToLanguage, filenameToLanguage } from "@band/dashboard-core";
+import { extensionToLanguage, filenameToLanguage } from "@band-app/dashboard-core";
 
 /**
  * Detect the language identifier from a filename.

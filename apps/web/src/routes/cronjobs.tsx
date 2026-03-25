@@ -17,7 +17,7 @@ import {
   SelectValue,
   Switch,
   Textarea,
-} from "@band/ui";
+} from "@band-app/ui";
 import { createFileRoute } from "@tanstack/react-router";
 import { Clock, Loader2, Pencil, Play, Plus, RefreshCw, Timer, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";

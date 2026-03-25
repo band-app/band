@@ -5,7 +5,7 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from "@band/ui";
+} from "@band-app/ui";
 import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { trpc } from "../lib/trpc-client";

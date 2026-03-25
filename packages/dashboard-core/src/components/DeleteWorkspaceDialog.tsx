@@ -6,7 +6,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@band/ui";
+} from "@band-app/ui";
 import { AlertTriangle } from "lucide-react";
 
 interface Props {

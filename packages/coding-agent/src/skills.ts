@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { createLogger } from "@band/logger";
+import { createLogger } from "@band-app/logger";
 import type { SkillInfo } from "./types.js";
 
 const log = createLogger("coding-agent:skills");

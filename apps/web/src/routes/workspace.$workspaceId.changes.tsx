@@ -1,4 +1,4 @@
-import { DiffView } from "@band/dashboard-core";
+import { DiffView } from "@band-app/dashboard-core";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback } from "react";
 import { useDiffStatsContext } from "./workspace.$workspaceId";

@@ -1,7 +1,7 @@
 import type { ChildProcess } from "node:child_process";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
-import { createLogger } from "@band/logger";
+import { createLogger } from "@band-app/logger";
 import type { GeminiCliConfig } from "../config.js";
 import type { AgentEvent } from "../events.js";
 import { discoverSkills } from "../skills.js";

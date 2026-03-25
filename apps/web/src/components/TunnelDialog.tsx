@@ -1,5 +1,12 @@
-import { useAdapter } from "@band/dashboard-core";
-import { Button, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@band/ui";
+import { useAdapter } from "@band-app/dashboard-core";
+import {
+  Button,
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@band-app/ui";
 import { Loader2 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { useEffect, useRef, useState } from "react";

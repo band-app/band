@@ -1,5 +1,5 @@
 import type { IncomingMessage } from "node:http";
-import { createLogger } from "@band/logger";
+import { createLogger } from "@band-app/logger";
 import type { WebSocket } from "ws";
 import { getOrSpawnTerminal, resizeTerminal } from "./terminal-manager";
 

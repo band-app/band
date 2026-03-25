@@ -1,5 +1,5 @@
 import { useChat } from "@ai-sdk/react";
-import { Badge } from "@band/ui";
+import { Badge } from "@band-app/ui";
 import { getToolName, isToolUIPart } from "ai";
 import { Bot, Clock, Loader2, X } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";

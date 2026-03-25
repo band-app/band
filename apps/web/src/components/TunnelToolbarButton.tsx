@@ -1,4 +1,4 @@
-import { Button, Tooltip, TooltipContent, TooltipTrigger } from "@band/ui";
+import { Button, Tooltip, TooltipContent, TooltipTrigger } from "@band-app/ui";
 import { Globe } from "lucide-react";
 import { useTunnel } from "@/hooks/use-tunnel";
 import { PrereqDialog } from "./PrereqDialog";

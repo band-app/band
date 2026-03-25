@@ -1,10 +1,10 @@
-import { DashboardProvider, DashboardShell } from "@band/dashboard-core";
+import { DashboardProvider, DashboardShell } from "@band-app/dashboard-core";
 import {
   HybridDashboardAdapter,
   NativeShellCapabilities,
-} from "@band/dashboard-core/adapters/hybrid";
-import { WebCapabilities, WebDashboardAdapter } from "@band/dashboard-core/adapters/web";
-import { TooltipProvider } from "@band/ui";
+} from "@band-app/dashboard-core/adapters/hybrid";
+import { WebCapabilities, WebDashboardAdapter } from "@band-app/dashboard-core/adapters/web";
+import { TooltipProvider } from "@band-app/ui";
 import {
   createRootRoute,
   HeadContent,
@@ -62,7 +62,7 @@ function AppShell() {
   // Wire up client-side navigation for WebCapabilities
   useEffect(() => {
     if (capabilities.navigate) return;
-    (capabilities as import("@band/dashboard-core/adapters/web").WebCapabilities).navigate = (
+    (capabilities as import("@band-app/dashboard-core/adapters/web").WebCapabilities).navigate = (
       href: string,
     ) => {
       router.navigate({ to: href });

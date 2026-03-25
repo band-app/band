@@ -1,4 +1,4 @@
-import { cn } from "@band/ui";
+import { cn } from "@band-app/ui";
 import { Command as CommandIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePromptInputContext } from "./prompt-input";

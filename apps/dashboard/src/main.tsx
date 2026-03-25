@@ -1,4 +1,4 @@
-import { TooltipProvider } from "@band/ui";
+import { TooltipProvider } from "@band-app/ui";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";

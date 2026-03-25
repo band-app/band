@@ -14,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
   Textarea,
-} from "@band/ui";
+} from "@band-app/ui";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
   AlertCircle,

@@ -1,4 +1,4 @@
-import { FileBrowser, FileViewer, openFileSearchPanel } from "@band/dashboard-core";
+import { FileBrowser, FileViewer, openFileSearchPanel } from "@band-app/dashboard-core";
 import { File } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useIsDesktop } from "../hooks/useIsDesktop";

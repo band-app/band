@@ -1,4 +1,4 @@
-import { cn } from "@band/ui";
+import { cn } from "@band-app/ui";
 import { cjk } from "@streamdown/cjk";
 import { code } from "@streamdown/code";
 import { math } from "@streamdown/math";

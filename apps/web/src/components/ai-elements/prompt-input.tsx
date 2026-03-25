@@ -1,4 +1,4 @@
-import { Badge, cn } from "@band/ui";
+import { Badge, cn } from "@band-app/ui";
 import type { ChatStatus } from "ai";
 import { ArrowUpIcon, Clock, FileIcon, Loader2, Paperclip, SquareIcon, X } from "lucide-react";
 import type {

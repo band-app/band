@@ -1,4 +1,4 @@
-import { Button, cn } from "@band/ui";
+import { Button, cn } from "@band-app/ui";
 import { CheckIcon, Loader2 } from "lucide-react";
 import { useCallback, useState } from "react";
 import { trpc } from "../../lib/trpc-client";

@@ -41,6 +41,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          registry-url: 'https://registry.npmjs.org'
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -123,7 +124,7 @@ jobs:
 
       - name: Test
         run: |
-          pnpm --filter @band/web test
+          pnpm --filter @band-app/server test
           cargo test --manifest-path apps/cli/Cargo.toml
           mkdir -p apps/web/dist
           touch apps/web/dist/start-server.mjs
@@ -133,10 +134,10 @@ jobs:
       - name: Build frontend
         run: |
           pnpm build:web
-          pnpm --filter @band/dashboard build
+          pnpm --filter @band-app/dashboard build
 
       - name: Build DMG
-        run: pnpm --filter @band/dashboard tauri build --ci --config '{"build":{"beforeBuildCommand":""}}'
+        run: pnpm --filter @band-app/dashboard tauri build --ci --config '{"build":{"beforeBuildCommand":""}}'
 
       - name: Commit and tag
         run: |
@@ -170,3 +171,9 @@ jobs:
           name: v${{ steps.version.outputs.new_version }}
           body: ${{ steps.changelog.outputs.changelog }}
           files: apps/dashboard/src-tauri/target/release/bundle/dmg/*.dmg
+
+      - name: Publish to npm
+        working-directory: apps/web
+        run: pnpm publish --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

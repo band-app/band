@@ -1,5 +1,5 @@
-import { CodeMirrorViewer } from "@band/dashboard-core";
-import { cn } from "@band/ui";
+import { CodeMirrorViewer } from "@band-app/dashboard-core";
+import { cn } from "@band-app/ui";
 import { Download, X } from "lucide-react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import { useCallback, useEffect, useState } from "react";

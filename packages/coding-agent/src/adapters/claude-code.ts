@@ -1,6 +1,6 @@
 import type { CanUseTool, SDKSessionInfo, SessionMessage } from "@anthropic-ai/claude-agent-sdk";
 import { getSessionMessages, listSessions, query } from "@anthropic-ai/claude-agent-sdk";
-import { createLogger } from "@band/logger";
+import { createLogger } from "@band-app/logger";
 import type { ClaudeCodeConfig } from "../config.js";
 import type { AgentEvent } from "../events.js";
 import { discoverSkills } from "../skills.js";

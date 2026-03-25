@@ -1,4 +1,4 @@
-import { Button, cn } from "@band/ui";
+import { Button, cn } from "@band-app/ui";
 import { ArrowDownIcon } from "lucide-react";
 import type { ComponentProps } from "react";
 import { useCallback } from "react";

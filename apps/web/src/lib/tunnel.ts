@@ -1,5 +1,5 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { createLogger } from "@band/logger";
+import { createLogger } from "@band-app/logger";
 import { getToken } from "./auth-token";
 import { shellPath } from "./process-utils";
 import { emit } from "./watcher";

@@ -1,4 +1,4 @@
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@band/ui";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@band-app/ui";
 import { ChevronDownIcon } from "lucide-react";
 
 import { AskUserQuestion } from "./ask-user-question";

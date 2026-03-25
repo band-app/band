@@ -1,5 +1,5 @@
 {
-  "name": "@band/cli",
+  "name": "@band-app/cli",
   "version": "0.1.0",
   "private": true,
   "bin": {
@@ -8,7 +8,7 @@
   "scripts": {
     "build": "cargo build --release",
     "build:dev": "cargo build",
-    "build:test-server": "pnpm --filter @band/web build:test-server",
+    "build:test-server": "pnpm --filter @band-app/server build:test-server",
     "test": "pnpm build:test-server && cargo test",
     "lint": "cargo clippy -- -D warnings",
     "format": "cargo fmt -- --check",

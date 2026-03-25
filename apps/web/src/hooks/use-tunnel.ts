@@ -1,4 +1,4 @@
-import { isServiceHealthy, useAdapter } from "@band/dashboard-core";
+import { isServiceHealthy, useAdapter } from "@band-app/dashboard-core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { trpc } from "../lib/trpc-client";
 

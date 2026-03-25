@@ -56,7 +56,7 @@ impl TestEnv {
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/web/dist/start-server.mjs");
         assert!(
             web_dist.exists(),
-            "Web server not built. Run: pnpm -F @band/web build"
+            "Web server not built. Run: pnpm -F @band-app/server build"
         );
 
         let mut child = Command::new("node")

@@ -1,4 +1,4 @@
-import { Badge, Collapsible, CollapsibleContent, CollapsibleTrigger, cn } from "@band/ui";
+import { Badge, Collapsible, CollapsibleContent, CollapsibleTrigger, cn } from "@band-app/ui";
 import type { DynamicToolUIPart, ToolUIPart } from "ai";
 import {
   CheckCircleIcon,

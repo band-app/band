@@ -38,7 +38,7 @@ fn resolve_web_dir() -> Result<std::path::PathBuf, String> {
         }
     }
 
-    Err("Web server bundle not found. Run `pnpm -F @band/web build` first.".to_string())
+    Err("Web server bundle not found. Run `pnpm -F @band-app/server build` first.".to_string())
 }
 
 pub(crate) fn get_configured_port() -> u16 {

@@ -15,7 +15,7 @@ import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@band/ui";
+} from "@band-app/ui";
 import { Check, FolderPlus, Pencil, Plus, Settings, Tag, X } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useCliSetup } from "../hooks/use-cli-setup";

@@ -1,4 +1,4 @@
-import { toWorkspaceId } from "@band/dashboard-core";
+import { toWorkspaceId } from "@band-app/dashboard-core";
 import { eq } from "drizzle-orm";
 import { getDb } from "./db/connection";
 import { branchStatuses as branchStatusesTable } from "./db/schema";

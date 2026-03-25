@@ -11,6 +11,6 @@ if [ -x "$SCRIPT_DIR/target/release/band" ]; then
 elif [ -x "$SCRIPT_DIR/target/debug/band" ]; then
   exec "$SCRIPT_DIR/target/debug/band" "$@"
 else
-  echo "error: band binary not found. Run 'pnpm --filter @band/cli build' first." >&2
+  echo "error: band binary not found. Run 'pnpm --filter @band-app/cli build' first." >&2
   exit 1
 fi
