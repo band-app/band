@@ -1,0 +1,38 @@
+[
+  {
+    "type": "vscode",
+    "bundleId": "com.microsoft.VSCode",
+    "displayName": "Visual Studio Code",
+    "launchCommand": "open -a \"Visual Studio Code\" \"{{path}}\"",
+    "titleHint": "{{folder}}"
+  },
+  {
+    "type": "cursor",
+    "bundleId": "com.todesktop.230313mzl4w4u92",
+    "displayName": "Cursor",
+    "launchCommand": "open -a \"Cursor\" \"{{path}}\"",
+    "titleHint": "{{folder}}"
+  },
+  {
+    "type": "zed",
+    "bundleId": "dev.zed.Zed",
+    "displayName": "Zed",
+    "launchCommand": "open -a \"Zed\" \"{{path}}\"",
+    "titleHint": "{{folder}}"
+  },
+  {
+    "type": "iterm",
+    "bundleId": "com.googlecode.iterm2",
+    "displayName": "iTerm2",
+    "launchCommand": "open -a \"iTerm\"",
+    "newWindowCommand": "osascript -e 'tell application \"iTerm2\" to create window with default profile'",
+    "setupCommand": "$HOME/.band/scripts/iterm-setup.py \"{{path}}\" \"{{folder}}\"",
+    "titleHint": "band:{{folder}}"
+  },
+  {
+    "type": "chrome",
+    "bundleId": "com.google.Chrome",
+    "displayName": "Google Chrome",
+    "launchCommand": "$HOME/.band/scripts/chrome-launch.py"
+  }
+]

@@ -8,8 +8,8 @@ export interface SetupResult {
 export async function setupWorkspace(config: BandConfig): Promise<SetupResult> {
   const terminals: vscode.Terminal[] = [];
 
-  // Extract terminal config from the VS Code app entry in the apps array
-  const terminalConfigs = getVsCodeTerminals(config);
+  // Extract terminal config from the VS Code or Cursor app entry in the apps array
+  const terminalConfigs = getEditorTerminals(config);
 
   // Create terminals (skip if they already exist from a previous session)
   if (terminalConfigs.length > 0) {
@@ -41,15 +41,16 @@ export async function setupWorkspace(config: BandConfig): Promise<SetupResult> {
   return { terminals };
 }
 
-function getVsCodeTerminals(config: BandConfig): TerminalConfig[] {
+function getEditorTerminals(config: BandConfig): TerminalConfig[] {
   if (!config.apps) {
     return [];
   }
 
-  const vscodeApp = config.apps.find((app) => app.type === "vscode");
-  if (!vscodeApp || vscodeApp.type !== "vscode") {
+  // Find the first app that has terminals configured
+  const editorApp = config.apps.find((app) => app.terminals && app.terminals.length > 0);
+  if (!editorApp) {
     return [];
   }
 
-  return vscodeApp.terminals ?? [];
+  return editorApp.terminals ?? [];
 }

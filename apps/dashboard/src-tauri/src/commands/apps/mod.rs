@@ -1,9 +1,9 @@
-pub mod chrome;
-pub mod iterm;
-pub mod vscode;
-pub mod zed;
+use std::collections::HashMap;
+use std::sync::LazyLock;
 
 use serde::{Deserialize, Serialize};
+
+use crate::commands::ax_windows;
 
 const DASHBOARD_WIDTH: i32 = 400;
 
@@ -17,8 +17,8 @@ pub struct ScreenRect {
 
 pub trait AppHandler: Send + Sync {
     fn bundle_id(&self) -> &str;
-    fn display_name(&self) -> &'static str;
-    fn app_type(&self) -> &'static str;
+    fn display_name(&self) -> &str;
+    fn app_type(&self) -> &str;
 
     /// Launch the app / create a new window. Called only when no existing window was found.
     fn launch(
@@ -58,78 +58,220 @@ pub trait AppHandler: Send + Sync {
     }
 }
 
+// --- Data-driven app definition ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppDef {
+    #[serde(rename = "type")]
+    pub app_type: String,
+    pub bundle_id: String,
+    pub display_name: String,
+    pub launch_command: String,
+    /// Command to create a new window when the app is already running.
+    /// If set and the app has existing windows, this is used instead of `launch_command`.
+    #[serde(default)]
+    pub new_window_command: Option<String>,
+    #[serde(default)]
+    pub setup_command: Option<String>,
+    /// Window title pattern. Use `{{folder}}` for folder name substitution.
+    /// Set to null to disable title-based window discovery.
+    #[serde(default)]
+    pub title_hint: Option<String>,
+    /// `AXObserver` watcher hint. Defaults to same as `title_hint`.
+    /// Set to explicit null to disable watching.
+    #[serde(default)]
+    pub watcher_hint: Option<String>,
+}
+
+impl AppHandler for AppDef {
+    fn bundle_id(&self) -> &str {
+        &self.bundle_id
+    }
+
+    fn display_name(&self) -> &str {
+        &self.display_name
+    }
+
+    fn app_type(&self) -> &str {
+        &self.app_type
+    }
+
+    fn launch(
+        &self,
+        worktree_path: &str,
+        folder_name: &str,
+        config: &serde_json::Value,
+    ) -> Result<(), String> {
+        // If the app is already running and has a new_window_command, use that
+        // instead of launch_command (which may just focus the existing window).
+        if let Some(ref new_window_cmd) = self.new_window_command {
+            let has_windows = !ax_windows::list_windows_for_bundle(&self.bundle_id).is_empty();
+            if has_windows {
+                let cmd = new_window_cmd
+                    .replace("{{path}}", worktree_path)
+                    .replace("{{folder}}", folder_name);
+                return run_shell(&cmd, config);
+            }
+        }
+
+        let cmd = self
+            .launch_command
+            .replace("{{path}}", worktree_path)
+            .replace("{{folder}}", folder_name);
+
+        run_shell(&cmd, config)?;
+        Ok(())
+    }
+
+    fn setup(
+        &self,
+        worktree_path: &str,
+        folder_name: &str,
+        config: &serde_json::Value,
+    ) -> Result<(), String> {
+        let Some(ref setup_cmd) = self.setup_command else {
+            return Ok(());
+        };
+
+        let cmd = setup_cmd
+            .replace("{{path}}", worktree_path)
+            .replace("{{folder}}", folder_name);
+
+        run_shell(&cmd, config)?;
+        Ok(())
+    }
+
+    fn window_title_hint(&self, folder_name: &str) -> Option<String> {
+        self.title_hint
+            .as_ref()
+            .map(|hint| hint.replace("{{folder}}", folder_name))
+    }
+
+    fn watcher_title_hint(&self, folder_name: &str) -> Option<String> {
+        if self.watcher_hint.is_some() {
+            self.watcher_hint
+                .as_ref()
+                .map(|hint| hint.replace("{{folder}}", folder_name))
+        } else {
+            self.window_title_hint(folder_name)
+        }
+    }
+}
+
+// --- Built-in app definitions (loaded from app-presets.json at compile time) ---
+
+const APP_PRESETS_JSON: &str = include_str!("../../../app-presets.json");
+include!(concat!(env!("OUT_DIR"), "/bundled_scripts.rs"));
+
+fn builtin_app_defs() -> Vec<AppDef> {
+    serde_json::from_str(APP_PRESETS_JSON).expect("app-presets.json must be valid")
+}
+
+// --- App registry ---
+
+pub struct AppRegistry {
+    defs: HashMap<String, AppDef>,
+}
+
+impl AppRegistry {
+    fn load() -> Self {
+        ensure_bundled_scripts();
+        let mut defs = HashMap::new();
+
+        // Load builtins
+        for def in builtin_app_defs() {
+            defs.insert(def.app_type.clone(), def);
+        }
+
+        // Load user overrides from settings.json
+        if let Ok(settings) = crate::state::load_settings() {
+            if let Some(apps_val) = settings.extra.get("apps") {
+                if let Some(definitions) = apps_val.get("definitions").and_then(|d| d.as_array()) {
+                    for def_val in definitions {
+                        if let Ok(def) = serde_json::from_value::<AppDef>(def_val.clone()) {
+                            defs.insert(def.app_type.clone(), def);
+                        }
+                    }
+                }
+            }
+        }
+
+        Self { defs }
+    }
+
+    pub fn get(&self, app_type: &str) -> Option<&AppDef> {
+        self.defs.get(app_type)
+    }
+
+    #[allow(dead_code)]
+    pub fn all_bundle_ids(&self) -> Vec<(&str, &str)> {
+        self.defs
+            .values()
+            .map(|d| (d.app_type.as_str(), d.bundle_id.as_str()))
+            .collect()
+    }
+}
+
+static REGISTRY: LazyLock<AppRegistry> = LazyLock::new(AppRegistry::load);
+
+pub fn registry() -> &'static AppRegistry {
+    &REGISTRY
+}
+
+pub fn get_handler(app_type: &str) -> Option<&'static AppDef> {
+    registry().get(app_type)
+}
+
+pub fn all_known_bundle_ids() -> Vec<(&'static str, &'static str)> {
+    registry()
+        .defs
+        .values()
+        .map(|d| {
+            // SAFETY: registry is 'static (LazyLock), so the str references are 'static
+            let app_type: &'static str =
+                unsafe { &*std::ptr::from_ref::<str>(d.app_type.as_str()) };
+            let bundle_id: &'static str =
+                unsafe { &*std::ptr::from_ref::<str>(d.bundle_id.as_str()) };
+            (app_type, bundle_id)
+        })
+        .collect()
+}
+
 // --- Config types ---
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum AppConfig {
-    #[serde(rename = "vscode")]
-    VsCode(VsCodeAppConfig),
-    #[serde(rename = "zed")]
-    Zed(ZedAppConfig),
-    #[serde(rename = "iterm")]
-    ITerm(ITermAppConfig),
-    #[serde(rename = "chrome")]
-    Chrome(ChromeAppConfig),
+pub struct AppConfig {
+    #[serde(rename = "type")]
+    pub app_type: String,
+    #[serde(default)]
+    pub size: Option<f64>,
+    /// Split direction: "vertical" (side-by-side columns, default) or "horizontal" (stacked rows)
+    #[serde(default)]
+    pub split: Option<String>,
+    /// Terminal configs (for VS Code, Cursor, and similar editors)
+    #[serde(default)]
+    pub terminals: Option<Vec<serde_json::Value>>,
+    /// Command configs (for iTerm and similar terminals)
+    #[serde(default)]
+    pub commands: Option<Vec<serde_json::Value>>,
+    /// URL (for Chrome and similar browsers)
+    #[serde(default)]
+    pub url: Option<String>,
 }
 
 impl AppConfig {
     pub fn app_type(&self) -> &str {
-        match self {
-            AppConfig::VsCode(_) => "vscode",
-            AppConfig::Zed(_) => "zed",
-            AppConfig::ITerm(_) => "iterm",
-            AppConfig::Chrome(_) => "chrome",
-        }
+        &self.app_type
     }
 
     pub fn size(&self) -> f64 {
-        match self {
-            AppConfig::VsCode(c) => c.size.unwrap_or(1.0),
-            AppConfig::Zed(c) => c.size.unwrap_or(1.0),
-            AppConfig::ITerm(c) => c.size.unwrap_or(1.0),
-            AppConfig::Chrome(c) => c.size.unwrap_or(1.0),
-        }
+        self.size.unwrap_or(1.0)
     }
 
     pub fn to_json(&self) -> serde_json::Value {
         serde_json::to_value(self).unwrap_or(serde_json::Value::Null)
     }
-
-    #[allow(dead_code)]
-    pub fn is_editor(&self) -> bool {
-        matches!(self, AppConfig::VsCode(_) | AppConfig::Zed(_))
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VsCodeAppConfig {
-    pub size: Option<f64>,
-    pub terminals: Option<Vec<serde_json::Value>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ZedAppConfig {
-    pub size: Option<f64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ITermAppConfig {
-    pub size: Option<f64>,
-    pub commands: Option<Vec<ITermCommand>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ITermCommand {
-    pub name: Option<String>,
-    pub command: String,
-    pub split: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChromeAppConfig {
-    pub size: Option<f64>,
-    pub url: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -139,43 +281,79 @@ pub struct BandAppsConfig {
 
 // --- Layout engine ---
 
-pub fn compute_layout(app_sizes: &[f64], screen_width: i32, screen_height: i32) -> Vec<ScreenRect> {
-    if app_sizes.is_empty() {
+pub fn compute_layout(
+    apps: &[AppConfig],
+    screen_width: i32,
+    screen_height: i32,
+) -> Vec<ScreenRect> {
+    if apps.is_empty() {
         return Vec::new();
     }
 
-    let available = screen_width - DASHBOARD_WIDTH;
-    let total: f64 = app_sizes.iter().sum();
+    let available_width = screen_width - DASHBOARD_WIDTH;
 
-    if total <= 0.0 {
-        return app_sizes
-            .iter()
-            .map(|_| ScreenRect {
-                x: DASHBOARD_WIDTH,
-                y: 0,
-                width: available,
-                height: screen_height,
-            })
-            .collect();
+    // Group apps into columns.
+    // `split: "horizontal"` → join the previous column (stack vertically).
+    // Anything else (no split, or `split: "vertical"`) → start a new column.
+    // Each column tracks its app indices and uses the first app's size as width weight.
+    let mut columns: Vec<(f64, Vec<usize>)> = Vec::new();
+
+    for (i, app) in apps.iter().enumerate() {
+        if i == 0 || app.split.as_deref() != Some("horizontal") {
+            columns.push((app.size(), vec![i]));
+        } else {
+            columns
+                .last_mut()
+                .expect("at least one column exists")
+                .1
+                .push(i);
+        }
     }
 
-    let mut rects = Vec::with_capacity(app_sizes.len());
+    // Compute column widths proportionally
+    let total_w: f64 = columns.iter().map(|(w, _)| w).sum();
+    let total_w = if total_w <= 0.0 { 1.0 } else { total_w };
+
+    let mut rects = vec![
+        ScreenRect {
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0,
+        };
+        apps.len()
+    ];
     let mut x = DASHBOARD_WIDTH;
 
-    for (i, &size) in app_sizes.iter().enumerate() {
-        let width = if i == app_sizes.len() - 1 {
+    for (col_idx, (col_weight, col_apps)) in columns.iter().enumerate() {
+        let col_width = if col_idx == columns.len() - 1 {
             screen_width - x
         } else {
-            ((size / total) * available as f64).round() as i32
+            ((col_weight / total_w) * available_width as f64).round() as i32
         };
 
-        rects.push(ScreenRect {
-            x,
-            y: 0,
-            width,
-            height: screen_height,
-        });
-        x += width;
+        // Within this column, stack apps proportionally by height
+        let total_h: f64 = col_apps.iter().map(|&i| apps[i].size()).sum();
+        let total_h = if total_h <= 0.0 { 1.0 } else { total_h };
+
+        let mut y = 0;
+        for (row_idx, &app_idx) in col_apps.iter().enumerate() {
+            let row_height = if row_idx == col_apps.len() - 1 {
+                screen_height - y
+            } else {
+                ((apps[app_idx].size() / total_h) * screen_height as f64).round() as i32
+            };
+
+            rects[app_idx] = ScreenRect {
+                x,
+                y,
+                width: col_width,
+                height: row_height,
+            };
+            y += row_height;
+        }
+
+        x += col_width;
     }
 
     rects
@@ -212,24 +390,42 @@ pub fn load_apps_config(worktree_path: &str) -> Vec<AppConfig> {
     Vec::new()
 }
 
-// --- Handler registry ---
+// --- Shell / AppleScript helpers ---
 
-pub fn get_handler(app_type: &str) -> Option<Box<dyn AppHandler>> {
-    match app_type {
-        "vscode" => Some(Box::new(vscode::VsCodeDriver)),
-        "zed" => Some(Box::new(zed::ZedDriver)),
-        "iterm" => Some(Box::new(iterm::ITermDriver)),
-        "chrome" => Some(Box::new(chrome::ChromeDriver)),
-        _ => None,
+fn run_shell(cmd: &str, config: &serde_json::Value) -> Result<(), String> {
+    let config_json = serde_json::to_string(config).unwrap_or_default();
+
+    let output = std::process::Command::new("sh")
+        .args(["-c", cmd])
+        .env("BAND_CONFIG", &config_json)
+        .output()
+        .map_err(|e| format!("Failed to run command: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if !stderr.is_empty() {
+            return Err(format!("Command failed: {stderr}"));
+        }
     }
+
+    Ok(())
 }
 
-/// Get all known app handlers with their bundle IDs.
-pub fn all_known_bundle_ids() -> Vec<(&'static str, &'static str)> {
-    vec![
-        ("vscode", vscode::BUNDLE_ID),
-        ("zed", zed::BUNDLE_ID),
-        ("iterm", iterm::BUNDLE_ID),
-        ("chrome", chrome::BUNDLE_ID),
-    ]
+fn ensure_bundled_scripts() {
+    let Ok(home) = std::env::var("HOME") else {
+        return;
+    };
+    let scripts_dir = std::path::PathBuf::from(&home)
+        .join(".band")
+        .join("scripts");
+    let _ = std::fs::create_dir_all(&scripts_dir);
+    for (name, content) in BUNDLED_SCRIPTS {
+        let path = scripts_dir.join(name);
+        let _ = std::fs::write(&path, content);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755));
+        }
+    }
 }

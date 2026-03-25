@@ -9,7 +9,7 @@ use tauri::{Emitter, Manager};
 
 use std::io::Write;
 
-use super::apps;
+use super::apps::{self, AppHandler};
 use super::ax_windows::{
     self, get_bundle_id, get_frontmost_window, objc_getClass, objc_msgSend, proc_listpids,
     proc_pidinfo, sel_registerName, PROC_ALL_PIDS, PROC_PIDTBSDINFO, PROC_PIDVNODEPATHINFO,
@@ -554,8 +554,7 @@ pub fn workspace_focus(
         ax_windows::get_screen_size().ok_or("Failed to get screen size")?;
 
     // Compute layout for all apps
-    let sizes: Vec<f64> = app_configs.iter().map(apps::AppConfig::size).collect();
-    let rects = apps::compute_layout(&sizes, screen_width, screen_height);
+    let rects = apps::compute_layout(&app_configs, screen_width, screen_height);
 
     // Open/focus each app in its own thread so slow apps
     // (e.g. iTerm AppleScript) don't block the UI.
@@ -569,8 +568,7 @@ pub fn workspace_focus(
             let path = wt_path.clone();
             let app_type = app_config.app_type().to_string();
             std::thread::spawn(move || {
-                let launched = match wm.open_or_focus(&*handler, &path, &ws, &folder, &config_json)
-                {
+                let launched = match wm.open_or_focus(handler, &path, &ws, &folder, &config_json) {
                     Ok(v) => v,
                     Err(e) => {
                         log_debug(&format!("Failed to open {app_type}: {e}"));

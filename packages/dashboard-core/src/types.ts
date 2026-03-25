@@ -67,40 +67,22 @@ export interface SetupStatus {
   error?: string;
 }
 
-export type AppType = "vscode" | "zed" | "iterm" | "chrome";
-
-export interface VsCodeAppConfig {
-  type: "vscode";
+export interface AppConfig {
+  type: string;
   size?: number;
+  split?: "horizontal" | "vertical";
   terminals?: {
     name: string;
     command: string;
     split?: "horizontal" | "vertical";
   }[];
-}
-
-export interface ZedAppConfig {
-  type: "zed";
-  size?: number;
-}
-
-export interface ITermAppConfig {
-  type: "iterm";
-  size?: number;
   commands?: {
     name?: string;
     command: string;
     split?: "horizontal" | "vertical";
   }[];
-}
-
-export interface ChromeAppConfig {
-  type: "chrome";
-  size?: number;
   url?: string;
 }
-
-export type AppConfig = VsCodeAppConfig | ZedAppConfig | ITermAppConfig | ChromeAppConfig;
 
 export interface BandConfig {
   apps?: AppConfig[];
