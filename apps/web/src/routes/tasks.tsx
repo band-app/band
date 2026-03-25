@@ -117,7 +117,7 @@ function TasksPage() {
   }, [tasks, projectFilter, statusFilter]);
 
   const projectNames = useMemo(() => {
-    const names = new Set(tasks.map((t) => t.project));
+    const names = new Set(tasks.map((t) => t.project).filter(Boolean));
     return Array.from(names).sort();
   }, [tasks]);
 
