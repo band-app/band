@@ -150,7 +150,7 @@ export function FileBrowser({
                 } ${isSelected ? "bg-accent/50 text-foreground" : ""}`}
               >
                 {entry.type === "directory" ? (
-                  <Folder className={`shrink-0 text-blue-400 ${compact ? "size-4" : "size-4"}`} />
+                  <Folder className={`shrink-0 text-blue-600 dark:text-blue-400 ${compact ? "size-4" : "size-4"}`} />
                 ) : (
                   <File
                     className={`shrink-0 text-muted-foreground ${compact ? "size-4" : "size-4"}`}

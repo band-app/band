@@ -283,7 +283,7 @@ export const PromptInputAttach = ({ className, ...props }: PromptInputAttachProp
       <button
         type="button"
         className={cn(
-          "inline-flex size-8 lg:size-7 shrink-0 items-center justify-center rounded text-white/40 transition-colors hover:bg-muted hover:text-foreground",
+          "inline-flex size-8 lg:size-7 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
           className,
         )}
         onClick={() => fileInputRef.current?.click()}
@@ -326,7 +326,7 @@ function highlightSlashCommands(text: string): ReactNode[] {
 
     // Command in blue
     segments.push(
-      <span key={commandStart} className="text-blue-400">
+      <span key={commandStart} className="text-blue-600 dark:text-blue-400">
         {commandStr}
       </span>,
     );
@@ -399,7 +399,7 @@ export const PromptInputTextarea = ({
         autoCorrect="off"
         spellCheck={false}
         className={cn(
-          "min-h-[44px] lg:min-h-[36px] max-h-48 w-full resize-none bg-transparent px-2 py-2.5 lg:py-2 text-base lg:text-sm outline-none placeholder:text-white/40 field-sizing-content",
+          "min-h-[44px] lg:min-h-[36px] max-h-48 w-full resize-none bg-transparent px-2 py-2.5 lg:py-2 text-base lg:text-sm outline-none placeholder:text-muted-foreground field-sizing-content",
           hasSlashCommand && "text-transparent caret-foreground",
           className,
         )}
@@ -481,7 +481,7 @@ export const PromptInputSubmit = ({
               ? isBusy
                 ? "bg-primary text-primary-foreground hover:bg-primary/80"
                 : "bg-foreground text-background hover:bg-foreground/80"
-              : "bg-white/15 text-white/40",
+              : "bg-muted text-muted-foreground",
             className,
           )}
           {...props}

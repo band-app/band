@@ -124,31 +124,52 @@ export async function loadLanguage(lang: string): Promise<LanguageSupport | null
 
 /**
  * Base extensions for a read-only CodeMirror viewer.
+ * @param isDark - Whether to use dark theme colours. Defaults to true for backwards compat.
  */
-export function baseViewerExtensions(): Extension[] {
+export function baseViewerExtensions(isDark = true): Extension[] {
   return [
     EditorState.readOnly.of(true),
     EditorView.editable.of(false),
     lineNumbers(),
     bracketMatching(),
     highlightSelectionMatches(),
-    syntaxHighlighting(oneDarkHighlightStyle),
-    syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+    ...(isDark
+      ? [
+          syntaxHighlighting(oneDarkHighlightStyle),
+          syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+        ]
+      : [
+          syntaxHighlighting(defaultHighlightStyle),
+          syntaxHighlighting(oneDarkHighlightStyle, { fallback: true }),
+        ]),
     keymap.of([...defaultKeymap, ...searchKeymap]),
     EditorView.theme(
-      {
-        "&": { height: "100%", backgroundColor: "#181818" },
-        ".cm-scroller": { overflow: "auto" },
-        ".cm-gutters": { backgroundColor: "#181818", border: "none" },
-        ".cm-activeLineGutter": { backgroundColor: "transparent" },
-        ".cm-activeLine": { backgroundColor: "transparent" },
-        "&.cm-focused .cm-cursor": { borderLeftColor: "#fff" },
-        "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
-          backgroundColor: "rgba(255, 255, 255, 0.1)",
-        },
-        ".cm-line": { color: "#abb2bf" },
-      },
-      { dark: true },
+      isDark
+        ? {
+            "&": { height: "100%", backgroundColor: "#181818" },
+            ".cm-scroller": { overflow: "auto" },
+            ".cm-gutters": { backgroundColor: "#181818", border: "none" },
+            ".cm-activeLineGutter": { backgroundColor: "transparent" },
+            ".cm-activeLine": { backgroundColor: "transparent" },
+            "&.cm-focused .cm-cursor": { borderLeftColor: "#fff" },
+            "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
+              backgroundColor: "rgba(255, 255, 255, 0.1)",
+            },
+            ".cm-line": { color: "#abb2bf" },
+          }
+        : {
+            "&": { height: "100%", backgroundColor: "#ffffff" },
+            ".cm-scroller": { overflow: "auto" },
+            ".cm-gutters": { backgroundColor: "#f8f9fa", border: "none", color: "#6e7781" },
+            ".cm-activeLineGutter": { backgroundColor: "transparent" },
+            ".cm-activeLine": { backgroundColor: "transparent" },
+            "&.cm-focused .cm-cursor": { borderLeftColor: "#24292f" },
+            "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
+              backgroundColor: "rgba(0, 0, 0, 0.07)",
+            },
+            ".cm-line": { color: "#24292f" },
+          },
+      { dark: isDark },
     ),
   ];
 }

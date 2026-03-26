@@ -13,7 +13,7 @@ export function SetupStatusIndicator({ setup }: Props) {
     return (
       <Tooltip>
         <TooltipTrigger asChild>
-          <Loader className="size-3.5 shrink-0 text-blue-400 animate-spin" />
+          <Loader className="size-3.5 shrink-0 text-blue-600 dark:text-blue-400 animate-spin" />
         </TooltipTrigger>
         <TooltipContent side="top">Setting up workspace...</TooltipContent>
       </Tooltip>
@@ -24,7 +24,7 @@ export function SetupStatusIndicator({ setup }: Props) {
     return (
       <Tooltip>
         <TooltipTrigger asChild>
-          <CircleAlert className="size-3.5 shrink-0 text-red-400" />
+          <CircleAlert className="size-3.5 shrink-0 text-red-600 dark:text-red-400" />
         </TooltipTrigger>
         <TooltipContent side="top">
           Setup failed{setup.error ? `: ${setup.error}` : ""}

@@ -1,4 +1,8 @@
-import { DashboardProvider, DashboardShell } from "@band-app/dashboard-core";
+import {
+  DashboardProvider,
+  DashboardShell,
+  useSettingsQuery,
+} from "@band-app/dashboard-core";
 import {
   HybridDashboardAdapter,
   NativeShellCapabilities,
@@ -55,6 +59,37 @@ function NotFound() {
   );
 }
 
+/** Syncs the "dark" class on <html> with the persisted theme setting.
+ *  Runs for ALL pages (including standalone Tauri windows like tasks/cronjobs). */
+function ThemeSync() {
+  const { settings } = useSettingsQuery();
+  const theme = settings.theme ?? "system";
+
+  useEffect(() => {
+    const root = document.documentElement;
+
+    const apply = (isDark: boolean) => {
+      if (isDark) {
+        root.classList.add("dark");
+      } else {
+        root.classList.remove("dark");
+      }
+    };
+
+    if (theme === "system") {
+      const mq = window.matchMedia("(prefers-color-scheme: dark)");
+      apply(mq.matches);
+      const handler = (e: MediaQueryListEvent) => apply(e.matches);
+      mq.addEventListener("change", handler);
+      return () => mq.removeEventListener("change", handler);
+    }
+
+    apply(theme === "dark");
+  }, [theme]);
+
+  return null;
+}
+
 function AppShell() {
   const isDesktop = useIsDesktop() && !isTauri;
   const router = useRouter();
@@ -87,12 +122,13 @@ function AppShell() {
 
 function RootLayout() {
   return (
-    <html lang="en" className="dark">
+    <html lang="en">
       <head>
         <HeadContent />
       </head>
       <body>
         <DashboardProvider adapter={adapter} capabilities={capabilities}>
+          <ThemeSync />
           <TooltipProvider>
             <AppShell />
           </TooltipProvider>

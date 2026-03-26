@@ -186,7 +186,7 @@ function DesktopDetailTabNav({
         <GitCompare className="size-4" />
         Changes
         {diffStats && diffStats.filesChanged > 0 && (
-          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-500/20 text-blue-400 px-1.5 text-xs font-medium">
+          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-500/20 text-blue-600 dark:text-blue-400 px-1.5 text-xs font-medium">
             {diffStats.filesChanged}
           </span>
         )}

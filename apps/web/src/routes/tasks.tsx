@@ -246,7 +246,7 @@ function StatusBadge({ status }: { status: TaskRecord["status"] }) {
       );
     case "completed":
       return (
-        <Badge variant="secondary" className="gap-1.5 text-green-400">
+        <Badge variant="secondary" className="gap-1.5 text-green-600 dark:text-green-400">
           <CheckCircle2 className="size-3" />
           Completed
         </Badge>
