@@ -106,6 +106,8 @@ export interface LabelDefinition {
   color: string;
 }
 
+export type Theme = "system" | "light" | "dark";
+
 export interface Settings {
   worktreesDir: string | null;
   defaults?: BandConfig;
@@ -115,6 +117,7 @@ export interface Settings {
   labels?: LabelDefinition[];
   tokenSecret?: string;
   autoStartTunnel?: boolean;
+  theme?: Theme;
 }
 
 export interface HooksStatus {

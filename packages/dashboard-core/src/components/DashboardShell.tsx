@@ -16,11 +16,23 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@band-app/ui";
-import { Check, FolderPlus, Pencil, Plus, Settings, Tag, X } from "lucide-react";
+import {
+  Check,
+  FolderPlus,
+  Monitor,
+  Moon,
+  Pencil,
+  Plus,
+  Settings,
+  Sun,
+  Tag,
+  X,
+} from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useCliSetup } from "../hooks/use-cli-setup";
 import { useHooksSetup } from "../hooks/use-hooks-setup";
 import { useProjects } from "../hooks/use-projects";
+import { useUpdateSettings } from "../hooks/use-settings-mutations";
 import { useSettingsQuery } from "../hooks/use-settings-query";
 import {
   useActiveWorkspaceWatcher,
@@ -42,6 +54,7 @@ const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
 export function DashboardShell({ toolbarExtra }: DashboardShellProps) {
   const { projects, isLoading: loading } = useProjects();
   const { settings } = useSettingsQuery();
+  const updateSettingsMutation = useUpdateSettings();
   const labels = settings.labels ?? [];
   const error = useDashboardStore((s) => s.error);
   const clearError = useDashboardStore((s) => s.clearError);
@@ -83,6 +96,54 @@ export function DashboardShell({ toolbarExtra }: DashboardShellProps) {
     return () => el.removeEventListener("mousedown", onMouseDown);
   }, []);
 
+  // Sync theme class on <html> with persisted setting
+  const theme = settings.theme ?? "system";
+  useEffect(() => {
+    const root = document.documentElement;
+
+    const apply = (isDark: boolean) => {
+      if (isDark) {
+        root.classList.add("dark");
+      } else {
+        root.classList.remove("dark");
+      }
+    };
+
+    if (theme === "system") {
+      const mq = window.matchMedia("(prefers-color-scheme: dark)");
+      apply(mq.matches);
+      const handler = (e: MediaQueryListEvent) => apply(e.matches);
+      mq.addEventListener("change", handler);
+      return () => mq.removeEventListener("change", handler);
+    }
+
+    apply(theme === "dark");
+  }, [theme]);
+
+  // Resolve effective theme for icon display
+  const [resolvedDark, setResolvedDark] = useState(() =>
+    typeof window !== "undefined"
+      ? window.matchMedia("(prefers-color-scheme: dark)").matches
+      : true,
+  );
+  useEffect(() => {
+    if (theme !== "system") return;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    setResolvedDark(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setResolvedDark(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, [theme]);
+
+  const effectiveDark = theme === "dark" || (theme === "system" && resolvedDark);
+
+  const toggleTheme = () => {
+    const order = ["system", "light", "dark"] as const;
+    const idx = order.indexOf(theme as (typeof order)[number]);
+    const next = order[(idx + 1) % order.length];
+    updateSettingsMutation.mutate({ ...settings, theme: next });
+  };
+
   useStatusWatcher();
   useActiveWorkspaceWatcher();
   useBranchStatusWatcher();
@@ -111,7 +172,7 @@ export function DashboardShell({ toolbarExtra }: DashboardShellProps) {
         </ScrollArea>
       ) : (
         <>
-          <div className="flex h-12 shrink-0 items-center justify-between border-b border-white/20 px-4">
+          <div className="flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
             <div className="flex items-center gap-1">
               <DropdownMenu>
                 <Tooltip>
@@ -181,14 +242,36 @@ export function DashboardShell({ toolbarExtra }: DashboardShellProps) {
                 </DropdownMenu>
               )}
             </div>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button size="icon-sm" variant="ghost" onClick={() => setShowAddDialog(true)}>
-                  <Plus className="size-5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Add project</TooltipContent>
-            </Tooltip>
+            <div className="flex items-center gap-1">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button size="icon-sm" variant="ghost" onClick={toggleTheme}>
+                    {theme === "system" ? (
+                      <Monitor className="size-5" />
+                    ) : effectiveDark ? (
+                      <Sun className="size-5" />
+                    ) : (
+                      <Moon className="size-5" />
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {theme === "system"
+                    ? "Theme: System"
+                    : theme === "dark"
+                      ? "Theme: Dark"
+                      : "Theme: Light"}
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button size="icon-sm" variant="ghost" onClick={() => setShowAddDialog(true)}>
+                    <Plus className="size-5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Add project</TooltipContent>
+              </Tooltip>
+            </div>
           </div>
 
           <ScrollArea
@@ -229,7 +312,7 @@ export function DashboardShell({ toolbarExtra }: DashboardShellProps) {
 
           {(cliState.status === "manual" || cliState.status === "conflict") && (
             <div className="mx-4 mb-2 px-4 py-2 bg-blue-500/10 border border-blue-500/30 rounded-lg text-sm flex items-center justify-between gap-2">
-              <span className="text-blue-200">
+              <span className="text-blue-700 dark:text-blue-200">
                 {cliState.status === "conflict"
                   ? "A different `band` binary exists — replace it to use the bundled CLI"
                   : `Install \`band\` CLI to /usr/local/bin (${cliState.reason})`}
@@ -242,7 +325,7 @@ export function DashboardShell({ toolbarExtra }: DashboardShellProps) {
 
           {hooksState.status === "needs_install" && (
             <div className="mx-4 mb-2 px-4 py-2 bg-blue-500/10 border border-blue-500/30 rounded-lg text-sm flex items-center justify-between gap-2">
-              <span className="text-blue-200">
+              <span className="text-blue-700 dark:text-blue-200">
                 Install Claude Code hooks for agent status detection
               </span>
               <Button

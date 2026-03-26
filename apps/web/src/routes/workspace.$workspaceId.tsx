@@ -177,7 +177,7 @@ function DesktopDetailTabNav({
     }`;
 
   return (
-    <div className="flex h-12 shrink-0 items-center border-b border-white/20">
+    <div className="flex h-12 shrink-0 items-center border-b border-border">
       <Link
         to="/workspace/$workspaceId/changes"
         params={{ workspaceId }}
@@ -265,7 +265,7 @@ function DesktopWorkspaceLayout({
   return (
     <div className="flex h-full overflow-hidden">
       {/* Middle Panel — Changes / Code / Terminal */}
-      <div className="flex-1 min-w-0 border-r border-white/20 overflow-hidden">
+      <div className="flex-1 min-w-0 border-r border-border overflow-hidden">
         <div className="flex h-full flex-col overflow-hidden">
           <DesktopDetailTabNav workspaceId={encodedId} diffStats={diffStats} />
           <div className="min-h-0 flex-1 overflow-hidden">

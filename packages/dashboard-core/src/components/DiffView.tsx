@@ -428,7 +428,7 @@ function LegacyDiffView({ workspaceId, active, onStatsChange, onOpenFile }: Diff
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <div className="flex shrink-0 items-center justify-between border-b border-white/20 px-4 py-2">
+      <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-2">
         <div>
           <div className="text-sm text-muted-foreground">
             <span className="font-medium text-foreground">{data.stats.filesChanged}</span>{" "}
@@ -617,7 +617,7 @@ export function DiffView({ workspaceId, active = true, onStatsChange, onOpenFile
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <div className="flex shrink-0 items-center justify-between border-b border-white/20 px-4 py-2">
+      <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-2">
         <div>
           <div className="text-sm text-muted-foreground">
             <span className="font-medium text-foreground">{summary.stats.filesChanged}</span>{" "}
