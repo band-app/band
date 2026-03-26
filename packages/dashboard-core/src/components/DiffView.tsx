@@ -441,9 +441,7 @@ function LegacyDiffView({ workspaceId, active, onStatsChange, onOpenFile }: Diff
               </span>
             )}
             {data.stats.deletions > 0 && (
-              <span className="ml-1 text-red-600 dark:text-red-400">
-                -{data.stats.deletions}
-              </span>
+              <span className="ml-1 text-red-600 dark:text-red-400">-{data.stats.deletions}</span>
             )}
           </div>
           <div className="mt-0.5 text-xs text-muted-foreground">
