@@ -1,8 +1,4 @@
-import {
-  DashboardProvider,
-  DashboardShell,
-  useSettingsQuery,
-} from "@band-app/dashboard-core";
+import { DashboardProvider, DashboardShell, useSettingsQuery } from "@band-app/dashboard-core";
 import {
   HybridDashboardAdapter,
   NativeShellCapabilities,

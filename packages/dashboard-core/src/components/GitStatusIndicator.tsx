@@ -11,7 +11,11 @@ export function GitStatusIndicator({ git }: Props) {
   if (git.conflict) {
     parts.push({ text: "!", color: "text-red-600 dark:text-red-400", tooltip: "Merge conflict" });
   } else if (git.dirty) {
-    parts.push({ text: "M", color: "text-yellow-600 dark:text-yellow-400", tooltip: "Uncommitted changes" });
+    parts.push({
+      text: "M",
+      color: "text-yellow-600 dark:text-yellow-400",
+      tooltip: "Uncommitted changes",
+    });
   }
 
   if (git.sync_state === "ahead") {

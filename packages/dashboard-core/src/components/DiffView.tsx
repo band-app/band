@@ -436,10 +436,14 @@ function LegacyDiffView({ workspaceId, active, onStatsChange, onOpenFile }: Diff
             <span className="font-medium text-foreground">{data.stats.filesChanged}</span>{" "}
             {data.stats.filesChanged === 1 ? "file" : "files"} changed
             {data.stats.insertions > 0 && (
-              <span className="ml-2 text-green-600 dark:text-green-400">+{data.stats.insertions}</span>
+              <span className="ml-2 text-green-600 dark:text-green-400">
+                +{data.stats.insertions}
+              </span>
             )}
             {data.stats.deletions > 0 && (
-              <span className="ml-1 text-red-600 dark:text-red-400">-{data.stats.deletions}</span>
+              <span className="ml-1 text-red-600 dark:text-red-400">
+                -{data.stats.deletions}
+              </span>
             )}
           </div>
           <div className="mt-0.5 text-xs text-muted-foreground">
@@ -625,10 +629,14 @@ export function DiffView({ workspaceId, active = true, onStatsChange, onOpenFile
             <span className="font-medium text-foreground">{summary.stats.filesChanged}</span>{" "}
             {summary.stats.filesChanged === 1 ? "file" : "files"} changed
             {summary.stats.insertions > 0 && (
-              <span className="ml-2 text-green-600 dark:text-green-400">+{summary.stats.insertions}</span>
+              <span className="ml-2 text-green-600 dark:text-green-400">
+                +{summary.stats.insertions}
+              </span>
             )}
             {summary.stats.deletions > 0 && (
-              <span className="ml-1 text-red-600 dark:text-red-400">-{summary.stats.deletions}</span>
+              <span className="ml-1 text-red-600 dark:text-red-400">
+                -{summary.stats.deletions}
+              </span>
             )}
           </div>
           <div className="mt-0.5 text-xs text-muted-foreground">
