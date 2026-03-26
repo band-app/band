@@ -164,6 +164,7 @@ export function DashboardShell({ toolbarExtra }: DashboardShellProps) {
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start">
                     <DropdownMenuItem onClick={() => setLabelFilter(null)}>
+                      <Tag className="size-3.5 shrink-0 mr-2 text-muted-foreground" />
                       <span className="flex-1">All</span>
                       {!labelFilter && <Check className="size-3 ml-2" />}
                     </DropdownMenuItem>
