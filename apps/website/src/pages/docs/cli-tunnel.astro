@@ -1,0 +1,102 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+---
+<DocsLayout title="band tunnel — Band Docs">
+  <h1>band tunnel</h1>
+
+  <p>
+    The <code>band tunnel</code> command group manages the Cloudflare tunnel that enables remote
+    access to your Band server. When the tunnel is running, you can access the dashboard and API
+    from any device over the internet — including your phone.
+  </p>
+
+  <h2>Prerequisites</h2>
+
+  <p>
+    The tunnel feature requires <strong>cloudflared</strong> to be installed on your system.
+    Cloudflared is Cloudflare's open-source tunnel client.
+  </p>
+
+  <pre><code># macOS
+brew install cloudflared
+
+# Linux
+sudo apt install cloudflared
+
+# Or download from https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/</code></pre>
+
+  <p>
+    You do not need a Cloudflare account. Band uses cloudflared's quick tunnel feature, which
+    generates a temporary public URL without any configuration.
+  </p>
+
+  <h2>Check Tunnel Status</h2>
+
+  <p>Display the current tunnel state, URL, and connection info.</p>
+
+  <pre><code>band tunnel status</code></pre>
+
+  <p>Example output when running:</p>
+
+  <pre><code>Status:    running
+URL:       https://abc-def-123.trycloudflare.com
+Uptime:    2h 34m
+Subdomain: abc-def-123</code></pre>
+
+  <p>Example output when stopped:</p>
+
+  <pre><code>Status:    stopped</code></pre>
+
+  <h2>Start the Tunnel</h2>
+
+  <p>
+    Start a Cloudflare tunnel to make your local Band server accessible from the internet.
+  </p>
+
+  <pre><code>band tunnel start</code></pre>
+
+  <p>
+    Once started, Band generates an authentication token and prints the public URL. You can share
+    this URL along with the token to access Band from another device.
+  </p>
+
+  <h2>Stop the Tunnel</h2>
+
+  <p>Shut down the tunnel and revoke the public URL.</p>
+
+  <pre><code>band tunnel stop</code></pre>
+
+  <h2>Custom Subdomains</h2>
+
+  <p>
+    By default, cloudflared assigns a random subdomain. If you have a Cloudflare account and a
+    configured domain, you can set up a persistent subdomain through Cloudflare's dashboard. This
+    gives you a stable URL like <code>https://band.yourdomain.com</code>.
+  </p>
+
+  <h2>Security</h2>
+
+  <p>
+    When the tunnel is active, Band generates a random authentication token. Remote clients must
+    include this token (via the <code>BAND_TOKEN</code> environment variable or the login screen in
+    the web interface) to access the API.
+  </p>
+
+  <ul>
+    <li>The token is displayed when the tunnel starts.</li>
+    <li>The token is also available via <code>band tunnel status --output json</code>.</li>
+    <li>Tokens are rotated each time the tunnel is restarted.</li>
+    <li>The dashboard shows a QR code for easy mobile access with the token embedded.</li>
+  </ul>
+
+  <h2>JSON Output</h2>
+
+  <pre><code>band tunnel status --output json</code></pre>
+
+  <pre><code set:html={`{'{'}
+  "status": "running",
+  "url": "https://abc-def-123.trycloudflare.com",
+  "token": "bnd_a1b2c3d4e5f6...",
+  "uptimeSeconds": 9240
+{'}'}`}></code></pre>
+</DocsLayout>

@@ -1,0 +1,236 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+---
+
+<BaseLayout title="Comparison — Band" description="See how Band compares to running agents directly or using IDE-native features.">
+  <main class="pt-16">
+    <section class="py-20 md:py-28">
+      <div class="mx-auto max-w-4xl px-6">
+        <h1 class="text-4xl font-bold tracking-tight text-text">
+          Why Band?
+        </h1>
+        <p class="mt-4 text-lg text-muted-foreground">
+          Understanding where Band fits compared to running agents directly or relying on IDE-native agent features.
+        </p>
+
+        <!-- Comparison Table -->
+        <div class="mt-12 overflow-x-auto">
+          <table class="w-full text-left text-sm">
+            <thead>
+              <tr class="border-b border-border">
+                <th class="py-3 pr-6 font-semibold text-text">Feature</th>
+                <th class="py-3 pr-6 font-semibold text-text">Band</th>
+                <th class="py-3 pr-6 font-semibold text-text">Direct Terminal</th>
+                <th class="py-3 font-semibold text-text">IDE-Native</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-border">
+              <tr>
+                <td class="py-3 pr-6 text-muted-foreground">Unified dashboard</td>
+                <td class="py-3 pr-6 text-success">Yes</td>
+                <td class="py-3 pr-6 text-muted-foreground">No</td>
+                <td class="py-3 text-muted-foreground">Per IDE only</td>
+              </tr>
+              <tr>
+                <td class="py-3 pr-6 text-muted-foreground">Multi-IDE support</td>
+                <td class="py-3 pr-6 text-success">All major IDEs</td>
+                <td class="py-3 pr-6 text-muted-foreground">N/A</td>
+                <td class="py-3 text-muted-foreground">Single IDE</td>
+              </tr>
+              <tr>
+                <td class="py-3 pr-6 text-muted-foreground">Multi-agent support</td>
+                <td class="py-3 pr-6 text-success">Claude, Cursor, Gemini</td>
+                <td class="py-3 pr-6 text-success">Any</td>
+                <td class="py-3 text-muted-foreground">IDE's agent only</td>
+              </tr>
+              <tr>
+                <td class="py-3 pr-6 text-muted-foreground">Workspace isolation</td>
+                <td class="py-3 pr-6 text-success">Git worktrees</td>
+                <td class="py-3 pr-6 text-muted-foreground">Manual setup</td>
+                <td class="py-3 text-muted-foreground">Manual setup</td>
+              </tr>
+              <tr>
+                <td class="py-3 pr-6 text-muted-foreground">Task queue</td>
+                <td class="py-3 pr-6 text-success">Yes</td>
+                <td class="py-3 pr-6 text-muted-foreground">No</td>
+                <td class="py-3 text-muted-foreground">No</td>
+              </tr>
+              <tr>
+                <td class="py-3 pr-6 text-muted-foreground">Scheduled tasks (cron)</td>
+                <td class="py-3 pr-6 text-success">Yes</td>
+                <td class="py-3 pr-6 text-muted-foreground">External tools</td>
+                <td class="py-3 text-muted-foreground">No</td>
+              </tr>
+              <tr>
+                <td class="py-3 pr-6 text-muted-foreground">Remote access</td>
+                <td class="py-3 pr-6 text-success">Built-in tunnel</td>
+                <td class="py-3 pr-6 text-muted-foreground">Manual setup</td>
+                <td class="py-3 text-muted-foreground">No</td>
+              </tr>
+              <tr>
+                <td class="py-3 pr-6 text-muted-foreground">Mobile dashboard</td>
+                <td class="py-3 pr-6 text-success">Yes</td>
+                <td class="py-3 pr-6 text-muted-foreground">No</td>
+                <td class="py-3 text-muted-foreground">No</td>
+              </tr>
+              <tr>
+                <td class="py-3 pr-6 text-muted-foreground">Window management</td>
+                <td class="py-3 pr-6 text-success">Auto-position</td>
+                <td class="py-3 pr-6 text-muted-foreground">Manual</td>
+                <td class="py-3 text-muted-foreground">Single window</td>
+              </tr>
+              <tr>
+                <td class="py-3 pr-6 text-muted-foreground">CLI automation</td>
+                <td class="py-3 pr-6 text-success">Full CLI</td>
+                <td class="py-3 pr-6 text-success">Agent CLI</td>
+                <td class="py-3 text-muted-foreground">Limited</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Band vs Terminal -->
+        <div class="mt-16">
+          <h2 class="text-2xl font-bold text-text">Band vs. running agents directly in the terminal</h2>
+          <p class="mt-4 leading-relaxed text-muted-foreground">
+            Running a coding agent directly in a terminal window works fine for a single task. But as soon as you're
+            managing multiple agents across different projects, the complexity grows quickly.
+          </p>
+          <div class="mt-6 grid gap-4 md:grid-cols-2">
+            <div class="rounded-xl border border-border bg-card/50 p-5">
+              <h3 class="font-semibold text-text">Without Band</h3>
+              <ul class="mt-3 space-y-2 text-sm text-muted-foreground">
+                <li class="flex items-start gap-2">
+                  <span class="mt-1 text-muted-foreground">&bull;</span>
+                  Manually create branches and check out worktrees
+                </li>
+                <li class="flex items-start gap-2">
+                  <span class="mt-1 text-muted-foreground">&bull;</span>
+                  Switch between terminal tabs to check on agents
+                </li>
+                <li class="flex items-start gap-2">
+                  <span class="mt-1 text-muted-foreground">&bull;</span>
+                  No overview of what each agent is doing
+                </li>
+                <li class="flex items-start gap-2">
+                  <span class="mt-1 text-muted-foreground">&bull;</span>
+                  Can't schedule recurring tasks
+                </li>
+                <li class="flex items-start gap-2">
+                  <span class="mt-1 text-muted-foreground">&bull;</span>
+                  No remote or mobile access
+                </li>
+              </ul>
+            </div>
+            <div class="rounded-xl border border-primary/30 bg-primary-muted p-5">
+              <h3 class="font-semibold text-text">With Band</h3>
+              <ul class="mt-3 space-y-2 text-sm text-muted-foreground">
+                <li class="flex items-start gap-2">
+                  <span class="mt-1 text-primary">&bull;</span>
+                  One-click workspace creation with isolated worktrees
+                </li>
+                <li class="flex items-start gap-2">
+                  <span class="mt-1 text-primary">&bull;</span>
+                  All agents visible in a single dashboard
+                </li>
+                <li class="flex items-start gap-2">
+                  <span class="mt-1 text-primary">&bull;</span>
+                  Real-time status for every workspace
+                </li>
+                <li class="flex items-start gap-2">
+                  <span class="mt-1 text-primary">&bull;</span>
+                  Cron-based scheduling for automated tasks
+                </li>
+                <li class="flex items-start gap-2">
+                  <span class="mt-1 text-primary">&bull;</span>
+                  Access from anywhere via Cloudflare tunnel
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <!-- Band vs IDE-Native -->
+        <div class="mt-16">
+          <h2 class="text-2xl font-bold text-text">Band vs. IDE-native agent features</h2>
+          <p class="mt-4 leading-relaxed text-muted-foreground">
+            Most IDEs now have built-in AI coding features. These are great for single-editor workflows,
+            but they're limited to that one IDE and that IDE's agent.
+          </p>
+          <div class="mt-6 space-y-4">
+            <div class="rounded-xl border border-border bg-card/50 p-5">
+              <h3 class="font-semibold text-text">IDE lock-in</h3>
+              <p class="mt-2 text-sm leading-relaxed text-muted-foreground">
+                IDE-native agents tie you to that editor. If you use VS Code for web projects and Xcode for iOS,
+                you need separate agent setups. Band gives you one dashboard regardless of which editor you're using.
+              </p>
+            </div>
+            <div class="rounded-xl border border-border bg-card/50 p-5">
+              <h3 class="font-semibold text-text">Agent lock-in</h3>
+              <p class="mt-2 text-sm leading-relaxed text-muted-foreground">
+                IDE-native features typically only support the IDE's own agent. With Band, you can use Claude Code
+                in one workspace and Cursor in another, choosing the best agent for each task.
+              </p>
+            </div>
+            <div class="rounded-xl border border-border bg-card/50 p-5">
+              <h3 class="font-semibold text-text">No cross-project visibility</h3>
+              <p class="mt-2 text-sm leading-relaxed text-muted-foreground">
+                IDE agents work within a single project window. Band shows you agent activity across all your
+                projects in one place, making it easy to manage multiple parallel tasks.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Why a separate orchestrator -->
+        <div class="mt-16">
+          <h2 class="text-2xl font-bold text-text">Why a separate orchestrator?</h2>
+          <p class="mt-4 leading-relaxed text-muted-foreground">
+            As coding agents become a daily tool, you need infrastructure around them — just like you need CI/CD
+            infrastructure around your code. Band is that infrastructure layer.
+          </p>
+          <ul class="mt-4 space-y-2 text-muted-foreground">
+            <li class="flex items-start gap-2">
+              <span class="mt-1 text-primary">&bull;</span>
+              <strong class="text-text">Separation of concerns:</strong> The agent codes, Band manages the lifecycle.
+            </li>
+            <li class="flex items-start gap-2">
+              <span class="mt-1 text-primary">&bull;</span>
+              <strong class="text-text">Composability:</strong> Swap agents, IDEs, and workflows without changing your orchestration setup.
+            </li>
+            <li class="flex items-start gap-2">
+              <span class="mt-1 text-primary">&bull;</span>
+              <strong class="text-text">Automation:</strong> Schedule, queue, and batch agent tasks. No manual babysitting.
+            </li>
+            <li class="flex items-start gap-2">
+              <span class="mt-1 text-primary">&bull;</span>
+              <strong class="text-text">Visibility:</strong> One place to see everything. From your desk or your phone.
+            </li>
+          </ul>
+        </div>
+
+        <!-- CTA -->
+        <div class="mt-16 rounded-xl border border-border bg-card/50 p-8 text-center">
+          <h2 class="text-xl font-bold text-text">Try Band today</h2>
+          <p class="mt-2 text-muted-foreground">
+            Free, open source, and ready to use.
+          </p>
+          <div class="mt-6 flex items-center justify-center gap-3">
+            <a
+              href="https://github.com/topdev1de/band/releases/latest"
+              class="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-hover"
+            >
+              Download for macOS
+            </a>
+            <a
+              href="/docs/getting-started"
+              class="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-5 py-2.5 text-sm font-medium text-text transition-colors hover:bg-accent"
+            >
+              Get Started
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</BaseLayout>

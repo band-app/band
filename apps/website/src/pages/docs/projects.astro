@@ -1,0 +1,107 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+---
+<DocsLayout title="Project Management — Band Docs">
+  <h1>Project Management</h1>
+  <p>
+    Projects in Band represent git repositories that you want to manage with coding agent
+    workspaces. Every project must be a valid git repository. Band does not create or modify
+    your repositories &mdash; it simply registers them and manages worktrees within them.
+  </p>
+
+  <h2>Adding Projects</h2>
+  <p>
+    There are two ways to register a project with Band:
+  </p>
+
+  <h3>From the Dashboard UI</h3>
+  <p>
+    Click the <strong>+</strong> button in the top-right corner of the dashboard toolbar. A dialog
+    will appear where you can select a directory. Band validates that the selected path is a git
+    repository and detects the default branch automatically.
+  </p>
+
+  <h3>From the CLI</h3>
+  <p>
+    Use the <code>band projects add</code> command to register an existing git repository:
+  </p>
+  <pre><code>band projects add /path/to/your/repo
+band projects add /path/to/your/repo --label my-label</code></pre>
+  <p>
+    The CLI detects the repository name and default branch. You can optionally assign a label
+    at registration time using the <code>--label</code> flag.
+  </p>
+
+  <h2>Removing Projects</h2>
+  <p>
+    Removing a project from Band unregisters it from the dashboard. It does <strong>not</strong>
+    delete the repository or any of its files. You can remove a project by:
+  </p>
+  <ul>
+    <li>Right-clicking the project name and selecting <strong>Remove from list</strong>.</li>
+    <li>Entering edit mode (via the settings menu) and clicking the trash icon next to the project.</li>
+    <li>Using the CLI: <code>band projects remove &lt;name&gt;</code></li>
+  </ul>
+
+  <h2>Reordering Projects</h2>
+  <p>
+    To reorder projects in the sidebar, open the settings menu and select <strong>Edit list</strong>.
+    This enables edit mode, which shows drag handles next to each project name. Drag projects
+    up or down to rearrange them. The new order is persisted automatically. Click
+    <strong>Done editing</strong> when finished.
+  </p>
+
+  <h2>Labels and Filtering</h2>
+  <p>
+    Projects can be organized using color-coded labels. Labels are created in the
+    <a href="/docs/settings">Settings</a> page, and then assigned to projects via the
+    right-click context menu.
+  </p>
+  <ul>
+    <li>Right-click a project name to see the <strong>Set label</strong> submenu.</li>
+    <li>Select a label to assign it, or choose <strong>None</strong> to remove the label.</li>
+    <li>Use the label filter dropdown in the toolbar to show only projects with a specific label.</li>
+    <li>When labels are defined, projects are visually grouped by label with colored section headers.</li>
+  </ul>
+  <p>
+    You can also drag projects between label groups in edit mode to reassign labels quickly.
+  </p>
+
+  <h2>Project Configuration</h2>
+  <p>
+    Each project can have a <code>.band/config.json</code> file in its repository root. This
+    file configures per-project behavior such as which applications to open when focusing
+    a workspace, and setup/teardown scripts.
+  </p>
+  <pre><code set:html={`{
+  "apps": [
+    {
+      "type": "vscode",
+      "terminals": [
+        { "name": "claude", "command": "band tasks watch && claude --continue" },
+        { "name": "shell", "command": "", "split": "vertical" }
+      ]
+    },
+    { "type": "iterm" },
+    { "type": "chrome", "url": "http://localhost:3000" }
+  ],
+  "setup": "npm install",
+  "teardown": "docker compose down"
+}`}></code></pre>
+  <p>
+    The <code>setup</code> script runs automatically after a workspace is created. The
+    <code>teardown</code> script runs before a workspace is removed. Both are non-fatal &mdash;
+    if they fail, the operation continues.
+  </p>
+
+  <h2>Context Menu</h2>
+  <p>
+    Right-clicking a project name reveals additional actions:
+  </p>
+  <ul>
+    <li><strong>Set label</strong> &mdash; Assign or remove a color-coded label.</li>
+    <li><strong>Copy path</strong> &mdash; Copy the project's filesystem path to the clipboard.</li>
+    <li><strong>Open in Finder</strong> &mdash; Reveal the project directory in Finder.</li>
+    <li><strong>Remove from list</strong> &mdash; Unregister the project from Band.</li>
+  </ul>
+</DocsLayout>

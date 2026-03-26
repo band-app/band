@@ -1,0 +1,118 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+---
+<DocsLayout title="IDE Extensions — Band Docs">
+  <h1>IDE Extensions</h1>
+
+  <p>
+    Band provides IDE extensions that bridge the gap between your editor and the Band dashboard.
+    The primary extension is for VS Code and compatible editors (Cursor, Windsurf), enabling
+    automatic workspace detection, terminal management, and agent status reporting.
+  </p>
+
+  <h2>VS Code / Cursor Extension</h2>
+
+  <p>
+    The Band extension for VS Code and Cursor provides the following capabilities:
+  </p>
+
+  <ul>
+    <li>Automatic workspace detection when opening a Band worktree directory.</li>
+    <li>Terminal creation and splitting based on <code>.band/config.json</code>.</li>
+    <li>Real-time agent status reporting to the Band dashboard.</li>
+    <li>Integration with Claude Code hooks for task lifecycle events.</li>
+  </ul>
+
+  <h2>Auto-Activation</h2>
+
+  <p>
+    The extension activates automatically when it detects a <code>.band/config.json</code> file in
+    the opened workspace. No manual configuration is needed — just open a directory that is part of
+    a Band project and the extension connects to the Band server.
+  </p>
+
+  <p>
+    The extension discovers the Band server URL from the default location
+    (<code>http://localhost:3001</code>) or from the <code>BAND_SERVER_URL</code> environment
+    variable.
+  </p>
+
+  <h2>Terminal Creation and Splitting</h2>
+
+  <p>
+    When the extension activates, it reads the terminal commands from your project configuration
+    and creates terminal instances accordingly:
+  </p>
+
+  <ul>
+    <li>Each command entry creates a named terminal tab.</li>
+    <li>Commands with <code>"split": true</code> open as split panes within the previous terminal.</li>
+    <li>Commands run automatically in the workspace directory.</li>
+  </ul>
+
+  <pre><code set:html={`// .band/config.json
+{'{'}
+  "apps": [
+    {'{'}
+      "preset": "cursor",
+      "commands": [
+        {"{"} "command": "npm run dev", "name": "dev" {'}'},
+        {"{"} "command": "npm test -- --watch", "name": "test", "split": true {'}'}
+      ]
+    {'}'}
+  ]
+{'}'}`}></code></pre>
+
+  <h2>Agent Status Reporting</h2>
+
+  <p>
+    The extension monitors the AI agent running inside the editor and reports its status to the
+    Band dashboard. This enables the dashboard to show whether an agent is:
+  </p>
+
+  <ul>
+    <li><strong>Idle</strong> — No agent activity.</li>
+    <li><strong>Working</strong> — Agent is actively processing a task.</li>
+    <li><strong>Waiting</strong> — Agent is waiting for user input or approval.</li>
+    <li><strong>Error</strong> — Agent encountered an error.</li>
+  </ul>
+
+  <p>
+    Status is communicated via JSON files in the workspace's <code>.band/</code> directory. This
+    file-based protocol ensures compatibility across different agent implementations.
+  </p>
+
+  <h2>Claude Code Hooks Integration</h2>
+
+  <p>
+    Band integrates with Claude Code's hooks system to track agent lifecycle events. When Claude
+    Code runs inside a Band workspace, hooks fire on key events:
+  </p>
+
+  <ul>
+    <li><strong>Task start</strong> — When Claude Code begins processing a prompt.</li>
+    <li><strong>Task complete</strong> — When Claude Code finishes a task.</li>
+    <li><strong>Tool use</strong> — When Claude Code invokes tools (file edits, terminal commands).</li>
+    <li><strong>Error</strong> — When Claude Code encounters an error.</li>
+  </ul>
+
+  <p>
+    These events are forwarded to the Band server, allowing the dashboard to display real-time
+    agent activity including tool calls, file changes, and chat messages.
+  </p>
+
+  <h2>Supported Editors</h2>
+
+  <p>The extension is compatible with:</p>
+
+  <ul>
+    <li><strong>Visual Studio Code</strong> — Full support.</li>
+    <li><strong>Cursor</strong> — Full support (uses VS Code extension API).</li>
+    <li><strong>Windsurf</strong> — Full support (uses VS Code extension API).</li>
+  </ul>
+
+  <p>
+    JetBrains IDEs use a different integration mechanism. See
+    <a href="/docs/app-presets">App Presets</a> for JetBrains IDE support.
+  </p>
+</DocsLayout>

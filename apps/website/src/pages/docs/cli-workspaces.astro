@@ -1,0 +1,87 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+---
+<DocsLayout title="band workspaces — Band Docs">
+  <h1>band workspaces</h1>
+
+  <p>
+    The <code>band workspaces</code> command group manages workspaces within projects. A workspace is
+    an isolated working environment backed by a Git worktree. Each workspace gets its own branch,
+    its own working directory, and its own agent session.
+  </p>
+
+  <h2>List Workspaces</h2>
+
+  <p>Display all workspaces across all projects, or filter by project.</p>
+
+  <pre><code>band workspaces list</code></pre>
+
+  <p>Example output:</p>
+
+  <pre><code>ID   Project    Name             Branch                    Status
+1    my-app     fix-auth-bug     ws/fix-auth-bug           active
+2    my-app     add-dark-mode    ws/add-dark-mode          active
+3    my-app     refactor-api     ws/refactor-api           idle
+4    api-server update-deps      ws/update-deps            active</code></pre>
+
+  <h2>Create a Workspace</h2>
+
+  <p>
+    Create a new workspace in a project. Band will create a Git worktree with a new branch and set
+    up the isolated environment.
+  </p>
+
+  <pre><code>band workspaces create --project my-app --name fix-auth-bug</code></pre>
+
+  <p>
+    The workspace directory is created at <code>.band/worktrees/&lt;project&gt;/&lt;name&gt;</code>
+    inside the Band home directory. A new Git branch is created from the project's current HEAD.
+  </p>
+
+  <p>Options:</p>
+
+  <ul>
+    <li><code>--project &lt;name&gt;</code> — The project to create the workspace in (required).</li>
+    <li><code>--name &lt;ws-name&gt;</code> — A descriptive name for the workspace (required).</li>
+  </ul>
+
+  <h2>Remove a Workspace</h2>
+
+  <p>
+    Remove a workspace by its ID. This deletes the Git worktree directory and removes the workspace
+    record from Band's database.
+  </p>
+
+  <pre><code>band workspaces remove 2</code></pre>
+
+  <p>
+    Active tasks in the workspace will be cancelled before removal. The Git branch created for the
+    workspace is not deleted automatically — you can still merge or reference it.
+  </p>
+
+  <h2>JSON Output</h2>
+
+  <pre><code>band workspaces list --output json</code></pre>
+
+  <p>Example JSON output:</p>
+
+  <pre><code set:html={`[
+  {'{'}
+    "id": 1,
+    "project": "my-app",
+    "name": "fix-auth-bug",
+    "branch": "ws/fix-auth-bug",
+    "path": "/Users/dev/.band/worktrees/my-app/fix-auth-bug",
+    "status": "active"
+  {'}'}
+]`}></code></pre>
+
+  <h2>Notes</h2>
+
+  <ul>
+    <li>Workspace names must be unique within a project.</li>
+    <li>Each workspace has its own isolated file system via Git worktrees.</li>
+    <li>Workspaces persist across restarts — they are stored in SQLite and the worktree stays on disk.</li>
+    <li>Use the dashboard or <code>band tasks</code> to assign work to a workspace.</li>
+  </ul>
+</DocsLayout>

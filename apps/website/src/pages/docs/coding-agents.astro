@@ -1,0 +1,128 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+---
+<DocsLayout title="Coding Agents — Band Docs">
+  <h1>Coding Agents</h1>
+  <p>
+    Band is an agent orchestrator that works with multiple coding agents through a
+    unified adapter pattern. You choose which agent powers your workspaces, and Band
+    handles task submission, output streaming, session management, and lifecycle tracking
+    regardless of which agent is running underneath.
+  </p>
+
+  <h2>Supported Agents</h2>
+  <p>
+    Band currently ships adapters for four coding agents. Each adapter implements the
+    same <code>CodingAgent</code> interface, so switching between agents requires only a
+    settings change — no workflow modifications.
+  </p>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Feature</th>
+        <th>Claude Code</th>
+        <th>Cursor CLI</th>
+        <th>Gemini CLI</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Cost tracking</td>
+        <td>Yes</td>
+        <td>No</td>
+        <td>No</td>
+      </tr>
+      <tr>
+        <td>Session listing</td>
+        <td>Yes</td>
+        <td>No</td>
+        <td>No</td>
+      </tr>
+      <tr>
+        <td>Session resume</td>
+        <td>Yes</td>
+        <td>Yes</td>
+        <td>No</td>
+      </tr>
+      <tr>
+        <td>Real-time streaming</td>
+        <td>Yes</td>
+        <td>Yes</td>
+        <td>Yes</td>
+      </tr>
+      <tr>
+        <td>Tool use visibility</td>
+        <td>Yes</td>
+        <td>Yes</td>
+        <td>Yes</td>
+      </tr>
+      <tr>
+        <td>User input prompts</td>
+        <td>Yes</td>
+        <td>No</td>
+        <td>No</td>
+      </tr>
+      <tr>
+        <td>Custom model selection</td>
+        <td>Yes</td>
+        <td>Yes</td>
+        <td>Yes</td>
+      </tr>
+      <tr>
+        <td>Skill discovery</td>
+        <td>Yes</td>
+        <td>No</td>
+        <td>Yes</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>The Adapter Pattern</h2>
+  <p>
+    Band uses a factory function (<code>createCodingAgent</code>) that accepts a
+    configuration object with a <code>type</code> field and returns the appropriate
+    adapter. Each adapter implements the <code>CodingAgent</code> interface:
+  </p>
+  <ul>
+    <li><strong>runSession(prompt, sessionId?)</strong> — Starts an agent session and yields a stream of events (text deltas, tool calls, tool results, session results).</li>
+    <li><strong>abort()</strong> — Cancels the currently running session.</li>
+    <li><strong>listSessions(dir)</strong> — Returns previous sessions for a directory (where supported).</li>
+    <li><strong>getSessionMessages(sessionId, dir)</strong> — Retrieves the message history for a session.</li>
+    <li><strong>listSkills()</strong> — Discovers available skills in the workspace.</li>
+  </ul>
+  <p>
+    All adapters emit a common set of <code>AgentEvent</code> types:
+    <code>session-start</code>, <code>text-delta</code>, <code>tool-use</code>,
+    <code>tool-result</code>, <code>session-result</code>, and <code>error</code>.
+    The Band task runner consumes these events and broadcasts them to the dashboard UI
+    in real time.
+  </p>
+
+  <h2>Selecting the Default Agent</h2>
+  <p>
+    Open the Band dashboard and navigate to <strong>Settings</strong>. Under the
+    <strong>Coding Agent</strong> section, select your preferred agent type from the
+    dropdown. The available options are:
+  </p>
+  <ul>
+    <li><code>claude-code</code> — Claude Code (default)</li>
+    <li><code>cursor-cli</code> — Cursor CLI</li>
+    <li><code>gemini-cli</code> — Gemini CLI</li>
+  </ul>
+  <p>
+    You can also specify a custom executable path if the agent CLI is not on your
+    system <code>PATH</code>. The setting is stored in Band's configuration database
+    and applies to all new agent sessions. Existing running sessions are not affected
+    until they complete and a new session starts.
+  </p>
+
+  <h2>Agent Pool</h2>
+  <p>
+    Band maintains an in-memory agent pool keyed by workspace ID. When a task is
+    submitted, Band checks the pool for an existing agent instance. If none exists, it
+    creates one using the current settings. This means each workspace gets its own
+    isolated agent instance with its own working directory, session state, and
+    configuration. Agents are removed from the pool when a workspace is deleted.
+  </p>
+</DocsLayout>

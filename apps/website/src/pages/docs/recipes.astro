@@ -1,0 +1,98 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+---
+<DocsLayout title="Recipes & Workflows — Band Docs">
+  <h1>Recipes &amp; Workflows</h1>
+  <p>
+    This page collects practical workflows for common development scenarios with Band.
+    Each recipe describes a concrete pattern you can adopt and adapt to your projects.
+  </p>
+
+  <h2>Feature Branch Workflow</h2>
+  <p>
+    Use Band's workspace model to isolate feature work on dedicated branches with their
+    own git worktrees.
+  </p>
+  <ol>
+    <li>Open the Band dashboard and select your project.</li>
+    <li>Click <strong>New Workspace</strong> and enter your feature branch name (e.g., <code>feat/user-profiles</code>). Band creates a git worktree for the branch.</li>
+    <li>Submit a task with your feature requirements: "Implement user profile page with avatar upload, bio field, and settings form."</li>
+    <li>Review the agent's output in real time. Once the task completes, open the workspace in your IDE to inspect the changes.</li>
+    <li>Queue follow-up tasks for refinements: "Add validation to the bio field — max 500 characters — and display a character counter."</li>
+    <li>When the feature is ready, create a pull request directly from the dashboard or your terminal.</li>
+  </ol>
+
+  <h2>Parallel Agent Execution Across Workspaces</h2>
+  <p>
+    Band allows one task per workspace, but you can run tasks across multiple workspaces
+    simultaneously. This is useful for working on independent features in parallel.
+  </p>
+  <ol>
+    <li>Create multiple workspaces for your project, each on a different feature branch.</li>
+    <li>Submit tasks to each workspace. Band spawns a separate agent instance for each one.</li>
+    <li>Monitor all running tasks from the dashboard. Each workspace shows its agent's status and output independently.</li>
+    <li>As tasks complete, review the results in each workspace and submit follow-up prompts as needed.</li>
+  </ol>
+  <p>
+    This pattern works well when you have a backlog of independent issues. Create a
+    workspace per issue, submit the task, and let the agents work in parallel.
+  </p>
+
+  <h2>Automated PR Review Workflow</h2>
+  <p>
+    Use cronjobs to automatically review incoming pull requests on a schedule.
+  </p>
+  <ol>
+    <li>Create a project-scoped cronjob with the name "PR Review".</li>
+    <li>Set the prompt to: "List all open pull requests. For each one, review the diff and leave a comment summarizing potential issues, missing tests, and style concerns."</li>
+    <li>Set the cron expression to <code>0 9 * * 1-5</code> (every weekday at 9 AM).</li>
+    <li>Enable the job. Every weekday morning, Band submits the review task to the default branch workspace.</li>
+  </ol>
+
+  <h2>Backlog Processing with Multiple Agents</h2>
+  <p>
+    Process a queue of issues from your issue tracker by assigning each to a workspace.
+  </p>
+  <ol>
+    <li>From your issue tracker, identify a batch of issues suitable for agent work (bug fixes, refactors, small features).</li>
+    <li>For each issue, create a workspace with a branch named after the issue (e.g., <code>fix/issue-142</code>).</li>
+    <li>Submit a task to each workspace referencing the issue: "Fix issue #142: the login form does not validate email format. Add regex validation and display an error message."</li>
+    <li>Band runs agents in parallel across all workspaces. Monitor progress from the dashboard.</li>
+    <li>As agents complete, review the changes and create pull requests for the ones that look good.</li>
+  </ol>
+
+  <h2>CI Integration Patterns</h2>
+  <p>
+    Band exposes a web server that you can call from CI pipelines to trigger tasks
+    programmatically.
+  </p>
+  <ol>
+    <li>Ensure the Band server is accessible from your CI environment (running on a known host and port).</li>
+    <li>In your CI pipeline, use the Band CLI or HTTP API to submit a task:
+      <pre><code>band task submit --workspace "myproject/main" --prompt "Run the full test suite and fix any failures"</code></pre>
+    </li>
+    <li>Poll the task status or use webhooks to wait for completion.</li>
+    <li>Based on the task result, continue or fail the CI pipeline.</li>
+  </ol>
+  <p>
+    This pattern is useful for automated fix-and-retry workflows: if CI fails, trigger
+    an agent to diagnose and fix the issue, then re-run the pipeline.
+  </p>
+
+  <h2>Using Band with Monorepos</h2>
+  <p>
+    Band works naturally with monorepos because projects in Band map to git repositories,
+    and workspaces map to branches. For monorepos with multiple packages:
+  </p>
+  <ol>
+    <li>Add your monorepo as a single project in Band.</li>
+    <li>Create workspaces for each feature or fix, just as you would in a single-package repo.</li>
+    <li>In your task prompts, specify which package the agent should focus on: "In the <code>packages/api</code> directory, add rate limiting to the /users endpoint."</li>
+    <li>Use your project's <code>CLAUDE.md</code> file to document monorepo conventions — workspace structure, shared dependencies, build commands — so the agent follows them automatically.</li>
+  </ol>
+  <p>
+    For very large monorepos, consider creating separate Band projects for independent
+    sub-repositories if they have distinct git histories, or use the additional
+    directories feature to give the agent access to shared configuration.
+  </p>
+</DocsLayout>

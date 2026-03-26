@@ -1,0 +1,94 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+---
+<DocsLayout title="CLI Reference — Band Docs">
+  <h1>CLI Reference</h1>
+
+  <p>
+    The <code>band</code> CLI is a command-line interface for managing projects, workspaces, tasks,
+    cron jobs, and tunnels. It communicates with the Band server over HTTP and provides both
+    human-readable and machine-readable output formats.
+  </p>
+
+  <h2>Installation</h2>
+
+  <p>
+    The CLI is <strong>bundled with the Band desktop app</strong>. When you install the desktop
+    application, the <code>band</code> binary is placed on your system PATH automatically. No
+    separate installation step is needed.
+  </p>
+
+  <p>
+    If you prefer a standalone installation (for example, on a headless server or in CI), you can
+    install the CLI binary directly from the project releases page.
+  </p>
+
+  <h2>Configuration via Environment Variables</h2>
+
+  <p>
+    The CLI reads the following environment variables. These override any defaults and are useful in
+    scripted or CI environments.
+  </p>
+
+  <ul>
+    <li><code>BAND_SERVER_URL</code> — Base URL of the Band server. Defaults to <code>http://localhost:3001</code>.</li>
+    <li><code>BAND_TOKEN</code> — Authentication token for remote access. Required when connecting through a tunnel.</li>
+    <li><code>BAND_OUTPUT</code> — Default output format. Set to <code>json</code> for machine-readable output.</li>
+    <li><code>BAND_HOME</code> — Override the Band home directory (defaults to <code>~/.band</code>).</li>
+  </ul>
+
+  <h2>JSON Output Mode</h2>
+
+  <p>
+    Every command supports a <code>--output json</code> flag that prints structured JSON instead of
+    the default table or text output. This is useful for scripting and piping into tools like
+    <code>jq</code>.
+  </p>
+
+  <pre><code>band projects list --output json
+band tasks list --output json | jq '.[0].id'</code></pre>
+
+  <p>
+    You can also set <code>BAND_OUTPUT=json</code> in your shell profile to make JSON the default
+    for all commands.
+  </p>
+
+  <h2>Schema Introspection</h2>
+
+  <p>
+    The <code>band schema</code> command outputs the full API schema as JSON. This is helpful for
+    building tooling on top of Band or for understanding the available endpoints and their
+    parameters.
+  </p>
+
+  <pre><code>band schema</code></pre>
+
+  <p>
+    The schema includes all available commands, their arguments, expected input types, and response
+    shapes. Pipe it through <code>jq</code> to explore interactively.
+  </p>
+
+  <h2>Command Groups</h2>
+
+  <p>The CLI is organized into the following command groups:</p>
+
+  <ul>
+    <li><strong><a href="/docs/cli-projects">band projects</a></strong> — Add, list, and remove projects.</li>
+    <li><strong><a href="/docs/cli-workspaces">band workspaces</a></strong> — Create, list, and remove workspaces.</li>
+    <li><strong><a href="/docs/cli-tasks">band tasks</a></strong> — Create, list, cancel, rerun, and watch tasks.</li>
+    <li><strong><a href="/docs/cli-cronjobs">band cronjobs</a></strong> — Schedule recurring tasks with cron expressions.</li>
+    <li><strong><a href="/docs/cli-tunnel">band tunnel</a></strong> — Manage Cloudflare tunnel for remote access.</li>
+    <li><strong><a href="/docs/cli-settings">band settings</a></strong> — View current configuration.</li>
+  </ul>
+
+  <h2>Getting Help</h2>
+
+  <p>
+    Append <code>--help</code> to any command or subcommand to see usage information, available
+    flags, and examples.
+  </p>
+
+  <pre><code>band --help
+band projects --help
+band tasks create --help</code></pre>
+</DocsLayout>

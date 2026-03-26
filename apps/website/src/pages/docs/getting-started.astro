@@ -1,0 +1,85 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+---
+
+<DocsLayout title="Getting Started — Band Docs">
+  <h1>Getting Started</h1>
+
+  <p>
+    Band is an <strong>IDE-agnostic agent orchestrator</strong> that helps developers manage
+    AI coding agents across multiple projects and workspaces. Whether you use VS Code, Cursor,
+    Windsurf, or any other editor, Band provides a unified dashboard to dispatch tasks, monitor
+    progress, and manage the git worktrees that keep your work organized.
+  </p>
+
+  <h2>Who is Band for?</h2>
+
+  <p>
+    Band is built for developers who work with AI coding agents and want a better way to
+    manage them. If you find yourself juggling multiple agent sessions, switching between
+    terminal windows to check on task progress, or manually creating git branches for each
+    piece of work, Band is for you.
+  </p>
+
+  <ul>
+    <li><strong>Solo developers</strong> running multiple agents in parallel across different features</li>
+    <li><strong>Teams</strong> that want a shared view of what agents are working on</li>
+    <li><strong>Anyone</strong> who wants to keep their main branch clean while agents work in isolated worktrees</li>
+  </ul>
+
+  <h2>What can you do with Band?</h2>
+
+  <p>Band gives you four core capabilities:</p>
+
+  <ul>
+    <li>
+      <strong>Manage projects</strong> &mdash; Register your git repositories with Band so it
+      can track them and create workspaces from them.
+    </li>
+    <li>
+      <strong>Create workspaces</strong> &mdash; Each workspace is a git worktree with its own
+      branch, giving your agent an isolated environment to work in without affecting your main code.
+    </li>
+    <li>
+      <strong>Dispatch tasks</strong> &mdash; Send prompts to coding agents and have them execute
+      in a specific workspace. You can submit tasks from the dashboard UI or the CLI.
+    </li>
+    <li>
+      <strong>Monitor agents</strong> &mdash; Watch task output in real time, see which agents are
+      running, check whether tasks completed or failed, and re-run tasks if needed.
+    </li>
+  </ul>
+
+  <h2>How it works</h2>
+
+  <p>
+    Band runs a local web server on your machine (port 3456 by default) that manages all state,
+    git operations, and agent processes. You interact with it through either the
+    <strong>dashboard UI</strong> (a desktop app with a web interface) or the
+    <strong>Band CLI</strong> from your terminal.
+  </p>
+
+  <p>
+    The web interface is accessible from any browser, which means you can monitor your agents
+    from your phone or another device on the same network.
+  </p>
+
+  <h2>Platform support</h2>
+
+  <p>
+    Band is currently available for <strong>macOS</strong> only (macOS 13 Ventura or later).
+    The desktop app is a native Tauri application, and the CLI is a standalone binary that
+    ships alongside it. Windows and Linux support is planned for a future release.
+  </p>
+
+  <h2>Next steps</h2>
+
+  <p>Follow these guides in order to get up and running:</p>
+
+  <ol>
+    <li><a href="/docs/installation">Installation</a> &mdash; Download and install Band on your Mac</li>
+    <li><a href="/docs/first-project">Adding your first project</a> &mdash; Register a git repository</li>
+    <li><a href="/docs/first-workspace">Creating your first workspace</a> &mdash; Set up an isolated worktree</li>
+    <li><a href="/docs/first-task">Running your first task</a> &mdash; Dispatch a prompt to a coding agent</li>
+  </ol>
+</DocsLayout>

@@ -1,0 +1,436 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+---
+
+<BaseLayout title="Band — IDE-agnostic agent orchestrator">
+  <main class="pt-14">
+    <!-- Hero Section -->
+    <section class="relative overflow-hidden">
+      <div class="absolute inset-0 bg-[radial-gradient(ellipse_at_top,oklch(0.922 0 0 / 0.04),transparent_60%)]"></div>
+      <div class="relative mx-auto max-w-6xl px-6 pb-20 pt-24 md:pb-28 md:pt-32">
+        <div class="mx-auto max-w-3xl text-center">
+          <div class="mb-6 inline-flex items-center gap-2 rounded-full border border-border bg-card px-4 py-1.5 text-sm text-muted-foreground">
+            <span class="inline-block h-2 w-2 rounded-full bg-success animate-pulse"></span>
+            Open source &mdash; MIT License
+          </div>
+
+          <h1 class="text-4xl font-bold leading-tight tracking-tight text-text md:text-6xl">
+            IDE-agnostic<br />
+            <span class="bg-gradient-to-r from-primary to-primary-hover bg-clip-text text-transparent">agent orchestrator</span>
+          </h1>
+
+          <p class="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-muted-foreground md:text-xl">
+            Manage AI coding agents across any editor from one dashboard.
+            One place to create workspaces, dispatch tasks, and monitor agent activity.
+          </p>
+
+          <div class="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
+            <a
+              href="https://github.com/topdev1de/band/releases/latest"
+              class="inline-flex items-center gap-2 rounded-lg bg-primary px-6 py-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-hover"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+              Download for macOS
+            </a>
+            <a
+              href="https://github.com/topdev1de/band"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-6 py-3 text-sm font-medium text-text transition-colors hover:bg-accent"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+              </svg>
+              View on GitHub
+            </a>
+          </div>
+
+          <!-- Value props -->
+          <div class="mt-14 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div class="rounded-xl border border-border bg-card/50 px-5 py-4 text-left">
+              <div class="mb-1 text-sm font-medium text-text">One dashboard for all agents</div>
+              <div class="text-sm text-muted-foreground">Unified view of every workspace, task, and agent across all your projects.</div>
+            </div>
+            <div class="rounded-xl border border-border bg-card/50 px-5 py-4 text-left">
+              <div class="mb-1 text-sm font-medium text-text">Works with any IDE</div>
+              <div class="text-sm text-muted-foreground">VS Code, Cursor, Zed, JetBrains, Xcode, and more &mdash; all from one place.</div>
+            </div>
+            <div class="rounded-xl border border-border bg-card/50 px-5 py-4 text-left">
+              <div class="mb-1 text-sm font-medium text-text">Works with any coding agent</div>
+              <div class="text-sm text-muted-foreground">Claude Code, Cursor, Gemini &mdash; swap agents without changing your workflow.</div>
+            </div>
+            <div class="rounded-xl border border-border bg-card/50 px-5 py-4 text-left">
+              <div class="mb-1 text-sm font-medium text-text">Git worktree isolation</div>
+              <div class="text-sm text-muted-foreground">Every task gets its own branch and workspace. No conflicts, no stashing.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Dashboard mockup -->
+        <div class="mx-auto mt-16 max-w-4xl">
+          <div class="overflow-hidden rounded-xl border border-border bg-card shadow-2xl shadow-black/40">
+            <!-- Window chrome -->
+            <div class="flex items-center gap-2 border-b border-border px-4 py-3">
+              <div class="h-3 w-3 rounded-full bg-[#ff5f57]"></div>
+              <div class="h-3 w-3 rounded-full bg-[#febc2e]"></div>
+              <div class="h-3 w-3 rounded-full bg-[#28c840]"></div>
+              <span class="ml-3 text-xs text-muted-foreground">Band Dashboard</span>
+            </div>
+            <!-- Dashboard content mockup -->
+            <div class="flex min-h-[340px]">
+              <!-- Sidebar -->
+              <div class="w-56 shrink-0 border-r border-border bg-bg p-3">
+                <div class="mb-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Projects</div>
+                <div class="space-y-1">
+                  <div class="flex items-center gap-2 rounded-lg bg-primary-muted px-3 py-2">
+                    <div class="h-2 w-2 rounded-full bg-primary"></div>
+                    <span class="text-sm font-medium text-primary">band</span>
+                    <span class="ml-auto text-xs text-primary/60">3</span>
+                  </div>
+                  <div class="flex items-center gap-2 rounded-lg px-3 py-2 text-muted-foreground">
+                    <div class="h-2 w-2 rounded-full bg-muted-foreground"></div>
+                    <span class="text-sm">my-saas-app</span>
+                    <span class="ml-auto text-xs text-muted-foreground">1</span>
+                  </div>
+                  <div class="flex items-center gap-2 rounded-lg px-3 py-2 text-muted-foreground">
+                    <div class="h-2 w-2 rounded-full bg-muted-foreground"></div>
+                    <span class="text-sm">api-service</span>
+                    <span class="ml-auto text-xs text-muted-foreground">2</span>
+                  </div>
+                </div>
+              </div>
+              <!-- Main content -->
+              <div class="flex-1 p-4">
+                <div class="mb-4 flex items-center justify-between">
+                  <h3 class="text-sm font-semibold text-text">Workspaces</h3>
+                  <div class="rounded-md bg-primary/10 px-2 py-1 text-xs font-medium text-primary">+ New</div>
+                </div>
+                <div class="space-y-2">
+                  <div class="flex items-center justify-between rounded-lg border border-border bg-bg px-4 py-3">
+                    <div class="flex items-center gap-3">
+                      <div class="flex h-7 w-7 items-center justify-center rounded-md bg-success/10 text-success">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                      </div>
+                      <div>
+                        <div class="text-sm font-medium text-text">feat/add-dark-mode</div>
+                        <div class="text-xs text-muted-foreground">Claude Code &middot; completed 2m ago</div>
+                      </div>
+                    </div>
+                    <span class="rounded-full bg-success/10 px-2 py-0.5 text-xs font-medium text-success">done</span>
+                  </div>
+                  <div class="flex items-center justify-between rounded-lg border border-primary/30 bg-primary-muted px-4 py-3">
+                    <div class="flex items-center gap-3">
+                      <div class="flex h-7 w-7 items-center justify-center rounded-md bg-primary/10 text-primary">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="animate-spin" style="animation-duration: 2s"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+                      </div>
+                      <div>
+                        <div class="text-sm font-medium text-text">fix/api-auth-bug</div>
+                        <div class="text-xs text-muted-foreground">Claude Code &middot; working...</div>
+                      </div>
+                    </div>
+                    <span class="rounded-full bg-primary/20 px-2 py-0.5 text-xs font-medium text-primary">working</span>
+                  </div>
+                  <div class="flex items-center justify-between rounded-lg border border-border bg-bg px-4 py-3">
+                    <div class="flex items-center gap-3">
+                      <div class="flex h-7 w-7 items-center justify-center rounded-md bg-warning/10 text-warning">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                      </div>
+                      <div>
+                        <div class="text-sm font-medium text-text">refactor/db-layer</div>
+                        <div class="text-xs text-muted-foreground">Cursor &middot; needs input</div>
+                      </div>
+                    </div>
+                    <span class="rounded-full bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning">needs input</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Problem Section -->
+    <section class="border-t border-border py-20 md:py-28">
+      <div class="mx-auto max-w-6xl px-6">
+        <div class="mx-auto max-w-2xl text-center">
+          <h2 class="text-3xl font-bold tracking-tight text-text md:text-4xl">
+            Managing agents is chaos
+          </h2>
+          <p class="mt-4 text-lg text-muted-foreground">
+            As AI coding agents become essential, keeping track of them across projects and editors is a growing pain.
+          </p>
+        </div>
+
+        <div class="mt-14 grid gap-6 md:grid-cols-2">
+          <div class="rounded-xl border border-border bg-card/50 p-6">
+            <div class="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
+              </svg>
+            </div>
+            <h3 class="text-lg font-semibold text-text">No unified view</h3>
+            <p class="mt-2 text-sm leading-relaxed text-muted-foreground">
+              Agents run in scattered terminal windows across different IDEs. You have no central place to see what each one is doing.
+            </p>
+          </div>
+
+          <div class="rounded-xl border border-border bg-card/50 p-6">
+            <div class="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+              </svg>
+            </div>
+            <h3 class="text-lg font-semibold text-text">Constant context switching</h3>
+            <p class="mt-2 text-sm leading-relaxed text-muted-foreground">
+              Jumping between IDE windows to check on agents wastes time and breaks your focus.
+            </p>
+          </div>
+
+          <div class="rounded-xl border border-border bg-card/50 p-6">
+            <div class="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
+              </svg>
+            </div>
+            <h3 class="text-lg font-semibold text-text">No task queue</h3>
+            <p class="mt-2 text-sm leading-relaxed text-muted-foreground">
+              You can't dispatch a batch of tasks to agents and come back later. Every task needs manual setup.
+            </p>
+          </div>
+
+          <div class="rounded-xl border border-border bg-card/50 p-6">
+            <div class="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+              </svg>
+            </div>
+            <h3 class="text-lg font-semibold text-text">No automation</h3>
+            <p class="mt-2 text-sm leading-relaxed text-muted-foreground">
+              Repetitive agent tasks like code reviews, dependency updates, and daily reports can't be scheduled.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- How It Works Section -->
+    <section class="border-t border-border bg-card py-20 md:py-28">
+      <div class="mx-auto max-w-6xl px-6">
+        <div class="mx-auto max-w-2xl text-center">
+          <h2 class="text-3xl font-bold tracking-tight text-text md:text-4xl">
+            How it works
+          </h2>
+          <p class="mt-4 text-lg text-muted-foreground">
+            Four steps from zero to orchestrated agents.
+          </p>
+        </div>
+
+        <div class="mt-14 grid gap-8 md:grid-cols-4">
+          <div class="relative text-center">
+            <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-2xl font-bold text-primary">
+              1
+            </div>
+            <h3 class="text-lg font-semibold text-text">Register projects</h3>
+            <p class="mt-2 text-sm text-muted-foreground">
+              Point Band at your git repos. It discovers branches, worktrees, and configuration automatically.
+            </p>
+          </div>
+
+          <div class="relative text-center">
+            <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-2xl font-bold text-primary">
+              2
+            </div>
+            <h3 class="text-lg font-semibold text-text">Create workspaces</h3>
+            <p class="mt-2 text-sm text-muted-foreground">
+              Each workspace gets an isolated git worktree with its own branch. No conflicts with your main work.
+            </p>
+          </div>
+
+          <div class="relative text-center">
+            <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-2xl font-bold text-primary">
+              3
+            </div>
+            <h3 class="text-lg font-semibold text-text">Dispatch tasks</h3>
+            <p class="mt-2 text-sm text-muted-foreground">
+              Send prompts to coding agents. Watch their output stream in real-time from the dashboard.
+            </p>
+          </div>
+
+          <div class="relative text-center">
+            <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-2xl font-bold text-primary">
+              4
+            </div>
+            <h3 class="text-lg font-semibold text-text">Monitor status</h3>
+            <p class="mt-2 text-sm text-muted-foreground">
+              See agent activity, git changes, and CI status at a glance. From desktop or mobile.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Feature Highlights Section -->
+    <section class="border-t border-border py-20 md:py-28">
+      <div class="mx-auto max-w-6xl px-6">
+        <div class="mx-auto max-w-2xl text-center">
+          <h2 class="text-3xl font-bold tracking-tight text-text md:text-4xl">
+            Everything you need
+          </h2>
+          <p class="mt-4 text-lg text-muted-foreground">
+            A complete toolkit for managing AI coding agents at scale.
+          </p>
+        </div>
+
+        <div class="mt-14 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {[
+            {
+              icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>`,
+              title: "Multi-IDE support",
+              desc: "VS Code, Cursor, Zed, JetBrains (all IDEs), Xcode, iTerm, Warp, Ghostty, Chrome, Safari, Firefox.",
+            },
+            {
+              icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>`,
+              title: "Multi-agent support",
+              desc: "Claude Code, Cursor CLI, Gemini CLI. Swap coding agents per workspace.",
+            },
+            {
+              icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>`,
+              title: "Task management",
+              desc: "Submit, cancel, re-run, and watch tasks in real-time. Full task history.",
+            },
+            {
+              icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`,
+              title: "Scheduled tasks",
+              desc: "Automate recurring agent work with cron expressions. Code reviews, dependency updates, and more.",
+            },
+            {
+              icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>`,
+              title: "Remote access",
+              desc: "Built-in Cloudflare tunnel. Access your dashboard from anywhere, including mobile.",
+            },
+            {
+              icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>`,
+              title: "CLI-first",
+              desc: "Every operation is scriptable via the band CLI. JSON output mode for automation.",
+            },
+            {
+              icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>`,
+              title: "Git worktree isolation",
+              desc: "Clean branch-per-task workflow. Every workspace is isolated from the main branch.",
+            },
+            {
+              icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>`,
+              title: "Real-time status",
+              desc: "Live agent status, git dirty/ahead/behind indicators, and CI pass/fail at a glance.",
+            },
+            {
+              icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>`,
+              title: "Window management",
+              desc: "Auto-position IDE windows. One-click workspace focus to jump right into any agent's context.",
+            },
+            {
+              icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>`,
+              title: "Setup & teardown scripts",
+              desc: "Per-project .band/config.json for automation. Run scripts on workspace creation and removal.",
+            },
+          ].map(({ icon, title, desc }) => (
+            <div class="group rounded-xl border border-border bg-card/30 p-5 transition-colors hover:bg-card/60">
+              <div class="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors group-hover:bg-primary/20">
+                <Fragment set:html={icon} />
+              </div>
+              <h3 class="text-sm font-semibold text-text">{title}</h3>
+              <p class="mt-1.5 text-sm leading-relaxed text-muted-foreground">{desc}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+
+    <!-- Supported IDEs Section -->
+    <section class="border-t border-border bg-card py-20 md:py-28">
+      <div class="mx-auto max-w-6xl px-6">
+        <div class="mx-auto max-w-2xl text-center">
+          <h2 class="text-3xl font-bold tracking-tight text-text md:text-4xl">
+            Works with your tools
+          </h2>
+          <p class="mt-4 text-lg text-muted-foreground">
+            Band integrates with the editors, terminals, and browsers you already use.
+          </p>
+        </div>
+
+        <div class="mt-14 space-y-10">
+          <div>
+            <h3 class="mb-4 text-center text-sm font-semibold uppercase tracking-wider text-muted-foreground">Code Editors</h3>
+            <div class="flex flex-wrap justify-center gap-3">
+              {["VS Code", "Cursor", "Zed", "Windsurf", "Kiro"].map((name) => (
+                <span class="rounded-lg border border-border bg-card px-4 py-2.5 text-sm font-medium text-muted-foreground">
+                  {name}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <h3 class="mb-4 text-center text-sm font-semibold uppercase tracking-wider text-muted-foreground">JetBrains</h3>
+            <div class="flex flex-wrap justify-center gap-3">
+              {["IntelliJ IDEA", "WebStorm", "PyCharm", "GoLand", "Rider", "CLion", "RustRover", "PhpStorm", "Android Studio"].map((name) => (
+                <span class="rounded-lg border border-border bg-card px-4 py-2.5 text-sm font-medium text-muted-foreground">
+                  {name}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <h3 class="mb-4 text-center text-sm font-semibold uppercase tracking-wider text-muted-foreground">Other Apps</h3>
+            <div class="flex flex-wrap justify-center gap-3">
+              {["Xcode", "iTerm2", "Warp", "Ghostty", "Chrome", "Safari", "Firefox"].map((name) => (
+                <span class="rounded-lg border border-border bg-card px-4 py-2.5 text-sm font-medium text-muted-foreground">
+                  {name}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CTA Section -->
+    <section class="border-t border-border py-20 md:py-28">
+      <div class="mx-auto max-w-6xl px-6">
+        <div class="mx-auto max-w-2xl text-center">
+          <h2 class="text-3xl font-bold tracking-tight text-text md:text-4xl">
+            Ready to orchestrate?
+          </h2>
+          <p class="mt-4 text-lg text-muted-foreground">
+            Download Band and start managing your coding agents from one place.
+          </p>
+          <div class="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
+            <a
+              href="https://github.com/topdev1de/band/releases/latest"
+              class="inline-flex items-center gap-2 rounded-lg bg-primary px-6 py-3 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary-hover"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+              Download for macOS
+            </a>
+            <a
+              href="/docs/getting-started"
+              class="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-6 py-3 text-sm font-medium text-text transition-colors hover:bg-accent"
+            >
+              Read the docs
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</BaseLayout>

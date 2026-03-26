@@ -1,0 +1,111 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+---
+<DocsLayout title="Cronjobs & Automation — Band Docs">
+  <h1>Cronjobs &amp; Automation</h1>
+  <p>
+    Band includes a built-in cronjob scheduler that lets you run coding agent tasks on
+    a recurring schedule. Cronjobs are defined with standard cron expressions and can be
+    scoped to either a project or a specific workspace. When a cronjob fires, it submits
+    a task to the configured coding agent just as if you had typed the prompt manually.
+  </p>
+
+  <h2>Creating a Cronjob</h2>
+  <p>
+    From the Band dashboard, navigate to the <strong>Cronjobs</strong> section and click
+    <strong>Create Cronjob</strong>. Fill in the following fields:
+  </p>
+  <ul>
+    <li><strong>Name</strong> — A human-readable name for the job (e.g., "Daily dependency check").</li>
+    <li><strong>Prompt</strong> — The prompt sent to the coding agent when the job fires.</li>
+    <li><strong>Cron Expression</strong> — A 5-field cron expression defining the schedule.</li>
+    <li><strong>Scope</strong> — Either "project" or "workspace".</li>
+    <li><strong>Enabled</strong> — Whether the job is active.</li>
+  </ul>
+
+  <h2>Cron Expression Syntax</h2>
+  <p>
+    Band uses standard 5-field cron expressions. Each field is separated by a space:
+  </p>
+  <pre><code>┌───────────── minute (0-59)
+│ ┌───────────── hour (0-23)
+│ │ ┌───────────── day of month (1-31)
+│ │ │ ┌───────────── month (1-12)
+│ │ │ │ ┌───────────── day of week (0-7, 0 and 7 are Sunday)
+│ │ │ │ │
+* * * * *</code></pre>
+  <p>Common examples:</p>
+  <table>
+    <thead>
+      <tr>
+        <th>Expression</th>
+        <th>Schedule</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td><code>0 9 * * 1-5</code></td><td>Every weekday at 9:00 AM</td></tr>
+      <tr><td><code>0 */4 * * *</code></td><td>Every 4 hours</td></tr>
+      <tr><td><code>30 8 * * 1</code></td><td>Every Monday at 8:30 AM</td></tr>
+      <tr><td><code>0 0 1 * *</code></td><td>First day of every month at midnight</td></tr>
+      <tr><td><code>*/15 * * * *</code></td><td>Every 15 minutes</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Project-Scoped vs Workspace-Scoped Jobs</h2>
+  <h3>Project-Scoped</h3>
+  <p>
+    A project-scoped cronjob runs on the project's default branch. Band looks up the
+    project by name and submits the task to the workspace corresponding to the default
+    branch. This is ideal for recurring tasks that should always run against the main
+    codebase, such as dependency updates or code quality checks.
+  </p>
+  <h3>Workspace-Scoped</h3>
+  <p>
+    A workspace-scoped cronjob targets a specific workspace (project + branch
+    combination). You select the workspace when creating the job. This is useful for
+    branch-specific automation, such as running checks on a long-lived feature branch.
+  </p>
+
+  <h2>Enable and Disable</h2>
+  <p>
+    Each cronjob has an <strong>enabled</strong> toggle. When disabled, the cron
+    schedule is stopped and the job will not fire. You can re-enable it at any time
+    without recreating it. Disabling a job does not affect any currently running tasks
+    that were triggered by it.
+  </p>
+
+  <h2>Manual Triggering</h2>
+  <p>
+    You can manually trigger any cronjob from the dashboard regardless of its schedule.
+    This submits the job's prompt as a task immediately. Manual triggers respect the
+    same conflict rules as scheduled runs — if a task is already running in the target
+    workspace, the trigger is skipped.
+  </p>
+
+  <h2>Conflict Handling</h2>
+  <p>
+    When a cronjob fires and a task is already running in the target workspace, the
+    execution is skipped and recorded with a "skipped" status. Band does not queue
+    cronjob prompts — skipped executions are simply noted and the next scheduled run
+    will attempt again. This prevents cronjobs from piling up during long-running tasks.
+  </p>
+
+  <h2>Execution History</h2>
+  <p>
+    Each cronjob records its last run time and status. The possible statuses are:
+  </p>
+  <ul>
+    <li><strong>completed</strong> — The task was submitted successfully.</li>
+    <li><strong>failed</strong> — The task submission failed (e.g., workspace not found).</li>
+    <li><strong>skipped</strong> — A task was already running in the target workspace.</li>
+  </ul>
+
+  <h2>Use Cases</h2>
+  <ul>
+    <li><strong>Automated code reviews.</strong> Schedule a daily prompt like "Review all files changed in the last 24 hours and report any issues."</li>
+    <li><strong>Dependency updates.</strong> Run "Check for outdated dependencies and create a PR with updates" weekly.</li>
+    <li><strong>Daily reports.</strong> Generate "Summarize the git log from the last 24 hours and post a summary" every morning.</li>
+    <li><strong>Test suite monitoring.</strong> Schedule "Run the test suite and report any failures" every few hours.</li>
+    <li><strong>Documentation freshness.</strong> Prompt "Check if any public API changes are missing documentation updates" weekly.</li>
+  </ul>
+</DocsLayout>

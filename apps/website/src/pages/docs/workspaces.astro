@@ -1,0 +1,105 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+---
+<DocsLayout title="Workspace Management — Band Docs">
+  <h1>Workspace Management</h1>
+  <p>
+    Workspaces in Band are <strong>git worktree</strong>-based isolated environments for each
+    branch you work on. Every workspace gets its own directory on disk with a full copy of the
+    repository at the specified branch, allowing you to work on multiple branches simultaneously
+    without switching contexts.
+  </p>
+
+  <h2>Creating Workspaces</h2>
+  <p>
+    You can create a new workspace from the dashboard or the CLI. Each workspace corresponds
+    to a git worktree branch.
+  </p>
+
+  <h3>From the Dashboard</h3>
+  <p>
+    Click the <strong>+</strong> button next to a project name. A dialog appears with three fields:
+  </p>
+  <ul>
+    <li><strong>Branch name</strong> &mdash; The name of the new branch (e.g., <code>feature/auth</code>).</li>
+    <li><strong>Base branch</strong> (optional) &mdash; The branch to base the new worktree on. Defaults to the project's default branch.</li>
+    <li><strong>Initial prompt</strong> (optional) &mdash; A task prompt for the coding agent. If provided, the agent starts working immediately after workspace creation.</li>
+  </ul>
+
+  <h3>From the CLI</h3>
+  <pre><code># Create workspace and start an agent task immediately
+band workspaces create my-app feat/login --prompt "Implement login page"
+
+# Create workspace without starting a task
+band workspaces create my-app feat/experiment
+
+# Create from a specific base branch
+band workspaces create my-app feat/api --base develop</code></pre>
+  <p>
+    Workspace creation is <strong>idempotent</strong> &mdash; creating an existing workspace
+    simply returns its path without duplicating anything.
+  </p>
+
+  <h2>Workspace List</h2>
+  <p>
+    Workspaces appear nested under their parent project in the dashboard. Each workspace card
+    displays:
+  </p>
+  <ul>
+    <li><strong>Branch name</strong> &mdash; The git branch this workspace tracks.</li>
+    <li><strong>Agent status indicator</strong> &mdash; A colored dot showing whether the coding agent is working or needs attention. See <a href="/docs/agent-status">Agent Status</a>.</li>
+    <li><strong>Setup status</strong> &mdash; Shows whether the setup script is running, completed, or failed.</li>
+    <li><strong>Git status</strong> &mdash; Indicates dirty files, unpushed commits, and sync state (ahead, behind, diverged).</li>
+    <li><strong>CI status</strong> &mdash; Shows the current CI pipeline state (pending, running, success, failure, cancelled, merged).</li>
+  </ul>
+
+  <h2>Focusing a Workspace</h2>
+  <p>
+    Clicking a workspace opens it &mdash; Band positions and focuses the configured IDE
+    windows for that workspace. The active workspace is highlighted with a left border accent.
+    See <a href="/docs/window-management">Window Management</a> for details on how windows
+    are arranged.
+  </p>
+
+  <h2>Removing Workspaces</h2>
+  <p>
+    You can remove a workspace from the context menu (right-click) or via the CLI:
+  </p>
+  <pre><code>band workspaces remove my-app feat/login</code></pre>
+  <p>
+    Before removal, Band runs the project's <code>teardown</code> script if one is defined in
+    <code>.band/config.json</code>. The teardown script is non-fatal &mdash; removal proceeds
+    even if it fails.
+  </p>
+  <p>
+    If the workspace has unmerged pull requests, dirty files, or unpushed commits, a confirmation
+    dialog appears warning you about potential data loss. You must explicitly confirm deletion in
+    these cases.
+  </p>
+
+  <h2>Workspace Context Menu</h2>
+  <p>
+    Right-clicking a workspace reveals additional actions:
+  </p>
+  <ul>
+    <li><strong>Copy path</strong> &mdash; Copy the worktree path to clipboard.</li>
+    <li><strong>Open in Finder</strong> &mdash; Reveal the worktree directory.</li>
+    <li><strong>Run setup</strong> &mdash; Manually re-run the setup script (only shown if a setup script is defined).</li>
+    <li><strong>Run teardown</strong> &mdash; Manually run the teardown script.</li>
+    <li><strong>Git pull</strong> &mdash; Pull the latest changes for this branch.</li>
+    <li><strong>Git push</strong> &mdash; Push local commits to the remote.</li>
+    <li><strong>Delete workspace</strong> &mdash; Remove the workspace and its worktree (not available for the default branch).</li>
+  </ul>
+
+  <h2>Naming Conventions</h2>
+  <p>
+    Workspace names are derived from their branch names. Band supports standard git branch
+    naming conventions including slashes for namespacing (e.g., <code>feature/auth</code>,
+    <code>fix/bug-123</code>). Branch names must not contain control characters or path
+    traversals (<code>../</code>).
+  </p>
+  <p>
+    Worktree directories are stored in the configured worktrees folder (default:
+    <code>~/.band/worktrees</code>), organized by project name and branch.
+  </p>
+</DocsLayout>

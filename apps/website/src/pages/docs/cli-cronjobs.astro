@@ -1,0 +1,97 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+---
+<DocsLayout title="band cronjobs — Band Docs">
+  <h1>band cronjobs</h1>
+
+  <p>
+    The <code>band cronjobs</code> command group manages scheduled recurring tasks. Cron jobs let
+    you run agent tasks on a schedule — for example, running daily code reviews, updating
+    dependencies weekly, or generating reports every morning.
+  </p>
+
+  <h2>List Cron Jobs</h2>
+
+  <p>Display all configured cron jobs.</p>
+
+  <pre><code>band cronjobs list</code></pre>
+
+  <p>Example output:</p>
+
+  <pre><code>ID   Project    Schedule       Prompt                           Last Run            Next Run
+1    my-app     0 9 * * *     Review open PRs and summar...    2025-12-01 09:00    2025-12-02 09:00
+2    my-app     0 0 * * 1     Update npm dependencies          2025-11-25 00:00    2025-12-02 00:00
+3    api-server 0 */6 * * *   Run integration test suite       2025-12-01 12:00    2025-12-01 18:00</code></pre>
+
+  <h2>Create a Cron Job</h2>
+
+  <p>
+    Schedule a recurring task. The schedule uses standard cron expression syntax (5 fields: minute,
+    hour, day-of-month, month, day-of-week).
+  </p>
+
+  <pre><code>band cronjobs create --project 1 --schedule "0 9 * * *" --prompt "Review all open pull requests and post a summary"</code></pre>
+
+  <p>Options:</p>
+
+  <ul>
+    <li><code>--project &lt;id&gt;</code> — The project ID to run the cron job against (required).</li>
+    <li><code>--schedule "..."</code> — Cron expression defining the schedule (required).</li>
+    <li><code>--prompt "..."</code> — The task prompt for the agent (required).</li>
+  </ul>
+
+  <h3>Common Cron Expressions</h3>
+
+  <ul>
+    <li><code>0 9 * * *</code> — Every day at 9:00 AM</li>
+    <li><code>0 0 * * 1</code> — Every Monday at midnight</li>
+    <li><code>0 */6 * * *</code> — Every 6 hours</li>
+    <li><code>30 8 * * 1-5</code> — Weekdays at 8:30 AM</li>
+    <li><code>0 0 1 * *</code> — First day of every month at midnight</li>
+  </ul>
+
+  <h2>Update a Cron Job</h2>
+
+  <p>Modify an existing cron job's schedule or prompt.</p>
+
+  <pre><code>band cronjobs update 1 --schedule "30 8 * * 1-5" --prompt "Review open PRs and check CI status"</code></pre>
+
+  <p>You can update the schedule, prompt, or both. Fields not provided remain unchanged.</p>
+
+  <h2>Delete a Cron Job</h2>
+
+  <p>Remove a cron job. Pending runs are cancelled and the schedule is removed.</p>
+
+  <pre><code>band cronjobs delete 2</code></pre>
+
+  <h2>Trigger a Cron Job</h2>
+
+  <p>
+    Manually trigger a cron job to run immediately, regardless of its schedule. This is useful for
+    testing or for one-off executions.
+  </p>
+
+  <pre><code>band cronjobs trigger 1</code></pre>
+
+  <p>
+    The triggered run creates a new task in a fresh workspace, just like a scheduled run would. It
+    does not affect the next scheduled execution time.
+  </p>
+
+  <h2>JSON Output</h2>
+
+  <pre><code>band cronjobs list --output json</code></pre>
+
+  <p>Example JSON output:</p>
+
+  <pre><code set:html={`[
+  {'{'}
+    "id": 1,
+    "projectId": 1,
+    "schedule": "0 9 * * *",
+    "prompt": "Review open PRs and summarize findings",
+    "lastRunAt": "2025-12-01T09:00:00Z",
+    "nextRunAt": "2025-12-02T09:00:00Z"
+  {'}'}
+]`}></code></pre>
+</DocsLayout>

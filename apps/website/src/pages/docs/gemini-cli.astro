@@ -1,0 +1,116 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+---
+<DocsLayout title="Gemini CLI — Band Docs">
+  <h1>Gemini CLI</h1>
+  <p>
+    Gemini CLI is a supported coding agent in Band that integrates with Google's Gemini
+    models. Band communicates with Gemini CLI by spawning it as a child process and
+    reading its NDJSON (newline-delimited JSON) output stream. This adapter supports
+    real-time streaming, tool use visibility, and skill discovery.
+  </p>
+
+  <h2>Prerequisites</h2>
+  <ol>
+    <li>Install the Gemini CLI. Follow the official installation guide from Google to get the <code>gemini</code> binary on your system.</li>
+    <li>Authenticate with your Google API credentials. Gemini CLI reads credentials from your environment.</li>
+    <li>Verify the installation by running <code>gemini --version</code> in your terminal.</li>
+  </ol>
+
+  <h2>Configuring Band to Use Gemini</h2>
+  <ol>
+    <li>Open the Band dashboard and go to <strong>Settings</strong>.</li>
+    <li>Under <strong>Coding Agent</strong>, select <code>gemini-cli</code> from the agent type dropdown.</li>
+    <li>Optionally, set a custom executable path if the <code>gemini</code> binary is not on your system PATH.</li>
+    <li>Save your settings. New tasks will now use the Gemini CLI adapter.</li>
+  </ol>
+
+  <h2>How It Works</h2>
+  <p>
+    When a task is submitted, Band spawns the Gemini CLI with the
+    <code>--output-format stream-json</code> flag, which tells it to emit structured
+    events as NDJSON on stdout. Band reads each line, parses it, and maps the events
+    to the common <code>AgentEvent</code> format. The CLI is spawned with
+    <code>stdio: ["ignore", "pipe", "pipe"]</code> — stdin is closed, stdout is parsed
+    for events, and stderr is logged for diagnostics.
+  </p>
+  <p>
+    The Gemini CLI adapter generates a random session ID for each run since Gemini does
+    not have a native session system. This means session resume is not available.
+  </p>
+
+  <h2>Feature Support</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Feature</th>
+        <th>Supported</th>
+        <th>Notes</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Real-time streaming</td>
+        <td>Yes</td>
+        <td>Via NDJSON output</td>
+      </tr>
+      <tr>
+        <td>Tool use visibility</td>
+        <td>Yes</td>
+        <td>Tool calls and results are streamed</td>
+      </tr>
+      <tr>
+        <td>Skill discovery</td>
+        <td>Yes</td>
+        <td>Discovers skills from workspace files</td>
+      </tr>
+      <tr>
+        <td>Cost tracking</td>
+        <td>No</td>
+        <td>Gemini CLI does not report cost data</td>
+      </tr>
+      <tr>
+        <td>Session listing</td>
+        <td>No</td>
+        <td>No persistent session storage</td>
+      </tr>
+      <tr>
+        <td>Session resume</td>
+        <td>No</td>
+        <td>Each run starts a fresh session</td>
+      </tr>
+      <tr>
+        <td>User input prompts</td>
+        <td>No</td>
+        <td>All tool calls are auto-approved</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Event Format</h2>
+  <p>
+    The Gemini CLI emits the following NDJSON event types that Band processes:
+  </p>
+  <ul>
+    <li><strong>message</strong> — Contains a <code>text</code> field with the assistant's response. Mapped to <code>text-delta</code>.</li>
+    <li><strong>tool_use</strong> — A tool invocation with <code>id</code>, <code>name</code>, and <code>input</code> fields.</li>
+    <li><strong>tool_result</strong> — The result of a tool call, with <code>tool_use_id</code>, <code>output</code>, and <code>is_error</code> fields.</li>
+    <li><strong>result</strong> — Final session result with a <code>status</code> field (either <code>"success"</code> or an error).</li>
+    <li><strong>error</strong> — An error event with a <code>message</code> field.</li>
+  </ul>
+
+  <h2>Configuration Options</h2>
+  <ul>
+    <li><strong>model</strong> — Override the default Gemini model. If not set, the CLI uses its own default.</li>
+    <li><strong>executablePath</strong> — Path to the <code>gemini</code> binary. Defaults to <code>"gemini"</code> (found via PATH).</li>
+    <li><strong>maxTurns</strong> — Maximum number of agentic turns per session (default: 50 when run through Band).</li>
+  </ul>
+
+  <h2>Differences from Claude Code</h2>
+  <ul>
+    <li>No hook-based status detection. Band only knows about Gemini activity through tasks it submits.</li>
+    <li>No cost data. Task result summaries will not include cost information.</li>
+    <li>No session history. You cannot browse previous sessions or resume them.</li>
+    <li>Process-based integration. Gemini CLI runs as a child process rather than through an SDK library call.</li>
+  </ul>
+</DocsLayout>

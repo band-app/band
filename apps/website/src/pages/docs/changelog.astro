@@ -1,0 +1,40 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+---
+
+<DocsLayout title="Changelog — Band Docs">
+  <h1>Changelog</h1>
+  <p>
+    Notable changes and releases for Band. For the complete commit history, see the
+    <a href="https://github.com/topdev1de/band/releases">GitHub releases page</a>.
+  </p>
+
+  <h2>v0.1.0 — Initial Release</h2>
+  <p>The first public release of Band.</p>
+
+  <h3>Features</h3>
+  <ul>
+    <li><strong>Desktop dashboard</strong> — Tauri-based native macOS app with project sidebar, workspace list, and status indicators</li>
+    <li><strong>Web interface</strong> — Browser-based dashboard with responsive layout for desktop and mobile</li>
+    <li><strong>Multi-IDE support</strong> — VS Code, Cursor, Zed, Windsurf, Kiro, all JetBrains IDEs, Xcode, iTerm2, Warp, Ghostty, Chrome, Safari, Firefox</li>
+    <li><strong>Multi-agent support</strong> — Claude Code, Cursor CLI, and Gemini CLI with pluggable adapter pattern</li>
+    <li><strong>Git worktree workspaces</strong> — Isolated branch-per-task workflow with automatic worktree management</li>
+    <li><strong>Task management</strong> — Submit, cancel, re-run, and watch agent tasks with real-time streaming output</li>
+    <li><strong>Scheduled tasks</strong> — Cron-based automation for recurring agent work</li>
+    <li><strong>Remote access</strong> — Built-in Cloudflare tunnel with token-based authentication and QR code for mobile</li>
+    <li><strong>CLI</strong> — Full command-line interface for all operations with JSON output mode</li>
+    <li><strong>Window management</strong> — Auto-position IDE windows when focusing a workspace</li>
+    <li><strong>Project configuration</strong> — Per-project <code>.band/config.json</code> with setup/teardown scripts and app presets</li>
+    <li><strong>VS Code extension</strong> — Auto-activation, terminal management, and agent status reporting</li>
+    <li><strong>Agent status protocol</strong> — Real-time status detection via Claude Code hooks and file-based communication</li>
+  </ul>
+
+  <h3>Architecture</h3>
+  <ul>
+    <li>Desktop app built with Tauri 2.0 and React</li>
+    <li>Web server built with Node.js, Vite, and TanStack Router</li>
+    <li>CLI built with Rust</li>
+    <li>tRPC API with HTTP and WebSocket subscriptions</li>
+    <li>SQLite for persistent state</li>
+  </ul>
+</DocsLayout>

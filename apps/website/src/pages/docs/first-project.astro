@@ -1,0 +1,111 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+---
+
+<DocsLayout title="Adding Your First Project — Band Docs">
+  <h1>Adding Your First Project</h1>
+
+  <p>
+    A project in Band is a registered git repository. Once you add a project, Band tracks it
+    and lets you create workspaces (isolated git worktrees) from it. You need at least one
+    project before you can create workspaces or dispatch tasks.
+  </p>
+
+  <h2>Requirements</h2>
+
+  <p>
+    The directory you register must be a <strong>git repository</strong>. Band uses git
+    worktrees under the hood, so it needs a valid <code>.git</code> directory to work with.
+    The repository can be any size and can have any branch structure.
+  </p>
+
+  <h2>Add a project via the dashboard</h2>
+
+  <ol>
+    <li>Open the Band dashboard.</li>
+    <li>Click the <strong>"Add Project"</strong> button in the sidebar.</li>
+    <li>Select the folder containing your git repository in the file picker.</li>
+    <li>Band detects the project name from the repository's directory name and registers it.</li>
+  </ol>
+
+  <p>
+    The project appears in the sidebar immediately. Band automatically detects the default
+    branch (usually <code>main</code> or <code>master</code>) and displays the number of
+    existing worktrees.
+  </p>
+
+  <h2>Add a project via the CLI</h2>
+
+  <p>
+    You can also register a project from your terminal using the Band CLI:
+  </p>
+
+  <pre><code>band projects add /path/to/your/repo</code></pre>
+
+  <p>For example, to register a project located at <code>~/code/my-app</code>:</p>
+
+  <pre><code>band projects add ~/code/my-app</code></pre>
+
+  <p>
+    You can optionally assign a label to the project to help organize your projects:
+  </p>
+
+  <pre><code>band projects add ~/code/my-app --label "work"</code></pre>
+
+  <p>
+    To verify the project was added, list all registered projects:
+  </p>
+
+  <pre><code>band projects list</code></pre>
+
+  <p>
+    This outputs a tab-separated list showing each project's name, path, and worktree count.
+    For structured output, add the <code>--output json</code> flag:
+  </p>
+
+  <pre><code>band projects list --output json</code></pre>
+
+  <h2>What happens when you add a project</h2>
+
+  <p>When you register a project, Band does the following:</p>
+
+  <ul>
+    <li>
+      <strong>Validates the repository</strong> &mdash; Confirms the path points to a valid
+      git repository with a <code>.git</code> directory.
+    </li>
+    <li>
+      <strong>Detects the default branch</strong> &mdash; Identifies the main branch
+      (e.g., <code>main</code>, <code>master</code>) so workspaces can be branched from it.
+    </li>
+    <li>
+      <strong>Discovers existing worktrees</strong> &mdash; If the repository already has git
+      worktrees, Band picks them up and displays them as workspaces.
+    </li>
+    <li>
+      <strong>Reads project configuration</strong> &mdash; If a <code>.band/config.json</code>
+      file exists in the repository, Band reads it for setup and teardown scripts that run
+      when workspaces are created or removed.
+    </li>
+  </ul>
+
+  <h2>Removing a project</h2>
+
+  <p>
+    If you want to unregister a project, you can do so from the CLI:
+  </p>
+
+  <pre><code>band projects remove my-app</code></pre>
+
+  <p>
+    This removes the project from Band's registry but does <strong>not</strong> delete the
+    repository or any of its files from disk.
+  </p>
+
+  <h2>Next step</h2>
+
+  <p>
+    With a project registered, you are ready to
+    <a href="/docs/first-workspace">create your first workspace</a>.
+  </p>
+</DocsLayout>
