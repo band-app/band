@@ -28,7 +28,7 @@ import { useCapabilities } from "../context";
 import { useUpdateSettings } from "../hooks/use-settings-mutations";
 import { useSettingsQuery } from "../hooks/use-settings-query";
 import { playSound, SOUNDS, type SoundId } from "../lib/sounds";
-import type { CodingAgentConfig, CodingAgentType, LabelDefinition } from "../types";
+import type { CodingAgentConfig, CodingAgentType, LabelDefinition, Theme } from "../types";
 
 const AGENT_TYPES: { value: CodingAgentType; label: string }[] = [
   { value: "claude-code", label: "Claude Code" },
@@ -52,6 +52,7 @@ const DEFAULT_DEFAULTS = {
 
 type Section =
   | "menu"
+  | "appearance"
   | "general"
   | "coding-agent"
   | "defaults"
@@ -108,6 +109,7 @@ export function SettingsPage({ onClose }: Props) {
   );
   const [labels, setLabels] = useState<LabelDefinition[]>(settings.labels ?? []);
   const [autoStartTunnel, setAutoStartTunnel] = useState(settings.autoStartTunnel ?? false);
+  const [selectedTheme, setSelectedTheme] = useState<Theme>(settings.theme ?? "system");
 
   const isDirty = useMemo(() => {
     if (worktreesDir !== (settings.worktreesDir ?? "")) return true;
@@ -121,6 +123,7 @@ export function SettingsPage({ onClose }: Props) {
     if (selectedSound !== ((settings.notifications?.sound as SoundId) ?? "chime")) return true;
     if (JSON.stringify(labels) !== JSON.stringify(settings.labels ?? [])) return true;
     if (autoStartTunnel !== (settings.autoStartTunnel ?? false)) return true;
+    if (selectedTheme !== (settings.theme ?? "system")) return true;
     return false;
   }, [
     worktreesDir,
@@ -132,6 +135,7 @@ export function SettingsPage({ onClose }: Props) {
     selectedSound,
     labels,
     autoStartTunnel,
+    selectedTheme,
     settings,
   ]);
 
@@ -145,6 +149,7 @@ export function SettingsPage({ onClose }: Props) {
     setSelectedSound((settings.notifications?.sound as SoundId) ?? "chime");
     setLabels(settings.labels ?? []);
     setAutoStartTunnel(settings.autoStartTunnel ?? false);
+    setSelectedTheme(settings.theme ?? "system");
   }, [
     settings.worktreesDir,
     settings.defaults,
@@ -153,6 +158,7 @@ export function SettingsPage({ onClose }: Props) {
     settings.notifications,
     settings.labels,
     settings.autoStartTunnel,
+    settings.theme,
   ]);
 
   const handleBrowse = async () => {
@@ -216,6 +222,7 @@ export function SettingsPage({ onClose }: Props) {
       labels: labels.length > 0 ? labels : undefined,
       tokenSecret: settings.tokenSecret,
       autoStartTunnel: autoStartTunnel || undefined,
+      theme: selectedTheme,
     });
   };
 
@@ -225,6 +232,8 @@ export function SettingsPage({ onClose }: Props) {
   const portPreview = webServerPort || "3456";
   const labelsPreview =
     labels.length > 0 ? `${labels.length} label${labels.length === 1 ? "" : "s"}` : "None";
+  const themePreview =
+    selectedTheme === "system" ? "System" : selectedTheme === "dark" ? "Dark" : "Light";
   const notificationsPreview = soundOnNeedsAttention
     ? (SOUNDS.find((s) => s.id === selectedSound)?.label ?? "On")
     : "Off";
@@ -237,6 +246,7 @@ export function SettingsPage({ onClose }: Props) {
             <ChevronLeft className="size-5" />
           </Button>
           <h2 className="text-base font-semibold flex-1">
+            {section === "appearance" && "Appearance"}
             {section === "general" && "General"}
             {section === "labels" && "Labels"}
             {section === "coding-agent" && "Coding Agent"}
@@ -263,6 +273,47 @@ export function SettingsPage({ onClose }: Props) {
           </Tooltip>
         </div>
         <Separator className="mb-3" />
+
+        {section === "appearance" && (
+          <div className="space-y-4 px-1">
+            <div className="space-y-2">
+              <Label>Theme</Label>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full justify-between font-normal h-7 text-xs px-2"
+                  >
+                    {selectedTheme === "system"
+                      ? "System"
+                      : selectedTheme === "dark"
+                        ? "Dark"
+                        : "Light"}
+                    <ChevronDown className="size-3 opacity-50" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="start"
+                  className="w-[--radix-dropdown-menu-trigger-width]"
+                >
+                  <DropdownMenuRadioGroup
+                    value={selectedTheme}
+                    onValueChange={(v: string) => setSelectedTheme(v as Theme)}
+                  >
+                    <DropdownMenuRadioItem value="system">System</DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="light">Light</DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="dark">Dark</DropdownMenuRadioItem>
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <p className="text-xs text-muted-foreground">
+                Choose between system default, light, and dark mode. System follows your OS
+                preference. You can also cycle through themes using the toolbar button.
+              </p>
+            </div>
+          </div>
+        )}
 
         {section === "general" && (
           <div className="space-y-4 px-1">
@@ -544,6 +595,12 @@ export function SettingsPage({ onClose }: Props) {
       </div>
       <Separator />
       <div className="flex flex-col gap-px">
+        <SettingsRow
+          label="Appearance"
+          value={themePreview}
+          onClick={() => setSection("appearance")}
+        />
+        <Separator />
         <SettingsRow
           label="General"
           value={worktreesDirPreview}

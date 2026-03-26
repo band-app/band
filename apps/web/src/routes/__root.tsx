@@ -75,7 +75,7 @@ function AppShell() {
 
   return (
     <div className="flex h-dvh w-full overflow-hidden bg-background text-foreground">
-      <div className="w-80 shrink-0 border-r border-white/20 overflow-hidden">
+      <div className="w-80 shrink-0 border-r border-border overflow-hidden">
         <DashboardShell toolbarExtra={<ToolbarButtons />} />
       </div>
       <div className="flex-1 min-w-0 overflow-hidden">

@@ -10,7 +10,7 @@ export function DesktopLayout({ toolbarExtra }: DesktopLayoutProps) {
   return (
     <div className="flex h-dvh w-full overflow-hidden bg-background text-foreground">
       {/* Left Panel — Project List */}
-      <div className="w-80 shrink-0 border-r border-white/20 overflow-hidden">
+      <div className="w-80 shrink-0 border-r border-border overflow-hidden">
         <DashboardShell toolbarExtra={toolbarExtra} />
       </div>
 

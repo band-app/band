@@ -105,7 +105,7 @@ export function CodeBrowserView({
   return (
     <div className="flex h-full overflow-hidden">
       {/* Left sidebar - file tree */}
-      <div className="w-60 shrink-0 border-r border-white/20 overflow-hidden">
+      <div className="w-60 shrink-0 border-r border-border overflow-hidden">
         <FileBrowser
           workspaceId={workspaceId}
           currentPath={currentPath}
