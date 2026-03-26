@@ -7,6 +7,7 @@
   "scripts": {
     "dev:dashboard": "pnpm build:cli:dev && pnpm build:extension && pnpm build:web && pnpm --filter @band-app/dashboard tauri:dev",
     "dev:web": "pnpm --filter @band-app/server dev",
+    "dev:docs": "pnpm --filter @band-app/docs dev",
     "build:dashboard": "pnpm --filter @band-app/dashboard tauri build",
     "build:web": "pnpm --filter @band-app/server build",
     "build:cli": "pnpm --filter @band-app/cli build && mkdir -p apps/dashboard/src-tauri/binaries && cp apps/cli/target/release/band \"apps/dashboard/src-tauri/binaries/band-$(rustc -vV | sed -n 's/host: //p')\"",

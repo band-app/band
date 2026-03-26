@@ -1,0 +1,128 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+---
+
+<DocsLayout title="Running Your First Task — Band Docs">
+  <h1>Running Your First Task</h1>
+
+  <p>
+    A task in Band is a prompt sent to a coding agent that runs inside a specific workspace.
+    When you create a task, Band dispatches your prompt to the agent, which then works inside
+    the workspace's git worktree. You can watch the agent's progress in real time from the
+    dashboard or your terminal.
+  </p>
+
+  <h2>Prerequisites</h2>
+
+  <p>Before creating a task, make sure you have:</p>
+
+  <ul>
+    <li>A <a href="/docs/first-project">registered project</a> in Band.</li>
+    <li>A <a href="/docs/first-workspace">workspace</a> created for that project.</li>
+    <li>A coding agent (such as Claude Code) installed and configured on your machine.</li>
+  </ul>
+
+  <h2>Create a task via the dashboard</h2>
+
+  <ol>
+    <li>Open the Band dashboard and select a workspace from the sidebar.</li>
+    <li>In the workspace view, find the task input area.</li>
+    <li>Type your prompt describing what you want the agent to do.</li>
+    <li>Click <strong>Submit</strong> to dispatch the task.</li>
+  </ol>
+
+  <p>
+    The task appears in the workspace view and begins executing immediately. You can see the
+    agent's output streaming in real time as it works through your prompt.
+  </p>
+
+  <h2>Create a task via the CLI</h2>
+
+  <p>
+    To submit a task from your terminal, use the <code>band tasks create</code> command with
+    the workspace ID and a prompt:
+  </p>
+
+  <pre><code>band tasks create &lt;workspace_id&gt; --prompt "Fix the failing tests in the auth module"</code></pre>
+
+  <p>
+    The command returns the task ID, which you can use to watch or manage the task.
+    In most cases, you want to create a workspace and start a task at the same time. The
+    <code>workspaces create</code> command supports a <code>--prompt</code> flag that does
+    both in a single step:
+  </p>
+
+  <pre><code>band workspaces create my-app feat/validation --prompt "Add input validation to all API endpoints"</code></pre>
+
+  <p>
+    This is the recommended approach &mdash; it creates the workspace, sets up the worktree,
+    and immediately dispatches the task so the agent starts working without delay.
+  </p>
+
+  <h2>Task lifecycle</h2>
+
+  <p>Every task goes through a defined set of states:</p>
+
+  <ul>
+    <li>
+      <strong>Running</strong> &mdash; The agent is actively working on the task. You can see
+      its output streaming in real time.
+    </li>
+    <li>
+      <strong>Completed</strong> &mdash; The agent finished the task successfully. You can
+      review the changes it made in the workspace.
+    </li>
+    <li>
+      <strong>Failed</strong> &mdash; The agent encountered an error and could not complete the
+      task. Check the output log for details.
+    </li>
+  </ul>
+
+  <h2>Watching task progress</h2>
+
+  <p>
+    The dashboard shows task output in real time as the agent works. From the CLI, you can
+    stream the output using the <code>watch</code> command:
+  </p>
+
+  <pre><code>band tasks watch &lt;task_id&gt;</code></pre>
+
+  <p>
+    Or watch the latest task for a specific workspace:
+  </p>
+
+  <pre><code>band tasks watch --workspace ws_abc123</code></pre>
+
+  <p>
+    The watch command streams output to your terminal until the task completes or you
+    press <code>Ctrl+C</code>.
+  </p>
+
+  <h2>Managing tasks</h2>
+
+  <p>
+    The CLI provides commands to list, cancel, and re-run tasks:
+  </p>
+
+  <pre><code>band tasks list                    # all tasks
+band tasks list --status running   # only running tasks
+band tasks cancel &lt;task_id&gt;        # stop a running task
+band tasks rerun &lt;task_id&gt;         # re-run a completed or failed task</code></pre>
+
+  <h2>Running multiple tasks in parallel</h2>
+
+  <p>
+    Because each workspace is an isolated git worktree, you can run multiple tasks across
+    different workspaces simultaneously without file conflicts:
+  </p>
+
+  <pre><code>band workspaces create my-app feat/auth --prompt "Implement OAuth2 login flow"
+band workspaces create my-app feat/api --prompt "Add pagination to all list endpoints"
+band workspaces create my-app fix/tests --prompt "Fix the 12 failing integration tests"</code></pre>
+
+  <p>
+    You now know the core Band workflow: register a project, create a workspace, and dispatch
+    a task. From here you can explore project configuration with
+    <code>.band/config.json</code>, remote tunnels, and team workflows.
+  </p>
+</DocsLayout>

@@ -1,0 +1,83 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+---
+<DocsLayout title="Dashboard Overview — Band Docs">
+  <h1>Dashboard Overview</h1>
+  <p>
+    The Band desktop app is a native application built with <strong>Tauri</strong> that serves as
+    your central command center for managing coding agent workspaces. It provides a compact,
+    always-accessible interface for monitoring projects, workspaces, and agent activity.
+  </p>
+
+  <h2>Application Layout</h2>
+  <p>
+    The dashboard uses a single-window design with a clear visual hierarchy. The main window is
+    divided into three areas:
+  </p>
+  <ul>
+    <li><strong>Top toolbar</strong> &mdash; Contains the settings menu, label filter dropdown, theme toggle, and an add-project button. The toolbar provides quick access to the most common actions.</li>
+    <li><strong>Project list</strong> &mdash; The main scrollable area displays all registered projects. Each project shows its name and a list of workspaces underneath it. Workspaces display their branch name, agent status indicator, git status, and CI status.</li>
+    <li><strong>Status bar</strong> &mdash; The bottom area shows setup prompts (such as installing the CLI or Claude Code hooks) and error messages when they occur.</li>
+  </ul>
+
+  <h2>Title Bar</h2>
+  <p>
+    On macOS, Band uses a native overlay title bar that displays <code>Band</code> by default or
+    <code>Band - &lt;branch&gt;</code> when a git branch is detected. The title bar supports
+    native window dragging.
+  </p>
+
+  <h2>Theme Support</h2>
+  <p>
+    Band supports three theme modes that control the visual appearance of the entire application:
+  </p>
+  <ul>
+    <li><strong>System</strong> &mdash; Follows your operating system preference. When your OS switches between light and dark mode, Band updates automatically.</li>
+    <li><strong>Light</strong> &mdash; Forces a light color scheme regardless of system settings.</li>
+    <li><strong>Dark</strong> &mdash; Forces a dark color scheme regardless of system settings.</li>
+  </ul>
+  <p>
+    You can cycle through themes by clicking the theme toggle button in the top toolbar. The icon
+    changes to reflect the current mode: a monitor icon for system, a sun icon for dark (click to
+    switch to light), and a moon icon for light (click to switch to dark). Theme preference is
+    persisted in your settings.
+  </p>
+
+  <h2>Tasks Window</h2>
+  <p>
+    The tasks window opens as a separate native window (900x700 pixels) and provides a
+    consolidated view of all coding agent tasks across your projects. From this window you can
+    submit new tasks, filter by project or status, cancel running tasks, and re-run completed or
+    failed ones. See the <a href="/docs/tasks-window">Tasks Window</a> documentation for details.
+  </p>
+
+  <h2>Cronjobs Window</h2>
+  <p>
+    The cronjobs window is another separate native window that lets you manage scheduled
+    agent tasks. You can create recurring jobs with cron expressions, scope them to a project
+    or specific workspace, and enable or disable them on the fly. See the
+    <a href="/docs/cronjobs-window">Cronjobs Window</a> documentation for details.
+  </p>
+
+  <h2>Keyboard Navigation</h2>
+  <p>
+    The project list supports full keyboard navigation. Use <strong>Arrow Up</strong> and
+    <strong>Arrow Down</strong> to move the focus highlight between workspaces, and press
+    <strong>Enter</strong> to open the focused workspace. The focused workspace is indicated
+    by a ring highlight. Clicking any workspace with the mouse also works as expected.
+  </p>
+
+  <h2>Setup Prompts</h2>
+  <p>
+    When Band detects that required components are not installed, it shows setup prompts at the
+    bottom of the dashboard:
+  </p>
+  <ul>
+    <li><strong>CLI installation</strong> &mdash; Prompts to install the <code>band</code> CLI binary to <code>/usr/local/bin</code> so you can use it from any terminal.</li>
+    <li><strong>Hooks installation</strong> &mdash; Prompts to install Claude Code hooks for automatic agent status detection.</li>
+  </ul>
+  <p>
+    Each prompt includes a one-click Install button. These prompts disappear once the
+    components are installed.
+  </p>
+</DocsLayout>

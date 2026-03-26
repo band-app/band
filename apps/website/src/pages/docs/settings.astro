@@ -1,0 +1,136 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+---
+<DocsLayout title="Settings — Band Docs">
+  <h1>Settings</h1>
+  <p>
+    The Settings page in Band lets you configure global preferences that apply across all
+    projects and workspaces. Access it by clicking the gear icon in the dashboard toolbar
+    and selecting <strong>Settings</strong>.
+  </p>
+  <p>
+    Settings are organized into sections. Each section has a dedicated page with a save button.
+    A blue indicator dot appears on the save button when you have unsaved changes.
+  </p>
+
+  <h2>Appearance</h2>
+  <p>
+    Controls the visual theme of the Band dashboard:
+  </p>
+  <ul>
+    <li><strong>System</strong> &mdash; Follows your operating system's light/dark mode preference. Updates automatically when your OS theme changes.</li>
+    <li><strong>Light</strong> &mdash; Forces a light color scheme.</li>
+    <li><strong>Dark</strong> &mdash; Forces a dark color scheme.</li>
+  </ul>
+  <p>
+    You can also cycle through themes using the theme toggle button in the dashboard toolbar
+    without opening Settings.
+  </p>
+
+  <h2>General</h2>
+  <p>
+    The General section contains core configuration:
+  </p>
+  <ul>
+    <li>
+      <strong>Worktrees folder</strong> &mdash; The directory where new git worktrees are created.
+      Defaults to <code>~/.band/worktrees</code>. You can change this to any directory, for example
+      if you want worktrees on a faster drive or a specific location. Use the browse button to
+      pick a folder via the native file picker.
+    </li>
+  </ul>
+
+  <h2>Labels</h2>
+  <p>
+    Labels let you organize projects into color-coded groups. From this section you can:
+  </p>
+  <ul>
+    <li><strong>Add labels</strong> &mdash; Click the <strong>Add label</strong> button to create a new label with a default name and color.</li>
+    <li><strong>Edit labels</strong> &mdash; Change the name and color of any existing label. Click the color swatch to open a color picker.</li>
+    <li><strong>Delete labels</strong> &mdash; Click the trash icon to remove a label. Projects assigned to a deleted label become unlabeled.</li>
+  </ul>
+  <p>
+    Once labels are created, assign them to projects via the right-click context menu on any
+    project name in the dashboard. Use the label filter in the toolbar to show only projects
+    with a specific label.
+  </p>
+
+  <h2>Coding Agent</h2>
+  <p>
+    Configure the coding agent used for background tasks:
+  </p>
+  <ul>
+    <li>
+      <strong>Agent type</strong> &mdash; Select the coding agent. Currently supports
+      <strong>Claude Code</strong>. Set to "None" to disable agent task submission.
+    </li>
+    <li>
+      <strong>Command</strong> (optional) &mdash; A custom command to launch the agent.
+      For example, <code>claude --dangerously-skip-permissions</code>. Leave empty to use
+      the default command for the selected agent type.
+    </li>
+  </ul>
+
+  <h2>Workspace Settings (Defaults)</h2>
+  <p>
+    Define the default apps configuration that applies to workspaces when no project-level
+    <code>.band/config.json</code> exists. This is entered as a JSON object.
+  </p>
+  <p>
+    Click <strong>Insert template</strong> to populate the field with a standard VS Code
+    configuration:
+  </p>
+  <pre><code set:html={`{
+  "apps": [
+    {
+      "type": "vscode",
+      "terminals": [
+        {
+          "name": "claude",
+          "command": "band tasks watch && claude --continue"
+        },
+        {
+          "name": "shell",
+          "command": "",
+          "split": "vertical"
+        }
+      ]
+    }
+  ]
+}`}></code></pre>
+  <p>
+    This default opens VS Code with two terminal splits: one running the coding agent and
+    another as a general shell. See <a href="/docs/window-management">Window Management</a>
+    for the full configuration reference.
+  </p>
+
+  <h2>Notifications</h2>
+  <p>
+    Configure audio notifications for agent events:
+  </p>
+  <ul>
+    <li><strong>Notification sound toggle</strong> &mdash; Enable or disable playing a sound when an agent transitions from working to needs attention.</li>
+    <li><strong>Sound selection</strong> &mdash; Choose from several built-in sounds. Selecting a sound plays a preview so you can hear it before saving.</li>
+  </ul>
+
+  <h2>Web Server</h2>
+  <p>
+    Configure the Band web server that powers the dashboard and provides the API:
+  </p>
+  <ul>
+    <li><strong>Port</strong> &mdash; The port the web server listens on. Defaults to <code>3456</code>. Changing this requires a restart.</li>
+    <li><strong>Auto-start tunnel</strong> &mdash; When enabled, automatically starts a remote tunnel when the app launches, making your Band instance accessible from mobile devices or other machines.</li>
+  </ul>
+
+  <h2>Settings Storage</h2>
+  <p>
+    All settings are persisted in <code>~/.band/settings.json</code>. You can view the current
+    settings via the CLI:
+  </p>
+  <pre><code>band settings
+band settings --output json</code></pre>
+  <p>
+    While you can edit the file directly, it is recommended to use the Settings UI to avoid
+    malformed JSON or invalid values.
+  </p>
+</DocsLayout>

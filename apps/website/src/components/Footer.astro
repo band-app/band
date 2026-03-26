@@ -1,0 +1,90 @@
+---
+const currentYear = new Date().getFullYear();
+
+const links = {
+  product: [
+    { href: "/docs/getting-started", label: "Getting Started" },
+    { href: "/docs/desktop-app", label: "Desktop App" },
+    { href: "/docs/cli-reference", label: "CLI Reference" },
+    { href: "/docs/changelog", label: "Changelog" },
+  ],
+  resources: [
+    { href: "/docs/getting-started", label: "Documentation" },
+    { href: "/faq", label: "FAQ" },
+    { href: "/comparison", label: "Comparison" },
+    { href: "/docs/recipes", label: "Recipes" },
+  ],
+  community: [
+    { href: "https://github.com/topdev1de/band", label: "GitHub" },
+    { href: "https://github.com/topdev1de/band/issues", label: "Issues" },
+    { href: "https://github.com/topdev1de/band/releases", label: "Releases" },
+  ],
+};
+---
+
+<footer class="border-t border-border bg-background">
+  <div class="mx-auto max-w-6xl px-6 py-12">
+    <div class="grid grid-cols-2 gap-8 md:grid-cols-4">
+      <div class="col-span-2 md:col-span-1">
+        <a href="/" class="flex items-center gap-2.5 font-semibold text-foreground">
+          <img src="/logo-64.png" alt="Band" width="36" height="36" class="rounded-lg" />
+          <span>Band</span>
+        </a>
+        <p class="mt-3 text-sm leading-relaxed text-muted-foreground">
+          IDE-agnostic agent orchestrator. Manage AI coding agents across any editor from one dashboard.
+        </p>
+      </div>
+
+      <div>
+        <h3 class="mb-3 text-sm font-semibold text-foreground">Product</h3>
+        <ul class="space-y-2">
+          {links.product.map((link) => (
+            <li>
+              <a href={link.href} class="text-sm text-muted-foreground transition-colors hover:text-foreground">
+                {link.label}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <div>
+        <h3 class="mb-3 text-sm font-semibold text-foreground">Resources</h3>
+        <ul class="space-y-2">
+          {links.resources.map((link) => (
+            <li>
+              <a href={link.href} class="text-sm text-muted-foreground transition-colors hover:text-foreground">
+                {link.label}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <div>
+        <h3 class="mb-3 text-sm font-semibold text-foreground">Community</h3>
+        <ul class="space-y-2">
+          {links.community.map((link) => (
+            <li>
+              <a
+                href={link.href}
+                target={link.href.startsWith("http") ? "_blank" : undefined}
+                rel={link.href.startsWith("http") ? "noopener noreferrer" : undefined}
+                class="text-sm text-muted-foreground transition-colors hover:text-foreground"
+              >
+                {link.label}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+
+    <div class="mt-10 flex flex-col items-center justify-between gap-4 border-t border-border pt-8 sm:flex-row">
+      <p class="text-sm text-muted-foreground">&copy; {currentYear} Band. MIT License.</p>
+      <p class="text-sm text-muted-foreground">
+        Built with <a href="https://astro.build" target="_blank" rel="noopener noreferrer" class="text-foreground/60 hover:text-foreground">Astro</a>
+      </p>
+    </div>
+  </div>
+</footer>

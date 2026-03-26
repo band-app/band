@@ -1,0 +1,103 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+---
+<DocsLayout title="Web Interface — Band Docs">
+  <h1>Web Interface</h1>
+
+  <p>
+    The Band web interface is a browser-based dashboard for managing workspaces, monitoring agent
+    activity, and interacting with your codebase. It runs locally alongside the Band server and is
+    also accessible remotely through a Cloudflare tunnel.
+  </p>
+
+  <h2>Desktop Layout</h2>
+
+  <p>
+    On larger screens, the dashboard uses a sidebar-based layout. The sidebar provides navigation
+    between projects and workspaces, while the main area shows the selected workspace's content.
+  </p>
+
+  <ul>
+    <li><strong>Sidebar</strong> — Lists all projects and their workspaces. Click to switch context.</li>
+    <li><strong>Main panel</strong> — Displays agent chat, code viewer, file browser, or other tools.</li>
+    <li><strong>Status bar</strong> — Shows connection status, active tasks, and tunnel state.</li>
+  </ul>
+
+  <h2>Mobile Layout</h2>
+
+  <p>
+    On smaller screens (phones and tablets), the interface adapts to a mobile-friendly layout. The
+    sidebar collapses into a navigation menu, and content panels stack vertically. This makes it
+    easy to monitor and manage agents from your phone, especially when combined with
+    <a href="/docs/remote-access">remote access</a>.
+  </p>
+
+  <h2>Real-Time Agent Chat</h2>
+
+  <p>
+    The chat panel shows a live stream of agent activity as it happens. Messages include:
+  </p>
+
+  <ul>
+    <li><strong>Agent responses</strong> — Text output from the AI agent.</li>
+    <li><strong>Tool calls</strong> — File edits, terminal commands, and search operations.</li>
+    <li><strong>File changes</strong> — Inline diffs showing what the agent modified.</li>
+    <li><strong>Status updates</strong> — Task progress, completion, and error messages.</li>
+  </ul>
+
+  <p>
+    Chat is streamed in real time over WebSocket, so you see agent output as soon as it is
+    generated. You can also send messages to the agent directly from the chat input.
+  </p>
+
+  <h2>Code Viewer</h2>
+
+  <p>
+    The built-in code viewer displays files from the workspace with syntax highlighting. You can
+    browse files directly in the dashboard without switching to your editor.
+  </p>
+
+  <ul>
+    <li>Syntax highlighting for common languages.</li>
+    <li>Line numbers and code folding.</li>
+    <li>Direct links from agent tool calls to the relevant file and line.</li>
+  </ul>
+
+  <h2>File Browser</h2>
+
+  <p>
+    The file browser shows the workspace directory tree. Navigate through directories, open files
+    in the code viewer, and see which files were recently modified by the agent.
+  </p>
+
+  <h2>Git Diff Viewer</h2>
+
+  <p>
+    The diff viewer shows all changes made in the current workspace compared to the base branch.
+    This gives you a clear picture of what the agent has done and makes it easy to review before
+    merging.
+  </p>
+
+  <ul>
+    <li>Side-by-side or unified diff view.</li>
+    <li>File-by-file change navigation.</li>
+    <li>Summary of added, modified, and deleted files.</li>
+  </ul>
+
+  <h2>File Search and Content Search</h2>
+
+  <p>
+    The dashboard includes two search modes:
+  </p>
+
+  <ul>
+    <li>
+      <strong>File search</strong> — Find files by name using fuzzy matching. Type a partial
+      filename to quickly navigate to the right file.
+    </li>
+    <li>
+      <strong>Content search</strong> — Search for text within files across the workspace. Results
+      show matching lines with context, similar to grep or ripgrep output.
+    </li>
+  </ul>
+</DocsLayout>

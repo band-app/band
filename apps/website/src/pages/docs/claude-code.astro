@@ -1,0 +1,88 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+---
+<DocsLayout title="Claude Code — Band Docs">
+  <h1>Claude Code</h1>
+  <p>
+    Claude Code is the default coding agent in Band and offers the deepest integration.
+    It supports cost tracking, session listing, session resume, user input prompts, and
+    skill discovery. Band communicates with Claude Code through the
+    <code>@anthropic-ai/claude-agent-sdk</code>, which provides a streaming event
+    interface for programmatic control.
+  </p>
+
+  <h2>Prerequisites</h2>
+  <ol>
+    <li>Install the Claude Code CLI by following the official Anthropic documentation at <a href="https://docs.anthropic.com/en/docs/claude-code/overview">docs.anthropic.com</a>.</li>
+    <li>Authenticate with your Anthropic API key or Claude Pro/Team subscription.</li>
+    <li>Verify the installation by running <code>claude --version</code> in your terminal.</li>
+  </ol>
+
+  <h2>How Band Integrates via Hooks</h2>
+  <p>
+    Band uses Claude Code's hook system to receive automatic status updates. When you
+    set up Band, it installs hooks into your Claude Code settings file at
+    <code>~/.claude/settings.json</code>. Three hook events are registered:
+  </p>
+  <ul>
+    <li><strong>UserPromptSubmit</strong> — Fires when a user submits a prompt, letting Band track that a session is active.</li>
+    <li><strong>PostToolUse</strong> — Fires after each tool call completes, providing real-time progress updates.</li>
+    <li><strong>Stop</strong> — Fires when the agent finishes, allowing Band to update the session status.</li>
+  </ul>
+  <p>
+    Each hook runs the command <code>band notify</code>, which sends a lightweight
+    status update to the Band server. This is how Band detects agent activity in
+    workspaces where Claude Code is running independently (outside of Band-submitted tasks).
+  </p>
+
+  <h3>Hooks Configuration</h3>
+  <p>
+    Band manages hooks automatically. From the dashboard, navigate to
+    <strong>Settings</strong> and click <strong>Install Hooks</strong>. Band will locate
+    the <code>band</code> CLI binary on your system and write the hook entries into
+    <code>~/.claude/settings.json</code>. If you already have other hooks configured,
+    Band preserves them and only adds its own entries.
+  </p>
+  <p>The resulting configuration in <code>settings.json</code> looks like:</p>
+  <pre><code set:html={`{
+  "hooks": {
+    "UserPromptSubmit": [
+      { "hooks": [{ "type": "command", "command": "/usr/local/bin/band notify" }] }
+    ],
+    "PostToolUse": [
+      { "hooks": [{ "type": "command", "command": "/usr/local/bin/band notify" }] }
+    ],
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "/usr/local/bin/band notify" }] }
+    ]
+  }
+}`}></code></pre>
+
+  <h2>Session Management</h2>
+  <p>
+    Claude Code supports full session management through Band. You can:
+  </p>
+  <ul>
+    <li>View a list of previous sessions for any workspace, including the session summary, first prompt, git branch, and last modified time.</li>
+    <li>Resume a previous session by selecting it from the session list. Band passes the session ID to Claude Code, which picks up where it left off.</li>
+    <li>Browse the full message history of any session, including user messages, assistant responses, tool calls, and tool results.</li>
+  </ul>
+
+  <h2>Cost Tracking</h2>
+  <p>
+    Claude Code reports the total cost in USD for each session via the
+    <code>session-result</code> event. Band displays this in the task completion
+    summary, so you can monitor API spend per task. Cost data is available in the task
+    history view for completed tasks.
+  </p>
+
+  <h2>Configuration Options</h2>
+  <p>
+    The Claude Code adapter accepts these configuration options through Band's settings:
+  </p>
+  <ul>
+    <li><strong>model</strong> — Override the default Claude model (e.g., <code>claude-sonnet-4-20250514</code>).</li>
+    <li><strong>executablePath</strong> — Path to the Claude Code binary if it is not on your system PATH.</li>
+    <li><strong>maxTurns</strong> — Maximum number of agentic turns per session (default: 50).</li>
+  </ul>
+</DocsLayout>

@@ -1,0 +1,91 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+---
+<DocsLayout title="band settings — Band Docs">
+  <h1>band settings</h1>
+
+  <p>
+    The <code>band settings</code> command displays the current Band configuration, including server
+    connection details, output format, and home directory paths. This is useful for debugging
+    connection issues or verifying your environment setup.
+  </p>
+
+  <h2>Usage</h2>
+
+  <pre><code>band settings</code></pre>
+
+  <p>Example output:</p>
+
+  <pre><code>Band Settings
+─────────────────────────────────────
+Server URL:    http://localhost:3001
+Home:          /Users/dev/.band
+Output:        text
+Token:         (not set)
+Server:        connected (v0.12.0)</code></pre>
+
+  <h2>Configuration Sources</h2>
+
+  <p>
+    Settings are resolved from multiple sources, with the following precedence (highest to lowest):
+  </p>
+
+  <ol>
+    <li><strong>Command-line flags</strong> — e.g., <code>--output json</code> on any command.</li>
+    <li><strong>Environment variables</strong> — <code>BAND_SERVER_URL</code>, <code>BAND_TOKEN</code>, <code>BAND_OUTPUT</code>, <code>BAND_HOME</code>.</li>
+    <li><strong>Default values</strong> — Built-in defaults (server at <code>localhost:3001</code>, text output, home at <code>~/.band</code>).</li>
+  </ol>
+
+  <h2>Settings Reference</h2>
+
+  <ul>
+    <li>
+      <strong>Server URL</strong> — The address of the Band web server. Defaults to
+      <code>http://localhost:3001</code>. Override with <code>BAND_SERVER_URL</code>.
+    </li>
+    <li>
+      <strong>Home</strong> — The Band home directory where worktrees, database, and configuration
+      files are stored. Defaults to <code>~/.band</code>. Override with <code>BAND_HOME</code>.
+    </li>
+    <li>
+      <strong>Output</strong> — The default output format (<code>text</code> or <code>json</code>).
+      Override with <code>BAND_OUTPUT</code> or <code>--output</code> flag.
+    </li>
+    <li>
+      <strong>Token</strong> — Authentication token for remote server access. Set via
+      <code>BAND_TOKEN</code>. Not needed for local connections.
+    </li>
+    <li>
+      <strong>Server</strong> — Connection status and server version. Shown as "connected" with the
+      version number, or "unreachable" if the server is not running.
+    </li>
+  </ul>
+
+  <h2>JSON Output</h2>
+
+  <pre><code>band settings --output json</code></pre>
+
+  <pre><code set:html={`{'{'}
+  "serverUrl": "http://localhost:3001",
+  "home": "/Users/dev/.band",
+  "output": "text",
+  "token": null,
+  "server": {'{'}
+    "status": "connected",
+    "version": "0.12.0"
+  {'}'}
+{'}'}`}></code></pre>
+
+  <h2>Troubleshooting</h2>
+
+  <p>
+    If <code>band settings</code> shows "unreachable" for the server status, verify that:
+  </p>
+
+  <ul>
+    <li>The Band desktop app or web server is running.</li>
+    <li>The <code>BAND_SERVER_URL</code> points to the correct address and port.</li>
+    <li>No firewall is blocking the connection.</li>
+    <li>If connecting remotely, ensure the tunnel is active and <code>BAND_TOKEN</code> is set.</li>
+  </ul>
+</DocsLayout>

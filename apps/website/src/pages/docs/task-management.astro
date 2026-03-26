@@ -1,0 +1,102 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+---
+<DocsLayout title="Task Management — Band Docs">
+  <h1>Task Management</h1>
+  <p>
+    Tasks are the core unit of work in Band. A task represents a single prompt submitted
+    to a coding agent within a workspace. Band handles the full lifecycle: submission,
+    real-time output streaming, completion tracking, and history.
+  </p>
+
+  <h2>Submitting a Task</h2>
+  <p>
+    To submit a task, select a workspace from the dashboard and type your prompt in the
+    input field. The prompt is sent to the configured coding agent, which begins working
+    immediately. Only one task can run per workspace at a time — if you submit another
+    prompt while a task is running, it is added to the workspace's message queue and
+    starts automatically when the current task completes.
+  </p>
+
+  <h3>File Attachments</h3>
+  <p>
+    You can attach files to your task prompt. Attached files are stored in Band's
+    uploads directory (<code>~/.band/uploads</code>) and made available to the coding
+    agent as an additional directory. When using Claude Code, the agent can read these
+    files directly. This is useful for providing screenshots, design mockups, data
+    files, or any reference material the agent needs.
+  </p>
+
+  <h2>Task Lifecycle</h2>
+  <p>
+    Every task moves through a defined set of states:
+  </p>
+  <ol>
+    <li><strong>Running</strong> — The agent is actively processing the prompt. You can see real-time output in the dashboard.</li>
+    <li><strong>Completed</strong> — The agent finished successfully. The task summary shows duration, number of turns, and cost (if supported by the agent).</li>
+    <li><strong>Failed</strong> — The agent encountered an error, was aborted by the user, or the session ended unexpectedly.</li>
+  </ol>
+  <p>
+    Tasks are persisted in Band's database with their workspace ID, project, branch,
+    prompt, status, session ID, and timestamps. This allows you to review task history
+    even after restarting Band.
+  </p>
+
+  <h2>Real-Time Output Streaming</h2>
+  <p>
+    While a task is running, Band streams the agent's output to the dashboard in real
+    time. You see:
+  </p>
+  <ul>
+    <li><strong>Text responses</strong> — The agent's reasoning and explanations, streamed as deltas.</li>
+    <li><strong>Tool calls</strong> — Each tool invocation (Read, Write, Bash, Edit, Glob, Grep) with its input parameters.</li>
+    <li><strong>Tool results</strong> — The output of each tool call, truncated to 10,000 characters if very long.</li>
+    <li><strong>Images</strong> — Screenshots or other images produced during tool execution.</li>
+    <li><strong>Errors</strong> — Any errors the agent encounters during execution.</li>
+  </ul>
+  <p>
+    If you disconnect from the dashboard and reconnect while a task is running, Band
+    replays the buffered output chunks so you see the full history up to the current
+    point. Buffers are kept in memory for 30 minutes after a task completes.
+  </p>
+
+  <h2>Cancelling a Task</h2>
+  <p>
+    You can cancel a running task from the dashboard. Band sends an abort signal to
+    the coding agent, which terminates the current session. The task is marked as
+    failed with the message "Task aborted by user". Cancellation is immediate — the
+    agent's process or stream is forcefully closed.
+  </p>
+
+  <h2>Queued Messages</h2>
+  <p>
+    When a task completes successfully, Band checks the workspace's message queue for
+    any pending prompts. If one exists, it is automatically submitted as a new task
+    using the same session ID, allowing the agent to continue in context. This enables
+    you to queue up multiple prompts and let them execute sequentially.
+  </p>
+
+  <h2>Task History</h2>
+  <p>
+    All tasks are stored in Band's database. You can filter task history by:
+  </p>
+  <ul>
+    <li><strong>Project</strong> — See all tasks across a project's workspaces.</li>
+    <li><strong>Workspace</strong> — See tasks for a specific branch.</li>
+    <li><strong>Status</strong> — Filter by running, completed, or failed tasks.</li>
+  </ul>
+  <p>
+    Task records include the original prompt, status, session ID, start time, and
+    completion time. For agents that support session listing (like Claude Code), you
+    can also drill into the full session message history.
+  </p>
+
+  <h2>Tips for Writing Good Prompts</h2>
+  <ul>
+    <li><strong>Be specific.</strong> Instead of "fix the bug", say "fix the null pointer exception in the UserService.getProfile method when the user has no email address".</li>
+    <li><strong>Provide context.</strong> Mention relevant file paths, function names, or error messages. The agent works faster when it does not need to search for context.</li>
+    <li><strong>Define success criteria.</strong> Say what the result should look like: "the test suite should pass", "the API should return a 200 status", "the component should render without errors".</li>
+    <li><strong>Use project conventions.</strong> If your project has a CLAUDE.md or similar instructions file, the agent will follow those conventions automatically.</li>
+    <li><strong>Break large tasks into steps.</strong> Instead of one massive prompt, submit focused tasks and use the message queue to chain them together.</li>
+  </ul>
+</DocsLayout>

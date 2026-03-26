@@ -1,0 +1,121 @@
+---
+interface Props {
+  currentPath: string;
+}
+
+const { currentPath } = Astro.props;
+
+const sections = [
+  {
+    title: "Getting Started",
+    links: [
+      { href: "/docs/getting-started", label: "Introduction" },
+      { href: "/docs/installation", label: "Installation" },
+      { href: "/docs/first-project", label: "First Project" },
+      { href: "/docs/first-workspace", label: "First Workspace" },
+      { href: "/docs/first-task", label: "First Task" },
+    ],
+  },
+  {
+    title: "Desktop App",
+    links: [
+      { href: "/docs/desktop-app", label: "Dashboard Overview" },
+      { href: "/docs/projects", label: "Project Management" },
+      { href: "/docs/workspaces", label: "Workspace Management" },
+      { href: "/docs/agent-status", label: "Agent Status" },
+      { href: "/docs/window-management", label: "Window Management" },
+      { href: "/docs/tasks-window", label: "Tasks Window" },
+      { href: "/docs/cronjobs-window", label: "Cronjobs Window" },
+      { href: "/docs/settings", label: "Settings" },
+    ],
+  },
+  {
+    title: "Web Interface",
+    links: [
+      { href: "/docs/web-interface", label: "Overview" },
+      { href: "/docs/remote-access", label: "Remote Access" },
+    ],
+  },
+  {
+    title: "CLI Reference",
+    links: [
+      { href: "/docs/cli-reference", label: "Overview" },
+      { href: "/docs/cli-projects", label: "band projects" },
+      { href: "/docs/cli-workspaces", label: "band workspaces" },
+      { href: "/docs/cli-tasks", label: "band tasks" },
+      { href: "/docs/cli-cronjobs", label: "band cronjobs" },
+      { href: "/docs/cli-tunnel", label: "band tunnel" },
+      { href: "/docs/cli-settings", label: "band settings" },
+    ],
+  },
+  {
+    title: "Configuration",
+    links: [
+      { href: "/docs/configuration", label: "Project Config" },
+      { href: "/docs/app-presets", label: "App Presets" },
+      { href: "/docs/ide-extensions", label: "IDE Extensions" },
+    ],
+  },
+  {
+    title: "Coding Agents",
+    links: [
+      { href: "/docs/coding-agents", label: "Overview" },
+      { href: "/docs/claude-code", label: "Claude Code" },
+      { href: "/docs/cursor-cli", label: "Cursor CLI" },
+      { href: "/docs/gemini-cli", label: "Gemini CLI" },
+    ],
+  },
+  {
+    title: "Guides",
+    links: [
+      { href: "/docs/task-management", label: "Task Management" },
+      { href: "/docs/cronjobs", label: "Cronjobs & Automation" },
+      { href: "/docs/recipes", label: "Recipes & Workflows" },
+      { href: "/docs/architecture", label: "Architecture" },
+    ],
+  },
+  {
+    title: "More",
+    links: [
+      { href: "/docs/changelog", label: "Changelog" },
+      { href: "/faq", label: "FAQ" },
+      { href: "/comparison", label: "Comparison" },
+    ],
+  },
+];
+
+function isActive(href: string, currentPath: string): boolean {
+  const normalizedCurrent = currentPath.replace(/\/$/, "");
+  const normalizedHref = href.replace(/\/$/, "");
+  return normalizedCurrent === normalizedHref;
+}
+---
+
+<aside class="sticky top-14 hidden h-[calc(100vh-3.5rem)] w-64 shrink-0 overflow-y-auto border-r border-sidebar-border bg-sidebar py-8 pl-6 pr-4 lg:block">
+  <nav class="space-y-6">
+    {sections.map((section) => (
+      <div>
+        <h4 class="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          {section.title}
+        </h4>
+        <ul class="space-y-0.5">
+          {section.links.map((link) => (
+            <li>
+              <a
+                href={link.href}
+                class:list={[
+                  "block rounded-md px-3 py-1.5 text-sm transition-colors",
+                  isActive(link.href, currentPath)
+                    ? "bg-primary-muted text-primary font-medium"
+                    : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                ]}
+              >
+                {link.label}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </div>
+    ))}
+  </nav>
+</aside>

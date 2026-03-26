@@ -1,0 +1,46 @@
+---
+import Header from "../components/Header.astro";
+import Footer from "../components/Footer.astro";
+import DocsSidebar from "../components/DocsSidebar.astro";
+import "../styles/global.css";
+
+interface Props {
+  title: string;
+  description?: string;
+}
+
+const { title, description = "Band documentation" } = Astro.props;
+
+const currentPath = Astro.url.pathname;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content={description} />
+    <meta name="generator" content={Astro.generator} />
+
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="Band" />
+
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+
+    <title>{title}</title>
+  </head>
+  <body class="min-h-screen">
+    <Header />
+    <div class="mx-auto flex max-w-7xl pt-14">
+      <DocsSidebar currentPath={currentPath} />
+      <main class="mx-auto min-w-0 max-w-3xl flex-1 px-8 py-10 md:px-12">
+        <article class="prose">
+          <slot />
+        </article>
+      </main>
+    </div>
+    <Footer />
+  </body>
+</html>

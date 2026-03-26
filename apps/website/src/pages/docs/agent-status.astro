@@ -1,0 +1,109 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+---
+<DocsLayout title="Agent Status Monitoring — Band Docs">
+  <h1>Agent Status Monitoring</h1>
+  <p>
+    Band continuously monitors the status of coding agents running in your workspaces. Agent
+    status is displayed as a colored indicator dot on each workspace card, giving you an
+    at-a-glance view of what every agent is doing across all your projects.
+  </p>
+
+  <h2>Status Types</h2>
+  <p>
+    Each workspace's coding agent can be in one of three states:
+  </p>
+  <ul>
+    <li>
+      <strong>Waiting (no indicator)</strong> &mdash; The agent is idle. No task is running and no
+      agent activity has been detected. No indicator dot is shown in this state.
+    </li>
+    <li>
+      <strong>Working (animated dot)</strong> &mdash; The agent is actively executing a task.
+      The indicator uses the <code>bg-status-working</code> color, typically a pulsing blue or
+      green dot. This means the agent is reading files, writing code, running commands, or
+      otherwise making progress on its assigned task.
+    </li>
+    <li>
+      <strong>Needs attention (static dot)</strong> &mdash; The agent has finished its current
+      task or requires human input. The indicator uses the <code>bg-status-needs-attention</code>
+      color, typically amber or orange. This state means you should review the agent's output
+      and either provide input, approve changes, or start a new task.
+    </li>
+  </ul>
+
+  <h2>How Status Is Detected</h2>
+  <p>
+    Band detects agent status through <strong>Claude Code hooks</strong>. When the Band dashboard
+    installs hooks (prompted on first launch), it registers hook handlers that fire on key
+    Claude Code lifecycle events.
+  </p>
+  <p>
+    The hooks use the <code>band notify</code> command to send status updates to the Band server:
+  </p>
+  <pre><code set:html={`echo '{"hook_event_name":"Stop","cwd":"/path/to/worktree"}' | band notify`}></code></pre>
+  <p>
+    The Band server processes these notifications and updates the agent status for the
+    corresponding workspace. Status changes are broadcast to the dashboard in real-time
+    via server-sent events (SSE).
+  </p>
+
+  <h3>Hook Events</h3>
+  <p>
+    The following Claude Code hook events are monitored:
+  </p>
+  <ul>
+    <li><strong>Start</strong> &mdash; The agent has begun working. Transitions the workspace to the <em>working</em> state.</li>
+    <li><strong>Stop</strong> &mdash; The agent has stopped (task completed or exited). Transitions to the <em>needs attention</em> state.</li>
+  </ul>
+
+  <h2>Status Display</h2>
+  <p>
+    Agent status is displayed in two locations:
+  </p>
+  <ul>
+    <li><strong>Workspace list</strong> &mdash; A small colored dot appears next to the branch name in the project list. This is always visible and provides a quick summary.</li>
+    <li><strong>Workspace detail view</strong> &mdash; When viewing a workspace in the web interface, the status is shown alongside other workspace metadata.</li>
+  </ul>
+
+  <h2>Notification Sounds</h2>
+  <p>
+    Band can play a notification sound when an agent transitions from <em>working</em> to
+    <em>needs attention</em>. This is useful when you have multiple agents running and want
+    to know when one finishes without constantly watching the dashboard.
+  </p>
+  <p>
+    To enable notification sounds, go to <a href="/docs/settings">Settings</a> and toggle
+    <strong>Notification sound</strong> on. You can choose from several built-in sounds and
+    preview them before saving.
+  </p>
+
+  <h2>Installing Hooks</h2>
+  <p>
+    If Claude Code hooks are not installed, the dashboard shows a setup prompt at the bottom:
+  </p>
+  <pre><code>Install Claude Code hooks for agent status detection  [Install]</code></pre>
+  <p>
+    Click <strong>Install</strong> to set up the hooks. This configures Claude Code to send
+    lifecycle notifications to Band automatically. The hooks are installed globally and apply
+    to all Claude Code sessions on your machine.
+  </p>
+
+  <h2>Troubleshooting</h2>
+  <ul>
+    <li>
+      <strong>No status showing</strong> &mdash; Make sure Claude Code hooks are installed
+      (check the dashboard for the install prompt). Verify the Band server is running.
+    </li>
+    <li>
+      <strong>Status stuck on "working"</strong> &mdash; This can happen if the agent process
+      was terminated without sending a stop notification. Restarting the agent or creating a
+      new task will reset the status.
+    </li>
+    <li>
+      <strong>Hooks prompt keeps appearing</strong> &mdash; Another tool may be overwriting
+      the Claude Code hooks configuration. Check your Claude Code settings for conflicting
+      hook definitions.
+    </li>
+  </ul>
+</DocsLayout>

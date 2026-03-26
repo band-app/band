@@ -1,0 +1,128 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+---
+<DocsLayout title="Architecture — Band Docs">
+  <h1>Architecture</h1>
+
+  <p>
+    Band is composed of three main components: a desktop application, a web server, and a CLI. Each
+    component has a distinct responsibility, and they communicate over HTTP and WebSocket.
+  </p>
+
+  <h2>System Overview</h2>
+
+  <ul>
+    <li><strong>Desktop App (Tauri)</strong> — Window management, app launching, and native OS integration.</li>
+    <li><strong>Web Server (Node.js)</strong> — Data management, state, API, and background processes.</li>
+    <li><strong>CLI (Rust)</strong> — Command-line interface for scripting and automation.</li>
+  </ul>
+
+  <h2>Separation of Concerns</h2>
+
+  <p>
+    The web server handles <strong>data, state, and background processes</strong> exclusively. It
+    never performs window management — no spawning editors, no AppleScript, no opening or focusing
+    IDE windows.
+  </p>
+
+  <p>
+    Window management is the <strong>desktop app's</strong> responsibility. When a workspace is
+    focused, the desktop app reads the configuration and handles launching editors, positioning
+    windows, opening terminal tabs, and managing IDE focus. This separation ensures the web server
+    can run headlessly (e.g., on a remote machine) while the desktop app manages the local
+    desktop environment.
+  </p>
+
+  <h2>Git Worktree-Based Workspace Isolation</h2>
+
+  <p>
+    Each workspace is backed by a Git worktree. When you create a workspace, Band runs
+    <code>git worktree add</code> to create an isolated working directory with its own branch. This
+    provides:
+  </p>
+
+  <ul>
+    <li><strong>File isolation</strong> — Each workspace has its own copy of the project files.</li>
+    <li><strong>Branch isolation</strong> — Each workspace works on its own Git branch.</li>
+    <li><strong>Concurrent work</strong> — Multiple agents can work on different tasks simultaneously without conflicts.</li>
+    <li><strong>Efficient storage</strong> — Git worktrees share the object database, so disk usage is minimal.</li>
+  </ul>
+
+  <p>
+    Worktrees are stored in the Band home directory at
+    <code>~/.band/worktrees/&lt;project&gt;/&lt;workspace&gt;</code>.
+  </p>
+
+  <h2>SQLite for State</h2>
+
+  <p>
+    All application state is stored in a local SQLite database at <code>~/.band/band.db</code>.
+    This includes projects, workspaces, tasks, cron jobs, and tunnel configuration. SQLite was
+    chosen for its simplicity, reliability, and zero-configuration nature — no external database
+    server is needed.
+  </p>
+
+  <h2>tRPC API (HTTP + WebSocket)</h2>
+
+  <p>
+    The web server exposes a tRPC API that supports both HTTP (for request/response operations)
+    and WebSocket (for real-time streaming). The API is used by:
+  </p>
+
+  <ul>
+    <li>The web dashboard (browser client).</li>
+    <li>The desktop app (Tauri frontend).</li>
+    <li>The CLI (via HTTP requests).</li>
+    <li>IDE extensions (for status reporting).</li>
+  </ul>
+
+  <p>
+    tRPC provides end-to-end type safety between the server and TypeScript clients, ensuring the
+    API contract is enforced at compile time.
+  </p>
+
+  <h2>Agent Adapter Pattern</h2>
+
+  <p>
+    Band uses an adapter pattern to support different AI agents. Each agent implementation (e.g.,
+    Claude Code) is wrapped in an adapter that translates between Band's task model and the
+    agent's specific interface. This allows Band to:
+  </p>
+
+  <ul>
+    <li>Start and stop agent processes.</li>
+    <li>Stream agent output to the dashboard in a uniform format.</li>
+    <li>Support multiple agent backends without changing the core system.</li>
+  </ul>
+
+  <h2>Status Protocol</h2>
+
+  <p>
+    Communication between IDE extensions and the Band dashboard uses a file-based status protocol.
+    Each workspace has a <code>.band/status.json</code> file that the IDE extension writes to and
+    the server watches.
+  </p>
+
+  <pre><code set:html={`{'{'}
+  "agent": "claude-code",
+  "status": "working",
+  "task": "Implementing dark mode toggle",
+  "updatedAt": "2025-12-01T10:30:00Z"
+{'}'}`}></code></pre>
+
+  <p>
+    This file-based approach was chosen for its simplicity and compatibility — any IDE extension or
+    agent wrapper can write a JSON file, regardless of the programming language or runtime.
+  </p>
+
+  <h2>Data Flow</h2>
+
+  <ol>
+    <li>User creates a task via dashboard, CLI, or cron job.</li>
+    <li>Server stores the task in SQLite and spawns an agent process in the workspace.</li>
+    <li>Agent works in the Git worktree, making file changes and running commands.</li>
+    <li>Agent output is streamed via WebSocket to connected dashboard clients.</li>
+    <li>IDE extension updates <code>.band/status.json</code>; server detects changes and broadcasts status.</li>
+    <li>Desktop app handles window focus and positioning when the user switches workspaces.</li>
+  </ol>
+</DocsLayout>

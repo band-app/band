@@ -1,0 +1,83 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+---
+<DocsLayout title="Cursor CLI — Band Docs">
+  <h1>Cursor CLI</h1>
+  <p>
+    Cursor CLI is a supported coding agent in Band that uses the
+    <code>@nothumanwork/cursor-agents-sdk</code> to interact with Cursor's AI backend.
+    It provides real-time streaming, tool use visibility, and session resume, but does
+    not support cost tracking or session listing.
+  </p>
+
+  <h2>Prerequisites</h2>
+  <ol>
+    <li>Install the Cursor IDE from <a href="https://cursor.com">cursor.com</a>.</li>
+    <li>Ensure the Cursor CLI agent SDK is available. Band uses the <code>@nothumanwork/cursor-agents-sdk</code> package internally.</li>
+    <li>Have an active Cursor subscription with API access enabled.</li>
+  </ol>
+
+  <h2>Configuring Band to Use Cursor</h2>
+  <p>
+    To switch Band to use Cursor CLI as the coding agent:
+  </p>
+  <ol>
+    <li>Open the Band dashboard and go to <strong>Settings</strong>.</li>
+    <li>Under <strong>Coding Agent</strong>, select <code>cursor-cli</code> from the agent type dropdown.</li>
+    <li>Save your settings. All new tasks will now use the Cursor CLI adapter.</li>
+  </ol>
+
+  <h2>How It Works</h2>
+  <p>
+    The Cursor CLI adapter creates a <code>CursorAgent</code> instance and calls its
+    <code>stream()</code> method with the task prompt. Band processes the streaming
+    events and maps Cursor's tool call format to Band's unified event system. Cursor
+    uses a different tool naming convention internally — Band translates these
+    automatically:
+  </p>
+  <table>
+    <thead>
+      <tr>
+        <th>Cursor Internal Name</th>
+        <th>Band Display Name</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td>readToolCall</td><td>Read</td></tr>
+      <tr><td>writeToolCall</td><td>Write</td></tr>
+      <tr><td>shellToolCall</td><td>Bash</td></tr>
+      <tr><td>editToolCall</td><td>Edit</td></tr>
+      <tr><td>globToolCall</td><td>Glob</td></tr>
+      <tr><td>grepToolCall</td><td>Grep</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Differences from Claude Code</h2>
+  <p>
+    There are several differences to be aware of when using Cursor CLI instead of Claude Code:
+  </p>
+  <ul>
+    <li><strong>No cost tracking.</strong> Cursor does not report per-session cost data. The cost field in task results will always be zero.</li>
+    <li><strong>No session listing.</strong> You cannot browse previous Cursor sessions from the Band dashboard. The session history view is unavailable.</li>
+    <li><strong>No hook-based status detection.</strong> Cursor does not have a hook system like Claude Code. Band only detects Cursor activity through tasks it submits directly.</li>
+    <li><strong>No user input prompts.</strong> The Cursor adapter does not support intercepting tool approval requests. All tool calls are auto-approved.</li>
+    <li><strong>Model selection.</strong> Cursor uses its own model routing. The <code>model</code> option defaults to <code>"auto"</code>, which lets Cursor choose the best model for each request.</li>
+  </ul>
+
+  <h2>Configuration Options</h2>
+  <p>
+    The Cursor CLI adapter accepts these configuration options:
+  </p>
+  <ul>
+    <li><strong>model</strong> — The model to use for Cursor requests. Defaults to <code>"auto"</code>. Cursor supports its own set of model identifiers.</li>
+    <li><strong>maxTurns</strong> — Maximum number of agentic turns per session (default: 50 when run through Band).</li>
+  </ul>
+
+  <h2>Session Resume</h2>
+  <p>
+    Cursor CLI does support session resume via chat IDs. When a task completes and a
+    follow-up task is queued, Band passes the previous session's chat ID so the agent
+    can continue in the same conversation context. However, you cannot manually browse
+    or select previous sessions from the dashboard as you can with Claude Code.
+  </p>
+</DocsLayout>
