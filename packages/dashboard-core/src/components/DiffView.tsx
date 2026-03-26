@@ -4,6 +4,7 @@ import { EditorView } from "@codemirror/view";
 import { Columns2, Loader2, Rows2, SquareArrowOutUpRight } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAdapter } from "../context";
+import { useIsDark } from "../hooks/use-is-dark";
 import { baseViewerExtensions, loadLanguage } from "../lib/codemirror-setup";
 import { extensionToLanguage, filenameToLanguage } from "../lib/language-map";
 import type { FileStatus, WorkspaceDiffSummary } from "../types";
@@ -48,11 +49,11 @@ function parseDiffFiles(diff: string): ParsedFile[] {
 }
 
 const statusColors: Record<FileStatus, string> = {
-  A: "text-green-400",
-  M: "text-blue-400",
-  D: "text-red-400",
-  R: "text-purple-400",
-  U: "text-yellow-400",
+  A: "text-green-600 dark:text-green-400",
+  M: "text-blue-600 dark:text-blue-400",
+  D: "text-red-600 dark:text-red-400",
+  R: "text-purple-600 dark:text-purple-400",
+  U: "text-yellow-600 dark:text-yellow-400",
 };
 
 function FileStatusBadge({ status }: { status: FileStatus | undefined }) {
@@ -127,6 +128,7 @@ function DiffFileContent({
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | MergeView | null>(null);
+  const isDark = useIsDark();
 
   useEffect(() => {
     const container = containerRef.current;
@@ -149,7 +151,7 @@ function DiffFileContent({
       const { oldText, newText } = buildOldNew(diffLines);
 
       if (viewMode === "split") {
-        const sharedExtensions = [...baseViewerExtensions(), diffTheme];
+        const sharedExtensions = [...baseViewerExtensions(isDark), diffTheme];
         if (langSupport) {
           sharedExtensions.push(langSupport);
         }
@@ -169,7 +171,7 @@ function DiffFileContent({
         });
       } else {
         const extensions = [
-          ...baseViewerExtensions(),
+          ...baseViewerExtensions(isDark),
           unifiedMergeView({
             original: Text.of(oldText.split("\n")),
             mergeControls: false,
@@ -203,7 +205,7 @@ function DiffFileContent({
         viewRef.current = null;
       }
     };
-  }, [hunks, filename, viewMode]);
+  }, [hunks, filename, viewMode, isDark]);
 
   return <div ref={containerRef} />;
 }
@@ -434,10 +436,12 @@ function LegacyDiffView({ workspaceId, active, onStatsChange, onOpenFile }: Diff
             <span className="font-medium text-foreground">{data.stats.filesChanged}</span>{" "}
             {data.stats.filesChanged === 1 ? "file" : "files"} changed
             {data.stats.insertions > 0 && (
-              <span className="ml-2 text-green-400">+{data.stats.insertions}</span>
+              <span className="ml-2 text-green-600 dark:text-green-400">
+                +{data.stats.insertions}
+              </span>
             )}
             {data.stats.deletions > 0 && (
-              <span className="ml-1 text-red-400">-{data.stats.deletions}</span>
+              <span className="ml-1 text-red-600 dark:text-red-400">-{data.stats.deletions}</span>
             )}
           </div>
           <div className="mt-0.5 text-xs text-muted-foreground">
@@ -623,10 +627,14 @@ export function DiffView({ workspaceId, active = true, onStatsChange, onOpenFile
             <span className="font-medium text-foreground">{summary.stats.filesChanged}</span>{" "}
             {summary.stats.filesChanged === 1 ? "file" : "files"} changed
             {summary.stats.insertions > 0 && (
-              <span className="ml-2 text-green-400">+{summary.stats.insertions}</span>
+              <span className="ml-2 text-green-600 dark:text-green-400">
+                +{summary.stats.insertions}
+              </span>
             )}
             {summary.stats.deletions > 0 && (
-              <span className="ml-1 text-red-400">-{summary.stats.deletions}</span>
+              <span className="ml-1 text-red-600 dark:text-red-400">
+                -{summary.stats.deletions}
+              </span>
             )}
           </div>
           <div className="mt-0.5 text-xs text-muted-foreground">

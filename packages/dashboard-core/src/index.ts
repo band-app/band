@@ -23,6 +23,7 @@ export { type WorkspaceTab, WorkspaceTabNav } from "./components/WorkspaceTabNav
 // Context
 export { DashboardProvider, useAdapter, useCapabilities } from "./context";
 export { type HooksSetupState, useHooksSetup } from "./hooks/use-hooks-setup";
+export { useIsDark } from "./hooks/use-is-dark";
 export {
   useAddProject,
   useCreateWorkspace,

@@ -1,6 +1,7 @@
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { useEffect, useRef } from "react";
+import { useIsDark } from "../hooks/use-is-dark";
 import { baseViewerExtensions, loadLanguage } from "../lib/codemirror-setup";
 
 interface CodeMirrorViewerProps {
@@ -21,8 +22,9 @@ export function CodeMirrorViewer({
   const viewRef = useRef<EditorView | null>(null);
   const onEditorViewRef = useRef(onEditorView);
   onEditorViewRef.current = onEditorView;
+  const isDark = useIsDark();
 
-  // Create/recreate the editor when content or language changes
+  // Create/recreate the editor when content, language, or theme changes
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -40,7 +42,7 @@ export function CodeMirrorViewer({
         onEditorViewRef.current?.(null);
       }
 
-      const extensions = [...baseViewerExtensions()];
+      const extensions = [...baseViewerExtensions(isDark)];
       if (langSupport) {
         extensions.push(langSupport);
       }
@@ -68,7 +70,7 @@ export function CodeMirrorViewer({
         onEditorViewRef.current?.(null);
       }
     };
-  }, [content, language]);
+  }, [content, language, isDark]);
 
   return <div ref={containerRef} className={className} />;
 }

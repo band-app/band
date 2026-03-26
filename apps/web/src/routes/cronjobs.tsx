@@ -223,7 +223,7 @@ function LastRunBadge({ status }: { status?: string }) {
   switch (status) {
     case "completed":
       return (
-        <Badge variant="secondary" className="gap-1 text-green-400">
+        <Badge variant="secondary" className="gap-1 text-green-600 dark:text-green-400">
           Completed
         </Badge>
       );
@@ -235,7 +235,7 @@ function LastRunBadge({ status }: { status?: string }) {
       );
     case "skipped":
       return (
-        <Badge variant="secondary" className="gap-1 text-yellow-400">
+        <Badge variant="secondary" className="gap-1 text-yellow-600 dark:text-yellow-400">
           Skipped
         </Badge>
       );

@@ -19,7 +19,7 @@ export function TaskListWidget({ tasks }: { tasks: TaskMap }) {
       <button
         type="button"
         onClick={() => setCollapsed(!collapsed)}
-        className="flex w-full items-center justify-between gap-2 px-2.5 py-1.5 transition-colors hover:bg-white/5"
+        className="flex w-full items-center justify-between gap-2 px-2.5 py-1.5 transition-colors hover:bg-accent/50"
       >
         <div className="flex items-center gap-1.5">
           {collapsed ? (
