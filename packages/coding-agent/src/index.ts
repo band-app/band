@@ -19,6 +19,7 @@ export { createCodingAgent } from "./factory.js";
 export type {
   CodingAgent,
   CodingAgentFeatures,
+  RunSessionOptions,
   SessionListItem,
   SessionMessageItem,
   SkillInfo,

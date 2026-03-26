@@ -104,6 +104,9 @@ enum WorkspacesCmd {
         /// Prompt to pass to the coding agent
         #[arg(long)]
         prompt: Option<String>,
+        /// Maximum number of agentic turns
+        #[arg(long)]
+        max_turns: Option<u32>,
     },
     /// Remove a workspace (git worktree + state cleanup)
     Remove {
@@ -132,6 +135,9 @@ enum TasksCmd {
         /// Prompt text to send to the agent
         #[arg(long)]
         prompt: String,
+        /// Maximum number of agentic turns
+        #[arg(long)]
+        max_turns: Option<u32>,
     },
     /// Cancel a running task
     Cancel {
@@ -293,7 +299,14 @@ fn main() {
                 branch,
                 base,
                 prompt,
-            } => cmd_workspaces_create(&project, &branch, base.as_deref(), prompt.as_deref()),
+                max_turns,
+            } => cmd_workspaces_create(
+                &project,
+                &branch,
+                base.as_deref(),
+                prompt.as_deref(),
+                max_turns,
+            ),
             WorkspacesCmd::Remove { project, branch } => cmd_workspaces_remove(&project, &branch),
         },
         Commands::Tasks { cmd } => match cmd {
@@ -303,7 +316,8 @@ fn main() {
             TasksCmd::Create {
                 workspace_id,
                 prompt,
-            } => cmd_tasks_create(&workspace_id, &prompt),
+                max_turns,
+            } => cmd_tasks_create(&workspace_id, &prompt, max_turns),
             TasksCmd::Cancel { task_id } => cmd_tasks_cancel(&task_id),
             TasksCmd::Rerun { task_id } => cmd_tasks_rerun(&task_id),
             TasksCmd::Watch { .. } => unreachable!(),
@@ -536,6 +550,7 @@ fn cmd_workspaces_create(
     branch: &str,
     base: Option<&str>,
     prompt: Option<&str>,
+    max_turns: Option<u32>,
 ) -> Result<CommandResult, String> {
     validate::validate_name(project, "Project name")?;
     validate::validate_name(branch, "Branch name")?;
@@ -553,6 +568,9 @@ fn cmd_workspaces_create(
     }
     if let Some(prompt) = prompt {
         input["prompt"] = serde_json::json!(prompt);
+    }
+    if let Some(max_turns) = max_turns {
+        input["maxTurns"] = serde_json::json!(max_turns);
     }
     let data = client.trpc_mutate("workspaces.create", &input)?;
     let path = data.get("path").and_then(|p| p.as_str()).unwrap_or("");
@@ -635,15 +653,20 @@ fn cmd_tasks_list(project: Option<&str>, status: Option<&str>) -> Result<Command
     })
 }
 
-fn cmd_tasks_create(workspace_id: &str, prompt: &str) -> Result<CommandResult, String> {
+fn cmd_tasks_create(
+    workspace_id: &str,
+    prompt: &str,
+    max_turns: Option<u32>,
+) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
-    let data = client.trpc_mutate(
-        "tasks.submit",
-        &serde_json::json!({
-            "workspaceId": workspace_id,
-            "prompt": prompt,
-        }),
-    )?;
+    let mut input = serde_json::json!({
+        "workspaceId": workspace_id,
+        "prompt": prompt,
+    });
+    if let Some(max_turns) = max_turns {
+        input["maxTurns"] = serde_json::json!(max_turns);
+    }
+    let data = client.trpc_mutate("tasks.submit", &input)?;
 
     let id = data.get("id").and_then(|i| i.as_str()).unwrap_or("");
     let ws = data

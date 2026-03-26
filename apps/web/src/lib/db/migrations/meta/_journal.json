@@ -36,6 +36,13 @@
       "when": 1774340938871,
       "tag": "0004_handy_ricochet",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1774511963227,
+      "tag": "0005_daffy_clint_barton",
+      "breakpoints": true
     }
   ]
 }

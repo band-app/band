@@ -5,7 +5,7 @@ import { createLogger } from "@band-app/logger";
 import type { GeminiCliConfig } from "../config.js";
 import type { AgentEvent } from "../events.js";
 import { discoverSkills } from "../skills.js";
-import type { CodingAgent, SkillInfo } from "../types.js";
+import type { CodingAgent, RunSessionOptions, SkillInfo } from "../types.js";
 
 const log = createLogger("coding-agent:gemini-cli");
 
@@ -37,13 +37,18 @@ export class GeminiCliAdapter implements CodingAgent {
     }
   }
 
-  async *runSession(prompt: string, _sessionId?: string): AsyncGenerator<AgentEvent> {
+  async *runSession(
+    prompt: string,
+    _sessionId?: string,
+    options?: RunSessionOptions,
+  ): AsyncGenerator<AgentEvent> {
+    const effectiveMaxTurns = options?.maxTurns ?? this.maxTurns;
     log.info(
       {
         prompt: prompt.slice(0, 100),
         model: this.model,
         cwd: this.workspaceDir,
-        maxTurns: this.maxTurns,
+        maxTurns: effectiveMaxTurns,
       },
       "runSession starting",
     );

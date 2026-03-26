@@ -2,7 +2,7 @@ import { createLogger } from "@band-app/logger";
 import { CursorAgent } from "@nothumanwork/cursor-agents-sdk";
 import type { CursorCliConfig } from "../config.js";
 import type { AgentEvent } from "../events.js";
-import type { CodingAgent } from "../types.js";
+import type { CodingAgent, RunSessionOptions } from "../types.js";
 
 const log = createLogger("coding-agent:cursor-cli");
 
@@ -72,7 +72,11 @@ export class CursorCliAdapter implements CodingAgent {
     }
   }
 
-  async *runSession(prompt: string, sessionId?: string): AsyncGenerator<AgentEvent> {
+  async *runSession(
+    prompt: string,
+    sessionId?: string,
+    _options?: RunSessionOptions,
+  ): AsyncGenerator<AgentEvent> {
     log.info(
       {
         prompt: prompt.slice(0, 100),

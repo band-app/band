@@ -22,7 +22,7 @@ function getAgentConfig(worktreePath: string): CodingAgentConfig {
   return {
     type: agentType,
     workspaceDir: worktreePath,
-    maxTurns: 50,
+    maxTurns: 100,
     additionalDirectories: [join(bandHome(), "uploads")],
     options: {
       executablePath: settings.codingAgent?.command,

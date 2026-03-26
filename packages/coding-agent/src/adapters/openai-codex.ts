@@ -2,7 +2,7 @@ import { createLogger } from "@band-app/logger";
 import type { OpenAICodexConfig } from "../config.js";
 import type { AgentEvent } from "../events.js";
 import { discoverSkills } from "../skills.js";
-import type { CodingAgent, SkillInfo } from "../types.js";
+import type { CodingAgent, RunSessionOptions, SkillInfo } from "../types.js";
 
 const log = createLogger("coding-agent:openai-codex");
 
@@ -34,14 +34,19 @@ export class OpenAICodexAdapter implements CodingAgent {
     }
   }
 
-  async *runSession(prompt: string, sessionId?: string): AsyncGenerator<AgentEvent> {
+  async *runSession(
+    prompt: string,
+    sessionId?: string,
+    options?: RunSessionOptions,
+  ): AsyncGenerator<AgentEvent> {
+    const effectiveMaxTurns = options?.maxTurns ?? this.maxTurns;
     log.info(
       {
         prompt: prompt.slice(0, 100),
         sessionId,
         model: this.model,
         cwd: this.workspaceDir,
-        maxTurns: this.maxTurns,
+        maxTurns: effectiveMaxTurns,
       },
       "runSession starting",
     );
@@ -65,7 +70,7 @@ export class OpenAICodexAdapter implements CodingAgent {
 
     const stream = thread.runStreamed(prompt, {
       cwd: this.workspaceDir,
-      maxTurns: this.maxTurns,
+      maxTurns: effectiveMaxTurns,
       sandbox: this.sandboxMode,
     });
 

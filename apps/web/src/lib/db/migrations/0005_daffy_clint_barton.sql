@@ -1,0 +1,1 @@
+ALTER TABLE `tasks` ADD `max_turns` integer;

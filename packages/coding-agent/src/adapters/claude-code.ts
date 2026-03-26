@@ -6,6 +6,7 @@ import type { AgentEvent } from "../events.js";
 import { discoverSkills } from "../skills.js";
 import type {
   CodingAgent,
+  RunSessionOptions,
   SessionListItem,
   SessionMessageItem,
   SkillInfo,
@@ -53,7 +54,12 @@ export class ClaudeCodeAdapter implements CodingAgent {
     }
   }
 
-  async *runSession(prompt: string, sessionId?: string): AsyncGenerator<AgentEvent> {
+  async *runSession(
+    prompt: string,
+    sessionId?: string,
+    options?: RunSessionOptions,
+  ): AsyncGenerator<AgentEvent> {
+    const effectiveMaxTurns = options?.maxTurns ?? this.maxTurns;
     const env = { ...process.env };
     env.CLAUDECODE = undefined;
     env.CLAUDE_CODE_ENTRYPOINT = undefined;
@@ -65,7 +71,7 @@ export class ClaudeCodeAdapter implements CodingAgent {
         sessionId,
         model: this.model,
         cwd: this.workspaceDir,
-        maxTurns: this.maxTurns,
+        maxTurns: effectiveMaxTurns,
         claudeCodePath: this.executablePath || "(default)",
       },
       "runSession starting",
@@ -107,7 +113,7 @@ export class ClaudeCodeAdapter implements CodingAgent {
       options: {
         cwd: this.workspaceDir,
         model: this.model,
-        maxTurns: this.maxTurns,
+        maxTurns: effectiveMaxTurns,
         resume: sessionId,
         canUseTool,
         env,

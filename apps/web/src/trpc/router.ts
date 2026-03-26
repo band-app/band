@@ -240,6 +240,7 @@ const workspacesRouter = t.router({
         branch: z.string(),
         base: z.string().optional(),
         prompt: z.string().optional(),
+        maxTurns: z.number().int().positive().optional(),
       }),
     )
     .mutation(({ input }) => {
@@ -281,7 +282,7 @@ const workspacesRouter = t.router({
       // If a prompt is provided, defer task submission until setup completes
       // so the agent has dependencies installed.
       const onSetupComplete = input.prompt
-        ? () => submitTask(workspaceId, input.prompt!)
+        ? () => submitTask(workspaceId, input.prompt!, undefined, undefined, input.maxTurns)
         : undefined;
 
       runSetup(workspaceId, worktreePath, proj.path, onSetupComplete);
@@ -1002,6 +1003,7 @@ const tasksRouter = t.router({
         workspaceId: z.string(),
         prompt: z.string(),
         sessionId: z.string().optional(),
+        maxTurns: z.number().int().positive().optional(),
         files: z
           .array(
             z.object({
@@ -1024,7 +1026,13 @@ const tasksRouter = t.router({
       }
 
       try {
-        const task = submitTask(input.workspaceId, input.prompt, input.sessionId, agentPrompt);
+        const task = submitTask(
+          input.workspaceId,
+          input.prompt,
+          input.sessionId,
+          agentPrompt,
+          input.maxTurns,
+        );
         return { id: task.id, workspaceId: task.workspaceId, sessionId: task.sessionId };
       } catch (err) {
         if (err instanceof TaskConflictError) {
@@ -1074,7 +1082,13 @@ const tasksRouter = t.router({
     }
 
     try {
-      const task = submitTask(record.workspaceId, record.prompt);
+      const task = submitTask(
+        record.workspaceId,
+        record.prompt,
+        undefined,
+        undefined,
+        record.maxTurns,
+      );
       return { workspaceId: task.workspaceId, sessionId: task.sessionId };
     } catch (err) {
       if (err instanceof TaskConflictError) {

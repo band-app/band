@@ -25,6 +25,7 @@ export interface TaskInfo {
   startedAt: number;
   completedAt?: number;
   prompt: string;
+  maxTurns?: number;
 }
 
 type Listener = (chunk: UIMessageChunk) => void;
@@ -63,6 +64,7 @@ function persistTask(task: InternalTask): void {
       sessionId: task.sessionId,
       startedAt: task.startedAt,
       completedAt: task.completedAt,
+      maxTurns: task.maxTurns,
     });
   } catch (err) {
     log.warn({ err, taskId: task.taskRecordId }, "failed to persist task");
@@ -91,6 +93,7 @@ export function submitTask(
   prompt: string,
   sessionId?: string,
   agentPrompt?: string,
+  maxTurns?: number,
 ): TaskInfo {
   const workspace = resolveWorkspace(workspaceId);
   if (!workspace) {
@@ -115,6 +118,7 @@ export function submitTask(
     prompt,
     taskRecordId: generateTaskId(),
     agentPrompt: agentPrompt ?? prompt,
+    maxTurns,
     chunks: [
       // Emit user-facing prompt so reconnecting clients can reconstruct the user message
       { type: "data-prompt", data: { text: prompt } } as UIMessageChunk,
@@ -218,7 +222,8 @@ async function runTask(workspaceId: string, task: InternalTask) {
   }
 
   try {
-    for await (const event of agent.runSession(task.agentPrompt, task.sessionId)) {
+    const sessionOptions = task.maxTurns ? { maxTurns: task.maxTurns } : undefined;
+    for await (const event of agent.runSession(task.agentPrompt, task.sessionId, sessionOptions)) {
       log.info({ workspaceId, eventType: event.type }, "task event");
 
       switch (event.type) {
@@ -418,6 +423,7 @@ function toTaskInfo(task: InternalTask): TaskInfo {
     startedAt: task.startedAt,
     completedAt: task.completedAt,
     prompt: task.prompt,
+    maxTurns: task.maxTurns,
   };
 }
 

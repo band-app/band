@@ -70,7 +70,7 @@ JSON output: `{"workspaces": [{"project": "...", "branch": "...", "path": "..."}
 ### Create a workspace
 
 ```sh
-band workspaces create <project> <branch> [--base <branch>] [--prompt <text>]
+band workspaces create <project> <branch> [--base <branch>] [--prompt <text>] [--max-turns <N>]
 ```
 
 Returns the worktree path. Idempotent — creating an existing workspace returns its path. Runs `.band/config.json` `setup` script if present (non-fatal).
@@ -146,10 +146,10 @@ JSON output: `{"tasks": [{"id": "...", "status": "...", "project": "...", "branc
 ### Create a task
 
 ```sh
-band tasks create <workspace_id> --prompt <text>
+band tasks create <workspace_id> --prompt <text> [--max-turns <N>]
 ```
 
-Submits a new task to the coding agent. Returns the task ID.
+Submits a new task to the coding agent. `--max-turns` sets the maximum number of agentic turns (default: 100). Returns the task ID.
 JSON output: `{"id": "...", "workspaceId": "..."}`
 
 ### Cancel a task

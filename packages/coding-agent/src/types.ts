@@ -36,11 +36,19 @@ export interface SkillInfo {
   argumentHint?: string;
 }
 
+export interface RunSessionOptions {
+  maxTurns?: number;
+}
+
 export interface CodingAgent {
   readonly name: string;
   readonly supportedFeatures: CodingAgentFeatures;
   onUserInputNeeded?: (request: UserInputRequest) => Promise<Record<string, string>>;
-  runSession(prompt: string, sessionId?: string): AsyncGenerator<AgentEvent>;
+  runSession(
+    prompt: string,
+    sessionId?: string,
+    options?: RunSessionOptions,
+  ): AsyncGenerator<AgentEvent>;
   abort?(): void;
   listSessions?(dir: string): Promise<SessionListItem[]>;
   getSessionMessages?(
