@@ -57,11 +57,6 @@ export const tasks = sqliteTable("tasks", {
   mode: text("mode"),
 });
 
-export const settings = sqliteTable("settings", {
-  id: integer("id").primaryKey().default(1),
-  data: text("data").notNull().default("{}"),
-});
-
 export const cronjobs = sqliteTable("cronjobs", {
   id: text("id").primaryKey(),
   fileKey: text("file_key").notNull(),

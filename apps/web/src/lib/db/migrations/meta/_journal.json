@@ -50,6 +50,13 @@
       "when": 1774599447027,
       "tag": "0006_lumpy_morph",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1774857600000,
+      "tag": "0007_drop_settings",
+      "breakpoints": true
     }
   ]
 }

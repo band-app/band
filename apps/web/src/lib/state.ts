@@ -1,13 +1,13 @@
 import { randomBytes } from "node:crypto";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { toWorkspaceId } from "@band-app/dashboard-core";
 import { eq } from "drizzle-orm";
 import { getDb } from "./db/connection";
 import {
   branchStatuses as branchStatusesTable,
   projects as projectsTable,
-  settings as settingsTable,
   workspaceStatuses as workspaceStatusesTable,
   worktrees as worktreesTable,
 } from "./db/schema";
@@ -52,6 +52,11 @@ export interface LabelDefinition {
   color: string;
 }
 
+export interface NotificationSettings {
+  soundOnNeedsAttention?: boolean;
+  sound?: string;
+}
+
 export interface Settings {
   worktreesDir?: string;
   defaults?: unknown;
@@ -59,8 +64,13 @@ export interface Settings {
     type: string;
     command?: string;
   };
+  webServerPort?: number;
+  notifications?: NotificationSettings;
   labels?: LabelDefinition[];
   tokenSecret?: string;
+  autoStartTunnel?: boolean;
+  /** Extra fields not explicitly modeled (e.g. Tauri app definitions). Preserved across read/write. */
+  [key: string]: unknown;
 }
 
 export function bandHome(): string {
@@ -129,21 +139,36 @@ export function saveState(state: AppState): void {
   });
 }
 
+function settingsFile(): string {
+  return join(bandHome(), "settings.json");
+}
+
 export function loadSettings(): Settings {
-  const db = getDb();
-  const row = db.select().from(settingsTable).where(eq(settingsTable.id, 1)).get();
-  if (row) {
-    return JSON.parse(row.data) as Settings;
+  try {
+    const data = readFileSync(settingsFile(), "utf-8");
+    return JSON.parse(data) as Settings;
+  } catch {
+    return {};
   }
-  return {};
 }
 
 export function saveSettings(settings: Settings): void {
-  const db = getDb();
-  db.insert(settingsTable)
-    .values({ id: 1, data: JSON.stringify(settings) })
-    .onConflictDoUpdate({ target: settingsTable.id, set: { data: JSON.stringify(settings) } })
-    .run();
+  const filePath = settingsFile();
+  // Merge with existing file contents to preserve unknown fields (e.g. Tauri extras)
+  let existing: Record<string, unknown> = {};
+  try {
+    existing = JSON.parse(readFileSync(filePath, "utf-8"));
+  } catch {
+    // File doesn't exist or is invalid — start fresh
+  }
+  const merged = { ...existing, ...settings };
+  const data = JSON.stringify(merged, null, 2) + "\n";
+  // Atomic write: write to temp file then rename
+  const dir = dirname(filePath);
+  mkdirSync(dir, { recursive: true });
+  const tmpPath = filePath + ".tmp." + process.pid;
+  writeFileSync(tmpPath, data, "utf-8");
+  renameSync(tmpPath, filePath);
 }
 
 export function getOrCreateToken(): string {
