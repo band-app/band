@@ -296,8 +296,8 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
               </DropdownMenuContent>
             </DropdownMenu>
             <p className="text-xs text-muted-foreground">
-              Choose between system default, light, and dark mode. System follows your OS preference.
-              You can also cycle through themes using the toolbar button.
+              Choose between system default, light, and dark mode. System follows your OS
+              preference. You can also cycle through themes using the toolbar button.
             </p>
           </div>
         </div>
@@ -478,9 +478,7 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
           <div className="space-y-2">
             <Label>Notification sound</Label>
             <div className="flex items-center justify-between">
-              <span className="text-xs text-muted-foreground">
-                Play when agent needs attention
-              </span>
+              <span className="text-xs text-muted-foreground">Play when agent needs attention</span>
               <Switch
                 id="sound-needs-attention"
                 checked={soundOnNeedsAttention}
@@ -666,9 +664,7 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
               >
                 <ChevronLeft className="size-5" />
               </Button>
-              <h2 className="text-base font-semibold flex-1">
-                {SECTION_TITLES[activeSection]}
-              </h2>
+              <h2 className="text-base font-semibold flex-1">{SECTION_TITLES[activeSection]}</h2>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button

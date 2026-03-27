@@ -145,7 +145,12 @@ export function CronjobsPageContent() {
           >
             <RefreshCw className="size-3.5" />
           </button>
-          <Button variant="outline" size="xs" className="hidden sm:inline-flex" onClick={handleCreate}>
+          <Button
+            variant="outline"
+            size="xs"
+            className="hidden sm:inline-flex"
+            onClick={handleCreate}
+          >
             <Plus className="size-3" />
             New Cronjob
           </Button>

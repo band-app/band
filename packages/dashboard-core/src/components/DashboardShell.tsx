@@ -250,12 +250,7 @@ export function DashboardShell({ toolbarExtra }: DashboardShellProps) {
           <span className="text-blue-700 dark:text-blue-200">
             Install Claude Code hooks for agent status detection
           </span>
-          <Button
-            variant="outline"
-            size="sm"
-            className="shrink-0 text-xs"
-            onClick={installHooks}
-          >
+          <Button variant="outline" size="sm" className="shrink-0 text-xs" onClick={installHooks}>
             Install
           </Button>
         </div>

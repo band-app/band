@@ -163,11 +163,21 @@ export function TasksPageContent() {
           >
             <RefreshCw className="size-3.5" />
           </button>
-          <Button variant="outline" size="xs" className="hidden sm:inline-flex" onClick={() => setShowNewTask(true)}>
+          <Button
+            variant="outline"
+            size="xs"
+            className="hidden sm:inline-flex"
+            onClick={() => setShowNewTask(true)}
+          >
             <Plus className="size-3" />
             New Task
           </Button>
-          <Button variant="outline" size="icon-xs" className="sm:hidden" onClick={() => setShowNewTask(true)}>
+          <Button
+            variant="outline"
+            size="icon-xs"
+            className="sm:hidden"
+            onClick={() => setShowNewTask(true)}
+          >
             <Plus className="size-3.5" />
           </Button>
         </div>
