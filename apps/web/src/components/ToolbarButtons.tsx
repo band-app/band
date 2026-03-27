@@ -1,5 +1,9 @@
 import {
   Button,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -8,32 +12,34 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@band-app/ui";
-import { useNavigate } from "@tanstack/react-router";
 import { ListTodo, Timer, Zap } from "lucide-react";
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { isTauri } from "../lib/is-tauri";
+import { CronjobsPageContent } from "./CronjobsPageContent";
+import { TasksPageContent } from "./TasksPageContent";
 import { TunnelToolbarButton } from "./TunnelToolbarButton";
 
 export function ToolbarButtons() {
-  const navigate = useNavigate();
+  const [showTasksDialog, setShowTasksDialog] = useState(false);
+  const [showCronjobsDialog, setShowCronjobsDialog] = useState(false);
 
   const handleTasksClick = useCallback(async () => {
     if (isTauri) {
       const { invoke } = await import("@tauri-apps/api/core");
       await invoke("open_tasks_window");
     } else {
-      navigate({ to: "/tasks" });
+      setShowTasksDialog(true);
     }
-  }, [navigate]);
+  }, []);
 
   const handleCronjobsClick = useCallback(async () => {
     if (isTauri) {
       const { invoke } = await import("@tauri-apps/api/core");
       await invoke("open_cronjobs_window");
     } else {
-      navigate({ to: "/cronjobs" });
+      setShowCronjobsDialog(true);
     }
-  }, [navigate]);
+  }, []);
 
   return (
     <>
@@ -60,6 +66,24 @@ export function ToolbarButtons() {
         </DropdownMenuContent>
       </DropdownMenu>
       <TunnelToolbarButton />
+
+      <Dialog open={showTasksDialog} onOpenChange={setShowTasksDialog}>
+        <DialogContent className="sm:max-w-6xl h-[80vh] flex flex-col p-0 gap-0">
+          <DialogHeader className="px-6 pt-6 pb-4 border-b border-border/50 shrink-0">
+            <DialogTitle>Tasks</DialogTitle>
+          </DialogHeader>
+          <TasksPageContent />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showCronjobsDialog} onOpenChange={setShowCronjobsDialog}>
+        <DialogContent className="sm:max-w-6xl h-[80vh] flex flex-col p-0 gap-0">
+          <DialogHeader className="px-6 pt-6 pb-4 border-b border-border/50 shrink-0">
+            <DialogTitle>Cronjobs</DialogTitle>
+          </DialogHeader>
+          <CronjobsPageContent />
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

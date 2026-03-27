@@ -73,6 +73,7 @@ pub fn run() {
             commands::webserver::webserver_stop,
             commands::window::open_tasks_window,
             commands::window::open_cronjobs_window,
+            commands::window::open_settings_window,
             commands::window::get_app_title,
         ])
         .setup(move |app| {
@@ -152,6 +153,10 @@ pub fn run() {
                     if let Some(cron_win) = app_handle_for_close.get_webview_window("cronjobs") {
                         let _ = cron_win.destroy();
                     }
+                    if let Some(settings_win) = app_handle_for_close.get_webview_window("settings")
+                    {
+                        let _ = settings_win.destroy();
+                    }
                     web_proc.kill();
                     webserver::kill_port_sync(webserver::get_configured_port());
                 }
@@ -193,6 +198,9 @@ pub fn run() {
             }
             if let Some(cron_win) = app_handle.get_webview_window("cronjobs") {
                 let _ = cron_win.destroy();
+            }
+            if let Some(settings_win) = app_handle.get_webview_window("settings") {
+                let _ = settings_win.destroy();
             }
             web_proc.kill();
             webserver::kill_port_sync(webserver::get_configured_port());

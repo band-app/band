@@ -12,6 +12,7 @@ import {
   Outlet,
   Scripts,
   useRouter,
+  useRouterState,
 } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { ToolbarButtons } from "../components/ToolbarButtons";
@@ -55,14 +56,23 @@ function NotFound() {
   );
 }
 
+/** Blocking script injected into <head> to apply the theme before first paint.
+ *  Reads a cached theme value from localStorage (written by ThemeSync). */
+const THEME_INIT_SCRIPT = `(function(){try{var t=localStorage.getItem("band-theme")||"dark";var d=document.documentElement;if(t==="system"){if(window.matchMedia("(prefers-color-scheme:dark)").matches)d.classList.add("dark");else d.classList.remove("dark")}else if(t==="dark"){d.classList.add("dark")}else{d.classList.remove("dark")}}catch(e){document.documentElement.classList.add("dark")}})()`;
+
 /** Syncs the "dark" class on <html> with the persisted theme setting.
- *  Runs for ALL pages (including standalone Tauri windows like tasks/cronjobs). */
+ *  Runs for ALL pages (including standalone Tauri windows like tasks/cronjobs).
+ *  Also caches the theme in localStorage so the blocking script can use it. */
 function ThemeSync() {
   const { settings } = useSettingsQuery();
-  const theme = settings.theme ?? "system";
+  const theme = settings.theme ?? "dark";
 
   useEffect(() => {
     const root = document.documentElement;
+
+    try {
+      localStorage.setItem("band-theme", theme);
+    } catch {}
 
     const apply = (isDark: boolean) => {
       if (isDark) {
@@ -86,9 +96,13 @@ function ThemeSync() {
   return null;
 }
 
+const STANDALONE_ROUTES = ["/tasks", "/cronjobs", "/settings"];
+
 function AppShell() {
   const isDesktop = useIsDesktop() && !isTauri;
   const router = useRouter();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const isStandalone = STANDALONE_ROUTES.includes(pathname);
 
   // Wire up client-side navigation for WebCapabilities
   useEffect(() => {
@@ -100,7 +114,7 @@ function AppShell() {
     };
   }, [router]);
 
-  if (!isDesktop) {
+  if (!isDesktop || isStandalone) {
     return <Outlet />;
   }
 
@@ -121,6 +135,8 @@ function RootLayout() {
     <html lang="en">
       <head>
         <HeadContent />
+        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: static inline script to prevent theme flash */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
       <body>
         <DashboardProvider adapter={adapter} capabilities={capabilities}>
