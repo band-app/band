@@ -216,7 +216,7 @@ test("new task dialog opens and shows project/workspace selectors", async ({ pag
   await expect(page.getByText("Prompt", { exact: true })).toBeVisible();
 });
 
-test("tasks page has header with title", async ({ page }) => {
+test("tasks page renders filter controls", async ({ page }) => {
   await page.goto(`${server.url}/tasks?token=${TOKEN}`);
-  await expect(page.locator("h1", { hasText: "Tasks" })).toBeVisible();
+  await expect(page.getByText("All Projects")).toBeVisible();
 });
