@@ -1,4 +1,3 @@
-use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -32,25 +31,13 @@ pub fn band_home() -> PathBuf {
 }
 
 pub fn load_settings() -> Result<Settings, String> {
-    let db_path = band_home().join("band.db");
-    if !db_path.exists() {
+    let settings_path = band_home().join("settings.json");
+    if !settings_path.exists() {
         return Ok(Settings::default());
     }
 
-    let conn = Connection::open_with_flags(&db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-        .map_err(|e| format!("Failed to open database: {e}"))?;
+    let data =
+        std::fs::read_to_string(&settings_path).map_err(|e| format!("Failed to read settings: {e}"))?;
 
-    // The settings table may not exist yet if migrations haven't run
-    let data: Option<String> = conn
-        .query_row("SELECT data FROM settings WHERE id = 1", [], |row| {
-            row.get(0)
-        })
-        .ok();
-
-    match data {
-        Some(json) => {
-            serde_json::from_str(&json).map_err(|e| format!("Failed to parse settings: {e}"))
-        }
-        None => Ok(Settings::default()),
-    }
+    serde_json::from_str(&data).map_err(|e| format!("Failed to parse settings: {e}"))
 }
