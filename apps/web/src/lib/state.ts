@@ -162,11 +162,11 @@ export function saveSettings(settings: Settings): void {
     // File doesn't exist or is invalid — start fresh
   }
   const merged = { ...existing, ...settings };
-  const data = JSON.stringify(merged, null, 2) + "\n";
+  const data = `${JSON.stringify(merged, null, 2)}\n`;
   // Atomic write: write to temp file then rename
   const dir = dirname(filePath);
   mkdirSync(dir, { recursive: true });
-  const tmpPath = filePath + ".tmp." + process.pid;
+  const tmpPath = `${filePath}.tmp.${process.pid}`;
   writeFileSync(tmpPath, data, "utf-8");
   renameSync(tmpPath, filePath);
 }
