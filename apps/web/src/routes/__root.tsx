@@ -12,6 +12,7 @@ import {
   Outlet,
   Scripts,
   useRouter,
+  useRouterState,
 } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { ToolbarButtons } from "../components/ToolbarButtons";
@@ -86,9 +87,13 @@ function ThemeSync() {
   return null;
 }
 
+const STANDALONE_ROUTES = ["/tasks", "/cronjobs", "/settings"];
+
 function AppShell() {
   const isDesktop = useIsDesktop() && !isTauri;
   const router = useRouter();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const isStandalone = STANDALONE_ROUTES.includes(pathname);
 
   // Wire up client-side navigation for WebCapabilities
   useEffect(() => {
@@ -100,7 +105,7 @@ function AppShell() {
     };
   }, [router]);
 
-  if (!isDesktop) {
+  if (!isDesktop || isStandalone) {
     return <Outlet />;
   }
 
