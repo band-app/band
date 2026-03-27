@@ -43,6 +43,13 @@
       "when": 1774511963227,
       "tag": "0005_daffy_clint_barton",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1774599447027,
+      "tag": "0006_lumpy_morph",
+      "breakpoints": true
     }
   ]
 }

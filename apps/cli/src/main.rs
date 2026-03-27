@@ -107,6 +107,9 @@ enum WorkspacesCmd {
         /// Maximum number of agentic turns
         #[arg(long)]
         max_turns: Option<u32>,
+        /// Agent mode (e.g. 'plan', 'edit')
+        #[arg(long)]
+        mode: Option<String>,
     },
     /// Remove a workspace (git worktree + state cleanup)
     Remove {
@@ -138,6 +141,9 @@ enum TasksCmd {
         /// Maximum number of agentic turns
         #[arg(long)]
         max_turns: Option<u32>,
+        /// Agent mode (e.g. 'plan', 'edit')
+        #[arg(long)]
+        mode: Option<String>,
     },
     /// Cancel a running task
     Cancel {
@@ -300,12 +306,14 @@ fn main() {
                 base,
                 prompt,
                 max_turns,
+                mode,
             } => cmd_workspaces_create(
                 &project,
                 &branch,
                 base.as_deref(),
                 prompt.as_deref(),
                 max_turns,
+                mode.as_deref(),
             ),
             WorkspacesCmd::Remove { project, branch } => cmd_workspaces_remove(&project, &branch),
         },
@@ -317,7 +325,8 @@ fn main() {
                 workspace_id,
                 prompt,
                 max_turns,
-            } => cmd_tasks_create(&workspace_id, &prompt, max_turns),
+                mode,
+            } => cmd_tasks_create(&workspace_id, &prompt, max_turns, mode.as_deref()),
             TasksCmd::Cancel { task_id } => cmd_tasks_cancel(&task_id),
             TasksCmd::Rerun { task_id } => cmd_tasks_rerun(&task_id),
             TasksCmd::Watch { .. } => unreachable!(),
@@ -551,6 +560,7 @@ fn cmd_workspaces_create(
     base: Option<&str>,
     prompt: Option<&str>,
     max_turns: Option<u32>,
+    mode: Option<&str>,
 ) -> Result<CommandResult, String> {
     validate::validate_name(project, "Project name")?;
     validate::validate_name(branch, "Branch name")?;
@@ -571,6 +581,9 @@ fn cmd_workspaces_create(
     }
     if let Some(max_turns) = max_turns {
         input["maxTurns"] = serde_json::json!(max_turns);
+    }
+    if let Some(mode) = mode {
+        input["mode"] = serde_json::json!(mode);
     }
     let data = client.trpc_mutate("workspaces.create", &input)?;
     let path = data.get("path").and_then(|p| p.as_str()).unwrap_or("");
@@ -657,6 +670,7 @@ fn cmd_tasks_create(
     workspace_id: &str,
     prompt: &str,
     max_turns: Option<u32>,
+    mode: Option<&str>,
 ) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
     let mut input = serde_json::json!({
@@ -665,6 +679,9 @@ fn cmd_tasks_create(
     });
     if let Some(max_turns) = max_turns {
         input["maxTurns"] = serde_json::json!(max_turns);
+    }
+    if let Some(mode) = mode {
+        input["mode"] = serde_json::json!(mode);
     }
     let data = client.trpc_mutate("tasks.submit", &input)?;
 
@@ -1321,6 +1338,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "branch", "type": "string", "required": true, "positional": true, "description": "Branch name"},
                 {"name": "--base", "type": "string", "required": false, "description": "Base branch to create from (defaults to project's default branch)"},
                 {"name": "--prompt", "type": "string", "required": false, "description": "Prompt to pass to the coding agent"},
+                {"name": "--mode", "type": "string", "required": false, "description": "Agent mode (e.g. 'plan', 'edit')"},
             ],
             "notes": "Returns the worktree path. Idempotent — creating an existing workspace returns its path. Runs `.band/config.json` `setup` script if present (non-fatal).\n\n**Always use `--prompt` when the user wants work to begin immediately.** This submits a task to the coding agent right after workspace creation, so the agent starts working without a separate step. Only omit `--prompt` when the user explicitly wants to create the workspace for manual/later use.\n\nWhen to use `--prompt` (most cases):\n```sh\n# User says \"create a workspace and implement X\" or \"start working on X\"\nband workspaces create my-app feat/auth --prompt \"Implement GitHub issue #42: Add JWT authentication\"\n\n# User says \"create a workspace for issue #99 and start implementing\"\nband workspaces create my-app fix/bug-99 --prompt \"Fix issue #99: login redirect loop. See https://github.com/org/repo/issues/99\"\n```\n\nWhen to omit `--prompt` (rare — user explicitly wants no task):\n```sh\n# User says \"just create a workspace, I'll work on it myself\"\nband workspaces create my-app feat/experiment\n```\n\n**Do NOT create a workspace without `--prompt` and then separately run `band tasks create`.** That is two steps for what `--prompt` does in one."
         }),
@@ -1372,6 +1390,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "parameters": [
                 {"name": "workspace_id", "type": "string", "required": true, "positional": true, "description": "Workspace ID"},
                 {"name": "--prompt", "type": "string", "required": true, "description": "Prompt text to send to the agent"},
+                {"name": "--mode", "type": "string", "required": false, "description": "Agent mode (e.g. 'plan', 'edit')"},
             ],
             "notes": "Submits a new task to the coding agent. Returns the task ID.\nJSON output: `{\"id\": \"...\", \"workspaceId\": \"...\"}`"
         }),

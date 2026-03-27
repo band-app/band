@@ -1,7 +1,14 @@
 import { useChat } from "@ai-sdk/react";
-import { Badge } from "@band-app/ui";
+import {
+  Badge,
+  cn,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@band-app/ui";
 import { getToolName, isToolUIPart } from "ai";
-import { Bot, Clock, Loader2, X } from "lucide-react";
+import { Bot, ChevronDown, Clock, Loader2, X } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { TaskChatTransport } from "../lib/task-chat-transport";
 import { trpc } from "../lib/trpc-client";
@@ -163,6 +170,15 @@ export function ChatView({
       .catch(() => setSkills([]));
   }, [workspaceId]);
 
+  const [modes, setModes] = useState<{ id: string; name: string; description?: string }[]>([]);
+  const [selectedMode, setSelectedMode] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    trpc.modes.list
+      .query({ workspaceId })
+      .then((data) => setModes(data.modes as { id: string; name: string; description?: string }[]))
+      .catch(() => setModes([]));
+  }, [workspaceId]);
+
   const [queuedMessages, setQueuedMessages] = useState<string[]>([]);
 
   // Subscribe to queue state changes via a dedicated tRPC subscription.
@@ -185,6 +201,10 @@ export function ChatView({
     () => new TaskChatTransport(workspaceId, () => sessionIdRef.current),
     [workspaceId],
   );
+
+  useEffect(() => {
+    transport.mode = selectedMode;
+  }, [transport, selectedMode]);
 
   const { messages, sendMessage, status, setMessages, stop } = useChat({
     id: workspaceId,
@@ -625,7 +645,12 @@ export function ChatView({
             onPreviousMessage={getLastUserMessage}
           />
           <PromptInputActions>
-            <PromptInputAttach />
+            <div className="flex items-center gap-0.5">
+              <PromptInputAttach />
+              {modes.length > 0 && (
+                <ModeMenu modes={modes} selected={selectedMode} onSelect={setSelectedMode} />
+              )}
+            </div>
             <PromptInputSubmit
               status={status}
               onStop={handleStop}
@@ -635,6 +660,48 @@ export function ChatView({
         </PromptInput>
       </div>
     </div>
+  );
+}
+
+function ModeMenu({
+  modes,
+  selected,
+  onSelect,
+}: {
+  modes: { id: string; name: string; description?: string }[];
+  selected: string | undefined;
+  onSelect: (mode: string | undefined) => void;
+}) {
+  const current = modes.find((m) => m.id === selected) ?? modes[0];
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <ChevronDown className="size-3" />
+          {current?.name ?? "Mode"}
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="min-w-[140px]">
+        {modes.map((mode) => (
+          <DropdownMenuItem
+            key={mode.id}
+            onClick={() => onSelect(mode.id)}
+            className={cn(
+              "flex flex-col items-start gap-0.5",
+              mode.id === (selected ?? modes[0]?.id) ? "bg-accent" : "",
+            )}
+          >
+            <span className="text-sm font-medium">{mode.name}</span>
+            {mode.description && (
+              <span className="text-xs text-muted-foreground">{mode.description}</span>
+            )}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

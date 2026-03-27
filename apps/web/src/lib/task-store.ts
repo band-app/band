@@ -18,6 +18,7 @@ export interface TaskRecord {
   startedAt: number;
   completedAt?: number;
   maxTurns?: number;
+  mode?: string;
 }
 
 export interface TaskFilters {
@@ -44,6 +45,7 @@ export function saveTask(task: TaskRecord): void {
       startedAt: task.startedAt,
       completedAt: task.completedAt ?? null,
       maxTurns: task.maxTurns ?? null,
+      mode: task.mode ?? null,
     })
     .onConflictDoUpdate({
       target: tasks.id,
@@ -57,6 +59,7 @@ export function saveTask(task: TaskRecord): void {
         startedAt: task.startedAt,
         completedAt: task.completedAt ?? null,
         maxTurns: task.maxTurns ?? null,
+        mode: task.mode ?? null,
       },
     })
     .run();
@@ -144,5 +147,6 @@ function rowToRecord(row: typeof tasks.$inferSelect): TaskRecord {
     startedAt: row.startedAt,
     completedAt: row.completedAt ?? undefined,
     maxTurns: row.maxTurns ?? undefined,
+    mode: row.mode ?? undefined,
   };
 }

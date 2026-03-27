@@ -32,6 +32,7 @@ function subscriptionToStream(
 export class TaskChatTransport implements ChatTransport<UIMessage> {
   private workspaceId: string;
   private getSessionId: () => string | undefined;
+  mode: string | undefined;
 
   constructor(workspaceId: string, getSessionId: () => string | undefined) {
     this.workspaceId = workspaceId;
@@ -82,6 +83,7 @@ export class TaskChatTransport implements ChatTransport<UIMessage> {
         prompt: userText,
         sessionId: this.getSessionId(),
         ...(files.length > 0 && { files }),
+        ...(this.mode && { mode: this.mode }),
       });
     } catch (err) {
       throw new Error(err instanceof Error ? err.message : "Submit failed");

@@ -36,8 +36,15 @@ export interface SkillInfo {
   argumentHint?: string;
 }
 
+export interface AgentMode {
+  id: string;
+  name: string;
+  description?: string;
+}
+
 export interface RunSessionOptions {
   maxTurns?: number;
+  mode?: string;
 }
 
 export interface CodingAgent {
@@ -57,4 +64,5 @@ export interface CodingAgent {
     options?: { limit?: number; offset?: number },
   ): Promise<SessionMessageItem[]>;
   listSkills?(): Promise<SkillInfo[]>;
+  listModes?(): AgentMode[];
 }

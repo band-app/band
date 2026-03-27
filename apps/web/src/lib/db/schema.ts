@@ -54,6 +54,7 @@ export const tasks = sqliteTable("tasks", {
   startedAt: integer("started_at").notNull(),
   completedAt: integer("completed_at"),
   maxTurns: integer("max_turns"),
+  mode: text("mode"),
 });
 
 export const settings = sqliteTable("settings", {

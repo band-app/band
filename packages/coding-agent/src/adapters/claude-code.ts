@@ -5,6 +5,7 @@ import type { ClaudeCodeConfig } from "../config.js";
 import type { AgentEvent } from "../events.js";
 import { discoverSkills } from "../skills.js";
 import type {
+  AgentMode,
   CodingAgent,
   RunSessionOptions,
   SessionListItem,
@@ -108,6 +109,8 @@ export class ClaudeCodeAdapter implements CodingAgent {
       }
     };
 
+    const permissionMode = options?.mode === "plan" ? ("plan" as const) : undefined;
+
     const conversation = query({
       prompt,
       options: {
@@ -120,6 +123,7 @@ export class ClaudeCodeAdapter implements CodingAgent {
         additionalDirectories: this.additionalDirectories,
         pathToClaudeCodeExecutable: this.executablePath,
         settingSources: ["user", "project"],
+        permissionMode,
         stderr: (data) => log.warn({ data }, "claude-code stderr"),
       },
     });
@@ -178,6 +182,13 @@ export class ClaudeCodeAdapter implements CodingAgent {
 
   async listSkills(): Promise<SkillInfo[]> {
     return discoverSkills(this.workspaceDir);
+  }
+
+  listModes(): AgentMode[] {
+    return [
+      { id: "edit", name: "Edit", description: "Agent can read and edit files" },
+      { id: "plan", name: "Plan", description: "Agent creates a plan without making changes" },
+    ];
   }
 }
 

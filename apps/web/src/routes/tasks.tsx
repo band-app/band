@@ -122,8 +122,8 @@ function TasksPage() {
   }, [tasks]);
 
   const handleNewTaskSubmit = useCallback(
-    async (workspaceId: string, prompt: string) => {
-      await trpc.tasks.submit.mutate({ workspaceId, prompt });
+    async (workspaceId: string, prompt: string, mode?: string) => {
+      await trpc.tasks.submit.mutate({ workspaceId, prompt, mode });
       setShowNewTask(false);
       await fetchData();
     },
@@ -364,6 +364,12 @@ function TaskCard({ task, onAction }: { task: TaskRecord; onAction: () => void }
   );
 }
 
+interface AgentMode {
+  id: string;
+  name: string;
+  description?: string;
+}
+
 function NewTaskDialog({
   open,
   onOpenChange,
@@ -371,20 +377,27 @@ function NewTaskDialog({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSubmit: (workspaceId: string, prompt: string) => Promise<void>;
+  onSubmit: (workspaceId: string, prompt: string, mode?: string) => Promise<void>;
 }) {
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [selectedProject, setSelectedProject] = useState<string>("");
   const [selectedBranch, setSelectedBranch] = useState<string>("");
   const [prompt, setPrompt] = useState("");
+  const [selectedMode, setSelectedMode] = useState<string>("");
+  const [modes, setModes] = useState<AgentMode[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const workspaceId =
+    selectedProject && selectedBranch ? `${selectedProject}-${selectedBranch}` : "";
 
   useEffect(() => {
     if (open) {
       setSelectedProject("");
       setSelectedBranch("");
       setPrompt("");
+      setSelectedMode("");
+      setModes([]);
       setSubmitError(null);
       trpc.projects.list.query().then((data) => {
         setProjects(data.projects as ProjectInfo[]);
@@ -392,13 +405,22 @@ function NewTaskDialog({
     }
   }, [open]);
 
+  useEffect(() => {
+    if (workspaceId) {
+      trpc.modes.list.query({ workspaceId }).then((data) => {
+        setModes(data.modes as AgentMode[]);
+        setSelectedMode("");
+      });
+    } else {
+      setModes([]);
+      setSelectedMode("");
+    }
+  }, [workspaceId]);
+
   const branches = useMemo(() => {
     const project = projects.find((p) => p.name === selectedProject);
     return project?.worktrees.map((w) => w.branch) ?? [];
   }, [projects, selectedProject]);
-
-  const workspaceId =
-    selectedProject && selectedBranch ? `${selectedProject}-${selectedBranch}` : "";
 
   const handleProjectChange = useCallback((value: string) => {
     setSelectedProject(value);
@@ -410,16 +432,17 @@ function NewTaskDialog({
     setSubmitting(true);
     setSubmitError(null);
     try {
-      await onSubmit(workspaceId, prompt.trim());
+      await onSubmit(workspaceId, prompt.trim(), selectedMode || undefined);
       setSelectedProject("");
       setSelectedBranch("");
       setPrompt("");
+      setSelectedMode("");
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : "Failed to submit task");
     } finally {
       setSubmitting(false);
     }
-  }, [workspaceId, prompt, onSubmit]);
+  }, [workspaceId, prompt, selectedMode, onSubmit]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -471,6 +494,26 @@ function NewTaskDialog({
               </SelectContent>
             </Select>
           </div>
+
+          {modes.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-medium" htmlFor="mode-select">
+                Mode
+              </label>
+              <Select value={selectedMode} onValueChange={setSelectedMode}>
+                <SelectTrigger id="mode-select">
+                  <SelectValue placeholder="Default" />
+                </SelectTrigger>
+                <SelectContent>
+                  {modes.map((mode) => (
+                    <SelectItem key={mode.id} value={mode.id}>
+                      {mode.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           <div className="flex flex-col gap-2">
             <label className="text-sm font-medium" htmlFor="task-prompt">

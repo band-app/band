@@ -241,6 +241,7 @@ const workspacesRouter = t.router({
         base: z.string().optional(),
         prompt: z.string().optional(),
         maxTurns: z.number().int().positive().optional(),
+        mode: z.string().optional(),
       }),
     )
     .mutation(({ input }) => {
@@ -282,7 +283,8 @@ const workspacesRouter = t.router({
       // If a prompt is provided, defer task submission until setup completes
       // so the agent has dependencies installed.
       const onSetupComplete = input.prompt
-        ? () => submitTask(workspaceId, input.prompt!, undefined, undefined, input.maxTurns)
+        ? () =>
+            submitTask(workspaceId, input.prompt!, undefined, undefined, input.maxTurns, input.mode)
         : undefined;
 
       runSetup(workspaceId, worktreePath, proj.path, onSetupComplete);
@@ -1004,6 +1006,7 @@ const tasksRouter = t.router({
         prompt: z.string(),
         sessionId: z.string().optional(),
         maxTurns: z.number().int().positive().optional(),
+        mode: z.string().optional(),
         files: z
           .array(
             z.object({
@@ -1032,6 +1035,7 @@ const tasksRouter = t.router({
           input.sessionId,
           agentPrompt,
           input.maxTurns,
+          input.mode,
         );
         return { id: task.id, workspaceId: task.workspaceId, sessionId: task.sessionId };
       } catch (err) {
@@ -1088,6 +1092,7 @@ const tasksRouter = t.router({
         undefined,
         undefined,
         record.maxTurns,
+        record.mode,
       );
       return { workspaceId: task.workspaceId, sessionId: task.sessionId };
     } catch (err) {
@@ -1525,6 +1530,26 @@ const skillsRouter = t.router({
 });
 
 // ---------------------------------------------------------------------------
+// Modes
+// ---------------------------------------------------------------------------
+
+const modesRouter = t.router({
+  list: publicProcedure.input(z.object({ workspaceId: z.string() })).query(async ({ input }) => {
+    const workspace = resolveWorkspace(input.workspaceId);
+    if (!workspace) {
+      return { modes: [] };
+    }
+
+    const agent = await getOrCreateAgent(input.workspaceId, workspace.worktree.path);
+    if (agent.listModes) {
+      return { modes: agent.listModes() };
+    }
+
+    return { modes: [] };
+  }),
+});
+
+// ---------------------------------------------------------------------------
 // Queue (persisted queued messages)
 // ---------------------------------------------------------------------------
 
@@ -1629,6 +1654,7 @@ export const appRouter = t.router({
   status: statusRouter,
   cronjobs: cronjobsRouter,
   skills: skillsRouter,
+  modes: modesRouter,
   queue: queueRouter,
 });
 

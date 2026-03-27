@@ -17,6 +17,7 @@ export type {
 } from "./events.js";
 export { createCodingAgent } from "./factory.js";
 export type {
+  AgentMode,
   CodingAgent,
   CodingAgentFeatures,
   RunSessionOptions,
