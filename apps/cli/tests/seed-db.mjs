@@ -3,10 +3,10 @@
 // Usage: node seed-db.mjs <band_dir> <project_name> <project_path> <default_branch> [settings_json]
 //
 // Creates band.db with Drizzle migrations applied, a single project row,
-// and optionally a settings row.
+// and optionally writes settings to settings.json.
 
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, readdirSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const [bandDir, projectName, projectPath, defaultBranch, settingsJson] =
@@ -76,11 +76,9 @@ db.prepare(
   "INSERT INTO projects (name, path, default_branch, sort_order) VALUES (?, ?, ?, 0)"
 ).run(projectName, projectPath, defaultBranch);
 
-// Seed settings if provided
-if (settingsJson) {
-  db.prepare(
-    "INSERT OR REPLACE INTO settings (id, data) VALUES (1, ?)"
-  ).run(settingsJson);
-}
-
 db.close();
+
+// Seed settings to settings.json if provided
+if (settingsJson) {
+  writeFileSync(join(bandDir, "settings.json"), settingsJson, "utf-8");
+}
