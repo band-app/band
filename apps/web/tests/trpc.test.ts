@@ -417,15 +417,15 @@ describe("tRPC — settings CRUD", () => {
     expect(data.autoStartTunnel).toBe(true);
   });
 
-  it("settings.update overwrites previous settings", async () => {
+  it("settings.update merges with existing settings", async () => {
     const res = await trpcMutate(server.url, "settings.update", { worktreesDir: null });
     expect(res.status).toBe(200);
 
     const getRes = await trpcQuery(server.url, "settings.get");
     const data = await trpcData<Record<string, unknown>>(getRes);
     expect(data.worktreesDir).toBeNull();
-    // Previous keys should be gone since update replaces the whole file
-    expect(data.autoStartTunnel).toBeUndefined();
+    // Previous keys are preserved (merge semantics, not replace)
+    expect(data.autoStartTunnel).toBe(true);
   });
 });
 
