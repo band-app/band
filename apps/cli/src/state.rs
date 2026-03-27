@@ -36,8 +36,8 @@ pub fn load_settings() -> Result<Settings, String> {
         return Ok(Settings::default());
     }
 
-    let data =
-        std::fs::read_to_string(&settings_path).map_err(|e| format!("Failed to read settings: {e}"))?;
+    let data = std::fs::read_to_string(&settings_path)
+        .map_err(|e| format!("Failed to read settings: {e}"))?;
 
     serde_json::from_str(&data).map_err(|e| format!("Failed to parse settings: {e}"))
 }
