@@ -11,7 +11,7 @@ import { startCronjobScheduler, stopCronjobScheduler } from "./src/lib/cronjob-s
 import { closeDb } from "./src/lib/db/connection.ts";
 import { runMigrations } from "./src/lib/db/migrate.ts";
 import { checkPrereqs } from "./src/lib/process-utils.ts";
-import { bandHome, getOrCreateToken, loadSettings } from "./src/lib/state.ts";
+import { bandHome, getOrCreateToken, loadSettings, resetAgentStatuses } from "./src/lib/state.ts";
 import { cleanupStaleTasks } from "./src/lib/task-store.ts";
 import { killAllTerminals } from "./src/lib/terminal-manager.ts";
 import { handleTerminalConnection } from "./src/lib/terminal-ws.ts";
@@ -67,6 +67,13 @@ async function main() {
   // Mark any persisted "running" tasks as "failed" — no agent can be running
   // if the server just started.
   cleanupStaleTasks();
+
+  // Reset any "working" agent statuses — no agent is active on a fresh
+  // server start.
+  const resetCount = resetAgentStatuses();
+  if (resetCount > 0) {
+    console.log(`Reset ${resetCount} stale agent status(es) on startup`);
+  }
 
   // Start cronjob scheduler — reads definitions and watches for changes
   startCronjobScheduler();

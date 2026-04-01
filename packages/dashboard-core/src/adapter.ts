@@ -62,6 +62,9 @@ export interface DashboardAdapter {
   checkCli(): Promise<CliStatus>;
   installCli(): Promise<void>;
 
+  // Agent status (optional)
+  updateAgentStatus?(workspaceId: string, status: string): Promise<void>;
+
   // Window management
   closeWorkspaceWindows(workspaceId: string): Promise<void>;
 

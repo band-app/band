@@ -48,6 +48,22 @@ export function createDashboardStore(adapter: DashboardAdapter): DashboardStore 
       // but allow switching to a different workspace.
       if (get()._openingWorkspace && get().activeWorkspaceId === workspaceId) return;
       set({ activeWorkspaceId: workspaceId, _openingWorkspace: true });
+
+      // Clear needs_attention when the user actively selects a workspace
+      const currentStatus = get().statuses.get(workspaceId);
+      if (currentStatus?.agent?.status === "needs_attention") {
+        const cleared: WorkspaceStatus = {
+          ...currentStatus,
+          agent: { ...currentStatus.agent, status: "waiting" },
+        };
+        set((state) => {
+          const statuses = new Map(state.statuses);
+          statuses.set(workspaceId, cleared);
+          return { statuses };
+        });
+        adapter.updateAgentStatus?.(workspaceId, "waiting");
+      }
+
       adapter
         .openWorkspace(workspaceId)
         .catch((e) => {

@@ -317,6 +317,20 @@ export function upsertWorkspaceStatus(
   return getWorkspaceStatus(workspaceId)!;
 }
 
+/**
+ * Reset all "working" agent statuses to "waiting".
+ * Called on server startup — no agent can be running if the server just started.
+ */
+export function resetAgentStatuses(): number {
+  const db = getDb();
+  const result = db
+    .update(workspaceStatusesTable)
+    .set({ agentStatus: "waiting", updatedAt: Date.now() })
+    .where(eq(workspaceStatusesTable.agentStatus, "working"))
+    .run();
+  return result.changes;
+}
+
 function resolveWorkspaceIdentity(
   workspaceId: string,
 ): { project: string; branch: string; worktreePath: string } | null {

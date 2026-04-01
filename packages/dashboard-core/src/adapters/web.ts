@@ -84,6 +84,10 @@ export class WebDashboardAdapter implements DashboardAdapter {
     // No-op: window management is handled by the desktop app
   }
 
+  async updateAgentStatus(workspaceId: string, status: string): Promise<void> {
+    await this.trpc.statuses.update.mutate({ workspaceId, agent: { status } });
+  }
+
   async closeWorkspaceWindows(_workspaceId: string): Promise<void> {
     // No-op: window management is handled by the desktop app
   }
