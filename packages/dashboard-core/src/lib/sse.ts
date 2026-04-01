@@ -18,4 +18,5 @@ export type SSEEvent = {
   error?: string;
   setupState?: "running" | "completed" | "failed";
   setupError?: string;
+  runningSetups?: string[];
 };
