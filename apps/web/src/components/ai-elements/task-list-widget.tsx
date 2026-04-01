@@ -1,11 +1,40 @@
 import { cn } from "@band-app/ui";
 import { CheckCircle2, ChevronDown, ChevronRight, Circle, Loader2 } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 
 import type { TaskMap } from "./task-state";
 
-export function TaskListWidget({ tasks }: { tasks: TaskMap }) {
-  const [collapsed, setCollapsed] = useState(false);
+function readCollapsed(workspaceId: string): boolean {
+  try {
+    return sessionStorage.getItem(`band-tasks-collapsed:${workspaceId}`) === "true";
+  } catch {
+    return false;
+  }
+}
+
+export function TaskListWidget({
+  tasks,
+  workspaceId,
+}: {
+  tasks: TaskMap;
+  workspaceId: string;
+}) {
+  const [collapsed, setCollapsed] = useState(() => readCollapsed(workspaceId));
+  const toggleCollapsed = useCallback(() => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      try {
+        if (next) {
+          sessionStorage.setItem(`band-tasks-collapsed:${workspaceId}`, "true");
+        } else {
+          sessionStorage.removeItem(`band-tasks-collapsed:${workspaceId}`);
+        }
+      } catch {
+        // ignore storage errors
+      }
+      return next;
+    });
+  }, [workspaceId]);
 
   if (tasks.size === 0) return null;
 
@@ -18,7 +47,7 @@ export function TaskListWidget({ tasks }: { tasks: TaskMap }) {
     <div className="not-prose mb-2 w-full rounded border border-border/50">
       <button
         type="button"
-        onClick={() => setCollapsed(!collapsed)}
+        onClick={toggleCollapsed}
         className="flex w-full items-center justify-between gap-2 px-2.5 py-1.5 transition-colors hover:bg-accent/50"
       >
         <div className="flex items-center gap-1.5">

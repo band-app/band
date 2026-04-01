@@ -175,13 +175,44 @@ export function ChatView({
   }, [workspaceId]);
 
   const [modes, setModes] = useState<{ id: string; name: string; description?: string }[]>([]);
-  const [selectedMode, setSelectedMode] = useState<string | undefined>(undefined);
+  const modeStorageKey = `band-mode:${workspaceId}`;
+  const [selectedMode, setSelectedMode] = useState<string | undefined>(() => {
+    try {
+      return sessionStorage.getItem(modeStorageKey) ?? undefined;
+    } catch {
+      return undefined;
+    }
+  });
+  const handleModeSelect = useCallback(
+    (mode: string | undefined) => {
+      setSelectedMode(mode);
+      try {
+        if (mode) {
+          sessionStorage.setItem(modeStorageKey, mode);
+        } else {
+          sessionStorage.removeItem(modeStorageKey);
+        }
+      } catch {
+        // ignore storage errors
+      }
+    },
+    [modeStorageKey],
+  );
   useEffect(() => {
     trpc.modes.list
       .query({ workspaceId })
       .then((data) => setModes(data.modes as { id: string; name: string; description?: string }[]))
       .catch(() => setModes([]));
-  }, [workspaceId]);
+    // Derive mode from active task (e.g. reconnecting to a running plan-mode task)
+    trpc.tasks.get
+      .query({ workspaceId })
+      .then((data) => {
+        if (data.task?.mode && data.task.status === "running") {
+          handleModeSelect(data.task.mode);
+        }
+      })
+      .catch(() => {});
+  }, [workspaceId, handleModeSelect]);
 
   const [queuedMessages, setQueuedMessages] = useState<string[]>([]);
 
@@ -648,7 +679,7 @@ export function ChatView({
       </Conversation>
 
       <div className="mx-auto w-full max-w-3xl shrink-0 px-3 lg:px-4 pt-2 pb-4 standalone:pb-[env(safe-area-inset-bottom)]">
-        <TaskListWidget tasks={displayTaskMap} />
+        <TaskListWidget tasks={displayTaskMap} workspaceId={workspaceId} />
         <PromptInput onSubmit={handleSubmit} draftKey={workspaceId}>
           <SlashCommandSuggestions skills={skills} />
           <PromptInputTextarea
@@ -660,7 +691,7 @@ export function ChatView({
             <div className="flex items-center gap-0.5">
               <PromptInputAttach />
               {modes.length > 0 && (
-                <ModeMenu modes={modes} selected={selectedMode} onSelect={setSelectedMode} />
+                <ModeMenu modes={modes} selected={selectedMode} onSelect={handleModeSelect} />
               )}
             </div>
             <PromptInputSubmit
