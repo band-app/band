@@ -3,7 +3,9 @@ import type { UIMessageChunk } from "ai";
 import { getAgent, getOrCreateAgent } from "./agent-pool";
 import { createPendingInput } from "./pending-inputs";
 import { shiftQueuedMessage } from "./queued-message-store";
+import { upsertWorkspaceStatus } from "./state";
 import { generateTaskId, markTaskFailed, saveTask } from "./task-store";
+import { emit as emitStatusEvent } from "./watcher";
 import { resolveWorkspace } from "./workspace";
 
 const log = createLogger("task-runner");
@@ -210,7 +212,17 @@ async function runTask(workspaceId: string, task: InternalTask) {
   const agent = await getOrCreateAgent(workspaceId, workspace.worktree.path);
 
   agent.onUserInputNeeded = async (request) => {
-    return createPendingInput(request.approvalId);
+    // Set status to needs_attention while waiting for user input
+    const needsAttention = upsertWorkspaceStatus(workspaceId, { status: "needs_attention" });
+    emitStatusEvent({ kind: "update", status: needsAttention });
+
+    const answers = await createPendingInput(request.approvalId);
+
+    // Restore working status after user responds
+    const restored = upsertWorkspaceStatus(workspaceId, { status: "working" });
+    emitStatusEvent({ kind: "update", status: restored });
+
+    return answers;
   };
 
   let textPartId = "";
