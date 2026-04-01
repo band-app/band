@@ -4,7 +4,7 @@
 export type { DashboardAdapter, PlatformCapabilities, Unsubscribe } from "./adapter";
 // Components
 export { AddProjectDialog } from "./components/AddProjectDialog";
-export { AgentStatusBadge } from "./components/AgentStatusBadge";
+export { AgentStatusIndicator } from "./components/AgentStatusIndicator";
 export { CIStatusIndicator } from "./components/CIStatusIndicator";
 export { CodeMirrorViewer } from "./components/CodeMirrorViewer";
 export { DashboardShell } from "./components/DashboardShell";
