@@ -42,9 +42,16 @@ export interface AgentMode {
   description?: string;
 }
 
+export interface AgentModel {
+  id: string;
+  name: string;
+  description?: string;
+}
+
 export interface RunSessionOptions {
   maxTurns?: number;
   mode?: string;
+  model?: string;
 }
 
 export interface CodingAgent {
@@ -65,4 +72,5 @@ export interface CodingAgent {
   ): Promise<SessionMessageItem[]>;
   listSkills?(): Promise<SkillInfo[]>;
   listModes?(): AgentMode[];
+  listModels?(): AgentModel[] | Promise<AgentModel[]>;
 }

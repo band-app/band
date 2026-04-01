@@ -5,7 +5,7 @@ import { createLogger } from "@band-app/logger";
 import type { GeminiCliConfig } from "../config.js";
 import type { AgentEvent } from "../events.js";
 import { discoverSkills } from "../skills.js";
-import type { CodingAgent, RunSessionOptions, SkillInfo } from "../types.js";
+import type { AgentModel, CodingAgent, RunSessionOptions, SkillInfo } from "../types.js";
 
 const log = createLogger("coding-agent:gemini-cli");
 
@@ -43,10 +43,12 @@ export class GeminiCliAdapter implements CodingAgent {
     options?: RunSessionOptions,
   ): AsyncGenerator<AgentEvent> {
     const effectiveMaxTurns = options?.maxTurns ?? this.maxTurns;
+    const effectiveModel = options?.model ?? this.model;
+
     log.info(
       {
         prompt: prompt.slice(0, 100),
-        model: this.model,
+        model: effectiveModel,
         cwd: this.workspaceDir,
         maxTurns: effectiveMaxTurns,
       },
@@ -54,8 +56,8 @@ export class GeminiCliAdapter implements CodingAgent {
     );
 
     const args = ["--output-format", "stream-json"];
-    if (this.model) {
-      args.push("--model", this.model);
+    if (effectiveModel) {
+      args.push("--model", effectiveModel);
     }
     args.push("--", prompt);
 
@@ -163,5 +165,12 @@ export class GeminiCliAdapter implements CodingAgent {
 
   async listSkills(): Promise<SkillInfo[]> {
     return discoverSkills(this.workspaceDir);
+  }
+
+  listModels(): AgentModel[] {
+    return [
+      { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", description: "Most capable" },
+      { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", description: "Fast and efficient" },
+    ];
   }
 }

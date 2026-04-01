@@ -2,7 +2,7 @@ import { createLogger } from "@band-app/logger";
 import { CursorAgent } from "@nothumanwork/cursor-agents-sdk";
 import type { CursorCliConfig } from "../config.js";
 import type { AgentEvent } from "../events.js";
-import type { CodingAgent, RunSessionOptions } from "../types.js";
+import type { AgentModel, CodingAgent, RunSessionOptions } from "../types.js";
 
 const log = createLogger("coding-agent:cursor-cli");
 
@@ -75,20 +75,22 @@ export class CursorCliAdapter implements CodingAgent {
   async *runSession(
     prompt: string,
     sessionId?: string,
-    _options?: RunSessionOptions,
+    options?: RunSessionOptions,
   ): AsyncGenerator<AgentEvent> {
+    const effectiveModel = options?.model ?? this.model;
+
     log.info(
       {
         prompt: prompt.slice(0, 100),
         sessionId,
-        model: this.model,
+        model: effectiveModel,
         maxTurns: this.maxTurns,
       },
       "runSession starting",
     );
 
     const agent = new CursorAgent({
-      defaultModel: this.model,
+      defaultModel: effectiveModel,
       forceWrites: true,
     });
 
@@ -156,6 +158,10 @@ export class CursorCliAdapter implements CodingAgent {
     } finally {
       this.activeIterator = null;
     }
+  }
+
+  listModels(): AgentModel[] {
+    return [{ id: "auto", name: "Auto", description: "Cursor chooses the best model" }];
   }
 }
 

@@ -1,4 +1,9 @@
-import type { CanUseTool, SDKSessionInfo, SessionMessage } from "@anthropic-ai/claude-agent-sdk";
+import type {
+  CanUseTool,
+  ModelInfo,
+  SDKSessionInfo,
+  SessionMessage,
+} from "@anthropic-ai/claude-agent-sdk";
 import { getSessionMessages, listSessions, query } from "@anthropic-ai/claude-agent-sdk";
 import { createLogger } from "@band-app/logger";
 import type { ClaudeCodeConfig } from "../config.js";
@@ -6,6 +11,7 @@ import type { AgentEvent } from "../events.js";
 import { discoverSkills } from "../skills.js";
 import type {
   AgentMode,
+  AgentModel,
   CodingAgent,
   RunSessionOptions,
   SessionListItem,
@@ -38,6 +44,7 @@ export class ClaudeCodeAdapter implements CodingAgent {
   private readonly executablePath: string | undefined;
   private readonly additionalDirectories: string[] | undefined;
   private activeConversation: ReturnType<typeof query> | null = null;
+  private cachedModels: AgentModel[] | null = null;
 
   constructor(config: ClaudeCodeConfig) {
     this.workspaceDir = config.workspaceDir;
@@ -66,11 +73,13 @@ export class ClaudeCodeAdapter implements CodingAgent {
     env.CLAUDE_CODE_ENTRYPOINT = undefined;
     env.ANTHROPIC_CUSTOM_HEADERS = undefined;
 
+    const effectiveModel = options?.model ?? this.model;
+
     log.info(
       {
         prompt: prompt.slice(0, 100),
         sessionId,
-        model: this.model,
+        model: effectiveModel,
         cwd: this.workspaceDir,
         maxTurns: effectiveMaxTurns,
         claudeCodePath: this.executablePath || "(default)",
@@ -114,7 +123,7 @@ export class ClaudeCodeAdapter implements CodingAgent {
       prompt,
       options: {
         cwd: this.workspaceDir,
-        model: this.model,
+        model: effectiveModel,
         maxTurns: effectiveMaxTurns,
         resume: sessionId,
         canUseTool,
@@ -129,6 +138,19 @@ export class ClaudeCodeAdapter implements CodingAgent {
 
     this.activeConversation = conversation;
     log.info("query() called, waiting for messages...");
+
+    // Fetch available models from the SDK and cache them
+    if (!this.cachedModels) {
+      conversation
+        .supportedModels()
+        .then((models) => {
+          this.cachedModels = models.map(mapModelInfo);
+          log.info({ count: models.length }, "cached supported models from SDK");
+        })
+        .catch((err) => {
+          log.warn({ err }, "failed to fetch supported models");
+        });
+    }
 
     const state: ProcessedState = {
       assistantContentIndex: 0,
@@ -189,6 +211,52 @@ export class ClaudeCodeAdapter implements CodingAgent {
       { id: "plan", name: "Plan", description: "Agent creates a plan without making changes" },
     ];
   }
+
+  async listModels(): Promise<AgentModel[]> {
+    if (this.cachedModels) {
+      return this.cachedModels;
+    }
+
+    // Spawn a lightweight query to fetch the model list from the SDK
+    try {
+      const env = { ...process.env };
+      env.CLAUDECODE = undefined;
+      env.CLAUDE_CODE_ENTRYPOINT = undefined;
+      env.ANTHROPIC_CUSTOM_HEADERS = undefined;
+
+      const conversation = query({
+        prompt: "",
+        options: {
+          cwd: this.workspaceDir,
+          maxTurns: 0,
+          env,
+          pathToClaudeCodeExecutable: this.executablePath,
+          settingSources: ["user", "project"],
+        },
+      });
+
+      const models = await conversation.supportedModels();
+      conversation.close();
+
+      this.cachedModels = models.map(mapModelInfo);
+      log.info({ count: models.length }, "fetched supported models from SDK");
+      return this.cachedModels;
+    } catch (err) {
+      log.warn({ err }, "failed to fetch models from SDK, returning defaults");
+      return [
+        { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4", description: "Fast and capable" },
+        { id: "claude-opus-4-20250514", name: "Claude Opus 4", description: "Most capable" },
+      ];
+    }
+  }
+}
+
+function mapModelInfo(info: ModelInfo): AgentModel {
+  return {
+    id: info.value,
+    name: info.displayName,
+    description: info.description,
+  };
 }
 
 function mapSessionInfo(info: SDKSessionInfo): SessionListItem {

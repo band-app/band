@@ -18,6 +18,7 @@ export type {
 export { createCodingAgent } from "./factory.js";
 export type {
   AgentMode,
+  AgentModel,
   CodingAgent,
   CodingAgentFeatures,
   RunSessionOptions,

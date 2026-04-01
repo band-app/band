@@ -2,7 +2,7 @@ import { createLogger } from "@band-app/logger";
 import type { OpenAICodexConfig } from "../config.js";
 import type { AgentEvent } from "../events.js";
 import { discoverSkills } from "../skills.js";
-import type { CodingAgent, RunSessionOptions, SkillInfo } from "../types.js";
+import type { AgentModel, CodingAgent, RunSessionOptions, SkillInfo } from "../types.js";
 
 const log = createLogger("coding-agent:openai-codex");
 
@@ -40,11 +40,13 @@ export class OpenAICodexAdapter implements CodingAgent {
     options?: RunSessionOptions,
   ): AsyncGenerator<AgentEvent> {
     const effectiveMaxTurns = options?.maxTurns ?? this.maxTurns;
+    const effectiveModel = options?.model ?? this.model;
+
     log.info(
       {
         prompt: prompt.slice(0, 100),
         sessionId,
-        model: this.model,
+        model: effectiveModel,
         cwd: this.workspaceDir,
         maxTurns: effectiveMaxTurns,
       },
@@ -61,7 +63,7 @@ export class OpenAICodexAdapter implements CodingAgent {
       };
     };
 
-    const codex = new sdk.Codex({ model: this.model });
+    const codex = new sdk.Codex({ model: effectiveModel });
 
     const startMs = Date.now();
     let turnCount = 0;
@@ -164,6 +166,13 @@ export class OpenAICodexAdapter implements CodingAgent {
 
   async listSkills(): Promise<SkillInfo[]> {
     return discoverSkills(this.workspaceDir);
+  }
+
+  listModels(): AgentModel[] {
+    return [
+      { id: "codex-mini", name: "Codex Mini", description: "Fast and efficient" },
+      { id: "o4-mini", name: "o4-mini" },
+    ];
   }
 }
 

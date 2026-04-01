@@ -1007,6 +1007,7 @@ const tasksRouter = t.router({
         sessionId: z.string().optional(),
         maxTurns: z.number().int().positive().optional(),
         mode: z.string().optional(),
+        model: z.string().optional(),
         files: z
           .array(
             z.object({
@@ -1036,6 +1037,7 @@ const tasksRouter = t.router({
           agentPrompt,
           input.maxTurns,
           input.mode,
+          input.model,
         );
         return { id: task.id, workspaceId: task.workspaceId, sessionId: task.sessionId };
       } catch (err) {
@@ -1093,6 +1095,7 @@ const tasksRouter = t.router({
         undefined,
         record.maxTurns,
         record.mode,
+        record.model,
       );
       return { workspaceId: task.workspaceId, sessionId: task.sessionId };
     } catch (err) {
@@ -1550,6 +1553,26 @@ const modesRouter = t.router({
 });
 
 // ---------------------------------------------------------------------------
+// Models
+// ---------------------------------------------------------------------------
+
+const modelsRouter = t.router({
+  list: publicProcedure.input(z.object({ workspaceId: z.string() })).query(async ({ input }) => {
+    const workspace = resolveWorkspace(input.workspaceId);
+    if (!workspace) {
+      return { models: [] };
+    }
+
+    const agent = await getOrCreateAgent(input.workspaceId, workspace.worktree.path);
+    if (agent.listModels) {
+      return { models: await agent.listModels() };
+    }
+
+    return { models: [] };
+  }),
+});
+
+// ---------------------------------------------------------------------------
 // Queue (persisted queued messages)
 // ---------------------------------------------------------------------------
 
@@ -1655,6 +1678,7 @@ export const appRouter = t.router({
   cronjobs: cronjobsRouter,
   skills: skillsRouter,
   modes: modesRouter,
+  models: modelsRouter,
   queue: queueRouter,
 });
 

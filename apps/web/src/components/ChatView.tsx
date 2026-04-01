@@ -183,6 +183,34 @@ export function ChatView({
       .catch(() => setModes([]));
   }, [workspaceId]);
 
+  const [models, setModels] = useState<{ id: string; name: string; description?: string }[]>([]);
+  const [selectedModel, setSelectedModel] = useState<string | undefined>(() => {
+    try {
+      return sessionStorage.getItem(`band-model:${workspaceId}`) ?? undefined;
+    } catch {
+      return undefined;
+    }
+  });
+  useEffect(() => {
+    trpc.models.list
+      .query({ workspaceId })
+      .then((data) =>
+        setModels(data.models as { id: string; name: string; description?: string }[]),
+      )
+      .catch(() => setModels([]));
+  }, [workspaceId]);
+  useEffect(() => {
+    try {
+      if (selectedModel) {
+        sessionStorage.setItem(`band-model:${workspaceId}`, selectedModel);
+      } else {
+        sessionStorage.removeItem(`band-model:${workspaceId}`);
+      }
+    } catch {
+      // sessionStorage may not be available
+    }
+  }, [selectedModel, workspaceId]);
+
   const [queuedMessages, setQueuedMessages] = useState<string[]>([]);
 
   // Subscribe to queue state changes via a dedicated tRPC subscription.
@@ -209,6 +237,10 @@ export function ChatView({
   useEffect(() => {
     transport.mode = selectedMode;
   }, [transport, selectedMode]);
+
+  useEffect(() => {
+    transport.model = selectedModel;
+  }, [transport, selectedModel]);
 
   const { messages, sendMessage, status, setMessages, stop } = useChat({
     id: workspaceId,
@@ -651,6 +683,9 @@ export function ChatView({
           <PromptInputActions>
             <div className="flex items-center gap-0.5">
               <PromptInputAttach />
+              {models.length > 0 && (
+                <ModelMenu models={models} selected={selectedModel} onSelect={setSelectedModel} />
+              )}
               {modes.length > 0 && (
                 <ModeMenu modes={modes} selected={selectedMode} onSelect={setSelectedMode} />
               )}
@@ -701,6 +736,48 @@ function ModeMenu({
             <span className="text-sm font-medium">{mode.name}</span>
             {mode.description && (
               <span className="text-xs text-muted-foreground">{mode.description}</span>
+            )}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function ModelMenu({
+  models,
+  selected,
+  onSelect,
+}: {
+  models: { id: string; name: string; description?: string }[];
+  selected: string | undefined;
+  onSelect: (model: string | undefined) => void;
+}) {
+  const current = models.find((m) => m.id === selected) ?? models[0];
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <ChevronDown className="size-3" />
+          {current?.name ?? "Model"}
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="min-w-[140px]">
+        {models.map((model) => (
+          <DropdownMenuItem
+            key={model.id}
+            onClick={() => onSelect(model.id)}
+            className={cn(
+              "flex flex-col items-start gap-0.5",
+              model.id === (selected ?? models[0]?.id) ? "bg-accent" : "",
+            )}
+          >
+            <span className="text-sm font-medium">{model.name}</span>
+            {model.description && (
+              <span className="text-xs text-muted-foreground">{model.description}</span>
             )}
           </DropdownMenuItem>
         ))}

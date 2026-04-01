@@ -55,6 +55,7 @@ export const tasks = sqliteTable("tasks", {
   completedAt: integer("completed_at"),
   maxTurns: integer("max_turns"),
   mode: text("mode"),
+  model: text("model"),
 });
 
 export const cronjobs = sqliteTable("cronjobs", {
