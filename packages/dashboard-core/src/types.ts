@@ -88,7 +88,12 @@ export interface BandConfig {
   apps?: AppConfig[];
 }
 
-export type CodingAgentType = "claude-code";
+export type CodingAgentType =
+  | "claude-code"
+  | "codex"
+  | "openai-codex"
+  | "gemini-cli"
+  | "cursor-cli";
 
 export interface CodingAgentConfig {
   type: CodingAgentType;

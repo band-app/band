@@ -1,7 +1,9 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { createLogger } from "@band-app/logger";
 import type { OpenAICodexConfig } from "../config.js";
 import type { AgentEvent } from "../events.js";
-import { discoverSkills } from "../skills.js";
+import { readSkillsFromDir } from "../skills.js";
 import type { AgentModel, CodingAgent, RunSessionOptions, SkillInfo } from "../types.js";
 
 const log = createLogger("coding-agent:openai-codex");
@@ -165,7 +167,7 @@ export class OpenAICodexAdapter implements CodingAgent {
   }
 
   async listSkills(): Promise<SkillInfo[]> {
-    return discoverSkills(this.workspaceDir);
+    return discoverCodexSkills(this.workspaceDir);
   }
 
   listModels(): AgentModel[] {
@@ -185,6 +187,31 @@ interface CodexThread {
       sandbox?: string;
     },
   ): AsyncIterable<Record<string, unknown>>;
+}
+
+const CODEX_HOME = process.env.CODEX_HOME || join(homedir(), ".codex");
+
+function discoverCodexSkills(workspaceDir: string): SkillInfo[] {
+  const globalSkillsDir = join(CODEX_HOME, "skills");
+  const systemSkillsDir = join(CODEX_HOME, "skills", ".system");
+  const projectSkillsDir = join(workspaceDir, ".codex", "skills");
+
+  const systemSkills = readSkillsFromDir(systemSkillsDir);
+  const globalSkills = readSkillsFromDir(globalSkillsDir);
+  const projectSkills = readSkillsFromDir(projectSkillsDir);
+
+  const skillMap = new Map<string, SkillInfo>();
+  for (const skill of systemSkills) {
+    skillMap.set(skill.name, skill);
+  }
+  for (const skill of globalSkills) {
+    skillMap.set(skill.name, skill);
+  }
+  for (const skill of projectSkills) {
+    skillMap.set(skill.name, skill);
+  }
+
+  return Array.from(skillMap.values()).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 function parseInput(args: unknown): Record<string, unknown> {

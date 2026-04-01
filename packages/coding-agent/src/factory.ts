@@ -15,6 +15,10 @@ export async function createCodingAgent(config: CodingAgentConfig): Promise<Codi
       const { OpenAICodexAdapter } = await import("./adapters/openai-codex.js");
       return new OpenAICodexAdapter(config);
     }
+    case "codex": {
+      const { CodexAdapter } = await import("./adapters/codex.js");
+      return new CodexAdapter(config);
+    }
     case "gemini-cli": {
       const { GeminiCliAdapter } = await import("./adapters/gemini-cli.js");
       return new GeminiCliAdapter(config);

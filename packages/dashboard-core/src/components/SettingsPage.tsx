@@ -32,10 +32,17 @@ import type { CodingAgentConfig, CodingAgentType, LabelDefinition, Theme } from 
 
 const AGENT_TYPES: { value: CodingAgentType; label: string }[] = [
   { value: "claude-code", label: "Claude Code" },
+  { value: "codex", label: "Codex" },
+  { value: "gemini-cli", label: "Gemini CLI" },
+  { value: "cursor-cli", label: "Cursor CLI" },
 ];
 
 const AGENT_LABEL: Record<string, string> = {
   "claude-code": "Claude Code",
+  codex: "Codex",
+  "openai-codex": "OpenAI Codex (SDK)",
+  "gemini-cli": "Gemini CLI",
+  "cursor-cli": "Cursor CLI",
 };
 
 const DEFAULT_DEFAULTS = {

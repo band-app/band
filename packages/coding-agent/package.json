@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "scripts": {
+    "test": "node --experimental-strip-types --import ./tests/register-mock-loader.mjs --test tests/**/*.test.ts"
+  },
   "main": "src/index.ts",
   "types": "src/index.ts",
   "exports": {
@@ -14,13 +17,17 @@
   },
   "peerDependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.62",
-    "@nothumanwork/cursor-agents-sdk": "^0.7.0"
+    "@nothumanwork/cursor-agents-sdk": "^0.7.0",
+    "@openai/codex-sdk": "^0.118.0"
   },
   "peerDependenciesMeta": {
     "@anthropic-ai/claude-agent-sdk": {
       "optional": true
     },
     "@nothumanwork/cursor-agents-sdk": {
+      "optional": true
+    },
+    "@openai/codex-sdk": {
       "optional": true
     }
   }

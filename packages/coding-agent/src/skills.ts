@@ -1,5 +1,4 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { createLogger } from "@band-app/logger";
 import type { SkillInfo } from "./types.js";
@@ -26,7 +25,14 @@ function parseFrontmatter(content: string): Record<string, string> {
     if (colonIndex === -1) continue;
 
     const key = line.slice(0, colonIndex).trim();
-    const value = line.slice(colonIndex + 1).trim();
+    let value = line.slice(colonIndex + 1).trim();
+    // Strip surrounding YAML quotes
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
     if (key && value) {
       result[key] = value;
     }
@@ -79,30 +85,4 @@ export function readSkillsFromDir(skillsDir: string): SkillInfo[] {
   }
 
   return skills;
-}
-
-/**
- * Discover skills from both global (~/.claude/skills/) and project-level
- * (<workspaceDir>/.claude/skills/) directories.
- *
- * Project-level skills override global skills with the same name.
- * This is agent-agnostic — any adapter with a workspaceDir can use it.
- */
-export function discoverSkills(workspaceDir: string): SkillInfo[] {
-  const globalSkillsDir = join(homedir(), ".claude", "skills");
-  const projectSkillsDir = join(workspaceDir, ".claude", "skills");
-
-  const globalSkills = readSkillsFromDir(globalSkillsDir);
-  const projectSkills = readSkillsFromDir(projectSkillsDir);
-
-  // Merge: project-level skills override global ones with the same name
-  const skillMap = new Map<string, SkillInfo>();
-  for (const skill of globalSkills) {
-    skillMap.set(skill.name, skill);
-  }
-  for (const skill of projectSkills) {
-    skillMap.set(skill.name, skill);
-  }
-
-  return Array.from(skillMap.values()).sort((a, b) => a.name.localeCompare(b.name));
 }

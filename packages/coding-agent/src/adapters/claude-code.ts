@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type {
   CanUseTool,
   ModelInfo,
@@ -8,7 +10,7 @@ import { getSessionMessages, listSessions, query } from "@anthropic-ai/claude-ag
 import { createLogger } from "@band-app/logger";
 import type { ClaudeCodeConfig } from "../config.js";
 import type { AgentEvent } from "../events.js";
-import { discoverSkills } from "../skills.js";
+import { readSkillsFromDir } from "../skills.js";
 import type {
   AgentMode,
   AgentModel,
@@ -202,7 +204,7 @@ export class ClaudeCodeAdapter implements CodingAgent {
   }
 
   async listSkills(): Promise<SkillInfo[]> {
-    return discoverSkills(this.workspaceDir);
+    return discoverClaudeSkills(this.workspaceDir);
   }
 
   listModes(): AgentMode[] {
@@ -529,4 +531,22 @@ function* extractImageEvents(content: unknown): Generator<AgentEvent> {
       }
     }
   }
+}
+
+function discoverClaudeSkills(workspaceDir: string): SkillInfo[] {
+  const globalSkillsDir = join(homedir(), ".claude", "skills");
+  const projectSkillsDir = join(workspaceDir, ".claude", "skills");
+
+  const globalSkills = readSkillsFromDir(globalSkillsDir);
+  const projectSkills = readSkillsFromDir(projectSkillsDir);
+
+  const skillMap = new Map<string, SkillInfo>();
+  for (const skill of globalSkills) {
+    skillMap.set(skill.name, skill);
+  }
+  for (const skill of projectSkills) {
+    skillMap.set(skill.name, skill);
+  }
+
+  return Array.from(skillMap.values()).sort((a, b) => a.name.localeCompare(b.name));
 }

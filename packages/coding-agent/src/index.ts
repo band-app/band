@@ -1,5 +1,6 @@
 export {
   type ClaudeCodeConfig,
+  type CodexConfig,
   type CodingAgentConfig,
   type CursorCliConfig,
   codingAgentConfigSchema,

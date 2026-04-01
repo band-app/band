@@ -1,10 +1,12 @@
 import type { ChildProcess } from "node:child_process";
 import { spawn } from "node:child_process";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { createLogger } from "@band-app/logger";
 import type { GeminiCliConfig } from "../config.js";
 import type { AgentEvent } from "../events.js";
-import { discoverSkills } from "../skills.js";
+import { readSkillsFromDir } from "../skills.js";
 import type { AgentModel, CodingAgent, RunSessionOptions, SkillInfo } from "../types.js";
 
 const log = createLogger("coding-agent:gemini-cli");
@@ -164,7 +166,7 @@ export class GeminiCliAdapter implements CodingAgent {
   }
 
   async listSkills(): Promise<SkillInfo[]> {
-    return discoverSkills(this.workspaceDir);
+    return discoverGeminiSkills(this.workspaceDir);
   }
 
   listModels(): AgentModel[] {
@@ -173,4 +175,22 @@ export class GeminiCliAdapter implements CodingAgent {
       { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", description: "Fast and efficient" },
     ];
   }
+}
+
+function discoverGeminiSkills(workspaceDir: string): SkillInfo[] {
+  const globalSkillsDir = join(homedir(), ".gemini", "skills");
+  const projectSkillsDir = join(workspaceDir, ".gemini", "skills");
+
+  const globalSkills = readSkillsFromDir(globalSkillsDir);
+  const projectSkills = readSkillsFromDir(projectSkillsDir);
+
+  const skillMap = new Map<string, SkillInfo>();
+  for (const skill of globalSkills) {
+    skillMap.set(skill.name, skill);
+  }
+  for (const skill of projectSkills) {
+    skillMap.set(skill.name, skill);
+  }
+
+  return Array.from(skillMap.values()).sort((a, b) => a.name.localeCompare(b.name));
 }
