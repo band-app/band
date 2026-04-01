@@ -12,13 +12,7 @@ function readCollapsed(workspaceId: string): boolean {
   }
 }
 
-export function TaskListWidget({
-  tasks,
-  workspaceId,
-}: {
-  tasks: TaskMap;
-  workspaceId: string;
-}) {
+export function TaskListWidget({ tasks, workspaceId }: { tasks: TaskMap; workspaceId: string }) {
   const [collapsed, setCollapsed] = useState(() => readCollapsed(workspaceId));
   const toggleCollapsed = useCallback(() => {
     setCollapsed((prev) => {
