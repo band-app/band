@@ -370,6 +370,7 @@ function MobileWorkspaceLayout({
           transform: appOffsetTop ? `translateY(${appOffsetTop}px)` : undefined,
         }}
       >
+        {isTauri && <div data-tauri-drag-region className="h-[28px] shrink-0" />}
         <header className="flex shrink-0 items-center gap-3 border-b border-border/50 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
           <button
             type="button"
