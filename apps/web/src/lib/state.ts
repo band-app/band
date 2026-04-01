@@ -167,10 +167,7 @@ export function loadSettings(): Settings {
  * Resolve a coding agent definition by ID.
  * Falls back to the default agent, then the first in the list, then a built-in claude-code default.
  */
-export function getAgentDefinition(
-  settings: Settings,
-  agentId?: string,
-): CodingAgentDefinition {
+export function getAgentDefinition(settings: Settings, agentId?: string): CodingAgentDefinition {
   const agents = settings.codingAgents ?? [];
   if (agentId) {
     const found = agents.find((a) => a.id === agentId);

@@ -31,10 +31,11 @@ import { playSound, SOUNDS, type SoundId } from "../lib/sounds";
 import type { CodingAgentDefinition, CodingAgentType, LabelDefinition, Theme } from "../types";
 import { AgentIcon } from "./agent-icons";
 
-const KNOWN_AGENTS: { id: string; type: CodingAgentType; label: string; defaultCommand: string }[] = [
-  { id: "claude-code", type: "claude-code", label: "Claude Code", defaultCommand: "claude" },
-  { id: "codex", type: "codex", label: "Codex", defaultCommand: "codex" },
-];
+const KNOWN_AGENTS: { id: string; type: CodingAgentType; label: string; defaultCommand: string }[] =
+  [
+    { id: "claude-code", type: "claude-code", label: "Claude Code", defaultCommand: "claude" },
+    { id: "codex", type: "codex", label: "Codex", defaultCommand: "codex" },
+  ];
 
 const DEFAULT_DEFAULTS = {
   apps: [
@@ -131,7 +132,11 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
     if (worktreesDir !== (settings.worktreesDir ?? "")) return true;
     const savedDefaults = settings.defaults ? JSON.stringify(settings.defaults, null, 2) : "";
     if (defaultsJson !== savedDefaults) return true;
-    if (JSON.stringify(codingAgents) !== JSON.stringify(Array.isArray(settings.codingAgents) ? settings.codingAgents : [])) return true;
+    if (
+      JSON.stringify(codingAgents) !==
+      JSON.stringify(Array.isArray(settings.codingAgents) ? settings.codingAgents : [])
+    )
+      return true;
     if (defaultAgentId !== (settings.defaultCodingAgent ?? "")) return true;
     if (webServerPort !== (settings.webServerPort?.toString() ?? "")) return true;
     if (soundOnNeedsAttention !== (settings.notifications?.soundOnNeedsAttention ?? false))
@@ -420,21 +425,21 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
                       {defaultAgentId === known.id ? "Default" : "Set as default"}
                     </button>
                     <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">Command</Label>
-                    <Input
-                      placeholder={known.defaultCommand}
-                      value={agent?.command ?? ""}
-                      onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                        setCodingAgents((prev) =>
-                          prev.map((a) =>
-                            a.id === known.id
-                              ? { ...a, command: e.target.value || undefined }
-                              : a,
-                          ),
-                        )
-                      }
-                      className="h-7 text-xs"
-                    />
+                      <Label className="text-xs text-muted-foreground">Command</Label>
+                      <Input
+                        placeholder={known.defaultCommand}
+                        value={agent?.command ?? ""}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                          setCodingAgents((prev) =>
+                            prev.map((a) =>
+                              a.id === known.id
+                                ? { ...a, command: e.target.value || undefined }
+                                : a,
+                            ),
+                          )
+                        }
+                        className="h-7 text-xs"
+                      />
                     </div>
                   </div>
                 )}
@@ -442,8 +447,8 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
             );
           })}
           <p className="text-xs text-muted-foreground">
-            Enable agents and set a default. The default agent is used for new workspaces.
-            You can switch agents per workspace from the workspace chat header.
+            Enable agents and set a default. The default agent is used for new workspaces. You can
+            switch agents per workspace from the workspace chat header.
           </p>
         </div>
       )}

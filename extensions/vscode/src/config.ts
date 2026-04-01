@@ -185,8 +185,7 @@ export async function loadCodingAgentSettings(): Promise<CodingAgentSettings | n
     if (settings?.codingAgents && Array.isArray(settings.codingAgents)) {
       const agents = settings.codingAgents as CodingAgentDefinition[];
       const defaultId = settings.defaultCodingAgent as string | undefined;
-      const agent =
-        (defaultId ? agents.find((a) => a.id === defaultId) : undefined) ?? agents[0];
+      const agent = (defaultId ? agents.find((a) => a.id === defaultId) : undefined) ?? agents[0];
       if (agent) {
         return { type: agent.type, command: agent.command };
       }

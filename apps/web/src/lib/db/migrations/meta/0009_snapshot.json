@@ -436,12 +436,8 @@
           "name": "worktrees_project_name_projects_name_fk",
           "tableFrom": "worktrees",
           "tableTo": "projects",
-          "columnsFrom": [
-            "project_name"
-          ],
-          "columnsTo": [
-            "name"
-          ],
+          "columnsFrom": ["project_name"],
+          "columnsTo": ["name"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }

@@ -76,14 +76,17 @@ export function WorkspaceChatPanel({ workspaceId }: WorkspaceChatPanelProps) {
       }
     });
 
-    trpc.statuses.get.query({ workspaceId }).then((status) => {
-      if (cancelled) return;
-      if (status?.agent?.codingAgentId) {
-        setCurrentAgentId(status.agent.codingAgentId);
-      }
-    }).catch(() => {
-      // Status might not exist yet
-    });
+    trpc.statuses.get
+      .query({ workspaceId })
+      .then((status) => {
+        if (cancelled) return;
+        if (status?.agent?.codingAgentId) {
+          setCurrentAgentId(status.agent.codingAgentId);
+        }
+      })
+      .catch(() => {
+        // Status might not exist yet
+      });
 
     return () => {
       cancelled = true;
@@ -147,9 +150,7 @@ export function WorkspaceChatPanel({ workspaceId }: WorkspaceChatPanelProps) {
               }`}
             >
               {currentAgent && <AgentIcon type={currentAgent.type} className="size-3.5 shrink-0" />}
-              <span className="max-w-[120px] truncate">
-                {currentAgent?.label ?? "Default"}
-              </span>
+              <span className="max-w-[120px] truncate">{currentAgent?.label ?? "Default"}</span>
               <ChevronDown className="size-3 opacity-50" />
             </button>
             {showAgentMenu && !switchDisabled && (
