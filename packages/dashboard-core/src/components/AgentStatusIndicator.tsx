@@ -23,9 +23,7 @@ export function AgentStatusIndicator({ agent, isActive }: Props) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span
-          className={`inline-block size-2.5 shrink-0 rounded-full ${color}`}
-        />
+        <span className={`inline-block size-2.5 shrink-0 rounded-full ${color}`} />
       </TooltipTrigger>
       <TooltipContent side="top">{tooltip}</TooltipContent>
     </Tooltip>
