@@ -35,6 +35,7 @@ export interface StatusEvent {
   error?: string;
   setupState?: "running" | "completed" | "failed";
   setupError?: string;
+  runningSetups?: string[];
 }
 
 type StatusListener = (event: StatusEvent) => void;
@@ -71,11 +72,10 @@ export function subscribe(listener: StatusListener): () => void {
   listeners.add(listener);
   startBranchStatusPoller();
 
-  // Send current agent status snapshot
+  // Send current agent status snapshot (always include runningSetups for reconciliation)
   const statuses = loadCurrentStatuses();
-  if (statuses.length > 0) {
-    listener({ kind: "snapshot", statuses });
-  }
+  const runningSetups = getRunningSetups();
+  listener({ kind: "snapshot", statuses, runningSetups });
 
   // Send current branch status snapshots
   for (const event of loadCurrentBranchStatuses()) {

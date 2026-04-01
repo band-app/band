@@ -82,10 +82,17 @@ export function useSetupStatusWatcher() {
   const adapter = useAdapter();
   const updateSetupStatus = useDashboardStore((s) => s.updateSetupStatus);
   const removeSetupStatus = useDashboardStore((s) => s.removeSetupStatus);
+  const reconcileSetupStatuses = useDashboardStore((s) => s.reconcileSetupStatuses);
 
   useEffect(() => {
     const unsubscribe = adapter.subscribeStatusEvents((event) => {
       const data = event as SSEEvent;
+
+      if (data.kind === "snapshot" && data.runningSetups) {
+        reconcileSetupStatuses(data.runningSetups);
+        return;
+      }
+
       if (data.kind !== "setup-status" || !data.workspaceId) return;
 
       if (data.setupState === "running") {
@@ -101,5 +108,5 @@ export function useSetupStatusWatcher() {
     });
 
     return unsubscribe;
-  }, [adapter, updateSetupStatus, removeSetupStatus]);
+  }, [adapter, updateSetupStatus, removeSetupStatus, reconcileSetupStatuses]);
 }

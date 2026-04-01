@@ -29,6 +29,7 @@ export interface DashboardState {
   updateCIStatus: (workspaceId: string, ci: CIStatus) => void;
   updateSetupStatus: (workspaceId: string, status: SetupStatus) => void;
   removeSetupStatus: (workspaceId: string) => void;
+  reconcileSetupStatuses: (runningSetups: string[]) => void;
 }
 
 export type DashboardStore = UseBoundStore<StoreApi<DashboardState>>;
@@ -164,6 +165,21 @@ export function createDashboardStore(adapter: DashboardAdapter): DashboardStore 
         const setupStatuses = new Map(state.setupStatuses);
         setupStatuses.delete(workspaceId);
         return { setupStatuses };
+      });
+    },
+
+    reconcileSetupStatuses: (runningSetups: string[]) => {
+      set((state) => {
+        const runningSet = new Set(runningSetups);
+        let changed = false;
+        const setupStatuses = new Map(state.setupStatuses);
+        for (const [id, status] of setupStatuses) {
+          if (status.state === "running" && !runningSet.has(id)) {
+            setupStatuses.delete(id);
+            changed = true;
+          }
+        }
+        return changed ? { setupStatuses } : state;
       });
     },
   }));
