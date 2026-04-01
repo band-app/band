@@ -86,9 +86,7 @@ impl TestEnv {
             }
             let _ = tx.send(false);
         });
-        let found = rx
-            .recv_timeout(Duration::from_secs(30))
-            .unwrap_or(false);
+        let found = rx.recv_timeout(Duration::from_secs(30)).unwrap_or(false);
         if !found {
             // Kill server and capture stderr for diagnostics
             let _ = child.kill();
