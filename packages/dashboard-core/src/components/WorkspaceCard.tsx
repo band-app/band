@@ -12,7 +12,6 @@ import {
   ArrowUpFromLine,
   Clipboard,
   FolderOpen,
-  GitBranch,
   Play,
   Square,
   Trash2,
@@ -29,7 +28,7 @@ import type {
   WorkspaceStatus,
   WorktreeInfo,
 } from "../types";
-import { AgentStatusBadge } from "./AgentStatusBadge";
+import { AgentStatusIndicator } from "./AgentStatusIndicator";
 import { CIStatusIndicator } from "./CIStatusIndicator";
 import { GitStatusIndicator } from "./GitStatusIndicator";
 import { SetupStatusIndicator } from "./SetupStatusIndicator";
@@ -128,9 +127,7 @@ export const WorkspaceCard = memo(function WorkspaceCard({
           <Tooltip>
             <TooltipTrigger asChild>
               <div className="flex items-center gap-3 min-w-0 overflow-hidden">
-                <GitBranch
-                  className={`size-3.5 shrink-0 ${isActive ? "text-primary" : "text-muted-foreground"}`}
-                />
+                <AgentStatusIndicator agent={status?.agent} isActive={isActive} />
                 <span
                   className={`text-sm truncate ${isActive ? "font-semibold text-foreground" : "font-medium"}`}
                   style={isActive ? undefined : { color: "oklch(0.7 0 0)" }}
@@ -143,7 +140,6 @@ export const WorkspaceCard = memo(function WorkspaceCard({
           </Tooltip>
           {!editMode && (
             <div className="flex items-center gap-2 shrink-0 ml-auto pl-2">
-              <AgentStatusBadge agent={status?.agent} />
               <SetupStatusIndicator setup={setupStatus} />
               {branchStatus && <GitStatusIndicator git={branchStatus.git} />}
               {branchStatus && <CIStatusIndicator ci={branchStatus.ci} />}
