@@ -244,7 +244,11 @@ export class ClaudeCodeAdapter implements CodingAgent {
     } catch (err) {
       log.warn({ err }, "failed to fetch models from SDK, returning defaults");
       return [
-        { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4", description: "Fast and capable" },
+        {
+          id: "claude-sonnet-4-20250514",
+          name: "Claude Sonnet 4",
+          description: "Fast and capable",
+        },
         { id: "claude-opus-4-20250514", name: "Claude Opus 4", description: "Most capable" },
       ];
     }
