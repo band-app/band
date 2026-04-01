@@ -7,7 +7,7 @@ import { createLogger } from "@band-app/logger";
 import { initTRPC, TRPCError } from "@trpc/server";
 import { Cron } from "croner";
 import { z } from "zod";
-import { getOrCreateAgent, removeAgent } from "../lib/agent-pool";
+import { getOrCreateAgent, removeAgent, replaceAgent } from "../lib/agent-pool";
 import { checkCli, installCli } from "../lib/cli";
 import { reloadSchedules, stopJobsForKey } from "../lib/cronjob-scheduler";
 import {
@@ -885,6 +885,36 @@ const workspaceRouter = t.router({
       }
 
       return { results };
+    }),
+
+  switchAgent: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        agentId: z.string(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const workspace = resolveWorkspace(input.workspaceId);
+      if (!workspace) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Workspace not found" });
+      }
+
+      // Abort any running task for this workspace
+      abortTask(input.workspaceId);
+
+      // Replace the agent in the pool with the new agent type
+      await replaceAgent(input.workspaceId, workspace.worktree.path, input.agentId);
+
+      // Update workspace status with the new coding agent ID
+      upsertWorkspaceStatus(input.workspaceId, {
+        status: "idle",
+        codingAgentId: input.agentId,
+      });
+
+      emit({ kind: "update", status: getWorkspaceStatus(input.workspaceId)! });
+
+      return { ok: true };
     }),
 });
 

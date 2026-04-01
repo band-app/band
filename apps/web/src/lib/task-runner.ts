@@ -3,7 +3,7 @@ import type { UIMessageChunk } from "ai";
 import { getAgent, getOrCreateAgent } from "./agent-pool";
 import { createPendingInput } from "./pending-inputs";
 import { shiftQueuedMessage } from "./queued-message-store";
-import { upsertWorkspaceStatus } from "./state";
+import { getWorkspaceStatus, upsertWorkspaceStatus } from "./state";
 import { generateTaskId, markTaskFailed, saveTask } from "./task-store";
 import { emit as emitStatusEvent } from "./watcher";
 import { resolveWorkspace } from "./workspace";
@@ -213,7 +213,10 @@ async function runTask(workspaceId: string, task: InternalTask) {
     return;
   }
 
-  const agent = await getOrCreateAgent(workspaceId, workspace.worktree.path);
+  // Look up the workspace's preferred coding agent from the DB status
+  const wsStatus = getWorkspaceStatus(workspaceId);
+  const codingAgentId = wsStatus?.agent?.codingAgentId;
+  const agent = await getOrCreateAgent(workspaceId, workspace.worktree.path, codingAgentId);
 
   agent.onUserInputNeeded = async (request) => {
     // Set status to needs_attention while waiting for user input

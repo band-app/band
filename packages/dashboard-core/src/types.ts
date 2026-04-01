@@ -4,6 +4,7 @@ export interface AgentInfo {
   name: string;
   status: AgentStatusType;
   lastActivity: string;
+  codingAgentId?: string;
 }
 
 export interface WorkspaceStatus {
@@ -88,15 +89,17 @@ export interface BandConfig {
   apps?: AppConfig[];
 }
 
-export type CodingAgentType =
-  | "claude-code"
-  | "codex"
-  | "openai-codex"
-  | "gemini-cli"
-  | "cursor-cli";
+export type CodingAgentType = "claude-code" | "codex" | "gemini-cli" | "cursor-cli";
 
 export interface CodingAgentConfig {
   type: CodingAgentType;
+  command?: string;
+}
+
+export interface CodingAgentDefinition {
+  id: string;
+  type: CodingAgentType;
+  label: string;
   command?: string;
 }
 
@@ -116,7 +119,10 @@ export type Theme = "system" | "light" | "dark";
 export interface Settings {
   worktreesDir: string | null;
   defaults?: BandConfig;
+  /** @deprecated Use codingAgents + defaultCodingAgent instead. Kept for migration. */
   codingAgent?: CodingAgentConfig;
+  codingAgents?: CodingAgentDefinition[];
+  defaultCodingAgent?: string;
   webServerPort?: number;
   notifications?: NotificationSettings;
   labels?: LabelDefinition[];

@@ -166,6 +166,13 @@ export interface CodingAgentSettings {
   command?: string;
 }
 
+interface CodingAgentDefinition {
+  id: string;
+  type: string;
+  label: string;
+  command?: string;
+}
+
 export async function loadCodingAgentSettings(): Promise<CodingAgentSettings | null> {
   const settingsPath = path.join(os.homedir(), ".band", "settings.json");
 
@@ -174,6 +181,17 @@ export async function loadCodingAgentSettings(): Promise<CodingAgentSettings | n
     const content = await fs.promises.readFile(settingsPath, "utf-8");
     const settings = JSON.parse(content);
 
+    // New format: codingAgents array + defaultCodingAgent
+    if (settings?.codingAgents && Array.isArray(settings.codingAgents)) {
+      const agents = settings.codingAgents as CodingAgentDefinition[];
+      const defaultId = settings.defaultCodingAgent as string | undefined;
+      const agent = (defaultId ? agents.find((a) => a.id === defaultId) : undefined) ?? agents[0];
+      if (agent) {
+        return { type: agent.type, command: agent.command };
+      }
+    }
+
+    // Legacy format: single codingAgent object
     if (settings?.codingAgent) {
       return settings.codingAgent as CodingAgentSettings;
     }

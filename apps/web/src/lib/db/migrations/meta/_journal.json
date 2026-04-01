@@ -64,6 +64,13 @@
       "when": 1775045965677,
       "tag": "0008_stiff_red_ghost",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1775100000000,
+      "tag": "0009_chief_maddog",
+      "breakpoints": true
     }
   ]
 }

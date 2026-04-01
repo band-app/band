@@ -187,7 +187,7 @@ export const PromptInput = ({
   return (
     <form
       className={cn(
-        "relative flex w-full flex-col rounded-md border border-border bg-muted/50 p-2 shadow-sm",
+        "relative flex w-full flex-col rounded-md border-2 border-white/20 bg-muted/50 p-2 shadow-sm",
         isDragging && "border-primary/50 bg-primary/5",
         className,
       )}

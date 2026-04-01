@@ -89,11 +89,11 @@ export type ToolInputProps = ComponentProps<"div"> & {
 
 export const ToolInput = ({ className, input, ...props }: ToolInputProps) => (
   <div className={cn("space-y-2 overflow-hidden", className)} {...props}>
-    <h4 className="font-medium text-muted-foreground text-sm uppercase tracking-wide">
+    <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
       Parameters
     </h4>
     <div className="rounded-md bg-muted/50">
-      <pre className="overflow-auto p-3 text-sm">
+      <pre className="overflow-auto p-3 text-xs">
         <code>{JSON.stringify(input, null, 2)}</code>
       </pre>
     </div>
@@ -114,13 +114,13 @@ export const ToolOutput = ({ className, output, errorText, ...props }: ToolOutpu
 
   if (typeof output === "object" && !isValidElement(output)) {
     renderedOutput = (
-      <pre className="overflow-auto p-3 text-sm">
+      <pre className="overflow-auto p-3 text-xs">
         <code>{JSON.stringify(output, null, 2)}</code>
       </pre>
     );
   } else if (typeof output === "string") {
     renderedOutput = (
-      <pre className="overflow-auto p-3 text-sm">
+      <pre className="overflow-auto p-3 text-xs">
         <code>{output}</code>
       </pre>
     );
@@ -128,12 +128,12 @@ export const ToolOutput = ({ className, output, errorText, ...props }: ToolOutpu
 
   return (
     <div className={cn("space-y-2", className)} {...props}>
-      <h4 className="font-medium text-muted-foreground text-sm uppercase tracking-wide">
+      <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
         {errorText ? "Error" : "Result"}
       </h4>
       <div
         className={cn(
-          "overflow-x-auto rounded-md text-sm",
+          "overflow-x-auto rounded-md text-xs",
           errorText ? "bg-destructive/10 text-destructive" : "bg-muted/50 text-foreground",
         )}
       >

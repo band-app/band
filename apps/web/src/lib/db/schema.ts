@@ -10,6 +10,7 @@ export const workspaceStatuses = sqliteTable("workspace_statuses", {
   agentStatus: text("agent_status"),
   agentLastActivity: text("agent_last_activity"),
   agentSummary: text("agent_summary"),
+  codingAgentId: text("coding_agent_id"),
   updatedAt: integer("updated_at").notNull(),
 });
 

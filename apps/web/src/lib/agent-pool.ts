@@ -5,7 +5,7 @@ import {
   createCodingAgent,
 } from "@band-app/coding-agent";
 import { createLogger } from "@band-app/logger";
-import { bandHome, loadSettings } from "./state";
+import { bandHome, getAgentDefinition, loadSettings } from "./state";
 
 const log = createLogger("agent-pool");
 
@@ -15,17 +15,17 @@ const g = globalThis as unknown as Record<symbol, unknown>;
 if (!g[POOL_KEY]) g[POOL_KEY] = new Map<string, CodingAgent>();
 const pool = g[POOL_KEY] as Map<string, CodingAgent>;
 
-function getAgentConfig(worktreePath: string): CodingAgentConfig {
+function getAgentConfig(worktreePath: string, agentId?: string): CodingAgentConfig {
   const settings = loadSettings();
-  const agentType = settings.codingAgent?.type ?? "claude-code";
+  const agentDef = getAgentDefinition(settings, agentId);
 
   return {
-    type: agentType,
+    type: agentDef.type,
     workspaceDir: worktreePath,
     maxTurns: 100,
     additionalDirectories: [join(bandHome(), "uploads")],
     options: {
-      executablePath: settings.codingAgent?.command,
+      executablePath: agentDef.command,
     },
   } as CodingAgentConfig;
 }
@@ -42,13 +42,31 @@ export function removeAgent(workspaceId: string): boolean {
 export async function getOrCreateAgent(
   workspaceId: string,
   worktreePath: string,
+  agentId?: string,
 ): Promise<CodingAgent> {
   const existing = pool.get(workspaceId);
   if (existing) return existing;
 
-  const config = getAgentConfig(worktreePath);
+  const config = getAgentConfig(worktreePath, agentId);
   log.info({ workspaceId, type: config.type, cwd: worktreePath }, "creating agent");
   const agent = await createCodingAgent(config);
   pool.set(workspaceId, agent);
   return agent;
+}
+
+/**
+ * Replace the current agent for a workspace with one using a different config.
+ * Aborts the existing agent (if any) before creating the new one.
+ */
+export async function replaceAgent(
+  workspaceId: string,
+  worktreePath: string,
+  agentId: string,
+): Promise<CodingAgent> {
+  const existing = pool.get(workspaceId);
+  if (existing?.abort) {
+    existing.abort();
+  }
+  pool.delete(workspaceId);
+  return getOrCreateAgent(workspaceId, worktreePath, agentId);
 }

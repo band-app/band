@@ -5,6 +5,7 @@ export type { DashboardAdapter, PlatformCapabilities, Unsubscribe } from "./adap
 // Components
 export { AddProjectDialog } from "./components/AddProjectDialog";
 export { AgentStatusIndicator } from "./components/AgentStatusIndicator";
+export { AgentIcon, ClaudeIcon, CodexIcon } from "./components/agent-icons";
 export { CIStatusIndicator } from "./components/CIStatusIndicator";
 export { CodeMirrorViewer } from "./components/CodeMirrorViewer";
 export { DashboardShell } from "./components/DashboardShell";
@@ -65,6 +66,7 @@ export type {
   CIState,
   CIStatus,
   CodingAgentConfig,
+  CodingAgentDefinition,
   CodingAgentType,
   ContentSearchMatch,
   FileContentResult,
