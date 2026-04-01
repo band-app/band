@@ -90,16 +90,16 @@ export function ToolCall({ item }: { item: ToolCallItem }) {
 
   return (
     <>
-      <Collapsible className="group not-prose w-full rounded border border-border/50">
-        <CollapsibleTrigger className="flex w-full items-center justify-between gap-4 p-2">
+      <Collapsible className="group not-prose w-full rounded border border-border/30 bg-muted/20">
+        <CollapsibleTrigger className="flex w-full items-center justify-between gap-4 px-2 py-1.5">
           <div className="flex min-w-0 items-center gap-2">
             <StatusDot isError={item.isError} isInProgress={item.isInProgress} />
-            <span className="truncate font-medium text-sm">{title}</span>
+            <span className="truncate font-medium text-xs text-muted-foreground">{title}</span>
           </div>
           <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
         </CollapsibleTrigger>
 
-        <CollapsibleContent className="space-y-4 border-t border-border/50 px-4 py-3 text-popover-foreground">
+        <CollapsibleContent className="space-y-3 border-t border-border/30 px-3 py-2 text-popover-foreground">
           <ToolInput input={item.input} />
           <ToolOutput output={item.output} errorText={item.errorText} />
         </CollapsibleContent>

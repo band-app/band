@@ -148,6 +148,7 @@ interface ChatViewProps {
   initialSessionId?: string;
   showSessionList: boolean;
   onShowSessionListChange: (show: boolean) => void;
+  onStreamingChange?: (streaming: boolean) => void;
 }
 
 export function ChatView({
@@ -157,6 +158,7 @@ export function ChatView({
   initialSessionId,
   showSessionList,
   onShowSessionListChange,
+  onStreamingChange,
 }: ChatViewProps) {
   const sessionIdRef = useRef<string | undefined>(undefined);
   const [activeSessionId, setActiveSessionId] = useState<string | undefined>(undefined);
@@ -300,6 +302,10 @@ export function ChatView({
   }, [transport, stop]);
 
   const isStreaming = status === "submitted" || status === "streaming";
+
+  useEffect(() => {
+    onStreamingChange?.(isStreaming);
+  }, [isStreaming, onStreamingChange]);
 
   const handleEscape = useCallback(() => {
     if (isStreaming) {

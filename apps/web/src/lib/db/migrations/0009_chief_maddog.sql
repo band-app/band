@@ -1,0 +1,1 @@
+ALTER TABLE `workspace_statuses` ADD `coding_agent_id` text;

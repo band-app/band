@@ -35,6 +35,7 @@ export interface AgentInfo {
   status: string;
   lastActivity: string;
   summary?: string;
+  codingAgentId?: string;
 }
 
 export interface WorkspaceStatus {
@@ -57,13 +58,23 @@ export interface NotificationSettings {
   sound?: string;
 }
 
+export interface CodingAgentDefinition {
+  id: string;
+  type: string;
+  label: string;
+  command?: string;
+}
+
 export interface Settings {
   worktreesDir?: string;
   defaults?: unknown;
+  /** @deprecated Use codingAgents + defaultCodingAgent instead. Kept for migration. */
   codingAgent?: {
     type: string;
     command?: string;
   };
+  codingAgents?: CodingAgentDefinition[];
+  defaultCodingAgent?: string;
   webServerPort?: number;
   notifications?: NotificationSettings;
   labels?: LabelDefinition[];
@@ -152,6 +163,27 @@ export function loadSettings(): Settings {
   }
 }
 
+/**
+ * Resolve a coding agent definition by ID.
+ * Falls back to the default agent, then the first in the list, then a built-in claude-code default.
+ */
+export function getAgentDefinition(
+  settings: Settings,
+  agentId?: string,
+): CodingAgentDefinition {
+  const agents = settings.codingAgents ?? [];
+  if (agentId) {
+    const found = agents.find((a) => a.id === agentId);
+    if (found) return found;
+  }
+  if (settings.defaultCodingAgent) {
+    const found = agents.find((a) => a.id === settings.defaultCodingAgent);
+    if (found) return found;
+  }
+  if (agents.length > 0) return agents[0];
+  return { id: "claude-code", type: "claude-code", label: "Claude Code" };
+}
+
 export function saveSettings(settings: Settings): void {
   const filePath = settingsFile();
   // Merge with existing file contents to preserve unknown fields (e.g. Tauri extras)
@@ -201,6 +233,7 @@ export function loadCurrentStatuses(): WorkspaceStatus[] {
           status: row.agentStatus ?? "unknown",
           lastActivity: row.agentLastActivity ?? "",
           summary: row.agentSummary ?? undefined,
+          codingAgentId: row.codingAgentId ?? undefined,
         }
       : undefined,
   }));
@@ -226,6 +259,7 @@ export function getWorkspaceStatus(workspaceId: string): WorkspaceStatus | null 
           status: row.agentStatus ?? "unknown",
           lastActivity: row.agentLastActivity ?? "",
           summary: row.agentSummary ?? undefined,
+          codingAgentId: row.codingAgentId ?? undefined,
         }
       : undefined,
   };
@@ -233,7 +267,7 @@ export function getWorkspaceStatus(workspaceId: string): WorkspaceStatus | null 
 
 export function upsertWorkspaceStatus(
   workspaceId: string,
-  agent: { status: string; lastActivity?: string },
+  agent: { status: string; lastActivity?: string; codingAgentId?: string },
 ): WorkspaceStatus {
   const db = getDb();
 
@@ -250,6 +284,7 @@ export function upsertWorkspaceStatus(
     agentStatus: agent.status,
     agentLastActivity: agent.lastActivity ?? existing?.agentLastActivity ?? "",
     agentSummary: existing?.agentSummary ?? null,
+    codingAgentId: agent.codingAgentId ?? existing?.codingAgentId ?? null,
   };
 
   if (existing) {

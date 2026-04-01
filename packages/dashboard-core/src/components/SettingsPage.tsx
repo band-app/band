@@ -28,22 +28,13 @@ import { useCapabilities } from "../context";
 import { useUpdateSettings } from "../hooks/use-settings-mutations";
 import { useSettingsQuery } from "../hooks/use-settings-query";
 import { playSound, SOUNDS, type SoundId } from "../lib/sounds";
-import type { CodingAgentConfig, CodingAgentType, LabelDefinition, Theme } from "../types";
+import type { CodingAgentDefinition, CodingAgentType, LabelDefinition, Theme } from "../types";
+import { AgentIcon } from "./agent-icons";
 
-const AGENT_TYPES: { value: CodingAgentType; label: string }[] = [
-  { value: "claude-code", label: "Claude Code" },
-  { value: "codex", label: "Codex" },
-  { value: "gemini-cli", label: "Gemini CLI" },
-  { value: "cursor-cli", label: "Cursor CLI" },
+const KNOWN_AGENTS: { id: string; type: CodingAgentType; label: string; defaultCommand: string }[] = [
+  { id: "claude-code", type: "claude-code", label: "Claude Code", defaultCommand: "claude" },
+  { id: "codex", type: "codex", label: "Codex", defaultCommand: "codex" },
 ];
-
-const AGENT_LABEL: Record<string, string> = {
-  "claude-code": "Claude Code",
-  codex: "Codex",
-  "openai-codex": "OpenAI Codex (SDK)",
-  "gemini-cli": "Gemini CLI",
-  "cursor-cli": "Cursor CLI",
-};
 
 const DEFAULT_DEFAULTS = {
   apps: [
@@ -71,7 +62,7 @@ const SECTION_TITLES: Record<Exclude<Section, "menu">, string> = {
   appearance: "Appearance",
   general: "General",
   labels: "Labels",
-  "coding-agent": "Coding Agent",
+  "coding-agent": "Coding Agents",
   defaults: "Workspace Settings",
   notifications: "Notifications",
   "web-server": "Web Server",
@@ -121,10 +112,10 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
   const [worktreesDir, setWorktreesDir] = useState(settings.worktreesDir ?? "");
   const [defaultsJson, setDefaultsJson] = useState("");
   const [defaultsError, setDefaultsError] = useState<string | null>(null);
-  const [agentType, setAgentType] = useState<CodingAgentType | "">(
-    settings.codingAgent?.type ?? "",
+  const [codingAgents, setCodingAgents] = useState<CodingAgentDefinition[]>(
+    Array.isArray(settings.codingAgents) ? settings.codingAgents : [],
   );
-  const [agentCommand, setAgentCommand] = useState(settings.codingAgent?.command ?? "");
+  const [defaultAgentId, setDefaultAgentId] = useState(settings.defaultCodingAgent ?? "");
   const [webServerPort, setWebServerPort] = useState(settings.webServerPort?.toString() ?? "");
   const [soundOnNeedsAttention, setSoundOnNeedsAttention] = useState(
     settings.notifications?.soundOnNeedsAttention ?? false,
@@ -140,8 +131,8 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
     if (worktreesDir !== (settings.worktreesDir ?? "")) return true;
     const savedDefaults = settings.defaults ? JSON.stringify(settings.defaults, null, 2) : "";
     if (defaultsJson !== savedDefaults) return true;
-    if (agentType !== (settings.codingAgent?.type ?? "")) return true;
-    if (agentCommand !== (settings.codingAgent?.command ?? "")) return true;
+    if (JSON.stringify(codingAgents) !== JSON.stringify(Array.isArray(settings.codingAgents) ? settings.codingAgents : [])) return true;
+    if (defaultAgentId !== (settings.defaultCodingAgent ?? "")) return true;
     if (webServerPort !== (settings.webServerPort?.toString() ?? "")) return true;
     if (soundOnNeedsAttention !== (settings.notifications?.soundOnNeedsAttention ?? false))
       return true;
@@ -153,8 +144,8 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
   }, [
     worktreesDir,
     defaultsJson,
-    agentType,
-    agentCommand,
+    codingAgents,
+    defaultAgentId,
     webServerPort,
     soundOnNeedsAttention,
     selectedSound,
@@ -167,8 +158,8 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
   useEffect(() => {
     setWorktreesDir(settings.worktreesDir ?? "");
     setDefaultsJson(settings.defaults ? JSON.stringify(settings.defaults, null, 2) : "");
-    setAgentType(settings.codingAgent?.type ?? "");
-    setAgentCommand(settings.codingAgent?.command ?? "");
+    setCodingAgents(Array.isArray(settings.codingAgents) ? settings.codingAgents : []);
+    setDefaultAgentId(settings.defaultCodingAgent ?? "");
     setWebServerPort(settings.webServerPort?.toString() ?? "");
     setSoundOnNeedsAttention(settings.notifications?.soundOnNeedsAttention ?? false);
     setSelectedSound((settings.notifications?.sound as SoundId) ?? "chime");
@@ -178,7 +169,8 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
   }, [
     settings.worktreesDir,
     settings.defaults,
-    settings.codingAgent,
+    settings.codingAgents,
+    settings.defaultCodingAgent,
     settings.webServerPort,
     settings.notifications,
     settings.labels,
@@ -225,13 +217,6 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
         return;
       }
     }
-    let codingAgent: CodingAgentConfig | undefined;
-    if (agentType) {
-      codingAgent = { type: agentType };
-      if (agentCommand.trim()) {
-        codingAgent.command = agentCommand.trim();
-      }
-    }
     let parsedPort: number | undefined;
     if (webServerPort.trim()) {
       const n = parseInt(webServerPort.trim(), 10);
@@ -241,7 +226,8 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
     await updateSettingsMutation.mutateAsync({
       worktreesDir: worktreesDir.trim() || null,
       defaults,
-      codingAgent,
+      codingAgents: codingAgents.length > 0 ? codingAgents : undefined,
+      defaultCodingAgent: defaultAgentId || undefined,
       webServerPort: parsedPort,
       notifications: { soundOnNeedsAttention, sound: selectedSound },
       labels: labels.length > 0 ? labels : undefined,
@@ -252,7 +238,10 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
   };
 
   const worktreesDirPreview = worktreesDir || "Default";
-  const agentPreview = agentType ? AGENT_LABEL[agentType] : "None";
+  const agentPreview =
+    codingAgents.length > 0
+      ? `${codingAgents.length} agent${codingAgents.length === 1 ? "" : "s"}`
+      : "None";
   const defaultsPreview = defaultsJson.trim() ? "Configured" : "None";
   const portPreview = webServerPort || "3456";
   const labelsPreview =
@@ -383,60 +372,79 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
       )}
 
       {activeSection === "coding-agent" && (
-        <div className="space-y-4 px-1">
-          <div className="space-y-2">
-            <Label>Agent type</Label>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full justify-between font-normal h-7 text-xs px-2"
-                >
-                  {agentType ? AGENT_LABEL[agentType] : "None"}
-                  <ChevronDown className="size-3 opacity-50" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                align="start"
-                className="w-[--radix-dropdown-menu-trigger-width]"
+        <div className="space-y-3 px-1">
+          {KNOWN_AGENTS.map((known) => {
+            const agent = codingAgents.find((a) => a.id === known.id);
+            const enabled = !!agent;
+            return (
+              <div
+                key={known.id}
+                className={`space-y-2 rounded-md border border-border p-3 transition-opacity ${!enabled ? "opacity-50" : ""}`}
               >
-                <DropdownMenuRadioGroup
-                  value={agentType}
-                  onValueChange={(v: string) => setAgentType(v as CodingAgentType | "")}
-                >
-                  <DropdownMenuRadioItem value="">None</DropdownMenuRadioItem>
-                  {AGENT_TYPES.map((t) => (
-                    <DropdownMenuRadioItem key={t.value} value={t.value}>
-                      {t.label}
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <p className="text-xs text-muted-foreground">
-              The coding agent used for background jobs.
-            </p>
-          </div>
-          {agentType && (
-            <div className="space-y-2">
-              <Label htmlFor="agent-command">
-                Command <span className="text-muted-foreground font-normal">(optional)</span>
-              </Label>
-              <Input
-                id="agent-command"
-                placeholder="claude --dangerously-skip-permissions"
-                value={agentCommand}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                  setAgentCommand(e.target.value)
-                }
-              />
-              <p className="text-xs text-muted-foreground">
-                Custom command with arguments to run the agent. Leave empty to use the default
-                command for the selected agent type.
-              </p>
-            </div>
-          )}
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`size-2 rounded-full shrink-0 ${enabled ? "bg-green-500" : "bg-muted-foreground/30"}`}
+                  />
+                  <AgentIcon type={known.type} className="size-4 shrink-0" />
+                  <span className="flex-1 text-sm font-medium">{known.label}</span>
+                  <Switch
+                    checked={enabled}
+                    onCheckedChange={(checked: boolean) => {
+                      if (checked) {
+                        setCodingAgents((prev) => [
+                          ...prev,
+                          { id: known.id, type: known.type, label: known.label },
+                        ]);
+                        if (!defaultAgentId) setDefaultAgentId(known.id);
+                      } else {
+                        setCodingAgents((prev) => prev.filter((a) => a.id !== known.id));
+                        if (defaultAgentId === known.id) {
+                          const remaining = codingAgents.filter((a) => a.id !== known.id);
+                          setDefaultAgentId(remaining.length > 0 ? remaining[0].id : "");
+                        }
+                      }
+                    }}
+                  />
+                </div>
+                {enabled && (
+                  <div className="space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => setDefaultAgentId(known.id)}
+                      className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium transition-colors ${
+                        defaultAgentId === known.id
+                          ? "bg-primary/15 text-primary"
+                          : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                      }`}
+                    >
+                      {defaultAgentId === known.id ? "Default" : "Set as default"}
+                    </button>
+                    <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Command</Label>
+                    <Input
+                      placeholder={known.defaultCommand}
+                      value={agent?.command ?? ""}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                        setCodingAgents((prev) =>
+                          prev.map((a) =>
+                            a.id === known.id
+                              ? { ...a, command: e.target.value || undefined }
+                              : a,
+                          ),
+                        )
+                      }
+                      className="h-7 text-xs"
+                    />
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          <p className="text-xs text-muted-foreground">
+            Enable agents and set a default. The default agent is used for new workspaces.
+            You can switch agents per workspace from the workspace chat header.
+          </p>
         </div>
       )}
 
@@ -603,7 +611,7 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
       />
       <Separator />
       <SettingsRow
-        label="Coding Agent"
+        label="Coding Agents"
         value={agentPreview}
         active={activeSection === "coding-agent"}
         onClick={() => setSection("coding-agent")}
