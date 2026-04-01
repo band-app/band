@@ -481,7 +481,15 @@ export function ChatView({
             return messages.map((message, messageIndex) => {
               const isLastMessage = messageIndex === messages.length - 1;
               const isLastAssistant = message.role === "assistant" && isLastMessage;
-              const showThinking = isLastAssistant && isStreaming;
+              const hasPendingInteractiveTool =
+                isLastAssistant &&
+                message.parts.some(
+                  (p) =>
+                    isToolUIPart(p) &&
+                    IN_PROGRESS_STATES.has(p.state) &&
+                    (getToolName(p) === "AskUserQuestion" || getToolName(p) === "ExitPlanMode"),
+                );
+              const showThinking = isLastAssistant && isStreaming && !hasPendingInteractiveTool;
 
               if (message.role !== "assistant") {
                 // User messages render normally
