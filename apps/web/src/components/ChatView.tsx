@@ -402,7 +402,7 @@ export function ChatView({
       // or another tab) that this chat doesn't know about yet.
       try {
         const { task } = await trpc.tasks.get.query({ workspaceId });
-        if (task) {
+        if (task && task.status === "running") {
           queueMessage(message.text);
           return;
         }
