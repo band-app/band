@@ -47,6 +47,49 @@ impl RenderConfig {
     }
 }
 
+// ── Interactive input types ────────────────────────────────────────
+
+/// What the SSE loop should do after rendering a chunk.
+pub enum RenderAction {
+    /// Keep reading SSE events.
+    Continue,
+    /// Stream finished (received "finish" chunk).
+    Finish,
+    /// An interactive tool needs user input before continuing.
+    NeedsInput(InteractiveRequest),
+}
+
+/// A request for user input from an interactive tool.
+pub struct InteractiveRequest {
+    /// The approval ID to send back with the answer (equals toolCallId).
+    pub approval_id: String,
+    /// What kind of interactive input is needed.
+    pub kind: InteractiveKind,
+}
+
+/// The specific kind of interactive input.
+pub enum InteractiveKind {
+    /// `ExitPlanMode` — user must approve or reject the plan.
+    /// The plan content is already displayed by the renderer before this is returned.
+    PlanApproval,
+    /// `AskUserQuestion` — user must answer one or more questions.
+    AskUserQuestion { questions: Vec<QuestionData> },
+}
+
+/// A single question from `AskUserQuestion`.
+pub struct QuestionData {
+    pub question: String,
+    pub header: Option<String>,
+    pub options: Vec<OptionData>,
+    pub multi_select: bool,
+}
+
+/// A single option for a question.
+pub struct OptionData {
+    pub label: String,
+    pub description: Option<String>,
+}
+
 // ── ANSI escape helpers ────────────────────────────────────────────
 
 struct Ansi {
@@ -105,6 +148,14 @@ impl Ansi {
             ""
         }
     }
+
+    fn cyan(&self) -> &str {
+        if self.color {
+            "\x1b[36m"
+        } else {
+            ""
+        }
+    }
 }
 
 // ── Tool call tracking ─────────────────────────────────────────────
@@ -143,23 +194,27 @@ impl Renderer {
     }
 
     /// Main dispatch: render a single SSE chunk.
-    /// Returns `true` if this was a `"finish"` chunk (caller should exit).
-    pub fn render_chunk(&mut self, chunk: &serde_json::Value) -> bool {
+    /// Returns a `RenderAction` indicating what the caller should do next.
+    pub fn render_chunk(&mut self, chunk: &serde_json::Value) -> RenderAction {
         let chunk_type = chunk.get("type").and_then(|t| t.as_str()).unwrap_or("");
 
         match chunk_type {
             "text-delta" => self.on_text_delta(chunk),
             "text-end" => self.on_text_end(),
-            "tool-input-available" => self.on_tool_input(chunk),
+            "tool-input-available" => {
+                if let Some(req) = self.on_tool_input(chunk) {
+                    return RenderAction::NeedsInput(req);
+                }
+            }
             "tool-output-available" => self.on_tool_output(chunk),
             "error" => self.on_error(chunk),
             "data-result" => self.on_data_result(chunk),
-            "finish" => return true,
+            "finish" => return RenderAction::Finish,
             // text-start, data-session, data-prompt, finish-step, file — no rendering
             _ => {}
         }
 
-        false
+        RenderAction::Continue
     }
 
     // ── Chunk handlers ─────────────────────────────────────────────
@@ -176,11 +231,10 @@ impl Renderer {
         self.in_text = false;
     }
 
-    fn on_tool_input(&mut self, chunk: &serde_json::Value) {
+    /// Handle a tool-input-available chunk.
+    /// Returns `Some(InteractiveRequest)` if this is an interactive tool that needs user input.
+    fn on_tool_input(&mut self, chunk: &serde_json::Value) -> Option<InteractiveRequest> {
         let tool_display = self.config.effective_tool_display();
-        if tool_display == ToolDisplay::Off {
-            return;
-        }
 
         // If stdout cursor is mid-line, add a newline so the tool line starts fresh.
         if self.needs_newline {
@@ -198,6 +252,37 @@ impl Renderer {
             .and_then(|n| n.as_str())
             .unwrap_or("");
         let input = chunk.get("input").unwrap_or(&serde_json::Value::Null);
+
+        // Check for interactive tools first.
+        match tool_name {
+            "ExitPlanMode" => {
+                let plan = input
+                    .get("plan")
+                    .and_then(|p| p.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                self.display_plan_review(&plan);
+                return Some(InteractiveRequest {
+                    approval_id: tool_call_id.to_string(),
+                    kind: InteractiveKind::PlanApproval,
+                });
+            }
+            "AskUserQuestion" => {
+                let questions = parse_questions(input);
+                self.display_questions(&questions);
+                return Some(InteractiveRequest {
+                    approval_id: tool_call_id.to_string(),
+                    kind: InteractiveKind::AskUserQuestion { questions },
+                });
+            }
+            _ => {}
+        }
+
+        // Regular tool — show normal summary.
+        if tool_display == ToolDisplay::Off {
+            return None;
+        }
+
         let summary = tool_summary(tool_name, input);
 
         // Store for later correlation with output.
@@ -229,6 +314,8 @@ impl Renderer {
                 }
             }
         }
+
+        None
     }
 
     fn on_tool_output(&mut self, chunk: &serde_json::Value) {
@@ -350,6 +437,101 @@ impl Renderer {
             eprintln!("\n{}{}Task completed.{}", a.green(), a.bold(), a.reset(),);
         }
     }
+
+    // ── Interactive display helpers ─────────────────────────────────
+
+    fn display_plan_review(&self, plan: &str) {
+        let a = &self.ansi;
+        let separator = "\u{2500}".repeat(50);
+        eprintln!(
+            "\n  {}{}{separator}{}",
+            a.cyan(),
+            a.bold(),
+            a.reset(),
+        );
+        eprintln!(
+            "  {}{}  Plan Review{}",
+            a.cyan(),
+            a.bold(),
+            a.reset(),
+        );
+        eprintln!(
+            "  {}{}{separator}{}",
+            a.cyan(),
+            a.bold(),
+            a.reset(),
+        );
+        if !plan.is_empty() {
+            eprintln!();
+            for line in plan.lines() {
+                eprintln!("  {line}");
+            }
+            eprintln!();
+        }
+        eprintln!(
+            "  {}{}{separator}{}",
+            a.cyan(),
+            a.bold(),
+            a.reset(),
+        );
+    }
+
+    fn display_questions(&self, questions: &[QuestionData]) {
+        let a = &self.ansi;
+        let separator = "\u{2500}".repeat(50);
+
+        for q in questions {
+            eprintln!(
+                "\n  {}{}{separator}{}",
+                a.cyan(),
+                a.bold(),
+                a.reset(),
+            );
+            if let Some(header) = &q.header {
+                eprintln!(
+                    "  {}{}  {header}{}",
+                    a.cyan(),
+                    a.bold(),
+                    a.reset(),
+                );
+            }
+            eprintln!(
+                "  {}{}  {}{}",
+                a.cyan(),
+                a.bold(),
+                q.question,
+                a.reset(),
+            );
+            eprintln!(
+                "  {}{}{separator}{}",
+                a.cyan(),
+                a.bold(),
+                a.reset(),
+            );
+            for (i, opt) in q.options.iter().enumerate() {
+                let num = i + 1;
+                if let Some(desc) = &opt.description {
+                    eprintln!(
+                        "  {}{}  {num}){} {} {}\u{2014} {desc}{}",
+                        a.yellow(),
+                        a.bold(),
+                        a.reset(),
+                        opt.label,
+                        a.dim(),
+                        a.reset(),
+                    );
+                } else {
+                    eprintln!(
+                        "  {}{}  {num}){} {}",
+                        a.yellow(),
+                        a.bold(),
+                        a.reset(),
+                        opt.label,
+                    );
+                }
+            }
+        }
+    }
 }
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -373,4 +555,56 @@ pub fn tool_summary(name: &str, args: &serde_json::Value) -> String {
         }
     }
     name.to_string()
+}
+
+/// Parse the `input.questions` JSON array into typed `QuestionData` structs.
+fn parse_questions(input: &serde_json::Value) -> Vec<QuestionData> {
+    let Some(questions) = input.get("questions").and_then(|q| q.as_array()) else {
+        return Vec::new();
+    };
+
+    questions
+        .iter()
+        .map(|q| {
+            let question = q
+                .get("question")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let header = q
+                .get("header")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let multi_select = q
+                .get("multiSelect")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
+            let options = q
+                .get("options")
+                .and_then(|v| v.as_array())
+                .map(|opts| {
+                    opts.iter()
+                        .map(|o| OptionData {
+                            label: o
+                                .get("label")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .to_string(),
+                            description: o
+                                .get("description")
+                                .and_then(|v| v.as_str())
+                                .map(String::from),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            QuestionData {
+                question,
+                header,
+                options,
+                multi_select,
+            }
+        })
+        .collect()
 }

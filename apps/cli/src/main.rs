@@ -5,6 +5,7 @@ mod state;
 mod validate;
 
 use clap::{Parser, Subcommand};
+use std::collections::HashMap;
 use std::fmt::Write;
 use std::io::BufRead;
 use std::process;
@@ -957,13 +958,14 @@ fn cmd_tasks_watch(
 
     let mut body = response.into_body();
     let reader = std::io::BufReader::new(body.as_reader());
-    stream_sse_events(reader, json_output, config)
+    stream_sse_events(reader, json_output, config, &client)
 }
 
 fn stream_sse_events(
     reader: impl BufRead,
     json_output: bool,
     config: render::RenderConfig,
+    client: &api::ApiClient,
 ) -> Result<bool, String> {
     let mut line_buf = String::new();
     let mut data_buf = String::new();
@@ -982,10 +984,14 @@ fn stream_sse_events(
 
         if line.is_empty() {
             if !data_buf.is_empty() {
-                let should_exit = process_sse_data(&data_buf, json_output, &mut renderer)?;
+                let action = process_sse_data(&data_buf, json_output, &mut renderer)?;
                 data_buf.clear();
-                if should_exit {
-                    return Ok(renderer.task_succeeded);
+                match action {
+                    render::RenderAction::Finish => return Ok(renderer.task_succeeded),
+                    render::RenderAction::NeedsInput(req) => {
+                        handle_interactive_input(&req, client)?;
+                    }
+                    render::RenderAction::Continue => {}
                 }
             }
             continue;
@@ -1007,17 +1013,215 @@ fn process_sse_data(
     data: &str,
     json_output: bool,
     renderer: &mut render::Renderer,
-) -> Result<bool, String> {
+) -> Result<render::RenderAction, String> {
     let chunk: serde_json::Value =
         serde_json::from_str(data).map_err(|e| format!("Invalid JSON in SSE: {e}"))?;
 
     if json_output {
         let chunk_type = chunk.get("type").and_then(|t| t.as_str()).unwrap_or("");
         println!("{}", serde_json::to_string(&chunk).unwrap_or_default());
-        Ok(chunk_type == "finish")
+        if chunk_type == "finish" {
+            Ok(render::RenderAction::Finish)
+        } else {
+            Ok(render::RenderAction::Continue)
+        }
     } else {
         Ok(renderer.render_chunk(&chunk))
     }
+}
+
+// ── Interactive input handling ──────────────────────────────────────
+
+fn handle_interactive_input(
+    req: &render::InteractiveRequest,
+    client: &api::ApiClient,
+) -> Result<(), String> {
+    use std::io::IsTerminal;
+
+    let is_tty = std::io::stdin().is_terminal();
+
+    let answers = match &req.kind {
+        render::InteractiveKind::PlanApproval => prompt_plan_approval(is_tty)?,
+        render::InteractiveKind::AskUserQuestion { questions } => {
+            prompt_questions(questions, is_tty)?
+        }
+    };
+
+    client.trpc_mutate(
+        "chat.answer",
+        &serde_json::json!({
+            "approvalId": req.approval_id,
+            "answers": answers,
+        }),
+    )?;
+
+    Ok(())
+}
+
+fn prompt_plan_approval(is_tty: bool) -> Result<HashMap<String, String>, String> {
+    use std::io::Write as _;
+
+    if !is_tty {
+        eprintln!("  (non-interactive: auto-approving plan)");
+        let mut answers = HashMap::new();
+        answers.insert("plan".to_string(), "approved".to_string());
+        return Ok(answers);
+    }
+
+    for attempt in 0..3 {
+        eprint!("  Approve plan? [y/n]: ");
+        std::io::stderr().flush().ok();
+
+        let mut input = String::new();
+        std::io::stdin()
+            .read_line(&mut input)
+            .map_err(|e| format!("Failed to read input: {e}"))?;
+
+        let trimmed = input.trim().to_lowercase();
+        match trimmed.as_str() {
+            "y" | "yes" => {
+                eprintln!("  Plan approved — agent continuing");
+                let mut answers = HashMap::new();
+                answers.insert("plan".to_string(), "approved".to_string());
+                return Ok(answers);
+            }
+            "n" | "no" => {
+                eprintln!("  Plan rejected");
+                let mut answers = HashMap::new();
+                answers.insert("plan".to_string(), "rejected".to_string());
+                return Ok(answers);
+            }
+            _ => {
+                if attempt < 2 {
+                    eprintln!("  Please enter y or n.");
+                }
+            }
+        }
+    }
+
+    // After 3 invalid attempts, default to approved.
+    eprintln!("  (defaulting to approved)");
+    let mut answers = HashMap::new();
+    answers.insert("plan".to_string(), "approved".to_string());
+    Ok(answers)
+}
+
+fn prompt_questions(
+    questions: &[render::QuestionData],
+    is_tty: bool,
+) -> Result<HashMap<String, String>, String> {
+
+    let mut answers = HashMap::new();
+
+    for q in questions {
+        if q.options.is_empty() {
+            continue;
+        }
+
+        if !is_tty {
+            let first_label = &q.options[0].label;
+            eprintln!("  (non-interactive: selecting \"{first_label}\")");
+            answers.insert(q.question.clone(), first_label.clone());
+            continue;
+        }
+
+        let selected = if q.multi_select {
+            prompt_multi_select(q)?
+        } else {
+            prompt_single_select(q)?
+        };
+
+        if !selected.is_empty() {
+            answers.insert(q.question.clone(), selected);
+        }
+    }
+
+    Ok(answers)
+}
+
+fn prompt_single_select(q: &render::QuestionData) -> Result<String, String> {
+    use std::io::Write as _;
+
+    let num_options = q.options.len();
+
+    for attempt in 0..3 {
+        eprint!("  Select option [1-{num_options}]: ");
+        std::io::stderr().flush().ok();
+
+        let mut input = String::new();
+        std::io::stdin()
+            .read_line(&mut input)
+            .map_err(|e| format!("Failed to read input: {e}"))?;
+
+        if let Some(label) = parse_single_selection(input.trim(), &q.options) {
+            eprintln!("  Selected: {label}");
+            return Ok(label);
+        }
+
+        if attempt < 2 {
+            eprintln!("  Invalid selection. Enter a number from 1 to {num_options}.");
+        }
+    }
+
+    // Default to first option after 3 failed attempts.
+    let label = q.options[0].label.clone();
+    eprintln!("  (defaulting to \"{label}\")");
+    Ok(label)
+}
+
+fn prompt_multi_select(q: &render::QuestionData) -> Result<String, String> {
+    use std::io::Write as _;
+
+    let num_options = q.options.len();
+
+    for attempt in 0..3 {
+        eprint!("  Select options (comma-separated, e.g. 1,3) [1-{num_options}]: ");
+        std::io::stderr().flush().ok();
+
+        let mut input = String::new();
+        std::io::stdin()
+            .read_line(&mut input)
+            .map_err(|e| format!("Failed to read input: {e}"))?;
+
+        let labels = parse_multi_selection(input.trim(), &q.options);
+        if !labels.is_empty() {
+            eprintln!("  Selected: {labels}");
+            return Ok(labels);
+        }
+
+        if attempt < 2 {
+            eprintln!("  Invalid selection. Enter numbers from 1 to {num_options}, separated by commas.");
+        }
+    }
+
+    // Default to first option after 3 failed attempts.
+    let label = q.options[0].label.clone();
+    eprintln!("  (defaulting to \"{label}\")");
+    Ok(label)
+}
+
+fn parse_single_selection(input: &str, options: &[render::OptionData]) -> Option<String> {
+    let num: usize = input.parse().ok()?;
+    if num >= 1 && num <= options.len() {
+        Some(options[num - 1].label.clone())
+    } else {
+        None
+    }
+}
+
+fn parse_multi_selection(input: &str, options: &[render::OptionData]) -> String {
+    let labels: Vec<&str> = input
+        .split(',')
+        .filter_map(|s| {
+            let num: usize = s.trim().parse().ok()?;
+            if num >= 1 && num <= options.len() {
+                Some(options[num - 1].label.as_str())
+            } else {
+                None
+            }
+        })
+        .collect();
+    labels.join(", ")
 }
 
 /// Resolve a task ID (tsk_*) or workspace ID to a workspace ID.
