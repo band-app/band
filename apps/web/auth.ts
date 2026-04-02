@@ -78,6 +78,12 @@ export function createAuthMiddleware(token: string | undefined) {
       return false;
     }
 
+    // Check Authorization: Bearer header
+    const authHeader = req.headers.authorization;
+    if (authHeader?.startsWith("Bearer ") && tokensEqual(authHeader.slice(7), expectedToken)) {
+      return false; // Authenticated — continue to normal handler
+    }
+
     // Check cookie
     const cookies = parseCookies(req);
     if (tokensEqual(cookies.band_token, expectedToken)) {

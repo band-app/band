@@ -66,6 +66,12 @@ function trpcDevPlugin(): Plugin {
         });
       });
 
+      // MCP (Model Context Protocol) endpoint (no auth in dev mode)
+      server.middlewares.use("/mcp", async (req, res) => {
+        const { handleMcpRequest } = await server.ssrLoadModule("./src/mcp/server");
+        await handleMcpRequest(req, res);
+      });
+
       // WebSocket server for tRPC subscriptions (no auth in dev mode)
       const wss = new WebSocketServer({ noServer: true });
       const terminalWss = new WebSocketServer({ noServer: true });

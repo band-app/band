@@ -16,6 +16,7 @@ import { cleanupStaleTasks } from "./src/lib/task-store.ts";
 import { killAllTerminals } from "./src/lib/terminal-manager.ts";
 import { handleTerminalConnection } from "./src/lib/terminal-ws.ts";
 import { startTunnel, stopTunnel } from "./src/lib/tunnel.ts";
+import { handleMcpRequest } from "./src/mcp/server.ts";
 import { createContext } from "./src/trpc/context.ts";
 import { getScalarHtml } from "./src/trpc/openapi.ts";
 import { appRouter } from "./src/trpc/router.ts";
@@ -157,6 +158,12 @@ async function main() {
         "Cache-Control": "no-cache",
       });
       res.end(scalarHtml);
+      return;
+    }
+
+    // Handle MCP (Model Context Protocol) requests
+    if (req.url?.startsWith("/mcp")) {
+      await handleMcpRequest(req, res);
       return;
     }
 
