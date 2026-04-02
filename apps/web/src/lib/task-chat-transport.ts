@@ -88,7 +88,22 @@ export class TaskChatTransport implements ChatTransport<UIMessage> {
         ...(this.model && { model: this.model }),
       });
     } catch (err) {
-      throw new Error(err instanceof Error ? err.message : "Submit failed");
+      const msg = err instanceof Error ? err.message : "Submit failed";
+      // If a task is already running (race condition — the pre-check in
+      // handleSubmit passed but a task started before submit), queue the
+      // message instead of failing.
+      if (msg.includes("already running") || msg.includes("CONFLICT")) {
+        await trpc.queue.push.mutate({ workspaceId: this.workspaceId, text: userText });
+        // Return an immediately-closed stream so useChat goes back to
+        // "ready" state. We don't connect to the running task's stream
+        // because it may be from a different agent.
+        return new ReadableStream<UIMessageChunk>({
+          start(controller) {
+            controller.close();
+          },
+        });
+      }
+      throw new Error(msg);
     }
 
     return subscriptionToStream(this.workspaceId, abortSignal);

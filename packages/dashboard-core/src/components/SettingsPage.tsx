@@ -35,6 +35,7 @@ const KNOWN_AGENTS: { id: string; type: CodingAgentType; label: string; defaultC
   [
     { id: "claude-code", type: "claude-code", label: "Claude Code", defaultCommand: "claude" },
     { id: "codex", type: "codex", label: "Codex", defaultCommand: "codex" },
+    { id: "opencode", type: "opencode", label: "OpenCode", defaultCommand: "opencode" },
   ];
 
 const DEFAULT_DEFAULTS = {

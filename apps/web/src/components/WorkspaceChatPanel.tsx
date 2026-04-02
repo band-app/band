@@ -50,6 +50,7 @@ export function WorkspaceChatPanel({ workspaceId }: WorkspaceChatPanelProps) {
   }, [workspaceId]);
 
   // Load available agents from settings and current workspace agent
+  // biome-ignore lint/correctness/useExhaustiveDependencies: chatKey intentionally triggers reload after agent switch; currentAgentId excluded to avoid infinite loop
   useEffect(() => {
     let cancelled = false;
 
@@ -196,6 +197,7 @@ export function WorkspaceChatPanel({ workspaceId }: WorkspaceChatPanelProps) {
       <div className="flex min-h-0 flex-1 flex-col">
         <ChatView
           key={chatKey}
+          chatKey={chatKey}
           workspaceId={workspaceId}
           workspaceName={workspaceId}
           supportsSessionListing={supportsSessionListing}

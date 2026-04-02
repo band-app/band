@@ -60,12 +60,25 @@ const geminiCliConfigSchema = z.object({
     .default({}),
 });
 
+const opencodeConfigSchema = z.object({
+  type: z.literal("opencode"),
+  workspaceDir: z.string().default(process.cwd()),
+  maxTurns: z.number().int().positive().default(3),
+  options: z
+    .object({
+      model: z.string().optional(),
+      executablePath: z.string().optional(),
+    })
+    .default({}),
+});
+
 export const codingAgentConfigSchema = z.discriminatedUnion("type", [
   claudeCodeConfigSchema,
   cursorCliConfigSchema,
   openaiCodexConfigSchema,
   codexConfigSchema,
   geminiCliConfigSchema,
+  opencodeConfigSchema,
 ]);
 
 export type CodingAgentConfig = z.infer<typeof codingAgentConfigSchema>;
@@ -75,3 +88,4 @@ export type CursorCliConfig = z.infer<typeof cursorCliConfigSchema>;
 export type OpenAICodexConfig = z.infer<typeof openaiCodexConfigSchema>;
 export type CodexConfig = z.infer<typeof codexConfigSchema>;
 export type GeminiCliConfig = z.infer<typeof geminiCliConfigSchema>;
+export type OpenCodeConfig = z.infer<typeof opencodeConfigSchema>;

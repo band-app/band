@@ -32,12 +32,34 @@ export function CodexIcon({ className }: IconProps) {
   );
 }
 
+export function OpenCodeIcon({ className }: IconProps) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      role="img"
+      aria-label="OpenCode"
+    >
+      <polyline points="4 17 10 11 4 5" />
+      <line x1="12" y1="19" x2="20" y2="19" />
+    </svg>
+  );
+}
+
 export function AgentIcon({ type, className }: { type: string; className?: string }) {
   switch (type) {
     case "claude-code":
       return <ClaudeIcon className={className} />;
     case "codex":
       return <CodexIcon className={className} />;
+    case "opencode":
+      return <OpenCodeIcon className={className} />;
     default:
       return null;
   }

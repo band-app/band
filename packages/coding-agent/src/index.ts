@@ -6,6 +6,7 @@ export {
   codingAgentConfigSchema,
   type GeminiCliConfig,
   type OpenAICodexConfig,
+  type OpenCodeConfig,
 } from "./config.js";
 export type {
   AgentEvent,

@@ -67,6 +67,13 @@ const t = initTRPC.context<Context>().create();
 
 const publicProcedure = t.procedure;
 
+/** Resolve the coding agent for a workspace, respecting the per-workspace agent selection. */
+async function getWorkspaceAgent(workspaceId: string, worktreePath: string) {
+  const wsStatus = getWorkspaceStatus(workspaceId);
+  const codingAgentId = wsStatus?.agent?.codingAgentId;
+  return getOrCreateAgent(workspaceId, worktreePath, codingAgentId);
+}
+
 // ---------------------------------------------------------------------------
 // Projects
 // ---------------------------------------------------------------------------
@@ -1220,7 +1227,7 @@ const sessionsRouter = t.router({
       throw new TRPCError({ code: "NOT_FOUND", message: "Workspace not found" });
     }
 
-    const agent = await getOrCreateAgent(input.workspaceId, workspace.worktree.path);
+    const agent = await getWorkspaceAgent(input.workspaceId, workspace.worktree.path);
 
     if (!agent.supportedFeatures.sessionListing || !agent.listSessions) {
       return { sessions: [], supported: false };
@@ -1238,7 +1245,7 @@ const sessionsRouter = t.router({
         throw new TRPCError({ code: "NOT_FOUND", message: "Workspace not found" });
       }
 
-      const agent = await getOrCreateAgent(input.workspaceId, workspace.worktree.path);
+      const agent = await getWorkspaceAgent(input.workspaceId, workspace.worktree.path);
 
       if (!agent.supportedFeatures.sessionListing || !agent.getSessionMessages) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Session listing not supported" });
@@ -1552,7 +1559,7 @@ const skillsRouter = t.router({
       return { skills: [] };
     }
 
-    const agent = await getOrCreateAgent(input.workspaceId, workspace.worktree.path);
+    const agent = await getWorkspaceAgent(input.workspaceId, workspace.worktree.path);
     if (agent.listSkills) {
       const skills = await agent.listSkills();
       return { skills };
@@ -1573,7 +1580,7 @@ const modesRouter = t.router({
       return { modes: [] };
     }
 
-    const agent = await getOrCreateAgent(input.workspaceId, workspace.worktree.path);
+    const agent = await getWorkspaceAgent(input.workspaceId, workspace.worktree.path);
     if (agent.listModes) {
       return { modes: agent.listModes() };
     }
@@ -1593,7 +1600,7 @@ const modelsRouter = t.router({
       return { models: [] };
     }
 
-    const agent = await getOrCreateAgent(input.workspaceId, workspace.worktree.path);
+    const agent = await getWorkspaceAgent(input.workspaceId, workspace.worktree.path);
     if (agent.listModels) {
       return { models: await agent.listModels() };
     }

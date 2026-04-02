@@ -149,6 +149,7 @@ interface ChatViewProps {
   showSessionList: boolean;
   onShowSessionListChange: (show: boolean) => void;
   onStreamingChange?: (streaming: boolean) => void;
+  chatKey?: number;
 }
 
 export function ChatView({
@@ -159,6 +160,7 @@ export function ChatView({
   showSessionList,
   onShowSessionListChange,
   onStreamingChange,
+  chatKey = 0,
 }: ChatViewProps) {
   const sessionIdRef = useRef<string | undefined>(undefined);
   const [activeSessionId, setActiveSessionId] = useState<string | undefined>(undefined);
@@ -276,7 +278,7 @@ export function ChatView({
   }, [transport, selectedModel]);
 
   const { messages, sendMessage, status, setMessages, stop } = useChat({
-    id: workspaceId,
+    id: `${workspaceId}:${chatKey}`,
     transport,
     resume: true,
     onData: (dataPart) => {
@@ -377,21 +379,41 @@ export function ChatView({
     onShowSessionListChange(false);
   }, [setMessages, onShowSessionListChange, workspaceId]);
 
+  const queueMessage = useCallback(
+    (text: string) => {
+      setQueuedMessages((prev) => [...prev, text]);
+      trpc.queue.push.mutate({ workspaceId, text }).catch(() => {});
+    },
+    [workspaceId],
+  );
+
   const handleSubmit = useCallback(
-    (message: PromptInputMessage) => {
+    async (message: PromptInputMessage) => {
       if (!message.text.trim() && !message.files?.length) return;
 
       if (isStreaming) {
         // Agent is busy — queue the message on the backend.
         // Optimistic update for instant feedback; subscription corrects if needed.
-        setQueuedMessages((prev) => [...prev, message.text]);
-        trpc.queue.push.mutate({ workspaceId, text: message.text }).catch(() => {});
+        queueMessage(message.text);
         return;
+      }
+
+      // Check if a task is running in the background (e.g. started from CLI
+      // or another tab) that this chat doesn't know about yet.
+      try {
+        const { task } = await trpc.tasks.get.query({ workspaceId });
+        if (task) {
+          queueMessage(message.text);
+          return;
+        }
+      } catch {
+        // If the check fails, proceed with sending — the backend will
+        // reject with CONFLICT if a task is actually running.
       }
 
       doSendMessage(message);
     },
-    [doSendMessage, isStreaming, workspaceId],
+    [doSendMessage, isStreaming, workspaceId, queueMessage],
   );
 
   const handleCancelQueued = useCallback(

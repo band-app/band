@@ -23,6 +23,10 @@ export async function createCodingAgent(config: CodingAgentConfig): Promise<Codi
       const { GeminiCliAdapter } = await import("./adapters/gemini-cli.js");
       return new GeminiCliAdapter(config);
     }
+    case "opencode": {
+      const { OpenCodeAdapter } = await import("./adapters/opencode.js");
+      return new OpenCodeAdapter(config);
+    }
     default:
       throw new Error(`Unknown agent type: ${(config as { type: string }).type}`);
   }
