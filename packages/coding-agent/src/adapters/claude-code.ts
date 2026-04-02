@@ -219,41 +219,37 @@ export class ClaudeCodeAdapter implements CodingAgent {
       return this.cachedModels;
     }
 
-    // Spawn a lightweight query to fetch the model list from the SDK
-    try {
-      const env = { ...process.env };
-      env.CLAUDECODE = undefined;
-      env.CLAUDE_CODE_ENTRYPOINT = undefined;
-      env.ANTHROPIC_CUSTOM_HEADERS = undefined;
-
-      const conversation = query({
-        prompt: "",
-        options: {
-          cwd: this.workspaceDir,
-          maxTurns: 0,
-          env,
-          pathToClaudeCodeExecutable: this.executablePath,
-          settingSources: ["user", "project"],
-        },
-      });
-
-      const models = await conversation.supportedModels();
-      conversation.close();
-
-      this.cachedModels = models.map(mapModelInfo);
-      log.info({ count: models.length }, "fetched supported models from SDK");
-      return this.cachedModels;
-    } catch (err) {
-      log.warn({ err }, "failed to fetch models from SDK, returning defaults");
-      return [
-        {
-          id: "claude-sonnet-4-20250514",
-          name: "Claude Sonnet 4",
-          description: "Fast and capable",
-        },
-        { id: "claude-opus-4-20250514", name: "Claude Opus 4", description: "Most capable" },
-      ];
-    }
+    // Return defaults until a real session populates the cache.
+    // Spawning a Claude Code process just to list models triggers hooks
+    // (band notify) which incorrectly sets the workspace status to "working".
+    // The cache is populated during the first runSession() call.
+    return [
+      {
+        id: "claude-sonnet-4-6",
+        name: "Default (recommended)",
+        description: "Use the default model (currently Sonnet 4.6) · $3/$15 per Mtok",
+      },
+      {
+        id: "claude-sonnet-4-6[1m]",
+        name: "Sonnet (1M context)",
+        description: "Sonnet 4.6 for long sessions · $6/$22.50 per Mtok",
+      },
+      {
+        id: "claude-opus-4-6",
+        name: "Opus",
+        description: "Opus 4.6 · Most capable for complex work · $5/$25 per Mtok",
+      },
+      {
+        id: "claude-opus-4-6[1m]",
+        name: "Opus (1M context)",
+        description: "Opus 4.6 for long sessions · $10/$37.50 per Mtok",
+      },
+      {
+        id: "claude-haiku-4-5-20251001",
+        name: "Haiku",
+        description: "Haiku 4.5 · Fastest for quick answers · $1/$5 per Mtok",
+      },
+    ];
   }
 }
 
