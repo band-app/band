@@ -1110,7 +1110,6 @@ fn prompt_questions(
     questions: &[render::QuestionData],
     is_tty: bool,
 ) -> Result<HashMap<String, String>, String> {
-
     let mut answers = HashMap::new();
 
     for q in questions {
@@ -1190,7 +1189,9 @@ fn prompt_multi_select(q: &render::QuestionData) -> Result<String, String> {
         }
 
         if attempt < 2 {
-            eprintln!("  Invalid selection. Enter numbers from 1 to {num_options}, separated by commas.");
+            eprintln!(
+                "  Invalid selection. Enter numbers from 1 to {num_options}, separated by commas."
+            );
         }
     }
 
