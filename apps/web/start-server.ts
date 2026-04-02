@@ -1,4 +1,4 @@
-import { appendFileSync, createReadStream, mkdirSync, statSync } from "node:fs";
+import { appendFileSync, createReadStream, mkdirSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { basename, extname, join } from "node:path";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
@@ -17,6 +17,7 @@ import { killAllTerminals } from "./src/lib/terminal-manager.ts";
 import { handleTerminalConnection } from "./src/lib/terminal-ws.ts";
 import { startTunnel, stopTunnel } from "./src/lib/tunnel.ts";
 import { createContext } from "./src/trpc/context.ts";
+import { getScalarHtml } from "./src/trpc/openapi.ts";
 import { appRouter } from "./src/trpc/router.ts";
 
 // ---------------------------------------------------------------------------
@@ -59,6 +60,13 @@ const assets = sirv(clientDir, {
   gzip: true,
   etag: true,
 });
+
+// OpenAPI spec is pre-generated at build time by @trpc/openapi CLI.
+// Add server base path so docs show correct /trpc/* URLs.
+const openApiDoc = JSON.parse(readFileSync(join(import.meta.dirname, "openapi.json"), "utf-8"));
+openApiDoc.servers = [{ url: "/trpc" }];
+const openApiSpec = JSON.stringify(openApiDoc, null, 2);
+const scalarHtml = getScalarHtml("/api/openapi.json");
 
 async function main() {
   // Run database migrations before anything else
@@ -120,6 +128,27 @@ async function main() {
         res.writeHead(404);
         res.end("Not found");
       }
+      return;
+    }
+
+    // Serve OpenAPI spec
+    if (req.url === "/api/openapi.json") {
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-cache",
+        "Access-Control-Allow-Origin": "*",
+      });
+      res.end(openApiSpec);
+      return;
+    }
+
+    // Serve Scalar API docs UI
+    if (req.url === "/api/docs") {
+      res.writeHead(200, {
+        "Content-Type": "text/html",
+        "Cache-Control": "no-cache",
+      });
+      res.end(scalarHtml);
       return;
     }
 

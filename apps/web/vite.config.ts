@@ -2,16 +2,52 @@ import { resolve } from "node:path";
 import { createLogger } from "@band-app/logger";
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
+import { generateOpenAPIDocument } from "@trpc/openapi";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
 import { WebSocketServer } from "ws";
+import { getScalarHtml } from "./src/trpc/openapi.ts";
 
 const log = createLogger("vite-plugin");
 
 function trpcDevPlugin(): Plugin {
+  let cachedSpec: string | null = null;
+
   return {
     name: "trpc-dev-server",
     configureServer(server) {
+      // Invalidate cached spec when router or related files change
+      server.watcher.on("change", (file) => {
+        if (file.includes("/trpc/") || file.endsWith("router.ts")) {
+          cachedSpec = null;
+        }
+      });
+
+      // Serve OpenAPI spec (generated via @trpc/openapi static analysis)
+      server.middlewares.use("/api/openapi.json", async (_req, res) => {
+        if (!cachedSpec) {
+          const doc = await generateOpenAPIDocument("./src/trpc/router.ts", {
+            title: "Band API",
+            version: "1.0.0",
+          });
+          // Add server base path so Scalar shows correct URLs
+          // biome-ignore lint/suspicious/noExplicitAny: extending generated OpenAPI doc
+          (doc as any).servers = [{ url: "/trpc" }];
+          cachedSpec = JSON.stringify(doc, null, 2);
+        }
+        res.writeHead(200, {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        });
+        res.end(cachedSpec);
+      });
+
+      // Serve Scalar API docs UI
+      server.middlewares.use("/api/docs", async (_req, res) => {
+        res.writeHead(200, { "Content-Type": "text/html" });
+        res.end(getScalarHtml("/api/openapi.json"));
+      });
+
       server.middlewares.use("/trpc", async (req, res) => {
         // Use ssrLoadModule so Vite handles TS resolution at dev time
         const [{ nodeHTTPRequestHandler }, { createContext }, { appRouter }] = (await Promise.all([

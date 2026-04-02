@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Generate OpenAPI spec from tRPC router (static TypeScript analysis)
+mkdir -p dist
+pnpm exec trpc-openapi ./src/trpc/router.ts -o dist/openapi.json --title "Band API" --version "1.0.0"
+
 # Bundle the server entry point
 esbuild start-server.ts \
   --bundle \
