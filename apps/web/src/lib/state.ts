@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { toWorkspaceId } from "@band-app/dashboard-core";
-import { eq } from "drizzle-orm";
+import { eq, or } from "drizzle-orm";
 import { getDb } from "./db/connection";
 import {
   branchStatuses as branchStatusesTable,
@@ -318,15 +318,21 @@ export function upsertWorkspaceStatus(
 }
 
 /**
- * Reset all "working" agent statuses to "waiting".
- * Called on server startup — no agent can be running if the server just started.
+ * Reset stale agent statuses to "waiting".
+ * Called on server startup — no agent can be running if the server just started,
+ * and any pending input requests are lost so "needs_attention" is also stale.
  */
 export function resetAgentStatuses(): number {
   const db = getDb();
   const result = db
     .update(workspaceStatusesTable)
     .set({ agentStatus: "waiting", updatedAt: Date.now() })
-    .where(eq(workspaceStatusesTable.agentStatus, "working"))
+    .where(
+      or(
+        eq(workspaceStatusesTable.agentStatus, "working"),
+        eq(workspaceStatusesTable.agentStatus, "needs_attention"),
+      ),
+    )
     .run();
   return result.changes;
 }
