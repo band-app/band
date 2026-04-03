@@ -8,12 +8,23 @@ import type { AgentStatusType, Settings } from "../types";
 
 export function useStatusWatcher() {
   const adapter = useAdapter();
+  const replaceAllStatuses = useDashboardStore((s) => s.replaceAllStatuses);
   const updateStatus = useDashboardStore((s) => s.updateStatus);
   const removeStatus = useDashboardStore((s) => s.removeStatus);
   const previousStatuses = useRef<Map<string, AgentStatusType>>(new Map());
 
   useEffect(() => {
     const unsubscribe = adapter.subscribeAgentStatus(
+      (statuses) => {
+        replaceAllStatuses(statuses);
+        // Rebuild previous statuses tracking from snapshot
+        previousStatuses.current.clear();
+        for (const status of statuses) {
+          if (status.agent?.status) {
+            previousStatuses.current.set(status.workspaceId, status.agent.status);
+          }
+        }
+      },
       (status) => {
         const wsId = status.workspaceId;
         const newAgentStatus = status.agent?.status;
@@ -43,7 +54,7 @@ export function useStatusWatcher() {
     );
 
     return unsubscribe;
-  }, [adapter, updateStatus, removeStatus]);
+  }, [adapter, replaceAllStatuses, updateStatus, removeStatus]);
 }
 
 export function useActiveWorkspaceWatcher() {

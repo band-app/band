@@ -40,6 +40,7 @@ export interface DashboardAdapter {
 
   // Event subscriptions (return unsubscribe fn)
   subscribeAgentStatus(
+    onSnapshot: (statuses: WorkspaceStatus[]) => void,
     onUpdate: (status: WorkspaceStatus) => void,
     onRemove: (workspaceId: string) => void,
   ): Unsubscribe;
@@ -63,7 +64,7 @@ export interface DashboardAdapter {
   installCli(): Promise<void>;
 
   // Agent status (optional)
-  updateAgentStatus?(workspaceId: string, status: string): Promise<void>;
+  clearNeedsAttention?(workspaceId: string): Promise<void>;
 
   // Window management
   closeWorkspaceWindows(workspaceId: string): Promise<void>;

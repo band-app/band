@@ -17,8 +17,10 @@ export interface DashboardState {
   _openingWorkspace: boolean;
 
   openWorkspace: (workspaceId: string) => void;
+  clearNeedsAttention: (workspaceId: string) => void;
   clearError: () => void;
   setError: (error: string) => void;
+  replaceAllStatuses: (statuses: WorkspaceStatus[]) => void;
   updateStatus: (status: WorkspaceStatus) => void;
   removeStatus: (workspaceId: string) => void;
   setActiveWorkspace: (workspaceId: string | null) => void;
@@ -49,20 +51,7 @@ export function createDashboardStore(adapter: DashboardAdapter): DashboardStore 
       if (get()._openingWorkspace && get().activeWorkspaceId === workspaceId) return;
       set({ activeWorkspaceId: workspaceId, _openingWorkspace: true });
 
-      // Clear needs_attention when the user actively selects a workspace
-      const currentStatus = get().statuses.get(workspaceId);
-      if (currentStatus?.agent?.status === "needs_attention") {
-        const cleared: WorkspaceStatus = {
-          ...currentStatus,
-          agent: { ...currentStatus.agent, status: "waiting" },
-        };
-        set((state) => {
-          const statuses = new Map(state.statuses);
-          statuses.set(workspaceId, cleared);
-          return { statuses };
-        });
-        adapter.updateAgentStatus?.(workspaceId, "waiting");
-      }
+      get().clearNeedsAttention(workspaceId);
 
       adapter
         .openWorkspace(workspaceId)
@@ -84,9 +73,18 @@ export function createDashboardStore(adapter: DashboardAdapter): DashboardStore 
         });
     },
 
+    clearNeedsAttention: (workspaceId: string) => {
+      adapter.clearNeedsAttention?.(workspaceId).catch(() => {});
+    },
+
     clearError: () => set({ error: null }),
 
     setError: (error: string) => set({ error }),
+
+    replaceAllStatuses: (list: WorkspaceStatus[]) => {
+      const statuses = new Map(list.map((s) => [s.workspaceId, s]));
+      set({ statuses });
+    },
 
     updateStatus: (status: WorkspaceStatus) => {
       set((state) => {
@@ -112,6 +110,12 @@ export function createDashboardStore(adapter: DashboardAdapter): DashboardStore 
       if (get()._openingWorkspace) return;
       if (get().activeWorkspaceId === workspaceId) return;
       set({ activeWorkspaceId: workspaceId });
+
+      // When Tauri focus-tracking selects a workspace with needs_attention,
+      // clear it — the user is now looking at this workspace.
+      if (workspaceId) {
+        get().clearNeedsAttention(workspaceId);
+      }
     },
 
     runScript: async (path: string, scriptType: string) => {

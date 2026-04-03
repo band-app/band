@@ -66,6 +66,7 @@ export const WorkspaceCard = memo(function WorkspaceCard({
   }, [isFocused]);
 
   const openWorkspace = useDashboardStore((s) => s.openWorkspace);
+  const clearNeedsAttention = useDashboardStore((s) => s.clearNeedsAttention);
   const runScript = useDashboardStore((s) => s.runScript);
   const gitPull = useDashboardStore((s) => s.gitPull);
   const gitPush = useDashboardStore((s) => s.gitPush);
@@ -76,6 +77,7 @@ export const WorkspaceCard = memo(function WorkspaceCard({
   const href = capabilities.getWorkspaceHref?.(workspaceId);
 
   const handleClick = () => {
+    clearNeedsAttention(workspaceId);
     if (href && capabilities.navigate) {
       capabilities.navigate(href);
     } else if (!href) {

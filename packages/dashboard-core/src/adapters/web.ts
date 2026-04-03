@@ -84,8 +84,8 @@ export class WebDashboardAdapter implements DashboardAdapter {
     // No-op: window management is handled by the desktop app
   }
 
-  async updateAgentStatus(workspaceId: string, status: string): Promise<void> {
-    await this.trpc.statuses.update.mutate({ workspaceId, agent: { status } });
+  async clearNeedsAttention(workspaceId: string): Promise<void> {
+    await this.trpc.statuses.clearNeedsAttention.mutate({ workspaceId });
   }
 
   async closeWorkspaceWindows(_workspaceId: string): Promise<void> {
@@ -172,14 +172,13 @@ export class WebDashboardAdapter implements DashboardAdapter {
   }
 
   subscribeAgentStatus(
+    onSnapshot: (statuses: WorkspaceStatus[]) => void,
     onUpdate: (status: WorkspaceStatus) => void,
     onRemove: (workspaceId: string) => void,
   ): Unsubscribe {
     return this.subscribeStatusStream((data) => {
       if (data.kind === "snapshot" && data.statuses) {
-        for (const status of data.statuses) {
-          onUpdate(status);
-        }
+        onSnapshot(data.statuses);
       } else if (data.kind === "update" && data.status) {
         onUpdate(data.status);
       } else if (data.kind === "remove" && data.workspaceId) {
