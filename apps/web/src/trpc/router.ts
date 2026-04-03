@@ -1151,12 +1151,9 @@ const tasksRouter = t.router({
     .input(z.object({ workspaceId: z.string() }))
     .subscription(async function* (opts) {
       const workspaceId = opts.input.workspaceId;
-      const task = getTask(workspaceId);
 
-      if (!task || task.status !== "running") {
-        return;
-      }
-
+      // Register the listener FIRST so we capture events from tasks that
+      // are already running (avoids race between submit and subscribe).
       type Chunk = Parameters<Parameters<typeof subscribeTask>[1]>[0];
       const queue: Chunk[] = [];
       let resolve: (() => void) | null = null;
@@ -1170,6 +1167,25 @@ const tasksRouter = t.router({
         unsubscribe();
         resolve?.();
       });
+
+      // Now check if a task is running. If not, wait briefly for one to
+      // start (handles race between submit and subscribe).
+      let task = getTask(workspaceId);
+      if (!task || task.status !== "running") {
+        for (let i = 0; i < 10 && !opts.signal?.aborted; i++) {
+          await new Promise((r) => setTimeout(r, 50));
+          // If events arrived while waiting, a task started and we caught it
+          if (queue.length > 0) break;
+          task = getTask(workspaceId);
+          if (task?.status === "running") break;
+        }
+      }
+
+      // If still no running task and no events captured, bail out
+      if (queue.length === 0 && (!task || task.status !== "running")) {
+        unsubscribe();
+        return;
+      }
 
       try {
         while (!opts.signal?.aborted) {

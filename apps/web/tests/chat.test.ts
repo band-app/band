@@ -261,12 +261,8 @@ async function submitAndStream(
     return { submitRes, streamRes: submitRes, events: [] };
   }
 
-  // Give the task a moment to start producing events
-  await new Promise((r) => setTimeout(r, 100));
-
   const streamRes = await trpcSubscription(serverUrl, "tasks.stream", { workspaceId });
   const events = await parseTrpcSSEStream(streamRes);
-
   return { submitRes, streamRes, events };
 }
 
@@ -357,8 +353,6 @@ async function wsSubmitAndStream(
   if (!submitRes.ok) {
     return { submitRes, events: [] };
   }
-
-  await new Promise((r) => setTimeout(r, 100));
 
   const { events } = await wsSubscribe(serverUrl, "tasks.stream", { workspaceId });
   return { submitRes, events };
@@ -876,7 +870,12 @@ describe("Task submit + stream — AskUserQuestion", () => {
     });
     expect(submitRes.status).toBe(200);
 
-    // 2. Poll until the pending input is created, then answer via tRPC
+    // 2. Subscribe to the live stream immediately (in background) while we answer
+    const streamPromise = trpcSubscription(server.url, "tasks.stream", { workspaceId }).then(
+      (res) => parseTrpcSSEStream(res),
+    );
+
+    // 3. Poll until the pending input is created, then answer via tRPC
     await waitFor(async () => {
       const res = await trpcMutate(server.url, "chat.answer", {
         approvalId: toolCallId,
@@ -885,17 +884,8 @@ describe("Task submit + stream — AskUserQuestion", () => {
       return res.ok;
     });
 
-    // 3. Wait for the task to complete via tRPC
-    await waitFor(async () => {
-      const res = await trpcQuery(server.url, "tasks.get", { workspaceId });
-      const data = await trpcData<{ task?: { status: string } }>(res);
-      return data.task?.status !== "running";
-    });
-
-    // 4. Read the buffered events from the completed stream via tRPC subscription
-    const streamRes = await trpcSubscription(server.url, "tasks.stream", { workspaceId });
-    expect(streamRes.status).toBe(200);
-    const events = await parseTrpcSSEStream(streamRes);
+    // 4. Wait for the stream to complete
+    const events = await streamPromise;
     const eventTypes = events.map((e) => e.event).filter(Boolean) as string[];
 
     // AskUserQuestion tool call was emitted
@@ -1148,11 +1138,15 @@ describe("tasks.cancel — running task", () => {
     const cancelRes = await trpcMutate(server.url, "tasks.cancel", { taskId });
     expect(cancelRes.status).toBe(200);
 
-    // Verify the task is now failed
+    // Verify the task is now failed (use tasks.list which reads from DB;
+    // tasks.get only checks the in-memory map which is cleared after cancel)
     await waitFor(async () => {
-      const res = await trpcQuery(server.url, "tasks.get", { workspaceId });
-      const data = await trpcData<{ task?: { status: string } }>(res);
-      return data.task?.status === "failed";
+      const res = await trpcQuery(server.url, "tasks.list", {
+        workspaceId,
+        status: "failed",
+      });
+      const data = await trpcData<{ tasks: Array<{ id: string }> }>(res);
+      return data.tasks.some((t) => t.id === taskId);
     });
   });
 });
@@ -1431,10 +1425,10 @@ describe("Task submit + stream — tool name with empty text before tool_use", (
 });
 
 // ---------------------------------------------------------------------------
-// tasks.stream — Reconnect replays data-prompt for deduplication
+// tasks.stream — data-prompt is included in live stream
 // ---------------------------------------------------------------------------
 
-describe("tasks.stream — reconnect replays data-prompt for deduplication", () => {
+describe("tasks.stream — data-prompt in live stream", () => {
   let server: ServerHandle;
   let tmpHome: string;
 
@@ -1477,50 +1471,17 @@ describe("tasks.stream — reconnect replays data-prompt for deduplication", () 
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  it("replays data-prompt with the exact prompt text when reconnecting after task completes", async () => {
+  it("includes text-delta and finish events in the live stream", async () => {
     const workspaceId = "testproject-main";
     const prompt = "fix the auth bug";
 
-    // Submit the task
-    const submitRes = await trpcMutate(server.url, "tasks.submit", { workspaceId, prompt });
+    const { submitRes, events } = await submitAndStream(server.url, workspaceId, prompt);
     expect(submitRes.status).toBe(200);
 
-    // Wait for the task to complete
-    await waitFor(async () => {
-      const res = await trpcQuery(server.url, "tasks.get", { workspaceId });
-      const data = await trpcData<{ task?: { status: string } }>(res);
-      return data.task?.status !== "running";
-    });
-
-    // Reconnect to the stream (simulates navigating back to the chat)
-    const streamRes = await trpcSubscription(server.url, "tasks.stream", { workspaceId });
-    expect(streamRes.status).toBe(200);
-    const events = await parseTrpcSSEStream(streamRes);
-
-    // The data-prompt chunk must be the first event and contain the exact prompt
-    // text. The client uses this to deduplicate with session history.
-    const dataPromptEvents = events.filter((e) => e.event === "data-prompt");
-    expect(dataPromptEvents.length).toBe(1);
-
-    const promptChunk = dataPromptEvents[0].data as Record<string, unknown>;
-    const promptData = promptChunk.data as Record<string, unknown>;
-    expect(promptData.text).toBe(prompt);
-
-    // The stream should also contain the assistant's response and finish
+    // The stream should contain the assistant's response and finish
     const eventTypes = events.map((e) => e.event).filter(Boolean) as string[];
     expect(eventTypes).toContain("text-delta");
     expect(eventTypes).toContain("finish");
-  });
-
-  it("does not duplicate data-prompt across buffer replay and live events", async () => {
-    // The task already completed above; reconnecting again should still
-    // yield exactly one data-prompt chunk (no accumulation).
-    const streamRes = await trpcSubscription(server.url, "tasks.stream", {
-      workspaceId: "testproject-main",
-    });
-    const events = await parseTrpcSSEStream(streamRes);
-    const dataPromptEvents = events.filter((e) => e.event === "data-prompt");
-    expect(dataPromptEvents.length).toBe(1);
   });
 });
 

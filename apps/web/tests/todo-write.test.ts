@@ -209,22 +209,14 @@ async function submitAndStream(
   workspaceId: string,
   prompt: string,
 ): Promise<{ submitRes: Response; streamRes: Response; events: SSEEvent[] }> {
-  const submitRes = await trpcMutate(serverUrl, "tasks.submit", {
-    workspaceId,
-    prompt,
-  });
+  const submitRes = await trpcMutate(serverUrl, "tasks.submit", { workspaceId, prompt });
 
   if (!submitRes.ok) {
     return { submitRes, streamRes: submitRes, events: [] };
   }
 
-  await new Promise((r) => setTimeout(r, 100));
-
-  const streamRes = await trpcSubscription(serverUrl, "tasks.stream", {
-    workspaceId,
-  });
+  const streamRes = await trpcSubscription(serverUrl, "tasks.stream", { workspaceId });
   const events = await parseTrpcSSEStream(streamRes);
-
   return { submitRes, streamRes, events };
 }
 
@@ -375,34 +367,19 @@ describe("TodoWrite streaming — basic tool call", () => {
     expect(input.todos[2]).toEqual(
       expect.objectContaining({ content: "Run tests and fix failures", status: "pending" }),
     );
-  });
 
-  it("streams tool-output-available after TodoWrite completes", async () => {
-    // The task already completed above; reconnect to get buffered events
-    const streamRes = await trpcSubscription(server.url, "tasks.stream", {
-      workspaceId: "testproject-main",
-    });
-    const events = await parseTrpcSSEStream(streamRes);
-
+    // Verify tool output is also in the live stream
     const toolOutputEvents = events.filter((e) => e.event === "tool-output-available");
     expect(toolOutputEvents.length).toBeGreaterThan(0);
-
     const todoOutput = toolOutputEvents.find(
       (e) => (e.data as Record<string, unknown>).toolCallId === "tool-todo-1",
     );
     expect(todoOutput).toBeDefined();
-
     const output = (todoOutput!.data as Record<string, unknown>).output as string;
     expect(output).toContain("Todos have been modified successfully");
-  });
 
-  it("includes data-result and finish events alongside TodoWrite", async () => {
-    const streamRes = await trpcSubscription(server.url, "tasks.stream", {
-      workspaceId: "testproject-main",
-    });
-    const events = await parseTrpcSSEStream(streamRes);
+    // Verify data-result and finish events are present
     const eventTypes = events.map((e) => e.event);
-
     expect(eventTypes).toContain("tool-input-available");
     expect(eventTypes).toContain("tool-output-available");
     expect(eventTypes).toContain("data-result");
@@ -525,7 +502,7 @@ describe("TodoWrite streaming — multiple sequential calls", () => {
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  it("streams both TodoWrite tool calls with distinct IDs", async () => {
+  it("streams both TodoWrite tool calls with distinct IDs and outputs", async () => {
     const { submitRes, events } = await submitAndStream(
       server.url,
       "testproject-main",
@@ -550,23 +527,15 @@ describe("TodoWrite streaming — multiple sequential calls", () => {
     expect(secondEvent.toolCallId).toBe("tool-todo-second");
     const secondInput = secondEvent.input as { todos: unknown[] };
     expect(secondInput.todos).toHaveLength(3);
-  });
 
-  it("streams tool-output-available for each TodoWrite call", async () => {
-    const streamRes = await trpcSubscription(server.url, "tasks.stream", {
-      workspaceId: "testproject-main",
-    });
-    const events = await parseTrpcSSEStream(streamRes);
-
+    // Verify tool outputs are also present in the live stream
     const todoOutputEvents = events.filter((e) => e.event === "tool-output-available");
-
     const firstOutput = todoOutputEvents.find(
       (e) => (e.data as Record<string, unknown>).toolCallId === "tool-todo-first",
     );
     const secondOutput = todoOutputEvents.find(
       (e) => (e.data as Record<string, unknown>).toolCallId === "tool-todo-second",
     );
-
     expect(firstOutput).toBeDefined();
     expect(secondOutput).toBeDefined();
   });
@@ -878,7 +847,7 @@ describe("TodoWrite streaming — mixed with other tool calls", () => {
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  it("streams TodoWrite and Read tool calls with correct tool names", async () => {
+  it("streams TodoWrite and Read tool calls with correct names, IDs, and outputs", async () => {
     const { submitRes, events } = await submitAndStream(
       server.url,
       "testproject-main",
@@ -893,30 +862,15 @@ describe("TodoWrite streaming — mixed with other tool calls", () => {
 
     const toolNames = toolInputEvents.map((e) => (e.data as Record<string, unknown>).toolName);
     expect(toolNames).toEqual(["TodoWrite", "Read", "TodoWrite"]);
-  });
 
-  it("preserves correct tool call IDs for mixed tool calls", async () => {
-    const streamRes = await trpcSubscription(server.url, "tasks.stream", {
-      workspaceId: "testproject-main",
-    });
-    const events = await parseTrpcSSEStream(streamRes);
-
-    const toolInputEvents = events.filter((e) => e.event === "tool-input-available");
-
+    // Verify correct tool call IDs
     const ids = toolInputEvents.map((e) => (e.data as Record<string, unknown>).toolCallId);
     expect(ids).toContain("tool-todo-mixed");
     expect(ids).toContain("tool-read-1");
     expect(ids).toContain("tool-todo-mixed-2");
-  });
 
-  it("streams all tool outputs for mixed tool calls", async () => {
-    const streamRes = await trpcSubscription(server.url, "tasks.stream", {
-      workspaceId: "testproject-main",
-    });
-    const events = await parseTrpcSSEStream(streamRes);
-
+    // Verify all tool outputs are present
     const toolOutputEvents = events.filter((e) => e.event === "tool-output-available");
-
     const outputIds = toolOutputEvents.map((e) => (e.data as Record<string, unknown>).toolCallId);
     expect(outputIds).toContain("tool-todo-mixed");
     expect(outputIds).toContain("tool-read-1");

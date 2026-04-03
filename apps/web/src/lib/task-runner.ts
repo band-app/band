@@ -336,6 +336,7 @@ async function runTask(workspaceId: string, task: InternalTask) {
               type: "error",
               errorText: `Agent error: ${event.errors.join(", ") || "unknown error"}`,
             });
+            broadcast(workspaceId, { type: "finish" });
             finished = true;
           }
           break;
@@ -363,6 +364,7 @@ async function runTask(workspaceId: string, task: InternalTask) {
         type: "error",
         errorText: "Agent session ended without producing a result",
       });
+      broadcast(workspaceId, { type: "finish" });
     }
   } catch (err) {
     task.status = "failed";
@@ -372,6 +374,7 @@ async function runTask(workspaceId: string, task: InternalTask) {
       type: "error",
       errorText: err instanceof Error ? err.message : "Unknown error",
     });
+    broadcast(workspaceId, { type: "finish" });
   }
 
   // Auto-start a new task if there's a queued message and the task succeeded
