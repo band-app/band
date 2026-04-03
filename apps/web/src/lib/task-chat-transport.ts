@@ -112,9 +112,9 @@ export class TaskChatTransport implements ChatTransport<UIMessage> {
   async reconnectToStream(
     _options: Parameters<ChatTransport<UIMessage>["reconnectToStream"]>[0],
   ): Promise<ReadableStream<UIMessageChunk> | null> {
-    // Check if there's an active task or buffered chunks
+    // Buffer disabled for testing — only reconnect to actively running tasks
     const task = await trpc.tasks.get.query({ workspaceId: this.workspaceId });
-    if (!task.task) return null;
+    if (!task.task || task.task.status !== "running") return null;
 
     return subscriptionToStream(this.workspaceId);
   }

@@ -37,8 +37,6 @@ type Listener = (chunk: UIMessageChunk) => void;
 interface InternalTask extends TaskInfo {
   taskRecordId: string;
   agentPrompt: string;
-  chunks: UIMessageChunk[];
-  expireTimer?: ReturnType<typeof setTimeout>;
 }
 
 // Use globalThis to ensure a single shared state across multiple bundles
@@ -52,8 +50,6 @@ if (!g[LISTENERS_KEY]) g[LISTENERS_KEY] = new Map<string, Set<Listener>>();
 
 const tasks = g[TASKS_KEY] as Map<string, InternalTask>;
 const listeners = g[LISTENERS_KEY] as Map<string, Set<Listener>>;
-
-const BUFFER_EXPIRE_MS = 30 * 60 * 1000; // 30 minutes
 
 function persistTask(task: InternalTask): void {
   const workspace = resolveWorkspace(task.workspaceId);
@@ -89,11 +85,6 @@ function broadcast(workspaceId: string, chunk: UIMessageChunk) {
   }
 }
 
-function emit(workspaceId: string, task: InternalTask, chunk: UIMessageChunk) {
-  task.chunks.push(chunk);
-  broadcast(workspaceId, chunk);
-}
-
 export function submitTask(
   workspaceId: string,
   prompt: string,
@@ -113,33 +104,22 @@ export function submitTask(
     throw new TaskConflictError(workspaceId);
   }
 
-  // Clear any previous expiration timer
-  if (existing?.expireTimer) {
-    clearTimeout(existing.expireTimer);
-  }
-
+  const taskRecordId = generateTaskId();
   const task: InternalTask = {
+    id: taskRecordId,
     workspaceId,
     sessionId,
     status: "running",
     startedAt: Date.now(),
     prompt,
-    taskRecordId: generateTaskId(),
+    taskRecordId,
     agentPrompt: agentPrompt ?? prompt,
     maxTurns,
     mode,
     model,
-    chunks: [
-      // Emit user-facing prompt so reconnecting clients can reconstruct the user message
-      { type: "data-prompt", data: { text: prompt } } as UIMessageChunk,
-    ],
   };
   tasks.set(workspaceId, task);
   persistTask(task);
-
-  // Broadcast to any live subscribers (auto-started tasks).
-  // For the initial task this is a no-op — no subscribers exist yet.
-  broadcast(workspaceId, task.chunks[0]);
 
   // Fire-and-forget async execution
   runTask(workspaceId, task).catch((err) => {
@@ -163,9 +143,9 @@ export function abortTask(workspaceId: string): boolean {
   task.status = "failed";
   task.completedAt = Date.now();
   persistTask(task);
-  emit(workspaceId, task, { type: "error", errorText: "Task aborted by user" });
-  emit(workspaceId, task, { type: "finish" });
-  scheduleExpiry(workspaceId);
+  broadcast(workspaceId, { type: "error", errorText: "Task aborted by user" });
+  broadcast(workspaceId, { type: "finish" });
+  tasks.delete(workspaceId);
 
   log.info({ workspaceId }, "task aborted by user");
   return true;
@@ -183,9 +163,9 @@ export function cancelTask(taskId: string): { cancelled: boolean; workspaceId?: 
       task.status = "failed";
       task.completedAt = Date.now();
       persistTask(task);
-      emit(workspaceId, task, { type: "error", errorText: "Task cancelled" });
-      emit(workspaceId, task, { type: "finish" });
-      scheduleExpiry(workspaceId);
+      broadcast(workspaceId, { type: "error", errorText: "Task cancelled" });
+      broadcast(workspaceId, { type: "finish" });
+      tasks.delete(workspaceId);
 
       log.info({ workspaceId, taskId }, "task cancelled (was running in-memory)");
       return { cancelled: true, workspaceId };
@@ -208,8 +188,8 @@ async function runTask(workspaceId: string, task: InternalTask) {
     task.status = "failed";
     task.completedAt = Date.now();
     persistTask(task);
-    emit(workspaceId, task, { type: "error", errorText: "Workspace not found" });
-    scheduleExpiry(workspaceId);
+    broadcast(workspaceId, { type: "error", errorText: "Workspace not found" });
+    tasks.delete(workspaceId);
     return;
   }
 
@@ -217,6 +197,10 @@ async function runTask(workspaceId: string, task: InternalTask) {
   const wsStatus = getWorkspaceStatus(workspaceId);
   const codingAgentId = wsStatus?.agent?.codingAgentId;
   const agent = await getOrCreateAgent(workspaceId, workspace.worktree.path, codingAgentId);
+
+  // Mark workspace as working now that the agent is ready
+  const working = upsertWorkspaceStatus(workspaceId, { status: "working" });
+  emitStatusEvent({ kind: "update", status: working });
 
   agent.onUserInputNeeded = async (request) => {
     // Set status to needs_attention while waiting for user input
@@ -239,7 +223,7 @@ async function runTask(workspaceId: string, task: InternalTask) {
 
   function endText() {
     if (textStarted) {
-      emit(workspaceId, task, { type: "text-end", id: textPartId });
+      broadcast(workspaceId, { type: "text-end", id: textPartId });
       textStarted = false;
     }
   }
@@ -260,7 +244,7 @@ async function runTask(workspaceId: string, task: InternalTask) {
         case "session-start": {
           task.sessionId = event.sessionId;
           persistTask(task);
-          emit(workspaceId, task, {
+          broadcast(workspaceId, {
             type: "data-session" as UIMessageChunk["type"],
             data: { sessionId: event.sessionId },
           } as UIMessageChunk);
@@ -270,10 +254,10 @@ async function runTask(workspaceId: string, task: InternalTask) {
         case "text-delta": {
           if (!textStarted) {
             textPartId = crypto.randomUUID();
-            emit(workspaceId, task, { type: "text-start", id: textPartId });
+            broadcast(workspaceId, { type: "text-start", id: textPartId });
             textStarted = true;
           }
-          emit(workspaceId, task, {
+          broadcast(workspaceId, {
             type: "text-delta",
             id: textPartId,
             delta: event.text,
@@ -284,7 +268,7 @@ async function runTask(workspaceId: string, task: InternalTask) {
         case "tool-use": {
           endText();
           announcedToolCalls.add(event.toolCallId);
-          emit(workspaceId, task, {
+          broadcast(workspaceId, {
             type: "tool-input-available",
             toolCallId: event.toolCallId,
             toolName: event.toolName,
@@ -296,7 +280,7 @@ async function runTask(workspaceId: string, task: InternalTask) {
         case "tool-result": {
           if (!announcedToolCalls.has(event.toolCallId)) {
             endText();
-            emit(workspaceId, task, {
+            broadcast(workspaceId, {
               type: "tool-input-available",
               toolCallId: event.toolCallId,
               toolName: event.toolName ?? "tool",
@@ -305,7 +289,7 @@ async function runTask(workspaceId: string, task: InternalTask) {
             announcedToolCalls.add(event.toolCallId);
           }
           const truncated = truncateToolOutput(event.output);
-          emit(workspaceId, task, {
+          broadcast(workspaceId, {
             type: "tool-output-available",
             toolCallId: event.toolCallId,
             output: truncated,
@@ -315,7 +299,7 @@ async function runTask(workspaceId: string, task: InternalTask) {
 
         case "file": {
           endText();
-          emit(workspaceId, task, {
+          broadcast(workspaceId, {
             type: "file",
             mediaType: event.mediaType,
             url: event.url,
@@ -330,7 +314,7 @@ async function runTask(workspaceId: string, task: InternalTask) {
             task.status = "completed";
             task.completedAt = Date.now();
             persistTask(task);
-            emit(workspaceId, task, {
+            broadcast(workspaceId, {
               type: "data-result" as UIMessageChunk["type"],
               data: {
                 sessionId: event.sessionId,
@@ -341,14 +325,14 @@ async function runTask(workspaceId: string, task: InternalTask) {
                 }),
               },
             } as UIMessageChunk);
-            emit(workspaceId, task, { type: "finish-step" });
-            emit(workspaceId, task, { type: "finish" });
+            broadcast(workspaceId, { type: "finish-step" });
+            broadcast(workspaceId, { type: "finish" });
             finished = true;
           } else {
             task.status = "failed";
             task.completedAt = Date.now();
             persistTask(task);
-            emit(workspaceId, task, {
+            broadcast(workspaceId, {
               type: "error",
               errorText: `Agent error: ${event.errors.join(", ") || "unknown error"}`,
             });
@@ -358,7 +342,7 @@ async function runTask(workspaceId: string, task: InternalTask) {
         }
 
         case "error": {
-          emit(workspaceId, task, {
+          broadcast(workspaceId, {
             type: "error",
             errorText: event.message,
           });
@@ -375,7 +359,7 @@ async function runTask(workspaceId: string, task: InternalTask) {
         task.completedAt = Date.now();
       }
       persistTask(task);
-      emit(workspaceId, task, {
+      broadcast(workspaceId, {
         type: "error",
         errorText: "Agent session ended without producing a result",
       });
@@ -384,36 +368,33 @@ async function runTask(workspaceId: string, task: InternalTask) {
     task.status = "failed";
     task.completedAt = Date.now();
     persistTask(task);
-    emit(workspaceId, task, {
+    broadcast(workspaceId, {
       type: "error",
       errorText: err instanceof Error ? err.message : "Unknown error",
     });
   }
 
-  scheduleExpiry(workspaceId);
-
   // Auto-start a new task if there's a queued message and the task succeeded
+  let autoStarted = false;
   if (task.status === "completed") {
     const queued = shiftQueuedMessage(workspaceId);
     if (queued) {
       try {
         submitTask(workspaceId, queued, task.sessionId);
+        autoStarted = true;
       } catch (err) {
         log.warn({ workspaceId, err }, "failed to auto-start queued task");
       }
     }
   }
-}
 
-function scheduleExpiry(workspaceId: string) {
-  const task = tasks.get(workspaceId);
-  if (!task) return;
-  task.expireTimer = setTimeout(() => {
-    const current = tasks.get(workspaceId);
-    if (current === task && current.status !== "running") {
-      tasks.delete(workspaceId);
-    }
-  }, BUFFER_EXPIRE_MS);
+  // Update workspace status — needs_attention on success (user should review),
+  // waiting on failure. Skip if a queued task already auto-started.
+  if (!autoStarted) {
+    const endStatus = task.status === "completed" ? "needs_attention" : "waiting";
+    const updated = upsertWorkspaceStatus(workspaceId, { status: endStatus });
+    emitStatusEvent({ kind: "update", status: updated });
+  }
 }
 
 export function getTask(workspaceId: string): TaskInfo | null {
@@ -436,12 +417,6 @@ export function subscribe(workspaceId: string, listener: Listener): () => void {
       listeners.delete(workspaceId);
     }
   };
-}
-
-export function getBufferedChunks(workspaceId: string): UIMessageChunk[] {
-  const task = tasks.get(workspaceId);
-  if (!task) return [];
-  return [...task.chunks];
 }
 
 function toTaskInfo(task: InternalTask): TaskInfo {

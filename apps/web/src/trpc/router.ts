@@ -49,7 +49,6 @@ import {
 import {
   abortTask,
   cancelTask,
-  getBufferedChunks,
   getTask,
   submitTask,
   subscribe as subscribeTask,
@@ -907,8 +906,10 @@ const workspaceRouter = t.router({
         throw new TRPCError({ code: "NOT_FOUND", message: "Workspace not found" });
       }
 
-      // Abort any running task for this workspace
+      // Abort any running task and clear queued messages so the new agent
+      // starts with a clean slate.
       abortTask(input.workspaceId);
+      clearQueuedMessages(input.workspaceId);
 
       // Replace the agent in the pool with the new agent type
       await replaceAgent(input.workspaceId, workspace.worktree.path, input.agentId);
@@ -1152,19 +1153,10 @@ const tasksRouter = t.router({
       const workspaceId = opts.input.workspaceId;
       const task = getTask(workspaceId);
 
-      if (!task) {
-        // No active task — replay any buffered chunks (e.g. recently completed)
-        const buffered = getBufferedChunks(workspaceId);
-        for (const chunk of buffered) {
-          yield chunk;
-        }
+      if (!task || task.status !== "running") {
         return;
       }
 
-      // Subscribe for live events FIRST, then snapshot the buffer.
-      // Both calls are synchronous, so no events can be emitted between
-      // them (single-threaded JS). This guarantees zero gap and zero
-      // overlap between the buffer snapshot and the live listener.
       type Chunk = Parameters<Parameters<typeof subscribeTask>[1]>[0];
       const queue: Chunk[] = [];
       let resolve: (() => void) | null = null;
@@ -1174,26 +1166,13 @@ const tasksRouter = t.router({
         resolve?.();
       });
 
-      const buffered = getBufferedChunks(workspaceId);
-
-      // Replay buffered chunks
-      for (const chunk of buffered) {
-        yield chunk;
-      }
-
-      // If task is already done and no live events queued, stop
-      if (task.status !== "running" && queue.length === 0) {
-        unsubscribe();
-        return;
-      }
-
-      opts.signal.addEventListener("abort", () => {
+      opts.signal?.addEventListener("abort", () => {
         unsubscribe();
         resolve?.();
       });
 
       try {
-        while (!opts.signal.aborted) {
+        while (!opts.signal?.aborted) {
           while (queue.length > 0) {
             const chunk = queue.shift()!;
             yield chunk;
@@ -1323,6 +1302,18 @@ const statusesRouter = t.router({
       return { ok: true };
     }),
 
+  clearNeedsAttention: publicProcedure
+    .input(z.object({ workspaceId: z.string() }))
+    .mutation(({ input }) => {
+      const existing = getWorkspaceStatus(input.workspaceId);
+      if (existing?.agent?.status !== "needs_attention") {
+        return { ok: true };
+      }
+      const status = upsertWorkspaceStatus(input.workspaceId, { status: "waiting" });
+      emit({ kind: "update", status });
+      return { ok: true };
+    }),
+
   resolve: publicProcedure.input(z.object({ cwd: z.string() })).query(({ input }) => {
     const state = loadState();
     for (const proj of state.projects) {
@@ -1351,13 +1342,13 @@ const statusRouter = t.router({
       resolve?.();
     });
 
-    opts.signal.addEventListener("abort", () => {
+    opts.signal?.addEventListener("abort", () => {
       unsubscribe();
       resolve?.();
     });
 
     try {
-      while (!opts.signal.aborted) {
+      while (!opts.signal?.aborted) {
         while (queue.length > 0) {
           yield queue.shift()!;
         }
