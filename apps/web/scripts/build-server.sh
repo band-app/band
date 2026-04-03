@@ -23,24 +23,40 @@ if [ "${NPM_PUBLISH:-}" != "1" ]; then
   # Clean stale native modules from previous builds
   rm -rf dist/node_modules
 
-  # Copy node-pty native module (only current platform prebuilds, no debug symbols)
-  mkdir -p dist/node_modules/node-pty/prebuilds
+  # Copy node-pty native module.
+  # node-pty resolves its .node binary via: build/Release, build/Debug,
+  # then prebuilds/<platform>-<arch> (see lib/utils.js).
+  # On macOS/Windows, prebuilt binaries ship under prebuilds/.
+  # On Linux, node-pty compiles from source into build/Release/.
+  mkdir -p dist/node_modules/node-pty
   cp -RL node_modules/node-pty/package.json dist/node_modules/node-pty/
   cp -RL node_modules/node-pty/lib dist/node_modules/node-pty/
-  PTY_PREBUILDS="$(cd node_modules/node-pty/prebuilds && pwd -P)"
-  PLATFORM="$(uname -s | tr '[:upper:]' '[:lower:]')"
-  case "$PLATFORM" in
-    darwin) PREBUILD_GLOB="darwin-*" ;;
-    linux)  PREBUILD_GLOB="linux-*" ;;
-    *)      PREBUILD_GLOB="*" ;;
-  esac
-  for dir in "$PTY_PREBUILDS"/$PREBUILD_GLOB; do
-    [ -d "$dir" ] || continue
-    target="dist/node_modules/node-pty/prebuilds/$(basename "$dir")"
-    mkdir -p "$target"
-    find "$dir" -maxdepth 1 -type f ! -name '*.pdb' -exec cp {} "$target/" \;
-  done
-  chmod +x dist/node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true
+
+  PTY_REAL="$(cd node_modules/node-pty && pwd -P)"
+
+  # Copy build/Release if it exists (compiled from source, typical on Linux)
+  if [ -d "$PTY_REAL/build/Release" ]; then
+    mkdir -p dist/node_modules/node-pty/build/Release
+    cp "$PTY_REAL"/build/Release/*.node dist/node_modules/node-pty/build/Release/
+  fi
+
+  # Copy platform-specific prebuilds (macOS/Windows ship these)
+  if [ -d "$PTY_REAL/prebuilds" ]; then
+    mkdir -p dist/node_modules/node-pty/prebuilds
+    PLATFORM="$(uname -s | tr '[:upper:]' '[:lower:]')"
+    case "$PLATFORM" in
+      darwin) PREBUILD_GLOB="darwin-*" ;;
+      linux)  PREBUILD_GLOB="linux-*" ;;
+      *)      PREBUILD_GLOB="*" ;;
+    esac
+    for dir in "$PTY_REAL"/prebuilds/$PREBUILD_GLOB; do
+      [ -d "$dir" ] || continue
+      target="dist/node_modules/node-pty/prebuilds/$(basename "$dir")"
+      mkdir -p "$target"
+      find "$dir" -maxdepth 1 -type f ! -name '*.pdb' -exec cp {} "$target/" \;
+    done
+    chmod +x dist/node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true
+  fi
 
   # Copy better-sqlite3 native module and its dependencies
   mkdir -p dist/node_modules/better-sqlite3/build/Release

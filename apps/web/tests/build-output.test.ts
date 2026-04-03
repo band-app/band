@@ -25,11 +25,14 @@ describe("build output", () => {
     expect(existsSync(join(dist, "node_modules/node-pty/package.json"))).toBe(true);
   });
 
-  it("contains node-pty prebuilds", () => {
-    const prebuildsDir = join(dist, "node_modules/node-pty/prebuilds");
-    expect(existsSync(prebuildsDir)).toBe(true);
-    const platforms = readdirSync(prebuildsDir);
-    expect(platforms.length).toBeGreaterThan(0);
+  it("contains node-pty native binary", () => {
+    // node-pty resolves its .node via build/Release (compiled) or prebuilds/<platform>-<arch>.
+    // On Linux it compiles from source into build/Release; on macOS/Windows prebuilds ship.
+    const ptyDir = join(dist, "node_modules/node-pty");
+    const hasBuildRelease = existsSync(join(ptyDir, "build/Release"));
+    const hasPrebuilds =
+      existsSync(join(ptyDir, "prebuilds")) && readdirSync(join(ptyDir, "prebuilds")).length > 0;
+    expect(hasBuildRelease || hasPrebuilds).toBe(true);
   });
 
   it("contains better-sqlite3 native binary", () => {
