@@ -65,6 +65,54 @@ export function seedState(tmpHome: string, state: StateData): void {
   sqlite.close();
 }
 
+export interface WorkspaceStatusData {
+  workspaceId: string;
+  project: string;
+  branch: string;
+  worktreePath: string;
+  ide?: string;
+  agentName?: string;
+  agentStatus?: string;
+  agentLastActivity?: string;
+  agentSummary?: string;
+  codingAgentId?: string;
+}
+
+export function seedWorkspaceStatuses(tmpHome: string, statuses: WorkspaceStatusData[]): void {
+  const bandDir = join(tmpHome, ".band");
+  mkdirSync(bandDir, { recursive: true });
+
+  const sqlite = new Database(join(bandDir, "band.db"));
+  sqlite.pragma("journal_mode = WAL");
+  sqlite.pragma("foreign_keys = ON");
+
+  const db = drizzle(sqlite, { schema });
+  migrate(db, { migrationsFolder });
+
+  const now = Date.now();
+  db.transaction((tx) => {
+    for (const s of statuses) {
+      tx.insert(schema.workspaceStatuses)
+        .values({
+          workspaceId: s.workspaceId,
+          project: s.project,
+          branch: s.branch,
+          worktreePath: s.worktreePath,
+          ide: s.ide ?? "vscode",
+          agentName: s.agentName ?? "claude-code",
+          agentStatus: s.agentStatus ?? "waiting",
+          agentLastActivity: s.agentLastActivity ?? "",
+          agentSummary: s.agentSummary ?? null,
+          codingAgentId: s.codingAgentId ?? null,
+          updatedAt: now,
+        })
+        .run();
+    }
+  });
+
+  sqlite.close();
+}
+
 export function seedSettings(tmpHome: string, settings: object): void {
   const bandDir = join(tmpHome, ".band");
   mkdirSync(bandDir, { recursive: true });
