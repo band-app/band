@@ -54,6 +54,38 @@ if [ "${NPM_PUBLISH:-}" != "1" ]; then
   cp -RL "$BINDINGS_REAL"/* dist/node_modules/bindings/
   mkdir -p dist/node_modules/file-uri-to-path
   cp -RL "$BINDINGS_PEERS/file-uri-to-path"/* dist/node_modules/file-uri-to-path/
+
+  # Resolve the monorepo root (where the pnpm store lives).
+  # The SDK packages below are deps of packages/coding-agent, not apps/web,
+  # so they only exist in the root node_modules/.pnpm store.
+  MONO_ROOT="$(cd ../.. && pwd)"
+
+  # Copy claude-agent-sdk CLI script.
+  # The SDK resolves cli.js via join(dirname(import.meta.url), "..", "cli.js").
+  # After esbuild bundling import.meta.url points to dist/start-server.mjs,
+  # so the SDK looks for dist/cli.js.
+  CLAUDE_SDK_CLI="$(find "$MONO_ROOT/node_modules/.pnpm" -path "*/@anthropic-ai/claude-agent-sdk/cli.js" -type f 2>/dev/null | head -1)"
+  if [ -n "$CLAUDE_SDK_CLI" ]; then
+    cp "$CLAUDE_SDK_CLI" dist/cli.js
+  fi
+
+  # Copy Codex CLI platform binary.
+  # The Codex SDK uses createRequire(import.meta.url).resolve("@openai/codex/package.json")
+  # which resolves from dist/, so we mirror the package structure in dist/node_modules/.
+  CODEX_PKG_DIR="$(find "$MONO_ROOT/node_modules/.pnpm" -path "*/@openai/codex/package.json" -type f 2>/dev/null | head -1)"
+  if [ -n "$CODEX_PKG_DIR" ]; then
+    CODEX_DIR="$(dirname "$CODEX_PKG_DIR")"
+    CODEX_PEERS="$(dirname "$CODEX_DIR")"
+    mkdir -p dist/node_modules/@openai/codex
+    cp "$CODEX_PKG_DIR" dist/node_modules/@openai/codex/
+    # Copy platform-specific binary package (e.g. @openai/codex-darwin-arm64)
+    for platform_dir in "$CODEX_PEERS"/codex-"$PLATFORM"-*; do
+      [ -d "$platform_dir" ] || continue
+      pkg_name="$(basename "$platform_dir")"
+      mkdir -p "dist/node_modules/@openai/$pkg_name"
+      cp -RL "$platform_dir"/* "dist/node_modules/@openai/$pkg_name/"
+    done
+  fi
 fi
 
 # Copy Drizzle migrations
