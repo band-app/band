@@ -1,4 +1,4 @@
-import { GitBranch, Loader2, MessageSquare, Plus, RefreshCw } from "lucide-react";
+import { GitBranch, Loader2, MessageSquare, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { trpc } from "../lib/trpc-client";
 
@@ -14,7 +14,6 @@ interface SessionListProps {
   workspaceId: string;
   activeSessionId?: string;
   onSelectSession: (sessionId: string) => void;
-  onNewSession: () => void;
 }
 
 function relativeTime(ms: number): string {
@@ -30,12 +29,7 @@ function relativeTime(ms: number): string {
   return `${months}mo ago`;
 }
 
-export function SessionList({
-  workspaceId,
-  activeSessionId,
-  onSelectSession,
-  onNewSession,
-}: SessionListProps) {
+export function SessionList({ workspaceId, activeSessionId, onSelectSession }: SessionListProps) {
   const [sessions, setSessions] = useState<SessionItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -83,17 +77,6 @@ export function SessionList({
 
   return (
     <div className="mx-auto flex h-full w-full max-w-2xl flex-col">
-      <div className="shrink-0 p-3 pb-1">
-        <button
-          type="button"
-          onClick={onNewSession}
-          className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-base font-medium text-primary-foreground transition-colors hover:bg-primary/90 active:bg-primary/80"
-        >
-          <Plus className="size-4" />
-          New Session
-        </button>
-      </div>
-
       {sessions.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
           <MessageSquare className="size-10 text-muted-foreground" />

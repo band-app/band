@@ -8,7 +8,7 @@ import {
   WorkspaceTabNav,
 } from "@band-app/dashboard-core";
 import { createFileRoute, Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
-import { ArrowLeft, ChevronDown, Clock, Code, GitCompare, Terminal } from "lucide-react";
+import { ArrowLeft, ChevronDown, Clock, Code, GitCompare, Plus, Terminal } from "lucide-react";
 import {
   createContext,
   useCallback,
@@ -328,6 +328,7 @@ function MobileWorkspaceLayout({
   const [showAgentMenu, setShowAgentMenu] = useState(false);
   const [taskRunning, setTaskRunning] = useState(false);
   const [chatKey, setChatKey] = useState(0);
+  const newSessionRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     if (!isTauri) {
@@ -436,7 +437,9 @@ function MobileWorkspaceLayout({
     <SessionListContext.Provider
       value={{ showSessionList, setShowSessionList: handleSetShowSessionList }}
     >
-      <AgentSwitcherContext.Provider value={{ chatKey, setTaskRunning }}>
+      <AgentSwitcherContext.Provider
+        value={{ chatKey, setTaskRunning, agentType: currentAgent?.type, newSessionRef }}
+      >
         <div
           className="flex flex-col overflow-hidden"
           style={{
@@ -504,13 +507,23 @@ function MobileWorkspaceLayout({
               </div>
             )}
             {supportsSessionListing && activeTab === "chat" && (
-              <button
-                type="button"
-                onClick={handleToggleSessionList}
-                className={`inline-flex size-8 items-center justify-center rounded-md transition-colors hover:bg-accent ${showSessionList ? "bg-accent text-foreground" : "text-muted-foreground"}`}
-              >
-                <Clock className="size-4" />
-              </button>
+              <div className="flex items-center gap-0.5">
+                <button
+                  type="button"
+                  onClick={handleToggleSessionList}
+                  className={`inline-flex size-8 items-center justify-center rounded-md transition-colors hover:bg-accent ${showSessionList ? "bg-accent text-foreground" : "text-muted-foreground"}`}
+                >
+                  <Clock className="size-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => newSessionRef.current?.()}
+                  className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  title="New session"
+                >
+                  <Plus className="size-4" />
+                </button>
+              </div>
             )}
           </header>
           <WorkspaceTabNav
