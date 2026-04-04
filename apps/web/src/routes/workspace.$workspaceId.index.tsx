@@ -29,7 +29,7 @@ function MobileChatContent({ workspaceId }: { workspaceId: string }) {
   const [supportsSessionListing, setSupportsSessionListing] = useState(false);
   const [initialSessionId, setInitialSessionId] = useState<string | undefined>(undefined);
   const { showSessionList, setShowSessionList } = useSessionListContext();
-  const { chatKey, setTaskRunning } = useAgentSwitcherContext();
+  const { chatKey, setTaskRunning, agentType, newSessionRef } = useAgentSwitcherContext();
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: chatKey intentionally triggers reload after agent switch
   useEffect(() => {
@@ -64,6 +64,8 @@ function MobileChatContent({ workspaceId }: { workspaceId: string }) {
         showSessionList={showSessionList}
         onShowSessionListChange={setShowSessionList}
         onStreamingChange={setTaskRunning}
+        onNewSessionRef={newSessionRef}
+        agentType={agentType}
       />
     </div>
   );

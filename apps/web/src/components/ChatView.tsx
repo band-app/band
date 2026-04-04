@@ -1,4 +1,5 @@
 import { useChat } from "@ai-sdk/react";
+import { AgentIcon } from "@band-app/dashboard-core";
 import {
   Badge,
   cn,
@@ -9,7 +10,7 @@ import {
 } from "@band-app/ui";
 import type { UIMessage } from "ai";
 import { getToolName, isToolUIPart } from "ai";
-import { Bot, ChevronDown, Clock, Loader2, X } from "lucide-react";
+import { Bot, ChevronDown, Clock, CodeXml, Loader2, ScrollText, X } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { TaskChatTransport } from "../lib/task-chat-transport";
 import { trpc } from "../lib/trpc-client";
@@ -233,7 +234,9 @@ interface ChatViewProps {
   showSessionList: boolean;
   onShowSessionListChange: (show: boolean) => void;
   onStreamingChange?: (streaming: boolean) => void;
+  onNewSessionRef?: React.MutableRefObject<(() => void) | null>;
   chatKey?: number;
+  agentType?: string;
 }
 
 export function ChatView({
@@ -244,7 +247,9 @@ export function ChatView({
   showSessionList,
   onShowSessionListChange,
   onStreamingChange,
+  onNewSessionRef,
   chatKey = 0,
+  agentType,
 }: ChatViewProps) {
   const sessionIdRef = useRef<string | undefined>(undefined);
   const [activeSessionId, setActiveSessionId] = useState<string | undefined>(undefined);
@@ -460,6 +465,17 @@ export function ChatView({
     onShowSessionListChange(false);
   }, [setMessages, onShowSessionListChange, workspaceId]);
 
+  useEffect(() => {
+    if (onNewSessionRef) {
+      onNewSessionRef.current = handleNewSession;
+    }
+    return () => {
+      if (onNewSessionRef) {
+        onNewSessionRef.current = null;
+      }
+    };
+  }, [onNewSessionRef, handleNewSession]);
+
   const queueMessage = useCallback(
     (text: string) => {
       setQueuedMessages((prev) => [...prev, text]);
@@ -557,7 +573,6 @@ export function ChatView({
         workspaceId={workspaceId}
         activeSessionId={activeSessionId ?? sessionIdRef.current}
         onSelectSession={handleSelectSession}
-        onNewSession={handleNewSession}
       />
     );
   }
@@ -568,7 +583,13 @@ export function ChatView({
         <ConversationContent>
           {isEmpty && (
             <ConversationEmptyState
-              icon={<Bot className="size-8" />}
+              icon={
+                agentType ? (
+                  <AgentIcon type={agentType} className="size-8" />
+                ) : (
+                  <Bot className="size-8" />
+                )
+              }
               title={workspaceName}
               description="Send a message to start coding"
             />
@@ -763,7 +784,12 @@ export function ChatView({
             <div className="flex items-center gap-0.5">
               <PromptInputAttach />
               {models.length > 0 && (
-                <ModelMenu models={models} selected={selectedModel} onSelect={setSelectedModel} />
+                <ModelMenu
+                  models={models}
+                  selected={selectedModel}
+                  onSelect={setSelectedModel}
+                  agentType={agentType}
+                />
               )}
               {modes.length > 0 && (
                 <ModeMenu modes={modes} selected={selectedMode} onSelect={handleModeSelect} />
@@ -779,6 +805,17 @@ export function ChatView({
       </div>
     </div>
   );
+}
+
+function ModeIcon({ modeId, className }: { modeId: string; className?: string }) {
+  switch (modeId) {
+    case "plan":
+      return <ScrollText className={className} />;
+    case "edit":
+      return <CodeXml className={className} />;
+    default:
+      return <ChevronDown className={className} />;
+  }
 }
 
 function ModeMenu({
@@ -798,7 +835,7 @@ function ModeMenu({
           type="button"
           className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         >
-          <ChevronDown className="size-3" />
+          <ModeIcon modeId={current?.id ?? ""} className="size-3" />
           {current?.name ?? "Mode"}
         </button>
       </DropdownMenuTrigger>
@@ -808,14 +845,17 @@ function ModeMenu({
             key={mode.id}
             onClick={() => onSelect(mode.id)}
             className={cn(
-              "flex flex-col items-start gap-0.5",
+              "flex items-start gap-2",
               mode.id === (selected ?? modes[0]?.id) ? "bg-accent" : "",
             )}
           >
-            <span className="text-sm font-medium">{mode.name}</span>
-            {mode.description && (
-              <span className="text-xs text-muted-foreground">{mode.description}</span>
-            )}
+            <ModeIcon modeId={mode.id} className="size-4 mt-0.5 shrink-0" />
+            <div className="flex flex-col gap-0.5">
+              <span className="text-sm font-medium">{mode.name}</span>
+              {mode.description && (
+                <span className="text-xs text-muted-foreground">{mode.description}</span>
+              )}
+            </div>
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>
@@ -827,10 +867,12 @@ function ModelMenu({
   models,
   selected,
   onSelect,
+  agentType,
 }: {
   models: { id: string; name: string; description?: string }[];
   selected: string | undefined;
   onSelect: (model: string | undefined) => void;
+  agentType?: string;
 }) {
   const current = models.find((m) => m.id === selected) ?? models[0];
   return (
@@ -840,7 +882,11 @@ function ModelMenu({
           type="button"
           className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         >
-          <ChevronDown className="size-3" />
+          {agentType ? (
+            <AgentIcon type={agentType} className="size-3" />
+          ) : (
+            <ChevronDown className="size-3" />
+          )}
           {current?.name ?? "Model"}
         </button>
       </DropdownMenuTrigger>

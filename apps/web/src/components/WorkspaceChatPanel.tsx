@@ -1,6 +1,6 @@
 import { AgentIcon } from "@band-app/dashboard-core";
-import { ChevronDown, Clock } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { ChevronDown, Clock, Plus } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { trpc } from "../lib/trpc-client";
 import { ChatView } from "./ChatView";
 
@@ -24,6 +24,7 @@ export function WorkspaceChatPanel({ workspaceId }: WorkspaceChatPanelProps) {
   const [taskRunning, setTaskRunning] = useState(false);
   // Incremented on agent switch to force ChatView remount
   const [chatKey, setChatKey] = useState(0);
+  const newSessionRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -185,13 +186,23 @@ export function WorkspaceChatPanel({ workspaceId }: WorkspaceChatPanelProps) {
           </div>
         )}
         {supportsSessionListing && (
-          <button
-            type="button"
-            onClick={handleToggleSessionList}
-            className={`inline-flex size-8 items-center justify-center rounded-md transition-colors hover:bg-accent ${showSessionList ? "bg-accent text-foreground" : "text-muted-foreground"}`}
-          >
-            <Clock className="size-4" />
-          </button>
+          <div className="flex items-center gap-0.5">
+            <button
+              type="button"
+              onClick={handleToggleSessionList}
+              className={`inline-flex size-8 items-center justify-center rounded-md transition-colors hover:bg-accent ${showSessionList ? "bg-accent text-foreground" : "text-muted-foreground"}`}
+            >
+              <Clock className="size-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => newSessionRef.current?.()}
+              className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              title="New session"
+            >
+              <Plus className="size-4" />
+            </button>
+          </div>
         )}
       </header>
       <div className="flex min-h-0 flex-1 flex-col">
@@ -205,6 +216,8 @@ export function WorkspaceChatPanel({ workspaceId }: WorkspaceChatPanelProps) {
           showSessionList={showSessionList}
           onShowSessionListChange={setShowSessionList}
           onStreamingChange={setTaskRunning}
+          onNewSessionRef={newSessionRef}
+          agentType={currentAgent?.type}
         />
       </div>
     </div>
