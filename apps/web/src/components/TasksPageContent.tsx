@@ -45,6 +45,9 @@ interface TaskRecord {
   sessionId?: string;
   startedAt: number;
   completedAt?: number;
+  mode?: string;
+  model?: string;
+  codingAgentId?: string;
 }
 
 interface ProjectInfo {
@@ -87,13 +90,40 @@ export function TasksPageContent() {
   const [projectFilter, setProjectFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [showNewTask, setShowNewTask] = useState(false);
+  const [agents, setAgents] = useState<CodingAgentDef[]>([]);
+
+  useEffect(() => {
+    trpc.settings.get.query().then((settings) => {
+      const raw = (settings as Record<string, unknown>).codingAgents;
+      const codingAgents = Array.isArray(raw) ? (raw as CodingAgentDef[]) : [];
+      setAgents(codingAgents);
+    });
+  }, []);
+
+  const agentMap = useMemo(() => {
+    const map = new Map<string, CodingAgentDef>();
+    for (const a of agents) map.set(a.id, a);
+    return map;
+  }, [agents]);
+
+  const [workspaceIds, setWorkspaceIds] = useState<Set<string>>(new Set());
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const tasksData = await trpc.tasks.list.query({});
+      const [tasksData, projectsData] = await Promise.all([
+        trpc.tasks.list.query({}),
+        trpc.projects.list.query(),
+      ]);
       setTasks(tasksData.tasks as TaskRecord[]);
+      const ids = new Set<string>();
+      for (const p of projectsData.projects) {
+        for (const wt of p.worktrees) {
+          if (wt.workspaceId) ids.add(wt.workspaceId);
+        }
+      }
+      setWorkspaceIds(ids);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load tasks");
     } finally {
@@ -121,7 +151,13 @@ export function TasksPageContent() {
   }, [tasks]);
 
   const handleNewTaskSubmit = useCallback(
-    async (workspaceId: string, prompt: string, mode?: string, model?: string, codingAgentId?: string) => {
+    async (
+      workspaceId: string,
+      prompt: string,
+      mode?: string,
+      model?: string,
+      codingAgentId?: string,
+    ) => {
       await trpc.tasks.submit.mutate({ workspaceId, prompt, mode, model, codingAgentId });
       setShowNewTask(false);
       await fetchData();
@@ -221,7 +257,13 @@ export function TasksPageContent() {
         {filteredTasks.length > 0 && (
           <div className="flex flex-col gap-2 p-4">
             {filteredTasks.map((task) => (
-              <TaskCard key={task.id} task={task} onAction={fetchData} />
+              <TaskCard
+                key={task.id}
+                task={task}
+                onAction={fetchData}
+                agentMap={agentMap}
+                workspaceExists={workspaceIds.has(task.workspaceId)}
+              />
             ))}
           </div>
         )}
@@ -262,10 +304,21 @@ function StatusBadge({ status }: { status: TaskRecord["status"] }) {
   }
 }
 
-function TaskCard({ task, onAction }: { task: TaskRecord; onAction: () => void }) {
-  const sessionHref = task.sessionId
-    ? `/workspace/${encodeURIComponent(task.workspaceId)}`
-    : undefined;
+function TaskCard({
+  task,
+  onAction,
+  agentMap,
+  workspaceExists,
+}: {
+  task: TaskRecord;
+  onAction: () => void;
+  agentMap: Map<string, CodingAgentDef>;
+  workspaceExists: boolean;
+}) {
+  const sessionHref =
+    task.sessionId && workspaceExists
+      ? `/workspace/${encodeURIComponent(task.workspaceId)}`
+      : undefined;
   const [acting, setActing] = useState(false);
 
   const handleCancel = useCallback(async () => {
@@ -337,7 +390,7 @@ function TaskCard({ task, onAction }: { task: TaskRecord; onAction: () => void }
         </div>
       </div>
 
-      <div className="flex items-center gap-3 text-xs text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <span className="font-medium text-foreground/70">
           {task.project}/{task.branch}
         </span>
@@ -348,6 +401,24 @@ function TaskCard({ task, onAction }: { task: TaskRecord; onAction: () => void }
         </span>
         <span className="text-border">·</span>
         <span>{formatDuration(task.startedAt, task.completedAt)}</span>
+        {task.codingAgentId && (
+          <>
+            <span className="text-border">·</span>
+            <span>{agentMap.get(task.codingAgentId)?.label ?? task.codingAgentId}</span>
+          </>
+        )}
+        {task.model && (
+          <>
+            <span className="text-border">·</span>
+            <span>{task.model}</span>
+          </>
+        )}
+        {task.mode && (
+          <>
+            <span className="text-border">·</span>
+            <span className="capitalize">{task.mode}</span>
+          </>
+        )}
         {sessionHref && (
           <>
             <span className="text-border">·</span>
@@ -390,7 +461,13 @@ function NewTaskDialog({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSubmit: (workspaceId: string, prompt: string, mode?: string, model?: string, codingAgentId?: string) => Promise<void>;
+  onSubmit: (
+    workspaceId: string,
+    prompt: string,
+    mode?: string,
+    model?: string,
+    codingAgentId?: string,
+  ) => Promise<void>;
 }) {
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [selectedProject, setSelectedProject] = useState<string>("");

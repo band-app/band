@@ -7,7 +7,12 @@ import { createLogger } from "@band-app/logger";
 import { initTRPC, TRPCError } from "@trpc/server";
 import { Cron } from "croner";
 import { z } from "zod";
-import { createMetadataAgent, getOrCreateAgent, removeAgent, replaceAgent } from "../lib/agent-pool";
+import {
+  createMetadataAgent,
+  getOrCreateAgent,
+  removeAgent,
+  replaceAgent,
+} from "../lib/agent-pool";
 import { checkCli, installCli } from "../lib/cli";
 import { reloadSchedules, stopJobsForKey } from "../lib/cronjob-scheduler";
 import {

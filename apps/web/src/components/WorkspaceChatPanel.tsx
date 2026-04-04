@@ -50,17 +50,22 @@ export function WorkspaceChatPanel({ workspaceId }: WorkspaceChatPanelProps) {
     };
   }, [workspaceId]);
 
-  // Load available agents from settings and current workspace agent
+  // Load available agents from settings and current workspace agent.
+  // Workspace status takes precedence over the settings default, so we
+  // fetch both in parallel and apply workspace status last.
   // biome-ignore lint/correctness/useExhaustiveDependencies: chatKey intentionally triggers reload after agent switch; currentAgentId excluded to avoid infinite loop
   useEffect(() => {
     let cancelled = false;
 
-    trpc.settings.get.query().then((settings) => {
+    const settingsPromise = trpc.settings.get.query();
+    const statusPromise = trpc.statuses.get.query({ workspaceId }).catch(() => null);
+
+    Promise.all([settingsPromise, statusPromise]).then(([settings, status]) => {
       if (cancelled) return;
+
       const raw = (settings as Record<string, unknown>).codingAgents;
       const codingAgents = Array.isArray(raw) ? (raw as CodingAgentDef[]) : [];
       if (codingAgents.length > 0) {
-        // Deduplicate by type (in case of stale settings with old + new entries)
         const seen = new Set<string>();
         const unique = codingAgents.filter((a) => {
           if (seen.has(a.type)) return false;
@@ -69,26 +74,20 @@ export function WorkspaceChatPanel({ workspaceId }: WorkspaceChatPanelProps) {
         });
         setAgents(unique);
       }
-      const defaultAgent = (settings as Record<string, unknown>).defaultCodingAgent as
-        | string
-        | undefined;
-      // Only set current agent from settings default if we don't have one yet
-      if (defaultAgent && !currentAgentId) {
-        setCurrentAgentId(defaultAgent);
+
+      // Workspace status agent takes precedence over settings default
+      const wsAgentId = status?.agent?.codingAgentId;
+      if (wsAgentId) {
+        setCurrentAgentId(wsAgentId);
+      } else {
+        const defaultAgent = (settings as Record<string, unknown>).defaultCodingAgent as
+          | string
+          | undefined;
+        if (defaultAgent) {
+          setCurrentAgentId(defaultAgent);
+        }
       }
     });
-
-    trpc.statuses.get
-      .query({ workspaceId })
-      .then((status) => {
-        if (cancelled) return;
-        if (status?.agent?.codingAgentId) {
-          setCurrentAgentId(status.agent.codingAgentId);
-        }
-      })
-      .catch(() => {
-        // Status might not exist yet
-      });
 
     return () => {
       cancelled = true;

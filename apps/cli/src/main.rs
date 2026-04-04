@@ -573,6 +573,7 @@ fn cmd_workspaces_list(project_filter: Option<&str>) -> Result<CommandResult, St
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn cmd_workspaces_create(
     project: &str,
     branch: &str,
