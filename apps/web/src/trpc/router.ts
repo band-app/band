@@ -414,7 +414,21 @@ const workspacesRouter = t.router({
         throw new Error("Workspace not found");
       }
       const cwd = workspace.worktree.path;
-      await execGit(["pull", "--rebase"], cwd);
+      try {
+        await execGit(["pull", "--rebase"], cwd);
+      } catch (e) {
+        // git pull --rebase can exit non-zero with "Cannot rebase onto multiple
+        // branches" when the fetch step already fast-forwarded the working tree.
+        // The pull effectively succeeded, so swallow this specific error.
+        const msg = String(e);
+        if (
+          msg.includes("fast-forwarding your working tree") &&
+          msg.includes("Cannot rebase onto multiple branches")
+        ) {
+          return { ok: true };
+        }
+        throw e;
+      }
       return { ok: true };
     }),
 
