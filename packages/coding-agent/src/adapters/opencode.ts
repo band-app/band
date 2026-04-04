@@ -62,114 +62,155 @@ export class OpenCodeAdapter implements CodingAgent {
       "runSession starting",
     );
 
-    const args = ["run", "--format", "json", "--dir", this.workspaceDir];
-    if (effectiveModel) {
-      args.push("--model", effectiveModel);
-    }
-    if (sessionId) {
-      args.push("--session", sessionId);
-    }
-    args.push(prompt);
-
-    const child = spawn(this.executablePath, args, {
-      cwd: this.workspaceDir,
-      stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env },
-    });
-    this.activeChild = child;
-
     const startMs = Date.now();
     let turnCount = 0;
     const generatedSessionId = sessionId ?? crypto.randomUUID();
 
     yield { type: "session-start", sessionId: generatedSessionId };
 
-    const rl = createInterface({ input: child.stdout });
+    let gotOutput = false;
+    let lastExitCode = 0;
+    let lastStderr = "";
+    let effectiveSessionId: string | undefined = sessionId;
+    const maxAttempts = sessionId ? 2 : 1;
 
-    try {
-      for await (const line of rl) {
-        if (!line.trim()) continue;
-
-        let parsed: Record<string, unknown>;
-        try {
-          parsed = JSON.parse(line);
-        } catch {
-          log.warn({ line }, "failed to parse NDJSON line");
-          continue;
-        }
-
-        const eventType = parsed.type as string;
-        const part = parsed.part as Record<string, unknown> | undefined;
-        log.debug({ eventType }, "opencode event");
-
-        switch (eventType) {
-          case "text": {
-            const text = part?.text as string | undefined;
-            if (text) {
-              yield { type: "text-delta", text };
-            }
-            break;
-          }
-
-          case "tool_use": {
-            turnCount++;
-            const state = part?.state as Record<string, unknown> | undefined;
-            yield {
-              type: "tool-use",
-              toolCallId: String(part?.callID ?? crypto.randomUUID()),
-              toolName: String(part?.tool ?? "unknown"),
-              input: (state?.input as Record<string, unknown>) ?? {},
-            };
-            if (state?.status === "completed" || state?.status === "failed") {
-              yield {
-                type: "tool-result",
-                toolCallId: String(part?.callID ?? ""),
-                toolName: String(part?.tool ?? "unknown"),
-                output: String(state?.output ?? ""),
-                isError: state?.status === "failed",
-              };
-            }
-            break;
-          }
-
-          case "error": {
-            yield {
-              type: "error",
-              message: String(parsed.message ?? part?.text ?? "Unknown OpenCode error"),
-            };
-            break;
-          }
-
-          // step_start, step_finish — no Band equivalent, skip
-        }
+    for (let attempt = 1; attempt <= maxAttempts && !gotOutput; attempt++) {
+      const args = ["run", "--format", "json", "--dir", this.workspaceDir];
+      if (effectiveModel) {
+        args.push("--model", effectiveModel);
       }
+      if (effectiveSessionId) {
+        args.push("--session", effectiveSessionId);
+      }
+      args.push(prompt);
 
-      const exitCode = await new Promise<number>((resolve) => {
-        child.on("close", (code) => resolve(code ?? 0));
+      const child = spawn(this.executablePath, args, {
+        cwd: this.workspaceDir,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env },
+      });
+      this.activeChild = child;
+
+      const stderrChunks: string[] = [];
+      child.stderr.on("data", (chunk: Buffer) => {
+        stderrChunks.push(chunk.toString());
       });
 
-      if (exitCode !== 0) {
-        log.warn({ exitCode }, "opencode process exited with non-zero code");
+      const rl = createInterface({ input: child.stdout });
+
+      try {
+        for await (const line of rl) {
+          if (!line.trim()) continue;
+
+          let parsed: Record<string, unknown>;
+          try {
+            parsed = JSON.parse(line);
+          } catch {
+            log.warn({ line }, "failed to parse NDJSON line");
+            continue;
+          }
+
+          const eventType = parsed.type as string;
+          const part = parsed.part as Record<string, unknown> | undefined;
+          log.debug({ eventType }, "opencode event");
+
+          switch (eventType) {
+            case "text": {
+              const text = part?.text as string | undefined;
+              if (text) {
+                gotOutput = true;
+                yield { type: "text-delta", text };
+              }
+              break;
+            }
+
+            case "tool_use": {
+              gotOutput = true;
+              turnCount++;
+              const state = part?.state as Record<string, unknown> | undefined;
+              yield {
+                type: "tool-use",
+                toolCallId: String(part?.callID ?? crypto.randomUUID()),
+                toolName: String(part?.tool ?? "unknown"),
+                input: (state?.input as Record<string, unknown>) ?? {},
+              };
+              if (state?.status === "completed" || state?.status === "failed") {
+                yield {
+                  type: "tool-result",
+                  toolCallId: String(part?.callID ?? ""),
+                  toolName: String(part?.tool ?? "unknown"),
+                  output: String(state?.output ?? ""),
+                  isError: state?.status === "failed",
+                };
+              }
+              break;
+            }
+
+            case "error": {
+              gotOutput = true;
+              yield {
+                type: "error",
+                message: String(parsed.message ?? part?.text ?? "Unknown OpenCode error"),
+              };
+              break;
+            }
+
+            // step_start, step_finish — no Band equivalent, skip
+          }
+        }
+
+        lastExitCode = await new Promise<number>((resolve) => {
+          child.on("close", (code) => resolve(code ?? 0));
+        });
+        lastStderr = stderrChunks.join("");
+
+        if (!gotOutput && effectiveSessionId && attempt < maxAttempts) {
+          log.warn(
+            { sessionId: effectiveSessionId, exitCode: lastExitCode, stderr: lastStderr },
+            "opencode produced no output with session ID, retrying without session",
+          );
+          effectiveSessionId = undefined;
+        }
+      } catch (err) {
+        log.error({ err }, "opencode error");
+        child.kill();
+        throw err;
+      } finally {
+        this.activeChild = null;
       }
-
-      yield {
-        type: "session-result",
-        success: exitCode === 0,
-        sessionId: generatedSessionId,
-        durationMs: Date.now() - startMs,
-        numTurns: turnCount,
-        costUsd: 0,
-        errors: exitCode === 0 ? [] : [`OpenCode exited with code ${exitCode}`],
-      };
-
-      log.info("opencode stream done");
-    } catch (err) {
-      log.error({ err }, "opencode error");
-      child.kill();
-      throw err;
-    } finally {
-      this.activeChild = null;
     }
+
+    if (!gotOutput && lastStderr) {
+      yield {
+        type: "error",
+        message: `OpenCode produced no output: ${lastStderr.trim()}`,
+      };
+    }
+
+    if (lastExitCode !== 0) {
+      log.warn({ exitCode: lastExitCode }, "opencode process exited with non-zero code");
+    }
+
+    const success = lastExitCode === 0 && gotOutput;
+    const errors: string[] = [];
+    if (lastExitCode !== 0) {
+      errors.push(`OpenCode exited with code ${lastExitCode}`);
+    }
+    if (!gotOutput) {
+      errors.push("OpenCode produced no output");
+    }
+
+    yield {
+      type: "session-result",
+      success,
+      sessionId: generatedSessionId,
+      durationMs: Date.now() - startMs,
+      numTurns: turnCount,
+      costUsd: 0,
+      errors,
+    };
+
+    log.info("opencode stream done");
   }
 
   async listSkills(): Promise<SkillInfo[]> {
