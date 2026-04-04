@@ -26,6 +26,7 @@ export interface TaskFilters {
   project?: string;
   workspaceId?: string;
   status?: TaskStatus;
+  sessionId?: string;
 }
 
 export function generateTaskId(): string {
@@ -87,6 +88,9 @@ export function listTasks(filters?: TaskFilters): TaskRecord[] {
   }
   if (filters?.status) {
     conditions.push(eq(tasks.status, filters.status));
+  }
+  if (filters?.sessionId) {
+    conditions.push(eq(tasks.sessionId, filters.sessionId));
   }
 
   const query =

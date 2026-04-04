@@ -1044,6 +1044,7 @@ const tasksRouter = t.router({
           project: z.string().optional(),
           workspaceId: z.string().optional(),
           status: z.enum(["running", "completed", "failed"]).optional(),
+          sessionId: z.string().optional(),
         })
         .optional(),
     )
