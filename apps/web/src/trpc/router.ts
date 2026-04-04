@@ -7,7 +7,7 @@ import { createLogger } from "@band-app/logger";
 import { initTRPC, TRPCError } from "@trpc/server";
 import { Cron } from "croner";
 import { z } from "zod";
-import { getOrCreateAgent, removeAgent, replaceAgent } from "../lib/agent-pool";
+import { createMetadataAgent, getOrCreateAgent, removeAgent, replaceAgent } from "../lib/agent-pool";
 import { checkCli, installCli } from "../lib/cli";
 import { reloadSchedules, stopJobsForKey } from "../lib/cronjob-scheduler";
 import {
@@ -248,6 +248,8 @@ const workspacesRouter = t.router({
         prompt: z.string().optional(),
         maxTurns: z.number().int().positive().optional(),
         mode: z.string().optional(),
+        model: z.string().optional(),
+        codingAgentId: z.string().optional(),
       }),
     )
     .mutation(({ input }) => {
@@ -290,7 +292,14 @@ const workspacesRouter = t.router({
       // so the agent has dependencies installed.
       const onSetupComplete = input.prompt
         ? () =>
-            submitTask(workspaceId, input.prompt!, undefined, undefined, input.maxTurns, input.mode)
+            submitTask({
+              workspaceId,
+              prompt: input.prompt!,
+              maxTurns: input.maxTurns,
+              mode: input.mode,
+              model: input.model,
+              codingAgentId: input.codingAgentId,
+            })
         : undefined;
 
       runSetup(workspaceId, worktreePath, proj.path, onSetupComplete);
@@ -1061,6 +1070,7 @@ const tasksRouter = t.router({
         maxTurns: z.number().int().positive().optional(),
         mode: z.string().optional(),
         model: z.string().optional(),
+        codingAgentId: z.string().optional(),
         files: z
           .array(
             z.object({
@@ -1083,15 +1093,16 @@ const tasksRouter = t.router({
       }
 
       try {
-        const task = submitTask(
-          input.workspaceId,
-          input.prompt,
-          input.sessionId,
+        const task = submitTask({
+          workspaceId: input.workspaceId,
+          prompt: input.prompt,
+          sessionId: input.sessionId,
           agentPrompt,
-          input.maxTurns,
-          input.mode,
-          input.model,
-        );
+          maxTurns: input.maxTurns,
+          mode: input.mode,
+          model: input.model,
+          codingAgentId: input.codingAgentId,
+        });
         return { id: task.id, workspaceId: task.workspaceId, sessionId: task.sessionId };
       } catch (err) {
         if (err instanceof TaskConflictError) {
@@ -1141,15 +1152,14 @@ const tasksRouter = t.router({
     }
 
     try {
-      const task = submitTask(
-        record.workspaceId,
-        record.prompt,
-        undefined,
-        undefined,
-        record.maxTurns,
-        record.mode,
-        record.model,
-      );
+      const task = submitTask({
+        workspaceId: record.workspaceId,
+        prompt: record.prompt,
+        maxTurns: record.maxTurns,
+        mode: record.mode,
+        model: record.model,
+        codingAgentId: record.codingAgentId,
+      });
       return { workspaceId: task.workspaceId, sessionId: task.sessionId };
     } catch (err) {
       if (err instanceof TaskConflictError) {
@@ -1561,7 +1571,7 @@ const cronjobsRouter = t.router({
       }
 
       try {
-        const task = submitTask(workspaceId, job.prompt);
+        const task = submitTask({ workspaceId, prompt: job.prompt });
         return { taskId: task.id, workspaceId };
       } catch (err) {
         if (err instanceof TaskConflictError) {
@@ -1601,19 +1611,15 @@ const skillsRouter = t.router({
 // ---------------------------------------------------------------------------
 
 const modesRouter = t.router({
-  list: publicProcedure.input(z.object({ workspaceId: z.string() })).query(async ({ input }) => {
-    const workspace = resolveWorkspace(input.workspaceId);
-    if (!workspace) {
+  list: publicProcedure
+    .input(z.object({ agentId: z.string().optional() }))
+    .query(async ({ input }) => {
+      const agent = await createMetadataAgent(input.agentId);
+      if (agent.listModes) {
+        return { modes: agent.listModes() };
+      }
       return { modes: [] };
-    }
-
-    const agent = await getWorkspaceAgent(input.workspaceId, workspace.worktree.path);
-    if (agent.listModes) {
-      return { modes: agent.listModes() };
-    }
-
-    return { modes: [] };
-  }),
+    }),
 });
 
 // ---------------------------------------------------------------------------
@@ -1621,19 +1627,15 @@ const modesRouter = t.router({
 // ---------------------------------------------------------------------------
 
 const modelsRouter = t.router({
-  list: publicProcedure.input(z.object({ workspaceId: z.string() })).query(async ({ input }) => {
-    const workspace = resolveWorkspace(input.workspaceId);
-    if (!workspace) {
+  list: publicProcedure
+    .input(z.object({ agentId: z.string().optional() }))
+    .query(async ({ input }) => {
+      const agent = await createMetadataAgent(input.agentId);
+      if (agent.listModels) {
+        return { models: await agent.listModels() };
+      }
       return { models: [] };
-    }
-
-    const agent = await getWorkspaceAgent(input.workspaceId, workspace.worktree.path);
-    if (agent.listModels) {
-      return { models: await agent.listModels() };
-    }
-
-    return { models: [] };
-  }),
+    }),
 });
 
 // ---------------------------------------------------------------------------

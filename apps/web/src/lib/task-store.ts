@@ -20,6 +20,7 @@ export interface TaskRecord {
   maxTurns?: number;
   mode?: string;
   model?: string;
+  codingAgentId?: string;
 }
 
 export interface TaskFilters {
@@ -49,6 +50,7 @@ export function saveTask(task: TaskRecord): void {
       maxTurns: task.maxTurns ?? null,
       mode: task.mode ?? null,
       model: task.model ?? null,
+      codingAgentId: task.codingAgentId ?? null,
     })
     .onConflictDoUpdate({
       target: tasks.id,
@@ -64,6 +66,7 @@ export function saveTask(task: TaskRecord): void {
         maxTurns: task.maxTurns ?? null,
         mode: task.mode ?? null,
         model: task.model ?? null,
+        codingAgentId: task.codingAgentId ?? null,
       },
     })
     .run();
@@ -156,5 +159,6 @@ function rowToRecord(row: typeof tasks.$inferSelect): TaskRecord {
     maxTurns: row.maxTurns ?? undefined,
     mode: row.mode ?? undefined,
     model: row.model ?? undefined,
+    codingAgentId: row.codingAgentId ?? undefined,
   };
 }

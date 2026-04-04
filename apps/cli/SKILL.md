@@ -70,7 +70,7 @@ JSON output: `{"workspaces": [{"project": "...", "branch": "...", "path": "..."}
 ### Create a workspace
 
 ```sh
-band workspaces create <project> <branch> [--base <branch>] [--prompt <text>] [--max-turns <N>] [--mode <mode>]
+band workspaces create <project> <branch> [--base <branch>] [--prompt <text>] [--max-turns <N>] [--mode <mode>] [--model <model>] [--agent <agent_id>]
 ```
 
 Returns the worktree path. Idempotent — creating an existing workspace returns its path. Runs `.band/config.json` `setup` script if present (non-fatal).
@@ -146,10 +146,10 @@ JSON output: `{"tasks": [{"id": "...", "status": "...", "project": "...", "branc
 ### Create a task
 
 ```sh
-band tasks create <workspace_id> --prompt <text> [--max-turns <N>] [--mode <mode>]
+band tasks create <workspace_id> --prompt <text> [--max-turns <N>] [--mode <mode>] [--model <model>] [--agent <agent_id>]
 ```
 
-Submits a new task to the coding agent. `--max-turns` sets the maximum number of agentic turns (default: 100). `--mode` sets the agent mode (e.g. `plan` for planning-only, `edit` for full editing). Available modes depend on the configured coding agent. Returns the task ID.
+Submits a new task to the coding agent. `--max-turns` sets the maximum number of agentic turns (default: 100). `--mode` sets the agent mode (e.g. `plan` for planning-only, `edit` for full editing). `--model` sets the LLM model for the task (e.g. `claude-opus-4-20250514`). `--agent` specifies which coding agent to use, overriding the workspace default (e.g. `claude-code`). Available modes depend on the configured coding agent. Returns the task ID.
 JSON output: `{"id": "...", "workspaceId": "..."}`
 
 ### Cancel a task

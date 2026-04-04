@@ -111,6 +111,12 @@ enum WorkspacesCmd {
         /// Agent mode (e.g. 'plan', 'edit')
         #[arg(long)]
         mode: Option<String>,
+        /// Model to use for the coding agent (e.g. 'claude-opus-4-20250514')
+        #[arg(long)]
+        model: Option<String>,
+        /// Coding agent ID to use (e.g. 'claude-code')
+        #[arg(long)]
+        agent: Option<String>,
     },
     /// Remove a workspace (git worktree + state cleanup)
     Remove {
@@ -145,6 +151,12 @@ enum TasksCmd {
         /// Agent mode (e.g. 'plan', 'edit')
         #[arg(long)]
         mode: Option<String>,
+        /// Model to use for the coding agent (e.g. 'claude-opus-4-20250514')
+        #[arg(long)]
+        model: Option<String>,
+        /// Coding agent ID to use (e.g. 'claude-code')
+        #[arg(long)]
+        agent: Option<String>,
     },
     /// Cancel a running task
     Cancel {
@@ -308,6 +320,8 @@ fn main() {
                 prompt,
                 max_turns,
                 mode,
+                model,
+                agent,
             } => cmd_workspaces_create(
                 &project,
                 &branch,
@@ -315,6 +329,8 @@ fn main() {
                 prompt.as_deref(),
                 max_turns,
                 mode.as_deref(),
+                model.as_deref(),
+                agent.as_deref(),
             ),
             WorkspacesCmd::Remove { project, branch } => cmd_workspaces_remove(&project, &branch),
         },
@@ -327,7 +343,9 @@ fn main() {
                 prompt,
                 max_turns,
                 mode,
-            } => cmd_tasks_create(&workspace_id, &prompt, max_turns, mode.as_deref()),
+                model,
+                agent,
+            } => cmd_tasks_create(&workspace_id, &prompt, max_turns, mode.as_deref(), model.as_deref(), agent.as_deref()),
             TasksCmd::Cancel { task_id } => cmd_tasks_cancel(&task_id),
             TasksCmd::Rerun { task_id } => cmd_tasks_rerun(&task_id),
             TasksCmd::Watch { .. } => unreachable!(),
@@ -562,6 +580,8 @@ fn cmd_workspaces_create(
     prompt: Option<&str>,
     max_turns: Option<u32>,
     mode: Option<&str>,
+    model: Option<&str>,
+    agent: Option<&str>,
 ) -> Result<CommandResult, String> {
     validate::validate_name(project, "Project name")?;
     validate::validate_name(branch, "Branch name")?;
@@ -585,6 +605,12 @@ fn cmd_workspaces_create(
     }
     if let Some(mode) = mode {
         input["mode"] = serde_json::json!(mode);
+    }
+    if let Some(model) = model {
+        input["model"] = serde_json::json!(model);
+    }
+    if let Some(agent) = agent {
+        input["codingAgentId"] = serde_json::json!(agent);
     }
     let data = client.trpc_mutate("workspaces.create", &input)?;
     let path = data.get("path").and_then(|p| p.as_str()).unwrap_or("");
@@ -672,6 +698,8 @@ fn cmd_tasks_create(
     prompt: &str,
     max_turns: Option<u32>,
     mode: Option<&str>,
+    model: Option<&str>,
+    agent: Option<&str>,
 ) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
     let mut input = serde_json::json!({
@@ -683,6 +711,12 @@ fn cmd_tasks_create(
     }
     if let Some(mode) = mode {
         input["mode"] = serde_json::json!(mode);
+    }
+    if let Some(model) = model {
+        input["model"] = serde_json::json!(model);
+    }
+    if let Some(agent) = agent {
+        input["codingAgentId"] = serde_json::json!(agent);
     }
     let data = client.trpc_mutate("tasks.submit", &input)?;
 
@@ -1543,7 +1577,10 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "branch", "type": "string", "required": true, "positional": true, "description": "Branch name"},
                 {"name": "--base", "type": "string", "required": false, "description": "Base branch to create from (defaults to project's default branch)"},
                 {"name": "--prompt", "type": "string", "required": false, "description": "Prompt to pass to the coding agent"},
+                {"name": "--max-turns", "type": "integer", "required": false, "description": "Maximum number of agentic turns"},
                 {"name": "--mode", "type": "string", "required": false, "description": "Agent mode (e.g. 'plan', 'edit')"},
+                {"name": "--model", "type": "string", "required": false, "description": "Model to use for the coding agent (e.g. 'claude-opus-4-20250514')"},
+                {"name": "--agent", "type": "string", "required": false, "description": "Coding agent ID to use (overrides workspace default)"},
             ],
             "notes": "Returns the worktree path. Idempotent — creating an existing workspace returns its path. Runs `.band/config.json` `setup` script if present (non-fatal).\n\n**Always use `--prompt` when the user wants work to begin immediately.** This submits a task to the coding agent right after workspace creation, so the agent starts working without a separate step. Only omit `--prompt` when the user explicitly wants to create the workspace for manual/later use.\n\nWhen to use `--prompt` (most cases):\n```sh\n# User says \"create a workspace and implement X\" or \"start working on X\"\nband workspaces create my-app feat/auth --prompt \"Implement GitHub issue #42: Add JWT authentication\"\n\n# User says \"create a workspace for issue #99 and start implementing\"\nband workspaces create my-app fix/bug-99 --prompt \"Fix issue #99: login redirect loop. See https://github.com/org/repo/issues/99\"\n```\n\nWhen to omit `--prompt` (rare — user explicitly wants no task):\n```sh\n# User says \"just create a workspace, I'll work on it myself\"\nband workspaces create my-app feat/experiment\n```\n\n**Do NOT create a workspace without `--prompt` and then separately run `band tasks create`.** That is two steps for what `--prompt` does in one."
         }),
@@ -1595,7 +1632,10 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "parameters": [
                 {"name": "workspace_id", "type": "string", "required": true, "positional": true, "description": "Workspace ID"},
                 {"name": "--prompt", "type": "string", "required": true, "description": "Prompt text to send to the agent"},
+                {"name": "--max-turns", "type": "integer", "required": false, "description": "Maximum number of agentic turns"},
                 {"name": "--mode", "type": "string", "required": false, "description": "Agent mode (e.g. 'plan', 'edit')"},
+                {"name": "--model", "type": "string", "required": false, "description": "Model to use for the coding agent (e.g. 'claude-opus-4-20250514')"},
+                {"name": "--agent", "type": "string", "required": false, "description": "Coding agent ID to use (overrides workspace default)"},
             ],
             "notes": "Submits a new task to the coding agent. Returns the task ID.\nJSON output: `{\"id\": \"...\", \"workspaceId\": \"...\"}`"
         }),

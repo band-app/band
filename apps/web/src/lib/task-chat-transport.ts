@@ -34,6 +34,7 @@ export class TaskChatTransport implements ChatTransport<UIMessage> {
   private getSessionId: () => string | undefined;
   mode: string | undefined;
   model: string | undefined;
+  codingAgentId: string | undefined;
 
   constructor(workspaceId: string, getSessionId: () => string | undefined) {
     this.workspaceId = workspaceId;
@@ -86,6 +87,7 @@ export class TaskChatTransport implements ChatTransport<UIMessage> {
         ...(files.length > 0 && { files }),
         ...(this.mode && { mode: this.mode }),
         ...(this.model && { model: this.model }),
+        ...(this.codingAgentId && { codingAgentId: this.codingAgentId }),
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Submit failed";

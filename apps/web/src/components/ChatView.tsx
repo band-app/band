@@ -227,6 +227,7 @@ interface ChatViewProps {
   onNewSessionRef?: React.MutableRefObject<(() => void) | null>;
   chatKey?: number;
   agentType?: string;
+  codingAgentId?: string;
 }
 
 export function ChatView({
@@ -240,6 +241,7 @@ export function ChatView({
   onNewSessionRef,
   chatKey = 0,
   agentType,
+  codingAgentId,
 }: ChatViewProps) {
   const sessionIdRef = useRef<string | undefined>(undefined);
   const [activeSessionId, setActiveSessionId] = useState<string | undefined>(undefined);
@@ -282,7 +284,7 @@ export function ChatView({
   );
   useEffect(() => {
     trpc.modes.list
-      .query({ workspaceId })
+      .query({})
       .then((data) => setModes(data.modes as { id: string; name: string; description?: string }[]))
       .catch(() => setModes([]));
     // Derive mode from active task (e.g. reconnecting to a running plan-mode task)
@@ -306,7 +308,7 @@ export function ChatView({
   });
   useEffect(() => {
     trpc.models.list
-      .query({ workspaceId })
+      .query({})
       .then((data) =>
         setModels(data.models as { id: string; name: string; description?: string }[]),
       )
@@ -354,6 +356,10 @@ export function ChatView({
   useEffect(() => {
     transport.model = selectedModel;
   }, [transport, selectedModel]);
+
+  useEffect(() => {
+    transport.codingAgentId = codingAgentId;
+  }, [transport, codingAgentId]);
 
   const { messages, sendMessage, status, setMessages, stop } = useChat({
     id: `${workspaceId}:${chatKey}`,

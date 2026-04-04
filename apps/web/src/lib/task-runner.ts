@@ -1,6 +1,6 @@
 import { createLogger } from "@band-app/logger";
 import type { UIMessageChunk } from "ai";
-import { getAgent, getOrCreateAgent } from "./agent-pool";
+import { getAgent, getOrCreateAgent, replaceAgent } from "./agent-pool";
 import { createPendingInput } from "./pending-inputs";
 import { shiftQueuedMessage } from "./queued-message-store";
 import { getWorkspaceStatus, upsertWorkspaceStatus } from "./state";
@@ -30,6 +30,18 @@ export interface TaskInfo {
   maxTurns?: number;
   mode?: string;
   model?: string;
+  codingAgentId?: string;
+}
+
+export interface SubmitTaskOptions {
+  workspaceId: string;
+  prompt: string;
+  sessionId?: string;
+  agentPrompt?: string;
+  maxTurns?: number;
+  mode?: string;
+  model?: string;
+  codingAgentId?: string;
 }
 
 type Listener = (chunk: UIMessageChunk) => void;
@@ -67,6 +79,7 @@ function persistTask(task: InternalTask): void {
       maxTurns: task.maxTurns,
       mode: task.mode,
       model: task.model,
+      codingAgentId: task.codingAgentId,
     });
   } catch (err) {
     log.warn({ err, taskId: task.taskRecordId }, "failed to persist task");
@@ -85,15 +98,10 @@ function broadcast(workspaceId: string, chunk: UIMessageChunk) {
   }
 }
 
-export function submitTask(
-  workspaceId: string,
-  prompt: string,
-  sessionId?: string,
-  agentPrompt?: string,
-  maxTurns?: number,
-  mode?: string,
-  model?: string,
-): TaskInfo {
+export function submitTask(options: SubmitTaskOptions): TaskInfo {
+  const { workspaceId, prompt, sessionId, agentPrompt, maxTurns, mode, model, codingAgentId } =
+    options;
+
   const workspace = resolveWorkspace(workspaceId);
   if (!workspace) {
     throw new Error(`Workspace not found: ${workspaceId}`);
@@ -117,6 +125,7 @@ export function submitTask(
     maxTurns,
     mode,
     model,
+    codingAgentId,
   };
   tasks.set(workspaceId, task);
   persistTask(task);
@@ -193,10 +202,13 @@ async function runTask(workspaceId: string, task: InternalTask) {
     return;
   }
 
-  // Look up the workspace's preferred coding agent from the DB status
+  // Prefer task-level coding agent; fall back to workspace's preferred agent
+  const taskAgentId = task.codingAgentId;
   const wsStatus = getWorkspaceStatus(workspaceId);
-  const codingAgentId = wsStatus?.agent?.codingAgentId;
-  const agent = await getOrCreateAgent(workspaceId, workspace.worktree.path, codingAgentId);
+  const resolvedAgentId = taskAgentId ?? wsStatus?.agent?.codingAgentId;
+  const agent = taskAgentId
+    ? await replaceAgent(workspaceId, workspace.worktree.path, taskAgentId)
+    : await getOrCreateAgent(workspaceId, workspace.worktree.path, resolvedAgentId);
 
   // Mark workspace as working now that the agent is ready
   const working = upsertWorkspaceStatus(workspaceId, { status: "working" });
@@ -389,7 +401,7 @@ async function runTask(workspaceId: string, task: InternalTask) {
           type: "data-prompt" as UIMessageChunk["type"],
           data: { text: queued },
         } as UIMessageChunk);
-        submitTask(workspaceId, queued, task.sessionId);
+        submitTask({ workspaceId, prompt: queued, sessionId: task.sessionId });
         autoStarted = true;
       } catch (err) {
         log.warn({ workspaceId, err }, "failed to auto-start queued task");
@@ -440,6 +452,7 @@ function toTaskInfo(task: InternalTask): TaskInfo {
     maxTurns: task.maxTurns,
     mode: task.mode,
     model: task.model,
+    codingAgentId: task.codingAgentId,
   };
 }
 

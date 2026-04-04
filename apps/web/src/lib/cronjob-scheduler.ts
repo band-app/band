@@ -88,7 +88,7 @@ async function executeCronjob(job: CronjobDefinition, fileKey: string): Promise<
   log.info({ jobId: job.id, name: job.name, workspaceId }, "executing cronjob");
 
   try {
-    submitTask(workspaceId, job.prompt);
+    submitTask({ workspaceId, prompt: job.prompt });
     updateLastRun(job.id, "completed");
   } catch (err) {
     if (err instanceof TaskConflictError) {

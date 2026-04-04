@@ -58,6 +58,15 @@ export async function getOrCreateAgent(
  * Replace the current agent for a workspace with one using a different config.
  * Aborts the existing agent (if any) before creating the new one.
  */
+/**
+ * Create a short-lived agent for metadata queries (listModes, listModels).
+ * Does NOT add it to the pool — caller should discard after use.
+ */
+export async function createMetadataAgent(agentId?: string): Promise<CodingAgent> {
+  const config = getAgentConfig(bandHome(), agentId);
+  return createCodingAgent(config);
+}
+
 export async function replaceAgent(
   workspaceId: string,
   worktreePath: string,

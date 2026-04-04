@@ -218,6 +218,7 @@ export function WorkspaceChatPanel({ workspaceId }: WorkspaceChatPanelProps) {
           onStreamingChange={setTaskRunning}
           onNewSessionRef={newSessionRef}
           agentType={currentAgent?.type}
+          codingAgentId={currentAgentId}
         />
       </div>
     </div>

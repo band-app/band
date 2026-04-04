@@ -57,6 +57,7 @@ export const tasks = sqliteTable("tasks", {
   maxTurns: integer("max_turns"),
   mode: text("mode"),
   model: text("model"),
+  codingAgentId: text("coding_agent_id"),
 });
 
 export const cronjobs = sqliteTable("cronjobs", {
