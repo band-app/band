@@ -151,7 +151,9 @@ export function WorkspaceChatPanel({ workspaceId }: WorkspaceChatPanelProps) {
               }`}
             >
               {currentAgent && <AgentIcon type={currentAgent.type} className="size-3.5 shrink-0" />}
-              <span className="hidden max-w-[120px] truncate sm:inline">{currentAgent?.label ?? "Default"}</span>
+              <span className="hidden max-w-[120px] truncate sm:inline">
+                {currentAgent?.label ?? "Default"}
+              </span>
               <ChevronDown className="size-3 opacity-50" />
             </button>
             {showAgentMenu && !switchDisabled && (
