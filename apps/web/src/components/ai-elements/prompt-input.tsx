@@ -417,6 +417,10 @@ export const PromptInputTextarea = ({
       if (e.key === "Enter") {
         if (isComposing || e.nativeEvent.isComposing) return;
         if (e.shiftKey) return;
+        // On mobile/touch devices, Enter inserts a newline (no keyboard shortcut
+        // for Shift+Enter). Users submit via the send button instead.
+        const isTouchDevice = "ontouchstart" in window || navigator.maxTouchPoints > 0;
+        if (isTouchDevice) return;
         e.preventDefault();
         e.currentTarget.form?.requestSubmit();
       } else if (e.key === "Escape") {
