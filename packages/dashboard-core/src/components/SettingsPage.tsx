@@ -380,7 +380,7 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
       {activeSection === "coding-agent" && (
         <div className="space-y-3 px-1">
           {KNOWN_AGENTS.map((known) => {
-            const agent = codingAgents.find((a) => a.id === known.id);
+            const agent = codingAgents.find((a) => a.type === known.type);
             const enabled = !!agent;
             return (
               <div
@@ -403,9 +403,9 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
                         ]);
                         if (!defaultAgentId) setDefaultAgentId(known.id);
                       } else {
-                        setCodingAgents((prev) => prev.filter((a) => a.id !== known.id));
-                        if (defaultAgentId === known.id) {
-                          const remaining = codingAgents.filter((a) => a.id !== known.id);
+                        setCodingAgents((prev) => prev.filter((a) => a.type !== known.type));
+                        if (defaultAgentId === known.id || defaultAgentId === agent?.id) {
+                          const remaining = codingAgents.filter((a) => a.type !== known.type);
                           setDefaultAgentId(remaining.length > 0 ? remaining[0].id : "");
                         }
                       }
@@ -416,14 +416,14 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
                   <div className="space-y-2">
                     <button
                       type="button"
-                      onClick={() => setDefaultAgentId(known.id)}
+                      onClick={() => setDefaultAgentId(agent?.id ?? known.id)}
                       className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium transition-colors ${
-                        defaultAgentId === known.id
+                        defaultAgentId === (agent?.id ?? known.id)
                           ? "bg-primary/15 text-primary"
                           : "text-muted-foreground hover:text-foreground hover:bg-muted"
                       }`}
                     >
-                      {defaultAgentId === known.id ? "Default" : "Set as default"}
+                      {defaultAgentId === (agent?.id ?? known.id) ? "Default" : "Set as default"}
                     </button>
                     <div className="space-y-1">
                       <Label className="text-xs text-muted-foreground">Command</Label>
@@ -433,7 +433,7 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
                         onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                           setCodingAgents((prev) =>
                             prev.map((a) =>
-                              a.id === known.id
+                              a.type === known.type
                                 ? { ...a, command: e.target.value || undefined }
                                 : a,
                             ),
