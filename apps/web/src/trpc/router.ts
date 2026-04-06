@@ -576,87 +576,99 @@ const LANG_MAP: Record<string, string> = {
 };
 
 const workspaceRouter = t.router({
-  getDiff: publicProcedure.input(z.object({ workspaceId: z.string() })).query(async ({ input }) => {
-    const workspace = resolveWorkspace(input.workspaceId);
-    if (!workspace) {
-      throw new Error("Workspace not found");
-    }
-
-    const cwd = workspace.worktree.path;
-    const defaultBranch = workspace.project.defaultBranch;
-
-    const headBranch = (await execGit(["rev-parse", "--abbrev-ref", "HEAD"], cwd)).trim();
-
-    let mergeBase: string;
-    try {
-      mergeBase = (await execGit(["merge-base", defaultBranch, "HEAD"], cwd)).trim();
-    } catch {
-      mergeBase = (await execGit(["hash-object", "-t", "tree", "/dev/null"], cwd)).trim();
-    }
-
-    let diff = await execGit(["diff", mergeBase], cwd);
-
-    const statOutput = await execGit(["diff", "--stat", mergeBase], cwd);
-    const statLines = statOutput.trim().split("\n");
-    const summaryLine = statLines[statLines.length - 1] || "";
-
-    let filesChanged = 0;
-    let insertions = 0;
-    let deletions = 0;
-
-    const filesMatch = summaryLine.match(/(\d+)\s+files?\s+changed/);
-    const insertMatch = summaryLine.match(/(\d+)\s+insertions?\(\+\)/);
-    const deleteMatch = summaryLine.match(/(\d+)\s+deletions?\(-\)/);
-
-    if (filesMatch) filesChanged = Number.parseInt(filesMatch[1], 10);
-    if (insertMatch) insertions = Number.parseInt(insertMatch[1], 10);
-    if (deleteMatch) deletions = Number.parseInt(deleteMatch[1], 10);
-
-    const fileStatuses: Record<string, string> = {};
-    const nameStatusOutput = await execGit(["diff", "--name-status", mergeBase], cwd);
-    for (const line of nameStatusOutput.trim().split("\n").filter(Boolean)) {
-      const parts = line.split("\t");
-      const statusCode = parts[0][0];
-      if (statusCode === "R" && parts[2]) {
-        fileStatuses[parts[2]] = "R";
-      } else if (parts[1]) {
-        fileStatuses[parts[1]] = statusCode;
+  getDiff: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        contextLines: z.number().int().min(0).max(99999).optional(),
+      }),
+    )
+    .query(async ({ input }) => {
+      const workspace = resolveWorkspace(input.workspaceId);
+      if (!workspace) {
+        throw new Error("Workspace not found");
       }
-    }
 
-    const untrackedOutput = await execGit(["ls-files", "--others", "--exclude-standard"], cwd);
-    const untrackedFiles = untrackedOutput.trim().split("\n").filter(Boolean);
+      const cwd = workspace.worktree.path;
+      const defaultBranch = workspace.project.defaultBranch;
 
-    for (const file of untrackedFiles) {
+      const headBranch = (await execGit(["rev-parse", "--abbrev-ref", "HEAD"], cwd)).trim();
+
+      let mergeBase: string;
       try {
-        const content = await readFile(join(cwd, file), "utf-8");
-        const lines = content.split("\n");
-        if (lines.length > 0 && lines[lines.length - 1] === "") {
-          lines.pop();
-        }
-        diff += `diff --git a/${file} b/${file}\n`;
-        diff += "new file mode 100644\n";
-        diff += "--- /dev/null\n";
-        diff += `+++ b/${file}\n`;
-        diff += `@@ -0,0 +1,${lines.length} @@\n`;
-        diff += lines.map((l) => `+${l}`).join("\n");
-        diff += "\n";
-        filesChanged++;
-        insertions += lines.length;
-        fileStatuses[file] = "U";
+        mergeBase = (await execGit(["merge-base", defaultBranch, "HEAD"], cwd)).trim();
       } catch {
-        // Skip binary or unreadable files
+        mergeBase = (await execGit(["hash-object", "-t", "tree", "/dev/null"], cwd)).trim();
       }
-    }
 
-    return {
-      diff,
-      stats: { filesChanged, insertions, deletions },
-      baseBranch: defaultBranch,
-      headBranch,
-      fileStatuses,
-    };
-  }),
+      const diffArgs = ["diff"];
+      if (input.contextLines !== undefined) {
+        diffArgs.push(`-U${input.contextLines}`);
+      }
+      diffArgs.push(mergeBase);
+      let diff = await execGit(diffArgs, cwd);
+
+      const statOutput = await execGit(["diff", "--stat", mergeBase], cwd);
+      const statLines = statOutput.trim().split("\n");
+      const summaryLine = statLines[statLines.length - 1] || "";
+
+      let filesChanged = 0;
+      let insertions = 0;
+      let deletions = 0;
+
+      const filesMatch = summaryLine.match(/(\d+)\s+files?\s+changed/);
+      const insertMatch = summaryLine.match(/(\d+)\s+insertions?\(\+\)/);
+      const deleteMatch = summaryLine.match(/(\d+)\s+deletions?\(-\)/);
+
+      if (filesMatch) filesChanged = Number.parseInt(filesMatch[1], 10);
+      if (insertMatch) insertions = Number.parseInt(insertMatch[1], 10);
+      if (deleteMatch) deletions = Number.parseInt(deleteMatch[1], 10);
+
+      const fileStatuses: Record<string, string> = {};
+      const nameStatusOutput = await execGit(["diff", "--name-status", mergeBase], cwd);
+      for (const line of nameStatusOutput.trim().split("\n").filter(Boolean)) {
+        const parts = line.split("\t");
+        const statusCode = parts[0][0];
+        if (statusCode === "R" && parts[2]) {
+          fileStatuses[parts[2]] = "R";
+        } else if (parts[1]) {
+          fileStatuses[parts[1]] = statusCode;
+        }
+      }
+
+      const untrackedOutput = await execGit(["ls-files", "--others", "--exclude-standard"], cwd);
+      const untrackedFiles = untrackedOutput.trim().split("\n").filter(Boolean);
+
+      for (const file of untrackedFiles) {
+        try {
+          const content = await readFile(join(cwd, file), "utf-8");
+          const lines = content.split("\n");
+          if (lines.length > 0 && lines[lines.length - 1] === "") {
+            lines.pop();
+          }
+          diff += `diff --git a/${file} b/${file}\n`;
+          diff += "new file mode 100644\n";
+          diff += "--- /dev/null\n";
+          diff += `+++ b/${file}\n`;
+          diff += `@@ -0,0 +1,${lines.length} @@\n`;
+          diff += lines.map((l) => `+${l}`).join("\n");
+          diff += "\n";
+          filesChanged++;
+          insertions += lines.length;
+          fileStatuses[file] = "U";
+        } catch {
+          // Skip binary or unreadable files
+        }
+      }
+
+      return {
+        diff,
+        stats: { filesChanged, insertions, deletions },
+        baseBranch: defaultBranch,
+        headBranch,
+        fileStatuses,
+      };
+    }),
 
   getDiffSummary: publicProcedure
     .input(z.object({ workspaceId: z.string() }))
@@ -734,7 +746,14 @@ const workspaceRouter = t.router({
     }),
 
   getFileDiff: publicProcedure
-    .input(z.object({ workspaceId: z.string(), filePath: z.string(), mergeBase: z.string() }))
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        filePath: z.string(),
+        mergeBase: z.string(),
+        contextLines: z.number().int().min(0).max(99999).optional(),
+      }),
+    )
     .query(async ({ input }) => {
       const workspace = resolveWorkspace(input.workspaceId);
       if (!workspace) {
@@ -769,7 +788,12 @@ const workspaceRouter = t.router({
       }
 
       // Tracked file — get diff for this single file
-      const diff = await execGit(["diff", input.mergeBase, "--", input.filePath], cwd);
+      const fileDiffArgs = ["diff"];
+      if (input.contextLines !== undefined) {
+        fileDiffArgs.push(`-U${input.contextLines}`);
+      }
+      fileDiffArgs.push(input.mergeBase, "--", input.filePath);
+      const diff = await execGit(fileDiffArgs, cwd);
       return { diff };
     }),
 

@@ -70,9 +70,14 @@ export interface DashboardAdapter {
   closeWorkspaceWindows(workspaceId: string): Promise<void>;
 
   // Code browsing (optional)
-  getWorkspaceDiff?(workspaceId: string): Promise<WorkspaceDiff>;
+  getWorkspaceDiff?(workspaceId: string, contextLines?: number): Promise<WorkspaceDiff>;
   getWorkspaceDiffSummary?(workspaceId: string): Promise<WorkspaceDiffSummary>;
-  getFileDiff?(workspaceId: string, filePath: string, mergeBase: string): Promise<FileDiffResult>;
+  getFileDiff?(
+    workspaceId: string,
+    filePath: string,
+    mergeBase: string,
+    contextLines?: number,
+  ): Promise<FileDiffResult>;
   listWorkspaceFiles?(workspaceId: string, path: string): Promise<FileListResult>;
   getWorkspaceFile?(workspaceId: string, path: string): Promise<FileContentResult>;
 

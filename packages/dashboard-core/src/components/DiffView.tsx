@@ -227,6 +227,71 @@ function DiffFileContent({
 }
 
 // ---------------------------------------------------------------------------
+// Context expansion helpers
+// ---------------------------------------------------------------------------
+
+const CONTEXT_STEPS = [3, 10, 25, 100, 99999] as const;
+
+function getNextContextStep(current: number): number | null {
+  for (const step of CONTEXT_STEPS) {
+    if (step > current) return step;
+  }
+  return null;
+}
+
+function contextLabel(lines: number): string {
+  if (lines >= 99999) return "full file";
+  return `${lines} lines`;
+}
+
+function ContextToolbar({
+  contextLines,
+  onLoadMore,
+  onShowFullFile,
+}: {
+  contextLines: number;
+  onLoadMore: () => void;
+  onShowFullFile: () => void;
+}) {
+  const nextStep = getNextContextStep(contextLines);
+  if (nextStep === null) return null;
+
+  const isLastStep = nextStep >= 99999;
+
+  return (
+    <div className="flex items-center justify-center gap-2 border-b border-border/20 px-4 py-1.5">
+      {isLastStep ? (
+        <button
+          type="button"
+          onClick={onShowFullFile}
+          className="text-xs text-muted-foreground transition-colors hover:text-foreground"
+        >
+          Show full file
+        </button>
+      ) : (
+        <>
+          <button
+            type="button"
+            onClick={onLoadMore}
+            className="text-xs text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Load more context
+          </button>
+          <span className="text-muted-foreground/50">|</span>
+          <button
+            type="button"
+            onClick={onShowFullFile}
+            className="text-xs text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Show full file
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Lazy file row — fetches diff on first expand
 // ---------------------------------------------------------------------------
 
@@ -252,17 +317,25 @@ function LazyFileRow({
   const [diff, setDiff] = useState<string | null>(null);
   const [loadingDiff, setLoadingDiff] = useState(false);
   const [diffError, setDiffError] = useState<string | null>(null);
-  // Track which mergeBase the cached diff belongs to
+  const [contextLines, setContextLines] = useState(3);
+  // Track which mergeBase + contextLines the cached diff belongs to
   const cachedMergeBaseRef = useRef<string | null>(null);
+  const cachedContextRef = useRef<number | null>(null);
 
   const toggle = useCallback(() => {
     setIsOpen((prev) => !prev);
   }, []);
 
-  // Fetch diff when expanded and not cached (or mergeBase changed)
+  // Fetch diff when expanded and not cached (or mergeBase/contextLines changed)
   useEffect(() => {
     if (!isOpen) return;
-    if (diff !== null && cachedMergeBaseRef.current === mergeBase) return;
+    if (
+      diff !== null &&
+      cachedMergeBaseRef.current === mergeBase &&
+      cachedContextRef.current === contextLines
+    ) {
+      return;
+    }
 
     const getFileDiff = adapter.getFileDiff;
     if (!getFileDiff) return;
@@ -272,11 +345,12 @@ function LazyFileRow({
     setDiffError(null);
 
     getFileDiff
-      .call(adapter, workspaceId, filename, mergeBase)
+      .call(adapter, workspaceId, filename, mergeBase, contextLines > 3 ? contextLines : undefined)
       .then((result) => {
         if (!cancelled) {
           setDiff(result.diff);
           cachedMergeBaseRef.current = mergeBase;
+          cachedContextRef.current = contextLines;
         }
       })
       .catch((err) => {
@@ -289,15 +363,33 @@ function LazyFileRow({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, adapter, workspaceId, filename, mergeBase, diff]);
+  }, [isOpen, adapter, workspaceId, filename, mergeBase, contextLines, diff]);
 
   // Invalidate cache when mergeBase changes
   useEffect(() => {
     if (cachedMergeBaseRef.current && cachedMergeBaseRef.current !== mergeBase) {
       setDiff(null);
       cachedMergeBaseRef.current = null;
+      cachedContextRef.current = null;
+      setContextLines(3);
     }
   }, [mergeBase]);
+
+  const isUntracked = status === "U";
+  const canLoadMore = !isUntracked && getNextContextStep(contextLines) !== null;
+
+  const handleLoadMore = useCallback(() => {
+    const next = getNextContextStep(contextLines);
+    if (next !== null) {
+      setDiff(null);
+      setContextLines(next);
+    }
+  }, [contextLines]);
+
+  const handleShowFullFile = useCallback(() => {
+    setDiff(null);
+    setContextLines(99999);
+  }, []);
 
   return (
     <div id={`diff-file-${encodeURIComponent(filename)}`} className="border-b border-border/30">
@@ -344,7 +436,16 @@ function LazyFileRow({
           )}
           {diffError && <div className="px-4 py-4 text-sm text-destructive">{diffError}</div>}
           {diff !== null && !loadingDiff && (
-            <DiffFileContent hunks={diff} filename={filename} viewMode={viewMode} />
+            <>
+              {canLoadMore && (
+                <ContextToolbar
+                  contextLines={contextLines}
+                  onLoadMore={handleLoadMore}
+                  onShowFullFile={handleShowFullFile}
+                />
+              )}
+              <DiffFileContent hunks={diff} filename={filename} viewMode={viewMode} />
+            </>
           )}
         </div>
       )}
@@ -369,6 +470,7 @@ function LegacyDiffView({ workspaceId, active, onStatsChange, onOpenFile }: Diff
   const [loading, setLoading] = useState(true);
   const [openFiles, setOpenFiles] = useState<Set<string>>(new Set());
   const [viewMode, setViewModeState] = useState<ViewMode>(getStoredViewMode);
+  const [contextLines, setContextLines] = useState(3);
   const setViewMode = useCallback((mode: ViewMode) => {
     setViewModeState(mode);
     storeViewMode(mode);
@@ -385,7 +487,7 @@ function LegacyDiffView({ workspaceId, active, onStatsChange, onOpenFile }: Diff
     let cancelled = false;
     const fetchDiff = () => {
       getWorkspaceDiff
-        .call(adapter, workspaceId)
+        .call(adapter, workspaceId, contextLines > 3 ? contextLines : undefined)
         .then((result) => {
           if (!cancelled) {
             setData(result);
@@ -407,7 +509,20 @@ function LegacyDiffView({ workspaceId, active, onStatsChange, onOpenFile }: Diff
       cancelled = true;
       if (interval) clearInterval(interval);
     };
-  }, [adapter, workspaceId, active, onStatsChange]);
+  }, [adapter, workspaceId, active, onStatsChange, contextLines]);
+
+  const canLoadMore = getNextContextStep(contextLines) !== null;
+
+  const handleLoadMore = useCallback(() => {
+    const next = getNextContextStep(contextLines);
+    if (next !== null) {
+      setContextLines(next);
+    }
+  }, [contextLines]);
+
+  const handleShowFullFile = useCallback(() => {
+    setContextLines(99999);
+  }, []);
 
   if (loading) {
     return (
@@ -539,6 +654,13 @@ function LegacyDiffView({ workspaceId, active, onStatsChange, onOpenFile }: Diff
               </button>
               {isOpen && (
                 <div className="border-t border-border/20 bg-muted/30">
+                  {canLoadMore && fileStatuses[file.filename] !== "U" && (
+                    <ContextToolbar
+                      contextLines={contextLines}
+                      onLoadMore={handleLoadMore}
+                      onShowFullFile={handleShowFullFile}
+                    />
+                  )}
                   <DiffFileContent
                     hunks={file.hunks}
                     filename={file.filename}
