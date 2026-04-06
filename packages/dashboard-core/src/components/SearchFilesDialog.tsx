@@ -10,9 +10,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@band-app/ui";
-import { CaseSensitive, File, SearchIcon } from "lucide-react";
+import { CaseSensitive, SearchIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAdapter } from "../context";
+import { getFileIcon } from "../lib/file-icon";
 import type { ContentSearchMatch } from "../types";
 
 interface SearchFilesDialogProps {
@@ -135,12 +136,14 @@ export function SearchFilesDialog({
                   ? "Type at least 2 characters to search."
                   : "No results found."}
             </CommandEmpty>
-            {grouped.map(([file, matches]) => (
+            {grouped.map(([file, matches]) => {
+              const FileIcon = getFileIcon(file);
+              return (
               <CommandGroup
                 key={file}
                 heading={
                   <span className="inline-flex items-center gap-1.5">
-                    <File className="size-3" />
+                    <FileIcon className="size-3" />
                     {file}
                   </span>
                 }
@@ -158,7 +161,8 @@ export function SearchFilesDialog({
                   </CommandItem>
                 ))}
               </CommandGroup>
-            ))}
+              );
+            })}
           </CommandList>
           {totalMatches > 0 && (
             <div className="border-t px-3 py-1.5 text-xs text-muted-foreground">
