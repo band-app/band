@@ -139,28 +139,28 @@ export function SearchFilesDialog({
             {grouped.map(([file, matches]) => {
               const FileIcon = getFileIcon(file);
               return (
-              <CommandGroup
-                key={file}
-                heading={
-                  <span className="inline-flex items-center gap-1.5">
-                    <FileIcon className="size-3" />
-                    {file}
-                  </span>
-                }
-              >
-                {matches.map((match) => (
-                  <CommandItem
-                    key={`${file}:${match.line}:${match.content}`}
-                    value={`${file}:${match.line}:${match.content}`}
-                    onSelect={() => handleSelect(file)}
-                  >
-                    <span className="w-8 shrink-0 text-right font-mono text-xs text-muted-foreground">
-                      {match.line}
+                <CommandGroup
+                  key={file}
+                  heading={
+                    <span className="inline-flex items-center gap-1.5">
+                      <FileIcon className="size-3" />
+                      {file}
                     </span>
-                    <span className="min-w-0 truncate font-mono text-xs">{match.content}</span>
-                  </CommandItem>
-                ))}
-              </CommandGroup>
+                  }
+                >
+                  {matches.map((match) => (
+                    <CommandItem
+                      key={`${file}:${match.line}:${match.content}`}
+                      value={`${file}:${match.line}:${match.content}`}
+                      onSelect={() => handleSelect(file)}
+                    >
+                      <span className="w-8 shrink-0 text-right font-mono text-xs text-muted-foreground">
+                        {match.line}
+                      </span>
+                      <span className="min-w-0 truncate font-mono text-xs">{match.content}</span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
               );
             })}
           </CommandList>
