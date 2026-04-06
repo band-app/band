@@ -135,6 +135,7 @@ function WorkspaceLayout() {
   const decoded = decodeURIComponent(workspaceId);
   const isDesktop = useIsDesktop() && !isTauri;
   const [diffStats, setDiffStats] = useState<DiffStats | null>(null);
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
 
   // Sync zustand active workspace from URL
   const setActiveWorkspace = useDashboardStore((s) => s.setActiveWorkspace);
@@ -148,6 +149,19 @@ function WorkspaceLayout() {
   useEffect(() => {
     clearNeedsAttention(decoded);
   }, [decoded, clearNeedsAttention]);
+
+  // Persist the full sub-path (e.g. "/code/src/index.ts") so it can be
+  // restored when navigating back — this remembers both the active tab
+  // and the specific file the user was viewing.
+  useEffect(() => {
+    const prefix = `/workspace/${workspaceId}`;
+    if (pathname.length > prefix.length && pathname.startsWith(prefix)) {
+      const subPath = pathname.slice(prefix.length); // e.g. "/code/src/index.ts"
+      try {
+        sessionStorage.setItem(`band-tab:${decoded}`, subPath);
+      } catch {}
+    }
+  }, [pathname, workspaceId, decoded]);
 
   return (
     <DiffStatsContext.Provider value={{ diffStats, setDiffStats }}>

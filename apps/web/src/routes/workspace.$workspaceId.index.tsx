@@ -16,7 +16,7 @@ function WorkspaceIndex() {
   const decoded = decodeURIComponent(workspaceId);
   const isDesktop = useIsDesktop() && !isTauri;
 
-  // Desktop: chat is always visible in the right panel — redirect to changes tab
+  // Desktop: chat is always visible in the left panel — redirect to changes tab
   if (isDesktop) {
     return <Navigate to="/workspace/$workspaceId/changes" params={{ workspaceId }} replace />;
   }
