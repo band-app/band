@@ -58,19 +58,16 @@ export function CodeBrowserView({
   const onFindInFileRef = useRef(onFindInFile);
   onFindInFileRef.current = onFindInFile;
 
-  const handleEditorView = useCallback(
-    (view: { focus: () => void } | null) => {
-      if (view) {
-        onFindInFileRef.current?.(() => {
-          view.focus();
-          openFileSearchPanel(view);
-        });
-      } else {
-        onFindInFileRef.current?.(null);
-      }
-    },
-    [],
-  );
+  const handleEditorView = useCallback((view: { focus: () => void } | null) => {
+    if (view) {
+      onFindInFileRef.current?.(() => {
+        view.focus();
+        openFileSearchPanel(view);
+      });
+    } else {
+      onFindInFileRef.current?.(null);
+    }
+  }, []);
 
   // Clean up on unmount
   useEffect(() => {
