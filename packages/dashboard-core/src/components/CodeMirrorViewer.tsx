@@ -2,7 +2,7 @@ import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { useEffect, useRef } from "react";
 import { useIsDark } from "../hooks/use-is-dark";
-import { baseViewerExtensions, loadLanguage } from "../lib/codemirror-setup";
+import { baseViewerExtensions, loadLanguage, openFileSearchPanel } from "../lib/codemirror-setup";
 
 interface CodeMirrorViewerProps {
   content: string;
@@ -71,6 +71,21 @@ export function CodeMirrorViewer({
       }
     };
   }, [content, language, isDark]);
+
+  // Listen for find-in-file custom event dispatched by the workspace layout
+  useEffect(() => {
+    const handler = () => {
+      const view = viewRef.current;
+      console.log("[band:find-in-file] handler fired, view:", !!view);
+      if (view) {
+        view.focus();
+        const result = openFileSearchPanel(view);
+        console.log("[band:find-in-file] openSearchPanel result:", result);
+      }
+    };
+    window.addEventListener("band:find-in-file", handler);
+    return () => window.removeEventListener("band:find-in-file", handler);
+  }, []);
 
   return <div ref={containerRef} className={className} />;
 }

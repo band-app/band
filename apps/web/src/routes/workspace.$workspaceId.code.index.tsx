@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback } from "react";
 import { CodeBrowserView } from "../components/CodeBrowserView";
+import { useFindInFileContext } from "./workspace.$workspaceId";
 
 export const Route = createFileRoute("/workspace/$workspaceId/code/")({
   component: CodeIndex,
@@ -9,6 +10,7 @@ export const Route = createFileRoute("/workspace/$workspaceId/code/")({
 function CodeIndex() {
   const { workspaceId } = Route.useParams();
   const navigate = useNavigate();
+  const { setFindInFile } = useFindInFileContext();
 
   const handleSelectFile = useCallback(
     (filePath: string | null) => {
@@ -26,6 +28,7 @@ function CodeIndex() {
     <CodeBrowserView
       workspaceId={decodeURIComponent(workspaceId)}
       onSelectFile={handleSelectFile}
+      onFindInFile={setFindInFile}
     />
   );
 }

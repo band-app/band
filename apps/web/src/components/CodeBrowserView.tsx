@@ -1,6 +1,6 @@
 import { FileBrowser, FileViewer, openFileSearchPanel } from "@band-app/dashboard-core";
 import { File } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 
 interface CodeBrowserViewProps {
@@ -53,19 +53,23 @@ export function CodeBrowserView({
     }
   }, [openFilePath, onFileOpened]);
 
+  // Use a ref for onFindInFile so the handleEditorView callback doesn't
+  // need to be recreated when onFindInFile changes identity.
+  const onFindInFileRef = useRef(onFindInFile);
+  onFindInFileRef.current = onFindInFile;
+
   const handleEditorView = useCallback(
-    // EditorView type from @codemirror/view — kept untyped to avoid cross-package dependency
     (view: { focus: () => void } | null) => {
       if (view) {
-        onFindInFile?.(() => {
+        onFindInFileRef.current?.(() => {
           view.focus();
           openFileSearchPanel(view);
         });
       } else {
-        onFindInFile?.(null);
+        onFindInFileRef.current?.(null);
       }
     },
-    [onFindInFile],
+    [],
   );
 
   // Clean up on unmount

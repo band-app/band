@@ -450,7 +450,7 @@ export const PromptInputTextarea = ({
         autoCorrect="off"
         spellCheck={false}
         className={cn(
-          "min-h-[44px] lg:min-h-[36px] max-h-48 w-full resize-none bg-transparent px-2 py-2.5 lg:py-2 text-base lg:text-sm outline-none placeholder:text-muted-foreground field-sizing-content",
+          "min-h-[44px] lg:min-h-[36px] max-h-48 w-full resize-none overflow-y-auto bg-transparent px-2 py-2.5 lg:py-2 text-base lg:text-sm outline-none placeholder:text-muted-foreground field-sizing-content",
           hasSlashCommand && "text-transparent caret-foreground",
           className,
         )}

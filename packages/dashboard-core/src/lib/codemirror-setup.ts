@@ -6,7 +6,12 @@ import {
   StreamLanguage,
   syntaxHighlighting,
 } from "@codemirror/language";
-import { highlightSelectionMatches, openSearchPanel, searchKeymap } from "@codemirror/search";
+import {
+  highlightSelectionMatches,
+  openSearchPanel,
+  search,
+  searchKeymap,
+} from "@codemirror/search";
 import { EditorState, type Extension } from "@codemirror/state";
 import { oneDarkHighlightStyle } from "@codemirror/theme-one-dark";
 import { EditorView, keymap, lineNumbers } from "@codemirror/view";
@@ -142,6 +147,7 @@ export function baseViewerExtensions(isDark = true): Extension[] {
           syntaxHighlighting(defaultHighlightStyle),
           syntaxHighlighting(oneDarkHighlightStyle, { fallback: true }),
         ]),
+    search(),
     keymap.of([...defaultKeymap, ...searchKeymap]),
     EditorView.theme(
       isDark

@@ -260,9 +260,11 @@ function DesktopWorkspaceLayout({
         e.preventDefault();
         setSearchFilesOpen(true);
       } else if (key === "f" && !e.shiftKey) {
+        e.preventDefault();
         if (findInFileRef.current) {
-          e.preventDefault();
           findInFileRef.current();
+        } else {
+          window.dispatchEvent(new CustomEvent("band:find-in-file"));
         }
       }
     };
