@@ -2,12 +2,25 @@ import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { useEffect, useRef } from "react";
 import { useIsDark } from "../hooks/use-is-dark";
-import { baseViewerExtensions, loadLanguage, openFileSearchPanel } from "../lib/codemirror-setup";
+import {
+  baseViewerExtensions,
+  lineHighlightExtension,
+  loadLanguage,
+  openFileSearchPanel,
+  scrollToLine,
+  setHighlightLines,
+} from "../lib/codemirror-setup";
 
 interface CodeMirrorViewerProps {
   content: string;
   language: string;
   className?: string;
+  /** 1-based line number to scroll to and highlight */
+  line?: number;
+  /** 1-based end line for range highlight (inclusive). Uses dash syntax: file:5-10 */
+  lineEnd?: number;
+  /** 1-based column number for cursor positioning. Uses colon syntax: file:5:10 */
+  column?: number;
   /** Called when the EditorView is created or destroyed */
   onEditorView?: (view: EditorView | null) => void;
 }
@@ -16,6 +29,9 @@ export function CodeMirrorViewer({
   content,
   language,
   className,
+  line,
+  lineEnd,
+  column,
   onEditorView,
 }: CodeMirrorViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -23,6 +39,14 @@ export function CodeMirrorViewer({
   const onEditorViewRef = useRef(onEditorView);
   onEditorViewRef.current = onEditorView;
   const isDark = useIsDark();
+
+  // Store line props in refs so the creation effect can read them without re-running
+  const lineRef = useRef(line);
+  const lineEndRef = useRef(lineEnd);
+  const columnRef = useRef(column);
+  lineRef.current = line;
+  lineEndRef.current = lineEnd;
+  columnRef.current = column;
 
   // Create/recreate the editor when content, language, or theme changes
   useEffect(() => {
@@ -42,7 +66,7 @@ export function CodeMirrorViewer({
         onEditorViewRef.current?.(null);
       }
 
-      const extensions = [...baseViewerExtensions(isDark)];
+      const extensions = [...baseViewerExtensions(isDark), ...lineHighlightExtension(isDark)];
       if (langSupport) {
         extensions.push(langSupport);
       }
@@ -56,6 +80,11 @@ export function CodeMirrorViewer({
         state,
         parent: container,
       });
+
+      // Scroll to line after creation
+      if (lineRef.current) {
+        scrollToLine(viewRef.current, lineRef.current, lineEndRef.current, columnRef.current);
+      }
 
       onEditorViewRef.current?.(viewRef.current);
     };
@@ -72,15 +101,26 @@ export function CodeMirrorViewer({
     };
   }, [content, language, isDark]);
 
+  // Handle line/lineEnd/column changes without recreating the editor
+  useEffect(() => {
+    if (!viewRef.current) return;
+    if (line) {
+      scrollToLine(viewRef.current, line, lineEnd, column);
+    } else {
+      // Clear highlight when line is removed
+      viewRef.current.dispatch({
+        effects: setHighlightLines.of(null),
+      });
+    }
+  }, [line, lineEnd, column]);
+
   // Listen for find-in-file custom event dispatched by the workspace layout
   useEffect(() => {
     const handler = () => {
       const view = viewRef.current;
-      console.log("[band:find-in-file] handler fired, view:", !!view);
       if (view) {
         view.focus();
-        const result = openFileSearchPanel(view);
-        console.log("[band:find-in-file] openSearchPanel result:", result);
+        openFileSearchPanel(view);
       }
     };
     window.addEventListener("band:find-in-file", handler);

@@ -14,6 +14,7 @@ import { CaseSensitive, SearchIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAdapter } from "../context";
 import { getFileIcon } from "../lib/file-icon";
+import { formatFileLocation } from "../lib/file-location";
 import type { ContentSearchMatch } from "../types";
 
 interface SearchFilesDialogProps {
@@ -89,8 +90,8 @@ export function SearchFilesDialog({
   }, [results]);
 
   const handleSelect = useCallback(
-    (filePath: string) => {
-      onOpenFile(filePath);
+    (filePath: string, line: number) => {
+      onOpenFile(formatFileLocation(filePath, line));
       onOpenChange(false);
     },
     [onOpenFile, onOpenChange],
@@ -152,7 +153,7 @@ export function SearchFilesDialog({
                     <CommandItem
                       key={`${file}:${match.line}:${match.content}`}
                       value={`${file}:${match.line}:${match.content}`}
-                      onSelect={() => handleSelect(file)}
+                      onSelect={() => handleSelect(file, match.line)}
                     >
                       <span className="w-8 shrink-0 text-right font-mono text-xs text-muted-foreground">
                         {match.line}

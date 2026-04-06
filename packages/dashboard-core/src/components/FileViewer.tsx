@@ -10,6 +10,12 @@ interface FileViewerProps {
   workspaceId: string;
   filePath: string;
   onBack?: () => void;
+  /** 1-based line number to scroll to and highlight */
+  line?: number;
+  /** 1-based end line for range highlight (inclusive) */
+  lineEnd?: number;
+  /** 1-based column number for cursor positioning */
+  column?: number;
   /** Called when the CodeMirror EditorView is created or destroyed */
   onEditorView?: (view: EditorView | null) => void;
 }
@@ -33,7 +39,15 @@ function detectLanguage(filePath: string, serverHint?: string): string {
   return fromName || "plaintext";
 }
 
-export function FileViewer({ workspaceId, filePath, onBack, onEditorView }: FileViewerProps) {
+export function FileViewer({
+  workspaceId,
+  filePath,
+  onBack,
+  line,
+  lineEnd,
+  column,
+  onEditorView,
+}: FileViewerProps) {
   const adapter = useAdapter();
   const [data, setData] = useState<FileContentResult | null>(null);
   const [loading, setLoading] = useState(true);
@@ -114,6 +128,9 @@ export function FileViewer({ workspaceId, filePath, onBack, onEditorView }: File
             content={data.content}
             language={lang}
             className="h-full"
+            line={line}
+            lineEnd={lineEnd}
+            column={column}
             onEditorView={onEditorView}
           />
         )}
