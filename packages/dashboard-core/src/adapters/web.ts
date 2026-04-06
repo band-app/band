@@ -282,12 +282,22 @@ export class WebDashboardAdapter implements DashboardAdapter {
   }
 }
 
+// Valid sub-path prefixes for restoring the last workspace location
+const VALID_TAB_PREFIXES = ["/changes", "/code", "/terminal"];
+
 export class WebCapabilities implements PlatformCapabilities {
   copyPath = false;
   navigate?: (href: string) => void;
 
   getWorkspaceHref(workspaceId: string): string {
-    return `/workspace/${encodeURIComponent(workspaceId)}`;
+    const base = `/workspace/${encodeURIComponent(workspaceId)}`;
+    try {
+      const stored = sessionStorage.getItem(`band-tab:${workspaceId}`);
+      if (stored && VALID_TAB_PREFIXES.some((p) => stored.startsWith(p))) {
+        return `${base}${stored}`;
+      }
+    } catch {}
+    return base;
   }
 
   async openUrl(url: string): Promise<void> {
