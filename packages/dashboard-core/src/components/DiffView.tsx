@@ -239,11 +239,6 @@ function getNextContextStep(current: number): number | null {
   return null;
 }
 
-function contextLabel(lines: number): string {
-  if (lines >= 99999) return "full file";
-  return `${lines} lines`;
-}
-
 function ContextToolbar({
   contextLines,
   onLoadMore,
