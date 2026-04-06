@@ -11,9 +11,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@band-app/ui";
-import { File } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAdapter } from "../context";
+import { getFileIcon } from "../lib/file-icon";
 
 interface QuickOpenDialogProps {
   workspaceId: string;
@@ -94,9 +94,10 @@ export function QuickOpenDialog({
             <CommandGroup>
               {files.map((file) => {
                 const fileName = file.split("/").pop() || file;
+                const Icon = getFileIcon(fileName);
                 return (
                   <CommandItem key={file} value={file} onSelect={() => handleSelect(file)}>
-                    <File className="size-4 shrink-0 text-muted-foreground" />
+                    <Icon className="size-4 shrink-0 text-muted-foreground" />
                     <div className="flex min-w-0 flex-1 items-baseline gap-2">
                       <span className="shrink-0 text-sm font-medium">{fileName}</span>
                       <span className="min-w-0 truncate text-xs text-muted-foreground">{file}</span>

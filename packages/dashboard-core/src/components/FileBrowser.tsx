@@ -1,6 +1,7 @@
-import { ChevronRight, File, Folder } from "lucide-react";
+import { ChevronRight, Folder } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useAdapter } from "../context";
+import { getFileIcon } from "../lib/file-icon";
 import type { FileEntry } from "../types";
 
 interface FileBrowserProps {
@@ -154,9 +155,14 @@ export function FileBrowser({
                     className={`shrink-0 text-blue-600 dark:text-blue-400 ${compact ? "size-4" : "size-4"}`}
                   />
                 ) : (
-                  <File
-                    className={`shrink-0 text-muted-foreground ${compact ? "size-4" : "size-4"}`}
-                  />
+                  (() => {
+                    const FileIcon = getFileIcon(entry.name);
+                    return (
+                      <FileIcon
+                        className={`shrink-0 text-muted-foreground ${compact ? "size-4" : "size-4"}`}
+                      />
+                    );
+                  })()
                 )}
                 <span className="min-w-0 flex-1 truncate">{entry.name}</span>
                 {!compact && entry.type === "directory" && (

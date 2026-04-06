@@ -10,9 +10,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@band-app/ui";
-import { CaseSensitive, File, SearchIcon } from "lucide-react";
+import { CaseSensitive, SearchIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAdapter } from "../context";
+import { getFileIcon } from "../lib/file-icon";
 import type { ContentSearchMatch } from "../types";
 
 interface SearchFilesDialogProps {
@@ -135,30 +136,33 @@ export function SearchFilesDialog({
                   ? "Type at least 2 characters to search."
                   : "No results found."}
             </CommandEmpty>
-            {grouped.map(([file, matches]) => (
-              <CommandGroup
-                key={file}
-                heading={
-                  <span className="inline-flex items-center gap-1.5">
-                    <File className="size-3" />
-                    {file}
-                  </span>
-                }
-              >
-                {matches.map((match) => (
-                  <CommandItem
-                    key={`${file}:${match.line}:${match.content}`}
-                    value={`${file}:${match.line}:${match.content}`}
-                    onSelect={() => handleSelect(file)}
-                  >
-                    <span className="w-8 shrink-0 text-right font-mono text-xs text-muted-foreground">
-                      {match.line}
+            {grouped.map(([file, matches]) => {
+              const FileIcon = getFileIcon(file);
+              return (
+                <CommandGroup
+                  key={file}
+                  heading={
+                    <span className="inline-flex items-center gap-1.5">
+                      <FileIcon className="size-3" />
+                      {file}
                     </span>
-                    <span className="min-w-0 truncate font-mono text-xs">{match.content}</span>
-                  </CommandItem>
-                ))}
-              </CommandGroup>
-            ))}
+                  }
+                >
+                  {matches.map((match) => (
+                    <CommandItem
+                      key={`${file}:${match.line}:${match.content}`}
+                      value={`${file}:${match.line}:${match.content}`}
+                      onSelect={() => handleSelect(file)}
+                    >
+                      <span className="w-8 shrink-0 text-right font-mono text-xs text-muted-foreground">
+                        {match.line}
+                      </span>
+                      <span className="min-w-0 truncate font-mono text-xs">{match.content}</span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              );
+            })}
           </CommandList>
           {totalMatches > 0 && (
             <div className="border-t px-3 py-1.5 text-xs text-muted-foreground">
