@@ -14,6 +14,7 @@ import {
   replaceAgent,
 } from "../lib/agent-pool";
 import { checkCli, installCli } from "../lib/cli";
+import { fuzzyScore } from "../lib/fuzzy-score";
 import { reloadSchedules, stopJobsForKey } from "../lib/cronjob-scheduler";
 import {
   deleteCronjobFile,
@@ -865,9 +866,15 @@ const workspaceRouter = t.router({
       let files = output.trim().split("\n").filter(Boolean);
 
       if (input.query) {
-        const chars = input.query.split("").map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-        const pattern = new RegExp(chars.join(".*"), "i");
-        files = files.filter((f) => pattern.test(f));
+        const scored: { file: string; score: number }[] = [];
+        for (const f of files) {
+          const score = fuzzyScore(input.query, f);
+          if (score !== null) {
+            scored.push({ file: f, score });
+          }
+        }
+        scored.sort((a, b) => b.score - a.score);
+        files = scored.map((r) => r.file);
       }
 
       return { files: files.slice(0, input.limit) };
