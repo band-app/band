@@ -160,9 +160,7 @@ describe("fuzzyScore – real-world ranking", () => {
 
   it("'qod' ranks QuickOpenDialog.tsx first", () => {
     const result = ranked("qod", FILES);
-    expect(result[0]).toBe(
-      "packages/dashboard-core/src/components/QuickOpenDialog.tsx",
-    );
+    expect(result[0]).toBe("packages/dashboard-core/src/components/QuickOpenDialog.tsx");
   });
 
   it("'git' ranks git.ts first", () => {

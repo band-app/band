@@ -14,7 +14,6 @@ import {
   replaceAgent,
 } from "../lib/agent-pool";
 import { checkCli, installCli } from "../lib/cli";
-import { fuzzyScore } from "../lib/fuzzy-score";
 import { reloadSchedules, stopJobsForKey } from "../lib/cronjob-scheduler";
 import {
   deleteCronjobFile,
@@ -24,6 +23,7 @@ import {
   saveCronjobFile,
 } from "../lib/cronjob-store";
 import type { CronjobDefinition } from "../lib/cronjob-types";
+import { fuzzyScore } from "../lib/fuzzy-score";
 import { execGit, gitCmd, listWorktrees } from "../lib/git";
 import { checkHooks, installHooks } from "../lib/hooks";
 import { resolvePendingInput } from "../lib/pending-inputs";

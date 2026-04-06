@@ -56,11 +56,7 @@ function isSeparatorCode(code: number): boolean {
  * - Being the very first character of the filename
  * - Sitting at a camelCase boundary
  */
-function positionBonus(
-  target: string,
-  j: number,
-  filenameStart: number,
-): number {
+function positionBonus(target: string, j: number, filenameStart: number): number {
   let bonus = 0;
 
   // Bonus for every match inside the filename
@@ -132,12 +128,10 @@ function dpScore(
         const bonus = positionBonus(target, j, filenameStart);
 
         // Continue a consecutive run (query[i-1] matched at target[j-1])
-        const consecutive =
-          prevM[j - 1] + SCORE_MATCH + BONUS_CONSECUTIVE + bonus;
+        const consecutive = prevM[j - 1] + SCORE_MATCH + BONUS_CONSECUTIVE + bonus;
 
         // Start a new run after a gap (penalised)
-        const afterGap =
-          prevD[j - 1] + SCORE_MATCH + bonus + PENALTY_GAP_START;
+        const afterGap = prevD[j - 1] + SCORE_MATCH + bonus + PENALTY_GAP_START;
 
         M[j] = Math.max(consecutive, afterGap);
       }
