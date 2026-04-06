@@ -44,6 +44,7 @@ export {
   useStatusWatcher,
 } from "./hooks/use-status";
 export { openFileSearchPanel } from "./lib/codemirror-setup";
+export { type FileLocation, formatFileLocation, parseFileLocation } from "./lib/file-location";
 export { extensionToLanguage, filenameToLanguage } from "./lib/language-map";
 export { isServiceHealthy, type ServiceHealth } from "./lib/service-health";
 // Lib

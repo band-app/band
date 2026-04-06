@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAdapter } from "../context";
 import { useIsDark } from "../hooks/use-is-dark";
 import { baseViewerExtensions, loadLanguage } from "../lib/codemirror-setup";
+import { formatFileLocation } from "../lib/file-location";
 import { extensionToLanguage, filenameToLanguage } from "../lib/language-map";
 import type { FileStatus, WorkspaceDiffSummary } from "../types";
 
@@ -43,6 +44,12 @@ interface DiffViewProps {
 interface ParsedFile {
   filename: string;
   hunks: string;
+}
+
+/** Extracts the start line of the first hunk in a diff (new-file side). */
+function firstChangeLine(hunks: string): number | undefined {
+  const match = hunks.match(/@@ [^ ]+ \+(\d+)/);
+  return match ? parseInt(match[1], 10) : undefined;
 }
 
 function parseDiffFiles(diff: string): ParsedFile[] {
@@ -407,12 +414,14 @@ function LazyFileRow({
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
-              onOpenFile(filename);
+              const line = diff ? firstChangeLine(diff) : undefined;
+              onOpenFile(formatFileLocation(filename, line));
             }}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.stopPropagation();
-                onOpenFile(filename);
+                const line = diff ? firstChangeLine(diff) : undefined;
+                onOpenFile(formatFileLocation(filename, line));
               }
             }}
             className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -633,12 +642,14 @@ function LegacyDiffView({ workspaceId, active, onStatsChange, onOpenFile }: Diff
                     onClick={(e) => {
                       e.preventDefault();
                       e.stopPropagation();
-                      onOpenFile(file.filename);
+                      const line = firstChangeLine(file.hunks);
+                      onOpenFile(formatFileLocation(file.filename, line));
                     }}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
                         e.stopPropagation();
-                        onOpenFile(file.filename);
+                        const line = firstChangeLine(file.hunks);
+                        onOpenFile(formatFileLocation(file.filename, line));
                       }
                     }}
                     className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"

@@ -7,9 +7,15 @@ import {
   syntaxHighlighting,
 } from "@codemirror/language";
 import { highlightSelectionMatches, openSearchPanel, searchKeymap } from "@codemirror/search";
-import { EditorState, type Extension } from "@codemirror/state";
+import {
+  EditorState,
+  type Extension,
+  type Range,
+  StateEffect,
+  StateField,
+} from "@codemirror/state";
 import { oneDarkHighlightStyle } from "@codemirror/theme-one-dark";
-import { EditorView, keymap, lineNumbers } from "@codemirror/view";
+import { Decoration, type DecorationSet, EditorView, keymap, lineNumbers } from "@codemirror/view";
 
 /**
  * Lazy-loads a CodeMirror LanguageSupport for the given language name.
@@ -181,4 +187,84 @@ export function baseViewerExtensions(isDark = true): Extension[] {
 // biome-ignore lint/suspicious/noExplicitAny: EditorView type from @codemirror/view — kept untyped for cross-package use
 export function openFileSearchPanel(view: any): boolean {
   return openSearchPanel(view as EditorView);
+}
+
+// ---------------------------------------------------------------------------
+// Line highlight extension
+// ---------------------------------------------------------------------------
+
+/** Effect to set or clear the highlighted line range. */
+export const setHighlightLines = StateEffect.define<{
+  from: number;
+  to: number;
+} | null>();
+
+const highlightLineDeco = Decoration.line({ class: "cm-highlighted-line" });
+
+const highlightLineField = StateField.define<DecorationSet>({
+  create() {
+    return Decoration.none;
+  },
+  update(decos, tr) {
+    for (const e of tr.effects) {
+      if (e.is(setHighlightLines)) {
+        if (!e.value) return Decoration.none;
+        const { from, to } = e.value;
+        const doc = tr.state.doc;
+        const decorations: Range<Decoration>[] = [];
+        for (let line = from; line <= to && line <= doc.lines; line++) {
+          decorations.push(highlightLineDeco.range(doc.line(line).from));
+        }
+        return Decoration.set(decorations);
+      }
+    }
+    return decos;
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});
+
+/**
+ * Extension that enables line highlighting via the setHighlightLines effect.
+ * Include this in the editor's extensions to support scroll-to-line + highlight.
+ */
+export function lineHighlightExtension(isDark = true): Extension[] {
+  return [
+    highlightLineField,
+    EditorView.theme(
+      {
+        ".cm-highlighted-line": {
+          backgroundColor: isDark ? "rgba(255, 213, 79, 0.12)" : "rgba(255, 213, 79, 0.25)",
+        },
+      },
+      { dark: isDark },
+    ),
+  ];
+}
+
+/**
+ * Scrolls the editor to the given 1-based line and highlights the range.
+ * Optionally positions cursor at a specific column.
+ */
+export function scrollToLine(
+  view: EditorView,
+  line: number,
+  lineEnd?: number,
+  column?: number,
+): void {
+  const doc = view.state.doc;
+  const clampedLine = Math.max(1, Math.min(line, doc.lines));
+  const clampedEnd = lineEnd ? Math.max(clampedLine, Math.min(lineEnd, doc.lines)) : clampedLine;
+
+  // Set highlight decorations
+  view.dispatch({
+    effects: setHighlightLines.of({ from: clampedLine, to: clampedEnd }),
+  });
+
+  // Scroll the target line into view (centered)
+  const lineObj = doc.line(clampedLine);
+  const scrollPos = column != null ? Math.min(lineObj.from + column - 1, lineObj.to) : lineObj.from;
+
+  view.dispatch({
+    effects: EditorView.scrollIntoView(scrollPos, { y: "center" }),
+  });
 }

@@ -1,4 +1,9 @@
-import { FileBrowser, FileViewer, openFileSearchPanel } from "@band-app/dashboard-core";
+import {
+  FileBrowser,
+  FileViewer,
+  openFileSearchPanel,
+  parseFileLocation,
+} from "@band-app/dashboard-core";
 import { File } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useIsDesktop } from "../hooks/useIsDesktop";
@@ -31,24 +36,51 @@ export function CodeBrowserView({
   onFindInFile,
 }: CodeBrowserViewProps) {
   const isDesktop = useIsDesktop();
-  const [currentPath, setCurrentPath] = useState(() => (file ? directoryOf(file) : ""));
-  const [viewFilePath, setViewFilePath] = useState(file ?? "");
+  const [currentPath, setCurrentPath] = useState(() => {
+    if (!file) return "";
+    const loc = parseFileLocation(file);
+    return directoryOf(loc.filePath);
+  });
+  const [viewFilePath, setViewFilePath] = useState(() => {
+    if (!file) return "";
+    return parseFileLocation(file).filePath;
+  });
+  const [viewLine, setViewLine] = useState<number | undefined>(() => {
+    if (!file) return undefined;
+    return parseFileLocation(file).line;
+  });
+  const [viewLineEnd, setViewLineEnd] = useState<number | undefined>(() => {
+    if (!file) return undefined;
+    return parseFileLocation(file).lineEnd;
+  });
+  const [viewColumn, setViewColumn] = useState<number | undefined>(() => {
+    if (!file) return undefined;
+    return parseFileLocation(file).column;
+  });
 
   // Sync when the file prop changes (e.g. navigating from diff view)
   useEffect(() => {
     if (file) {
-      setViewFilePath(file);
-      setCurrentPath(directoryOf(file));
+      const loc = parseFileLocation(file);
+      setViewFilePath(loc.filePath);
+      setCurrentPath(directoryOf(loc.filePath));
+      setViewLine(loc.line);
+      setViewLineEnd(loc.lineEnd);
+      setViewColumn(loc.column);
     }
   }, [file]);
 
   // Handle externally triggered file open
   useEffect(() => {
     if (openFilePath) {
-      setViewFilePath(openFilePath);
+      const loc = parseFileLocation(openFilePath);
+      setViewFilePath(loc.filePath);
+      setViewLine(loc.line);
+      setViewLineEnd(loc.lineEnd);
+      setViewColumn(loc.column);
       // Navigate the file browser to the file's parent directory
-      const lastSlash = openFilePath.lastIndexOf("/");
-      setCurrentPath(lastSlash > 0 ? openFilePath.slice(0, lastSlash) : "");
+      const lastSlash = loc.filePath.lastIndexOf("/");
+      setCurrentPath(lastSlash > 0 ? loc.filePath.slice(0, lastSlash) : "");
       onFileOpened?.();
     }
   }, [openFilePath, onFileOpened]);
@@ -76,6 +108,9 @@ export function CodeBrowserView({
   const handleSelectFile = useCallback(
     (filePath: string) => {
       setViewFilePath(filePath);
+      setViewLine(undefined);
+      setViewLineEnd(undefined);
+      setViewColumn(undefined);
       onSelectFile?.(filePath);
     },
     [onSelectFile],
@@ -83,13 +118,25 @@ export function CodeBrowserView({
 
   const handleBack = useCallback(() => {
     setViewFilePath("");
+    setViewLine(undefined);
+    setViewLineEnd(undefined);
+    setViewColumn(undefined);
     onSelectFile?.(null);
   }, [onSelectFile]);
 
   // Mobile: toggle between browse and view
   if (!isDesktop) {
     if (viewFilePath) {
-      return <FileViewer workspaceId={workspaceId} filePath={viewFilePath} onBack={handleBack} />;
+      return (
+        <FileViewer
+          workspaceId={workspaceId}
+          filePath={viewFilePath}
+          line={viewLine}
+          lineEnd={viewLineEnd}
+          column={viewColumn}
+          onBack={handleBack}
+        />
+      );
     }
     return (
       <FileBrowser
@@ -122,6 +169,9 @@ export function CodeBrowserView({
           <FileViewer
             workspaceId={workspaceId}
             filePath={viewFilePath}
+            line={viewLine}
+            lineEnd={viewLineEnd}
+            column={viewColumn}
             onEditorView={handleEditorView}
           />
         ) : (
