@@ -53,8 +53,7 @@ const ERROR_STATES = new Set<ToolPart["state"]>(["output-error", "output-denied"
 function toolPartToItem(part: ToolPart): ToolCallItem {
   const approval = "approval" in part ? (part.approval as { id?: string } | undefined) : undefined;
   const toolName = getToolName(part);
-  const displayTitle =
-    "title" in part && typeof part.title === "string" ? part.title : undefined;
+  const displayTitle = "title" in part && typeof part.title === "string" ? part.title : undefined;
   return {
     toolCallId: part.toolCallId,
     toolName,
