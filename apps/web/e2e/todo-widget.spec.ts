@@ -368,6 +368,7 @@ test("TodoWrite mixed with regular tool calls renders both correctly", async ({ 
           type: "tool_use",
           toolCallId: "tc2",
           toolName: "Read",
+          displayTitle: "Read(/src/app.ts)",
           input: { file_path: "/src/app.ts" },
         },
       ],
