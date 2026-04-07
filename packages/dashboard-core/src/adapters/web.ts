@@ -222,7 +222,11 @@ export class WebDashboardAdapter implements DashboardAdapter {
     await this.trpc.cli.install.mutate();
   }
 
-  async getWorkspaceDiff(workspaceId: string, contextLines?: number, diffMode?: DiffMode): Promise<WorkspaceDiff> {
+  async getWorkspaceDiff(
+    workspaceId: string,
+    contextLines?: number,
+    diffMode?: DiffMode,
+  ): Promise<WorkspaceDiff> {
     return (await this.trpc.workspace.getDiff.query({
       workspaceId,
       contextLines,
@@ -230,7 +234,10 @@ export class WebDashboardAdapter implements DashboardAdapter {
     })) as WorkspaceDiff;
   }
 
-  async getWorkspaceDiffSummary(workspaceId: string, diffMode?: DiffMode): Promise<WorkspaceDiffSummary> {
+  async getWorkspaceDiffSummary(
+    workspaceId: string,
+    diffMode?: DiffMode,
+  ): Promise<WorkspaceDiffSummary> {
     return (await this.trpc.workspace.getDiffSummary.query({
       workspaceId,
       diffMode,
