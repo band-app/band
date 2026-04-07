@@ -413,6 +413,46 @@ export function ProjectList({ labelFilter, editMode }: ProjectListProps) {
     }
   }
 
+  // ──────────────────────────────────────────────────────────────────────────
+  // Cmd+[ / Cmd+] — cycle to previous / next workspace
+  //
+  // This is a global (window-level, capture-phase) shortcut so it fires
+  // regardless of which element has focus.  It follows the same dual-path
+  // as WorkspaceCard: web uses capabilities.navigate(href), Tauri uses
+  // openWorkspace() which triggers IPC.
+  // ──────────────────────────────────────────────────────────────────────────
+  const capabilities = useCapabilities();
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const key = e.key;
+      if (key !== "[" && key !== "]") return;
+
+      e.preventDefault();
+      e.stopPropagation();
+      if (allWorkspaceIds.length <= 1) return;
+
+      const currentId = activeWorkspaceId;
+      if (!currentId) return;
+      const currentIndex = allWorkspaceIds.indexOf(currentId);
+      if (currentIndex === -1) return;
+
+      const delta = key === "[" ? -1 : 1;
+      const nextIndex = (currentIndex + delta + allWorkspaceIds.length) % allWorkspaceIds.length;
+      const nextId = allWorkspaceIds[nextIndex];
+
+      const href = capabilities.getWorkspaceHref?.(nextId);
+      if (href && capabilities.navigate) {
+        capabilities.navigate(href);
+      } else {
+        openWorkspace(nextId);
+      }
+    };
+    window.addEventListener("keydown", handler, true);
+    return () => window.removeEventListener("keydown", handler, true);
+  }, [allWorkspaceIds, activeWorkspaceId, openWorkspace, capabilities]);
+
   const allProjectNames = useMemo(
     () => visibleGroups.flatMap((g) => g.projects.map((p) => p.name)),
     [visibleGroups],

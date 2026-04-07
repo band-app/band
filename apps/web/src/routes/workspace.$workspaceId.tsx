@@ -7,6 +7,7 @@ import {
   type WorkspaceTab,
   WorkspaceTabNav,
 } from "@band-app/dashboard-core";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@band-app/ui";
 import { createFileRoute, Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
   ArrowLeft,
@@ -212,31 +213,50 @@ function DesktopDetailTabNav({ workspaceId }: { workspaceId: string }) {
 
   return (
     <div className="flex h-12 shrink-0 items-center border-b border-border">
-      <Link
-        to="/workspace/$workspaceId/changes"
-        params={{ workspaceId }}
-        className={tabClass(isChanges)}
-      >
-        <GitCompare className="size-4" />
-        Changes
-        {diffFileCount > 0 && (
-          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-500/20 text-blue-600 dark:text-blue-400 px-1.5 text-xs font-medium">
-            {diffFileCount}
-          </span>
-        )}
-      </Link>
-      <Link to="/workspace/$workspaceId/code" params={{ workspaceId }} className={tabClass(isCode)}>
-        <FolderOpen className="size-4" />
-        Files
-      </Link>
-      <Link
-        to="/workspace/$workspaceId/terminal"
-        params={{ workspaceId }}
-        className={tabClass(isTerminal)}
-      >
-        <Terminal className="size-4" />
-        Terminal
-      </Link>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Link
+            to="/workspace/$workspaceId/changes"
+            params={{ workspaceId }}
+            className={tabClass(isChanges)}
+          >
+            <GitCompare className="size-4" />
+            Changes
+            {diffFileCount > 0 && (
+              <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-500/20 text-blue-600 dark:text-blue-400 px-1.5 text-xs font-medium">
+                {diffFileCount}
+              </span>
+            )}
+          </Link>
+        </TooltipTrigger>
+        <TooltipContent>⌘E</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Link
+            to="/workspace/$workspaceId/code"
+            params={{ workspaceId }}
+            className={tabClass(isCode)}
+          >
+            <FolderOpen className="size-4" />
+            Files
+          </Link>
+        </TooltipTrigger>
+        <TooltipContent>⌘G</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Link
+            to="/workspace/$workspaceId/terminal"
+            params={{ workspaceId }}
+            className={tabClass(isTerminal)}
+          >
+            <Terminal className="size-4" />
+            Terminal
+          </Link>
+        </TooltipTrigger>
+        <TooltipContent>⌘J</TooltipContent>
+      </Tooltip>
     </div>
   );
 }
@@ -263,6 +283,14 @@ function DesktopWorkspaceLayout({
   // Global keyboard shortcuts (capture phase to beat browser defaults)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // Shift+Tab (no Ctrl/Cmd) → toggle mode between Edit and Plan
+      if (e.key === "Tab" && e.shiftKey && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        window.dispatchEvent(new CustomEvent("band:toggle-mode"));
+        return;
+      }
+
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
 
@@ -280,11 +308,29 @@ function DesktopWorkspaceLayout({
         } else {
           window.dispatchEvent(new CustomEvent("band:find-in-file"));
         }
+      } else if (key === "e" && !e.shiftKey) {
+        e.preventDefault();
+        navigate({
+          to: "/workspace/$workspaceId/changes",
+          params: { workspaceId: encodedId },
+        });
+      } else if (key === "j" && !e.shiftKey) {
+        e.preventDefault();
+        navigate({
+          to: "/workspace/$workspaceId/terminal",
+          params: { workspaceId: encodedId },
+        });
+      } else if (key === "g" && !e.shiftKey) {
+        e.preventDefault();
+        navigate({
+          to: "/workspace/$workspaceId/code",
+          params: { workspaceId: encodedId },
+        });
       }
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, []);
+  }, [encodedId, navigate]);
 
   // Resizable panel width
   const [panelPct, setPanelPct] = useState(getStoredPanelWidth);

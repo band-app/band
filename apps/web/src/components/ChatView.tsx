@@ -7,6 +7,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
 } from "@band-app/ui";
 import type { UIMessage } from "ai";
 import { getToolName, isToolUIPart } from "ai";
@@ -297,6 +300,18 @@ export function ChatView({
       })
       .catch(() => {});
   }, [workspaceId, codingAgentId, handleModeSelect]);
+
+  // Listen for Shift+Tab mode toggle dispatched from the workspace layout
+  useEffect(() => {
+    const handler = () => {
+      if (modes.length < 2) return;
+      const currentIndex = modes.findIndex((m) => m.id === selectedMode);
+      const nextIndex = currentIndex === -1 ? 1 : (currentIndex + 1) % modes.length;
+      handleModeSelect(modes[nextIndex].id);
+    };
+    window.addEventListener("band:toggle-mode", handler);
+    return () => window.removeEventListener("band:toggle-mode", handler);
+  }, [modes, selectedMode, handleModeSelect]);
 
   const [models, setModels] = useState<{ id: string; name: string; description?: string }[]>([]);
   const [selectedModel, setSelectedModel] = useState<string | undefined>(() => {
@@ -824,15 +839,20 @@ function ModeMenu({
   const current = modes.find((m) => m.id === selected) ?? modes[0];
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        >
-          <ModeIcon modeId={current?.id ?? ""} className="size-3" />
-          {current?.name ?? "Mode"}
-        </button>
-      </DropdownMenuTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <ModeIcon modeId={current?.id ?? ""} className="size-3" />
+              {current?.name ?? "Mode"}
+            </button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent>⇧Tab</TooltipContent>
+      </Tooltip>
       <DropdownMenuContent align="start" className="min-w-[140px]">
         {modes.map((mode) => (
           <DropdownMenuItem
