@@ -5,6 +5,7 @@ import type {
   CIStatus,
   CliStatus,
   ContentSearchMatch,
+  DiffMode,
   FileContentResult,
   FileDiffResult,
   FileListResult,
@@ -221,16 +222,25 @@ export class WebDashboardAdapter implements DashboardAdapter {
     await this.trpc.cli.install.mutate();
   }
 
-  async getWorkspaceDiff(workspaceId: string, contextLines?: number): Promise<WorkspaceDiff> {
+  async getWorkspaceDiff(
+    workspaceId: string,
+    contextLines?: number,
+    diffMode?: DiffMode,
+  ): Promise<WorkspaceDiff> {
     return (await this.trpc.workspace.getDiff.query({
       workspaceId,
       contextLines,
+      diffMode,
     })) as WorkspaceDiff;
   }
 
-  async getWorkspaceDiffSummary(workspaceId: string): Promise<WorkspaceDiffSummary> {
+  async getWorkspaceDiffSummary(
+    workspaceId: string,
+    diffMode?: DiffMode,
+  ): Promise<WorkspaceDiffSummary> {
     return (await this.trpc.workspace.getDiffSummary.query({
       workspaceId,
+      diffMode,
     })) as WorkspaceDiffSummary;
   }
 

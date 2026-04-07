@@ -8,7 +8,7 @@ import { useIsDark } from "../hooks/use-is-dark";
 import { baseViewerExtensions, loadLanguage } from "../lib/codemirror-setup";
 import { formatFileLocation } from "../lib/file-location";
 import { extensionToLanguage, filenameToLanguage } from "../lib/language-map";
-import type { FileStatus, WorkspaceDiffSummary } from "../types";
+import type { DiffMode, FileStatus, WorkspaceDiffSummary } from "../types";
 
 export interface DiffStats {
   filesChanged: number;
@@ -34,6 +34,22 @@ function storeViewMode(mode: ViewMode) {
   } catch {}
 }
 
+const DIFF_MODE_KEY = "band:diff-mode";
+
+function getStoredDiffMode(): DiffMode {
+  try {
+    const v = localStorage.getItem(DIFF_MODE_KEY);
+    if (v === "uncommitted" || v === "branch") return v;
+  } catch {}
+  return "branch";
+}
+
+function storeDiffMode(mode: DiffMode) {
+  try {
+    localStorage.setItem(DIFF_MODE_KEY, mode);
+  } catch {}
+}
+
 interface DiffViewProps {
   workspaceId: string;
   active?: boolean;
@@ -41,34 +57,10 @@ interface DiffViewProps {
   onOpenFile?: (filename: string) => void;
 }
 
-interface ParsedFile {
-  filename: string;
-  hunks: string;
-}
-
 /** Extracts the start line of the first hunk in a diff (new-file side). */
 function firstChangeLine(hunks: string): number | undefined {
   const match = hunks.match(/@@ [^ ]+ \+(\d+)/);
   return match ? parseInt(match[1], 10) : undefined;
-}
-
-function parseDiffFiles(diff: string): ParsedFile[] {
-  const files: ParsedFile[] = [];
-  const fileDiffs = diff.split(/^diff --git /m).filter(Boolean);
-
-  for (const fileDiff of fileDiffs) {
-    const lines = fileDiff.split("\n");
-    const firstLine = lines[0] || "";
-    const match = firstLine.match(/ b\/(.+)$/);
-    const filename = match ? match[1] : firstLine;
-
-    files.push({
-      filename,
-      hunks: `diff --git ${fileDiff}`,
-    });
-  }
-
-  return files;
 }
 
 const statusColors: Record<FileStatus, string> = {
@@ -458,260 +450,41 @@ function LazyFileRow({
 }
 
 // ---------------------------------------------------------------------------
-// Fallback: legacy full-diff mode (when adapter lacks new methods)
-// ---------------------------------------------------------------------------
-
-function LegacyDiffView({ workspaceId, active, onStatsChange, onOpenFile }: DiffViewProps) {
-  const adapter = useAdapter();
-  const [data, setData] = useState<{
-    diff: string;
-    stats: DiffStats;
-    baseBranch: string;
-    headBranch: string;
-    fileStatuses: Record<string, FileStatus>;
-  } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [openFiles, setOpenFiles] = useState<Set<string>>(new Set());
-  const [viewMode, setViewModeState] = useState<ViewMode>(getStoredViewMode);
-  const [contextLines, setContextLines] = useState(3);
-  const setViewMode = useCallback((mode: ViewMode) => {
-    setViewModeState(mode);
-    storeViewMode(mode);
-  }, []);
-
-  useEffect(() => {
-    const getWorkspaceDiff = adapter.getWorkspaceDiff;
-    if (!getWorkspaceDiff) {
-      setError("Diff viewing not supported");
-      setLoading(false);
-      return;
-    }
-
-    let cancelled = false;
-    const fetchDiff = () => {
-      getWorkspaceDiff
-        .call(adapter, workspaceId, contextLines > 3 ? contextLines : undefined)
-        .then((result) => {
-          if (!cancelled) {
-            setData(result);
-            setError(null);
-            onStatsChange?.(result?.diff ? result.stats : null);
-          }
-        })
-        .catch((err) => {
-          if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load diff");
-        })
-        .finally(() => {
-          if (!cancelled) setLoading(false);
-        });
-    };
-
-    fetchDiff();
-    const interval = active ? setInterval(fetchDiff, 15_000) : undefined;
-    return () => {
-      cancelled = true;
-      if (interval) clearInterval(interval);
-    };
-  }, [adapter, workspaceId, active, onStatsChange, contextLines]);
-
-  const canLoadMore = getNextContextStep(contextLines) !== null;
-
-  const handleLoadMore = useCallback(() => {
-    const next = getNextContextStep(contextLines);
-    if (next !== null) {
-      setContextLines(next);
-    }
-  }, [contextLines]);
-
-  const handleShowFullFile = useCallback(() => {
-    setContextLines(99999);
-  }, []);
-
-  if (loading) {
-    return (
-      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        Loading changes...
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="flex h-full items-center justify-center text-sm text-destructive">
-        {error}
-      </div>
-    );
-  }
-
-  if (!data || !data.diff) {
-    return (
-      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        No changes
-      </div>
-    );
-  }
-
-  const files = parseDiffFiles(data.diff);
-  const fileStatuses = data.fileStatuses || {};
-
-  const toggleFile = (filename: string) => {
-    setOpenFiles((prev) => {
-      const next = new Set(prev);
-      if (next.has(filename)) {
-        next.delete(filename);
-      } else {
-        next.add(filename);
-      }
-      return next;
-    });
-  };
-
-  return (
-    <div className="flex h-full flex-col overflow-hidden">
-      <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-2">
-        <div>
-          <div className="text-sm text-muted-foreground">
-            <span className="font-medium text-foreground">{data.stats.filesChanged}</span>{" "}
-            {data.stats.filesChanged === 1 ? "file" : "files"} changed
-            {data.stats.insertions > 0 && (
-              <span className="ml-2 text-green-600 dark:text-green-400">
-                +{data.stats.insertions}
-              </span>
-            )}
-            {data.stats.deletions > 0 && (
-              <span className="ml-1 text-red-600 dark:text-red-400">-{data.stats.deletions}</span>
-            )}
-          </div>
-          <div className="mt-0.5 text-xs text-muted-foreground">
-            {data.baseBranch} ← {data.headBranch}
-          </div>
-        </div>
-        <div className="hidden items-center rounded-md border border-border/50 bg-muted/50 md:flex">
-          <button
-            type="button"
-            onClick={() => setViewMode("unified")}
-            className={`inline-flex items-center gap-1 rounded-l-md px-2 py-1 text-xs transition-colors ${
-              viewMode === "unified"
-                ? "bg-accent text-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-            title="Unified view"
-          >
-            <Rows2 className="size-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => setViewMode("split")}
-            className={`inline-flex items-center gap-1 rounded-r-md px-2 py-1 text-xs transition-colors ${
-              viewMode === "split"
-                ? "bg-accent text-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-            title="Split view"
-          >
-            <Columns2 className="size-3.5" />
-          </button>
-        </div>
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        {files.map((file) => {
-          const isOpen = openFiles.has(file.filename);
-          return (
-            <div
-              key={file.filename}
-              id={`diff-file-${encodeURIComponent(file.filename)}`}
-              className="border-b border-border/30"
-            >
-              <button
-                type="button"
-                onClick={() => toggleFile(file.filename)}
-                className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm hover:bg-accent/50"
-              >
-                <span
-                  className={`shrink-0 text-muted-foreground transition-transform ${isOpen ? "rotate-90" : ""}`}
-                >
-                  ▶
-                </span>
-                <span className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-mono [scrollbar-width:none]">
-                  {file.filename} <FileStatusBadge status={fileStatuses[file.filename]} />
-                </span>
-                {onOpenFile && (
-                  <span
-                    title="Open in code browser"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      const line = firstChangeLine(file.hunks);
-                      onOpenFile(formatFileLocation(file.filename, line));
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.stopPropagation();
-                        const line = firstChangeLine(file.hunks);
-                        onOpenFile(formatFileLocation(file.filename, line));
-                      }
-                    }}
-                    className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-                  >
-                    <SquareArrowOutUpRight className="size-3.5" />
-                  </span>
-                )}
-              </button>
-              {isOpen && (
-                <div className="border-t border-border/20 bg-muted/30">
-                  {canLoadMore && fileStatuses[file.filename] !== "U" && (
-                    <ContextToolbar
-                      contextLines={contextLines}
-                      onLoadMore={handleLoadMore}
-                      onShowFullFile={handleShowFullFile}
-                    />
-                  )}
-                  <DiffFileContent
-                    hunks={file.hunks}
-                    filename={file.filename}
-                    viewMode={viewMode}
-                  />
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Main DiffView — uses lazy summary + per-file when available
+// Main DiffView
 // ---------------------------------------------------------------------------
 
 export function DiffView({ workspaceId, active = true, onStatsChange, onOpenFile }: DiffViewProps) {
   const adapter = useAdapter();
   const [summary, setSummary] = useState<WorkspaceDiffSummary | null>(null);
+  const [baseBranch, setBaseBranch] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewModeState] = useState<ViewMode>(getStoredViewMode);
+  const [diffMode, setDiffModeState] = useState<DiffMode>(getStoredDiffMode);
   const setViewMode = useCallback((mode: ViewMode) => {
     setViewModeState(mode);
     storeViewMode(mode);
   }, []);
-
-  // Fall back to legacy if adapter doesn't support new methods
-  const supportsLazy = !!(adapter.getWorkspaceDiffSummary && adapter.getFileDiff);
+  const setDiffMode = useCallback((mode: DiffMode) => {
+    setDiffModeState(mode);
+    storeDiffMode(mode);
+  }, []);
 
   useEffect(() => {
-    if (!supportsLazy) return;
-
-    const getWorkspaceDiffSummary = adapter.getWorkspaceDiffSummary!;
+    const getWorkspaceDiffSummary = adapter.getWorkspaceDiffSummary;
+    if (!getWorkspaceDiffSummary) return;
 
     let cancelled = false;
+    setLoading(true);
+    setSummary(null);
+
     const fetchSummary = () => {
       getWorkspaceDiffSummary
-        .call(adapter, workspaceId)
+        .call(adapter, workspaceId, diffMode)
         .then((result) => {
           if (!cancelled) {
             setSummary(result);
+            setBaseBranch(result.baseBranch);
             setError(null);
             const hasChanges = result.stats.filesChanged > 0;
             onStatsChange?.(hasChanges ? result.stats : null);
@@ -731,18 +504,7 @@ export function DiffView({ workspaceId, active = true, onStatsChange, onOpenFile
       cancelled = true;
       if (interval) clearInterval(interval);
     };
-  }, [adapter, workspaceId, active, onStatsChange, supportsLazy]);
-
-  if (!supportsLazy) {
-    return (
-      <LegacyDiffView
-        workspaceId={workspaceId}
-        active={active}
-        onStatsChange={onStatsChange}
-        onOpenFile={onOpenFile}
-      />
-    );
-  }
+  }, [adapter, workspaceId, active, onStatsChange, diffMode]);
 
   if (loading) {
     return (
@@ -762,8 +524,36 @@ export function DiffView({ workspaceId, active = true, onStatsChange, onOpenFile
 
   if (!summary || summary.stats.filesChanged === 0) {
     return (
-      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        No changes
+      <div className="flex h-full flex-col overflow-hidden">
+        <div className="flex shrink-0 items-center justify-end border-b border-border px-4 py-2">
+          <div className="flex items-center rounded-md border border-border/50 bg-muted/50">
+            <button
+              type="button"
+              onClick={() => setDiffMode("uncommitted")}
+              className={`inline-flex items-center rounded-l-md px-2.5 py-1 text-xs transition-colors ${
+                diffMode === "uncommitted"
+                  ? "bg-accent text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Uncommitted
+            </button>
+            <button
+              type="button"
+              onClick={() => setDiffMode("branch")}
+              className={`inline-flex items-center rounded-r-md px-2.5 py-1 text-xs transition-colors ${
+                diffMode === "branch"
+                  ? "bg-accent text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              vs {baseBranch ?? "base"}
+            </button>
+          </div>
+        </div>
+        <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+          No changes
+        </div>
       </div>
     );
   }
@@ -774,50 +564,78 @@ export function DiffView({ workspaceId, active = true, onStatsChange, onOpenFile
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-2">
-        <div>
-          <div className="text-sm text-muted-foreground">
-            <span className="font-medium text-foreground">{summary.stats.filesChanged}</span>{" "}
-            {summary.stats.filesChanged === 1 ? "file" : "files"} changed
-            {summary.stats.insertions > 0 && (
-              <span className="ml-2 text-green-600 dark:text-green-400">
-                +{summary.stats.insertions}
-              </span>
-            )}
-            {summary.stats.deletions > 0 && (
-              <span className="ml-1 text-red-600 dark:text-red-400">
-                -{summary.stats.deletions}
-              </span>
-            )}
-          </div>
-          <div className="mt-0.5 text-xs text-muted-foreground">
-            {summary.baseBranch} ← {summary.headBranch}
+        <div className="flex items-center gap-3">
+          <div>
+            <div className="text-sm text-muted-foreground">
+              <span className="font-medium text-foreground">{summary.stats.filesChanged}</span>{" "}
+              {summary.stats.filesChanged === 1 ? "file" : "files"} changed
+              {summary.stats.insertions > 0 && (
+                <span className="ml-2 text-green-600 dark:text-green-400">
+                  +{summary.stats.insertions}
+                </span>
+              )}
+              {summary.stats.deletions > 0 && (
+                <span className="ml-1 text-red-600 dark:text-red-400">
+                  -{summary.stats.deletions}
+                </span>
+              )}
+            </div>
+            <div className="mt-0.5 text-xs text-muted-foreground">
+              {summary.baseBranch} &larr; {summary.headBranch}
+            </div>
           </div>
         </div>
-        <div className="hidden items-center rounded-md border border-border/50 bg-muted/50 md:flex">
-          <button
-            type="button"
-            onClick={() => setViewMode("unified")}
-            className={`inline-flex items-center gap-1 rounded-l-md px-2 py-1 text-xs transition-colors ${
-              viewMode === "unified"
-                ? "bg-accent text-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-            title="Unified view"
-          >
-            <Rows2 className="size-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => setViewMode("split")}
-            className={`inline-flex items-center gap-1 rounded-r-md px-2 py-1 text-xs transition-colors ${
-              viewMode === "split"
-                ? "bg-accent text-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-            title="Split view"
-          >
-            <Columns2 className="size-3.5" />
-          </button>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center rounded-md border border-border/50 bg-muted/50">
+            <button
+              type="button"
+              onClick={() => setDiffMode("uncommitted")}
+              className={`inline-flex items-center rounded-l-md px-2.5 py-1 text-xs transition-colors ${
+                diffMode === "uncommitted"
+                  ? "bg-accent text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              Uncommitted
+            </button>
+            <button
+              type="button"
+              onClick={() => setDiffMode("branch")}
+              className={`inline-flex items-center rounded-r-md px-2.5 py-1 text-xs transition-colors ${
+                diffMode === "branch"
+                  ? "bg-accent text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              vs {baseBranch ?? "base"}
+            </button>
+          </div>
+          <div className="hidden items-center rounded-md border border-border/50 bg-muted/50 md:flex">
+            <button
+              type="button"
+              onClick={() => setViewMode("unified")}
+              className={`inline-flex items-center gap-1 rounded-l-md px-2 py-1 text-xs transition-colors ${
+                viewMode === "unified"
+                  ? "bg-accent text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+              title="Unified view"
+            >
+              <Rows2 className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("split")}
+              className={`inline-flex items-center gap-1 rounded-r-md px-2 py-1 text-xs transition-colors ${
+                viewMode === "split"
+                  ? "bg-accent text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+              title="Split view"
+            >
+              <Columns2 className="size-3.5" />
+            </button>
+          </div>
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">

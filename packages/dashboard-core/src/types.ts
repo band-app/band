@@ -153,6 +153,8 @@ export interface DeleteDialogInfo {
 
 export type FileStatus = "A" | "M" | "D" | "R" | "U";
 
+export type DiffMode = "uncommitted" | "branch";
+
 export interface WorkspaceDiff {
   diff: string;
   stats: { filesChanged: number; insertions: number; deletions: number };

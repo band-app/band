@@ -586,6 +586,7 @@ const workspaceRouter = t.router({
       z.object({
         workspaceId: z.string(),
         contextLines: z.number().int().min(0).max(99999).optional(),
+        diffMode: z.enum(["uncommitted", "branch"]).optional(),
       }),
     )
     .query(async ({ input }) => {
@@ -600,10 +601,14 @@ const workspaceRouter = t.router({
       const headBranch = (await execGit(["rev-parse", "--abbrev-ref", "HEAD"], cwd)).trim();
 
       let mergeBase: string;
-      try {
-        mergeBase = (await execGit(["merge-base", defaultBranch, "HEAD"], cwd)).trim();
-      } catch {
-        mergeBase = (await execGit(["hash-object", "-t", "tree", "/dev/null"], cwd)).trim();
+      if (input.diffMode === "uncommitted") {
+        mergeBase = (await execGit(["rev-parse", "HEAD"], cwd)).trim();
+      } else {
+        try {
+          mergeBase = (await execGit(["merge-base", defaultBranch, "HEAD"], cwd)).trim();
+        } catch {
+          mergeBase = (await execGit(["hash-object", "-t", "tree", "/dev/null"], cwd)).trim();
+        }
       }
 
       const diffArgs = ["diff"];
@@ -676,7 +681,12 @@ const workspaceRouter = t.router({
     }),
 
   getDiffSummary: publicProcedure
-    .input(z.object({ workspaceId: z.string() }))
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        diffMode: z.enum(["uncommitted", "branch"]).optional(),
+      }),
+    )
     .query(async ({ input }) => {
       const workspace = resolveWorkspace(input.workspaceId);
       if (!workspace) {
@@ -689,10 +699,14 @@ const workspaceRouter = t.router({
       const headBranch = (await execGit(["rev-parse", "--abbrev-ref", "HEAD"], cwd)).trim();
 
       let mergeBase: string;
-      try {
-        mergeBase = (await execGit(["merge-base", defaultBranch, "HEAD"], cwd)).trim();
-      } catch {
-        mergeBase = (await execGit(["hash-object", "-t", "tree", "/dev/null"], cwd)).trim();
+      if (input.diffMode === "uncommitted") {
+        mergeBase = (await execGit(["rev-parse", "HEAD"], cwd)).trim();
+      } else {
+        try {
+          mergeBase = (await execGit(["merge-base", defaultBranch, "HEAD"], cwd)).trim();
+        } catch {
+          mergeBase = (await execGit(["hash-object", "-t", "tree", "/dev/null"], cwd)).trim();
+        }
       }
 
       const statOutput = await execGit(["diff", "--stat", mergeBase], cwd);
