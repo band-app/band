@@ -26,6 +26,28 @@ const log = createLogger("coding-agent:claude-code");
 
 const ASK_USER_QUESTION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
+/**
+ * Build a human-readable display title for a Claude Code tool call.
+ *
+ * Picks the most recognisable argument from the tool input so the UI can
+ * show what the tool is doing at a glance without parsing raw JSON.
+ */
+function formatToolTitle(toolName: string, input: Record<string, unknown>): string {
+  const arg =
+    (input.command as string | undefined) ??
+    (input.pattern as string | undefined) ??
+    (input.query as string | undefined) ??
+    (input.file_path as string | undefined) ??
+    (input.url as string | undefined) ??
+    (input.content as string | undefined) ??
+    (input.description as string | undefined);
+  if (typeof arg === "string") {
+    const summary = arg.length > 80 ? `${arg.slice(0, 80)}...` : arg;
+    return `${toolName}(${summary})`;
+  }
+  return toolName;
+}
+
 function formatUserAnswer(answers: Record<string, string>): string {
   const lines = Object.entries(answers).map(([question, answer]) => `${question}: ${answer}`);
   return `The user selected:\n${lines.join("\n")}`;
@@ -304,11 +326,14 @@ function mapSessionMessage(msg: SessionMessage): SessionMessageItem {
       if (block.type === "text" && block.text) {
         content.push({ type: "text", text: block.text });
       } else if (block.type === "tool_use") {
+        const toolName = block.name ?? "unknown";
+        const input = (block.input ?? {}) as Record<string, unknown>;
         content.push({
           type: "tool_use",
           toolCallId: block.id ?? "",
-          toolName: block.name ?? "unknown",
-          input: block.input ?? {},
+          toolName,
+          displayTitle: formatToolTitle(toolName, input),
+          input,
         });
       } else if (block.type === "tool_result" && block.tool_use_id) {
         const output =
@@ -398,12 +423,14 @@ function* mapClaudeCodeEvent(
           } else if (block.type === "tool_use") {
             const toolCallId = block.id ?? crypto.randomUUID();
             const toolName = block.name ?? "unknown";
+            const input = (block.input ?? {}) as Record<string, unknown>;
             state.toolNames.set(toolCallId, toolName);
             yield {
               type: "tool-use",
               toolCallId,
               toolName,
-              input: block.input ?? {},
+              displayTitle: formatToolTitle(toolName, input),
+              input,
             };
             processedUpTo = i + 1;
           } else {

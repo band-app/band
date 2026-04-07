@@ -19,29 +19,14 @@ function extractMarkdown(item: ToolCallItem): string | null {
 export interface ToolCallItem {
   toolCallId: string;
   toolName: string;
+  /** Server-formatted display title (e.g. "Bash(git status)"). */
+  displayTitle?: string;
   input: unknown;
   output: unknown;
   errorText?: string;
   isError: boolean;
   isInProgress: boolean;
   approvalId?: string;
-}
-
-export function formatToolTitle(name: string, input: unknown): string {
-  if (!input || typeof input !== "object") return name;
-  const record = input as Record<string, unknown>;
-  const arg =
-    record.command ??
-    record.pattern ??
-    record.query ??
-    record.file_path ??
-    record.url ??
-    record.content;
-  if (typeof arg === "string") {
-    const summary = arg.length > 80 ? `${arg.slice(0, 80)}...` : arg;
-    return `${name}(${summary})`;
-  }
-  return name;
 }
 
 function StatusDot({ isError, isInProgress }: { isError: boolean; isInProgress: boolean }) {
@@ -84,7 +69,7 @@ export function ToolCall({ item }: { item: ToolCallItem }) {
     );
   }
 
-  const title = formatToolTitle(item.toolName, item.input);
+  const title = item.displayTitle ?? item.toolName;
 
   const markdown = extractMarkdown(item);
 

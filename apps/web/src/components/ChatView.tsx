@@ -53,9 +53,12 @@ const ERROR_STATES = new Set<ToolPart["state"]>(["output-error", "output-denied"
 function toolPartToItem(part: ToolPart): ToolCallItem {
   const approval = "approval" in part ? (part.approval as { id?: string } | undefined) : undefined;
   const toolName = getToolName(part);
+  const displayTitle =
+    "title" in part && typeof part.title === "string" ? part.title : undefined;
   return {
     toolCallId: part.toolCallId,
     toolName,
+    displayTitle,
     input: part.input,
     output: part.output,
     errorText: part.errorText,
@@ -150,6 +153,7 @@ function convertHistoryToUIMessages(history: HistoryMessage[]): UIMessage[] {
         } else if (block.type === "tool_use") {
           const callId = block.toolCallId ?? "";
           const toolName = block.toolName ?? "unknown";
+          const title = block.displayTitle;
           const result = toolResultMap.get(callId);
 
           if (result?.isError) {
@@ -160,6 +164,7 @@ function convertHistoryToUIMessages(history: HistoryMessage[]): UIMessage[] {
               state: "output-error",
               input: block.input,
               errorText: result.output ?? "Error",
+              ...(title ? { title } : {}),
             });
           } else if (result) {
             parts.push({
@@ -169,6 +174,7 @@ function convertHistoryToUIMessages(history: HistoryMessage[]): UIMessage[] {
               state: "output-available",
               input: block.input,
               output: result.output,
+              ...(title ? { title } : {}),
             });
           } else {
             // No result — tool is still waiting for input/completion
@@ -178,6 +184,7 @@ function convertHistoryToUIMessages(history: HistoryMessage[]): UIMessage[] {
               toolCallId: callId,
               state: "input-available",
               input: block.input,
+              ...(title ? { title } : {}),
             });
           }
         }

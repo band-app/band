@@ -12,6 +12,8 @@ export interface ToolUseEvent {
   type: "tool-use";
   toolCallId: string;
   toolName: string;
+  /** Human-readable display title (e.g. "Bash(git status)"). */
+  displayTitle?: string;
   input: Record<string, unknown>;
 }
 

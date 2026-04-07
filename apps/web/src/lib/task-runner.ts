@@ -293,6 +293,7 @@ async function runTask(workspaceId: string, task: InternalTask) {
             toolCallId: event.toolCallId,
             toolName: event.toolName,
             input: event.input,
+            ...(event.displayTitle ? { title: event.displayTitle } : {}),
           });
           break;
         }

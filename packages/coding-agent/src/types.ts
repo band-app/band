@@ -25,7 +25,7 @@ export interface SessionMessageItem {
   id: string;
   content: Array<
     | { type: "text"; text: string }
-    | { type: "tool_use"; toolCallId: string; toolName: string; input: unknown }
+    | { type: "tool_use"; toolCallId: string; toolName: string; displayTitle?: string; input: unknown }
     | { type: "tool_result"; toolCallId: string; output: string; isError: boolean }
   >;
 }
