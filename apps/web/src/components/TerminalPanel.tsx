@@ -20,8 +20,11 @@ export function TerminalPanel({ workspaceId, visible }: TerminalPanelProps) {
     let cleanup: (() => void) | undefined;
 
     // Dynamic import so @xterm (CJS) is never evaluated during SSR
-    Promise.all([import("@xterm/xterm"), import("@xterm/addon-fit")]).then(
-      ([{ Terminal: XTerm }, { FitAddon: XFitAddon }]) => {
+    Promise.all([
+      import("@xterm/xterm"),
+      import("@xterm/addon-fit"),
+      import("@xterm/addon-web-links"),
+    ]).then(([{ Terminal: XTerm }, { FitAddon: XFitAddon }, { WebLinksAddon: XWebLinksAddon }]) => {
         if (cancelled || !containerRef.current) return;
 
         // CSS loaded on client only
@@ -31,6 +34,7 @@ export function TerminalPanel({ workspaceId, visible }: TerminalPanelProps) {
           cursorBlink: true,
           fontSize: 13,
           fontFamily: "'SF Mono', Menlo, Monaco, 'Courier New', monospace",
+          macOptionIsMeta: true, // Alt+Left/Right → word navigation on macOS
           theme: {
             background: "#181818",
             foreground: "#e8e8e8",
@@ -41,7 +45,23 @@ export function TerminalPanel({ workspaceId, visible }: TerminalPanelProps) {
 
         const fitAddon = new XFitAddon();
         terminal.loadAddon(fitAddon);
+        terminal.loadAddon(new XWebLinksAddon());
         terminal.open(containerRef.current!);
+
+        // Alt+Arrow → word navigation (send ESC+b / ESC+f that shells understand)
+        terminal.attachCustomKeyEventHandler((e) => {
+          if (e.type === "keydown" && e.altKey && !e.metaKey && !e.ctrlKey) {
+            if (e.key === "ArrowLeft") {
+              terminal.input("\x1bb");
+              return false;
+            }
+            if (e.key === "ArrowRight") {
+              terminal.input("\x1bf");
+              return false;
+            }
+          }
+          return true;
+        });
 
         terminalRef.current = terminal;
         fitAddonRef.current = fitAddon;
