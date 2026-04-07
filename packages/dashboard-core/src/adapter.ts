@@ -2,6 +2,7 @@ import type {
   CIStatus,
   CliStatus,
   ContentSearchMatch,
+  DiffMode,
   FileContentResult,
   FileDiffResult,
   FileListResult,
@@ -70,8 +71,8 @@ export interface DashboardAdapter {
   closeWorkspaceWindows(workspaceId: string): Promise<void>;
 
   // Code browsing (optional)
-  getWorkspaceDiff?(workspaceId: string, contextLines?: number): Promise<WorkspaceDiff>;
-  getWorkspaceDiffSummary?(workspaceId: string): Promise<WorkspaceDiffSummary>;
+  getWorkspaceDiff?(workspaceId: string, contextLines?: number, diffMode?: DiffMode): Promise<WorkspaceDiff>;
+  getWorkspaceDiffSummary?(workspaceId: string, diffMode?: DiffMode): Promise<WorkspaceDiffSummary>;
   getFileDiff?(
     workspaceId: string,
     filePath: string,

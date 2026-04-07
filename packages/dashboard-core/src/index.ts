@@ -70,6 +70,7 @@ export type {
   CodingAgentDefinition,
   CodingAgentType,
   ContentSearchMatch,
+  DiffMode,
   FileContentResult,
   FileDiffResult,
   FileEntry,
