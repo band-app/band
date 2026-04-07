@@ -40,7 +40,7 @@ import {
   Tag,
   Trash2,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCapabilities } from "../context";
 import {
   useRemoveProject,
@@ -364,6 +364,8 @@ export function ProjectList({ labelFilter, editMode }: ProjectListProps) {
     }
   }, [hasProjects]);
 
+  const capabilities = useCapabilities();
+
   // ──────────────────────────────────────────────────────────────────────────
   // KEYBOARD NAVIGATION — READ BEFORE MODIFYING
   //
@@ -388,6 +390,18 @@ export function ProjectList({ labelFilter, editMode }: ProjectListProps) {
   // pressing Enter after arrow-key navigation opens the wrong workspace (or
   // no workspace at all, depending on the platform).
   // ──────────────────────────────────────────────────────────────────────────
+  const selectWorkspace = useCallback(
+    (wsId: string) => {
+      const href = capabilities.getWorkspaceHref?.(wsId);
+      if (href && capabilities.navigate) {
+        capabilities.navigate(href);
+      } else {
+        openWorkspace(wsId);
+      }
+    },
+    [capabilities, openWorkspace],
+  );
+
   function handleKeyDown(e: React.KeyboardEvent) {
     if (allWorkspaceIds.length === 0) return;
 
@@ -408,7 +422,7 @@ export function ProjectList({ labelFilter, editMode }: ProjectListProps) {
       e.preventDefault();
       if (focusedIndex >= 0 && focusedIndex < allWorkspaceIds.length) {
         keyboardNavRef.current = false;
-        openWorkspace(allWorkspaceIds[focusedIndex]);
+        selectWorkspace(allWorkspaceIds[focusedIndex]);
       }
     }
   }
@@ -421,8 +435,6 @@ export function ProjectList({ labelFilter, editMode }: ProjectListProps) {
   // as WorkspaceCard: web uses capabilities.navigate(href), Tauri uses
   // openWorkspace() which triggers IPC.
   // ──────────────────────────────────────────────────────────────────────────
-  const capabilities = useCapabilities();
-
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return;
@@ -440,18 +452,11 @@ export function ProjectList({ labelFilter, editMode }: ProjectListProps) {
 
       const delta = key === "[" ? -1 : 1;
       const nextIndex = (currentIndex + delta + allWorkspaceIds.length) % allWorkspaceIds.length;
-      const nextId = allWorkspaceIds[nextIndex];
-
-      const href = capabilities.getWorkspaceHref?.(nextId);
-      if (href && capabilities.navigate) {
-        capabilities.navigate(href);
-      } else {
-        openWorkspace(nextId);
-      }
+      selectWorkspace(allWorkspaceIds[nextIndex]);
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [allWorkspaceIds, activeWorkspaceId, openWorkspace, capabilities]);
+  }, [allWorkspaceIds, activeWorkspaceId, selectWorkspace]);
 
   const allProjectNames = useMemo(
     () => visibleGroups.flatMap((g) => g.projects.map((p) => p.name)),
