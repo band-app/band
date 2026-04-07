@@ -14,7 +14,13 @@
       ]
     },
     "apps/web": {
-      "entry": ["src/client.tsx", "src/server.ts", "src/router.tsx", "bin/band-server.mjs", "start-server.ts"],
+      "entry": [
+        "src/client.tsx",
+        "src/server.ts",
+        "src/router.tsx",
+        "bin/band-server.mjs",
+        "start-server.ts"
+      ],
       "project": ["src/**/*.{ts,tsx}", "tests/**/*.ts", "e2e/**/*.ts"],
       "ignoreDependencies": [
         "tailwindcss",
