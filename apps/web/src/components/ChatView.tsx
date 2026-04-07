@@ -933,7 +933,7 @@ function ModelMenu({
 
 function QueuedMessageBubble({ text, onCancel }: { text: string; onCancel: () => void }) {
   return (
-    <div className="group is-user flex w-full max-w-[95%] flex-col gap-2 ml-auto justify-end opacity-60">
+    <div className="group is-user flex w-full max-w-[90%] flex-col gap-2 ml-auto justify-end opacity-60">
       <div className="flex min-w-0 max-w-full flex-col gap-2 break-words text-base ml-auto w-fit rounded-md bg-secondary px-4 py-3 text-foreground">
         <MessageResponse>{text}</MessageResponse>
         <div className="flex items-center justify-end gap-2 mt-1">
