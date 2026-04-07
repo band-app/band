@@ -390,7 +390,7 @@ function LazyFileRow({
       <button
         type="button"
         onClick={toggle}
-        className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm hover:bg-accent/50"
+        className="sticky top-0 z-10 flex w-full items-center gap-2 bg-background px-4 py-2.5 text-left text-sm hover:bg-accent/50"
       >
         <span
           className={`shrink-0 text-muted-foreground transition-transform ${isOpen ? "rotate-90" : ""}`}
