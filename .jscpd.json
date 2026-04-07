@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json.schemastore.org/jscpd.json",
+  "threshold": 5,
+  "reporters": ["console"],
+  "ignore": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/build/**",
+    "**/target/**",
+    "**/.astro/**",
+    "**/*.gen.ts",
+    "**/apps/dashboard/src-tauri/gen/**",
+    "**/pnpm-lock.yaml",
+    "**/*.lock",
+    "**/apps/web/src/lib/db/migrations/**",
+    "**/tests/**",
+    "**/e2e/**",
+    "**/__tests__/**",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/*.spec.ts",
+    "**/*.spec.tsx"
+  ],
+  "format": ["typescript", "tsx", "javascript", "jsx", "css"],
+  "absolute": true,
+  "gitignore": true
+}

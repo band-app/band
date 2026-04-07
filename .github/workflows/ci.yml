@@ -45,6 +45,12 @@ jobs:
       - name: Lint (Biome)
         run: pnpm exec biome check .
 
+      - name: Check unused exports & dependencies (knip)
+        run: pnpm knip
+
+      - name: Check code duplication (jscpd)
+        run: pnpm jscpd
+
       - name: Lint (cargo fmt)
         run: |
           cargo fmt --manifest-path apps/cli/Cargo.toml -- --check

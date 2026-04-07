@@ -1,0 +1,69 @@
+{
+  "$schema": "https://unpkg.com/knip@latest/schema.json",
+  "ignoreWorkspaces": ["apps/cli"],
+  "exclude": ["exports", "types", "unresolved"],
+  "ignoreBinaries": ["rustc"],
+  "workspaces": {
+    ".": {
+      "entry": ["scripts/*.mjs"],
+      "ignoreDependencies": [
+        "@band-app/cli",
+        "@tanstack/react-query",
+        "@trpc/client",
+        "@trpc/server"
+      ]
+    },
+    "apps/web": {
+      "entry": ["src/client.tsx", "src/server.ts", "src/router.tsx", "bin/band-server.mjs", "start-server.ts"],
+      "project": ["src/**/*.{ts,tsx}", "tests/**/*.ts", "e2e/**/*.ts"],
+      "ignoreDependencies": [
+        "tailwindcss",
+        "tw-animate-css",
+        "class-variance-authority",
+        "clsx",
+        "tailwind-merge",
+        "@tauri-apps/plugin-shell",
+        "@dnd-kit/core",
+        "@dnd-kit/sortable",
+        "@dnd-kit/utilities",
+        "@tanstack/router-plugin",
+        "nanoid"
+      ]
+    },
+    "apps/dashboard": {
+      "entry": ["vitest.config.ts"],
+      "ignoreBinaries": ["vitest"],
+      "ignoreDependencies": ["vitest"]
+    },
+    "apps/website": {
+      "entry": ["src/**/*.{astro,ts,tsx}"],
+      "project": ["src/**/*.{astro,ts,tsx}"],
+      "ignoreDependencies": ["tailwindcss"]
+    },
+    "packages/ui": {
+      "entry": ["src/index.ts", "src/utils.ts"],
+      "project": ["src/**/*.{ts,tsx}"]
+    },
+    "packages/dashboard-core": {
+      "entry": ["src/index.ts", "src/adapters/web.ts", "src/adapters/hybrid.ts"],
+      "project": ["src/**/*.{ts,tsx}"]
+    },
+    "packages/coding-agent": {
+      "entry": ["src/index.ts", "tests/mocks/*.mjs"],
+      "project": ["src/**/*.ts", "tests/**/*.{ts,mjs}"],
+      "ignoreDependencies": [
+        "@anthropic-ai/claude-agent-sdk",
+        "@nothumanwork/cursor-agents-sdk",
+        "@openai/codex-sdk"
+      ]
+    },
+    "packages/logger": {
+      "entry": ["src/index.ts"],
+      "project": ["src/**/*.ts"]
+    },
+    "extensions/vscode": {
+      "project": ["src/**/*.ts"],
+      "ignoreBinaries": ["vsce"]
+    }
+  }
+}
