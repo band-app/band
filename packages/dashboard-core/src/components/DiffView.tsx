@@ -1,7 +1,14 @@
 import { MergeView, unifiedMergeView } from "@codemirror/merge";
 import { EditorState, Text } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import { Columns2, Loader2, Rows2, SquareArrowOutUpRight } from "lucide-react";
+import {
+  ChevronsDownUp,
+  ChevronsUpDown,
+  Columns2,
+  Loader2,
+  Rows2,
+  SquareArrowOutUpRight,
+} from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAdapter } from "../context";
 import { useIsDark } from "../hooks/use-is-dark";
@@ -47,6 +54,21 @@ function getStoredDiffMode(): DiffMode {
 function storeDiffMode(mode: DiffMode) {
   try {
     localStorage.setItem(DIFF_MODE_KEY, mode);
+  } catch {}
+}
+
+const EXPAND_ALL_KEY = "band:diff-expand-all";
+
+function getStoredExpandAll(): boolean {
+  try {
+    return localStorage.getItem(EXPAND_ALL_KEY) === "true";
+  } catch {}
+  return false;
+}
+
+function storeExpandAll(v: boolean) {
+  try {
+    localStorage.setItem(EXPAND_ALL_KEY, v ? "true" : "false");
   } catch {}
 }
 
@@ -295,6 +317,7 @@ interface LazyFileRowProps {
   workspaceId: string;
   mergeBase: string;
   viewMode: ViewMode;
+  expandAll: boolean;
   onOpenFile?: (filename: string) => void;
 }
 
@@ -304,10 +327,11 @@ function LazyFileRow({
   workspaceId,
   mergeBase,
   viewMode,
+  expandAll,
   onOpenFile,
 }: LazyFileRowProps) {
   const adapter = useAdapter();
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(expandAll);
   const [diff, setDiff] = useState<string | null>(null);
   const [loadingDiff, setLoadingDiff] = useState(false);
   const [diffError, setDiffError] = useState<string | null>(null);
@@ -319,6 +343,11 @@ function LazyFileRow({
   const toggle = useCallback(() => {
     setIsOpen((prev) => !prev);
   }, []);
+
+  // Sync with parent expand-all toggle
+  useEffect(() => {
+    setIsOpen(expandAll);
+  }, [expandAll]);
 
   // Fetch diff when expanded and not cached (or mergeBase/contextLines changed)
   useEffect(() => {
@@ -461,6 +490,7 @@ export function DiffView({ workspaceId, active = true, onStatsChange, onOpenFile
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewModeState] = useState<ViewMode>(getStoredViewMode);
   const [diffMode, setDiffModeState] = useState<DiffMode>(getStoredDiffMode);
+  const [expandAll, setExpandAllState] = useState(getStoredExpandAll);
   const setViewMode = useCallback((mode: ViewMode) => {
     setViewModeState(mode);
     storeViewMode(mode);
@@ -468,6 +498,10 @@ export function DiffView({ workspaceId, active = true, onStatsChange, onOpenFile
   const setDiffMode = useCallback((mode: DiffMode) => {
     setDiffModeState(mode);
     storeDiffMode(mode);
+  }, []);
+  const setExpandAll = useCallback((v: boolean) => {
+    setExpandAllState(v);
+    storeExpandAll(v);
   }, []);
 
   useEffect(() => {
@@ -586,6 +620,22 @@ export function DiffView({ workspaceId, active = true, onStatsChange, onOpenFile
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setExpandAll(!expandAll)}
+            className={`inline-flex items-center rounded-md border border-border/50 px-2 py-1 text-xs transition-colors ${
+              expandAll
+                ? "bg-accent text-foreground"
+                : "bg-muted/50 text-muted-foreground hover:text-foreground"
+            }`}
+            title={expandAll ? "Collapse all files" : "Expand all files"}
+          >
+            {expandAll ? (
+              <ChevronsDownUp className="size-3.5" />
+            ) : (
+              <ChevronsUpDown className="size-3.5" />
+            )}
+          </button>
           <div className="flex items-center rounded-md border border-border/50 bg-muted/50">
             <button
               type="button"
@@ -647,6 +697,7 @@ export function DiffView({ workspaceId, active = true, onStatsChange, onOpenFile
             workspaceId={workspaceId}
             mergeBase={summary.mergeBase}
             viewMode={viewMode}
+            expandAll={expandAll}
             onOpenFile={onOpenFile}
           />
         ))}
