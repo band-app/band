@@ -336,11 +336,14 @@ fn workspaces_create_makes_worktree_and_registers_state() {
     // Worktree directory exists on disk
     assert!(Path::new(&path).exists(), "worktree dir should exist");
 
-    // State was updated
+    // State was updated (default "main" worktree + newly created one)
     let state = env.state_json();
-    let worktrees = &state["projects"][0]["worktrees"];
-    assert_eq!(worktrees.as_array().unwrap().len(), 1);
-    assert_eq!(worktrees[0]["branch"], "feat/test");
+    let worktrees = state["projects"][0]["worktrees"].as_array().unwrap();
+    assert_eq!(worktrees.len(), 2);
+    assert!(
+        worktrees.iter().any(|w| w["branch"] == "feat/test"),
+        "expected feat/test in worktrees: {worktrees:?}"
+    );
 }
 
 #[test]
@@ -439,10 +442,11 @@ fn workspaces_remove_cleans_up_worktree_and_state() {
     let output = env.band(&["workspaces", "remove", "my-project", "feat/rm"]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
-    // Worktree removed from state
+    // Worktree removed from state (only the seeded "main" worktree remains)
     let state = env.state_json();
-    let worktrees = &state["projects"][0]["worktrees"];
-    assert_eq!(worktrees.as_array().unwrap().len(), 0);
+    let worktrees = state["projects"][0]["worktrees"].as_array().unwrap();
+    assert_eq!(worktrees.len(), 1);
+    assert_eq!(worktrees[0]["branch"], "main");
 
     // Worktree directory removed from disk
     assert!(!Path::new(&path).exists(), "worktree dir should be gone");
@@ -665,6 +669,166 @@ fn notify_silently_succeeds_when_server_unreachable() {
         output.status.success(),
         "notify should not fail when server is down. stderr: {}",
         stderr(&output)
+    );
+}
+
+/// Helper: run `band notify` piping `payload` to stdin, using the live server
+/// from a TestEnv.
+fn band_notify(env: &TestEnv, payload: &serde_json::Value) -> std::process::Output {
+    use std::io::Write;
+    let mut child = Command::new(env!("CARGO_BIN_EXE_band"))
+        .args(["notify"])
+        .env("BAND_HOME", &env.band_dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn band notify");
+    if let Some(ref mut stdin) = child.stdin {
+        let _ = stdin.write_all(payload.to_string().as_bytes());
+    }
+    child.wait_with_output().expect("band notify failed")
+}
+
+/// Helper: query workspace status from the SQLite database.
+fn query_agent_status(band_dir: &Path, workspace_id: &str) -> Option<String> {
+    let db_path = band_dir.join("band.db");
+    let script = format!(
+        r#"
+        const Database = (await import("{bsqlite}")).default;
+        const db = new Database("{db}");
+        const row = db.prepare(
+            "SELECT agent_status FROM workspace_statuses WHERE workspace_id = ?"
+        ).get("{ws}");
+        console.log(JSON.stringify({{ status: row ? row.agent_status : null }}));
+        db.close();
+        "#,
+        bsqlite = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../apps/web/node_modules/better-sqlite3/lib/index.js")
+            .to_string_lossy()
+            .replace('\\', "/"),
+        db = db_path.to_string_lossy().replace('\\', "/"),
+        ws = workspace_id,
+    );
+    let output = Command::new("node")
+        .args(["--input-type=module", "-e", &script])
+        .output()
+        .expect("query_agent_status failed");
+    assert!(
+        output.status.success(),
+        "query_agent_status failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: serde_json::Value =
+        serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("parse json");
+    json["status"].as_str().map(String::from)
+}
+
+#[test]
+fn notify_pre_tool_use_ask_user_question_sets_needs_attention() {
+    let env = TestEnv::new();
+    let payload = serde_json::json!({
+        "hook_event_name": "PreToolUse",
+        "tool_name": "AskUserQuestion",
+        "cwd": env.repo_path.to_string_lossy()
+    });
+    let output = band_notify(&env, &payload);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let status = query_agent_status(&env.band_dir, "my-project-main");
+    assert_eq!(
+        status.as_deref(),
+        Some("needs_attention"),
+        "PreToolUse+AskUserQuestion should set needs_attention"
+    );
+}
+
+#[test]
+fn notify_pre_tool_use_exit_plan_mode_sets_needs_attention() {
+    let env = TestEnv::new();
+    let payload = serde_json::json!({
+        "hook_event_name": "PreToolUse",
+        "tool_name": "ExitPlanMode",
+        "cwd": env.repo_path.to_string_lossy()
+    });
+    let output = band_notify(&env, &payload);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let status = query_agent_status(&env.band_dir, "my-project-main");
+    assert_eq!(
+        status.as_deref(),
+        Some("needs_attention"),
+        "PreToolUse+ExitPlanMode should set needs_attention"
+    );
+}
+
+#[test]
+fn notify_pre_tool_use_regular_tool_stays_working() {
+    let env = TestEnv::new();
+    let payload = serde_json::json!({
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Read",
+        "cwd": env.repo_path.to_string_lossy()
+    });
+    let output = band_notify(&env, &payload);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let status = query_agent_status(&env.band_dir, "my-project-main");
+    assert_eq!(
+        status.as_deref(),
+        Some("working"),
+        "PreToolUse+Read should set working, not needs_attention"
+    );
+}
+
+#[test]
+fn notify_post_tool_use_after_ask_user_restores_working() {
+    let env = TestEnv::new();
+
+    // First, AskUserQuestion triggers needs_attention
+    let payload = serde_json::json!({
+        "hook_event_name": "PreToolUse",
+        "tool_name": "AskUserQuestion",
+        "cwd": env.repo_path.to_string_lossy()
+    });
+    let output = band_notify(&env, &payload);
+    assert!(output.status.success());
+    assert_eq!(
+        query_agent_status(&env.band_dir, "my-project-main").as_deref(),
+        Some("needs_attention")
+    );
+
+    // Then PostToolUse fires after user responds → back to working
+    let payload = serde_json::json!({
+        "hook_event_name": "PostToolUse",
+        "tool_name": "AskUserQuestion",
+        "cwd": env.repo_path.to_string_lossy()
+    });
+    let output = band_notify(&env, &payload);
+    assert!(output.status.success());
+    assert_eq!(
+        query_agent_status(&env.band_dir, "my-project-main").as_deref(),
+        Some("working"),
+        "PostToolUse should restore working status"
+    );
+}
+
+#[test]
+fn notify_permission_request_sets_needs_attention() {
+    let env = TestEnv::new();
+    let payload = serde_json::json!({
+        "hook_event_name": "PermissionRequest",
+        "tool_name": "Bash",
+        "cwd": env.repo_path.to_string_lossy()
+    });
+    let output = band_notify(&env, &payload);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let status = query_agent_status(&env.band_dir, "my-project-main");
+    assert_eq!(
+        status.as_deref(),
+        Some("needs_attention"),
+        "PermissionRequest should set needs_attention"
     );
 }
 

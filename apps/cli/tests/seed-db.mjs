@@ -71,10 +71,14 @@ for (const file of sqlFiles) {
   }
 }
 
-// Seed the test project
+// Seed the test project and its default worktree
 db.prepare(
   "INSERT INTO projects (name, path, default_branch, sort_order) VALUES (?, ?, ?, 0)"
 ).run(projectName, projectPath, defaultBranch);
+
+db.prepare(
+  "INSERT INTO worktrees (project_name, branch, path) VALUES (?, ?, ?)"
+).run(projectName, defaultBranch, projectPath);
 
 db.close();
 

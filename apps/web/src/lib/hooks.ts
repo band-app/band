@@ -3,7 +3,13 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { whichBinary } from "./process-utils";
 
-const HOOK_EVENTS = ["UserPromptSubmit", "PostToolUse", "Stop"];
+const HOOK_EVENTS = [
+  "PreToolUse",
+  "PermissionRequest",
+  "UserPromptSubmit",
+  "PostToolUse",
+  "Stop",
+];
 
 function claudeSettingsPath(): string {
   return join(homedir(), ".claude", "settings.json");

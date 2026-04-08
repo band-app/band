@@ -1428,8 +1428,19 @@ fn cmd_notify() -> Result<CommandResult, String> {
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
+    let tool_name = payload
+        .get("tool_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
     let agent_status = match hook_event {
         "Stop" => "needs_attention",
+        "PermissionRequest" => "needs_attention",
+        "PreToolUse"
+            if tool_name == "AskUserQuestion" || tool_name == "ExitPlanMode" =>
+        {
+            "needs_attention"
+        }
         _ => "working",
     };
 

@@ -18,12 +18,13 @@ export function AgentStatusIndicator({ agent, isActive }: Props) {
 
   const isWorking = agent.status === "working";
   const color = isWorking ? "bg-status-working" : "bg-status-needs-attention";
-  const tooltip = isWorking ? "Agent running..." : "Agent done";
+  const tooltip = isWorking ? "Agent running..." : "Needs your attention";
+  const animation = isWorking ? "" : "animate-status-pulse";
 
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className={`inline-block size-2 shrink-0 rounded-full ${color}`} />
+        <span className={`inline-block size-2 shrink-0 rounded-full ${color} ${animation}`} />
       </TooltipTrigger>
       <TooltipContent side="top">{tooltip}</TooltipContent>
     </Tooltip>
