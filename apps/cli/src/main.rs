@@ -1434,8 +1434,10 @@ fn cmd_notify() -> Result<CommandResult, String> {
         .unwrap_or("");
 
     let agent_status = match hook_event {
-        "Stop" | "PermissionRequest" => "needs_attention",
-        "PreToolUse" if tool_name == "AskUserQuestion" || tool_name == "ExitPlanMode" => {
+        "Stop" => "needs_attention",
+        "PreToolUse"
+            if tool_name == "AskUserQuestion" || tool_name == "ExitPlanMode" =>
+        {
             "needs_attention"
         }
         _ => "working",
