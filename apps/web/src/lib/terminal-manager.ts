@@ -24,7 +24,10 @@ const workspaceTerminals = new Map<string, Set<string>>();
  * Spawns a new terminal session for the given workspace and terminalId.
  * Always creates a new PTY (each split pane gets its own shell).
  */
-export async function spawnTerminal(workspaceId: string, terminalId: string): Promise<TerminalSession> {
+export async function spawnTerminal(
+  workspaceId: string,
+  terminalId: string,
+): Promise<TerminalSession> {
   const workspace = resolveWorkspace(workspaceId);
   if (!workspace) {
     throw new Error(`Workspace not found: ${workspaceId}`);
@@ -53,7 +56,13 @@ export async function spawnTerminal(workspaceId: string, terminalId: string): Pr
     throw new Error(`Shell not found: ${shell}`);
   }
 
-  log.debug("Spawning shell %s in %s for terminal %s (PATH=%s)", shell, cwd, terminalId, resolvedPath.slice(0, 200));
+  log.debug(
+    "Spawning shell %s in %s for terminal %s (PATH=%s)",
+    shell,
+    cwd,
+    terminalId,
+    resolvedPath.slice(0, 200),
+  );
 
   const nodePty = (await import("node-pty")).default;
   let ptyProcess: IPty;

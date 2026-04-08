@@ -7,8 +7,8 @@ import {
   type LeafNode,
   loadTree,
   removeLeaf,
-  saveTree,
   type SplitNode,
+  saveTree,
   splitLeaf,
   type TreeNode,
   updateNodeSizes,
@@ -101,7 +101,14 @@ interface RenderNodeProps {
   totalLeaves: number;
 }
 
-function RenderNode({ node, workspaceId, visible, onSplit, onClose, totalLeaves }: RenderNodeProps) {
+function RenderNode({
+  node,
+  workspaceId,
+  visible,
+  onSplit,
+  onClose,
+  totalLeaves,
+}: RenderNodeProps) {
   if (node.type === "leaf") {
     return (
       <LeafPane
@@ -175,7 +182,11 @@ function SplitPane({ node, workspaceId, visible, onSplit, onClose, totalLeaves }
   );
 
   return (
-    <Group orientation={orientation} defaultLayout={defaultLayout} onLayoutChanged={handleLayoutChanged}>
+    <Group
+      orientation={orientation}
+      defaultLayout={defaultLayout}
+      onLayoutChanged={handleLayoutChanged}
+    >
       <Panel id="left" minSize={10}>
         <RenderNode
           node={node.children[0]}
@@ -186,11 +197,13 @@ function SplitPane({ node, workspaceId, visible, onSplit, onClose, totalLeaves }
           totalLeaves={totalLeaves}
         />
       </Panel>
-      <Separator className={
-        orientation === "horizontal"
-          ? "w-1 bg-neutral-700/50 hover:bg-blue-500/50 transition-colors"
-          : "h-1 bg-neutral-700/50 hover:bg-blue-500/50 transition-colors"
-      } />
+      <Separator
+        className={
+          orientation === "horizontal"
+            ? "w-1 bg-neutral-700/50 hover:bg-blue-500/50 transition-colors"
+            : "h-1 bg-neutral-700/50 hover:bg-blue-500/50 transition-colors"
+        }
+      />
       <Panel id="right" minSize={10}>
         <RenderNode
           node={node.children[1]}
@@ -229,17 +242,11 @@ function LeafPane({ node, workspaceId, visible, onSplit, onClose, showClose }: L
         >
           <Columns2 className="size-3.5" />
         </ToolbarButton>
-        <ToolbarButton
-          title="Split Vertical"
-          onClick={() => onSplit(node.terminalId, "vertical")}
-        >
+        <ToolbarButton title="Split Vertical" onClick={() => onSplit(node.terminalId, "vertical")}>
           <Rows2 className="size-3.5" />
         </ToolbarButton>
         {showClose && (
-          <ToolbarButton
-            title="Close Terminal"
-            onClick={() => onClose(node.terminalId)}
-          >
+          <ToolbarButton title="Close Terminal" onClick={() => onClose(node.terminalId)}>
             <X className="size-3.5" />
           </ToolbarButton>
         )}
@@ -247,11 +254,7 @@ function LeafPane({ node, workspaceId, visible, onSplit, onClose, showClose }: L
       {/* Terminal */}
       <div className="min-h-0 flex-1">
         <Suspense fallback={null}>
-          <TerminalPanel
-            workspaceId={workspaceId}
-            terminalId={node.terminalId}
-            visible={visible}
-          />
+          <TerminalPanel workspaceId={workspaceId} terminalId={node.terminalId} visible={visible} />
         </Suspense>
       </div>
     </div>

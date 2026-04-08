@@ -1,7 +1,12 @@
 import type { IncomingMessage } from "node:http";
 import { createLogger } from "@band-app/logger";
 import type { WebSocket } from "ws";
-import { getTerminalSession, killTerminal, resizeTerminal, spawnTerminal } from "./terminal-manager";
+import {
+  getTerminalSession,
+  killTerminal,
+  resizeTerminal,
+  spawnTerminal,
+} from "./terminal-manager";
 
 const log = createLogger("terminal-ws");
 
@@ -22,7 +27,12 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
       session = await spawnTerminal(workspaceId, terminalId);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      log.error("Failed to spawn terminal %s for workspace %s: %s", terminalId, workspaceId, message);
+      log.error(
+        "Failed to spawn terminal %s for workspace %s: %s",
+        terminalId,
+        workspaceId,
+        message,
+      );
       ws.close(4001, message);
       return;
     }
@@ -96,6 +106,6 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
  *  \x1b[=c   — Tertiary Device Attributes (DA3)
  */
 function stripTerminalQueries(data: string): string {
-  // eslint-disable-next-line no-control-regex
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional — matching real ESC sequences in terminal output
   return data.replace(/\x1b\[\??[0-9]*[nc]|\x1b\[>[0-9]*c|\x1b\[=[0-9]*c/g, "");
 }
