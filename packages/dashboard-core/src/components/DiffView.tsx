@@ -1,3 +1,4 @@
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@band-app/ui";
 import { MergeView, unifiedMergeView } from "@codemirror/merge";
 import { EditorState, Text } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
@@ -560,30 +561,15 @@ export function DiffView({ workspaceId, active = true, onStatsChange, onOpenFile
     return (
       <div className="flex h-full flex-col overflow-hidden">
         <div className="flex shrink-0 items-center justify-end border-b border-border px-4 py-2">
-          <div className="flex items-center rounded-md border border-border/50 bg-muted/50">
-            <button
-              type="button"
-              onClick={() => setDiffMode("uncommitted")}
-              className={`inline-flex items-center rounded-l-md px-2.5 py-1 text-xs transition-colors ${
-                diffMode === "uncommitted"
-                  ? "bg-accent text-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              Uncommitted
-            </button>
-            <button
-              type="button"
-              onClick={() => setDiffMode("branch")}
-              className={`inline-flex items-center rounded-r-md px-2.5 py-1 text-xs transition-colors ${
-                diffMode === "branch"
-                  ? "bg-accent text-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              vs {baseBranch ?? "base"}
-            </button>
-          </div>
+          <Select value={diffMode} onValueChange={(v) => setDiffMode(v as DiffMode)}>
+            <SelectTrigger className="h-7 w-auto gap-1 rounded-md border-border/50 bg-muted/50 px-2.5 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="uncommitted">Uncommitted</SelectItem>
+              <SelectItem value="branch">vs {baseBranch ?? "base"}</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
         <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
           No changes
@@ -636,30 +622,15 @@ export function DiffView({ workspaceId, active = true, onStatsChange, onOpenFile
               <ChevronsUpDown className="size-3.5" />
             )}
           </button>
-          <div className="flex items-center rounded-md border border-border/50 bg-muted/50">
-            <button
-              type="button"
-              onClick={() => setDiffMode("uncommitted")}
-              className={`inline-flex items-center rounded-l-md px-2.5 py-1 text-xs transition-colors ${
-                diffMode === "uncommitted"
-                  ? "bg-accent text-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              Uncommitted
-            </button>
-            <button
-              type="button"
-              onClick={() => setDiffMode("branch")}
-              className={`inline-flex items-center rounded-r-md px-2.5 py-1 text-xs transition-colors ${
-                diffMode === "branch"
-                  ? "bg-accent text-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              vs {baseBranch ?? "base"}
-            </button>
-          </div>
+          <Select value={diffMode} onValueChange={(v) => setDiffMode(v as DiffMode)}>
+            <SelectTrigger className="h-7 w-auto gap-1 rounded-md border-border/50 bg-muted/50 px-2.5 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="uncommitted">Uncommitted</SelectItem>
+              <SelectItem value="branch">vs {baseBranch ?? "base"}</SelectItem>
+            </SelectContent>
+          </Select>
           <div className="hidden items-center rounded-md border border-border/50 bg-muted/50 md:flex">
             <button
               type="button"
