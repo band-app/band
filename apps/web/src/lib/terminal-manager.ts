@@ -11,19 +11,20 @@ const MAX_SCROLLBACK_SIZE = 100_000;
 interface TerminalSession {
   pty: IPty;
   scrollback: string;
+  workspaceId: string;
 }
 
+/** terminalId -> session */
 const terminals = new Map<string, TerminalSession>();
 
-/**
- * Returns an existing terminal session for the workspace, or spawns a new one.
- */
-export async function getOrSpawnTerminal(workspaceId: string): Promise<TerminalSession> {
-  const existing = terminals.get(workspaceId);
-  if (existing) {
-    return existing;
-  }
+/** workspaceId -> Set<terminalId> (reverse index for workspace-level cleanup) */
+const workspaceTerminals = new Map<string, Set<string>>();
 
+/**
+ * Spawns a new terminal session for the given workspace and terminalId.
+ * Always creates a new PTY (each split pane gets its own shell).
+ */
+export async function spawnTerminal(workspaceId: string, terminalId: string): Promise<TerminalSession> {
   const workspace = resolveWorkspace(workspaceId);
   if (!workspace) {
     throw new Error(`Workspace not found: ${workspaceId}`);
@@ -52,7 +53,7 @@ export async function getOrSpawnTerminal(workspaceId: string): Promise<TerminalS
     throw new Error(`Shell not found: ${shell}`);
   }
 
-  log.debug("Spawning shell %s in %s (PATH=%s)", shell, cwd, resolvedPath.slice(0, 200));
+  log.debug("Spawning shell %s in %s for terminal %s (PATH=%s)", shell, cwd, terminalId, resolvedPath.slice(0, 200));
 
   const nodePty = (await import("node-pty")).default;
   let ptyProcess: IPty;
@@ -70,8 +71,16 @@ export async function getOrSpawnTerminal(workspaceId: string): Promise<TerminalS
     throw err;
   }
 
-  const session: TerminalSession = { pty: ptyProcess, scrollback: "" };
-  terminals.set(workspaceId, session);
+  const session: TerminalSession = { pty: ptyProcess, scrollback: "", workspaceId };
+  terminals.set(terminalId, session);
+
+  // Register in reverse index
+  let ids = workspaceTerminals.get(workspaceId);
+  if (!ids) {
+    ids = new Set();
+    workspaceTerminals.set(workspaceId, ids);
+  }
+  ids.add(terminalId);
 
   // Buffer all PTY output for replay on reconnect
   ptyProcess.onData((data: string) => {
@@ -82,30 +91,66 @@ export async function getOrSpawnTerminal(workspaceId: string): Promise<TerminalS
   });
 
   ptyProcess.onExit(() => {
-    log.debug("Terminal exited for workspace %s", workspaceId);
-    terminals.delete(workspaceId);
+    log.debug("Terminal exited: %s (workspace %s)", terminalId, workspaceId);
+    terminals.delete(terminalId);
+    const set = workspaceTerminals.get(workspaceId);
+    if (set) {
+      set.delete(terminalId);
+      if (set.size === 0) {
+        workspaceTerminals.delete(workspaceId);
+      }
+    }
   });
 
   return session;
 }
 
-export function getTerminal(workspaceId: string): TerminalSession | undefined {
-  return terminals.get(workspaceId);
+/**
+ * Returns an existing terminal session by terminalId, or undefined.
+ */
+export function getTerminalSession(terminalId: string): TerminalSession | undefined {
+  return terminals.get(terminalId);
 }
 
-export function resizeTerminal(workspaceId: string, cols: number, rows: number): void {
-  const session = terminals.get(workspaceId);
+export function resizeTerminal(terminalId: string, cols: number, rows: number): void {
+  const session = terminals.get(terminalId);
   if (session) {
     session.pty.resize(cols, rows);
   }
 }
 
-export function killTerminal(workspaceId: string): void {
-  const session = terminals.get(workspaceId);
+/**
+ * Kill a single terminal by terminalId.
+ */
+export function killTerminal(terminalId: string): void {
+  const session = terminals.get(terminalId);
   if (session) {
     session.pty.kill();
-    terminals.delete(workspaceId);
+    terminals.delete(terminalId);
+    const set = workspaceTerminals.get(session.workspaceId);
+    if (set) {
+      set.delete(terminalId);
+      if (set.size === 0) {
+        workspaceTerminals.delete(session.workspaceId);
+      }
+    }
   }
+}
+
+/**
+ * Kill all terminals for a workspace.
+ */
+export function killWorkspaceTerminals(workspaceId: string): void {
+  const ids = workspaceTerminals.get(workspaceId);
+  if (!ids) return;
+  for (const terminalId of ids) {
+    const session = terminals.get(terminalId);
+    if (session) {
+      session.pty.kill();
+      terminals.delete(terminalId);
+    }
+  }
+  workspaceTerminals.delete(workspaceId);
 }
 
 export function killAllTerminals(): void {
@@ -113,4 +158,5 @@ export function killAllTerminals(): void {
     session.pty.kill();
   }
   terminals.clear();
+  workspaceTerminals.clear();
 }

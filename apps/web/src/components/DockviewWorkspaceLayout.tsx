@@ -46,11 +46,11 @@ const PANEL_SHORTCUTS: Record<string, string> = {
 };
 
 // ---------------------------------------------------------------------------
-// Lazy-loaded terminal (avoid importing @xterm CJS during SSR)
+// Lazy-loaded split terminal container (avoid importing @xterm CJS during SSR)
 // ---------------------------------------------------------------------------
 
-const TerminalPanel = lazy(() =>
-  import("./TerminalPanel").then((m) => ({ default: m.TerminalPanel })),
+const SplitTerminalContainer = lazy(() =>
+  import("./SplitTerminalContainer").then((m) => ({ default: m.SplitTerminalContainer })),
 );
 
 // ---------------------------------------------------------------------------
@@ -143,7 +143,7 @@ function TerminalPanelComponent({ params, api }: IDockviewPanelProps<TerminalPar
 
   return (
     <Suspense fallback={null}>
-      <TerminalPanel workspaceId={params.workspaceId} visible={visible} />
+      <SplitTerminalContainer workspaceId={params.workspaceId} visible={visible} />
     </Suspense>
   );
 }

@@ -5,10 +5,11 @@ import { isTauri } from "../lib/is-tauri";
 
 interface TerminalPanelProps {
   workspaceId: string;
+  terminalId: string;
   visible: boolean;
 }
 
-export function TerminalPanel({ workspaceId, visible }: TerminalPanelProps) {
+export function TerminalPanel({ workspaceId, terminalId, visible }: TerminalPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -82,7 +83,7 @@ export function TerminalPanel({ workspaceId, visible }: TerminalPanelProps) {
       // Connect WebSocket
       const proto = location.protocol === "https:" ? "wss:" : "ws:";
       const ws = new WebSocket(
-        `${proto}//${location.host}/terminal?workspaceId=${encodeURIComponent(workspaceId)}`,
+        `${proto}//${location.host}/terminal?workspaceId=${encodeURIComponent(workspaceId)}&terminalId=${encodeURIComponent(terminalId)}`,
       );
       wsRef.current = ws;
 
@@ -142,7 +143,7 @@ export function TerminalPanel({ workspaceId, visible }: TerminalPanelProps) {
       cancelled = true;
       cleanup?.();
     };
-  }, [workspaceId]);
+  }, [terminalId, workspaceId]);
 
   // Refit when visibility changes and notify server of new size
   useEffect(() => {
@@ -160,7 +161,7 @@ export function TerminalPanel({ workspaceId, visible }: TerminalPanelProps) {
 
   return (
     <div className="relative h-full w-full">
-      <div ref={containerRef} className="absolute inset-3 overflow-hidden" />
+      <div ref={containerRef} className="absolute inset-1 overflow-hidden" />
     </div>
   );
 }

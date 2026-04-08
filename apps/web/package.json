@@ -32,7 +32,8 @@
   },
   "dependencies": {
     "better-sqlite3": "^12.8.0",
-    "node-pty": "^1.1.0"
+    "node-pty": "^1.1.0",
+    "react-resizable-panels": "^4.9.0"
   },
   "devDependencies": {
     "@ai-sdk/react": "^3.0.0",

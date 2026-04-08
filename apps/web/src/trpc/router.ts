@@ -68,7 +68,7 @@ import {
   TaskConflictError,
 } from "../lib/task-runner";
 import { listTasks, loadTask } from "../lib/task-store";
-import { killTerminal } from "../lib/terminal-manager";
+import { killWorkspaceTerminals } from "../lib/terminal-manager";
 import { getTunnelStatus, startTunnel, stopTunnel } from "../lib/tunnel";
 import { emit, subscribe as subscribeStatus } from "../lib/watcher";
 import { resolveWorkspace } from "../lib/workspace";
@@ -414,8 +414,8 @@ const workspacesRouter = t.router({
             // Clean up cached agent from pool
             removeAgent(workspaceId);
 
-            // Kill any running terminal PTY session
-            killTerminal(workspaceId);
+            // Kill any running terminal PTY sessions
+            killWorkspaceTerminals(workspaceId);
 
             // Clean up workspace-scoped cronjobs
             stopJobsForKey(workspaceId);

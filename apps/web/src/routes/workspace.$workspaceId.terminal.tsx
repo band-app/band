@@ -2,9 +2,9 @@ import { createFileRoute } from "@tanstack/react-router";
 import { lazy, Suspense } from "react";
 
 // Lazy-load to avoid importing @xterm/xterm (CJS) in SSR context
-const TerminalPanel = lazy(() =>
-  import("../components/TerminalPanel").then((m) => ({
-    default: m.TerminalPanel,
+const SplitTerminalContainer = lazy(() =>
+  import("../components/SplitTerminalContainer").then((m) => ({
+    default: m.SplitTerminalContainer,
   })),
 );
 
@@ -16,7 +16,7 @@ function WorkspaceTerminal() {
   const { workspaceId } = Route.useParams();
   return (
     <Suspense fallback={null}>
-      <TerminalPanel workspaceId={decodeURIComponent(workspaceId)} visible={true} />
+      <SplitTerminalContainer workspaceId={decodeURIComponent(workspaceId)} visible={true} />
     </Suspense>
   );
 }
