@@ -15,7 +15,7 @@ import {
   StateEffect,
   StateField,
 } from "@codemirror/state";
-import { oneDarkHighlightStyle } from "@codemirror/theme-one-dark";
+import { vscodeDarkInit } from "@uiw/codemirror-theme-vscode";
 import { Decoration, type DecorationSet, EditorView, keymap, lineNumbers } from "@codemirror/view";
 
 /**
@@ -142,27 +142,26 @@ export function baseViewerExtensions(isDark = true): Extension[] {
     highlightSelectionMatches(),
     ...(isDark
       ? [
-          syntaxHighlighting(oneDarkHighlightStyle),
+          vscodeDarkInit({
+            settings: {
+              background: "var(--background)",
+              gutterBackground: "var(--background)",
+              lineHighlight: "transparent",
+            },
+          }),
           syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
         ]
       : [
           syntaxHighlighting(defaultHighlightStyle),
-          syntaxHighlighting(oneDarkHighlightStyle, { fallback: true }),
         ]),
     keymap.of([...defaultKeymap]),
+    // Viewer-specific overrides
     EditorView.theme(
       isDark
         ? {
-            "&": { height: "100%", backgroundColor: "#181818" },
+            "&": { height: "100%", fontSize: "13px" },
             ".cm-scroller": { overflow: "auto" },
-            ".cm-gutters": { backgroundColor: "#181818", border: "none" },
             ".cm-activeLineGutter": { backgroundColor: "transparent" },
-            ".cm-activeLine": { backgroundColor: "transparent" },
-            "&.cm-focused .cm-cursor": { borderLeftColor: "#fff" },
-            "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
-              backgroundColor: "rgba(255, 255, 255, 0.1)",
-            },
-            ".cm-line": { color: "#abb2bf" },
             ".cm-searchMatch": {
               backgroundColor: "rgba(255, 213, 0, 0.35)",
               borderRadius: "2px",
@@ -172,9 +171,9 @@ export function baseViewerExtensions(isDark = true): Extension[] {
             },
           }
         : {
-            "&": { height: "100%", backgroundColor: "#ffffff" },
+            "&": { height: "100%", fontSize: "13px", backgroundColor: "var(--background)" },
             ".cm-scroller": { overflow: "auto" },
-            ".cm-gutters": { backgroundColor: "#f8f9fa", border: "none", color: "#6e7781" },
+            ".cm-gutters": { backgroundColor: "var(--background)", border: "none", color: "#6e7781" },
             ".cm-activeLineGutter": { backgroundColor: "transparent" },
             ".cm-activeLine": { backgroundColor: "transparent" },
             "&.cm-focused .cm-cursor": { borderLeftColor: "#24292f" },
