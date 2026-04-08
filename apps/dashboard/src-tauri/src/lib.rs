@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use commands::webserver::{self as webserver, ManagedProcess, WebServerState};
 use state::{ActiveWorkspaceState, ProjectCache};
+use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 use tauri::Manager;
 
 const MAX_LOG_SIZE: u64 = 5 * 1024 * 1024; // 5 MB
@@ -78,6 +79,36 @@ pub fn run() {
         ])
         .setup(move |app| {
             let window = app.get_webview_window("main").unwrap();
+
+            // Build a menu with Cmd+R to reload the webview.
+            let reload_item = MenuItemBuilder::with_id("reload", "Reload")
+                .accelerator("CmdOrCtrl+R")
+                .build(app)?;
+            let view_menu = SubmenuBuilder::new(app, "View")
+                .item(&reload_item)
+                .build()?;
+            let menu = MenuBuilder::new(app).item(&view_menu).build()?;
+            app.set_menu(menu)?;
+
+            // Handle the reload menu event on all windows.
+            let app_handle = app.handle().clone();
+            app.on_menu_event(move |_app, event| {
+                if event.id() == "reload" {
+                    // Reload whichever window is focused, or fall back to main.
+                    let target = app_handle
+                        .webview_windows()
+                        .values()
+                        .find(|w| w.is_focused().unwrap_or(false))
+                        .cloned()
+                        .or_else(|| app_handle.get_webview_window("main"));
+
+                    if let Some(win) = target {
+                        if let Some(url) = win.url().ok() {
+                            let _ = win.navigate(url);
+                        }
+                    }
+                }
+            });
 
             let cleaned_up = cleaned_up_setup;
 
