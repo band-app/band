@@ -170,7 +170,11 @@ export class TaskChatTransport implements ChatTransport<UIMessage> {
 
     const sessionId = this.getSessionId();
     const afterEventId = this.getLastEventId();
-    console.log("[reconnect] opening stream", { sessionId, afterEventId, taskSessionId: task.task.sessionId });
+    console.log("[reconnect] opening stream", {
+      sessionId,
+      afterEventId,
+      taskSessionId: task.task.sessionId,
+    });
     console.trace("[reconnect] call stack");
     return subscriptionToStream(this.workspaceId, {
       sessionId,

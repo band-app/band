@@ -22,10 +22,7 @@ function chunkToRecord(sessionId: string, chunk: StreamChunk): SessionEventRecor
  * Get the most recent N events for a session (for initial page load).
  * Returns events in ascending id order (oldest first).
  */
-export function getSessionEventsTail(
-  sessionId: string,
-  limit: number,
-): SessionEventRecord[] {
+export function getSessionEventsTail(sessionId: string, limit: number): SessionEventRecord[] {
   const buf = getSessionBuffer(sessionId);
   if (!buf) return [];
   const start = Math.max(0, buf.events.length - limit);
