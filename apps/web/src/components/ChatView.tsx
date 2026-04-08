@@ -32,6 +32,7 @@ import {
   ConversationEmptyState,
   ConversationScrollButton,
 } from "./ai-elements/conversation";
+import { FileMentionSuggestions } from "./ai-elements/file-mention-suggestions";
 import { groupMessageParts } from "./ai-elements/group-parts";
 import { Message, MessageContent, MessageFilePart, MessageResponse } from "./ai-elements/message";
 import type { PromptInputMessage } from "./ai-elements/prompt-input";
@@ -878,6 +879,7 @@ export function ChatView({
         <TaskListWidget tasks={taskMap} workspaceId={workspaceId} />
         <PromptInput onSubmit={handleSubmit} draftKey={workspaceId}>
           <SlashCommandSuggestions skills={skills} />
+          <FileMentionSuggestions workspaceId={workspaceId} />
           <PromptInputTextarea
             placeholder="Type a message..."
             onEscape={handleEscape}
