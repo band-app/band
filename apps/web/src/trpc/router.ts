@@ -447,10 +447,7 @@ const workspacesRouter = t.router({
         // branches" when the fetch step already fast-forwarded the working tree.
         // The pull effectively succeeded, so swallow this specific error.
         const msg = String(e);
-        if (
-          msg.includes("fast-forwarding your working tree") &&
-          msg.includes("Cannot rebase onto multiple branches")
-        ) {
+        if (msg.includes("Cannot rebase onto multiple branches")) {
           return { ok: true };
         }
         throw e;
