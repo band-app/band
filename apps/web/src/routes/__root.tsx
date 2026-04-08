@@ -14,9 +14,10 @@ import {
   useRouter,
   useRouterState,
 } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import { ToolbarButtons } from "../components/ToolbarButtons";
 import { useIsDesktop } from "../hooks/useIsDesktop";
+import { useNavigationHistory } from "../hooks/useNavigationHistory";
 import { isTauri } from "../lib/is-tauri";
 import "../styles/globals.css";
 
@@ -113,6 +114,10 @@ function AppShell() {
       router.navigate({ to: href });
     };
   }, [router]);
+
+  // Cmd+[ / Cmd+] — back/forward through workspace history
+  const routerNavigate = useCallback((href: string) => router.navigate({ to: href }), [router]);
+  useNavigationHistory(routerNavigate, capabilities);
 
   if (!isDesktop || isStandalone) {
     return <Outlet />;
