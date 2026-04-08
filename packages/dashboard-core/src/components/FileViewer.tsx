@@ -133,6 +133,7 @@ export function FileViewer({
             content={data.content}
             language={lang}
             className="h-full"
+            filePath={filePath}
             line={line}
             lineEnd={lineEnd}
             column={column}

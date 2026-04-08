@@ -1,3 +1,4 @@
+import type { SelectionToChatDetail } from "@band-app/dashboard-core";
 import { Badge, cn } from "@band-app/ui";
 import type { ChatStatus } from "ai";
 import { ArrowUpIcon, Clock, FileIcon, Loader2, Paperclip, SquareIcon, X } from "lucide-react";
@@ -181,6 +182,41 @@ export const PromptInput = ({
     textarea.focus();
     // Move cursor to end
     textarea.selectionStart = textarea.selectionEnd = value.length;
+  }, []);
+
+  // Listen for "Add to Chat" events from CodeMirror editors
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { filePath, startLine, endLine } = (e as CustomEvent<SelectionToChatDetail>).detail;
+
+      const lineRef =
+        startLine === endLine ? `${filePath}:${startLine}` : `${filePath}:${startLine}-${endLine}`;
+
+      const reference = `\`${lineRef}\` `;
+
+      const textarea = textareaRef.current;
+      const current = textarea?.value ?? "";
+      const combined = current + reference;
+
+      // Use native setter pattern to keep React in sync
+      if (textarea) {
+        const nativeSetter = Object.getOwnPropertyDescriptor(
+          HTMLTextAreaElement.prototype,
+          "value",
+        )?.set;
+        nativeSetter?.call(textarea, combined);
+        textarea.dispatchEvent(new Event("input", { bubbles: true }));
+        // Defer focus so it happens after CodeMirror finishes its dispatch
+        // (the mousedown handler collapses the selection which re-grabs focus)
+        requestAnimationFrame(() => {
+          textarea.focus();
+          textarea.selectionStart = textarea.selectionEnd = combined.length;
+        });
+      }
+    };
+
+    window.addEventListener("band:add-to-chat", handler);
+    return () => window.removeEventListener("band:add-to-chat", handler);
   }, []);
 
   return (

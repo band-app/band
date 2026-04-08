@@ -10,11 +10,14 @@ import {
   searchHighlightOnly,
   setHighlightLines,
 } from "../lib/codemirror-setup";
+import { selectionToChatExtension } from "../lib/selection-to-chat";
 
 interface CodeMirrorViewerProps {
   content: string;
   language: string;
   className?: string;
+  /** Workspace-relative file path — enables "Add to Chat" on text selection */
+  filePath?: string;
   /** 1-based line number to scroll to and highlight */
   line?: number;
   /** 1-based end line for range highlight (inclusive). Uses dash syntax: file:5-10 */
@@ -29,6 +32,7 @@ export function CodeMirrorViewer({
   content,
   language,
   className,
+  filePath,
   line,
   lineEnd,
   column,
@@ -71,6 +75,9 @@ export function CodeMirrorViewer({
         searchHighlightOnly(),
         ...lineHighlightExtension(isDark),
       ];
+      if (filePath) {
+        extensions.push(selectionToChatExtension(filePath));
+      }
       if (langSupport) {
         extensions.push(langSupport);
       }
@@ -103,7 +110,7 @@ export function CodeMirrorViewer({
         onEditorViewRef.current?.(null);
       }
     };
-  }, [content, language, isDark]);
+  }, [content, language, isDark, filePath]);
 
   // Handle line/lineEnd/column changes without recreating the editor
   useEffect(() => {

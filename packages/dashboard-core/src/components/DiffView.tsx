@@ -19,6 +19,7 @@ import { useSearch } from "../hooks/use-search";
 import { baseViewerExtensions, loadLanguage, searchHighlightOnly } from "../lib/codemirror-setup";
 import { formatFileLocation } from "../lib/file-location";
 import { extensionToLanguage, filenameToLanguage } from "../lib/language-map";
+import { selectionToChatExtension } from "../lib/selection-to-chat";
 import type { DiffMode, FileStatus, WorkspaceDiffSummary } from "../types";
 import { SearchBar, type SearchOptions } from "./SearchBar";
 
@@ -203,6 +204,7 @@ function DiffFileContent({
         const sharedExtensions = [
           ...baseViewerExtensions(isDark),
           searchHighlightOnly(),
+          selectionToChatExtension(filename),
           diffTheme,
         ];
         if (langSupport) {
@@ -228,6 +230,7 @@ function DiffFileContent({
         const extensions = [
           ...baseViewerExtensions(isDark),
           searchHighlightOnly(),
+          selectionToChatExtension(filename),
           unifiedMergeView({
             original: Text.of(oldText.split("\n")),
             mergeControls: false,
