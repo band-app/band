@@ -3,7 +3,11 @@ import { trpc } from "./trpc-client";
 
 function subscriptionToStream(
   workspaceId: string,
-  abortSignal?: AbortSignal,
+  opts?: {
+    sessionId?: string;
+    afterEventId?: number;
+    abortSignal?: AbortSignal;
+  },
 ): ReadableStream<UIMessageChunk> {
   let subscription: { unsubscribe: () => void } | null = null;
   let closed = false;
@@ -11,7 +15,11 @@ function subscriptionToStream(
   return new ReadableStream<UIMessageChunk>({
     start(controller) {
       subscription = trpc.tasks.stream.subscribe(
-        { workspaceId },
+        {
+          workspaceId,
+          ...(opts?.sessionId && { sessionId: opts.sessionId }),
+          ...(opts?.afterEventId != null && { afterEventId: opts.afterEventId }),
+        },
         {
           onData(chunk: UIMessageChunk) {
             if (!closed) {
@@ -23,6 +31,7 @@ function subscriptionToStream(
             }
           },
           onComplete() {
+            console.log("[stream] subscription completed");
             if (!closed) {
               closed = true;
               try {
@@ -33,6 +42,7 @@ function subscriptionToStream(
             }
           },
           onError(err: unknown) {
+            console.error("[stream] subscription error:", err);
             if (!closed) {
               closed = true;
               try {
@@ -45,7 +55,7 @@ function subscriptionToStream(
         },
       );
 
-      abortSignal?.addEventListener("abort", () => {
+      opts?.abortSignal?.addEventListener("abort", () => {
         if (!closed) {
           closed = true;
           try {
@@ -67,13 +77,19 @@ function subscriptionToStream(
 export class TaskChatTransport implements ChatTransport<UIMessage> {
   private workspaceId: string;
   private getSessionId: () => string | undefined;
+  private getLastEventId: () => number | undefined;
   mode: string | undefined;
   model: string | undefined;
   codingAgentId: string | undefined;
 
-  constructor(workspaceId: string, getSessionId: () => string | undefined) {
+  constructor(
+    workspaceId: string,
+    getSessionId: () => string | undefined,
+    getLastEventId: () => number | undefined,
+  ) {
     this.workspaceId = workspaceId;
     this.getSessionId = getSessionId;
+    this.getLastEventId = getLastEventId;
   }
 
   abort(): Promise<void> {
@@ -131,9 +147,6 @@ export class TaskChatTransport implements ChatTransport<UIMessage> {
       // message instead of failing.
       if (msg.includes("already running") || msg.includes("CONFLICT")) {
         await trpc.queue.push.mutate({ workspaceId: this.workspaceId, text: userText });
-        // Return an immediately-closed stream so useChat goes back to
-        // "ready" state. We don't connect to the running task's stream
-        // because it may be from a different agent.
         return new ReadableStream<UIMessageChunk>({
           start(controller) {
             controller.close();
@@ -143,16 +156,29 @@ export class TaskChatTransport implements ChatTransport<UIMessage> {
       throw new Error(msg);
     }
 
-    return subscriptionToStream(this.workspaceId, abortSignal);
+    return subscriptionToStream(this.workspaceId, {
+      sessionId: this.getSessionId(),
+      abortSignal,
+    });
   }
 
   async reconnectToStream(
     _options: Parameters<ChatTransport<UIMessage>["reconnectToStream"]>[0],
   ): Promise<ReadableStream<UIMessageChunk> | null> {
-    // Buffer disabled for testing — only reconnect to actively running tasks
     const task = await trpc.tasks.get.query({ workspaceId: this.workspaceId });
     if (!task.task || task.task.status !== "running") return null;
 
-    return subscriptionToStream(this.workspaceId);
+    const sessionId = this.getSessionId();
+    const afterEventId = this.getLastEventId();
+    console.log("[reconnect] opening stream", {
+      sessionId,
+      afterEventId,
+      taskSessionId: task.task.sessionId,
+    });
+    console.trace("[reconnect] call stack");
+    return subscriptionToStream(this.workspaceId, {
+      sessionId,
+      afterEventId,
+    });
   }
 }

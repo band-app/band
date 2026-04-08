@@ -655,23 +655,25 @@ describe("TodoWrite in session history — tool name resolution", () => {
     });
     expect(res.status).toBe(200);
 
+    // Server now returns UIMessage[] with parts (not HistoryMessage[] with content)
     const data = await trpcData<{
       messages: Array<{
         role: string;
-        content: Array<{
+        parts: Array<{
           type: string;
           toolName?: string;
           toolCallId?: string;
+          state?: string;
         }>;
       }>;
     }>(res);
 
-    const toolUseBlocks = data.messages.flatMap((m) =>
-      m.content.filter((b) => b.type === "tool_use"),
+    const toolParts = data.messages.flatMap((m) =>
+      m.parts.filter((p) => p.type === "dynamic-tool"),
     );
 
-    expect(toolUseBlocks.length).toBe(1);
-    expect(toolUseBlocks[0].toolName).toBe("TodoWrite");
+    expect(toolParts.length).toBe(1);
+    expect(toolParts[0].toolName).toBe("TodoWrite");
   });
 
   it("pairs TodoWrite tool_use with its tool_result", async () => {
@@ -680,31 +682,25 @@ describe("TodoWrite in session history — tool name resolution", () => {
       sessionId: SESSION_ID,
     });
 
+    // Server now returns UIMessage[] with parts
     const data = await trpcData<{
       messages: Array<{
         role: string;
-        content: Array<{
+        parts: Array<{
           type: string;
           toolCallId?: string;
+          state?: string;
         }>;
       }>;
     }>(res);
 
-    const toolUseIds = new Set(
-      data.messages
-        .flatMap((m) => m.content)
-        .filter((b) => b.type === "tool_use")
-        .map((b) => b.toolCallId),
-    );
-    const toolResultIds = new Set(
-      data.messages
-        .flatMap((m) => m.content)
-        .filter((b) => b.type === "tool_result")
-        .map((b) => b.toolCallId),
-    );
+    const toolParts = data.messages
+      .flatMap((m) => m.parts)
+      .filter((p) => p.type === "dynamic-tool");
 
-    for (const id of toolUseIds) {
-      expect(toolResultIds.has(id)).toBe(true);
+    // Every tool part should have output-available state (result paired)
+    for (const part of toolParts) {
+      expect(part.state).toBe("output-available");
     }
   });
 });

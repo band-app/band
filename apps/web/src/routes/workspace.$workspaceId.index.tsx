@@ -28,6 +28,7 @@ function WorkspaceIndex() {
 function MobileChatContent({ workspaceId }: { workspaceId: string }) {
   const [supportsSessionListing, setSupportsSessionListing] = useState(false);
   const [initialSessionId, setInitialSessionId] = useState<string | undefined>(undefined);
+  const [sessionQueryDone, setSessionQueryDone] = useState(false);
   const { showSessionList, setShowSessionList } = useSessionListContext();
   const { chatKey, setTaskRunning, agentType, newSessionRef } = useAgentSwitcherContext();
 
@@ -43,8 +44,10 @@ function MobileChatContent({ workspaceId }: { workspaceId: string }) {
           const latest = [...data.sessions].sort((a, b) => b.lastModified - a.lastModified)[0];
           if (latest) setInitialSessionId(latest.sessionId);
         }
+        setSessionQueryDone(true);
       })
       .catch((err) => {
+        if (!cancelled) setSessionQueryDone(true);
         console.error("[sessions] error:", err);
       });
     return () => {
@@ -61,6 +64,7 @@ function MobileChatContent({ workspaceId }: { workspaceId: string }) {
         workspaceName={workspaceId}
         supportsSessionListing={supportsSessionListing}
         initialSessionId={initialSessionId}
+        sessionQueryDone={sessionQueryDone}
         showSessionList={showSessionList}
         onShowSessionListChange={setShowSessionList}
         onStreamingChange={setTaskRunning}

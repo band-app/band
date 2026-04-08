@@ -293,26 +293,28 @@ describe("sessions.messages — tool name resolution", () => {
     });
     expect(res.status).toBe(200);
 
+    // Server now returns UIMessage[] with parts (not HistoryMessage[] with content)
     const data = await trpcData<{
       messages: Array<{
         role: string;
-        content: Array<{
+        parts: Array<{
           type: string;
           toolName?: string;
           toolCallId?: string;
+          state?: string;
         }>;
       }>;
     }>(res);
 
-    const toolUseBlocks = data.messages.flatMap((m) =>
-      m.content.filter((b) => b.type === "tool_use"),
+    const toolParts = data.messages.flatMap((m) =>
+      m.parts.filter((p) => p.type === "dynamic-tool"),
     );
 
-    // We should have one tool_use block per tool name
-    expect(toolUseBlocks.length).toBe(TOOL_NAMES.length);
+    // We should have one tool part per tool name
+    expect(toolParts.length).toBe(TOOL_NAMES.length);
 
-    // Every tool_use block must have a proper tool name (not "unknown", "tool", or empty)
-    const resolvedNames = toolUseBlocks.map((b) => b.toolName);
+    // Every tool part must have a proper tool name (not "unknown", "tool", or empty)
+    const resolvedNames = toolParts.map((p) => p.toolName);
     for (const name of resolvedNames) {
       expect(name).toBeDefined();
       expect(name).not.toBe("unknown");
@@ -329,32 +331,26 @@ describe("sessions.messages — tool name resolution", () => {
       workspaceId: "testproject-main",
       sessionId: SESSION_ID,
     });
+    // Server returns UIMessage[] — tool parts have state "output-available"
+    // when a result exists, "input-available" when pending
     const data = await trpcData<{
       messages: Array<{
         role: string;
-        content: Array<{
+        parts: Array<{
           type: string;
           toolCallId?: string;
+          state?: string;
         }>;
       }>;
     }>(res);
 
-    const toolUseIds = new Set(
-      data.messages
-        .flatMap((m) => m.content)
-        .filter((b) => b.type === "tool_use")
-        .map((b) => b.toolCallId),
-    );
-    const toolResultIds = new Set(
-      data.messages
-        .flatMap((m) => m.content)
-        .filter((b) => b.type === "tool_result")
-        .map((b) => b.toolCallId),
-    );
+    const toolParts = data.messages
+      .flatMap((m) => m.parts)
+      .filter((p) => p.type === "dynamic-tool");
 
-    // Every tool_use should have a corresponding tool_result
-    for (const id of toolUseIds) {
-      expect(toolResultIds.has(id)).toBe(true);
+    // Every tool part should have output-available state (result paired)
+    for (const part of toolParts) {
+      expect(part.state).toBe("output-available");
     }
   });
 });
