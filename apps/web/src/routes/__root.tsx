@@ -116,10 +116,7 @@ function AppShell() {
   }, [router]);
 
   // Cmd+[ / Cmd+] — back/forward through workspace history
-  const routerNavigate = useCallback(
-    (href: string) => router.navigate({ to: href }),
-    [router],
-  );
+  const routerNavigate = useCallback((href: string) => router.navigate({ to: href }), [router]);
   useNavigationHistory(routerNavigate, capabilities);
 
   if (!isDesktop || isStandalone) {
