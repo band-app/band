@@ -280,9 +280,7 @@ async function runTask(workspaceId: string, task: InternalTask) {
     // Append file-sharing hint so the agent knows it can send files to the user.
     // Only on the first message — resumed sessions already have the context.
     const fileSharingHint = `\n\n[File sharing: to send a file to the user, write or copy it to ${sharedDir}/ and it will appear as a downloadable file card in the chat.]`;
-    const effectivePrompt = task.sessionId
-      ? task.agentPrompt
-      : task.agentPrompt + fileSharingHint;
+    const effectivePrompt = task.sessionId ? task.agentPrompt : task.agentPrompt + fileSharingHint;
     for await (const event of agent.runSession(effectivePrompt, task.sessionId, sessionOptions)) {
       log.info({ workspaceId, eventType: event.type }, "task event");
 

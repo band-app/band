@@ -383,7 +383,9 @@ describe("Task stream — Write to shared dir emits file event", () => {
         },
       },
       // Simulate the real tool creating the file on disk
-      { _write_file: { path: `${sharedDir}/analysis.md`, content: "# Analysis\n\nResults here.\n" } },
+      {
+        _write_file: { path: `${sharedDir}/analysis.md`, content: "# Analysis\n\nResults here.\n" },
+      },
       {
         type: "user",
         message: {
@@ -521,11 +523,7 @@ describe("Task stream — Bash cp to shared dir emits file event", () => {
   });
 
   it("emits a file event when agent uses Bash to copy a file to shared dir", async () => {
-    const { submitRes, events } = await submitAndStream(
-      server.url,
-      WORKSPACE_ID,
-      "copy the image",
-    );
+    const { submitRes, events } = await submitAndStream(server.url, WORKSPACE_ID, "copy the image");
     expect(submitRes.status).toBe(200);
 
     const eventTypes = events.map((e) => e.event);
