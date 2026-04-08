@@ -1,4 +1,5 @@
-import { resolve } from "node:path";
+import { createReadStream, statSync } from "node:fs";
+import { basename, resolve } from "node:path";
 import { createLogger } from "@band-app/logger";
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
@@ -6,6 +7,7 @@ import { generateOpenAPIDocument } from "@trpc/openapi";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
 import { WebSocketServer } from "ws";
+import { mimeTypeFromFilename } from "./src/lib/mime-types.ts";
 import { getScalarHtml } from "./src/trpc/openapi.ts";
 
 const log = createLogger("vite-plugin");
@@ -46,6 +48,68 @@ function trpcDevPlugin(): Plugin {
       server.middlewares.use("/api/docs", async (_req, res) => {
         res.writeHead(200, { "Content-Type": "text/html" });
         res.end(getScalarHtml("/api/openapi.json"));
+      });
+
+      // Serve uploaded files
+      server.middlewares.use("/api/uploads/", async (req, res) => {
+        const { bandHome } = await server.ssrLoadModule("./src/lib/state");
+        const rawPath = req.url ?? "";
+        const filename = basename(decodeURIComponent(rawPath));
+        if (!filename || filename.includes("..")) {
+          res.writeHead(400);
+          res.end("Bad request");
+          return;
+        }
+        const filePath = resolve(bandHome(), "uploads", filename);
+        try {
+          const fileStat = statSync(filePath);
+          res.writeHead(200, {
+            "Content-Type": mimeTypeFromFilename(filename),
+            "Content-Length": fileStat.size.toString(),
+            "Cache-Control": "private, max-age=86400",
+          });
+          createReadStream(filePath).pipe(res);
+        } catch {
+          res.writeHead(404);
+          res.end("Not found");
+        }
+      });
+
+      // Serve agent-shared files — URL: /api/shared/<workspaceId>/<filename>
+      server.middlewares.use("/api/shared/", async (req, res) => {
+        const { bandHome } = await server.ssrLoadModule("./src/lib/state");
+        const rest = (req.url ?? "").replace(/^\//, "");
+        const slashIdx = rest.indexOf("/");
+        if (slashIdx === -1) {
+          res.writeHead(400);
+          res.end("Bad request");
+          return;
+        }
+        const partition = basename(decodeURIComponent(rest.slice(0, slashIdx)));
+        if (!partition || partition === ".." || partition === ".") {
+          res.writeHead(400);
+          res.end("Bad request");
+          return;
+        }
+        const filename = basename(decodeURIComponent(rest.slice(slashIdx + 1)));
+        if (!filename || filename.includes("..")) {
+          res.writeHead(400);
+          res.end("Bad request");
+          return;
+        }
+        const filePath = resolve(bandHome(), "shared", partition, filename);
+        try {
+          const fileStat = statSync(filePath);
+          res.writeHead(200, {
+            "Content-Type": mimeTypeFromFilename(filename),
+            "Content-Length": fileStat.size.toString(),
+            "Cache-Control": "private, max-age=86400",
+          });
+          createReadStream(filePath).pipe(res);
+        } catch {
+          res.writeHead(404);
+          res.end("Not found");
+        }
       });
 
       server.middlewares.use("/trpc", async (req, res) => {

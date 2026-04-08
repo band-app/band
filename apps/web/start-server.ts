@@ -1,6 +1,6 @@
 import { appendFileSync, createReadStream, mkdirSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { basename, extname, join } from "node:path";
+import { basename, join } from "node:path";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { applyWSSHandler } from "@trpc/server/adapters/ws";
 import sirv from "sirv";
@@ -10,6 +10,7 @@ import { stopBranchStatusPoller } from "./src/lib/branch-status-poller.ts";
 import { startCronjobScheduler, stopCronjobScheduler } from "./src/lib/cronjob-scheduler.ts";
 import { closeDb } from "./src/lib/db/connection.ts";
 import { runMigrations } from "./src/lib/db/migrate.ts";
+import { mimeTypeFromFilename } from "./src/lib/mime-types.ts";
 import { checkPrereqs } from "./src/lib/process-utils.ts";
 import { bandHome, getOrCreateToken, loadSettings, resetAgentStatuses } from "./src/lib/state.ts";
 import { cleanupStaleTasks } from "./src/lib/task-store.ts";
@@ -77,6 +78,38 @@ openApiDoc.servers = [{ url: "/trpc" }];
 const openApiSpec = JSON.stringify(openApiDoc, null, 2);
 const scalarHtml = getScalarHtml("/api/openapi.json");
 
+/**
+ * Serve a file from a subdirectory of a root path.
+ * Prevents path traversal and streams the file with the correct MIME type.
+ */
+function serveStaticFile(
+  res: ServerResponse,
+  root: string,
+  subdir: string,
+  rawFilename: string,
+): void {
+  const filename = basename(decodeURIComponent(rawFilename));
+  if (!filename || filename.includes("..")) {
+    res.writeHead(400);
+    res.end("Bad request");
+    return;
+  }
+  const filePath = join(root, subdir, filename);
+  try {
+    const fileStat = statSync(filePath);
+    const contentType = mimeTypeFromFilename(filename);
+    res.writeHead(200, {
+      "Content-Type": contentType,
+      "Content-Length": fileStat.size.toString(),
+      "Cache-Control": "private, max-age=86400",
+    });
+    createReadStream(filePath).pipe(res);
+  } catch {
+    res.writeHead(404);
+    res.end("Not found");
+  }
+}
+
 async function main() {
   // Run database migrations before anything else
   runMigrations();
@@ -104,39 +137,26 @@ async function main() {
 
     // Serve uploaded files (images, attachments)
     if (req.url?.startsWith("/api/uploads/")) {
-      const filename = basename(decodeURIComponent(req.url.slice("/api/uploads/".length)));
-      if (!filename || filename.includes("..")) {
+      serveStaticFile(res, bandHome(), "uploads", req.url.slice("/api/uploads/".length));
+      return;
+    }
+
+    // Serve agent-shared files — URL: /api/shared/<workspaceId>/<filename>
+    if (req.url?.startsWith("/api/shared/")) {
+      const rest = req.url.slice("/api/shared/".length);
+      const slashIdx = rest.indexOf("/");
+      if (slashIdx === -1) {
         res.writeHead(400);
         res.end("Bad request");
         return;
       }
-      const filePath = join(bandHome(), "uploads", filename);
-      try {
-        const fileStat = statSync(filePath);
-        const ext = extname(filename).toLowerCase();
-        const mimeTypes: Record<string, string> = {
-          ".png": "image/png",
-          ".jpg": "image/jpeg",
-          ".jpeg": "image/jpeg",
-          ".gif": "image/gif",
-          ".webp": "image/webp",
-          ".pdf": "application/pdf",
-          ".json": "application/json",
-          ".txt": "text/plain",
-          ".md": "text/markdown",
-          ".csv": "text/csv",
-        };
-        const contentType = mimeTypes[ext] || "application/octet-stream";
-        res.writeHead(200, {
-          "Content-Type": contentType,
-          "Content-Length": fileStat.size.toString(),
-          "Cache-Control": "private, max-age=86400",
-        });
-        createReadStream(filePath).pipe(res);
-      } catch {
-        res.writeHead(404);
-        res.end("Not found");
+      const partition = basename(decodeURIComponent(rest.slice(0, slashIdx)));
+      if (!partition || partition === ".." || partition === ".") {
+        res.writeHead(400);
+        res.end("Bad request");
+        return;
       }
+      serveStaticFile(res, bandHome(), join("shared", partition), rest.slice(slashIdx + 1));
       return;
     }
 

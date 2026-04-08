@@ -16,7 +16,8 @@
  * tool callbacks like canUseTool / AskUserQuestion).
  */
 
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 
 const scenarioPath = process.env.FAKE_AGENT_SCENARIO;
 if (!scenarioPath) {
@@ -91,6 +92,12 @@ process.stdin.on("data", (chunk) => {
 			await new Promise((resolve) => {
 				stdinWaiter = resolve;
 			});
+			continue;
+		}
+		// Create a file on disk (simulates what a real tool would do)
+		if (msg._write_file) {
+			mkdirSync(dirname(msg._write_file.path), { recursive: true });
+			writeFileSync(msg._write_file.path, msg._write_file.content ?? "");
 			continue;
 		}
 		process.stdout.write(JSON.stringify(msg) + "\n");

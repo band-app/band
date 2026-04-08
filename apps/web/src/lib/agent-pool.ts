@@ -23,7 +23,7 @@ function getAgentConfig(worktreePath: string, agentId?: string): CodingAgentConf
     type: agentDef.type,
     workspaceDir: worktreePath,
     maxTurns: 100,
-    additionalDirectories: [join(bandHome(), "uploads")],
+    additionalDirectories: [join(bandHome(), "uploads"), join(bandHome(), "shared")],
     options: {
       executablePath: agentDef.command,
     },

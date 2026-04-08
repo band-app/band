@@ -39,6 +39,7 @@ export interface FileEvent {
   type: "file";
   mediaType: string;
   url: string;
+  filename?: string;
 }
 
 export interface ErrorEvent {
