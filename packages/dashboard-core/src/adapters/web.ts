@@ -281,12 +281,14 @@ export class WebDashboardAdapter implements DashboardAdapter {
   async searchWorkspaceContent(
     workspaceId: string,
     query: string,
-    options?: { caseSensitive?: boolean; limit?: number },
+    options?: { caseSensitive?: boolean; wholeWord?: boolean; regex?: boolean; limit?: number },
   ): Promise<{ results: ContentSearchMatch[] }> {
     return (await this.trpc.workspace.searchContent.query({
       workspaceId,
       query,
       caseSensitive: options?.caseSensitive,
+      wholeWord: options?.wholeWord,
+      regex: options?.regex,
       limit: options?.limit,
     })) as { results: ContentSearchMatch[] };
   }

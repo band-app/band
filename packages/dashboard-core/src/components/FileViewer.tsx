@@ -18,6 +18,8 @@ interface FileViewerProps {
   column?: number;
   /** Called when the CodeMirror EditorView is created or destroyed */
   onEditorView?: (view: EditorView | null) => void;
+  /** Optional toolbar rendered between the title bar and the content area */
+  toolbar?: React.ReactNode;
 }
 
 function getFilename(path: string): string {
@@ -47,6 +49,7 @@ export function FileViewer({
   lineEnd,
   column,
   onEditorView,
+  toolbar,
 }: FileViewerProps) {
   const adapter = useAdapter();
   const [data, setData] = useState<FileContentResult | null>(null);
@@ -99,6 +102,8 @@ export function FileViewer({
           <span className="shrink-0 text-xs text-muted-foreground">{formatSize(data.size)}</span>
         )}
       </div>
+
+      {toolbar}
 
       <div className="min-h-0 flex-1 overflow-hidden">
         {loading && (

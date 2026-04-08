@@ -16,6 +16,7 @@ export { GitStatusIndicator } from "./components/GitStatusIndicator";
 export { NewWorkspaceDialog } from "./components/NewWorkspaceForm";
 export { ProjectList } from "./components/ProjectList";
 export { QuickOpenDialog } from "./components/QuickOpenDialog";
+export { SearchBar, type SearchBarHandle, type SearchOptions } from "./components/SearchBar";
 export { SearchFilesDialog } from "./components/SearchFilesDialog";
 export { SettingsPage } from "./components/SettingsPage";
 export { SetupStatusIndicator } from "./components/SetupStatusIndicator";
@@ -25,6 +26,7 @@ export { type WorkspaceTab, WorkspaceTabNav } from "./components/WorkspaceTabNav
 export { DashboardProvider, useAdapter, useCapabilities } from "./context";
 export { type HooksSetupState, useHooksSetup } from "./hooks/use-hooks-setup";
 export { useIsDark } from "./hooks/use-is-dark";
+export { useSearch, type UseSearchReturn } from "./hooks/use-search";
 export {
   useAddProject,
   useCreateWorkspace,
@@ -43,7 +45,12 @@ export {
   useSetupStatusWatcher,
   useStatusWatcher,
 } from "./hooks/use-status";
-export { openFileSearchPanel } from "./lib/codemirror-setup";
+export {
+  clearSearch,
+  collectSearchMatches,
+  dispatchSearch,
+  scrollToSearchMatch,
+} from "./lib/codemirror-setup";
 export { type FileLocation, formatFileLocation, parseFileLocation } from "./lib/file-location";
 export { extensionToLanguage, filenameToLanguage } from "./lib/language-map";
 export { isServiceHealthy, type ServiceHealth } from "./lib/service-health";

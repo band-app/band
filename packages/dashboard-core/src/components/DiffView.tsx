@@ -1,5 +1,6 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@band-app/ui";
 import { MergeView, unifiedMergeView } from "@codemirror/merge";
+import { SearchQuery } from "@codemirror/search";
 import { EditorState, Text } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import {
@@ -8,15 +9,22 @@ import {
   Columns2,
   Loader2,
   Rows2,
+  Search,
   SquareArrowOutUpRight,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAdapter } from "../context";
 import { useIsDark } from "../hooks/use-is-dark";
-import { baseViewerExtensions, loadLanguage } from "../lib/codemirror-setup";
+import { useSearch } from "../hooks/use-search";
+import {
+  baseViewerExtensions,
+  loadLanguage,
+  searchHighlightOnly,
+} from "../lib/codemirror-setup";
 import { formatFileLocation } from "../lib/file-location";
 import { extensionToLanguage, filenameToLanguage } from "../lib/language-map";
 import type { DiffMode, FileStatus, WorkspaceDiffSummary } from "../types";
+import { SearchBar, type SearchOptions } from "./SearchBar";
 
 export interface DiffStats {
   filesChanged: number;
@@ -78,6 +86,7 @@ interface DiffViewProps {
   active?: boolean;
   onStatsChange?: (stats: DiffStats | null) => void;
   onOpenFile?: (filename: string) => void;
+  onFindInFile?: (fn: (() => void) | null) => void;
 }
 
 /** Extracts the start line of the first hunk in a diff (new-file side). */
@@ -159,14 +168,20 @@ function DiffFileContent({
   hunks,
   filename,
   viewMode,
+  onEditorViews,
 }: {
   hunks: string;
   filename: string;
   viewMode: ViewMode;
+  onEditorViews?: (views: EditorView[]) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | MergeView | null>(null);
   const isDark = useIsDark();
+
+  // Use ref pattern so callback identity changes don't re-run the setup effect
+  const onEditorViewsRef = useRef(onEditorViews);
+  onEditorViewsRef.current = onEditorViews;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -189,7 +204,11 @@ function DiffFileContent({
       const { oldText, newText } = buildOldNew(diffLines);
 
       if (viewMode === "split") {
-        const sharedExtensions = [...baseViewerExtensions(isDark), diffTheme];
+        const sharedExtensions = [
+          ...baseViewerExtensions(isDark),
+          searchHighlightOnly(),
+          diffTheme,
+        ];
         if (langSupport) {
           sharedExtensions.push(langSupport);
         }
@@ -207,9 +226,12 @@ function DiffFileContent({
           highlightChanges: false,
           gutter: true,
         });
+
+        onEditorViewsRef.current?.([viewRef.current.a, viewRef.current.b]);
       } else {
         const extensions = [
           ...baseViewerExtensions(isDark),
+          searchHighlightOnly(),
           unifiedMergeView({
             original: Text.of(oldText.split("\n")),
             mergeControls: false,
@@ -231,6 +253,8 @@ function DiffFileContent({
           state,
           parent: container,
         });
+
+        onEditorViewsRef.current?.([viewRef.current]);
       }
     };
 
@@ -242,6 +266,7 @@ function DiffFileContent({
         viewRef.current.destroy();
         viewRef.current = null;
       }
+      onEditorViewsRef.current?.([]);
     };
   }, [hunks, filename, viewMode, isDark]);
 
@@ -320,6 +345,7 @@ interface LazyFileRowProps {
   viewMode: ViewMode;
   expandAll: boolean;
   onOpenFile?: (filename: string) => void;
+  onEditorViews?: (filename: string, views: EditorView[]) => void;
 }
 
 function LazyFileRow({
@@ -330,6 +356,7 @@ function LazyFileRow({
   viewMode,
   expandAll,
   onOpenFile,
+  onEditorViews,
 }: LazyFileRowProps) {
   const adapter = useAdapter();
   const [isOpen, setIsOpen] = useState(expandAll);
@@ -340,6 +367,20 @@ function LazyFileRow({
   // Track which mergeBase + contextLines the cached diff belongs to
   const cachedMergeBaseRef = useRef<string | null>(null);
   const cachedContextRef = useRef<number | null>(null);
+
+  const handleEditorViews = useCallback(
+    (views: EditorView[]) => {
+      onEditorViews?.(filename, views);
+    },
+    [filename, onEditorViews],
+  );
+
+  // Clear editor views when collapsing
+  useEffect(() => {
+    if (!isOpen) {
+      onEditorViews?.(filename, []);
+    }
+  }, [isOpen, filename, onEditorViews]);
 
   const toggle = useCallback(() => {
     setIsOpen((prev) => !prev);
@@ -470,7 +511,12 @@ function LazyFileRow({
                   onShowFullFile={handleShowFullFile}
                 />
               )}
-              <DiffFileContent hunks={diff} filename={filename} viewMode={viewMode} />
+              <DiffFileContent
+                hunks={diff}
+                filename={filename}
+                viewMode={viewMode}
+                onEditorViews={handleEditorViews}
+              />
             </>
           )}
         </div>
@@ -480,10 +526,50 @@ function LazyFileRow({
 }
 
 // ---------------------------------------------------------------------------
+// Search helpers
+// ---------------------------------------------------------------------------
+
+function collectAllMatches(
+  editorViewsMap: Map<string, EditorView[]>,
+  filenames: string[],
+  query: string,
+  opts?: SearchOptions,
+): Array<{ view: EditorView; from: number; to: number }> {
+  if (!query) return [];
+  const cmQuery = new SearchQuery({
+    search: query,
+    caseSensitive: opts?.caseSensitive ?? false,
+    literal: !opts?.regex,
+    regexp: opts?.regex ?? false,
+    wholeWord: opts?.wholeWord ?? false,
+  });
+  const matches: Array<{ view: EditorView; from: number; to: number }> = [];
+
+  for (const filename of filenames) {
+    const views = editorViewsMap.get(filename) || [];
+    for (const view of views) {
+      const cursor = cmQuery.getCursor(view.state);
+      let result = cursor.next();
+      while (!result.done) {
+        matches.push({ view, from: result.value.from, to: result.value.to });
+        result = cursor.next();
+      }
+    }
+  }
+  return matches;
+}
+
+// ---------------------------------------------------------------------------
 // Main DiffView
 // ---------------------------------------------------------------------------
 
-export function DiffView({ workspaceId, active = true, onStatsChange, onOpenFile }: DiffViewProps) {
+export function DiffView({
+  workspaceId,
+  active = true,
+  onStatsChange,
+  onOpenFile,
+  onFindInFile,
+}: DiffViewProps) {
   const adapter = useAdapter();
   const [summary, setSummary] = useState<WorkspaceDiffSummary | null>(null);
   const [baseBranch, setBaseBranch] = useState<string | null>(null);
@@ -504,6 +590,43 @@ export function DiffView({ workspaceId, active = true, onStatsChange, onOpenFile
     setExpandAllState(v);
     storeExpandAll(v);
   }, []);
+
+  // -------------------------------------------------------------------------
+  // Find-in-diff state
+  // -------------------------------------------------------------------------
+  const editorViewsRef = useRef<Map<string, EditorView[]>>(new Map());
+  // Track filenames in a ref for stable access in navigation callbacks
+  const filenamesRef = useRef<string[]>([]);
+
+  const getViews = useCallback(
+    () => Array.from(editorViewsRef.current.values()).flat(),
+    [],
+  );
+
+  const collectMatches = useCallback(
+    (query: string, opts: SearchOptions) =>
+      collectAllMatches(editorViewsRef.current, filenamesRef.current, query, opts),
+    [],
+  );
+
+  const search = useSearch({ getViews, collectMatches, onFindInFile });
+
+  // Editor views registry — also dispatches active search to newly registered views
+  const handleEditorViews = useCallback(
+    (filename: string, views: EditorView[]) => {
+      if (views.length === 0) {
+        editorViewsRef.current.delete(filename);
+      } else {
+        editorViewsRef.current.set(filename, views);
+        search.dispatchToViews(views);
+      }
+    },
+    [search.dispatchToViews],
+  );
+
+  // -------------------------------------------------------------------------
+  // Fetch diff summary
+  // -------------------------------------------------------------------------
 
   useEffect(() => {
     const getWorkspaceDiffSummary = adapter.getWorkspaceDiffSummary;
@@ -580,6 +703,7 @@ export function DiffView({ workspaceId, active = true, onStatsChange, onOpenFile
 
   const fileStatuses = summary.fileStatuses || {};
   const filenames = Object.keys(fileStatuses);
+  filenamesRef.current = filenames;
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -606,6 +730,14 @@ export function DiffView({ workspaceId, active = true, onStatsChange, onOpenFile
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={search.handleOpenSearch}
+            className="inline-flex items-center rounded-md border border-border/50 bg-muted/50 px-2 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+            title="Find in changes (⌘F)"
+          >
+            <Search className="size-3.5" />
+          </button>
           <button
             type="button"
             onClick={() => setExpandAll(!expandAll)}
@@ -659,6 +791,20 @@ export function DiffView({ workspaceId, active = true, onStatsChange, onOpenFile
           </div>
         </div>
       </div>
+      {search.searchOpen && (
+        <SearchBar
+          ref={search.searchBarRef}
+          query={search.searchQuery}
+          onQueryChange={search.setSearchQuery}
+          options={search.searchOptions}
+          onOptionsChange={search.setSearchOptions}
+          placeholder="Find in changes..."
+          matchInfo={search.matchInfo}
+          onNext={search.handleNext}
+          onPrevious={search.handlePrevious}
+          onClose={search.handleCloseSearch}
+        />
+      )}
       <div className="min-h-0 flex-1 overflow-y-auto">
         {filenames.map((filename) => (
           <LazyFileRow
@@ -670,6 +816,7 @@ export function DiffView({ workspaceId, active = true, onStatsChange, onOpenFile
             viewMode={viewMode}
             expandAll={expandAll}
             onOpenFile={onOpenFile}
+            onEditorViews={handleEditorViews}
           />
         ))}
       </div>

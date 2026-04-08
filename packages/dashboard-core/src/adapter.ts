@@ -95,7 +95,7 @@ export interface DashboardAdapter {
   searchWorkspaceContent?(
     workspaceId: string,
     query: string,
-    options?: { caseSensitive?: boolean; limit?: number },
+    options?: { caseSensitive?: boolean; wholeWord?: boolean; regex?: boolean; limit?: number },
   ): Promise<{ results: ContentSearchMatch[] }>;
 }
 

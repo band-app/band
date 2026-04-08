@@ -1,7 +1,7 @@
 import { DiffView } from "@band-app/dashboard-core";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback } from "react";
-import { useDiffStatsContext } from "./workspace.$workspaceId";
+import { useDiffStatsContext, useFindInFileContext } from "./workspace.$workspaceId";
 
 export const Route = createFileRoute("/workspace/$workspaceId/changes")({
   component: ChangesTab,
@@ -12,6 +12,7 @@ function ChangesTab() {
   const decoded = decodeURIComponent(workspaceId);
   const navigate = useNavigate();
   const { setDiffStats } = useDiffStatsContext();
+  const { setFindInFile } = useFindInFileContext();
 
   const handleOpenFile = useCallback(
     (filename: string) => {
@@ -29,6 +30,7 @@ function ChangesTab() {
       active
       onStatsChange={setDiffStats}
       onOpenFile={handleOpenFile}
+      onFindInFile={setFindInFile}
     />
   );
 }

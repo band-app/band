@@ -6,16 +6,12 @@ import {
   StreamLanguage,
   syntaxHighlighting,
 } from "@codemirror/language";
-import {
-  highlightSelectionMatches,
-  openSearchPanel,
-  search,
-  searchKeymap,
-} from "@codemirror/search";
+import { highlightSelectionMatches, SearchQuery } from "@codemirror/search";
 import {
   EditorState,
   type Extension,
   type Range,
+  RangeSetBuilder,
   StateEffect,
   StateField,
 } from "@codemirror/state";
@@ -153,8 +149,7 @@ export function baseViewerExtensions(isDark = true): Extension[] {
           syntaxHighlighting(defaultHighlightStyle),
           syntaxHighlighting(oneDarkHighlightStyle, { fallback: true }),
         ]),
-    search(),
-    keymap.of([...defaultKeymap, ...searchKeymap]),
+    keymap.of([...defaultKeymap]),
     EditorView.theme(
       isDark
         ? {
@@ -168,6 +163,13 @@ export function baseViewerExtensions(isDark = true): Extension[] {
               backgroundColor: "rgba(255, 255, 255, 0.1)",
             },
             ".cm-line": { color: "#abb2bf" },
+            ".cm-searchMatch": {
+              backgroundColor: "rgba(255, 213, 0, 0.35)",
+              borderRadius: "2px",
+            },
+            ".cm-searchMatch-selected": {
+              backgroundColor: "rgba(255, 150, 50, 0.5)",
+            },
           }
         : {
             "&": { height: "100%", backgroundColor: "#ffffff" },
@@ -180,19 +182,133 @@ export function baseViewerExtensions(isDark = true): Extension[] {
               backgroundColor: "rgba(0, 0, 0, 0.07)",
             },
             ".cm-line": { color: "#24292f" },
+            ".cm-searchMatch": {
+              backgroundColor: "rgba(255, 213, 0, 0.4)",
+              borderRadius: "2px",
+            },
+            ".cm-searchMatch-selected": {
+              backgroundColor: "rgba(255, 150, 50, 0.55)",
+            },
           },
       { dark: isDark },
     ),
   ];
 }
 
+// ---------------------------------------------------------------------------
+// Search highlight extension (custom — replaces @codemirror/search's built-in
+// searchHighlighter to avoid module-identity issues with setSearchQuery)
+// ---------------------------------------------------------------------------
+
+/** Effect that replaces the current search-match decorations. */
+const setSearchDecorations = StateEffect.define<DecorationSet>();
+
+const searchMatchMark = Decoration.mark({ class: "cm-searchMatch" });
+
+/** StateField that holds search-match decorations. */
+const searchHighlightField = StateField.define<DecorationSet>({
+  create() {
+    return Decoration.none;
+  },
+  update(value, tr) {
+    for (const effect of tr.effects) {
+      if (effect.is(setSearchDecorations)) return effect.value;
+    }
+    // Map existing decorations through document changes so positions stay correct.
+    return value.map(tr.changes);
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});
+
 /**
- * Opens the CodeMirror search panel for find-in-file.
- * Accepts a loose type so consumers don't need a direct @codemirror dependency.
+ * Extension that enables search-match highlighting via `dispatchSearch`.
+ * Include this in editor extensions to support find-in-file highlighting.
  */
-// biome-ignore lint/suspicious/noExplicitAny: EditorView type from @codemirror/view — kept untyped for cross-package use
-export function openFileSearchPanel(view: any): boolean {
-  return openSearchPanel(view as EditorView);
+export function searchHighlightOnly(): Extension {
+  return searchHighlightField;
+}
+
+/** Build a sorted DecorationSet for the given query against a view. */
+function buildSearchDecorations(view: EditorView, query: string, opts?: SearchOpts): DecorationSet {
+  if (!query) return Decoration.none;
+  const cmQuery = makeSearchQuery(query, opts);
+  const builder = new RangeSetBuilder<Decoration>();
+  const cursor = cmQuery.getCursor(view.state);
+  let result = cursor.next();
+  while (!result.done) {
+    builder.add(result.value.from, result.value.to, searchMatchMark);
+    result = cursor.next();
+  }
+  return builder.finish();
+}
+
+type SearchOpts = { caseSensitive?: boolean; wholeWord?: boolean; regex?: boolean };
+
+function makeSearchQuery(query: string, opts?: SearchOpts): SearchQuery {
+  return new SearchQuery({
+    search: query,
+    caseSensitive: opts?.caseSensitive ?? false,
+    literal: !opts?.regex,
+    regexp: opts?.regex ?? false,
+    wholeWord: opts?.wholeWord ?? false,
+  });
+}
+
+/**
+ * Dispatches a search query to one or more CodeMirror `EditorView` instances.
+ * Highlights matches inside each editor.
+ */
+export function dispatchSearch(views: EditorView[], query: string, opts?: SearchOpts): void {
+  for (const view of views) {
+    view.dispatch({
+      effects: setSearchDecorations.of(buildSearchDecorations(view, query, opts)),
+    });
+  }
+}
+
+/**
+ * Counts all matches in the given editor views and returns them as an ordered
+ * list of `{ view, from, to }` objects suitable for next/prev navigation.
+ */
+export function collectSearchMatches(
+  views: EditorView[],
+  query: string,
+  opts?: SearchOpts,
+): Array<{ view: EditorView; from: number; to: number }> {
+  if (!query) return [];
+  const cmQuery = makeSearchQuery(query, opts);
+  const matches: Array<{ view: EditorView; from: number; to: number }> = [];
+  for (const view of views) {
+    const cursor = cmQuery.getCursor(view.state);
+    let result = cursor.next();
+    while (!result.done) {
+      matches.push({ view, from: result.value.from, to: result.value.to });
+      result = cursor.next();
+    }
+  }
+  return matches;
+}
+
+/**
+ * Selects the given match range and scrolls it into view (centered).
+ */
+export function scrollToSearchMatch(match: { view: EditorView; from: number; to: number }): void {
+  match.view.dispatch({
+    selection: { anchor: match.from, head: match.to },
+    effects: EditorView.scrollIntoView(match.from, { y: "center" }),
+  });
+}
+
+/**
+ * Clears search highlights and collapses the selection in all given views.
+ */
+export function clearSearch(views: EditorView[]): void {
+  for (const view of views) {
+    view.dispatch({
+      effects: setSearchDecorations.of(Decoration.none),
+      selection: { anchor: view.state.selection.main.head },
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------

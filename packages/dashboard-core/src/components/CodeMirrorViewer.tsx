@@ -6,8 +6,8 @@ import {
   baseViewerExtensions,
   lineHighlightExtension,
   loadLanguage,
-  openFileSearchPanel,
   scrollToLine,
+  searchHighlightOnly,
   setHighlightLines,
 } from "../lib/codemirror-setup";
 
@@ -66,7 +66,11 @@ export function CodeMirrorViewer({
         onEditorViewRef.current?.(null);
       }
 
-      const extensions = [...baseViewerExtensions(isDark), ...lineHighlightExtension(isDark)];
+      const extensions = [
+        ...baseViewerExtensions(isDark),
+        searchHighlightOnly(),
+        ...lineHighlightExtension(isDark),
+      ];
       if (langSupport) {
         extensions.push(langSupport);
       }
@@ -113,19 +117,6 @@ export function CodeMirrorViewer({
       });
     }
   }, [line, lineEnd, column]);
-
-  // Listen for find-in-file custom event dispatched by the workspace layout
-  useEffect(() => {
-    const handler = () => {
-      const view = viewRef.current;
-      if (view) {
-        view.focus();
-        openFileSearchPanel(view);
-      }
-    };
-    window.addEventListener("band:find-in-file", handler);
-    return () => window.removeEventListener("band:find-in-file", handler);
-  }, []);
 
   return <div ref={containerRef} className={className} />;
 }

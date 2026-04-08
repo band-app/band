@@ -78,7 +78,7 @@ export function QuickOpenDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="overflow-hidden p-0 sm:max-w-[520px]">
+      <DialogContent className="overflow-hidden p-0 sm:max-w-[520px]" showCloseButton={false}>
         <DialogHeader className="sr-only">
           <DialogTitle>Quick Open</DialogTitle>
           <DialogDescription>Search for files by name</DialogDescription>

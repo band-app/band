@@ -10,12 +10,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@band-app/ui";
-import { CaseSensitive, SearchIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAdapter } from "../context";
 import { getFileIcon } from "../lib/file-icon";
 import { formatFileLocation } from "../lib/file-location";
 import type { ContentSearchMatch } from "../types";
+import { SearchBar, type SearchBarHandle, type SearchOptions } from "./SearchBar";
 
 interface SearchFilesDialogProps {
   workspaceId: string;
@@ -32,10 +32,15 @@ export function SearchFilesDialog({
 }: SearchFilesDialogProps) {
   const adapter = useAdapter();
   const [query, setQuery] = useState("");
-  const [caseSensitive, setCaseSensitive] = useState(false);
+  const [searchOptions, setSearchOptions] = useState<SearchOptions>({
+    caseSensitive: false,
+    wholeWord: false,
+    regex: false,
+  });
   const [results, setResults] = useState<ContentSearchMatch[]>([]);
   const [loading, setLoading] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchBarRef = useRef<SearchBarHandle>(null);
 
   useEffect(() => {
     if (!open || !adapter.searchWorkspaceContent || query.length < 2) {
@@ -50,7 +55,9 @@ export function SearchFilesDialog({
 
     debounceRef.current = setTimeout(() => {
       adapter.searchWorkspaceContent!(workspaceId, query, {
-        caseSensitive,
+        caseSensitive: searchOptions.caseSensitive,
+        wholeWord: searchOptions.wholeWord,
+        regex: searchOptions.regex,
         limit: 100,
       })
         .then((result) => {
@@ -68,13 +75,15 @@ export function SearchFilesDialog({
       cancelled = true;
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [adapter, workspaceId, query, caseSensitive, open]);
+  }, [adapter, workspaceId, query, searchOptions, open]);
 
-  // Reset on close
+  // Reset on close, auto-focus on open
   useEffect(() => {
     if (!open) {
       setQuery("");
       setResults([]);
+    } else {
+      requestAnimationFrame(() => searchBarRef.current?.focus());
     }
   }, [open]);
 
@@ -101,34 +110,20 @@ export function SearchFilesDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="overflow-hidden p-0 sm:max-w-[640px]">
+      <DialogContent className="overflow-hidden p-0 sm:max-w-[640px]" showCloseButton={false}>
         <DialogHeader className="sr-only">
           <DialogTitle>Search in Files</DialogTitle>
           <DialogDescription>Text search across workspace files</DialogDescription>
         </DialogHeader>
         <Command shouldFilter={false}>
-          <div className="flex items-center border-b px-3" cmdk-input-wrapper="">
-            <SearchIcon className="mr-2 size-4 shrink-0 opacity-50" />
-            <input
-              className="flex h-10 w-full bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground"
-              placeholder="Search in files..."
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              autoFocus
-            />
-            <button
-              type="button"
-              onClick={() => setCaseSensitive((v) => !v)}
-              className={`ml-2 inline-flex size-7 shrink-0 items-center justify-center rounded-sm transition-colors ${
-                caseSensitive
-                  ? "bg-accent text-accent-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-              title="Match Case"
-            >
-              <CaseSensitive className="size-4" />
-            </button>
-          </div>
+          <SearchBar
+            ref={searchBarRef}
+            query={query}
+            onQueryChange={setQuery}
+            options={searchOptions}
+            onOptionsChange={setSearchOptions}
+            placeholder="Search in files..."
+          />
           <CommandList className="max-h-[400px]">
             <CommandEmpty>
               {loading

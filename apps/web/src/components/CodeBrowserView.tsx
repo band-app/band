@@ -1,8 +1,9 @@
 import {
   FileBrowser,
   FileViewer,
-  openFileSearchPanel,
   parseFileLocation,
+  SearchBar,
+  useSearch,
 } from "@band-app/dashboard-core";
 import { File } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -85,26 +86,35 @@ export function CodeBrowserView({
     }
   }, [openFilePath, onFileOpened]);
 
-  // Use a ref for onFindInFile so the handleEditorView callback doesn't
-  // need to be recreated when onFindInFile changes identity.
-  const onFindInFileRef = useRef(onFindInFile);
-  onFindInFileRef.current = onFindInFile;
+  // -------------------------------------------------------------------------
+  // Find-in-file state
+  // -------------------------------------------------------------------------
+  // biome-ignore lint/suspicious/noExplicitAny: EditorView type from @codemirror/view — kept untyped to avoid cross-package dependency
+  const editorViewRef = useRef<any>(null);
 
-  const handleEditorView = useCallback((view: { focus: () => void } | null) => {
-    if (view) {
-      onFindInFileRef.current?.(() => {
-        view.focus();
-        openFileSearchPanel(view);
-      });
-    } else {
-      onFindInFileRef.current?.(null);
-    }
-  }, []);
+  const getViews = useCallback(
+    () => (editorViewRef.current ? [editorViewRef.current] : []),
+    [],
+  );
 
-  // Clean up on unmount
+  const search = useSearch({ getViews, onFindInFile });
+
+  const handleEditorView = useCallback(
+    // biome-ignore lint/suspicious/noExplicitAny: EditorView from @codemirror/view — kept untyped to avoid cross-package dependency
+    (view: any) => {
+      editorViewRef.current = view;
+      if (view) {
+        search.dispatchToViews([view]);
+      }
+    },
+    [search.dispatchToViews],
+  );
+
+  // Close search when file changes
+  // biome-ignore lint/correctness/useExhaustiveDependencies: viewFilePath intentionally triggers reset when user navigates to a different file
   useEffect(() => {
-    return () => onFindInFile?.(null);
-  }, [onFindInFile]);
+    search.handleCloseSearch();
+  }, [viewFilePath]);
 
   const handleSelectFile = useCallback(
     (filePath: string) => {
@@ -153,7 +163,7 @@ export function CodeBrowserView({
   return (
     <div className="flex h-full overflow-hidden">
       {/* Left sidebar - file tree */}
-      <div className="w-60 shrink-0 border-r border-border overflow-hidden">
+      <div className="w-60 shrink-0 overflow-hidden border-r border-border">
         <FileBrowser
           workspaceId={workspaceId}
           currentPath={currentPath}
@@ -165,7 +175,7 @@ export function CodeBrowserView({
       </div>
 
       {/* Right panel - file content */}
-      <div className="flex-1 min-w-0 overflow-hidden">
+      <div className="min-w-0 flex-1 overflow-hidden">
         {viewFilePath ? (
           <FileViewer
             workspaceId={workspaceId}
@@ -174,10 +184,26 @@ export function CodeBrowserView({
             lineEnd={viewLineEnd}
             column={viewColumn}
             onEditorView={handleEditorView}
+            toolbar={
+              search.searchOpen ? (
+                <SearchBar
+                  ref={search.searchBarRef}
+                  query={search.searchQuery}
+                  onQueryChange={search.setSearchQuery}
+                  options={search.searchOptions}
+                  onOptionsChange={search.setSearchOptions}
+                  placeholder="Find in file..."
+                  matchInfo={search.matchInfo}
+                  onNext={search.handleNext}
+                  onPrevious={search.handlePrevious}
+                  onClose={search.handleCloseSearch}
+                />
+              ) : undefined
+            }
           />
         ) : (
           <div className="flex h-full items-center justify-center">
-            <div className="flex flex-col items-center gap-3 text-center px-8">
+            <div className="flex flex-col items-center gap-3 px-8 text-center">
               <File className="size-8 text-muted-foreground/30" />
               <p className="text-sm text-muted-foreground">Select a file to view</p>
             </div>

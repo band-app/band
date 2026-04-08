@@ -928,6 +928,8 @@ const workspaceRouter = t.router({
         workspaceId: z.string(),
         query: z.string().min(1),
         caseSensitive: z.boolean().default(false),
+        wholeWord: z.boolean().default(false),
+        regex: z.boolean().default(false),
         limit: z.number().default(100),
       }),
     )
@@ -938,8 +940,14 @@ const workspaceRouter = t.router({
       }
 
       const cwd = workspace.worktree.path;
-      const args = ["grep", "-n", "--no-color", "-I", "-F"];
+      const args = ["grep", "-n", "--no-color", "-I"];
+      if (input.regex) {
+        args.push("-E");
+      } else {
+        args.push("-F");
+      }
       if (!input.caseSensitive) args.push("-i");
+      if (input.wholeWord) args.push("-w");
       args.push("--", input.query);
 
       let output: string;
