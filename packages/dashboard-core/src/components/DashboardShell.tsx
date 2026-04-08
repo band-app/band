@@ -35,11 +35,13 @@ import { SettingsPage } from "./SettingsPage";
 
 interface DashboardShellProps {
   toolbarExtra?: ReactNode;
+  /** Hide the Tauri title bar (e.g. when the parent renders a full-width one). */
+  hideTitleBar?: boolean;
 }
 
 const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
-export function DashboardShell({ toolbarExtra }: DashboardShellProps) {
+export function DashboardShell({ toolbarExtra, hideTitleBar }: DashboardShellProps) {
   const { projects, isLoading: loading } = useProjects();
   const { settings } = useSettingsQuery();
   const labels = settings.labels ?? [];
@@ -101,7 +103,7 @@ export function DashboardShell({ toolbarExtra }: DashboardShellProps) {
     <div
       className={`h-dvh w-full overflow-hidden flex flex-col bg-background text-foreground p-0 ${isTauri ? "" : "pt-[env(safe-area-inset-top)]"}`}
     >
-      {isTauri && (
+      {isTauri && !hideTitleBar && (
         <div
           ref={titleBarRef}
           data-tauri-drag-region

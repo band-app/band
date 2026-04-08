@@ -15,6 +15,7 @@ import {
   useRouterState,
 } from "@tanstack/react-router";
 import { useCallback, useEffect } from "react";
+import { TauriTitleBar } from "../components/TauriTitleBar";
 import { ToolbarButtons } from "../components/ToolbarButtons";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useNavigationHistory } from "../hooks/useNavigationHistory";
@@ -99,8 +100,32 @@ function ThemeSync() {
 
 const STANDALONE_ROUTES = ["/tasks", "/cronjobs", "/settings"];
 
+/**
+ * Syncs the appMode setting into the HybridDashboardAdapter and
+ * NativeShellCapabilities so they behave correctly for the active mode.
+ */
+function ModeSync() {
+  const { settings } = useSettingsQuery();
+  const appMode = settings.appMode ?? "side-panel";
+
+  useEffect(() => {
+    if (isTauri) {
+      (adapter as HybridDashboardAdapter).setAppMode(appMode);
+      (capabilities as NativeShellCapabilities).setAppMode(appMode);
+    }
+  }, [appMode]);
+
+  return null;
+}
+
 function AppShell() {
-  const isDesktop = useIsDesktop() && !isTauri;
+  const { settings } = useSettingsQuery();
+  const appMode = settings.appMode ?? "side-panel";
+  // Show desktop split layout when:
+  // - In a regular browser on a wide screen, OR
+  // - In Tauri with "full-editor" mode
+  const isWideScreen = useIsDesktop();
+  const isDesktop = (isWideScreen && !isTauri) || (isTauri && appMode === "full-editor");
   const router = useRouter();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const isStandalone = STANDALONE_ROUTES.includes(pathname);
@@ -123,13 +148,18 @@ function AppShell() {
     return <Outlet />;
   }
 
+  const isTauriFullEditor = isTauri && appMode === "full-editor";
+
   return (
-    <div className="flex h-dvh w-full overflow-hidden bg-background text-foreground">
-      <div className="w-80 shrink-0 border-r border-border overflow-hidden">
-        <DashboardShell toolbarExtra={<ToolbarButtons />} />
-      </div>
-      <div className="flex-1 min-w-0 overflow-hidden">
-        <Outlet />
+    <div className="flex flex-col h-dvh w-full overflow-hidden bg-background text-foreground">
+      {isTauriFullEditor && <TauriTitleBar />}
+      <div className="flex flex-1 min-h-0 overflow-hidden">
+        <div className="w-80 shrink-0 border-r border-border overflow-hidden">
+          <DashboardShell toolbarExtra={<ToolbarButtons />} hideTitleBar={isTauriFullEditor} />
+        </div>
+        <div className="flex-1 min-w-0 overflow-hidden">
+          <Outlet />
+        </div>
       </div>
     </div>
   );
@@ -146,6 +176,7 @@ function RootLayout() {
       <body>
         <DashboardProvider adapter={adapter} capabilities={capabilities}>
           <ThemeSync />
+          <ModeSync />
           <TooltipProvider>
             <AppShell />
           </TooltipProvider>

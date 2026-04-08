@@ -116,6 +116,8 @@ export interface LabelDefinition {
 
 export type Theme = "system" | "light" | "dark";
 
+export type AppMode = "side-panel" | "full-editor";
+
 export interface Settings {
   worktreesDir: string | null;
   defaults?: BandConfig;
@@ -129,6 +131,7 @@ export interface Settings {
   tokenSecret?: string;
   autoStartTunnel?: boolean;
   theme?: Theme;
+  appMode?: AppMode;
 }
 
 export interface HooksStatus {

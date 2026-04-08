@@ -65,6 +65,8 @@ pub struct Settings {
     pub token_secret: Option<String>,
     #[serde(rename = "autoStartTunnel", skip_serializing_if = "Option::is_none")]
     pub auto_start_tunnel: Option<bool>,
+    #[serde(rename = "appMode", skip_serializing_if = "Option::is_none")]
+    pub app_mode: Option<String>,
     /// Extra fields not explicitly modeled (e.g. user-defined app definitions).
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
