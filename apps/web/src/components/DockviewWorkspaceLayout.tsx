@@ -4,20 +4,20 @@ import {
   QuickOpenDialog,
   SearchFilesDialog,
 } from "@band-app/dashboard-core";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@band-app/ui";
 import {
+  type DockviewApi,
   DockviewReact,
   type DockviewReadyEvent,
-  type DockviewApi,
-  type IDockviewPanelProps,
-  type IDockviewPanelHeaderProps,
   type DockviewTheme,
+  type IDockviewPanelHeaderProps,
+  type IDockviewPanelProps,
 } from "dockview";
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { FolderOpen, GitCompare, MessageSquare, Terminal as TerminalIcon } from "lucide-react";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@band-app/ui";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { trpc } from "../lib/trpc-client";
 import { CodeBrowserView } from "./CodeBrowserView";
 import { WorkspaceChatPanel } from "./WorkspaceChatPanel";
-import { trpc } from "../lib/trpc-client";
 
 // ---------------------------------------------------------------------------
 // Custom dockview theme – prevents the default themeAbyss from being applied
@@ -597,7 +597,6 @@ export function DockviewWorkspaceLayout({ workspaceId }: DockviewWorkspaceLayout
         layoutChange.dispose();
       };
     },
-    // biome-ignore lint/correctness/useExhaustiveDependencies: injectParams is intentionally called via ref-like pattern; workspaceId triggers remount via key prop
     [buildDefaultLayout, addMissingPanel, injectParams],
   );
 
