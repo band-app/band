@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use commands::webserver::{self as webserver, ManagedProcess, WebServerState};
 use state::{ActiveWorkspaceState, ProjectCache};
-use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
 use tauri::Manager;
 
 const MAX_LOG_SIZE: u64 = 5 * 1024 * 1024; // 5 MB
@@ -80,14 +80,29 @@ pub fn run() {
         .setup(move |app| {
             let window = app.get_webview_window("main").unwrap();
 
-            // Build a menu with Cmd+R to reload the webview.
+            // Build an Edit menu so macOS routes Cmd+C/V/X/A to the webview.
+            let edit_menu = SubmenuBuilder::new(app, "Edit")
+                .item(&PredefinedMenuItem::undo(app, None)?)
+                .item(&PredefinedMenuItem::redo(app, None)?)
+                .separator()
+                .item(&PredefinedMenuItem::cut(app, None)?)
+                .item(&PredefinedMenuItem::copy(app, None)?)
+                .item(&PredefinedMenuItem::paste(app, None)?)
+                .item(&PredefinedMenuItem::select_all(app, None)?)
+                .build()?;
+
+            // Build a View menu with Cmd+R to reload the webview.
             let reload_item = MenuItemBuilder::with_id("reload", "Reload")
                 .accelerator("CmdOrCtrl+R")
                 .build(app)?;
             let view_menu = SubmenuBuilder::new(app, "View")
                 .item(&reload_item)
                 .build()?;
-            let menu = MenuBuilder::new(app).item(&view_menu).build()?;
+
+            let menu = MenuBuilder::new(app)
+                .item(&edit_menu)
+                .item(&view_menu)
+                .build()?;
             app.set_menu(menu)?;
 
             // Handle the reload menu event on all windows.
@@ -103,7 +118,7 @@ pub fn run() {
                         .or_else(|| app_handle.get_webview_window("main"));
 
                     if let Some(win) = target {
-                        if let Some(url) = win.url().ok() {
+                        if let Ok(url) = win.url() {
                             let _ = win.navigate(url);
                         }
                     }
