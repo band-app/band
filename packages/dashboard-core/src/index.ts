@@ -72,6 +72,7 @@ export {
 export type {
   AgentInfo,
   AgentStatusType,
+  AppMode,
   BandConfig,
   CIState,
   CIStatus,

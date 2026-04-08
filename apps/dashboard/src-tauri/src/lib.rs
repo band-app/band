@@ -74,6 +74,7 @@ pub fn run() {
             commands::window::open_cronjobs_window,
             commands::window::open_settings_window,
             commands::window::get_app_title,
+            commands::window::set_app_mode,
         ])
         .setup(move |app| {
             let window = app.get_webview_window("main").unwrap();
@@ -112,29 +113,48 @@ pub fn run() {
                 }
             }
 
-            // Position dashboard at left edge, full screen height (preserve current width)
+            // Read app mode from settings (defaults to "side-panel")
+            let app_mode = state::load_settings()
+                .ok()
+                .and_then(|s| s.app_mode)
+                .unwrap_or_else(|| "side-panel".to_string());
+
+            // Position and size the window based on app mode
             if let Ok(Some(monitor)) = window.current_monitor() {
                 let screen_size = monitor.size();
                 let scale_factor = monitor.scale_factor();
-                let screen_height = (f64::from(screen_size.height) / scale_factor) as u32;
-
-                let current_width = window
-                    .outer_size()
-                    .map(|s| (f64::from(s.width) / scale_factor) as u32)
-                    .unwrap_or(400);
+                let screen_width = f64::from(screen_size.width) / scale_factor;
+                let screen_height = f64::from(screen_size.height) / scale_factor;
 
                 let _ = window.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(
                     0.0, 0.0,
                 )));
-                let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(
-                    f64::from(current_width),
-                    f64::from(screen_height),
-                )));
+
+                if app_mode == "full-editor" {
+                    // Full editor: use entire screen
+                    let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(
+                        screen_width,
+                        screen_height,
+                    )));
+                } else {
+                    // Side panel: narrow width at left edge, full height
+                    let current_width = window
+                        .outer_size()
+                        .map(|s| (f64::from(s.width) / scale_factor) as u32)
+                        .unwrap_or(400);
+
+                    let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(
+                        f64::from(current_width),
+                        screen_height,
+                    )));
+                }
             }
 
-            // Poll the frontmost VS Code window to track active workspace
-            // (handles projects without the Band VS Code extension)
-            commands::ide::start_focus_polling(app.handle().clone());
+            // Poll the frontmost VS Code window to track active workspace.
+            // Only needed in side-panel mode where we manage external IDE windows.
+            if app_mode != "full-editor" {
+                commands::ide::start_focus_polling(app.handle().clone());
+            }
 
             // Kill web server and close secondary windows on app exit.
             // Uses a `cleaned_up` flag to avoid double cleanup when both
@@ -166,21 +186,24 @@ pub fn run() {
                 }
             });
 
-            // Raise the active workspace's app windows when dashboard gains focus
-            let active_ws_state: std::sync::Arc<std::sync::Mutex<Option<String>>> =
-                app.state::<ActiveWorkspaceState>().inner().0.clone();
-            let raise_cache = app.state::<ProjectCache>().inner().clone();
-            let window_ref = app.get_webview_window("main").unwrap();
-            window_ref.on_window_event(move |event| {
-                if let tauri::WindowEvent::Focused(true) = event {
-                    let workspace_id: Option<String> =
-                        active_ws_state.lock().ok().and_then(|guard| guard.clone());
+            // Raise the active workspace's app windows when dashboard gains focus.
+            // Only in side-panel mode where external IDE windows are managed.
+            if app_mode != "full-editor" {
+                let active_ws_state: std::sync::Arc<std::sync::Mutex<Option<String>>> =
+                    app.state::<ActiveWorkspaceState>().inner().0.clone();
+                let raise_cache = app.state::<ProjectCache>().inner().clone();
+                let window_ref = app.get_webview_window("main").unwrap();
+                window_ref.on_window_event(move |event| {
+                    if let tauri::WindowEvent::Focused(true) = event {
+                        let workspace_id: Option<String> =
+                            active_ws_state.lock().ok().and_then(|guard| guard.clone());
 
-                    if let Some(ws_id) = workspace_id {
-                        commands::ide::raise_workspace_windows(&ws_id, &raise_cache);
+                        if let Some(ws_id) = workspace_id {
+                            commands::ide::raise_workspace_windows(&ws_id, &raise_cache);
+                        }
                     }
-                }
-            });
+                });
+            }
 
             Ok(())
         })

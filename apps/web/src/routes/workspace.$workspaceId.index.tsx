@@ -1,3 +1,4 @@
+import { useSettingsQuery } from "@band-app/dashboard-core";
 import { createFileRoute, Navigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { ChatView } from "../components/ChatView";
@@ -14,7 +15,10 @@ export const Route = createFileRoute("/workspace/$workspaceId/")({
 function WorkspaceIndex() {
   const { workspaceId } = Route.useParams();
   const decoded = decodeURIComponent(workspaceId);
-  const isDesktop = useIsDesktop() && !isTauri;
+  const { settings } = useSettingsQuery();
+  const appMode = settings.appMode ?? "side-panel";
+  const isWideScreen = useIsDesktop();
+  const isDesktop = (isWideScreen && !isTauri) || (isTauri && appMode === "full-editor");
 
   // Desktop: chat is always visible in the left panel — redirect to changes tab
   if (isDesktop) {

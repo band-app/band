@@ -1,5 +1,6 @@
 import type { PlatformCapabilities, Unsubscribe } from "../adapter";
 import { toWorkspaceId } from "../lib/workspace-id";
+import type { AppMode } from "../types";
 import { WebCapabilities, WebDashboardAdapter } from "./web";
 
 function isTauri(): boolean {
@@ -19,11 +20,24 @@ async function tauriListen<T>(event: string, handler: (payload: T) => void): Pro
 /**
  * Hybrid adapter: data operations go through HTTP (WebDashboardAdapter),
  * but workspace open and active-workspace tracking use Tauri IPC when
- * running inside the Tauri webview.
+ * running inside the Tauri webview in side-panel mode.
+ *
+ * In full-editor mode, workspace clicks navigate to in-app routes instead
+ * of opening external IDE windows.
  */
 export class HybridDashboardAdapter extends WebDashboardAdapter {
+  private _appMode: AppMode = "side-panel";
+
+  setAppMode(mode: AppMode) {
+    this._appMode = mode;
+  }
+
+  get appMode(): AppMode {
+    return this._appMode;
+  }
+
   async removeWorkspace(project: string, branch: string): Promise<void> {
-    if (isTauri()) {
+    if (isTauri() && this._appMode === "side-panel") {
       const workspaceId = toWorkspaceId(project, branch);
       await tauriInvoke("workspace_close", { workspaceId });
     }
@@ -31,13 +45,13 @@ export class HybridDashboardAdapter extends WebDashboardAdapter {
   }
 
   async closeWorkspaceWindows(workspaceId: string): Promise<void> {
-    if (isTauri()) {
+    if (isTauri() && this._appMode === "side-panel") {
       await tauriInvoke("workspace_close", { workspaceId });
     }
   }
 
   async openWorkspace(workspaceId: string): Promise<void> {
-    if (isTauri()) {
+    if (isTauri() && this._appMode === "side-panel") {
       await tauriInvoke("workspace_focus", { workspaceId });
       return;
     }
@@ -45,7 +59,7 @@ export class HybridDashboardAdapter extends WebDashboardAdapter {
   }
 
   subscribeActiveWorkspace(onChange: (workspaceId: string | null) => void): Unsubscribe {
-    if (!isTauri()) {
+    if (!isTauri() || this._appMode === "full-editor") {
       return super.subscribeActiveWorkspace(onChange);
     }
 
@@ -74,18 +88,32 @@ export class HybridDashboardAdapter extends WebDashboardAdapter {
  * Native shell capabilities: Tauri IPC for native OS features
  * (copy path, reveal in finder, pick folder, open URL).
  * Tunnel and web server management are handled via HTTP endpoints.
+ *
+ * Mode-aware: in side-panel mode, workspace clicks focus IDE windows.
+ * In full-editor mode, workspace clicks navigate to in-app routes.
  */
 export class NativeShellCapabilities implements PlatformCapabilities {
   private web = new WebCapabilities();
+  private _appMode: AppMode = "side-panel";
+  navigate?: (href: string) => void;
+
+  setAppMode(mode: AppMode) {
+    this._appMode = mode;
+  }
+
+  get appMode(): AppMode {
+    return this._appMode;
+  }
 
   get copyPath(): boolean {
     return isTauri();
   }
 
   getWorkspaceHref(workspaceId: string): string | undefined {
-    // Inside Tauri, clicking a workspace should focus the IDE window
-    // via openWorkspace (Tauri IPC), not navigate to the chat page.
-    if (isTauri()) return undefined;
+    // In side-panel mode inside Tauri, clicking a workspace should focus
+    // the IDE window via openWorkspace (Tauri IPC), not navigate.
+    // In full-editor mode, navigate to the workspace page in-app.
+    if (isTauri() && this._appMode === "side-panel") return undefined;
     return this.web.getWorkspaceHref(workspaceId);
   }
 

@@ -4,6 +4,7 @@ import {
   QuickOpenDialog,
   SearchFilesDialog,
   useDashboardStore,
+  useSettingsQuery,
   type WorkspaceTab,
   WorkspaceTabNav,
 } from "@band-app/dashboard-core";
@@ -28,6 +29,7 @@ import {
   useState,
 } from "react";
 import { PanelResizer } from "../components/PanelResizer";
+import { TauriDragRegion } from "../components/TauriTitleBar";
 import { WorkspaceChatPanel } from "../components/WorkspaceChatPanel";
 import { AgentSwitcherContext } from "../hooks/useAgentSwitcherContext";
 import { useIsDesktop } from "../hooks/useIsDesktop";
@@ -134,7 +136,10 @@ function useDiffFileCount(workspaceId: string): number {
 function WorkspaceLayout() {
   const { workspaceId } = Route.useParams();
   const decoded = decodeURIComponent(workspaceId);
-  const isDesktop = useIsDesktop() && !isTauri;
+  const { settings } = useSettingsQuery();
+  const appMode = settings.appMode ?? "side-panel";
+  const isWideScreen = useIsDesktop();
+  const isDesktop = (isWideScreen && !isTauri) || (isTauri && appMode === "full-editor");
   const [diffStats, setDiffStats] = useState<DiffStats | null>(null);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
 
@@ -540,7 +545,7 @@ function MobileWorkspaceLayout({
             transform: appOffsetTop ? `translateY(${appOffsetTop}px)` : undefined,
           }}
         >
-          {isTauri && <div data-tauri-drag-region className="h-[28px] shrink-0" />}
+          {isTauri && <TauriDragRegion />}
           <header className="flex shrink-0 items-center gap-3 border-b border-border/50 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
             <button
               type="button"

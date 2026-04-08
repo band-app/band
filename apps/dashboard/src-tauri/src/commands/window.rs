@@ -174,3 +174,45 @@ pub fn get_app_title() -> String {
         None => "Band".to_string(),
     }
 }
+
+const SIDE_PANEL_WIDTH: f64 = 400.0;
+
+#[tauri::command]
+pub async fn set_app_mode(app: AppHandle, mode: String) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or("Main window not found")?;
+
+    let monitor = window
+        .current_monitor()
+        .map_err(|e| format!("Failed to get monitor: {e}"))?
+        .ok_or("No monitor found")?;
+
+    let screen_size = monitor.size();
+    let scale = monitor.scale_factor();
+    let screen_w = f64::from(screen_size.width) / scale;
+    let screen_h = f64::from(screen_size.height) / scale;
+
+    if mode == "full-editor" {
+        let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(
+            screen_w, screen_h,
+        )));
+        let _ = window.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(
+            0.0, 0.0,
+        )));
+    } else {
+        // Side panel: narrow width, full height, left edge
+        let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(
+            SIDE_PANEL_WIDTH,
+            screen_h,
+        )));
+        let _ = window.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(
+            0.0, 0.0,
+        )));
+    }
+
+    // Reload the main webview so it picks up the new app mode from settings
+    let _ = window.eval("window.location.replace('/')");
+
+    Ok(())
+}

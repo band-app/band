@@ -28,7 +28,13 @@ import { useCapabilities } from "../context";
 import { useUpdateSettings } from "../hooks/use-settings-mutations";
 import { useSettingsQuery } from "../hooks/use-settings-query";
 import { playSound, SOUNDS, type SoundId } from "../lib/sounds";
-import type { CodingAgentDefinition, CodingAgentType, LabelDefinition, Theme } from "../types";
+import type {
+  AppMode,
+  CodingAgentDefinition,
+  CodingAgentType,
+  LabelDefinition,
+  Theme,
+} from "../types";
 import { AgentIcon } from "./agent-icons";
 
 const KNOWN_AGENTS: { id: string; type: CodingAgentType; label: string; defaultCommand: string }[] =
@@ -52,6 +58,7 @@ const DEFAULT_DEFAULTS = {
 
 type Section =
   | "menu"
+  | "app-mode"
   | "appearance"
   | "general"
   | "coding-agent"
@@ -61,6 +68,7 @@ type Section =
   | "labels";
 
 const SECTION_TITLES: Record<Exclude<Section, "menu">, string> = {
+  "app-mode": "App Mode",
   appearance: "Appearance",
   general: "General",
   labels: "Labels",
@@ -107,7 +115,7 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
   const capabilities = useCapabilities();
   const [section, setSection] = useState<Section>(() => {
     if (typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches) {
-      return "appearance";
+      return "app-mode";
     }
     return "menu";
   });
@@ -128,6 +136,9 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
   const [labels, setLabels] = useState<LabelDefinition[]>(settings.labels ?? []);
   const [autoStartTunnel, setAutoStartTunnel] = useState(settings.autoStartTunnel ?? false);
   const [selectedTheme, setSelectedTheme] = useState<Theme>(settings.theme ?? "system");
+  const [appMode, setAppMode] = useState<AppMode>(settings.appMode ?? "side-panel");
+
+  const isTauriApp = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
   const isDirty = useMemo(() => {
     if (worktreesDir !== (settings.worktreesDir ?? "")) return true;
@@ -146,6 +157,7 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
     if (JSON.stringify(labels) !== JSON.stringify(settings.labels ?? [])) return true;
     if (autoStartTunnel !== (settings.autoStartTunnel ?? false)) return true;
     if (selectedTheme !== (settings.theme ?? "system")) return true;
+    if (appMode !== (settings.appMode ?? "side-panel")) return true;
     return false;
   }, [
     worktreesDir,
@@ -158,6 +170,7 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
     labels,
     autoStartTunnel,
     selectedTheme,
+    appMode,
     settings,
   ]);
 
@@ -172,6 +185,7 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
     setLabels(settings.labels ?? []);
     setAutoStartTunnel(settings.autoStartTunnel ?? false);
     setSelectedTheme(settings.theme ?? "system");
+    setAppMode(settings.appMode ?? "side-panel");
   }, [
     settings.worktreesDir,
     settings.defaults,
@@ -182,6 +196,7 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
     settings.labels,
     settings.autoStartTunnel,
     settings.theme,
+    settings.appMode,
   ]);
 
   const handleBrowse = async () => {
@@ -240,9 +255,21 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
       tokenSecret: settings.tokenSecret,
       autoStartTunnel: autoStartTunnel || undefined,
       theme: selectedTheme,
+      appMode,
     });
+
+    // If running in Tauri and the app mode changed, resize the window
+    if (isTauriApp && appMode !== (settings.appMode ?? "side-panel")) {
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        await invoke("set_app_mode", { mode: appMode });
+      } catch {
+        // Tauri command not available; mode will apply on next restart
+      }
+    }
   };
 
+  const appModePreview = appMode === "full-editor" ? "Full Editor" : "Side Panel";
   const worktreesDirPreview = worktreesDir || "Default";
   const agentPreview =
     codingAgents.length > 0
@@ -264,6 +291,70 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
 
   const sectionContent = activeSection && (
     <>
+      {activeSection === "app-mode" && (
+        <div className="space-y-4 px-1">
+          <div className="space-y-3">
+            <Label>App Mode</Label>
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => setAppMode("side-panel")}
+                className={`flex w-full items-start gap-3 rounded-md border p-3 text-left transition-colors ${
+                  appMode === "side-panel"
+                    ? "border-primary bg-primary/5"
+                    : "border-border hover:border-muted-foreground/50"
+                }`}
+              >
+                <div
+                  className={`mt-0.5 size-4 shrink-0 rounded-full border-2 flex items-center justify-center ${
+                    appMode === "side-panel" ? "border-primary" : "border-muted-foreground/40"
+                  }`}
+                >
+                  {appMode === "side-panel" && <div className="size-2 rounded-full bg-primary" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium">Side Panel</div>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Compact sidebar alongside your IDE. Clicking a workspace opens it in an external
+                    editor window.
+                  </p>
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={() => setAppMode("full-editor")}
+                className={`flex w-full items-start gap-3 rounded-md border p-3 text-left transition-colors ${
+                  appMode === "full-editor"
+                    ? "border-primary bg-primary/5"
+                    : "border-border hover:border-muted-foreground/50"
+                }`}
+              >
+                <div
+                  className={`mt-0.5 size-4 shrink-0 rounded-full border-2 flex items-center justify-center ${
+                    appMode === "full-editor" ? "border-primary" : "border-muted-foreground/40"
+                  }`}
+                >
+                  {appMode === "full-editor" && <div className="size-2 rounded-full bg-primary" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium">Full Editor</div>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Full-width editor with built-in file browser, changes view, chat, and terminal.
+                    No external IDE windows needed.
+                  </p>
+                </div>
+              </button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Choose how Band appears on your desktop.{" "}
+              {isTauriApp
+                ? "The window will resize immediately after saving."
+                : "This setting applies to the desktop app."}
+            </p>
+          </div>
+        </div>
+      )}
+
       {activeSection === "appearance" && (
         <div className="space-y-4 px-1">
           <div className="space-y-2">
@@ -595,6 +686,13 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
 
   const menuItems = (
     <div className="flex flex-col gap-px">
+      <SettingsRow
+        label="App Mode"
+        value={appModePreview}
+        active={activeSection === "app-mode"}
+        onClick={() => setSection("app-mode")}
+      />
+      <Separator />
       <SettingsRow
         label="Appearance"
         value={themePreview}
