@@ -7,12 +7,7 @@ import {
   WorkspaceTabNav,
 } from "@band-app/dashboard-core";
 import { createFileRoute, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
-import {
-  ArrowLeft,
-  ChevronDown,
-  Clock,
-  Plus,
-} from "lucide-react";
+import { ArrowLeft, ChevronDown, Clock, Plus } from "lucide-react";
 import {
   createContext,
   useCallback,

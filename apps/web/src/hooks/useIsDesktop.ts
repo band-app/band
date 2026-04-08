@@ -1,4 +1,4 @@
-import { useLayoutEffect, useState, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 
 const DESKTOP_QUERY = "(min-width: 1024px)";
 

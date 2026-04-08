@@ -53,16 +53,14 @@
 }
 
 /* Underline on the selected tab in an active group */
-.dockview-theme-band
-  .dv-groupview.dv-active-group
+.dockview-theme-band .dv-groupview.dv-active-group
   > .dv-tabs-and-actions-container
   .dv-tab.dv-active-tab {
   box-shadow: inset 0 -2px 0 0 var(--foreground);
 }
 
 /* Subtle underline on the selected tab in an inactive group */
-.dockview-theme-band
-  .dv-groupview.dv-inactive-group
+.dockview-theme-band .dv-groupview.dv-inactive-group
   > .dv-tabs-and-actions-container
   .dv-tab.dv-active-tab {
   box-shadow: inset 0 -2px 0 0 var(--muted-foreground);

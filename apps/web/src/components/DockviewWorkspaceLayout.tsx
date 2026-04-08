@@ -12,20 +12,8 @@ import {
   type IDockviewPanelHeaderProps,
   type DockviewTheme,
 } from "dockview";
-import {
-  lazy,
-  Suspense,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
-import {
-  FolderOpen,
-  GitCompare,
-  MessageSquare,
-  Terminal as TerminalIcon,
-} from "lucide-react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { FolderOpen, GitCompare, MessageSquare, Terminal as TerminalIcon } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@band-app/ui";
 import { CodeBrowserView } from "./CodeBrowserView";
 import { WorkspaceChatPanel } from "./WorkspaceChatPanel";
@@ -97,10 +85,7 @@ interface TerminalParams {
 // Panel wrapper components
 // ---------------------------------------------------------------------------
 
-function ChatPanelComponent({
-  params,
-  api,
-}: IDockviewPanelProps<ChatParams>) {
+function ChatPanelComponent({ params, api }: IDockviewPanelProps<ChatParams>) {
   const [visible, setVisible] = useState(api.isActive);
 
   useEffect(() => {
@@ -114,9 +99,7 @@ function ChatPanelComponent({
     };
   }, [api]);
 
-  return (
-    <WorkspaceChatPanel workspaceId={params.workspaceId} visible={visible} />
-  );
+  return <WorkspaceChatPanel workspaceId={params.workspaceId} visible={visible} />;
 }
 
 function ChangesPanelComponent({ params }: IDockviewPanelProps<ChangesParams>) {
@@ -144,10 +127,7 @@ function FilesPanelComponent({ params }: IDockviewPanelProps<FilesParams>) {
   );
 }
 
-function TerminalPanelComponent({
-  params,
-  api,
-}: IDockviewPanelProps<TerminalParams>) {
+function TerminalPanelComponent({ params, api }: IDockviewPanelProps<TerminalParams>) {
   const [visible, setVisible] = useState(api.isActive);
 
   useEffect(() => {
@@ -184,7 +164,10 @@ function DefaultTab(props: IDockviewPanelHeaderProps) {
 
   const tab = (
     <div className="dv-default-tab">
-      <div className="dv-default-tab-content" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <div
+        className="dv-default-tab-content"
+        style={{ display: "flex", alignItems: "center", gap: 6 }}
+      >
         {Icon && <Icon className="size-4 shrink-0" />}
         <span>{title}</span>
       </div>
@@ -196,7 +179,9 @@ function DefaultTab(props: IDockviewPanelHeaderProps) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>{tab}</TooltipTrigger>
-      <TooltipContent>{title} ({shortcut})</TooltipContent>
+      <TooltipContent>
+        {title} ({shortcut})
+      </TooltipContent>
     </Tooltip>
   );
 }
@@ -205,9 +190,7 @@ function BadgeTab(props: IDockviewPanelHeaderProps) {
   const Icon = PANEL_ICONS[props.api.component];
   const shortcut = PANEL_SHORTCUTS[props.api.component];
   const [title, setTitle] = useState(props.api.title ?? "");
-  const [badge, setBadge] = useState<number | undefined>(
-    props.params?.badge as number | undefined,
-  );
+  const [badge, setBadge] = useState<number | undefined>(props.params?.badge as number | undefined);
 
   useEffect(() => {
     const d = props.api.onDidTitleChange(() => setTitle(props.api.title ?? ""));
@@ -223,7 +206,10 @@ function BadgeTab(props: IDockviewPanelHeaderProps) {
 
   const tab = (
     <div className="dv-default-tab">
-      <div className="dv-default-tab-content" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <div
+        className="dv-default-tab-content"
+        style={{ display: "flex", alignItems: "center", gap: 6 }}
+      >
         {Icon && <Icon className="size-4 shrink-0" />}
         <span>{title}</span>
         {badge != null && badge > 0 && (
@@ -240,7 +226,9 @@ function BadgeTab(props: IDockviewPanelHeaderProps) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>{tab}</TooltipTrigger>
-      <TooltipContent>{title} ({shortcut})</TooltipContent>
+      <TooltipContent>
+        {title} ({shortcut})
+      </TooltipContent>
     </Tooltip>
   );
 }
@@ -249,6 +237,7 @@ function BadgeTab(props: IDockviewPanelHeaderProps) {
 // Component and tab registries
 // ---------------------------------------------------------------------------
 
+// biome-ignore lint/suspicious/noExplicitAny: dockview requires generic panel props
 const components: Record<string, React.FunctionComponent<IDockviewPanelProps<any>>> = {
   chat: ChatPanelComponent,
   changes: ChangesPanelComponent,
@@ -319,9 +308,7 @@ interface DockviewWorkspaceLayoutProps {
   encodedId: string;
 }
 
-export function DockviewWorkspaceLayout({
-  workspaceId,
-}: DockviewWorkspaceLayoutProps) {
+export function DockviewWorkspaceLayout({ workspaceId }: DockviewWorkspaceLayoutProps) {
   const apiRef = useRef<DockviewApi | null>(null);
 
   // Cross-panel state
@@ -501,6 +488,7 @@ export function DockviewWorkspaceLayout({
         opts.position = { referencePanel: anyExisting.id, direction: "within" };
       }
 
+      // biome-ignore lint/suspicious/noExplicitAny: dynamic panel options
       api.addPanel(opts as any);
     },
     [workspaceId],
@@ -561,6 +549,7 @@ export function DockviewWorkspaceLayout({
       const saved = loadLayout();
       if (saved) {
         try {
+          // biome-ignore lint/suspicious/noExplicitAny: localStorage JSON shape
           event.api.fromJSON(saved as any);
           restored = true;
         } catch {
@@ -608,8 +597,8 @@ export function DockviewWorkspaceLayout({
         layoutChange.dispose();
       };
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [workspaceId, buildDefaultLayout, addMissingPanel],
+    // biome-ignore lint/correctness/useExhaustiveDependencies: injectParams is intentionally called via ref-like pattern; workspaceId triggers remount via key prop
+    [buildDefaultLayout, addMissingPanel, injectParams],
   );
 
   // Re-inject params when callbacks/state change
