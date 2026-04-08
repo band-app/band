@@ -51,6 +51,7 @@ export {
   dispatchSearch,
   scrollToSearchMatch,
 } from "./lib/codemirror-setup";
+export { getFileIcon } from "./lib/file-icon";
 export { type FileLocation, formatFileLocation, parseFileLocation } from "./lib/file-location";
 export { extensionToLanguage, filenameToLanguage } from "./lib/language-map";
 export { isServiceHealthy, type ServiceHealth } from "./lib/service-health";
