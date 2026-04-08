@@ -26,6 +26,7 @@ import type { CronjobDefinition } from "../lib/cronjob-types";
 import { fuzzyScore } from "../lib/fuzzy-score";
 import { execGit, gitCmd, listWorktrees } from "../lib/git";
 import { checkHooks, installHooks } from "../lib/hooks";
+import { convertEventsToUIMessages, convertHistoryToUIMessages } from "../lib/convert-events";
 import { resolvePendingInput } from "../lib/pending-inputs";
 import { checkPrereqs, shellPath } from "../lib/process-utils";
 import { loadProjectConfig } from "../lib/project-config";
@@ -38,6 +39,11 @@ import {
   shiftQueuedMessage,
   subscribeQueue,
 } from "../lib/queued-message-store";
+import {
+  getSessionEventsAfter,
+  getSessionEventsBefore,
+  getSessionEventsTail,
+} from "../lib/session-store";
 import { runSetup } from "../lib/setup-runner";
 import {
   bandHome,
@@ -56,6 +62,7 @@ import {
   abortTask,
   cancelTask,
   getTask,
+  type StreamChunk,
   submitTask,
   subscribe as subscribeTask,
   TaskConflictError,
@@ -1240,17 +1247,25 @@ const tasksRouter = t.router({
   }),
 
   stream: publicProcedure
-    .input(z.object({ workspaceId: z.string() }))
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        sessionId: z.string().optional(),
+        afterEventId: z.number().optional(),
+      }),
+    )
     .subscription(async function* (opts) {
-      const workspaceId = opts.input.workspaceId;
+      const { workspaceId, sessionId, afterEventId } = opts.input;
 
       // Register the listener FIRST so we capture events from tasks that
       // are already running (avoids race between submit and subscribe).
-      type Chunk = Parameters<Parameters<typeof subscribeTask>[1]>[0];
-      const queue: Chunk[] = [];
+      const queue: StreamChunk[] = [];
       let resolve: (() => void) | null = null;
+      let highWaterMark = afterEventId ?? 0;
 
-      const unsubscribe = subscribeTask(workspaceId, (chunk) => {
+      const unsubscribe = subscribeTask(workspaceId, (chunk: StreamChunk) => {
+        // Dedup: skip events we already replayed from the buffer
+        if (chunk.eventId != null && chunk.eventId <= highWaterMark) return;
         queue.push(chunk);
         resolve?.();
       });
@@ -1260,8 +1275,22 @@ const tasksRouter = t.router({
         resolve?.();
       });
 
-      // Now check if a task is running. If not, wait briefly for one to
-      // start (handles race between submit and subscribe).
+      // Phase 1: Replay missed events from in-memory buffer (gap-fill)
+      if (sessionId && afterEventId != null) {
+        const missed = getSessionEventsAfter(sessionId, afterEventId);
+        for (const row of missed) {
+          let chunk: Record<string, unknown>;
+          try {
+            chunk = JSON.parse(row.chunkJson);
+          } catch {
+            continue;
+          }
+          yield { ...chunk, eventId: row.id };
+          highWaterMark = Math.max(highWaterMark, row.id);
+        }
+      }
+
+      // Phase 2: Live events — check if a task is running or wait briefly
       let task = getTask(workspaceId);
       if (!task || task.status !== "running") {
         for (let i = 0; i < 10 && !opts.signal?.aborted; i++) {
@@ -1273,7 +1302,9 @@ const tasksRouter = t.router({
         }
       }
 
-      // If still no running task and no events captured, bail out
+      // If still no running task and no events captured, bail out.
+      // This handles both fresh subscriptions (no replay) and gap-fill
+      // subscriptions where the task already finished.
       if (queue.length === 0 && (!task || task.status !== "running")) {
         unsubscribe();
         return;
@@ -1330,8 +1361,64 @@ const sessionsRouter = t.router({
   }),
 
   messages: publicProcedure
-    .input(z.object({ workspaceId: z.string(), sessionId: z.string() }))
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        sessionId: z.string(),
+        beforeEventId: z.number().optional(),
+        limit: z.number().min(1).max(200).default(100).optional(),
+      }),
+    )
     .query(async ({ input }) => {
+      const pageSize = input.limit ?? 100;
+
+      // Try in-memory session buffer first
+      const events = input.beforeEventId
+        ? getSessionEventsBefore(input.sessionId, input.beforeEventId, pageSize)
+        : getSessionEventsTail(input.sessionId, pageSize);
+
+      if (events.length > 0) {
+        const bufferMessages = convertEventsToUIMessages(events);
+        const firstEventId = events[0].id;
+        const lastEventId = events[events.length - 1].id;
+
+        // Check if there are more events before the first one we returned
+        const older = getSessionEventsBefore(input.sessionId, firstEventId, 1);
+        const hasMoreInBuffer = older.length > 0;
+
+        if (hasMoreInBuffer || input.beforeEventId) {
+          // More buffer pages available, or this is already a pagination request —
+          // return buffer page only.
+          return { messages: bufferMessages, firstEventId, lastEventId, hasMore: hasMoreInBuffer };
+        }
+
+        // We're at the start of the buffer with no older buffer pages.
+        // Check if JSONL history exists (e.g. from before a server restart).
+        // If it does, use JSONL as the sole history source — it contains the
+        // complete conversation including any tasks whose events are also in
+        // the buffer. Merging them would cause duplicates.
+        // The buffer's lastEventId is still returned so that resumeStream()
+        // can gap-fill from the correct point for any in-flight task.
+        try {
+          const workspace = resolveWorkspace(input.workspaceId);
+          if (workspace) {
+            const agent = await getWorkspaceAgent(input.workspaceId, workspace.worktree.path);
+            if (agent.supportedFeatures.sessionListing && agent.getSessionMessages) {
+              const rawMessages = await agent.getSessionMessages(input.sessionId, workspace.worktree.path);
+              if (rawMessages && rawMessages.length > 0) {
+                const historyMessages = convertHistoryToUIMessages(rawMessages as { role: "user" | "assistant"; id: string; content: { type: "text" | "tool_use" | "tool_result"; text?: string; toolCallId?: string; toolName?: string; displayTitle?: string; input?: unknown; output?: string; isError?: boolean }[] }[]);
+                return { messages: historyMessages, firstEventId: null, lastEventId, hasMore: false };
+              }
+            }
+          }
+        } catch {
+          // JSONL lookup failed — return buffer-only results
+        }
+
+        return { messages: bufferMessages, firstEventId, lastEventId, hasMore: false };
+      }
+
+      // Fallback: no buffer at all — convert agent's JSONL-based history server-side
       const workspace = resolveWorkspace(input.workspaceId);
       if (!workspace) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Workspace not found" });
@@ -1343,8 +1430,9 @@ const sessionsRouter = t.router({
         throw new TRPCError({ code: "BAD_REQUEST", message: "Session listing not supported" });
       }
 
-      const messages = await agent.getSessionMessages(input.sessionId, workspace.worktree.path);
-      return { messages };
+      const rawMessages = await agent.getSessionMessages(input.sessionId, workspace.worktree.path);
+      const messages = convertHistoryToUIMessages(rawMessages as { role: "user" | "assistant"; id: string; content: { type: "text" | "tool_use" | "tool_result"; text?: string; toolCallId?: string; toolName?: string; displayTitle?: string; input?: unknown; output?: string; isError?: boolean }[] }[]);
+      return { messages, firstEventId: null, lastEventId: null, hasMore: false };
     }),
 });
 

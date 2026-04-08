@@ -44,7 +44,18 @@ export interface SubmitTaskOptions {
   codingAgentId?: string;
 }
 
-type Listener = (chunk: UIMessageChunk) => void;
+/** A UIMessageChunk enriched with a monotonic eventId for gap-fill deduplication. */
+export type StreamChunk = UIMessageChunk & { eventId?: number };
+
+type Listener = (chunk: StreamChunk) => void;
+
+/** In-memory ring buffer of broadcast events per session, used for gap-fill replay. */
+export interface SessionBuffer {
+  events: StreamChunk[];
+  counter: number;
+}
+
+const MAX_BUFFER_SIZE = 2000;
 
 interface InternalTask extends TaskInfo {
   taskRecordId: string;
@@ -55,13 +66,16 @@ interface InternalTask extends TaskInfo {
 // (esbuild start-server.mjs and Vite SSR server.js produce separate copies of this module)
 const TASKS_KEY = Symbol.for("band.task-runner.tasks");
 const LISTENERS_KEY = Symbol.for("band.task-runner.listeners");
+const BUFFERS_KEY = Symbol.for("band.task-runner.sessionBuffers");
 
 const g = globalThis as unknown as Record<symbol, unknown>;
 if (!g[TASKS_KEY]) g[TASKS_KEY] = new Map<string, InternalTask>();
 if (!g[LISTENERS_KEY]) g[LISTENERS_KEY] = new Map<string, Set<Listener>>();
+if (!g[BUFFERS_KEY]) g[BUFFERS_KEY] = new Map<string, SessionBuffer>();
 
 const tasks = g[TASKS_KEY] as Map<string, InternalTask>;
 const listeners = g[LISTENERS_KEY] as Map<string, Set<Listener>>;
+const sessionBuffers = g[BUFFERS_KEY] as Map<string, SessionBuffer>;
 
 function persistTask(task: InternalTask): void {
   const workspace = resolveWorkspace(task.workspaceId);
@@ -87,11 +101,29 @@ function persistTask(task: InternalTask): void {
 }
 
 function broadcast(workspaceId: string, chunk: UIMessageChunk) {
+  const task = tasks.get(workspaceId);
+  let enrichedChunk: StreamChunk = chunk;
+
+  // Buffer the event in-memory for gap-fill replay
+  if (task?.sessionId) {
+    let buf = sessionBuffers.get(task.sessionId);
+    if (!buf) {
+      buf = { events: [], counter: 0 };
+      sessionBuffers.set(task.sessionId, buf);
+    }
+    const eventId = ++buf.counter;
+    enrichedChunk = { ...chunk, eventId };
+    buf.events.push(enrichedChunk);
+    if (buf.events.length > MAX_BUFFER_SIZE) {
+      buf.events.shift();
+    }
+  }
+
   const subs = listeners.get(workspaceId);
   if (!subs) return;
   for (const listener of subs) {
     try {
-      listener(chunk);
+      listener(enrichedChunk);
     } catch {
       // listener may have been removed
     }
@@ -268,6 +300,14 @@ async function runTask(workspaceId: string, task: InternalTask) {
             type: "data-session" as UIMessageChunk["type"],
             data: { sessionId: event.sessionId },
           } as UIMessageChunk);
+          // Broadcast the user's prompt AFTER session-start so task.sessionId
+          // is set and broadcast() stores it in the session buffer.
+          // Uses "user-message" (not "data-prompt") so the live stream ignores
+          // it — useChat already has the user message in its state.
+          broadcast(workspaceId, {
+            type: "user-message",
+            text: task.prompt,
+          } as unknown as UIMessageChunk);
           break;
         }
 
@@ -431,6 +471,14 @@ export function getTask(workspaceId: string): TaskInfo | null {
   const task = tasks.get(workspaceId);
   if (!task) return null;
   return toTaskInfo(task);
+}
+
+/**
+ * Get the in-memory event buffer for a session.
+ * Used by the tRPC router for gap-fill replay and message conversion.
+ */
+export function getSessionBuffer(sessionId: string): SessionBuffer | undefined {
+  return sessionBuffers.get(sessionId);
 }
 
 export function subscribe(workspaceId: string, listener: Listener): () => void {

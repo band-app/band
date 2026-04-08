@@ -17,6 +17,7 @@ interface WorkspaceChatPanelProps {
 export function WorkspaceChatPanel({ workspaceId }: WorkspaceChatPanelProps) {
   const [supportsSessionListing, setSupportsSessionListing] = useState(false);
   const [initialSessionId, setInitialSessionId] = useState<string | undefined>(undefined);
+  const [sessionQueryDone, setSessionQueryDone] = useState(false);
   const [showSessionList, setShowSessionList] = useState(false);
   const [agents, setAgents] = useState<CodingAgentDef[]>([]);
   const [currentAgentId, setCurrentAgentId] = useState<string>("");
@@ -40,8 +41,10 @@ export function WorkspaceChatPanel({ workspaceId }: WorkspaceChatPanelProps) {
             setInitialSessionId(latest.sessionId);
           }
         }
+        setSessionQueryDone(true);
       })
       .catch((err) => {
+        if (!cancelled) setSessionQueryDone(true);
         console.error("[sessions] error:", err);
       });
 
@@ -214,6 +217,7 @@ export function WorkspaceChatPanel({ workspaceId }: WorkspaceChatPanelProps) {
           workspaceName={workspaceId}
           supportsSessionListing={supportsSessionListing}
           initialSessionId={initialSessionId}
+          sessionQueryDone={sessionQueryDone}
           showSessionList={showSessionList}
           onShowSessionListChange={setShowSessionList}
           onStreamingChange={setTaskRunning}

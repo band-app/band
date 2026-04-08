@@ -14,7 +14,8 @@ import {
 import type { UIMessage } from "ai";
 import { getToolName, isToolUIPart } from "ai";
 import { Bot, ChevronDown, Clock, CodeXml, Loader2, ScrollText, X } from "lucide-react";
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { StickToBottomContext } from "use-stick-to-bottom";
 import { TaskChatTransport } from "../lib/task-chat-transport";
 import { trpc } from "../lib/trpc-client";
 import {
@@ -83,22 +84,6 @@ function ThinkingIndicator() {
   );
 }
 
-interface HistoryMessageContent {
-  type: "text" | "tool_use" | "tool_result";
-  text?: string;
-  toolCallId?: string;
-  toolName?: string;
-  input?: unknown;
-  output?: string;
-  isError?: boolean;
-}
-
-interface HistoryMessage {
-  role: "user" | "assistant";
-  id: string;
-  content: HistoryMessageContent[];
-}
-
 type UIMessageParts = ReturnType<
   typeof import("@ai-sdk/react").useChat
 >["messages"][number]["parts"];
@@ -107,93 +92,6 @@ type QueueSegment = {
   userPrompt: string | null;
   parts: UIMessageParts;
 };
-
-/**
- * Convert history messages (from agent session JSONL files) into UIMessage[]
- * that can be loaded directly into useChat's setMessages().
- *
- * This eliminates the need for a separate "historical messages" store — all
- * messages flow through the same useChat message array.
- */
-function convertHistoryToUIMessages(history: HistoryMessage[]): UIMessage[] {
-  // Build a map of tool_result blocks keyed by toolCallId for quick lookup
-  const toolResultMap = new Map<string, HistoryMessageContent>();
-  for (const msg of history) {
-    for (const block of msg.content) {
-      if (block.type === "tool_result" && block.toolCallId) {
-        toolResultMap.set(block.toolCallId, block);
-      }
-    }
-  }
-
-  return history.map((msg) => {
-    const parts: UIMessageParts = [];
-
-    if (msg.role === "user") {
-      const userText = msg.content
-        .filter((b) => b.type === "text" && b.text?.trim())
-        .map((b) => b.text!)
-        .join("\n");
-
-      if (userText) {
-        const { displayText, files } = parseSharedFiles(userText);
-        for (const file of files) {
-          parts.push(file);
-        }
-        if (displayText) {
-          parts.push({ type: "text", text: displayText });
-        }
-      }
-    } else {
-      // Assistant message
-      for (const block of msg.content) {
-        if (block.type === "text" && block.text?.trim()) {
-          parts.push({ type: "text", text: block.text });
-        } else if (block.type === "tool_use") {
-          const callId = block.toolCallId ?? "";
-          const toolName = block.toolName ?? "unknown";
-          const title = block.displayTitle;
-          const result = toolResultMap.get(callId);
-
-          if (result?.isError) {
-            parts.push({
-              type: "dynamic-tool",
-              toolName,
-              toolCallId: callId,
-              state: "output-error",
-              input: block.input,
-              errorText: result.output ?? "Error",
-              ...(title ? { title } : {}),
-            });
-          } else if (result) {
-            parts.push({
-              type: "dynamic-tool",
-              toolName,
-              toolCallId: callId,
-              state: "output-available",
-              input: block.input,
-              output: result.output,
-              ...(title ? { title } : {}),
-            });
-          } else {
-            // No result — tool is still waiting for input/completion
-            parts.push({
-              type: "dynamic-tool",
-              toolName,
-              toolCallId: callId,
-              state: "input-available",
-              input: block.input,
-              ...(title ? { title } : {}),
-            });
-          }
-        }
-        // tool_result blocks are consumed above via toolResultMap — skip them
-      }
-    }
-
-    return { id: msg.id, role: msg.role, parts };
-  });
-}
 
 /**
  * Splits an assistant message's parts at `data-prompt` boundaries so each
@@ -230,6 +128,8 @@ interface ChatViewProps {
   workspaceName: string;
   supportsSessionListing: boolean;
   initialSessionId?: string;
+  /** True once the parent's sessions.list query has resolved. */
+  sessionQueryDone?: boolean;
   showSessionList: boolean;
   onShowSessionListChange: (show: boolean) => void;
   onStreamingChange?: (streaming: boolean) => void;
@@ -244,6 +144,7 @@ export function ChatView({
   workspaceName,
   supportsSessionListing,
   initialSessionId,
+  sessionQueryDone = false,
   showSessionList,
   onShowSessionListChange,
   onStreamingChange,
@@ -253,8 +154,15 @@ export function ChatView({
   codingAgentId,
 }: ChatViewProps) {
   const sessionIdRef = useRef<string | undefined>(undefined);
+  const lastEventIdRef = useRef<number | undefined>(undefined);
+  const firstEventIdRef = useRef<number | undefined>(undefined);
   const [activeSessionId, setActiveSessionId] = useState<string | undefined>(undefined);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const scrollHeightBeforePrependRef = useRef<number | null>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const stickyContextRef = useRef<StickToBottomContext>(null);
   const initialSessionLoadedRef = useRef(false);
 
   const [skills, setSkills] = useState<
@@ -366,7 +274,12 @@ export function ChatView({
   }, [workspaceId]);
 
   const transport = useMemo(
-    () => new TaskChatTransport(workspaceId, () => sessionIdRef.current),
+    () =>
+      new TaskChatTransport(
+        workspaceId,
+        () => sessionIdRef.current,
+        () => lastEventIdRef.current,
+      ),
     [workspaceId],
   );
 
@@ -382,21 +295,68 @@ export function ChatView({
     transport.codingAgentId = codingAgentId;
   }, [transport, codingAgentId]);
 
-  const { messages, sendMessage, status, setMessages, stop } = useChat({
-    id: `${workspaceId}:${chatKey}`,
-    transport,
-    resume: true,
-    onData: (dataPart) => {
-      if (
-        dataPart.type === "data-session" &&
-        dataPart.data != null &&
-        typeof dataPart.data === "object" &&
-        "sessionId" in (dataPart.data as Record<string, unknown>)
-      ) {
-        sessionIdRef.current = (dataPart.data as { sessionId: string }).sessionId;
-      }
-    },
-  });
+  const { messages, sendMessage, status, setMessages, stop, resumeStream } =
+    useChat({
+      id: `${workspaceId}:${chatKey}`,
+      transport,
+      // Don't auto-resume — we control when to resume so that sessionIdRef
+      // and lastEventIdRef are populated first (from loadMessages).
+      resume: false,
+      onData: (dataPart) => {
+        // Track eventId from every chunk for gap-fill on reconnect
+        const eventId = (dataPart as Record<string, unknown>).eventId;
+        if (typeof eventId === "number") {
+          lastEventIdRef.current = eventId;
+        }
+
+        if (
+          dataPart.type === "data-session" &&
+          dataPart.data != null &&
+          typeof dataPart.data === "object" &&
+          "sessionId" in (dataPart.data as Record<string, unknown>)
+        ) {
+          sessionIdRef.current = (dataPart.data as { sessionId: string })
+            .sessionId;
+        }
+      },
+    });
+
+  // Reconnect to the stream when the tab regains focus, but only if we're
+  // not already streaming (avoids creating a duplicate concurrent stream).
+  const statusRef = useRef(status);
+  statusRef.current = status;
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState !== "visible") return;
+      const s = statusRef.current;
+      if (s === "streaming" || s === "submitted") return;
+      resumeStream();
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () =>
+      document.removeEventListener("visibilitychange", handleVisibility);
+  }, [resumeStream]);
+
+  // Auto-reconnect when the stream drops with an error (e.g. network issue).
+  // Gap-fill from lastEventIdRef picks up where we left off.
+  // Uses exponential backoff and a max retry limit to avoid infinite loops.
+  const reconnectAttemptsRef = useRef(0);
+  useEffect(() => {
+    if (status === "streaming" || status === "submitted") {
+      // Reset retry counter on successful connection
+      reconnectAttemptsRef.current = 0;
+      return;
+    }
+    if (status !== "error") return;
+    const attempt = reconnectAttemptsRef.current;
+    if (attempt >= 5) return; // Give up after 5 attempts
+    reconnectAttemptsRef.current = attempt + 1;
+    const delay = Math.min(1000 * 2 ** attempt, 30000);
+    const timer = setTimeout(() => {
+      resumeStream();
+    }, delay);
+    return () => clearTimeout(timer);
+  }, [status, resumeStream]);
 
   const abortingRef = useRef(false);
 
@@ -435,34 +395,139 @@ export function ChatView({
     [sendMessage],
   );
 
+  // Load session history, then attempt to resume the live stream.
+  // This ensures sessionIdRef and lastEventIdRef are set BEFORE
+  // reconnectToStream runs, so gap-fill replays from the right point.
   const loadMessages = useCallback(
     async (sessionId: string) => {
+      // Kill any stale stream before loading + resuming to prevent
+      // two concurrent streams writing to the same messages array.
+      stop();
       setLoadingHistory(true);
       try {
         const data = await trpc.sessions.messages.query({
           workspaceId,
           sessionId,
         });
-        setMessages(convertHistoryToUIMessages(data.messages as HistoryMessage[]));
+        setMessages(data.messages as UIMessage[]);
+        lastEventIdRef.current = data.lastEventId ?? undefined;
+        firstEventIdRef.current = data.firstEventId ?? undefined;
+        setHasMore(data.hasMore);
       } finally {
         setLoadingHistory(false);
       }
+      // Now that refs are populated, try to reconnect to a running stream.
+      // If no task is running, reconnectToStream returns null and this is a no-op.
+      resumeStream();
     },
-    [workspaceId, setMessages],
+    [workspaceId, setMessages, resumeStream, stop],
   );
 
+  // Load older messages when the user scrolls to the top of the chat.
+  const loadOlderMessages = useCallback(async () => {
+    const sessionId = sessionIdRef.current;
+    const beforeEventId = firstEventIdRef.current;
+    if (!sessionId || !beforeEventId || !hasMore || loadingOlder || loadingHistory) {
+      return;
+    }
+
+    setLoadingOlder(true);
+    try {
+      const data = await trpc.sessions.messages.query({
+        workspaceId,
+        sessionId,
+        beforeEventId,
+        limit: 100,
+      });
+
+      if (data.messages.length > 0) {
+        // Capture scroll height before prepend for position restoration
+        const scrollEl = stickyContextRef.current?.scrollRef?.current;
+        if (scrollEl) {
+          scrollHeightBeforePrependRef.current = scrollEl.scrollHeight;
+        }
+
+        setMessages((prev) => [...(data.messages as UIMessage[]), ...prev]);
+        firstEventIdRef.current = data.firstEventId ?? undefined;
+        setHasMore(data.hasMore);
+      } else {
+        setHasMore(false);
+      }
+    } catch (err) {
+      console.error("[loadOlderMessages] error:", err);
+    } finally {
+      setLoadingOlder(false);
+    }
+  }, [workspaceId, hasMore, loadingOlder, loadingHistory, setMessages]);
+
+  // Restore scroll position after prepending older messages so the user's
+  // viewport doesn't jump. Fires synchronously before the browser paints.
+  useLayoutEffect(() => {
+    const prevHeight = scrollHeightBeforePrependRef.current;
+    if (prevHeight === null) return;
+    scrollHeightBeforePrependRef.current = null;
+
+    const scrollEl = stickyContextRef.current?.scrollRef?.current;
+    if (!scrollEl) return;
+
+    const delta = scrollEl.scrollHeight - prevHeight;
+    if (delta > 0) {
+      scrollEl.scrollTop += delta;
+    }
+  }, [messages]);
+
+  // Observe a sentinel element at the top of the chat to trigger loading
+  // older messages when the user scrolls near the top.
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    const scrollEl = stickyContextRef.current?.scrollRef?.current;
+    if (!sentinel || !scrollEl) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          loadOlderMessages();
+        }
+      },
+      {
+        root: scrollEl,
+        rootMargin: "200px 0px 0px 0px",
+        threshold: 0,
+      },
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMore, loadingOlder, loadingHistory, loadOlderMessages]);
+
+  // Wait for the parent's session query to resolve before doing anything.
+  // This avoids the race where an eager resumeStream() opens stream A,
+  // then initialSessionId arrives → loadMessages opens stream B, and
+  // both pump chunks into the same messages array (causing duplicates).
   useEffect(() => {
     if (initialSessionId && !initialSessionLoadedRef.current) {
+      // Session query resolved with a session — load its history.
+      // loadMessages will call resumeStream() after setting refs.
       initialSessionLoadedRef.current = true;
       sessionIdRef.current = initialSessionId;
       setActiveSessionId(initialSessionId);
       loadMessages(initialSessionId);
+    } else if (sessionQueryDone && !initialSessionId && !initialSessionLoadedRef.current) {
+      // Session query resolved with NO sessions — just try resuming
+      // a running task (e.g. started from CLI).
+      initialSessionLoadedRef.current = true;
+      resumeStream();
     }
-  }, [initialSessionId, loadMessages]);
+  }, [initialSessionId, sessionQueryDone, loadMessages, resumeStream]);
 
   const handleSelectSession = useCallback(
     async (sessionId: string) => {
+      // Stop any active stream before switching sessions
+      stop();
       sessionIdRef.current = sessionId;
+      lastEventIdRef.current = undefined;
+      firstEventIdRef.current = undefined;
+      setHasMore(false);
       setActiveSessionId(sessionId);
       setMessages([]);
       setQueuedMessages([]);
@@ -470,17 +535,21 @@ export function ChatView({
       onShowSessionListChange(false);
       await loadMessages(sessionId);
     },
-    [loadMessages, setMessages, onShowSessionListChange, workspaceId],
+    [loadMessages, setMessages, stop, onShowSessionListChange, workspaceId],
   );
 
   const handleNewSession = useCallback(() => {
+    stop();
     sessionIdRef.current = undefined;
+    lastEventIdRef.current = undefined;
+    firstEventIdRef.current = undefined;
+    setHasMore(false);
     setActiveSessionId(undefined);
     setMessages([]);
     setQueuedMessages([]);
     trpc.queue.clear.mutate({ workspaceId }).catch(() => {});
     onShowSessionListChange(false);
-  }, [setMessages, onShowSessionListChange, workspaceId]);
+  }, [setMessages, stop, onShowSessionListChange, workspaceId]);
 
   useEffect(() => {
     if (onNewSessionRef) {
@@ -596,8 +665,20 @@ export function ChatView({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <Conversation className="min-h-0 flex-1">
+      <Conversation className="min-h-0 flex-1" contextRef={stickyContextRef}>
         <ConversationContent>
+          {/* Sentinel for scroll-back pagination */}
+          {hasMore && !loadingHistory && (
+            <div ref={sentinelRef} className="h-px w-full shrink-0" aria-hidden="true" />
+          )}
+
+          {/* Loading indicator for older messages */}
+          {loadingOlder && (
+            <div className="flex items-center justify-center py-4">
+              <Loader2 className="size-4 animate-spin text-muted-foreground" />
+            </div>
+          )}
+
           {isEmpty && (
             <ConversationEmptyState
               icon={
@@ -955,37 +1036,3 @@ function QueuedMessageBubble({ text, onCancel }: { text: string; onCancel: () =>
   );
 }
 
-const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
-
-/**
- * Parse the "I'm sharing these files with you:" prefix that the backend
- * prepends to prompts with file attachments.  Returns the display text
- * (without the prefix) and an array of file-part objects for rendering.
- */
-function parseSharedFiles(text: string): {
-  displayText: string;
-  files: { type: "file"; mediaType: string; url: string; filename: string }[];
-} {
-  const match = text.match(/^I'm sharing these files with you:\n((?:- .+\n)+)\n([\s\S]*)$/);
-  if (!match) return { displayText: text, files: [] };
-
-  const fileLines = match[1].trim().split("\n");
-  const displayText = match[2].trim();
-
-  const files = fileLines.map((line) => {
-    const filePath = line.replace(/^- /, "").trim();
-    const filename = filePath.split("/").pop() ?? filePath;
-    const ext = filename.includes(".") ? `.${filename.split(".").pop()!.toLowerCase()}` : "";
-    const isImage = IMAGE_EXTENSIONS.has(ext);
-    return {
-      type: "file" as const,
-      mediaType: isImage
-        ? `image/${ext.slice(1).replace("jpg", "jpeg")}`
-        : "application/octet-stream",
-      url: `/api/uploads/${encodeURIComponent(filename)}`,
-      filename,
-    };
-  });
-
-  return { displayText, files };
-}
