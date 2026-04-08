@@ -15,8 +15,8 @@ import {
   StateEffect,
   StateField,
 } from "@codemirror/state";
-import { vscodeDarkInit } from "@uiw/codemirror-theme-vscode";
 import { Decoration, type DecorationSet, EditorView, keymap, lineNumbers } from "@codemirror/view";
+import { vscodeDarkInit } from "@uiw/codemirror-theme-vscode";
 
 /**
  * Lazy-loads a CodeMirror LanguageSupport for the given language name.
@@ -151,9 +151,7 @@ export function baseViewerExtensions(isDark = true): Extension[] {
           }),
           syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
         ]
-      : [
-          syntaxHighlighting(defaultHighlightStyle),
-        ]),
+      : [syntaxHighlighting(defaultHighlightStyle)]),
     keymap.of([...defaultKeymap]),
     // Viewer-specific overrides
     EditorView.theme(
@@ -173,7 +171,11 @@ export function baseViewerExtensions(isDark = true): Extension[] {
         : {
             "&": { height: "100%", fontSize: "13px", backgroundColor: "var(--background)" },
             ".cm-scroller": { overflow: "auto" },
-            ".cm-gutters": { backgroundColor: "var(--background)", border: "none", color: "#6e7781" },
+            ".cm-gutters": {
+              backgroundColor: "var(--background)",
+              border: "none",
+              color: "#6e7781",
+            },
             ".cm-activeLineGutter": { backgroundColor: "transparent" },
             ".cm-activeLine": { backgroundColor: "transparent" },
             "&.cm-focused .cm-cursor": { borderLeftColor: "#24292f" },
