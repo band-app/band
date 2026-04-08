@@ -63,6 +63,22 @@ function NotFound() {
  *  Reads a cached theme value from localStorage (written by ThemeSync). */
 const THEME_INIT_SCRIPT = `(function(){try{var t=localStorage.getItem("band-theme")||"dark";var d=document.documentElement;if(t==="system"){if(window.matchMedia("(prefers-color-scheme:dark)").matches)d.classList.add("dark");else d.classList.remove("dark")}else if(t==="dark"){d.classList.add("dark")}else{d.classList.remove("dark")}}catch(e){document.documentElement.classList.add("dark")}})()`;
 
+/** Applies a theme value ("dark", "light", or "system") to the document root. */
+function applyTheme(theme: string) {
+  const root = document.documentElement;
+  if (theme === "system") {
+    if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+      root.classList.add("dark");
+    } else {
+      root.classList.remove("dark");
+    }
+  } else if (theme === "dark") {
+    root.classList.add("dark");
+  } else {
+    root.classList.remove("dark");
+  }
+}
+
 /** Syncs the "dark" class on <html> with the persisted theme setting.
  *  Runs for ALL pages (including standalone Tauri windows like tasks/cronjobs).
  *  Also caches the theme in localStorage so the blocking script can use it. */
@@ -71,30 +87,32 @@ function ThemeSync() {
   const theme = settings.theme ?? "dark";
 
   useEffect(() => {
-    const root = document.documentElement;
-
     try {
       localStorage.setItem("band-theme", theme);
     } catch {}
 
-    const apply = (isDark: boolean) => {
-      if (isDark) {
-        root.classList.add("dark");
-      } else {
-        root.classList.remove("dark");
-      }
-    };
+    applyTheme(theme);
 
     if (theme === "system") {
       const mq = window.matchMedia("(prefers-color-scheme: dark)");
-      apply(mq.matches);
-      const handler = (e: MediaQueryListEvent) => apply(e.matches);
+      const handler = () => applyTheme("system");
       mq.addEventListener("change", handler);
       return () => mq.removeEventListener("change", handler);
     }
-
-    apply(theme === "dark");
   }, [theme]);
+
+  // Cross-window theme sync via the storage event.
+  // When another window updates "band-theme" in localStorage,
+  // apply the change immediately to this window's DOM.
+  useEffect(() => {
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key !== "band-theme" || !e.newValue) return;
+      applyTheme(e.newValue);
+    };
+
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, []);
 
   return null;
 }

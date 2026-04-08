@@ -95,8 +95,13 @@ pub fn run() {
             let reload_item = MenuItemBuilder::with_id("reload", "Reload")
                 .accelerator("CmdOrCtrl+R")
                 .build(app)?;
+            let settings_item = MenuItemBuilder::with_id("settings", "Settings...")
+                .accelerator("CmdOrCtrl+Comma")
+                .build(app)?;
             let view_menu = SubmenuBuilder::new(app, "View")
                 .item(&reload_item)
+                .separator()
+                .item(&settings_item)
                 .build()?;
 
             let menu = MenuBuilder::new(app)
@@ -105,7 +110,7 @@ pub fn run() {
                 .build()?;
             app.set_menu(menu)?;
 
-            // Handle the reload menu event on all windows.
+            // Handle menu events on all windows.
             let app_handle = app.handle().clone();
             app.on_menu_event(move |_app, event| {
                 if event.id() == "reload" {
@@ -122,6 +127,11 @@ pub fn run() {
                             let _ = win.navigate(url);
                         }
                     }
+                } else if event.id() == "settings" {
+                    let handle = app_handle.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let _ = commands::window::open_settings_window(handle).await;
+                    });
                 }
             });
 
