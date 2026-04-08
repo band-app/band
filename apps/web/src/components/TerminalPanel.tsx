@@ -1,7 +1,7 @@
 import type { FitAddon } from "@xterm/addon-fit";
 import type { Terminal } from "@xterm/xterm";
 import { useEffect, useRef } from "react";
-import { isTauri } from "~/lib/is-tauri";
+import { isTauri } from "../lib/is-tauri";
 
 interface TerminalPanelProps {
   workspaceId: string;
