@@ -52,7 +52,8 @@
     },
     "packages/dashboard-core": {
       "entry": ["src/index.ts", "src/adapters/web.ts", "src/adapters/hybrid.ts"],
-      "project": ["src/**/*.{ts,tsx}"]
+      "project": ["src/**/*.{ts,tsx}"],
+      "ignoreDependencies": ["@babel/runtime"]
     },
     "packages/coding-agent": {
       "entry": ["src/index.ts", "tests/mocks/*.mjs"],
