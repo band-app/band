@@ -159,6 +159,7 @@ export function baseViewerExtensions(isDark = true): Extension[] {
         ? {
             "&": { height: "100%", fontSize: "13px" },
             ".cm-scroller": { overflow: "auto" },
+            ".cm-lineNumbers": { paddingLeft: "12px", paddingRight: "12px" },
             ".cm-activeLineGutter": { backgroundColor: "transparent" },
             ".cm-searchMatch": {
               backgroundColor: "rgba(255, 213, 0, 0.35)",
@@ -171,6 +172,7 @@ export function baseViewerExtensions(isDark = true): Extension[] {
         : {
             "&": { height: "100%", fontSize: "13px", backgroundColor: "var(--background)" },
             ".cm-scroller": { overflow: "auto" },
+            ".cm-lineNumbers": { paddingLeft: "12px", paddingRight: "12px" },
             ".cm-gutters": {
               backgroundColor: "var(--background)",
               border: "none",

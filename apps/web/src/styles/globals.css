@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "./dockview-theme.css";
 
 @source "../../../../packages/dashboard-core/src";
 @source "../../../../packages/ui/src";
