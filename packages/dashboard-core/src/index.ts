@@ -26,7 +26,6 @@ export { type WorkspaceTab, WorkspaceTabNav } from "./components/WorkspaceTabNav
 export { DashboardProvider, useAdapter, useCapabilities } from "./context";
 export { type HooksSetupState, useHooksSetup } from "./hooks/use-hooks-setup";
 export { useIsDark } from "./hooks/use-is-dark";
-export { useSearch, type UseSearchReturn } from "./hooks/use-search";
 export {
   useAddProject,
   useCreateWorkspace,
@@ -36,6 +35,7 @@ export {
   useUpdateProjectLabel,
 } from "./hooks/use-project-mutations";
 export { useProjects } from "./hooks/use-projects";
+export { type UseSearchReturn, useSearch } from "./hooks/use-search";
 export { useUpdateSettings } from "./hooks/use-settings-mutations";
 export { useSettingsQuery } from "./hooks/use-settings-query";
 // Hooks

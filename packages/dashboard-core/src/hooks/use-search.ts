@@ -1,7 +1,12 @@
 import type { EditorView } from "@codemirror/view";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { clearSearch, collectSearchMatches, dispatchSearch, scrollToSearchMatch } from "../lib/codemirror-setup";
 import type { SearchBarHandle, SearchOptions } from "../components/SearchBar";
+import {
+  clearSearch,
+  collectSearchMatches,
+  dispatchSearch,
+  scrollToSearchMatch,
+} from "../lib/codemirror-setup";
 
 type SearchMatch = { view: EditorView; from: number; to: number };
 
@@ -53,7 +58,11 @@ export interface UseSearchReturn {
   dispatchToViews: (views: EditorView[]) => void;
 }
 
-export function useSearch({ getViews, collectMatches, onFindInFile }: UseSearchOptions): UseSearchReturn {
+export function useSearch({
+  getViews,
+  collectMatches,
+  onFindInFile,
+}: UseSearchOptions): UseSearchReturn {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQueryText] = useState("");
   const [searchOptions, setSearchOptions] = useState<SearchOptions>(DEFAULT_SEARCH_OPTIONS);

@@ -92,10 +92,7 @@ export function CodeBrowserView({
   // biome-ignore lint/suspicious/noExplicitAny: EditorView type from @codemirror/view — kept untyped to avoid cross-package dependency
   const editorViewRef = useRef<any>(null);
 
-  const getViews = useCallback(
-    () => (editorViewRef.current ? [editorViewRef.current] : []),
-    [],
-  );
+  const getViews = useCallback(() => (editorViewRef.current ? [editorViewRef.current] : []), []);
 
   const search = useSearch({ getViews, onFindInFile });
 

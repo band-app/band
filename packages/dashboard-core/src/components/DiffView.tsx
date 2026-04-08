@@ -16,11 +16,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAdapter } from "../context";
 import { useIsDark } from "../hooks/use-is-dark";
 import { useSearch } from "../hooks/use-search";
-import {
-  baseViewerExtensions,
-  loadLanguage,
-  searchHighlightOnly,
-} from "../lib/codemirror-setup";
+import { baseViewerExtensions, loadLanguage, searchHighlightOnly } from "../lib/codemirror-setup";
 import { formatFileLocation } from "../lib/file-location";
 import { extensionToLanguage, filenameToLanguage } from "../lib/language-map";
 import type { DiffMode, FileStatus, WorkspaceDiffSummary } from "../types";
@@ -598,10 +594,7 @@ export function DiffView({
   // Track filenames in a ref for stable access in navigation callbacks
   const filenamesRef = useRef<string[]>([]);
 
-  const getViews = useCallback(
-    () => Array.from(editorViewsRef.current.values()).flat(),
-    [],
-  );
+  const getViews = useCallback(() => Array.from(editorViewsRef.current.values()).flat(), []);
 
   const collectMatches = useCallback(
     (query: string, opts: SearchOptions) =>
