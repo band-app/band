@@ -14,7 +14,15 @@ import {
 import type { UIMessage } from "ai";
 import { getToolName, isToolUIPart } from "ai";
 import { Bot, ChevronDown, Clock, CodeXml, Loader2, ScrollText, X } from "lucide-react";
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { StickToBottomContext } from "use-stick-to-bottom";
 import { TaskChatTransport } from "../lib/task-chat-transport";
 import { trpc } from "../lib/trpc-client";
@@ -295,31 +303,29 @@ export function ChatView({
     transport.codingAgentId = codingAgentId;
   }, [transport, codingAgentId]);
 
-  const { messages, sendMessage, status, setMessages, stop, resumeStream } =
-    useChat({
-      id: `${workspaceId}:${chatKey}`,
-      transport,
-      // Don't auto-resume — we control when to resume so that sessionIdRef
-      // and lastEventIdRef are populated first (from loadMessages).
-      resume: false,
-      onData: (dataPart) => {
-        // Track eventId from every chunk for gap-fill on reconnect
-        const eventId = (dataPart as Record<string, unknown>).eventId;
-        if (typeof eventId === "number") {
-          lastEventIdRef.current = eventId;
-        }
+  const { messages, sendMessage, status, setMessages, stop, resumeStream } = useChat({
+    id: `${workspaceId}:${chatKey}`,
+    transport,
+    // Don't auto-resume — we control when to resume so that sessionIdRef
+    // and lastEventIdRef are populated first (from loadMessages).
+    resume: false,
+    onData: (dataPart) => {
+      // Track eventId from every chunk for gap-fill on reconnect
+      const eventId = (dataPart as Record<string, unknown>).eventId;
+      if (typeof eventId === "number") {
+        lastEventIdRef.current = eventId;
+      }
 
-        if (
-          dataPart.type === "data-session" &&
-          dataPart.data != null &&
-          typeof dataPart.data === "object" &&
-          "sessionId" in (dataPart.data as Record<string, unknown>)
-        ) {
-          sessionIdRef.current = (dataPart.data as { sessionId: string })
-            .sessionId;
-        }
-      },
-    });
+      if (
+        dataPart.type === "data-session" &&
+        dataPart.data != null &&
+        typeof dataPart.data === "object" &&
+        "sessionId" in (dataPart.data as Record<string, unknown>)
+      ) {
+        sessionIdRef.current = (dataPart.data as { sessionId: string }).sessionId;
+      }
+    },
+  });
 
   // Reconnect to the stream when the tab regains focus, but only if we're
   // not already streaming (avoids creating a duplicate concurrent stream).
@@ -333,8 +339,7 @@ export function ChatView({
       resumeStream();
     };
     document.addEventListener("visibilitychange", handleVisibility);
-    return () =>
-      document.removeEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
   }, [resumeStream]);
 
   // Auto-reconnect when the stream drops with an error (e.g. network issue).
@@ -462,6 +467,7 @@ export function ChatView({
 
   // Restore scroll position after prepending older messages so the user's
   // viewport doesn't jump. Fires synchronously before the browser paints.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: messages triggers re-run after prepend
   useLayoutEffect(() => {
     const prevHeight = scrollHeightBeforePrependRef.current;
     if (prevHeight === null) return;
@@ -478,6 +484,7 @@ export function ChatView({
 
   // Observe a sentinel element at the top of the chat to trigger loading
   // older messages when the user scrolls near the top.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: hasMore/loadingOlder/loadingHistory re-create observer when state changes
   useEffect(() => {
     const sentinel = sentinelRef.current;
     const scrollEl = stickyContextRef.current?.scrollRef?.current;
@@ -1035,4 +1042,3 @@ function QueuedMessageBubble({ text, onCancel }: { text: string; onCancel: () =>
     </div>
   );
 }
-

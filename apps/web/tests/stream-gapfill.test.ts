@@ -239,7 +239,7 @@ interface WSMessage {
   error?: unknown;
 }
 
-function wsSubscribe(
+function _wsSubscribe(
   serverUrl: string,
   procedure: string,
   input: unknown,

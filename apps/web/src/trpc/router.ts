@@ -14,6 +14,7 @@ import {
   replaceAgent,
 } from "../lib/agent-pool";
 import { checkCli, installCli } from "../lib/cli";
+import { convertEventsToUIMessages, convertHistoryToUIMessages } from "../lib/convert-events";
 import { reloadSchedules, stopJobsForKey } from "../lib/cronjob-scheduler";
 import {
   deleteCronjobFile,
@@ -26,7 +27,6 @@ import type { CronjobDefinition } from "../lib/cronjob-types";
 import { fuzzyScore } from "../lib/fuzzy-score";
 import { execGit, gitCmd, listWorktrees } from "../lib/git";
 import { checkHooks, installHooks } from "../lib/hooks";
-import { convertEventsToUIMessages, convertHistoryToUIMessages } from "../lib/convert-events";
 import { resolvePendingInput } from "../lib/pending-inputs";
 import { checkPrereqs, shellPath } from "../lib/process-utils";
 import { loadProjectConfig } from "../lib/project-config";
@@ -1404,10 +1404,33 @@ const sessionsRouter = t.router({
           if (workspace) {
             const agent = await getWorkspaceAgent(input.workspaceId, workspace.worktree.path);
             if (agent.supportedFeatures.sessionListing && agent.getSessionMessages) {
-              const rawMessages = await agent.getSessionMessages(input.sessionId, workspace.worktree.path);
+              const rawMessages = await agent.getSessionMessages(
+                input.sessionId,
+                workspace.worktree.path,
+              );
               if (rawMessages && rawMessages.length > 0) {
-                const historyMessages = convertHistoryToUIMessages(rawMessages as { role: "user" | "assistant"; id: string; content: { type: "text" | "tool_use" | "tool_result"; text?: string; toolCallId?: string; toolName?: string; displayTitle?: string; input?: unknown; output?: string; isError?: boolean }[] }[]);
-                return { messages: historyMessages, firstEventId: null, lastEventId, hasMore: false };
+                const historyMessages = convertHistoryToUIMessages(
+                  rawMessages as {
+                    role: "user" | "assistant";
+                    id: string;
+                    content: {
+                      type: "text" | "tool_use" | "tool_result";
+                      text?: string;
+                      toolCallId?: string;
+                      toolName?: string;
+                      displayTitle?: string;
+                      input?: unknown;
+                      output?: string;
+                      isError?: boolean;
+                    }[];
+                  }[],
+                );
+                return {
+                  messages: historyMessages,
+                  firstEventId: null,
+                  lastEventId,
+                  hasMore: false,
+                };
               }
             }
           }
@@ -1431,7 +1454,22 @@ const sessionsRouter = t.router({
       }
 
       const rawMessages = await agent.getSessionMessages(input.sessionId, workspace.worktree.path);
-      const messages = convertHistoryToUIMessages(rawMessages as { role: "user" | "assistant"; id: string; content: { type: "text" | "tool_use" | "tool_result"; text?: string; toolCallId?: string; toolName?: string; displayTitle?: string; input?: unknown; output?: string; isError?: boolean }[] }[]);
+      const messages = convertHistoryToUIMessages(
+        rawMessages as {
+          role: "user" | "assistant";
+          id: string;
+          content: {
+            type: "text" | "tool_use" | "tool_result";
+            text?: string;
+            toolCallId?: string;
+            toolName?: string;
+            displayTitle?: string;
+            input?: unknown;
+            output?: string;
+            isError?: boolean;
+          }[];
+        }[],
+      );
       return { messages, firstEventId: null, lastEventId: null, hasMore: false };
     }),
 });
