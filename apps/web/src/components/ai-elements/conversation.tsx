@@ -18,8 +18,13 @@ export const Conversation = ({ className, ...props }: ConversationProps) => (
 
 export type ConversationContentProps = ComponentProps<typeof StickToBottom.Content>;
 
-export const ConversationContent = ({ className, ...props }: ConversationContentProps) => (
+export const ConversationContent = ({
+  className,
+  scrollClassName,
+  ...props
+}: ConversationContentProps) => (
   <StickToBottom.Content
+    scrollClassName={cn("overflow-y-auto", scrollClassName)}
     className={cn(
       "mx-auto flex w-full max-w-3xl flex-col overflow-hidden px-3 py-4 lg:px-4 [&>*+*]:mt-4 [&>.is-assistant+.is-assistant]:mt-2",
       className,

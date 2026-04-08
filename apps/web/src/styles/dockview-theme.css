@@ -1,0 +1,78 @@
+@import "dockview/dist/styles/dockview.css";
+
+/*
+ * Band theme for dockview.
+ * Maps --dv-* variables to our existing CSS variables so the dockview
+ * panels match the app's light/dark theme automatically.
+ */
+.dockview-theme-band {
+  /* Panel / group backgrounds */
+  --dv-group-view-background-color: var(--background);
+  --dv-tabs-and-actions-container-background-color: var(--background);
+
+  /* Active group – visible (selected) tab */
+  --dv-activegroup-visiblepanel-tab-background-color: var(--background);
+  --dv-activegroup-visiblepanel-tab-color: var(--foreground);
+
+  /* Active group – hidden (unselected) tabs */
+  --dv-activegroup-hiddenpanel-tab-background-color: var(--background);
+  --dv-activegroup-hiddenpanel-tab-color: var(--muted-foreground);
+
+  /* Inactive group – visible tab */
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--background);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--muted-foreground);
+
+  /* Inactive group – hidden tabs */
+  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--background);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--muted-foreground);
+
+  /* Borders and separators (--dv-separator-border is used as background-color) */
+  --dv-separator-border: var(--border);
+  --dv-tab-divider-color: transparent;
+
+  /* Drag-and-drop overlay */
+  --dv-drag-over-background-color: oklch(0.5 0.1 250 / 0.25);
+  --dv-drag-over-border-color: var(--ring);
+
+  /* Tab sizing */
+  --dv-tabs-and-actions-container-height: 40px;
+  --dv-tabs-and-actions-container-font-size: 13px;
+
+  /* Sash (resize handle between panels) */
+  --dv-sash-color: transparent;
+  --dv-active-sash-color: oklch(0.6 0.15 250);
+
+  /* Scrollbar in tab overflow */
+  --dv-tabs-container-scrollbar-color: var(--muted-foreground);
+
+  /* Icon hover */
+  --dv-icon-hover-background-color: var(--accent);
+
+  /* No gap between panels */
+  --dv-tab-margin: 0px;
+}
+
+/* Underline on the selected tab in an active group */
+.dockview-theme-band .dv-groupview.dv-active-group
+  > .dv-tabs-and-actions-container
+  .dv-tab.dv-active-tab {
+  box-shadow: inset 0 -2px 0 0 var(--foreground);
+}
+
+/* Subtle underline on the selected tab in an inactive group */
+.dockview-theme-band .dv-groupview.dv-inactive-group
+  > .dv-tabs-and-actions-container
+  .dv-tab.dv-active-tab {
+  box-shadow: inset 0 -2px 0 0 var(--muted-foreground);
+}
+
+/* Border below the tabs container */
+.dockview-theme-band .dv-tabs-and-actions-container {
+  border-bottom: 1px solid var(--border);
+}
+
+/* More horizontal padding in each tab */
+.dockview-theme-band .dv-tab {
+  padding-left: 1rem;
+  padding-right: 1rem;
+}

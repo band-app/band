@@ -146,6 +146,7 @@ interface ChatViewProps {
   chatKey?: number;
   agentType?: string;
   codingAgentId?: string;
+  visible?: boolean;
 }
 
 export function ChatView({
@@ -161,6 +162,7 @@ export function ChatView({
   chatKey = 0,
   agentType,
   codingAgentId,
+  visible,
 }: ChatViewProps) {
   const sessionIdRef = useRef<string | undefined>(undefined);
   const lastEventIdRef = useRef<number | undefined>(undefined);
@@ -173,6 +175,34 @@ export function ChatView({
   const sentinelRef = useRef<HTMLDivElement>(null);
   const stickyContextRef = useRef<StickToBottomContext>(null);
   const initialSessionLoadedRef = useRef(false);
+  const prevVisibleRef = useRef(visible);
+
+  // Scroll to bottom when the panel becomes visible (e.g. switching tabs in dockview).
+  // The scroll container may have had zero height while hidden, so StickToBottom
+  // couldn't track position. We force-scroll after layout settles.
+  useEffect(() => {
+    const wasHidden = prevVisibleRef.current === false;
+    prevVisibleRef.current = visible;
+    if (!wasHidden || !visible) return;
+
+    const scrollToEnd = () => {
+      // Try the StickToBottom API first
+      stickyContextRef.current?.scrollToBottom?.("instant");
+      // Also force the raw scroll element as a fallback
+      const el = stickyContextRef.current?.scrollRef?.current;
+      if (el) {
+        el.scrollTop = el.scrollHeight;
+      }
+    };
+
+    // Run after layout settles — rAF alone isn't enough because dockview
+    // may still be resizing the container after the tab switch.
+    requestAnimationFrame(() => {
+      scrollToEnd();
+      // Second pass catches late layout shifts
+      setTimeout(scrollToEnd, 50);
+    });
+  }, [visible]);
 
   const [skills, setSkills] = useState<
     { name: string; description: string; argumentHint?: string }[]

@@ -12,9 +12,10 @@ interface CodingAgentDef {
 
 interface WorkspaceChatPanelProps {
   workspaceId: string;
+  visible?: boolean;
 }
 
-export function WorkspaceChatPanel({ workspaceId }: WorkspaceChatPanelProps) {
+export function WorkspaceChatPanel({ workspaceId, visible }: WorkspaceChatPanelProps) {
   const [supportsSessionListing, setSupportsSessionListing] = useState(false);
   const [initialSessionId, setInitialSessionId] = useState<string | undefined>(undefined);
   const [sessionQueryDone, setSessionQueryDone] = useState(false);
@@ -224,6 +225,7 @@ export function WorkspaceChatPanel({ workspaceId }: WorkspaceChatPanelProps) {
           onNewSessionRef={newSessionRef}
           agentType={currentAgent?.type}
           codingAgentId={currentAgentId}
+          visible={visible}
         />
       </div>
     </div>

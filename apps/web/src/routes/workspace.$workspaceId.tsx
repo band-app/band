@@ -1,24 +1,13 @@
 import {
   AgentIcon,
   type DiffStats,
-  QuickOpenDialog,
-  SearchFilesDialog,
   useDashboardStore,
   useSettingsQuery,
   type WorkspaceTab,
   WorkspaceTabNav,
 } from "@band-app/dashboard-core";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@band-app/ui";
-import { createFileRoute, Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
-import {
-  ArrowLeft,
-  ChevronDown,
-  Clock,
-  FolderOpen,
-  GitCompare,
-  Plus,
-  Terminal,
-} from "lucide-react";
+import { createFileRoute, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
+import { ArrowLeft, ChevronDown, Clock, Plus } from "lucide-react";
 import {
   createContext,
   useCallback,
@@ -28,9 +17,8 @@ import {
   useRef,
   useState,
 } from "react";
-import { PanelResizer } from "../components/PanelResizer";
+import { DockviewWorkspaceLayout } from "../components/DockviewWorkspaceLayout";
 import { TauriDragRegion } from "../components/TauriTitleBar";
-import { WorkspaceChatPanel } from "../components/WorkspaceChatPanel";
 import { AgentSwitcherContext } from "../hooks/useAgentSwitcherContext";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { SessionListContext } from "../hooks/useSessionListContext";
@@ -140,8 +128,14 @@ function WorkspaceLayout() {
   const appMode = settings.appMode ?? "side-panel";
   const isWideScreen = useIsDesktop();
   const isDesktop = (isWideScreen && !isTauri) || (isTauri && appMode === "full-editor");
+  const [hydrated, setHydrated] = useState(false);
   const [diffStats, setDiffStats] = useState<DiffStats | null>(null);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+
+  // Mark as hydrated after first client render to prevent SSR layout flash
+  useLayoutEffect(() => {
+    setHydrated(true);
+  }, []);
 
   // Sync zustand active workspace from URL
   const setActiveWorkspace = useDashboardStore((s) => s.setActiveWorkspace);
@@ -171,100 +165,20 @@ function WorkspaceLayout() {
 
   return (
     <DiffStatsContext.Provider value={{ diffStats, setDiffStats }}>
-      {isDesktop ? (
-        <DesktopWorkspaceLayout workspaceId={decoded} encodedId={workspaceId} />
-      ) : (
-        <MobileWorkspaceLayout workspaceId={decoded} encodedId={workspaceId} />
-      )}
+      <div className={`h-full ${hydrated ? "" : "invisible"}`}>
+        {isDesktop ? (
+          <DesktopWorkspaceLayout workspaceId={decoded} encodedId={workspaceId} />
+        ) : (
+          <MobileWorkspaceLayout workspaceId={decoded} encodedId={workspaceId} />
+        )}
+      </div>
     </DiffStatsContext.Provider>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Resizable split panel
+// Desktop dockview layout
 // ---------------------------------------------------------------------------
-
-const PANEL_WIDTH_KEY = "band:chat-panel-width";
-const DEFAULT_PANEL_PCT = 50;
-const MIN_PANEL_PCT = 20;
-const MAX_PANEL_PCT = 80;
-
-function getStoredPanelWidth(): number {
-  try {
-    const v = Number(localStorage.getItem(PANEL_WIDTH_KEY));
-    if (v >= MIN_PANEL_PCT && v <= MAX_PANEL_PCT) return v;
-  } catch {}
-  return DEFAULT_PANEL_PCT;
-}
-
-// ---------------------------------------------------------------------------
-// Desktop 3-panel layout
-// ---------------------------------------------------------------------------
-
-function DesktopDetailTabNav({ workspaceId }: { workspaceId: string }) {
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const prefix = `/workspace/${workspaceId}`;
-  const isChanges = pathname.startsWith(`${prefix}/changes`);
-  const isCode = pathname.startsWith(`${prefix}/code`);
-  const isTerminal = pathname.startsWith(`${prefix}/terminal`);
-  const diffFileCount = useDiffFileCount(decodeURIComponent(workspaceId));
-
-  const tabClass = (active: boolean) =>
-    `flex h-full flex-1 items-center justify-center gap-2 text-sm font-medium transition-colors ${
-      active
-        ? "border-b border-foreground text-foreground"
-        : "text-muted-foreground hover:text-foreground"
-    }`;
-
-  return (
-    <div className="flex h-12 shrink-0 items-center border-b border-border">
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Link
-            to="/workspace/$workspaceId/changes"
-            params={{ workspaceId }}
-            className={tabClass(isChanges)}
-          >
-            <GitCompare className="size-4" />
-            Changes
-            {diffFileCount > 0 && (
-              <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-500/20 text-blue-600 dark:text-blue-400 px-1.5 text-xs font-medium">
-                {diffFileCount}
-              </span>
-            )}
-          </Link>
-        </TooltipTrigger>
-        <TooltipContent>⌘E</TooltipContent>
-      </Tooltip>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Link
-            to="/workspace/$workspaceId/code"
-            params={{ workspaceId }}
-            className={tabClass(isCode)}
-          >
-            <FolderOpen className="size-4" />
-            Files
-          </Link>
-        </TooltipTrigger>
-        <TooltipContent>⌘G</TooltipContent>
-      </Tooltip>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Link
-            to="/workspace/$workspaceId/terminal"
-            params={{ workspaceId }}
-            className={tabClass(isTerminal)}
-          >
-            <Terminal className="size-4" />
-            Terminal
-          </Link>
-        </TooltipTrigger>
-        <TooltipContent>⌘J</TooltipContent>
-      </Tooltip>
-    </div>
-  );
-}
 
 function DesktopWorkspaceLayout({
   workspaceId,
@@ -273,124 +187,9 @@ function DesktopWorkspaceLayout({
   workspaceId: string;
   encodedId: string;
 }) {
-  const navigate = useNavigate();
-
-  // Dialog state
-  const [quickOpenOpen, setQuickOpenOpen] = useState(false);
-  const [searchFilesOpen, setSearchFilesOpen] = useState(false);
-
-  // Find-in-file: child code routes register a callback here
-  const findInFileRef = useRef<(() => void) | null>(null);
-  const setFindInFile = useCallback((fn: (() => void) | null) => {
-    findInFileRef.current = fn;
-  }, []);
-
-  // Global keyboard shortcuts (capture phase to beat browser defaults)
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      // Shift+Tab (no Ctrl/Cmd) → toggle mode between Edit and Plan
-      if (e.key === "Tab" && e.shiftKey && !e.ctrlKey && !e.metaKey) {
-        e.preventDefault();
-        e.stopPropagation();
-        window.dispatchEvent(new CustomEvent("band:toggle-mode"));
-        return;
-      }
-
-      const mod = e.metaKey || e.ctrlKey;
-      if (!mod) return;
-
-      const key = e.key.toLowerCase();
-      if (key === "p" && !e.shiftKey) {
-        e.preventDefault();
-        setQuickOpenOpen(true);
-      } else if (key === "f" && e.shiftKey) {
-        e.preventDefault();
-        setSearchFilesOpen(true);
-      } else if (key === "f" && !e.shiftKey) {
-        e.preventDefault();
-        if (findInFileRef.current) {
-          findInFileRef.current();
-        } else {
-          window.dispatchEvent(new CustomEvent("band:find-in-file"));
-        }
-      } else if (key === "e" && !e.shiftKey) {
-        e.preventDefault();
-        navigate({
-          to: "/workspace/$workspaceId/changes",
-          params: { workspaceId: encodedId },
-        });
-      } else if (key === "j" && !e.shiftKey) {
-        e.preventDefault();
-        navigate({
-          to: "/workspace/$workspaceId/terminal",
-          params: { workspaceId: encodedId },
-        });
-      } else if (key === "g" && !e.shiftKey) {
-        e.preventDefault();
-        navigate({
-          to: "/workspace/$workspaceId/code",
-          params: { workspaceId: encodedId },
-        });
-      }
-    };
-    window.addEventListener("keydown", handler, true);
-    return () => window.removeEventListener("keydown", handler, true);
-  }, [encodedId, navigate]);
-
-  // Resizable panel width
-  const [panelPct, setPanelPct] = useState(getStoredPanelWidth);
-  const handleResize = useCallback((pct: number) => {
-    setPanelPct(pct);
-    try {
-      localStorage.setItem(PANEL_WIDTH_KEY, String(Math.round(pct)));
-    } catch {}
-  }, []);
-
-  // Open file from Quick Open / Search dialogs → navigate to code route
-  const handleOpenFile = useCallback(
-    (path: string) => {
-      navigate({
-        to: "/workspace/$workspaceId/code/$",
-        params: { workspaceId: encodedId, _splat: path },
-      });
-    },
-    [navigate, encodedId],
-  );
-
   return (
-    <div className="flex h-full overflow-hidden">
-      {/* Left Panel — Chat */}
-      <div className="min-w-0 overflow-hidden" style={{ width: `${panelPct}%` }}>
-        <WorkspaceChatPanel key={workspaceId} workspaceId={workspaceId} />
-      </div>
-
-      <PanelResizer onResize={handleResize} />
-
-      {/* Right Panel — Changes / Code / Terminal */}
-      <div className="min-w-0 flex-1 overflow-hidden">
-        <div className="flex h-full flex-col overflow-hidden">
-          <DesktopDetailTabNav workspaceId={encodedId} />
-          <div className="min-h-0 flex-1 overflow-hidden">
-            <FindInFileContext.Provider value={{ setFindInFile }}>
-              <Outlet />
-            </FindInFileContext.Provider>
-          </div>
-        </div>
-      </div>
-
-      {/* Dialogs */}
-      <QuickOpenDialog
-        workspaceId={workspaceId}
-        open={quickOpenOpen}
-        onOpenChange={setQuickOpenOpen}
-        onOpenFile={handleOpenFile}
-      />
-      <SearchFilesDialog
-        workspaceId={workspaceId}
-        open={searchFilesOpen}
-        onOpenChange={setSearchFilesOpen}
-        onOpenFile={handleOpenFile}
-      />
+    <div className="h-full overflow-hidden">
+      <DockviewWorkspaceLayout workspaceId={workspaceId} encodedId={encodedId} />
     </div>
   );
 }
