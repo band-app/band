@@ -472,9 +472,6 @@ function* mapClaudeCodeEvent(
               output,
               isError: block.is_error ?? false,
             };
-
-            // Emit file events for any images in the tool result content
-            yield* extractImageEvents(block.content);
           }
         }
       }
@@ -530,35 +527,6 @@ function* mapClaudeCodeEvent(
         message: "message" in message ? String(message.message) : "Unknown error",
       };
       break;
-    }
-  }
-}
-
-/**
- * Extract image blocks from tool result content and yield them as FileEvents.
- *
- * Tool result content can be a string or an array of content blocks.
- * Image blocks follow the Anthropic API format:
- *   { type: "image", source: { type: "base64", media_type: "image/png", data: "..." } }
- */
-function* extractImageEvents(content: unknown): Generator<AgentEvent> {
-  if (!Array.isArray(content)) return;
-
-  for (const item of content) {
-    if (typeof item !== "object" || item === null) continue;
-    const block = item as Record<string, unknown>;
-
-    if (block.type === "image" && typeof block.source === "object" && block.source !== null) {
-      const source = block.source as Record<string, unknown>;
-      const mediaType = String(source.media_type ?? "image/png");
-      const data = source.data as string | undefined;
-      if (data) {
-        yield {
-          type: "file",
-          mediaType,
-          url: `data:${mediaType};base64,${data}`,
-        };
-      }
     }
   }
 }

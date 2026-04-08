@@ -1,14 +1,28 @@
+import { mkdirSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { createLogger } from "@band-app/logger";
 import type { UIMessageChunk } from "ai";
 import { getAgent, getOrCreateAgent, replaceAgent } from "./agent-pool";
+import { mimeTypeFromFilename } from "./mime-types";
 import { createPendingInput } from "./pending-inputs";
 import { shiftQueuedMessage } from "./queued-message-store";
-import { getWorkspaceStatus, upsertWorkspaceStatus } from "./state";
+import { bandHome, getWorkspaceStatus, upsertWorkspaceStatus } from "./state";
 import { generateTaskId, markTaskFailed, saveTask } from "./task-store";
 import { emit as emitStatusEvent } from "./watcher";
 import { resolveWorkspace } from "./workspace";
 
 const log = createLogger("task-runner");
+
+/**
+ * List filenames in a directory. Returns a Set for quick membership checks.
+ */
+function listFiles(dir: string): Set<string> {
+  try {
+    return new Set(readdirSync(dir));
+  } catch {
+    return new Set();
+  }
+}
 
 const MAX_TOOL_OUTPUT_LEN = 10_000;
 
@@ -236,10 +250,16 @@ async function runTask(workspaceId: string, task: InternalTask) {
     return answers;
   };
 
+  // Per-workspace shared directory so concurrent tasks don't collide.
+  const sharedDir = join(bandHome(), "shared", workspaceId);
+  mkdirSync(sharedDir, { recursive: true });
+
   let textPartId = "";
   let textStarted = false;
   let finished = false;
   const announcedToolCalls = new Set<string>();
+  /** Files already emitted — avoids re-broadcasting files from earlier tasks. */
+  const emittedSharedFiles = listFiles(sharedDir);
 
   function endText() {
     if (textStarted) {
@@ -257,7 +277,13 @@ async function runTask(workspaceId: string, task: InternalTask) {
             ...(task.model && { model: task.model }),
           }
         : undefined;
-    for await (const event of agent.runSession(task.agentPrompt, task.sessionId, sessionOptions)) {
+    // Append file-sharing hint so the agent knows it can send files to the user.
+    // Only on the first message — resumed sessions already have the context.
+    const fileSharingHint = `\n\n[File sharing: to send a file to the user, write or copy it to ${sharedDir}/ and it will appear as a downloadable file card in the chat.]`;
+    const effectivePrompt = task.sessionId
+      ? task.agentPrompt
+      : task.agentPrompt + fileSharingHint;
+    for await (const event of agent.runSession(effectivePrompt, task.sessionId, sessionOptions)) {
       log.info({ workspaceId, eventType: event.type }, "task event");
 
       switch (event.type) {
@@ -315,6 +341,22 @@ async function runTask(workspaceId: string, task: InternalTask) {
             toolCallId: event.toolCallId,
             output: truncated,
           });
+
+          // Scan workspace shared dir for new files after every successful tool call.
+          // The dir is per-workspace so it's always small — scanning is negligible.
+          if (!event.isError) {
+            for (const filename of listFiles(sharedDir)) {
+              if (!emittedSharedFiles.has(filename)) {
+                emittedSharedFiles.add(filename);
+                broadcast(workspaceId, {
+                  type: "file",
+                  mediaType: mimeTypeFromFilename(filename),
+                  url: `/api/shared/${encodeURIComponent(workspaceId)}/${encodeURIComponent(filename)}`,
+                  filename,
+                } as UIMessageChunk);
+              }
+            }
+          }
           break;
         }
 
@@ -324,7 +366,8 @@ async function runTask(workspaceId: string, task: InternalTask) {
             type: "file",
             mediaType: event.mediaType,
             url: event.url,
-          });
+            ...(event.filename ? { filename: event.filename } : {}),
+          } as UIMessageChunk);
           break;
         }
 
