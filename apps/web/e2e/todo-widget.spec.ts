@@ -30,18 +30,30 @@ test.afterAll(async () => {
 // Helpers
 // ---------------------------------------------------------------------------
 
-type MessageContent =
+/**
+ * UIMessage-format part — matches the format returned by the server's
+ * sessions.messages endpoint after conversion.
+ */
+type UIPart =
   | { type: "text"; text: string }
-  | { type: "tool_use"; toolCallId: string; toolName: string; input?: unknown }
-  | { type: "tool_result"; toolCallId: string; output: string; isError: boolean };
+  | {
+      type: "dynamic-tool";
+      toolCallId: string;
+      toolName: string;
+      state: "input-available" | "output-available" | "output-error";
+      input?: unknown;
+      output?: string;
+      errorText?: string;
+      title?: string;
+    };
 
-interface SessionMessage {
+interface UIMessageFixture {
   role: "user" | "assistant";
   id: string;
-  content: MessageContent[];
+  parts: UIPart[];
 }
 
-function installSessionMock(mock: ReturnType<typeof createTrpcMock>, messages: SessionMessage[]) {
+function installSessionMock(mock: ReturnType<typeof createTrpcMock>, messages: UIMessageFixture[]) {
   mock.query("sessions.list", {
     sessions: [
       {
@@ -52,7 +64,12 @@ function installSessionMock(mock: ReturnType<typeof createTrpcMock>, messages: S
     ],
     supported: true,
   });
-  mock.query("sessions.messages", () => ({ messages }));
+  mock.query("sessions.messages", () => ({
+    messages,
+    firstEventId: null,
+    lastEventId: null,
+    hasMore: false,
+  }));
 }
 
 async function loadSession(page: import("@playwright/test").Page) {
@@ -72,16 +89,17 @@ test("TodoWrite renders as a task list widget, not a generic tool call", async (
     {
       role: "user",
       id: "m1",
-      content: [{ type: "text", text: "Help me with this project" }],
+      parts: [{ type: "text", text: "Help me with this project" }],
     },
     {
       role: "assistant",
       id: "m2",
-      content: [
+      parts: [
         {
-          type: "tool_use",
+          type: "dynamic-tool",
           toolCallId: "tc1",
           toolName: "TodoWrite",
+          state: "output-available",
           input: {
             todos: [
               { content: "Setup project", status: "completed" },
@@ -89,18 +107,14 @@ test("TodoWrite renders as a task list widget, not a generic tool call", async (
               { content: "Deploy to prod", status: "pending" },
             ],
           },
+          output: "ok",
         },
       ],
     },
     {
-      role: "user",
-      id: "m3",
-      content: [{ type: "tool_result", toolCallId: "tc1", output: "ok", isError: false }],
-    },
-    {
       role: "assistant",
       id: "m4",
-      content: [{ type: "text", text: "Here is your todo list." }],
+      parts: [{ type: "text", text: "Here is your todo list." }],
     },
   ]);
   await mock.install(page);
@@ -127,16 +141,17 @@ test("completed todos show strikethrough styling", async ({ page }) => {
     {
       role: "user",
       id: "m1",
-      content: [{ type: "text", text: "Track tasks" }],
+      parts: [{ type: "text", text: "Track tasks" }],
     },
     {
       role: "assistant",
       id: "m2",
-      content: [
+      parts: [
         {
-          type: "tool_use",
+          type: "dynamic-tool",
           toolCallId: "tc1",
           toolName: "TodoWrite",
+          state: "output-available",
           input: {
             todos: [
               { content: "First done", status: "completed" },
@@ -144,13 +159,9 @@ test("completed todos show strikethrough styling", async ({ page }) => {
               { content: "Still pending", status: "pending" },
             ],
           },
+          output: "ok",
         },
       ],
-    },
-    {
-      role: "user",
-      id: "m3",
-      content: [{ type: "tool_result", toolCallId: "tc1", output: "ok", isError: false }],
     },
   ]);
   await mock.install(page);
@@ -181,16 +192,17 @@ test("in-progress todos show activeForm text instead of subject", async ({ page 
     {
       role: "user",
       id: "m1",
-      content: [{ type: "text", text: "Work on tests" }],
+      parts: [{ type: "text", text: "Work on tests" }],
     },
     {
       role: "assistant",
       id: "m2",
-      content: [
+      parts: [
         {
-          type: "tool_use",
+          type: "dynamic-tool",
           toolCallId: "tc1",
           toolName: "TodoWrite",
+          state: "output-available",
           input: {
             todos: [
               {
@@ -201,13 +213,9 @@ test("in-progress todos show activeForm text instead of subject", async ({ page 
               { content: "Review PR", status: "pending" },
             ],
           },
+          output: "ok",
         },
       ],
-    },
-    {
-      role: "user",
-      id: "m3",
-      content: [{ type: "tool_result", toolCallId: "tc1", output: "ok", isError: false }],
     },
   ]);
   await mock.install(page);
@@ -233,27 +241,30 @@ test("multiple TodoWrite calls in same message collapse into one widget showing 
     {
       role: "user",
       id: "m1",
-      content: [{ type: "text", text: "Build the feature" }],
+      parts: [{ type: "text", text: "Build the feature" }],
     },
     {
       role: "assistant",
       id: "m2",
-      content: [
+      parts: [
         {
-          type: "tool_use",
+          type: "dynamic-tool",
           toolCallId: "tc1",
           toolName: "TodoWrite",
+          state: "output-available",
           input: {
             todos: [
               { content: "Research API", status: "in_progress" },
               { content: "Implement endpoint", status: "pending" },
             ],
           },
+          output: "ok",
         },
         {
-          type: "tool_use",
+          type: "dynamic-tool",
           toolCallId: "tc2",
           toolName: "TodoWrite",
+          state: "output-available",
           input: {
             todos: [
               { content: "Research API", status: "completed" },
@@ -261,16 +272,9 @@ test("multiple TodoWrite calls in same message collapse into one widget showing 
               { content: "Write tests", status: "in_progress" },
             ],
           },
+          output: "ok",
         },
         { type: "text", text: "Making progress on the implementation." },
-      ],
-    },
-    {
-      role: "user",
-      id: "m3",
-      content: [
-        { type: "tool_result", toolCallId: "tc1", output: "ok", isError: false },
-        { type: "tool_result", toolCallId: "tc2", output: "ok", isError: false },
       ],
     },
   ]);
@@ -298,16 +302,17 @@ test("task list is hidden when all todos are completed", async ({ page }) => {
     {
       role: "user",
       id: "m1",
-      content: [{ type: "text", text: "Finish everything" }],
+      parts: [{ type: "text", text: "Finish everything" }],
     },
     {
       role: "assistant",
       id: "m2",
-      content: [
+      parts: [
         {
-          type: "tool_use",
+          type: "dynamic-tool",
           toolCallId: "tc1",
           toolName: "TodoWrite",
+          state: "output-available",
           input: {
             todos: [
               { content: "Setup project", status: "completed" },
@@ -315,18 +320,14 @@ test("task list is hidden when all todos are completed", async ({ page }) => {
               { content: "Deploy to prod", status: "completed" },
             ],
           },
+          output: "ok",
         },
       ],
     },
     {
-      role: "user",
-      id: "m3",
-      content: [{ type: "tool_result", toolCallId: "tc1", output: "ok", isError: false }],
-    },
-    {
       role: "assistant",
       id: "m4",
-      content: [{ type: "text", text: "All done!" }],
+      parts: [{ type: "text", text: "All done!" }],
     },
   ]);
   await mock.install(page);
@@ -347,49 +348,40 @@ test("TodoWrite mixed with regular tool calls renders both correctly", async ({ 
     {
       role: "user",
       id: "m1",
-      content: [{ type: "text", text: "Help me fix the bug" }],
+      parts: [{ type: "text", text: "Help me fix the bug" }],
     },
     {
       role: "assistant",
       id: "m2",
-      content: [
+      parts: [
         {
-          type: "tool_use",
+          type: "dynamic-tool",
           toolCallId: "tc1",
           toolName: "TodoWrite",
+          state: "output-available",
           input: {
             todos: [
               { content: "Investigate bug", status: "in_progress" },
               { content: "Apply fix", status: "pending" },
             ],
           },
+          output: "ok",
         },
         {
-          type: "tool_use",
+          type: "dynamic-tool",
           toolCallId: "tc2",
           toolName: "Read",
-          displayTitle: "Read(/src/app.ts)",
+          state: "output-available",
           input: { file_path: "/src/app.ts" },
-        },
-      ],
-    },
-    {
-      role: "user",
-      id: "m3",
-      content: [
-        { type: "tool_result", toolCallId: "tc1", output: "ok", isError: false },
-        {
-          type: "tool_result",
-          toolCallId: "tc2",
           output: "const app = express();",
-          isError: false,
+          title: "Read(/src/app.ts)",
         },
       ],
     },
     {
       role: "assistant",
       id: "m4",
-      content: [{ type: "text", text: "I found the issue." }],
+      parts: [{ type: "text", text: "I found the issue." }],
     },
   ]);
   await mock.install(page);

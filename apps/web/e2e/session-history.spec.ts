@@ -118,14 +118,17 @@ test("selecting a session loads its messages", async ({ page }) => {
       {
         role: "user" as const,
         id: "m1",
-        content: [{ type: "text" as const, text: "Please fix the login bug" }],
+        parts: [{ type: "text" as const, text: "Please fix the login bug" }],
       },
       {
         role: "assistant" as const,
         id: "m2",
-        content: [{ type: "text" as const, text: "I found the issue in auth.ts and fixed it." }],
+        parts: [{ type: "text" as const, text: "I found the issue in auth.ts and fixed it." }],
       },
     ],
+    firstEventId: null,
+    lastEventId: null,
+    hasMore: false,
   }));
   await mock.install(page);
 
