@@ -1,7 +1,10 @@
-import { defaultKeymap } from "@codemirror/commands";
+import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import {
   bracketMatching,
   defaultHighlightStyle,
+  foldGutter,
+  foldKeymap,
+  indentOnInput,
   LanguageSupport,
   StreamLanguage,
   syntaxHighlighting,
@@ -15,7 +18,14 @@ import {
   StateEffect,
   StateField,
 } from "@codemirror/state";
-import { Decoration, type DecorationSet, EditorView, keymap, lineNumbers } from "@codemirror/view";
+import {
+  Decoration,
+  type DecorationSet,
+  EditorView,
+  type KeyBinding,
+  keymap,
+  lineNumbers,
+} from "@codemirror/view";
 import { vscodeDarkInit } from "@uiw/codemirror-theme-vscode";
 
 /**
@@ -180,6 +190,90 @@ export function baseViewerExtensions(isDark = true): Extension[] {
             },
             ".cm-activeLineGutter": { backgroundColor: "transparent" },
             ".cm-activeLine": { backgroundColor: "transparent" },
+            "&.cm-focused .cm-cursor": { borderLeftColor: "#24292f" },
+            "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
+              backgroundColor: "rgba(0, 0, 0, 0.07)",
+            },
+            ".cm-line": { color: "#24292f" },
+            ".cm-searchMatch": {
+              backgroundColor: "rgba(255, 213, 0, 0.4)",
+              borderRadius: "2px",
+            },
+            ".cm-searchMatch-selected": {
+              backgroundColor: "rgba(255, 150, 50, 0.55)",
+            },
+          },
+      { dark: isDark },
+    ),
+  ];
+}
+
+/**
+ * Base extensions for an editable CodeMirror editor.
+ * Includes editing features: undo/redo, indent-on-input, fold gutter.
+ * Does NOT include readOnly or editable(false).
+ * @param isDark - Whether to use dark theme colours. Defaults to true for backwards compat.
+ * @param onSave - Optional callback invoked on Cmd/Ctrl+S.
+ */
+export function baseEditorExtensions(isDark = true, onSave?: () => void): Extension[] {
+  const saveKeyBinding: KeyBinding[] = onSave
+    ? [
+        {
+          key: "Mod-s",
+          run: () => {
+            onSave();
+            return true;
+          },
+        },
+      ]
+    : [];
+
+  return [
+    lineNumbers(),
+    history(),
+    foldGutter(),
+    bracketMatching(),
+    indentOnInput(),
+    highlightSelectionMatches(),
+    ...(isDark
+      ? [
+          vscodeDarkInit({
+            settings: {
+              background: "var(--background)",
+              gutterBackground: "var(--background)",
+            },
+          }),
+          syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+        ]
+      : [syntaxHighlighting(defaultHighlightStyle)]),
+    keymap.of([...saveKeyBinding, ...defaultKeymap, ...historyKeymap, ...foldKeymap]),
+    EditorView.theme(
+      isDark
+        ? {
+            "&": { height: "100%", fontSize: "13px" },
+            ".cm-scroller": { overflow: "auto" },
+            ".cm-lineNumbers": { paddingLeft: "12px", paddingRight: "12px" },
+            ".cm-activeLine": { backgroundColor: "rgba(255,255,255,0.03)" },
+            ".cm-activeLineGutter": { backgroundColor: "rgba(255,255,255,0.03)" },
+            ".cm-searchMatch": {
+              backgroundColor: "rgba(255, 213, 0, 0.35)",
+              borderRadius: "2px",
+            },
+            ".cm-searchMatch-selected": {
+              backgroundColor: "rgba(255, 150, 50, 0.5)",
+            },
+          }
+        : {
+            "&": { height: "100%", fontSize: "13px", backgroundColor: "var(--background)" },
+            ".cm-scroller": { overflow: "auto" },
+            ".cm-lineNumbers": { paddingLeft: "12px", paddingRight: "12px" },
+            ".cm-gutters": {
+              backgroundColor: "var(--background)",
+              border: "none",
+              color: "#6e7781",
+            },
+            ".cm-activeLine": { backgroundColor: "rgba(0,0,0,0.03)" },
+            ".cm-activeLineGutter": { backgroundColor: "rgba(0,0,0,0.03)" },
             "&.cm-focused .cm-cursor": { borderLeftColor: "#24292f" },
             "&.cm-focused .cm-selectionBackground, .cm-selectionBackground": {
               backgroundColor: "rgba(0, 0, 0, 0.07)",
