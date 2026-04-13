@@ -45,11 +45,6 @@ interface CodeBrowserViewProps {
   onFindInFile?: (fn: (() => void) | null) => void;
 }
 
-function directoryOf(filePath: string): string {
-  const idx = filePath.lastIndexOf("/");
-  return idx > 0 ? filePath.slice(0, idx) : "";
-}
-
 export function CodeBrowserView({
   workspaceId,
   file,
@@ -59,11 +54,6 @@ export function CodeBrowserView({
   onFindInFile,
 }: CodeBrowserViewProps) {
   const isDesktop = useIsDesktop();
-  const [currentPath, setCurrentPath] = useState(() => {
-    if (!file) return "";
-    const loc = parseFileLocation(file);
-    return directoryOf(loc.filePath);
-  });
   const [viewFilePath, setViewFilePath] = useState(() => {
     if (!file) return "";
     return parseFileLocation(file).filePath;
@@ -86,7 +76,6 @@ export function CodeBrowserView({
     if (file) {
       const loc = parseFileLocation(file);
       setViewFilePath(loc.filePath);
-      setCurrentPath(directoryOf(loc.filePath));
       setViewLine(loc.line);
       setViewLineEnd(loc.lineEnd);
       setViewColumn(loc.column);
@@ -101,9 +90,6 @@ export function CodeBrowserView({
       setViewLine(loc.line);
       setViewLineEnd(loc.lineEnd);
       setViewColumn(loc.column);
-      // Navigate the file browser to the file's parent directory
-      const lastSlash = loc.filePath.lastIndexOf("/");
-      setCurrentPath(lastSlash > 0 ? loc.filePath.slice(0, lastSlash) : "");
       onFileOpened?.();
     }
   }, [openFilePath, onFileOpened]);
@@ -172,9 +158,8 @@ export function CodeBrowserView({
     return (
       <FileBrowser
         workspaceId={workspaceId}
-        currentPath={currentPath}
-        onNavigate={setCurrentPath}
         onOpenFile={handleSelectFile}
+        selectedFile={viewFilePath}
       />
     );
   }
@@ -186,8 +171,6 @@ export function CodeBrowserView({
       <div className="w-60 shrink-0 overflow-hidden border-r border-border">
         <FileBrowser
           workspaceId={workspaceId}
-          currentPath={currentPath}
-          onNavigate={setCurrentPath}
           onOpenFile={handleSelectFile}
           compact
           selectedFile={viewFilePath}
