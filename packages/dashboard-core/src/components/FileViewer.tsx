@@ -80,6 +80,14 @@ export function FileViewer({
   }, [previewType, viewMode, onEditorView]);
 
   useEffect(() => {
+    // Images and PDFs are rendered via the raw file URL — no tRPC fetch needed
+    if (previewType === "image" || previewType === "pdf") {
+      setData(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     if (!adapter.getWorkspaceFile) {
       setError("File viewing not supported");
       setLoading(false);
@@ -89,6 +97,7 @@ export function FileViewer({
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setData(null);
 
     adapter
       .getWorkspaceFile(workspaceId, filePath)
@@ -104,7 +113,7 @@ export function FileViewer({
     return () => {
       cancelled = true;
     };
-  }, [adapter, workspaceId, filePath]);
+  }, [adapter, workspaceId, filePath, previewType]);
 
   const lang = data?.content ? detectLanguage(filePath, data.language) : "plaintext";
 
