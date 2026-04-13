@@ -7,6 +7,7 @@
   },
   "permissions": [
     "core:default",
+    "core:webview:default",
     "fs:default",
     "fs:allow-read-file",
     "fs:allow-write-file",

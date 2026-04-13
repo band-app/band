@@ -9,6 +9,7 @@ use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use commands::browser::BrowserState;
 use commands::webserver::{self as webserver, ManagedProcess, WebServerState};
 use state::{ActiveWorkspaceState, ProjectCache};
 use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
@@ -62,6 +63,7 @@ pub fn run() {
         .manage(WebServerState(ManagedProcess::new()))
         .manage(ActiveWorkspaceState::new())
         .manage(ProjectCache::new())
+        .manage(BrowserState::new())
         .invoke_handler(tauri::generate_handler![
             commands::ide::workspace_focus,
             commands::ide::workspace_close,
@@ -76,6 +78,16 @@ pub fn run() {
             commands::window::open_settings_window,
             commands::window::get_app_title,
             commands::window::set_app_mode,
+            commands::browser::browser_create,
+            commands::browser::browser_navigate,
+            commands::browser::browser_go_back,
+            commands::browser::browser_go_forward,
+            commands::browser::browser_eval,
+            commands::browser::browser_reload,
+            commands::browser::browser_set_bounds,
+            commands::browser::browser_hide,
+            commands::browser::browser_show,
+            commands::browser::browser_destroy,
         ])
         .setup(move |app| {
             let window = app.get_webview_window("main").unwrap();
@@ -217,6 +229,11 @@ pub fn run() {
                         return;
                     }
 
+                    for (label, wv) in app_handle_for_close.webviews() {
+                        if label.starts_with("browser-") {
+                            let _ = wv.close();
+                        }
+                    }
                     if let Some(tasks_win) = app_handle_for_close.get_webview_window("tasks") {
                         let _ = tasks_win.destroy();
                     }
@@ -272,6 +289,11 @@ pub fn run() {
             }
 
             let web_proc = &app_handle.state::<WebServerState>().0;
+            for (label, wv) in app_handle.webviews() {
+                if label.starts_with("browser-") {
+                    let _ = wv.close();
+                }
+            }
             if let Some(tasks_win) = app_handle.get_webview_window("tasks") {
                 let _ = tasks_win.destroy();
             }

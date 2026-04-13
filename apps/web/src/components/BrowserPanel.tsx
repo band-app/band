@@ -1,0 +1,426 @@
+import type { IDockviewPanelProps } from "dockview";
+import { ArrowLeft, ArrowRight, RotateCw, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { isTauri } from "../lib/is-tauri";
+
+const DEFAULT_URL = "";
+const BLANK_URL = "about:blank";
+const STORAGE_PREFIX = "band:browser-url:";
+
+// ---------------------------------------------------------------------------
+// Per-workspace URL persistence in localStorage
+// ---------------------------------------------------------------------------
+
+function saveUrl(workspaceId: string, url: string) {
+  try {
+    localStorage.setItem(`${STORAGE_PREFIX}${workspaceId}`, url);
+  } catch {}
+}
+
+function loadUrl(workspaceId: string): string | null {
+  try {
+    return localStorage.getItem(`${STORAGE_PREFIX}${workspaceId}`);
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Browser panel component – renders an address bar and a placeholder div.
+// A native Tauri child webview is positioned over the placeholder area.
+// Each workspace gets its own persistent webview (hidden/shown on switch).
+// ---------------------------------------------------------------------------
+
+interface BrowserParams {
+  workspaceId: string;
+  wsActive?: boolean;
+}
+
+export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<BrowserParams>) {
+  const workspaceId = params.workspaceId;
+
+  const [currentUrl, setCurrentUrl] = useState(() => loadUrl(workspaceId) ?? DEFAULT_URL);
+  const [inputUrl, setInputUrl] = useState(() => loadUrl(workspaceId) ?? DEFAULT_URL);
+  const [loading, setLoading] = useState(false);
+  const [created, setCreated] = useState(false);
+  const createdRef = useRef(false);
+  const placeholderRef = useRef<HTMLDivElement>(null);
+  const creatingRef = useRef(false);
+  const pendingNavRef = useRef<string | null>(null);
+  const workspaceIdRef = useRef(workspaceId);
+  workspaceIdRef.current = workspaceId;
+  const currentUrlRef = useRef(currentUrl);
+  currentUrlRef.current = currentUrl;
+
+  // ------- restore persisted URL when workspaceId becomes available -------
+  // useState initializers run on first mount when workspaceId may still be
+  // undefined (fromJSON restores panels with empty params). This effect
+  // syncs state from localStorage once the real workspaceId is injected.
+
+  useEffect(() => {
+    if (!workspaceId) return;
+    const saved = loadUrl(workspaceId);
+    if (saved) {
+      setCurrentUrl(saved);
+      setInputUrl(saved);
+    }
+  }, [workspaceId]);
+
+  // ------- helpers -------
+
+  const getBounds = useCallback(() => {
+    const el = placeholderRef.current;
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    return { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
+  }, []);
+
+  const invoke = useCallback(async (cmd: string, args?: Record<string, unknown>) => {
+    if (!isTauri) return;
+    const { invoke: tauriInvoke } = await import("@tauri-apps/api/core");
+    return tauriInvoke(cmd, args);
+  }, []);
+
+  // ------- create or show webview once placeholder has real dimensions -------
+  //
+  // The panel may be mounted while its tab is inactive (dockview renders
+  // hidden tabs with display:none).  A simple setTimeout would see 0×0
+  // bounds and give up.  Instead we use a ResizeObserver that fires as
+  // soon as the placeholder gets a non-zero size (i.e. the tab is shown).
+
+  useEffect(() => {
+    if (!isTauri || created || creatingRef.current) return;
+    const el = placeholderRef.current;
+    if (!el) return;
+
+    let cancelled = false;
+
+    const tryCreate = async () => {
+      if (cancelled || createdRef.current || creatingRef.current) return;
+      const bounds = getBounds();
+      if (!bounds || bounds.width === 0 || bounds.height === 0) return;
+
+      observer.disconnect();
+      creatingRef.current = true;
+      try {
+        await invoke("browser_create", {
+          workspaceId,
+          ...bounds,
+          url: loadUrl(workspaceId) || currentUrlRef.current || BLANK_URL,
+        });
+        createdRef.current = true;
+        setCreated(true);
+        // If a navigation was requested while we were creating, flush it now
+        const pending = pendingNavRef.current;
+        if (pending) {
+          pendingNavRef.current = null;
+          await invoke("browser_navigate", {
+            workspaceId: workspaceIdRef.current,
+            url: pending,
+          });
+        }
+      } catch (e) {
+        console.error("Failed to create browser webview:", e);
+      } finally {
+        creatingRef.current = false;
+      }
+    };
+
+    // Watch for the placeholder gaining real dimensions
+    const observer = new ResizeObserver(() => {
+      tryCreate();
+    });
+    observer.observe(el);
+
+    // Also try after a short tick in case the tab is already visible
+    const timer = setTimeout(tryCreate, 50);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      observer.disconnect();
+    };
+  }, [created, getBounds, invoke, workspaceId]);
+
+  // ------- listen for URL changes from the Rust side -------
+
+  useEffect(() => {
+    if (!isTauri) return;
+    let unlisten: (() => void) | undefined;
+
+    (async () => {
+      const { listen } = await import("@tauri-apps/api/event");
+      unlisten = await listen<{ url: string; workspace_id: string; loading: boolean }>(
+        "browser-url-changed",
+        (event) => {
+          // Only update if the event is for our workspace
+          if (event.payload.workspace_id !== workspaceIdRef.current) return;
+          const url = event.payload.url;
+          setLoading(event.payload.loading);
+          // Don't sync about:blank to the address bar or localStorage
+          if (url === BLANK_URL) return;
+          setCurrentUrl(url);
+          setInputUrl(url);
+          saveUrl(workspaceIdRef.current, url);
+        },
+      );
+    })();
+
+    return () => {
+      unlisten?.();
+    };
+  }, []);
+
+  // ------- visibility tracking (hide/show when tab switches) -------
+
+  useEffect(() => {
+    if (!isTauri || !created) return;
+
+    const handleVisibility = async (visible: boolean) => {
+      if (visible) {
+        await invoke("browser_show", { workspaceId });
+        const bounds = getBounds();
+        if (bounds && bounds.width > 0 && bounds.height > 0) {
+          await invoke("browser_set_bounds", { workspaceId, ...bounds });
+        }
+      } else {
+        await invoke("browser_hide", { workspaceId });
+      }
+    };
+
+    const d1 = api.onDidActiveChange((e) => {
+      handleVisibility(e.isActive);
+    });
+    const d2 = api.onDidVisibilityChange((e) => {
+      if (!e.isVisible) {
+        handleVisibility(false);
+      } else if (api.isActive) {
+        handleVisibility(true);
+      }
+    });
+
+    return () => {
+      d1.dispose();
+      d2.dispose();
+    };
+  }, [api, created, getBounds, invoke, workspaceId]);
+
+  // ------- workspace-level visibility -------
+  // The native webview is an OS-level layer that floats on top of the DOM.
+  // When the workspace is hidden (wsActive=false) we must explicitly hide
+  // the webview — CSS display:none on the React tree has no effect on it.
+
+  useEffect(() => {
+    if (!isTauri || !created) return;
+    const wsActive = params.wsActive !== false;
+
+    if (!wsActive) {
+      invoke("browser_hide", { workspaceId }).catch(() => {});
+    } else if (api.isActive) {
+      // Only re-show if the browser tab is the active tab in its group
+      invoke("browser_show", { workspaceId }).catch(() => {});
+      const bounds = getBounds();
+      if (bounds && bounds.width > 0 && bounds.height > 0) {
+        invoke("browser_set_bounds", { workspaceId, ...bounds }).catch(() => {});
+      }
+    }
+  }, [params.wsActive, api, created, getBounds, invoke, workspaceId]);
+
+  // ------- keep webview bounds in sync on resize -------
+
+  useEffect(() => {
+    if (!isTauri || !created) return;
+    const el = placeholderRef.current;
+    if (!el) return;
+
+    const observer = new ResizeObserver(() => {
+      const bounds = getBounds();
+      if (!bounds || bounds.width === 0 || bounds.height === 0) return;
+      invoke("browser_set_bounds", { workspaceId, ...bounds }).catch(() => {});
+    });
+    observer.observe(el);
+
+    return () => observer.disconnect();
+  }, [created, getBounds, invoke, workspaceId]);
+
+  // ------- destroy on unmount (workspace evicted from frontend cache) -------
+  // Workspace *switches* are handled by the wsActive effect (hide/show).
+  // Unmount only happens when the workspace view is fully evicted, so we
+  // destroy the native webview to free memory.
+
+  useEffect(() => {
+    return () => {
+      if (isTauri) {
+        const wsId = workspaceIdRef.current;
+        import("@tauri-apps/api/core").then(({ invoke: tauriInvoke }) => {
+          tauriInvoke("browser_destroy", { workspaceId: wsId }).catch(() => {});
+        });
+      }
+    };
+  }, []);
+
+  // ------- navigation handlers -------
+
+  const handleNavigate = useCallback(
+    async (rawUrl: string) => {
+      let normalized = rawUrl.trim();
+      if (!normalized) return;
+
+      if (!normalized.startsWith("http://") && !normalized.startsWith("https://")) {
+        if (normalized.includes(".") && !normalized.includes(" ")) {
+          normalized = `https://${normalized}`;
+        } else {
+          normalized = `https://www.google.com/search?q=${encodeURIComponent(normalized)}`;
+        }
+      }
+
+      setCurrentUrl(normalized);
+      setInputUrl(normalized);
+      setLoading(true);
+      saveUrl(workspaceId, normalized);
+
+      if (createdRef.current) {
+        try {
+          await invoke("browser_navigate", { workspaceId, url: normalized });
+        } catch (e) {
+          console.error("browser_navigate failed:", e);
+        }
+      } else {
+        // Webview still being created — queue the navigation
+        pendingNavRef.current = normalized;
+      }
+    },
+    [invoke, workspaceId],
+  );
+
+  const handleBack = useCallback(async () => {
+    try {
+      await invoke("browser_go_back", { workspaceId });
+    } catch (e) {
+      console.error("browser_go_back failed:", e);
+    }
+  }, [invoke, workspaceId]);
+
+  const handleForward = useCallback(async () => {
+    try {
+      await invoke("browser_go_forward", { workspaceId });
+    } catch (e) {
+      console.error("browser_go_forward failed:", e);
+    }
+  }, [invoke, workspaceId]);
+
+  const handleReload = useCallback(async () => {
+    try {
+      setLoading(true);
+      await invoke("browser_reload", { workspaceId });
+    } catch (e) {
+      console.error("browser_reload failed:", e);
+    }
+  }, [invoke, workspaceId]);
+
+  const handleStop = useCallback(async () => {
+    try {
+      // Stop loading by evaluating window.stop() in the webview
+      await invoke("browser_eval", { workspaceId, js: "window.stop()" });
+      setLoading(false);
+    } catch {
+      setLoading(false);
+    }
+  }, [invoke, workspaceId]);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        handleNavigate(inputUrl);
+      }
+    },
+    [inputUrl, handleNavigate],
+  );
+
+  // Don't render until workspaceId is injected — during layout sync fromJSON
+  // recreates panels with empty params before injectParams runs a tick later.
+  if (!workspaceId) return null;
+
+  // ------- non-Tauri fallback -------
+
+  if (!isTauri) {
+    return (
+      <div className="flex h-full items-center justify-center text-muted-foreground">
+        Browser panel is only available in the desktop app
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-full w-full flex-col">
+      {/* Keyframes for the loading bar (injected once, deduped by browser) */}
+      <style>{`@keyframes browser-bar-slide {
+  0% { transform: translateX(-100%); }
+  50% { transform: translateX(200%); }
+  100% { transform: translateX(-100%); }
+}`}</style>
+      {/* Address bar */}
+      <div className="relative flex h-10 shrink-0 items-center gap-1 border-b border-border bg-background px-2">
+        <button
+          type="button"
+          onClick={handleBack}
+          className="flex items-center justify-center rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          title="Back"
+        >
+          <ArrowLeft className="size-4" />
+        </button>
+        <button
+          type="button"
+          onClick={handleForward}
+          className="flex items-center justify-center rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          title="Forward"
+        >
+          <ArrowRight className="size-4" />
+        </button>
+        {loading ? (
+          <button
+            type="button"
+            onClick={handleStop}
+            className="flex items-center justify-center rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            title="Stop"
+          >
+            <X className="size-4" />
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={handleReload}
+            className="flex items-center justify-center rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            title="Reload"
+          >
+            <RotateCw className="size-4" />
+          </button>
+        )}
+        <input
+          type="text"
+          value={inputUrl}
+          onChange={(e) => setInputUrl(e.target.value)}
+          onKeyDown={handleKeyDown}
+          onFocus={(e) => e.target.select()}
+          className="min-w-0 flex-1 rounded border border-transparent bg-muted/50 px-3 py-1.5 text-sm text-foreground outline-none transition-colors focus:border-border"
+          placeholder="Enter URL or search..."
+        />
+        {/* Loading progress bar — indeterminate sliding indicator */}
+        {loading && (
+          <div className="absolute inset-x-0 bottom-0 h-0.5 overflow-hidden bg-blue-500/10">
+            <div
+              className="h-full w-2/5 rounded-full bg-blue-500"
+              style={{
+                animation: "browser-bar-slide 1.4s ease-in-out infinite",
+              }}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Placeholder – the native webview is positioned over this area */}
+      <div ref={placeholderRef} className="min-h-0 flex-1" />
+    </div>
+  );
+}

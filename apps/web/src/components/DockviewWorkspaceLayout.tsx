@@ -13,8 +13,15 @@ import {
   type IDockviewPanelHeaderProps,
   type IDockviewPanelProps,
 } from "dockview";
-import { FolderOpen, GitCompare, MessageSquare, Terminal as TerminalIcon } from "lucide-react";
+import {
+  FolderOpen,
+  GitCompare,
+  Globe,
+  MessageSquare,
+  Terminal as TerminalIcon,
+} from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { isTauri } from "../lib/is-tauri";
 import { trpc } from "../lib/trpc-client";
 import { CodeBrowserView } from "./CodeBrowserView";
 import { WorkspaceChatPanel } from "./WorkspaceChatPanel";
@@ -37,12 +44,14 @@ const PANEL_ICONS: Record<string, React.FC<{ className?: string }>> = {
   changes: GitCompare,
   files: FolderOpen,
   terminal: TerminalIcon,
+  ...(isTauri ? { browser: Globe } : {}),
 };
 
 const PANEL_SHORTCUTS: Record<string, string> = {
   changes: "⌘E",
   files: "⌘G",
   terminal: "⌘J",
+  ...(isTauri ? { browser: "⌘B" } : {}),
 };
 
 // ---------------------------------------------------------------------------
@@ -52,6 +61,11 @@ const PANEL_SHORTCUTS: Record<string, string> = {
 const SplitTerminalContainer = lazy(() =>
   import("./SplitTerminalContainer").then((m) => ({ default: m.SplitTerminalContainer })),
 );
+
+// Lazy-load browser panel so the Tauri webview code is never bundled for web
+const LazyBrowserPanel = isTauri
+  ? lazy(() => import("./BrowserPanel").then((m) => ({ default: m.BrowserPanelComponent })))
+  : null;
 
 // ---------------------------------------------------------------------------
 // Panel params types
@@ -254,12 +268,25 @@ function BadgeTab(props: IDockviewPanelHeaderProps) {
 // Component and tab registries
 // ---------------------------------------------------------------------------
 
+// Wrap the lazy-loaded browser panel in Suspense so it can be registered
+// as a regular dockview component.
+// biome-ignore lint/suspicious/noExplicitAny: dockview requires generic panel props
+function BrowserPanelWrapper(props: IDockviewPanelProps<any>) {
+  if (!LazyBrowserPanel) return null;
+  return (
+    <Suspense fallback={null}>
+      <LazyBrowserPanel {...props} />
+    </Suspense>
+  );
+}
+
 // biome-ignore lint/suspicious/noExplicitAny: dockview requires generic panel props
 const components: Record<string, React.FunctionComponent<IDockviewPanelProps<any>>> = {
   chat: ChatPanelComponent,
   changes: ChangesPanelComponent,
   files: FilesPanelComponent,
   terminal: TerminalPanelComponent,
+  ...(isTauri ? { browser: BrowserPanelWrapper } : {}),
 };
 
 const tabComponents: Record<string, React.FunctionComponent<IDockviewPanelHeaderProps>> = {
@@ -297,8 +324,11 @@ function useDiffFileCount(workspaceId: string, isActive: boolean): number {
 // Required panel definitions & layout persistence
 // ---------------------------------------------------------------------------
 
-/** All panels that must always be present in the layout. */
-const REQUIRED_PANEL_IDS = ["chat", "changes", "files", "terminal"] as const;
+/** All panels that must always be present in the layout.
+ *  The browser panel is only available in the Tauri desktop app. */
+const REQUIRED_PANEL_IDS = isTauri
+  ? (["chat", "changes", "files", "terminal", "browser"] as const)
+  : (["chat", "changes", "files", "terminal"] as const);
 
 // ---------------------------------------------------------------------------
 // Layout persistence: shared structure + per-workspace active tabs
@@ -612,6 +642,9 @@ export function DockviewWorkspaceLayout({
       } else if (key === "g" && !e.shiftKey && api) {
         e.preventDefault();
         api.getPanel("files")?.api.setActive();
+      } else if (key === "b" && !e.shiftKey && api && isTauri) {
+        e.preventDefault();
+        api.getPanel("browser")?.api.setActive();
       }
     };
     window.addEventListener("keydown", handler, true);
@@ -644,6 +677,9 @@ export function DockviewWorkspaceLayout({
       api.getPanel("terminal")?.api.updateParameters({
         workspaceId,
       });
+      api.getPanel("browser")?.api.updateParameters({
+        workspaceId,
+      });
     },
     [
       workspaceId,
@@ -674,6 +710,7 @@ export function DockviewWorkspaceLayout({
         changes: "Changes",
         files: "Files",
         terminal: "Terminal",
+        browser: "Browser",
       };
 
       const opts: Record<string, unknown> = {
@@ -737,6 +774,17 @@ export function DockviewWorkspaceLayout({
         position: { referencePanel: "changes", direction: "within" },
         inactive: true,
       });
+
+      if (isTauri) {
+        api.addPanel({
+          id: "browser",
+          component: "browser",
+          title: "Browser",
+          params: { workspaceId },
+          position: { referencePanel: "changes", direction: "within" },
+          inactive: true,
+        });
+      }
 
       // Set chat panel to ~50% width
       try {
@@ -839,14 +887,15 @@ export function DockviewWorkspaceLayout({
   }, [injectParams]);
 
   // Propagate workspace active state only to panels that use it (chat,
-  // terminal).  Kept separate from injectParams so that a workspace switch
-  // doesn't trigger updateParameters on all 4 panels — changes and files
+  // terminal, browser).  Kept separate from injectParams so that a workspace
+  // switch doesn't trigger updateParameters on all panels — changes and files
   // don't care about wsActive and would re-render for nothing.
   useEffect(() => {
     const api = apiRef.current;
     if (!api) return;
     api.getPanel("chat")?.api.updateParameters({ wsActive: isActive });
     api.getPanel("terminal")?.api.updateParameters({ wsActive: isActive });
+    api.getPanel("browser")?.api.updateParameters({ wsActive: isActive });
   }, [isActive]);
 
   // Force dockview to recalculate layout after becoming visible.
@@ -865,6 +914,26 @@ export function DockviewWorkspaceLayout({
       });
     }
   }, [isActive]);
+
+  // Hide the browser webview when a dialog is open (z-ordering: native webview
+  // renders on top of the React DOM, so it would cover the dialog otherwise).
+  useEffect(() => {
+    if (!isTauri) return;
+    const isDialogOpen = quickOpenOpen || searchFilesOpen;
+
+    (async () => {
+      const { invoke } = await import("@tauri-apps/api/core");
+      if (isDialogOpen) {
+        invoke("browser_hide", { workspaceId }).catch(() => {});
+      } else {
+        // Only re-show if the browser panel is currently active
+        const browserPanel = apiRef.current?.getPanel("browser");
+        if (browserPanel?.api.isActive) {
+          invoke("browser_show", { workspaceId }).catch(() => {});
+        }
+      }
+    })();
+  }, [quickOpenOpen, searchFilesOpen, workspaceId]);
 
   return (
     <>
