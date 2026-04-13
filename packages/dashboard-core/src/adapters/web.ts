@@ -266,6 +266,13 @@ export class WebDashboardAdapter implements DashboardAdapter {
     return (await this.trpc.workspace.getFile.query({ workspaceId, path })) as FileContentResult;
   }
 
+  getWorkspaceFileUrl(workspaceId: string, path: string): string {
+    return `/api/workspace-file/${encodeURIComponent(workspaceId)}/${path
+      .split("/")
+      .map(encodeURIComponent)
+      .join("/")}`;
+  }
+
   async searchWorkspaceFiles(
     workspaceId: string,
     query: string,

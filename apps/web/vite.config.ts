@@ -1,5 +1,5 @@
 import { createReadStream, statSync } from "node:fs";
-import { basename, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { createLogger } from "@band-app/logger";
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
@@ -106,6 +106,50 @@ function trpcDevPlugin(): Plugin {
             "Cache-Control": "private, max-age=86400",
           });
           createReadStream(filePath).pipe(res);
+        } catch {
+          res.writeHead(404);
+          res.end("Not found");
+        }
+      });
+
+      // Serve workspace files (images, PDFs, etc.) — URL: /api/workspace-file/<workspaceId>/<path...>
+      server.middlewares.use("/api/workspace-file/", async (req, res) => {
+        const { resolveWorkspace } = await server.ssrLoadModule("./src/lib/workspace");
+        const rest = (req.url ?? "").replace(/^\//, "");
+        const slashIdx = rest.indexOf("/");
+        if (slashIdx === -1) {
+          res.writeHead(400);
+          res.end("Bad request");
+          return;
+        }
+        const wId = decodeURIComponent(rest.slice(0, slashIdx));
+        const filePath = rest.slice(slashIdx + 1);
+        if (!wId || !filePath) {
+          res.writeHead(400);
+          res.end("Bad request");
+          return;
+        }
+        const workspace = resolveWorkspace(wId);
+        if (!workspace) {
+          res.writeHead(404);
+          res.end("Workspace not found");
+          return;
+        }
+        const root = workspace.worktree.path;
+        const target = resolve(join(root, decodeURIComponent(filePath)));
+        if (!target.startsWith(`${root}/`) && target !== root) {
+          res.writeHead(400);
+          res.end("Bad request");
+          return;
+        }
+        try {
+          const fileStat = statSync(target);
+          res.writeHead(200, {
+            "Content-Type": mimeTypeFromFilename(basename(target)),
+            "Content-Length": fileStat.size.toString(),
+            "Cache-Control": "private, no-cache",
+          });
+          createReadStream(target).pipe(res);
         } catch {
           res.writeHead(404);
           res.end("Not found");

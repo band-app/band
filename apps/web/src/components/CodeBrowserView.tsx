@@ -5,9 +5,31 @@ import {
   SearchBar,
   useSearch,
 } from "@band-app/dashboard-core";
+import { cn } from "@band-app/ui";
+import { cjk } from "@streamdown/cjk";
+import { code } from "@streamdown/code";
+import { math } from "@streamdown/math";
+import { mermaid } from "@streamdown/mermaid";
 import { File } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Streamdown } from "streamdown";
 import { useIsDesktop } from "../hooks/useIsDesktop";
+
+const streamdownPlugins = { cjk, code, math, mermaid };
+
+function renderMarkdown(content: string) {
+  return (
+    <Streamdown
+      className={cn(
+        "size-full break-words leading-relaxed [overflow-wrap:anywhere]",
+        "[&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
+      )}
+      plugins={streamdownPlugins}
+    >
+      {content}
+    </Streamdown>
+  );
+}
 
 interface CodeBrowserViewProps {
   workspaceId: string;
@@ -143,6 +165,7 @@ export function CodeBrowserView({
           lineEnd={viewLineEnd}
           column={viewColumn}
           onBack={handleBack}
+          renderMarkdown={renderMarkdown}
         />
       );
     }
@@ -181,6 +204,7 @@ export function CodeBrowserView({
             lineEnd={viewLineEnd}
             column={viewColumn}
             onEditorView={handleEditorView}
+            renderMarkdown={renderMarkdown}
             toolbar={
               search.searchOpen ? (
                 <SearchBar

@@ -1,10 +1,14 @@
 import type { EditorView } from "@codemirror/view";
-import { ArrowLeft, FileWarning } from "lucide-react";
+import { ArrowLeft, Code, Eye, FileWarning } from "lucide-react";
+import type React from "react";
 import { useEffect, useState } from "react";
 import { useAdapter } from "../context";
+import { type FilePreviewType, getFilePreviewType } from "../lib/file-type";
 import { extensionToLanguage, filenameToLanguage } from "../lib/language-map";
 import type { FileContentResult } from "../types";
 import { CodeMirrorViewer } from "./CodeMirrorViewer";
+import { ImagePreview } from "./ImagePreview";
+import { PdfPreview } from "./PdfPreview";
 
 interface FileViewerProps {
   workspaceId: string;
@@ -20,6 +24,8 @@ interface FileViewerProps {
   onEditorView?: (view: EditorView | null) => void;
   /** Optional toolbar rendered between the title bar and the content area */
   toolbar?: React.ReactNode;
+  /** Optional markdown renderer — when provided, markdown files show a rendered preview with source toggle */
+  renderMarkdown?: (content: string) => React.ReactNode;
 }
 
 function getFilename(path: string): string {
@@ -50,11 +56,28 @@ export function FileViewer({
   column,
   onEditorView,
   toolbar,
+  renderMarkdown,
 }: FileViewerProps) {
   const adapter = useAdapter();
   const [data, setData] = useState<FileContentResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<"preview" | "source">("preview");
+
+  const previewType: FilePreviewType = getFilePreviewType(filePath);
+
+  // Reset view mode when navigating to a different file
+  // biome-ignore lint/correctness/useExhaustiveDependencies: filePath intentionally triggers reset when user navigates to a different file
+  useEffect(() => {
+    setViewMode("preview");
+  }, [filePath]);
+
+  // Notify parent that editor view is unavailable in preview mode
+  useEffect(() => {
+    if (previewType !== "code" && viewMode === "preview") {
+      onEditorView?.(null);
+    }
+  }, [previewType, viewMode, onEditorView]);
 
   useEffect(() => {
     if (!adapter.getWorkspaceFile) {
@@ -85,8 +108,15 @@ export function FileViewer({
 
   const lang = data?.content ? detectLanguage(filePath, data.language) : "plaintext";
 
+  const fileUrl = adapter.getWorkspaceFileUrl
+    ? adapter.getWorkspaceFileUrl(workspaceId, filePath)
+    : undefined;
+
+  const showMarkdownToggle = previewType === "markdown" && renderMarkdown;
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
+      {/* Title bar */}
       <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border/50 px-3">
         {onBack && (
           <button
@@ -101,44 +131,109 @@ export function FileViewer({
         {data && (
           <span className="shrink-0 text-xs text-muted-foreground">{formatSize(data.size)}</span>
         )}
+        {/* Markdown preview/source toggle icons */}
+        {showMarkdownToggle && (
+          <div className="flex shrink-0 items-center gap-0.5">
+            <button
+              type="button"
+              onClick={() => setViewMode("preview")}
+              title="Preview"
+              className={`inline-flex size-6 items-center justify-center rounded-md transition-colors ${
+                viewMode === "preview"
+                  ? "bg-accent text-accent-foreground"
+                  : "text-muted-foreground hover:bg-accent hover:text-foreground"
+              }`}
+            >
+              <Eye className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("source")}
+              title="Source"
+              className={`inline-flex size-6 items-center justify-center rounded-md transition-colors ${
+                viewMode === "source"
+                  ? "bg-accent text-accent-foreground"
+                  : "text-muted-foreground hover:bg-accent hover:text-foreground"
+              }`}
+            >
+              <Code className="size-3.5" />
+            </button>
+          </div>
+        )}
       </div>
 
       {toolbar}
 
+      {/* Content area */}
       <div className="min-h-0 flex-1 overflow-hidden">
         {loading && (
           <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
             Loading...
           </div>
         )}
+
         {error && (
           <div className="flex h-32 items-center justify-center text-sm text-destructive">
             {error}
           </div>
         )}
-        {data?.binary && (
+
+        {/* Image preview */}
+        {!loading && !error && previewType === "image" && fileUrl && (
+          <ImagePreview src={fileUrl} alt={getFilename(filePath)} />
+        )}
+
+        {/* PDF preview */}
+        {!loading && !error && previewType === "pdf" && fileUrl && (
+          <PdfPreview src={fileUrl} filename={getFilename(filePath)} />
+        )}
+
+        {/* Markdown preview (rendered) */}
+        {!loading &&
+          !error &&
+          previewType === "markdown" &&
+          renderMarkdown &&
+          viewMode === "preview" &&
+          data?.content && (
+            <div className="h-full overflow-auto">
+              <div className="mx-auto max-w-3xl px-8 py-6 text-sm">
+                {renderMarkdown(data.content)}
+              </div>
+            </div>
+          )}
+
+        {/* Source view: CodeMirror for markdown in source mode, or any code/text file */}
+        {!loading &&
+          !error &&
+          data?.content &&
+          (previewType === "code" ||
+            (previewType === "markdown" && (!renderMarkdown || viewMode === "source"))) && (
+            <CodeMirrorViewer
+              content={data.content}
+              language={lang}
+              className="h-full"
+              filePath={filePath}
+              line={line}
+              lineEnd={lineEnd}
+              column={column}
+              onEditorView={onEditorView}
+            />
+          )}
+
+        {/* Binary file fallback (non-image, non-pdf) */}
+        {!loading && !error && data?.binary && previewType === "code" && (
           <div className="flex h-32 flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
             <FileWarning className="size-8" />
             Binary file ({formatSize(data.size)})
           </div>
         )}
-        {data?.tooLarge && (
+
+        {/* File too large (only for code/text files — images and PDFs use the raw URL) */}
+        {!loading && !error && data?.tooLarge && previewType === "code" && (
           <div className="flex h-32 flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
             <FileWarning className="size-8" />
             File too large ({formatSize(data.size)})
           </div>
-        )}
-        {data?.content && (
-          <CodeMirrorViewer
-            content={data.content}
-            language={lang}
-            className="h-full"
-            filePath={filePath}
-            line={line}
-            lineEnd={lineEnd}
-            column={column}
-            onEditorView={onEditorView}
-          />
         )}
       </div>
     </div>

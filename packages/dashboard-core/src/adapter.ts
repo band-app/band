@@ -86,6 +86,9 @@ export interface DashboardAdapter {
   listWorkspaceFiles?(workspaceId: string, path: string): Promise<FileListResult>;
   getWorkspaceFile?(workspaceId: string, path: string): Promise<FileContentResult>;
 
+  /** Get a URL for raw file content (images, PDFs, etc.) */
+  getWorkspaceFileUrl?(workspaceId: string, path: string): string;
+
   // Search (optional)
   searchWorkspaceFiles?(
     workspaceId: string,

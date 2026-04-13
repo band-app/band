@@ -13,7 +13,9 @@ export { type DiffStats, DiffView } from "./components/DiffView";
 export { FileBrowser } from "./components/FileBrowser";
 export { FileViewer } from "./components/FileViewer";
 export { GitStatusIndicator } from "./components/GitStatusIndicator";
+export { ImagePreview } from "./components/ImagePreview";
 export { NewWorkspaceDialog } from "./components/NewWorkspaceForm";
+export { PdfPreview } from "./components/PdfPreview";
 export { ProjectList } from "./components/ProjectList";
 export { QuickOpenDialog } from "./components/QuickOpenDialog";
 export { SearchBar, type SearchBarHandle, type SearchOptions } from "./components/SearchBar";
@@ -53,6 +55,7 @@ export {
 } from "./lib/codemirror-setup";
 export { getFileIcon } from "./lib/file-icon";
 export { type FileLocation, formatFileLocation, parseFileLocation } from "./lib/file-location";
+export { type FilePreviewType, getFilePreviewType } from "./lib/file-type";
 export { extensionToLanguage, filenameToLanguage } from "./lib/language-map";
 export type { SelectionToChatDetail } from "./lib/selection-to-chat";
 export { isServiceHealthy, type ServiceHealth } from "./lib/service-health";

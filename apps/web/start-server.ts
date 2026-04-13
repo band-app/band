@@ -1,6 +1,6 @@
 import { appendFileSync, createReadStream, mkdirSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { basename, join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { applyWSSHandler } from "@trpc/server/adapters/ws";
 import sirv from "sirv";
@@ -17,6 +17,7 @@ import { cleanupStaleTasks } from "./src/lib/task-store.ts";
 import { killAllTerminals } from "./src/lib/terminal-manager.ts";
 import { handleTerminalConnection } from "./src/lib/terminal-ws.ts";
 import { startTunnel, stopTunnel } from "./src/lib/tunnel.ts";
+import { resolveWorkspace } from "./src/lib/workspace.ts";
 import { handleMcpRequest } from "./src/mcp/server.ts";
 import { createContext } from "./src/trpc/context.ts";
 import { getScalarHtml } from "./src/trpc/openapi.ts";
@@ -110,6 +111,43 @@ function serveStaticFile(
   }
 }
 
+/**
+ * Serve a file from a workspace by workspaceId and nested file path.
+ * Used for binary file previews (images, PDFs) in the file viewer.
+ */
+function serveWorkspaceFile(res: ServerResponse, workspaceId: string, rawPath: string): void {
+  const workspace = resolveWorkspace(workspaceId);
+  if (!workspace) {
+    res.writeHead(404);
+    res.end("Workspace not found");
+    return;
+  }
+
+  const root = workspace.worktree.path;
+  const target = resolve(join(root, rawPath));
+
+  // Path traversal protection: target must be within workspace root
+  if (!target.startsWith(`${root}/`) && target !== root) {
+    res.writeHead(400);
+    res.end("Bad request");
+    return;
+  }
+
+  try {
+    const fileStat = statSync(target);
+    const contentType = mimeTypeFromFilename(basename(target));
+    res.writeHead(200, {
+      "Content-Type": contentType,
+      "Content-Length": fileStat.size.toString(),
+      "Cache-Control": "private, no-cache",
+    });
+    createReadStream(target).pipe(res);
+  } catch {
+    res.writeHead(404);
+    res.end("Not found");
+  }
+}
+
 async function main() {
   // Run database migrations before anything else
   runMigrations();
@@ -157,6 +195,26 @@ async function main() {
         return;
       }
       serveStaticFile(res, bandHome(), join("shared", partition), rest.slice(slashIdx + 1));
+      return;
+    }
+
+    // Serve workspace files (images, PDFs, etc.) — URL: /api/workspace-file/<workspaceId>/<path...>
+    if (req.url?.startsWith("/api/workspace-file/")) {
+      const rest = req.url.slice("/api/workspace-file/".length);
+      const slashIdx = rest.indexOf("/");
+      if (slashIdx === -1) {
+        res.writeHead(400);
+        res.end("Bad request");
+        return;
+      }
+      const wId = decodeURIComponent(rest.slice(0, slashIdx));
+      const filePath = rest.slice(slashIdx + 1);
+      if (!wId || !filePath) {
+        res.writeHead(400);
+        res.end("Bad request");
+        return;
+      }
+      serveWorkspaceFile(res, wId, decodeURIComponent(filePath));
       return;
     }
 
