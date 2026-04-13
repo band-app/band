@@ -4,9 +4,9 @@ import { type ReactNode, useCallback, useRef } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import {
   loadSidebarWidth,
-  saveSidebarWidth,
   SIDEBAR_MAX_SIZE,
   SIDEBAR_MIN_SIZE,
+  saveSidebarWidth,
 } from "../lib/sidebar-width";
 
 interface DesktopLayoutProps {
@@ -34,7 +34,14 @@ export function DesktopLayout({ toolbarExtra }: DesktopLayoutProps) {
         defaultLayout={defaultLayout}
         onLayoutChanged={handleSidebarResize}
       >
-        <Panel id="sidebar" defaultSize={SIDEBAR_MIN_SIZE} minSize={SIDEBAR_MIN_SIZE} maxSize={SIDEBAR_MAX_SIZE} collapsible collapsedSize="0%">
+        <Panel
+          id="sidebar"
+          defaultSize={SIDEBAR_MIN_SIZE}
+          minSize={SIDEBAR_MIN_SIZE}
+          maxSize={SIDEBAR_MAX_SIZE}
+          collapsible
+          collapsedSize="0%"
+        >
           <div className="h-full border-r border-border overflow-hidden">
             <DashboardShell toolbarExtra={toolbarExtra} />
           </div>

@@ -24,9 +24,9 @@ import { useNavigationHistory } from "../hooks/useNavigationHistory";
 import { isTauri } from "../lib/is-tauri";
 import {
   loadSidebarWidth,
-  saveSidebarWidth,
   SIDEBAR_MAX_SIZE,
   SIDEBAR_MIN_SIZE,
+  saveSidebarWidth,
 } from "../lib/sidebar-width";
 import "../styles/globals.css";
 
@@ -210,10 +210,7 @@ function AppShell() {
   return (
     <div className="flex flex-col h-dvh w-full overflow-hidden bg-background text-foreground">
       {isTauriFullEditor && (
-        <TauriTitleBar
-          onToggleSidebar={toggleSidebar}
-          sidebarCollapsed={sidebarCollapsed}
-        />
+        <TauriTitleBar onToggleSidebar={toggleSidebar} sidebarCollapsed={sidebarCollapsed} />
       )}
       <div className="flex-1 min-h-0 overflow-hidden">
         <Group
