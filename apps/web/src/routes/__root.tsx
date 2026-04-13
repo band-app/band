@@ -14,13 +14,20 @@ import {
   useRouter,
   useRouterState,
 } from "@tanstack/react-router";
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Group, Panel, Separator, usePanelRef } from "react-resizable-panels";
 import { DockviewInstanceManager } from "../components/DockviewInstanceManager";
 import { TauriTitleBar } from "../components/TauriTitleBar";
 import { ToolbarButtons } from "../components/ToolbarButtons";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useNavigationHistory } from "../hooks/useNavigationHistory";
 import { isTauri } from "../lib/is-tauri";
+import {
+  loadSidebarWidth,
+  saveSidebarWidth,
+  SIDEBAR_MAX_SIZE,
+  SIDEBAR_MIN_SIZE,
+} from "../lib/sidebar-width";
 import "../styles/globals.css";
 
 const adapter = isTauri ? new HybridDashboardAdapter() : new WebDashboardAdapter();
@@ -163,6 +170,37 @@ function AppShell() {
   const routerNavigate = useCallback((href: string) => router.navigate({ to: href }), [router]);
   useNavigationHistory(routerNavigate, capabilities);
 
+  // Resizable sidebar: load persisted width and skip the first layout callback
+  // (react-resizable-panels fires it on mount with a computed layout that may
+  // differ from the default before the container has its final CSS dimensions).
+  const savedWidth = loadSidebarWidth();
+  const defaultLayout = savedWidth ? { sidebar: savedWidth, main: 100 - savedWidth } : undefined;
+  const skipFirstLayoutCallback = useRef(true);
+  const handleSidebarResize = useCallback((layout: Record<string, number>) => {
+    if (skipFirstLayoutCallback.current) {
+      skipFirstLayoutCallback.current = false;
+      return;
+    }
+    if (layout.sidebar != null) {
+      saveSidebarWidth(layout.sidebar);
+    }
+  }, []);
+
+  // Collapsible sidebar (Tauri title bar toggle)
+  const sidebarPanelRef = usePanelRef();
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const toggleSidebar = useCallback(() => {
+    const panel = sidebarPanelRef.current;
+    if (!panel) return;
+    if (panel.isCollapsed()) {
+      panel.expand();
+    } else {
+      panel.collapse();
+    }
+  }, [sidebarPanelRef]);
+  const handleSidebarCollapse = useCallback(() => setSidebarCollapsed(true), []);
+  const handleSidebarExpand = useCallback(() => setSidebarCollapsed(false), []);
+
   if (!isDesktop || isStandalone) {
     return <Outlet />;
   }
@@ -171,15 +209,43 @@ function AppShell() {
 
   return (
     <div className="flex flex-col h-dvh w-full overflow-hidden bg-background text-foreground">
-      {isTauriFullEditor && <TauriTitleBar />}
-      <div className="flex flex-1 min-h-0 overflow-hidden">
-        <div className="w-80 shrink-0 border-r border-border overflow-hidden">
-          <DashboardShell toolbarExtra={<ToolbarButtons />} hideTitleBar={isTauriFullEditor} />
-        </div>
-        <div className="flex-1 min-w-0 overflow-hidden relative">
-          <Outlet />
-          <DockviewInstanceManager />
-        </div>
+      {isTauriFullEditor && (
+        <TauriTitleBar
+          onToggleSidebar={toggleSidebar}
+          sidebarCollapsed={sidebarCollapsed}
+        />
+      )}
+      <div className="flex-1 min-h-0 overflow-hidden">
+        <Group
+          orientation="horizontal"
+          defaultLayout={defaultLayout}
+          onLayoutChanged={handleSidebarResize}
+        >
+          <Panel
+            id="sidebar"
+            defaultSize={SIDEBAR_MIN_SIZE}
+            minSize={SIDEBAR_MIN_SIZE}
+            maxSize={SIDEBAR_MAX_SIZE}
+            collapsible
+            collapsedSize="0%"
+            panelRef={sidebarPanelRef}
+            onResize={(size) => {
+              if (size.asPercentage === 0) handleSidebarCollapse();
+              else handleSidebarExpand();
+            }}
+          >
+            <div className="h-full border-r border-border overflow-hidden">
+              <DashboardShell toolbarExtra={<ToolbarButtons />} hideTitleBar={isTauriFullEditor} />
+            </div>
+          </Panel>
+          <Separator className="w-[3px] bg-transparent hover:bg-accent-foreground/20 active:bg-accent-foreground/30 transition-colors cursor-col-resize" />
+          <Panel id="main" minSize="20%">
+            <div className="h-full min-w-0 overflow-hidden relative">
+              <Outlet />
+              <DockviewInstanceManager />
+            </div>
+          </Panel>
+        </Group>
       </div>
     </div>
   );
