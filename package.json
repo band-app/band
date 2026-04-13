@@ -5,7 +5,7 @@
   "description": "IDE-agnostic agent orchestrator — dashboard + VS Code extension",
   "type": "module",
   "scripts": {
-    "dev:dashboard": "pnpm build:cli:dev & pnpm build:extension & pnpm build:web & wait && node scripts/dev-dashboard.mjs",
+    "dev:dashboard": "pnpm build:cli:dev && pnpm build:extension && pnpm build:web && node scripts/dev-dashboard.mjs",
     "dev:web": "pnpm --filter @band-app/server dev",
     "dev:docs": "pnpm --filter @band-app/docs dev",
     "build:dashboard": "pnpm --filter @band-app/dashboard tauri build",

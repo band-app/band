@@ -28,7 +28,6 @@
         "class-variance-authority",
         "clsx",
         "tailwind-merge",
-        "@tauri-apps/plugin-shell",
         "@dnd-kit/core",
         "@dnd-kit/sortable",
         "@dnd-kit/utilities",
