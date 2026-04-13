@@ -15,6 +15,7 @@ import {
   useRouterState,
 } from "@tanstack/react-router";
 import { useCallback, useEffect } from "react";
+import { DockviewInstanceManager } from "../components/DockviewInstanceManager";
 import { TauriTitleBar } from "../components/TauriTitleBar";
 import { ToolbarButtons } from "../components/ToolbarButtons";
 import { useIsDesktop } from "../hooks/useIsDesktop";
@@ -157,8 +158,9 @@ function AppShell() {
         <div className="w-80 shrink-0 border-r border-border overflow-hidden">
           <DashboardShell toolbarExtra={<ToolbarButtons />} hideTitleBar={isTauriFullEditor} />
         </div>
-        <div className="flex-1 min-w-0 overflow-hidden">
+        <div className="flex-1 min-w-0 overflow-hidden relative">
           <Outlet />
+          <DockviewInstanceManager />
         </div>
       </div>
     </div>

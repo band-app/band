@@ -59,6 +59,7 @@ const SplitTerminalContainer = lazy(() =>
 
 interface ChatParams {
   workspaceId: string;
+  wsActive?: boolean;
 }
 
 interface ChangesParams {
@@ -79,6 +80,7 @@ interface FilesParams {
 
 interface TerminalParams {
   workspaceId: string;
+  wsActive?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -86,12 +88,12 @@ interface TerminalParams {
 // ---------------------------------------------------------------------------
 
 function ChatPanelComponent({ params, api }: IDockviewPanelProps<ChatParams>) {
-  const [visible, setVisible] = useState(api.isActive);
+  const [tabActive, setTabActive] = useState(api.isActive);
 
   useEffect(() => {
-    const d1 = api.onDidActiveChange((e) => setVisible(e.isActive));
+    const d1 = api.onDidActiveChange((e) => setTabActive(e.isActive));
     const d2 = api.onDidVisibilityChange((e) => {
-      if (e.isVisible && api.isActive) setVisible(true);
+      if (e.isVisible && api.isActive) setTabActive(true);
     });
     return () => {
       d1.dispose();
@@ -99,10 +101,19 @@ function ChatPanelComponent({ params, api }: IDockviewPanelProps<ChatParams>) {
     };
   }, [api]);
 
+  // Chat is visible only when both the workspace is active AND the tab is active
+  const visible = params.wsActive !== false && tabActive;
+
+  // Don't render until workspaceId is injected — during layout sync fromJSON
+  // recreates panels with empty params before injectParams runs a tick later.
+  // Rendering with undefined workspaceId would cause draft/session state issues.
+  if (!params.workspaceId) return null;
+
   return <WorkspaceChatPanel workspaceId={params.workspaceId} visible={visible} />;
 }
 
 function ChangesPanelComponent({ params }: IDockviewPanelProps<ChangesParams>) {
+  if (!params.workspaceId) return null;
   return (
     <DiffView
       workspaceId={params.workspaceId}
@@ -115,6 +126,7 @@ function ChangesPanelComponent({ params }: IDockviewPanelProps<ChangesParams>) {
 }
 
 function FilesPanelComponent({ params }: IDockviewPanelProps<FilesParams>) {
+  if (!params.workspaceId) return null;
   return (
     <CodeBrowserView
       workspaceId={params.workspaceId}
@@ -128,18 +140,23 @@ function FilesPanelComponent({ params }: IDockviewPanelProps<FilesParams>) {
 }
 
 function TerminalPanelComponent({ params, api }: IDockviewPanelProps<TerminalParams>) {
-  const [visible, setVisible] = useState(api.isActive);
+  const [tabActive, setTabActive] = useState(api.isActive);
 
   useEffect(() => {
-    const d1 = api.onDidActiveChange((e) => setVisible(e.isActive));
+    const d1 = api.onDidActiveChange((e) => setTabActive(e.isActive));
     const d2 = api.onDidVisibilityChange((e) => {
-      if (e.isVisible && api.isActive) setVisible(true);
+      if (e.isVisible && api.isActive) setTabActive(true);
     });
     return () => {
       d1.dispose();
       d2.dispose();
     };
   }, [api]);
+
+  // Terminal is visible only when both the workspace is active AND the tab is active
+  const visible = params.wsActive !== false && tabActive;
+
+  if (!params.workspaceId) return null;
 
   return (
     <Suspense fallback={null}>
@@ -253,9 +270,10 @@ const tabComponents: Record<string, React.FunctionComponent<IDockviewPanelHeader
 // Diff file count hook (polls every 15s)
 // ---------------------------------------------------------------------------
 
-function useDiffFileCount(workspaceId: string): number {
+function useDiffFileCount(workspaceId: string, isActive: boolean): number {
   const [count, setCount] = useState(0);
   useEffect(() => {
+    if (!isActive) return;
     let cancelled = false;
     const fetchCount = () => {
       trpc.workspace.getDiffSummary
@@ -271,7 +289,7 @@ function useDiffFileCount(workspaceId: string): number {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [workspaceId]);
+  }, [workspaceId, isActive]);
   return count;
 }
 
@@ -282,18 +300,192 @@ function useDiffFileCount(workspaceId: string): number {
 /** All panels that must always be present in the layout. */
 const REQUIRED_PANEL_IDS = ["chat", "changes", "files", "terminal"] as const;
 
-const LAYOUT_KEY = "band:dockview-layout";
+// ---------------------------------------------------------------------------
+// Layout persistence: shared structure + per-workspace active tabs
+// ---------------------------------------------------------------------------
+//
+// Structural layout (panel positions, sizes, tab order) is shared across
+// ALL workspaces via a global key.  Active tab state (which tab is shown in
+// each group) is stored per-workspace so that switching workspaces doesn't
+// clobber the user's tab focus.
 
-function saveLayout(api: DockviewApi) {
-  try {
-    localStorage.setItem(LAYOUT_KEY, JSON.stringify(api.toJSON()));
-  } catch {}
+const GLOBAL_LAYOUT_KEY = "band:dockview-layout";
+const ACTIVE_STATE_KEY_PREFIX = "band:dockview-active:";
+
+/** Per-workspace active-tab state: which group is focused and which tab is
+ *  shown in each tabbed group. */
+interface ActiveTabState {
+  activeGroup?: string;
+  groups: Record<string, string>; // groupId → activeView panelId
 }
 
-function loadLayout(): unknown | null {
+// biome-ignore lint/suspicious/noExplicitAny: recursive grid JSON
+function walkGridNode(node: any, callback: (leaf: any) => void): void {
+  if (!node) return;
+  if (node.type === "leaf") {
+    callback(node);
+  } else if (node.type === "branch" && Array.isArray(node.data)) {
+    for (const child of node.data) {
+      walkGridNode(child, callback);
+    }
+  }
+}
+
+/** Extract per-workspace active tab state from serialized layout. */
+function extractActiveState(json: Record<string, unknown>): ActiveTabState {
+  const state: ActiveTabState = { groups: {} };
+  if (typeof json.activeGroup === "string") {
+    state.activeGroup = json.activeGroup;
+  }
+  // dockview v5 uses "activePanel" at the top level (the active GROUP id)
+  if (typeof json.activePanel === "string") {
+    state.activeGroup = json.activePanel;
+  }
+  const grid = json.grid as Record<string, unknown> | undefined;
+  if (grid?.root) {
+    walkGridNode(grid.root, (leaf) => {
+      const data = leaf.data;
+      if (data?.id && data?.activeView) {
+        state.groups[data.id] = data.activeView;
+      }
+    });
+  }
+  return state;
+}
+
+/** Apply per-workspace active tab state onto a layout JSON (mutates). */
+function applyActiveState(json: Record<string, unknown>, state: ActiveTabState): void {
+  if (state.activeGroup) {
+    // dockview v5 uses "activePanel" for the focused group
+    json.activePanel = state.activeGroup;
+  }
+  const grid = json.grid as Record<string, unknown> | undefined;
+  if (grid?.root) {
+    walkGridNode(grid.root, (leaf) => {
+      const data = leaf.data;
+      if (data?.id && state.groups[data.id]) {
+        data.activeView = state.groups[data.id];
+      }
+    });
+  }
+}
+
+/**
+ * Recursively sort all object keys so that JSON.stringify produces a
+ * deterministic output regardless of property insertion order.
+ */
+// biome-ignore lint/suspicious/noExplicitAny: recursive JSON normalizer
+function sortKeys(value: any): any {
+  if (Array.isArray(value)) return value.map(sortKeys);
+  if (value !== null && typeof value === "object") {
+    const sorted: Record<string, unknown> = {};
+    for (const key of Object.keys(value).sort()) {
+      sorted[key] = sortKeys(value[key]);
+    }
+    return sorted;
+  }
+  return value;
+}
+
+/**
+ * Compute a structural fingerprint of the layout that ignores active tab
+ * state and container dimensions.  Two layouts with the same panels in the
+ * same arrangement but different active tabs produce the same fingerprint.
+ *
+ * Keys are sorted before stringification so that property insertion order
+ * differences (e.g. fromJSON() vs toJSON()) don't produce false positives.
+ */
+function getStructuralFingerprint(json: Record<string, unknown>): string {
+  const clone = JSON.parse(JSON.stringify(json));
+  // Strip active-tab state
+  delete clone.activePanel;
+  delete clone.activeGroup;
+  const grid = clone.grid;
+  if (grid) {
+    delete grid.width;
+    delete grid.height;
+    walkGridNode(grid.root, (leaf) => {
+      if (leaf.data) delete leaf.data.activeView;
+    });
+  }
+  return JSON.stringify(sortKeys(clone));
+}
+
+/**
+ * Strip runtime panel params (file paths, callbacks, workspaceId) from the
+ * serialized layout so that the saved JSON only contains structural data
+ * (panel positions, sizes, groups). Each workspace re-injects its own params
+ * via injectParams() after restoring.
+ */
+function stripPanelParams(json: Record<string, unknown>): Record<string, unknown> {
+  // JSON round-trip instead of structuredClone because api.toJSON() includes
+  // panel params that may contain functions (callbacks injected via
+  // injectParams). structuredClone throws DataCloneError on functions.
+  const clone = JSON.parse(JSON.stringify(json));
+  const panels = clone.panels as Record<string, Record<string, unknown>> | undefined;
+  if (panels) {
+    for (const panel of Object.values(panels)) {
+      panel.params = {};
+    }
+  }
+  return clone;
+}
+
+/**
+ * Persist the current layout.
+ * - Full layout (structure + active tabs) → global key (shared by all ws)
+ * - Active tab state only → per-workspace key
+ *
+ * Returns true when the structural layout changed (panels moved, resized,
+ * reordered) so the caller can decide whether to evict cached workspaces.
+ */
+function saveLayout(
+  api: DockviewApi,
+  workspaceId: string,
+  lastStructureRef: React.MutableRefObject<string>,
+): boolean {
   try {
-    const raw = localStorage.getItem(LAYOUT_KEY);
-    return raw ? JSON.parse(raw) : null;
+    const json = stripPanelParams(api.toJSON() as unknown as Record<string, unknown>);
+
+    // Always save active tab state per-workspace
+    const activeState = extractActiveState(json);
+    localStorage.setItem(
+      `${ACTIVE_STATE_KEY_PREFIX}${workspaceId}`,
+      JSON.stringify(activeState),
+    );
+
+    // Always save full layout to the global key
+    localStorage.setItem(GLOBAL_LAYOUT_KEY, JSON.stringify(json));
+
+    // Detect structural changes (ignoring active tabs & container size)
+    const fingerprint = getStructuralFingerprint(json);
+    if (fingerprint !== lastStructureRef.current) {
+      lastStructureRef.current = fingerprint;
+      return true; // structural change
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/** Load layout: global structure + per-workspace active tabs merged. */
+function loadLayout(workspaceId: string): unknown | null {
+  try {
+    const raw = localStorage.getItem(GLOBAL_LAYOUT_KEY);
+    if (!raw) return null;
+    const layout = JSON.parse(raw);
+
+    // Overlay this workspace's saved active tab state
+    const activeRaw = localStorage.getItem(
+      `${ACTIVE_STATE_KEY_PREFIX}${workspaceId}`,
+    );
+    if (activeRaw) {
+      const activeState: ActiveTabState = JSON.parse(activeRaw);
+      applyActiveState(layout, activeState);
+    }
+
+    return layout;
   } catch {
     return null;
   }
@@ -305,16 +497,51 @@ function loadLayout(): unknown | null {
 
 interface DockviewWorkspaceLayoutProps {
   workspaceId: string;
-  encodedId: string;
+  isActive: boolean;
+  /** Called when the user makes a STRUCTURAL layout change (panel move,
+   *  resize, tab reorder — NOT simple tab activation).  The instance
+   *  manager uses this to evict hidden workspaces so they pick up the
+   *  new layout when re-opened. */
+  onLayoutChange?: () => void;
 }
 
-export function DockviewWorkspaceLayout({ workspaceId }: DockviewWorkspaceLayoutProps) {
+export function DockviewWorkspaceLayout({
+  workspaceId,
+  isActive,
+  onLayoutChange,
+}: DockviewWorkspaceLayoutProps) {
   const apiRef = useRef<DockviewApi | null>(null);
+
+  // Ref so the onDidLayoutChange handler always sees the latest callback
+  // without needing to re-subscribe.
+  const onLayoutChangeRef = useRef(onLayoutChange);
+  onLayoutChangeRef.current = onLayoutChange;
+
+  // Suppress saves during initial layout setup (fromJSON / buildDefaultLayout
+  // fire onDidLayoutChange events that are not user-initiated).
+  const initializedRef = useRef(false);
+
+  // Ref for injectParams so onReady doesn't need it as a dependency.
+  // Without this, onReady would be recreated on every isActive / currentFile /
+  // etc. change, causing dockview to dispose the onDidLayoutChange listener.
+  const injectParamsRef = useRef<(api: DockviewApi) => void>(() => {});
+
+  // Track active state via ref so the onDidLayoutChange handler can guard
+  // against saves from non-active workspaces. When a workspace is evicted,
+  // api.dispose() may fire layout events — without this guard the dying
+  // instance would overwrite the good layout the active workspace just saved.
+  const isActiveRef = useRef(isActive);
+  isActiveRef.current = isActive;
+
+  // Structural fingerprint for detecting real layout changes (panel move,
+  // resize, tab reorder) vs. simple tab activation changes.  Only
+  // structural changes trigger eviction of hidden workspaces.
+  const lastStructureRef = useRef("");
 
   // Cross-panel state
   const [currentFile, setCurrentFile] = useState<string | undefined>(undefined);
   const [openFilePath, setOpenFilePath] = useState<string | null>(null);
-  const diffFileCount = useDiffFileCount(workspaceId);
+  const diffFileCount = useDiffFileCount(workspaceId, isActive);
 
   // Dialog state
   const [quickOpenOpen, setQuickOpenOpen] = useState(false);
@@ -349,28 +576,10 @@ export function DockviewWorkspaceLayout({ workspaceId }: DockviewWorkspaceLayout
     setCurrentFile(filePath ?? undefined);
   }, []);
 
-  // Update Changes tab badge when diff file count changes
+  // Global keyboard shortcuts (capture phase) — only active for the visible workspace
   useEffect(() => {
-    const api = apiRef.current;
-    if (!api) return;
-    const panel = api.getPanel("changes");
-    if (panel) {
-      panel.api.updateParameters({ badge: diffFileCount });
-    }
-  }, [diffFileCount]);
+    if (!isActive) return;
 
-  // Update Files panel params when file state changes
-  useEffect(() => {
-    const api = apiRef.current;
-    if (!api) return;
-    api.getPanel("files")?.api.updateParameters({
-      file: currentFile,
-      openFilePath,
-    });
-  }, [currentFile, openFilePath]);
-
-  // Global keyboard shortcuts (capture phase)
-  useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       // Shift+Tab → toggle mode (Edit/Plan)
       if (e.key === "Tab" && e.shiftKey && !e.ctrlKey && !e.metaKey) {
@@ -412,9 +621,11 @@ export function DockviewWorkspaceLayout({ workspaceId }: DockviewWorkspaceLayout
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, []);
+  }, [isActive]);
 
-  // Wire callbacks into panels after layout restore (functions cannot be serialized)
+  // Wire callbacks into panels after layout restore (functions cannot be serialized).
+  // Note: wsActive is handled by a separate effect below so that workspace
+  // switches only re-render the 2 panels that care (chat, terminal), not all 4.
   const injectParams = useCallback(
     (api: DockviewApi) => {
       api.getPanel("chat")?.api.updateParameters({
@@ -451,6 +662,7 @@ export function DockviewWorkspaceLayout({ workspaceId }: DockviewWorkspaceLayout
       setFindInFile,
     ],
   );
+  injectParamsRef.current = injectParams;
 
   // Add a single missing panel back into the layout at a sensible position
   const addMissingPanel = useCallback(
@@ -546,7 +758,7 @@ export function DockviewWorkspaceLayout({ workspaceId }: DockviewWorkspaceLayout
 
       // Try to restore a saved layout
       let restored = false;
-      const saved = loadLayout();
+      const saved = loadLayout(workspaceId);
       if (saved) {
         try {
           // biome-ignore lint/suspicious/noExplicitAny: localStorage JSON shape
@@ -570,46 +782,103 @@ export function DockviewWorkspaceLayout({ workspaceId }: DockviewWorkspaceLayout
 
       // After restore, inject live callback references
       // (setTimeout ensures fromJSON completes rendering)
-      setTimeout(() => injectParams(event.api), 0);
+      setTimeout(() => injectParamsRef.current(event.api), 0);
 
       // Guard: if a required panel is removed (edge-case drag, API call, etc.)
-      // re-add it immediately so it can't be lost
-      const removeGuard = event.api.onDidRemovePanel((panel) => {
+      // re-add it immediately so it can't be lost.
+      // Note: DockviewReact ignores onReady's return value, so cleanup is
+      // handled by api.dispose() when the component unmounts — no need to
+      // store the disposable.
+      event.api.onDidRemovePanel((panel) => {
         const id = panel.id;
         if ((REQUIRED_PANEL_IDS as readonly string[]).includes(id)) {
           // Re-add on next tick so dockview finishes its removal first
           setTimeout(() => {
             if (!event.api.getPanel(id)) {
               addMissingPanel(event.api, id);
-              injectParams(event.api);
+              injectParamsRef.current(event.api);
             }
           }, 0);
         }
       });
 
-      // Persist layout on changes
-      const layoutChange = event.api.onDidLayoutChange(() => {
-        saveLayout(event.api);
+      // Initialize the structural fingerprint from the just-loaded layout
+      // so the first real structural change can be detected.
+      {
+        const initJson = stripPanelParams(
+          event.api.toJSON() as unknown as Record<string, unknown>,
+        );
+        lastStructureRef.current = getStructuralFingerprint(initJson);
+      }
+
+      // Persist layout on changes and notify the instance manager.
+      // The subscription is created AFTER fromJSON / buildDefaultLayout, so
+      // their synchronous onDidLayoutChange events are never captured.
+      // The initializedRef guard is a safety net for any edge-case async
+      // layout events during setup.
+      event.api.onDidLayoutChange(() => {
+        if (!initializedRef.current) return;
+        if (!isActiveRef.current) return;
+
+        // saveLayout writes:
+        //  - full layout → global key (shared structure)
+        //  - active tab state → per-workspace key
+        // It returns true when the STRUCTURAL layout changed (panels
+        // moved, resized, or reordered) — NOT for simple tab clicks.
+        const structureChanged = saveLayout(
+          event.api,
+          workspaceId,
+          lastStructureRef,
+        );
+
+        if (structureChanged) {
+          onLayoutChangeRef.current?.();
+        }
       });
 
-      return () => {
-        removeGuard.dispose();
-        layoutChange.dispose();
-      };
+      initializedRef.current = true;
     },
-    [buildDefaultLayout, addMissingPanel, injectParams],
+    [buildDefaultLayout, addMissingPanel],
   );
 
-  // Re-inject params when callbacks/state change
+  // Re-inject params when callbacks/state change (badge count, file
+  // state, and all callback references in one pass).
   useEffect(() => {
     const api = apiRef.current;
     if (api) injectParams(api);
   }, [injectParams]);
 
+  // Propagate workspace active state only to panels that use it (chat,
+  // terminal).  Kept separate from injectParams so that a workspace switch
+  // doesn't trigger updateParameters on all 4 panels — changes and files
+  // don't care about wsActive and would re-render for nothing.
+  useEffect(() => {
+    const api = apiRef.current;
+    if (!api) return;
+    api.getPanel("chat")?.api.updateParameters({ wsActive: isActive });
+    api.getPanel("terminal")?.api.updateParameters({ wsActive: isActive });
+  }, [isActive]);
+
+  // Force dockview to recalculate layout after becoming visible.
+  // When switching from display:none → display:block, dockview may have
+  // stale size info.  Calling layout() triggers a proper resize.
+  //
+  // No isResizingRef guard is needed here: the onDidLayoutChange handler
+  // uses a structural fingerprint comparison to detect real layout changes.
+  // A programmatic layout() with the same container dimensions produces
+  // the same fingerprint — no eviction is triggered.
+  useEffect(() => {
+    if (isActive && apiRef.current) {
+      const api = apiRef.current;
+      requestAnimationFrame(() => {
+        api.layout(api.width, api.height);
+      });
+    }
+  }, [isActive]);
+
   return (
     <>
       <DockviewReact
-        key={workspaceId}
         theme={bandTheme}
         className="h-full"
         components={components}

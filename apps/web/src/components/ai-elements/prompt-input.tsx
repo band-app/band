@@ -47,6 +47,9 @@ export type PromptInputProps = Omit<HTMLAttributes<HTMLFormElement>, "onSubmit">
   onSubmit: (message: PromptInputMessage, event: FormEvent<HTMLFormElement>) => void;
   /** When set, the unsent input text is persisted to sessionStorage under this key so it survives unmounts (e.g. tab switches). */
   draftKey?: string;
+  /** Whether the prompt input is currently visible/active. Used to gate global
+   *  event handlers so hidden workspaces' textareas aren't modified. */
+  visible?: boolean;
 };
 
 function readDraft(key: string | null): string {
@@ -62,6 +65,7 @@ export const PromptInput = ({
   className,
   onSubmit,
   draftKey,
+  visible,
   children,
   ...props
 }: PromptInputProps) => {
@@ -74,23 +78,32 @@ export const PromptInput = ({
   const [inputValue, setInputValue] = useState(() => readDraft(draftStorageKey));
   const [commandHint, setCommandHint] = useState<string | null>(null);
 
-  // Restore draft into the uncontrolled textarea on mount
+  // Restore draft into the uncontrolled textarea on mount.
+  // Always set the value — even when the draft is empty — to clear any
+  // stale content the browser/WebView may have restored by field name.
   const draftRestoredRef = useRef(false);
   useEffect(() => {
     if (draftRestoredRef.current) return;
     draftRestoredRef.current = true;
     const draft = readDraft(draftStorageKey);
-    if (!draft) return;
     const textarea = textareaRef.current;
     if (!textarea) return;
+    if (!draft && !textarea.value) return;
     const nativeSetter = Object.getOwnPropertyDescriptor(
       HTMLTextAreaElement.prototype,
       "value",
     )?.set;
     nativeSetter?.call(textarea, draft);
     textarea.dispatchEvent(new Event("input", { bubbles: true }));
-    textarea.selectionStart = textarea.selectionEnd = draft.length;
+    if (draft) {
+      textarea.selectionStart = textarea.selectionEnd = draft.length;
+    }
   }, [draftStorageKey]);
+
+  // Ref for gating global event handlers — hidden workspaces must not
+  // process events that would modify their textarea.
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
 
   const addFiles = useCallback((newFiles: FileList | File[]) => {
     const valid = Array.from(newFiles).filter((f) => f.size <= MAX_FILE_SIZE);
@@ -184,9 +197,13 @@ export const PromptInput = ({
     textarea.selectionStart = textarea.selectionEnd = value.length;
   }, []);
 
-  // Listen for "Add to Chat" events from CodeMirror editors
+  // Listen for "Add to Chat" events from CodeMirror editors.
+  // Only process the event when this prompt is visible — with workspace
+  // show/hide, multiple PromptInput instances are mounted simultaneously
+  // and we must not modify hidden workspaces' textareas.
   useEffect(() => {
     const handler = (e: Event) => {
+      if (visibleRef.current === false) return;
       const { filePath, startLine, endLine } = (e as CustomEvent<SelectionToChatDetail>).detail;
 
       const lineRef =

@@ -228,7 +228,13 @@ pub fn run() {
                         let _ = settings_win.destroy();
                     }
                     web_proc.kill();
-                    webserver::kill_port_sync(webserver::get_configured_port());
+                    // Only kill by port in release builds where we spawned the
+                    // server ourselves. In dev mode the orchestrating script
+                    // (scripts/dev-dashboard.mjs) handles cleanup — blindly
+                    // killing port 3456 could hit another Band instance.
+                    if cfg!(not(debug_assertions)) {
+                        webserver::kill_port_sync(webserver::get_configured_port());
+                    }
                 }
             });
 
@@ -276,7 +282,9 @@ pub fn run() {
                 let _ = settings_win.destroy();
             }
             web_proc.kill();
-            webserver::kill_port_sync(webserver::get_configured_port());
+            if cfg!(not(debug_assertions)) {
+                webserver::kill_port_sync(webserver::get_configured_port());
+            }
         }
     });
 }

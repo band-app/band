@@ -17,7 +17,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { DockviewWorkspaceLayout } from "../components/DockviewWorkspaceLayout";
 import { TauriDragRegion } from "../components/TauriTitleBar";
 import { AgentSwitcherContext } from "../hooks/useAgentSwitcherContext";
 import { useIsDesktop } from "../hooks/useIsDesktop";
@@ -181,17 +180,16 @@ function WorkspaceLayout() {
 // ---------------------------------------------------------------------------
 
 function DesktopWorkspaceLayout({
-  workspaceId,
-  encodedId,
+  workspaceId: _workspaceId,
+  encodedId: _encodedId,
 }: {
   workspaceId: string;
   encodedId: string;
 }) {
-  return (
-    <div className="h-full overflow-hidden">
-      <DockviewWorkspaceLayout workspaceId={workspaceId} encodedId={encodedId} />
-    </div>
-  );
+  // Dockview is now managed by DockviewInstanceManager in __root.tsx.
+  // Each workspace gets its own persistent DockviewReact instance that is
+  // shown/hidden via CSS rather than destroyed/recreated on workspace switch.
+  return null;
 }
 
 // ---------------------------------------------------------------------------
