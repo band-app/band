@@ -9,6 +9,8 @@ import {
   type UrlTransform,
 } from "streamdown";
 
+import { openExternalUrl } from "../../lib/open-external-url";
+
 // ---------------------------------------------------------------------------
 // Known file extensions (derived from dashboard-core file-icon.ts)
 // ---------------------------------------------------------------------------
@@ -295,11 +297,14 @@ function FileLinkedAnchor(props: ComponentProps<"a"> & ExtraProps) {
 
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
-      if (isBandFile && href) {
+      if (href) {
         e.preventDefault();
         e.stopPropagation();
-        const filename = href.slice("band-file:".length);
-        dispatchOpenFile(filename);
+        if (isBandFile) {
+          dispatchOpenFile(href.slice("band-file:".length));
+        } else {
+          openExternalUrl(href);
+        }
       }
     },
     [isBandFile, href],
@@ -322,9 +327,9 @@ function FileLinkedAnchor(props: ComponentProps<"a"> & ExtraProps) {
     );
   }
 
-  // Default link rendering — open external links in new tab
+  // Default link rendering — open external links in system browser (Tauri)
   return (
-    <a href={href} target="_blank" rel="noopener noreferrer" {...rest}>
+    <a href={href} target="_blank" rel="noopener noreferrer" onClick={handleClick} {...rest}>
       {children}
     </a>
   );

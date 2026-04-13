@@ -7,6 +7,7 @@ export { AddProjectDialog } from "./components/AddProjectDialog";
 export { AgentStatusIndicator } from "./components/AgentStatusIndicator";
 export { AgentIcon, ClaudeIcon, CodexIcon } from "./components/agent-icons";
 export { CIStatusIndicator } from "./components/CIStatusIndicator";
+export { CodeMirrorEditor } from "./components/CodeMirrorEditor";
 export { CodeMirrorViewer } from "./components/CodeMirrorViewer";
 export { DashboardShell } from "./components/DashboardShell";
 export { type DiffStats, DiffView } from "./components/DiffView";

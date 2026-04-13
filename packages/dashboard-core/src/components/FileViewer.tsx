@@ -1,11 +1,12 @@
 import type { EditorView } from "@codemirror/view";
-import { ArrowLeft, Code, Eye, FileWarning } from "lucide-react";
+import { ArrowLeft, Code, Eye, FileWarning, Loader2, Save } from "lucide-react";
 import type React from "react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAdapter } from "../context";
 import { type FilePreviewType, getFilePreviewType } from "../lib/file-type";
 import { extensionToLanguage, filenameToLanguage } from "../lib/language-map";
 import type { FileContentResult } from "../types";
+import { CodeMirrorEditor } from "./CodeMirrorEditor";
 import { CodeMirrorViewer } from "./CodeMirrorViewer";
 import { ImagePreview } from "./ImagePreview";
 import { PdfPreview } from "./PdfPreview";
@@ -26,7 +27,40 @@ interface FileViewerProps {
   toolbar?: React.ReactNode;
   /** Optional markdown renderer — when provided, markdown files show a rendered preview with source toggle */
   renderMarkdown?: (content: string) => React.ReactNode;
+  /** When true, code files open in an editable editor instead of read-only viewer */
+  editable?: boolean;
 }
+
+// localStorage-backed cache for unsaved edits — survives page reloads
+const EDITS_PREFIX = "band-edits:";
+
+function editsCacheKey(workspaceId: string, filePath: string): string {
+  return `${EDITS_PREFIX}${workspaceId}\0${filePath}`;
+}
+
+const unsavedEditsCache = {
+  get(key: string): string | undefined {
+    try {
+      return localStorage.getItem(key) ?? undefined;
+    } catch {
+      return undefined;
+    }
+  },
+  set(key: string, value: string): void {
+    try {
+      localStorage.setItem(key, value);
+    } catch {
+      // quota exceeded or unavailable — silently ignore
+    }
+  },
+  delete(key: string): void {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      // unavailable — silently ignore
+    }
+  },
+};
 
 function getFilename(path: string): string {
   return path.split("/").pop() || path;
@@ -57,6 +91,7 @@ export function FileViewer({
   onEditorView,
   toolbar,
   renderMarkdown,
+  editable,
 }: FileViewerProps) {
   const adapter = useAdapter();
   const [data, setData] = useState<FileContentResult | null>(null);
@@ -64,13 +99,46 @@ export function FileViewer({
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"preview" | "source">("preview");
 
+  // Editing state
+  const [editedContent, setEditedContent] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const isDirty = editedContent !== null && editedContent !== data?.content;
+
+  const canEdit = editable && !!adapter.saveWorkspaceFile;
+
   const previewType: FilePreviewType = getFilePreviewType(filePath);
 
-  // Reset view mode when navigating to a different file
-  // biome-ignore lint/correctness/useExhaustiveDependencies: filePath intentionally triggers reset when user navigates to a different file
+  // Persist unsaved edits to cache when leaving a file (navigation or unmount),
+  // and restore them when returning.
   useEffect(() => {
+    const key = editsCacheKey(workspaceId, filePath);
+    const cached = unsavedEditsCache.get(key);
     setViewMode("preview");
-  }, [filePath]);
+    setEditedContent(cached ?? null);
+    setSaveError(null);
+
+    return () => {
+      // Save current edits to cache when leaving this file
+      const current = editedContentRef.current;
+      if (current !== null) {
+        unsavedEditsCache.set(key, current);
+      } else {
+        unsavedEditsCache.delete(key);
+      }
+    };
+  }, [workspaceId, filePath]);
+
+  // Warn before tab close when dirty
+  useEffect(() => {
+    if (!isDirty) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [isDirty]);
 
   // Notify parent that editor view is unavailable in preview mode
   useEffect(() => {
@@ -123,6 +191,45 @@ export function FileViewer({
 
   const showMarkdownToggle = previewType === "markdown" && renderMarkdown;
 
+  // The content to display — use edited content when available, otherwise server content
+  const displayContent = editedContent ?? data?.content;
+
+  // Use a ref to avoid stale closure in the save handler
+  const editedContentRef = useRef(editedContent);
+  editedContentRef.current = editedContent;
+
+  const handleSave = useCallback(async () => {
+    if (!adapter.saveWorkspaceFile || editedContentRef.current === null) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await adapter.saveWorkspaceFile(workspaceId, filePath, editedContentRef.current);
+      // Update the data state so isDirty resets
+      const savedContent = editedContentRef.current;
+      setData((prev) => (prev ? { ...prev, content: savedContent } : prev));
+      // Clear cache — saved content is now on disk
+      unsavedEditsCache.delete(editsCacheKey(workspaceId, filePath));
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  }, [adapter, workspaceId, filePath]);
+
+  const handleContentChange = useCallback((newContent: string) => {
+    setEditedContent(newContent);
+  }, []);
+
+  const handleBack = useCallback(() => {
+    if (isDirty && !window.confirm("You have unsaved changes. Discard?")) {
+      return;
+    }
+    // Clear cache and ref so the cleanup effect doesn't re-save discarded edits
+    unsavedEditsCache.delete(editsCacheKey(workspaceId, filePath));
+    editedContentRef.current = null;
+    onBack?.();
+  }, [isDirty, onBack, workspaceId, filePath]);
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Title bar */}
@@ -130,15 +237,27 @@ export function FileViewer({
         {onBack && (
           <button
             type="button"
-            onClick={onBack}
+            onClick={handleBack}
             className="inline-flex size-6 items-center justify-center rounded-md hover:bg-accent"
           >
             <ArrowLeft className="size-3.5" />
           </button>
         )}
-        <span className="min-w-0 flex-1 truncate font-mono text-xs">{filePath}</span>
-        {data && (
-          <span className="shrink-0 text-xs text-muted-foreground">{formatSize(data.size)}</span>
+        <span className="min-w-0 flex-1 truncate font-mono text-xs">
+          {filePath}
+          {isDirty && <span className="ml-1 text-muted-foreground">(modified)</span>}
+        </span>
+        {saveError && <span className="shrink-0 text-xs text-destructive">{saveError}</span>}
+        {canEdit && isDirty && (
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={saving}
+            title="Save (Cmd+S)"
+            className="inline-flex size-6 items-center justify-center rounded-md hover:bg-accent disabled:opacity-50"
+          >
+            {saving ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
+          </button>
         )}
         {/* Markdown preview/source toggle icons */}
         {showMarkdownToggle && (
@@ -169,6 +288,9 @@ export function FileViewer({
             </button>
           </div>
         )}
+        {data && (
+          <span className="shrink-0 text-xs text-muted-foreground">{formatSize(data.size)}</span>
+        )}
       </div>
 
       {toolbar}
@@ -197,26 +319,37 @@ export function FileViewer({
           <PdfPreview src={fileUrl} filename={getFilename(filePath)} />
         )}
 
-        {/* Markdown preview (rendered) */}
+        {/* Markdown preview (rendered) — uses displayContent so edits show live */}
         {!loading &&
           !error &&
           previewType === "markdown" &&
           renderMarkdown &&
           viewMode === "preview" &&
-          data?.content && (
+          displayContent && (
             <div className="h-full overflow-auto">
               <div className="mx-auto max-w-3xl px-8 py-6 text-sm">
-                {renderMarkdown(data.content)}
+                {renderMarkdown(displayContent)}
               </div>
             </div>
           )}
 
-        {/* Source view: CodeMirror for markdown in source mode, or any code/text file */}
+        {/* Source view: editable editor or read-only viewer */}
         {!loading &&
           !error &&
           data?.content &&
           (previewType === "code" ||
-            (previewType === "markdown" && (!renderMarkdown || viewMode === "source"))) && (
+            (previewType === "markdown" && (!renderMarkdown || viewMode === "source"))) &&
+          (canEdit ? (
+            <CodeMirrorEditor
+              content={displayContent!}
+              language={lang}
+              className="h-full"
+              filePath={filePath}
+              onEditorView={onEditorView}
+              onContentChange={handleContentChange}
+              onSave={handleSave}
+            />
+          ) : (
             <CodeMirrorViewer
               content={data.content}
               language={lang}
@@ -227,7 +360,7 @@ export function FileViewer({
               column={column}
               onEditorView={onEditorView}
             />
-          )}
+          ))}
 
         {/* Binary file fallback (non-image, non-pdf) */}
         {!loading && !error && data?.binary && previewType === "code" && (

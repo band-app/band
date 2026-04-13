@@ -892,6 +892,37 @@ const workspaceRouter = t.router({
       };
     }),
 
+  saveFile: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        path: z.string().min(1),
+        content: z.string(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const workspace = resolveWorkspace(input.workspaceId);
+      if (!workspace) {
+        throw new Error("Workspace not found");
+      }
+
+      const root = workspace.worktree.path;
+      const target = resolve(join(root, input.path));
+
+      if (!target.startsWith(root)) {
+        throw new Error("Invalid path");
+      }
+
+      const fileStat = await stat(target);
+      if (fileStat.isDirectory()) {
+        throw new Error("Cannot write to a directory");
+      }
+
+      await writeFile(target, input.content, "utf-8");
+
+      return { ok: true };
+    }),
+
   searchFiles: publicProcedure
     .input(
       z.object({
