@@ -105,21 +105,20 @@ pub async fn browser_create(
 
     let app_handle = app.clone();
     let ws_id = workspace_id.clone();
-    let builder =
-        tauri::webview::WebviewBuilder::new(&label, WebviewUrl::External(parsed_url))
-            .on_page_load(move |webview, payload| {
-                let loading = matches!(payload.event(), PageLoadEvent::Started);
-                if let Ok(current_url) = webview.url() {
-                    let _ = app_handle.emit(
-                        "browser-url-changed",
-                        BrowserUrlChanged {
-                            url: current_url.to_string(),
-                            workspace_id: ws_id.clone(),
-                            loading,
-                        },
-                    );
-                }
-            });
+    let builder = tauri::webview::WebviewBuilder::new(&label, WebviewUrl::External(parsed_url))
+        .on_page_load(move |webview, payload| {
+            let loading = matches!(payload.event(), PageLoadEvent::Started);
+            if let Ok(current_url) = webview.url() {
+                let _ = app_handle.emit(
+                    "browser-url-changed",
+                    BrowserUrlChanged {
+                        url: current_url.to_string(),
+                        workspace_id: ws_id.clone(),
+                        loading,
+                    },
+                );
+            }
+        });
 
     window
         .add_child(
@@ -150,9 +149,7 @@ pub async fn browser_navigate(
 pub async fn browser_go_back(app: AppHandle, workspace_id: String) -> Result<(), String> {
     let label = webview_label(&workspace_id);
     let webview = app.get_webview(&label).ok_or("Browser webview not found")?;
-    webview
-        .eval("history.back()")
-        .map_err(|e| format!("{e}"))
+    webview.eval("history.back()").map_err(|e| format!("{e}"))
 }
 
 /// Go forward in the browser history.
