@@ -152,6 +152,7 @@ export function CodeBrowserView({
           column={viewColumn}
           onBack={handleBack}
           renderMarkdown={renderMarkdown}
+          editable
         />
       );
     }
@@ -188,6 +189,7 @@ export function CodeBrowserView({
             column={viewColumn}
             onEditorView={handleEditorView}
             renderMarkdown={renderMarkdown}
+            editable
             toolbar={
               search.searchOpen ? (
                 <SearchBar
