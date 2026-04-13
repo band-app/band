@@ -570,6 +570,7 @@ export function DockviewWorkspaceLayout({
 
   // Dialog state
   const [quickOpenOpen, setQuickOpenOpen] = useState(false);
+  const [quickOpenQuery, setQuickOpenQuery] = useState<string | undefined>(undefined);
   const [searchFilesOpen, setSearchFilesOpen] = useState(false);
 
   // Find-in-file: active panel registers its search callback here
@@ -649,6 +650,20 @@ export function DockviewWorkspaceLayout({
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
+  }, [isActive]);
+
+  // Listen for file link clicks from chat messages → open Quick Open with query
+  useEffect(() => {
+    if (!isActive) return;
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ filename: string }>).detail;
+      if (detail?.filename) {
+        setQuickOpenQuery(detail.filename);
+        setQuickOpenOpen(true);
+      }
+    };
+    window.addEventListener("band:open-file", handler);
+    return () => window.removeEventListener("band:open-file", handler);
   }, [isActive]);
 
   // Wire callbacks into panels after layout restore (functions cannot be serialized).
@@ -949,8 +964,13 @@ export function DockviewWorkspaceLayout({
       <QuickOpenDialog
         workspaceId={workspaceId}
         open={quickOpenOpen}
-        onOpenChange={setQuickOpenOpen}
+        onOpenChange={(open) => {
+          setQuickOpenOpen(open);
+          if (!open) setQuickOpenQuery(undefined);
+        }}
         onOpenFile={handleOpenFile}
+        initialQuery={quickOpenQuery}
+        autoOpen={quickOpenQuery != null}
       />
       <SearchFilesDialog
         workspaceId={workspaceId}

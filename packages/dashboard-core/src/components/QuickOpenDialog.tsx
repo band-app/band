@@ -21,6 +21,11 @@ interface QuickOpenDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onOpenFile: (path: string) => void;
+  /** When set, the dialog opens with this query pre-filled. Cleared on close. */
+  initialQuery?: string;
+  /** When true and only one result is found, auto-open it without showing
+   *  the dialog. The dialog is still shown if there are 0 or 2+ results. */
+  autoOpen?: boolean;
 }
 
 export function QuickOpenDialog({
@@ -28,12 +33,26 @@ export function QuickOpenDialog({
   open,
   onOpenChange,
   onOpenFile,
+  initialQuery,
+  autoOpen,
 }: QuickOpenDialogProps) {
   const adapter = useAdapter();
   const [query, setQuery] = useState("");
   const [files, setFiles] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Track whether a search has resolved at least once since the dialog opened.
+  // This prevents the auto-open effect from firing before the search starts
+  // (when `loading` is still its initial `false` value).
+  const searchResolved = useRef(false);
+
+  // Seed query from initialQuery when the dialog opens
+  useEffect(() => {
+    if (open && initialQuery) {
+      setQuery(initialQuery);
+    }
+  }, [open, initialQuery]);
 
   // Parse line/column reference from the query (e.g. "src/main.rs:42" -> line 42)
   const parsedQuery = useMemo(() => parseFileLocation(query), [query]);
@@ -55,7 +74,10 @@ export function QuickOpenDialog({
         })
         .catch(() => {})
         .finally(() => {
-          if (!cancelled) setLoading(false);
+          if (!cancelled) {
+            setLoading(false);
+            searchResolved.current = true;
+          }
         });
     }, delay);
 
@@ -65,11 +87,48 @@ export function QuickOpenDialog({
     };
   }, [adapter, workspaceId, searchQuery, open]);
 
+  // Auto-open: wait for the initial search to resolve, then either open the
+  // single result directly or reveal the dialog for the user to pick.
+  // While waiting, `dialogVisible` stays false so no UI flash occurs.
+  const autoOpened = useRef(false);
+  const [dialogVisible, setDialogVisible] = useState(!autoOpen);
+
+  // When the dialog opens with autoOpen, hide it until search resolves.
+  // When opened normally (no autoOpen), show it immediately.
+  // This is needed because useState(!autoOpen) only evaluates on mount —
+  // if autoOpen changes later, dialogVisible won't update automatically.
+  useEffect(() => {
+    if (open) {
+      setDialogVisible(!autoOpen);
+    }
+  }, [open, autoOpen]);
+
+  useEffect(() => {
+    if (!open || !autoOpen || autoOpened.current) return;
+    if (!searchResolved.current) return; // search hasn't completed yet
+
+    autoOpened.current = true;
+    if (files.length === 1) {
+      // Single result — open it directly, never show the dialog
+      const location = formatFileLocation(files[0], parsedQuery.line, {
+        lineEnd: parsedQuery.lineEnd,
+        column: parsedQuery.column,
+      });
+      onOpenFile(location);
+      onOpenChange(false);
+    } else {
+      // 0 or 2+ results — reveal the dialog so the user can pick
+      setDialogVisible(true);
+    }
+  }, [autoOpen, loading, files, open, parsedQuery, onOpenFile, onOpenChange]);
+
   // Reset on close
   useEffect(() => {
     if (!open) {
       setQuery("");
       setFiles([]);
+      autoOpened.current = false;
+      searchResolved.current = false;
     }
   }, [open]);
 
@@ -86,7 +145,7 @@ export function QuickOpenDialog({
   );
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open && dialogVisible} onOpenChange={onOpenChange}>
       <DialogContent className="overflow-hidden p-0 sm:max-w-[520px]" showCloseButton={false}>
         <DialogHeader className="sr-only">
           <DialogTitle>Quick Open</DialogTitle>

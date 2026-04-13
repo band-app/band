@@ -1,6 +1,7 @@
 import {
   AgentIcon,
   type DiffStats,
+  QuickOpenDialog,
   useDashboardStore,
   useSettingsQuery,
   type WorkspaceTab,
@@ -292,6 +293,33 @@ function MobileWorkspaceLayout({
     };
   }, [workspaceId, chatKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Quick Open state for file link clicks from chat
+  const [quickOpenOpen, setQuickOpenOpen] = useState(false);
+  const [quickOpenQuery, setQuickOpenQuery] = useState<string | undefined>(undefined);
+
+  const handleOpenFile = useCallback(
+    (filename: string) => {
+      navigate({
+        to: "/workspace/$workspaceId/code/$",
+        params: { workspaceId: encodedId, _splat: filename },
+      });
+    },
+    [navigate, encodedId],
+  );
+
+  // Listen for file link clicks from chat messages → open Quick Open with query
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ filename: string }>).detail;
+      if (detail?.filename) {
+        setQuickOpenQuery(detail.filename);
+        setQuickOpenOpen(true);
+      }
+    };
+    window.addEventListener("band:open-file", handler);
+    return () => window.removeEventListener("band:open-file", handler);
+  }, []);
+
   const handleSwitchAgent = useCallback(
     async (agentId: string) => {
       setShowAgentMenu(false);
@@ -429,6 +457,17 @@ function MobileWorkspaceLayout({
           <main className="flex min-h-0 flex-1 flex-col">
             <Outlet />
           </main>
+          <QuickOpenDialog
+            workspaceId={workspaceId}
+            open={quickOpenOpen}
+            onOpenChange={(open) => {
+              setQuickOpenOpen(open);
+              if (!open) setQuickOpenQuery(undefined);
+            }}
+            onOpenFile={handleOpenFile}
+            initialQuery={quickOpenQuery}
+            autoOpen={quickOpenQuery != null}
+          />
         </div>
       </AgentSwitcherContext.Provider>
     </SessionListContext.Provider>
