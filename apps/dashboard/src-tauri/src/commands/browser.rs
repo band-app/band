@@ -69,6 +69,7 @@ fn enforce_lru(app: &AppHandle, state: &BrowserState, new_workspace_id: &str) {
 /// If a webview for this workspace already exists it is shown and repositioned.
 /// Otherwise a new child webview is created inside the main window.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn browser_create(
     app: AppHandle,
     state: tauri::State<'_, BrowserState>,
