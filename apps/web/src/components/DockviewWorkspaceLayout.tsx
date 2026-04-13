@@ -449,10 +449,7 @@ function saveLayout(
 
     // Always save active tab state per-workspace
     const activeState = extractActiveState(json);
-    localStorage.setItem(
-      `${ACTIVE_STATE_KEY_PREFIX}${workspaceId}`,
-      JSON.stringify(activeState),
-    );
+    localStorage.setItem(`${ACTIVE_STATE_KEY_PREFIX}${workspaceId}`, JSON.stringify(activeState));
 
     // Always save full layout to the global key
     localStorage.setItem(GLOBAL_LAYOUT_KEY, JSON.stringify(json));
@@ -477,9 +474,7 @@ function loadLayout(workspaceId: string): unknown | null {
     const layout = JSON.parse(raw);
 
     // Overlay this workspace's saved active tab state
-    const activeRaw = localStorage.getItem(
-      `${ACTIVE_STATE_KEY_PREFIX}${workspaceId}`,
-    );
+    const activeRaw = localStorage.getItem(`${ACTIVE_STATE_KEY_PREFIX}${workspaceId}`);
     if (activeRaw) {
       const activeState: ActiveTabState = JSON.parse(activeRaw);
       applyActiveState(layout, activeState);
@@ -752,6 +747,7 @@ export function DockviewWorkspaceLayout({
   );
 
   // onReady: restore or create default layout, then heal missing panels
+  // biome-ignore lint/correctness/useExhaustiveDependencies: workspaceId is constant for the lifetime of this component instance — one DockviewWorkspaceLayout per workspace. Including it would cause dockview to re-init on workspace ID change, which never happens.
   const onReady = useCallback(
     (event: DockviewReadyEvent) => {
       apiRef.current = event.api;
@@ -805,9 +801,7 @@ export function DockviewWorkspaceLayout({
       // Initialize the structural fingerprint from the just-loaded layout
       // so the first real structural change can be detected.
       {
-        const initJson = stripPanelParams(
-          event.api.toJSON() as unknown as Record<string, unknown>,
-        );
+        const initJson = stripPanelParams(event.api.toJSON() as unknown as Record<string, unknown>);
         lastStructureRef.current = getStructuralFingerprint(initJson);
       }
 
@@ -825,11 +819,7 @@ export function DockviewWorkspaceLayout({
         //  - active tab state → per-workspace key
         // It returns true when the STRUCTURAL layout changed (panels
         // moved, resized, or reordered) — NOT for simple tab clicks.
-        const structureChanged = saveLayout(
-          event.api,
-          workspaceId,
-          lastStructureRef,
-        );
+        const structureChanged = saveLayout(event.api, workspaceId, lastStructureRef);
 
         if (structureChanged) {
           onLayoutChangeRef.current?.();
