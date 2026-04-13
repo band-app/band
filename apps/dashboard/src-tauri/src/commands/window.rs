@@ -8,7 +8,9 @@ fn secondary_window_url(app: &AppHandle, path: &str) -> Result<url::Url, String>
     let main = app
         .get_webview_window("main")
         .ok_or("Main window not found")?;
-    let mut url = main.url().map_err(|e| format!("Failed to get main window URL: {e}"))?;
+    let mut url = main
+        .url()
+        .map_err(|e| format!("Failed to get main window URL: {e}"))?;
     url.set_path(path);
     Ok(url)
 }
@@ -40,14 +42,10 @@ fn build_secondary_window(
 
     let url = secondary_window_url(app, path)?;
 
-    let builder = WebviewWindowBuilder::new(
-        app,
-        label,
-        WebviewUrl::External(url),
-    )
-    .title(title)
-    .inner_size(900.0, 700.0)
-    .center();
+    let builder = WebviewWindowBuilder::new(app, label, WebviewUrl::External(url))
+        .title(title)
+        .inner_size(900.0, 700.0)
+        .center();
 
     #[cfg(target_os = "macos")]
     let builder = builder
