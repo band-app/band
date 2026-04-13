@@ -969,6 +969,7 @@ export function DockviewWorkspaceLayout({
           if (!open) setQuickOpenQuery(undefined);
         }}
         onOpenFile={handleOpenFile}
+        currentFile={currentFile}
         initialQuery={quickOpenQuery}
         autoOpen={quickOpenQuery != null}
       />

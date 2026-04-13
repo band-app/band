@@ -21,6 +21,8 @@ interface QuickOpenDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onOpenFile: (path: string) => void;
+  /** The currently open file path (used for ":line" go-to-line shortcut). */
+  currentFile?: string;
   /** When set, the dialog opens with this query pre-filled. Cleared on close. */
   initialQuery?: string;
   /** When true and only one result is found, auto-open it without showing
@@ -33,6 +35,7 @@ export function QuickOpenDialog({
   open,
   onOpenChange,
   onOpenFile,
+  currentFile,
   initialQuery,
   autoOpen,
 }: QuickOpenDialogProps) {
@@ -61,6 +64,14 @@ export function QuickOpenDialog({
   useEffect(() => {
     if (!open || !adapter.searchWorkspaceFiles) return;
 
+    // Skip file search when the query is a pure go-to-line (":42")
+    if (searchQuery === "" && parsedQuery.line != null) {
+      setFiles([]);
+      setLoading(false);
+      searchResolved.current = true;
+      return;
+    }
+
     let cancelled = false;
     setLoading(true);
 
@@ -85,7 +96,7 @@ export function QuickOpenDialog({
       cancelled = true;
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [adapter, workspaceId, searchQuery, open]);
+  }, [adapter, workspaceId, searchQuery, parsedQuery.line, open]);
 
   // Auto-open: wait for the initial search to resolve, then either open the
   // single result directly or reveal the dialog for the user to pick.
@@ -132,6 +143,19 @@ export function QuickOpenDialog({
     }
   }, [open]);
 
+  // "Go to line in current file" — when query is just ":N" with no filename
+  const isGoToLine = parsedQuery.filePath === "" && parsedQuery.line != null;
+
+  const handleGoToLine = useCallback(() => {
+    if (!currentFile || parsedQuery.line == null) return;
+    const location = formatFileLocation(currentFile, parsedQuery.line, {
+      lineEnd: parsedQuery.lineEnd,
+      column: parsedQuery.column,
+    });
+    onOpenFile(location);
+    onOpenChange(false);
+  }, [currentFile, parsedQuery, onOpenFile, onOpenChange]);
+
   const handleSelect = useCallback(
     (filePath: string) => {
       const location = formatFileLocation(filePath, parsedQuery.line, {
@@ -162,9 +186,24 @@ export function QuickOpenDialog({
               Go to line {parsedQuery.line}
               {parsedQuery.lineEnd != null && `-${parsedQuery.lineEnd}`}
               {parsedQuery.column != null && `, column ${parsedQuery.column}`}
+              {isGoToLine && currentFile && (
+                <span className="ml-1">in {currentFile.split("/").pop()}</span>
+              )}
             </div>
           )}
           <CommandList className="max-h-[360px]">
+            {isGoToLine && currentFile ? (
+              <CommandGroup>
+                <CommandItem onSelect={handleGoToLine}>
+                  <span className="text-sm">
+                    Go to line {parsedQuery.line}
+                    {parsedQuery.lineEnd != null && `-${parsedQuery.lineEnd}`}
+                    {" "}in {currentFile}
+                  </span>
+                </CommandItem>
+              </CommandGroup>
+            ) : (
+            <>
             <CommandEmpty>{loading ? "Searching..." : "No files found."}</CommandEmpty>
             <CommandGroup>
               {files.map((file) => {
@@ -181,6 +220,8 @@ export function QuickOpenDialog({
                 );
               })}
             </CommandGroup>
+            </>
+            )}
           </CommandList>
         </Command>
       </DialogContent>
