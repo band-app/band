@@ -20,6 +20,7 @@ import { baseViewerExtensions, loadLanguage, searchHighlightOnly } from "../lib/
 import { formatFileLocation } from "../lib/file-location";
 import { extensionToLanguage, filenameToLanguage } from "../lib/language-map";
 import { selectionToChatExtension } from "../lib/selection-to-chat";
+import type { SSEEvent } from "../lib/sse";
 import type { DiffMode, FileStatus, WorkspaceDiffSummary } from "../types";
 import { SearchBar, type SearchOptions } from "./SearchBar";
 
@@ -653,10 +654,23 @@ export function DiffView({
     };
 
     fetchSummary();
-    const interval = active ? setInterval(fetchSummary, 15_000) : undefined;
+
+    // Subscribe to branch-status events to auto-refresh when files change.
+    // The branch-status-poller emits events every ~5s with the workspace's
+    // git dirty state, so the diff view stays in sync without slow polling.
+    let unsubscribe: (() => void) | undefined;
+    if (active) {
+      unsubscribe = adapter.subscribeStatusEvents((event) => {
+        const data = event as SSEEvent;
+        if (data.kind === "branch-status" && data.workspaceId === workspaceId) {
+          fetchSummary();
+        }
+      });
+    }
+
     return () => {
       cancelled = true;
-      if (interval) clearInterval(interval);
+      unsubscribe?.();
     };
   }, [adapter, workspaceId, active, onStatsChange, diffMode]);
 
