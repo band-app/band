@@ -48,9 +48,7 @@ export function TerminalPanel({ workspaceId, terminalId, visible }: TerminalPane
 
       const fitAddon = new XFitAddon();
       terminal.loadAddon(fitAddon);
-      terminal.loadAddon(
-        new XWebLinksAddon((_event, uri) => openExternalUrl(uri)),
-      );
+      terminal.loadAddon(new XWebLinksAddon((_event, uri) => openExternalUrl(uri)));
       terminal.open(containerRef.current!);
 
       // Alt+Arrow → word navigation (send ESC+b / ESC+f that shells understand)

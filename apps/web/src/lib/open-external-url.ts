@@ -11,9 +11,7 @@ import { isTauri } from "./is-tauri";
  */
 export function openExternalUrl(url: string): void {
   if (isTauri) {
-    import("@tauri-apps/plugin-shell")
-      .then(({ open }) => open(url))
-      .catch(() => window.open(url));
+    import("@tauri-apps/plugin-shell").then(({ open }) => open(url)).catch(() => window.open(url));
   } else {
     window.open(url, "_blank", "noopener");
   }
