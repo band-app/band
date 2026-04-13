@@ -197,30 +197,31 @@ export function QuickOpenDialog({
                 <CommandItem onSelect={handleGoToLine}>
                   <span className="text-sm">
                     Go to line {parsedQuery.line}
-                    {parsedQuery.lineEnd != null && `-${parsedQuery.lineEnd}`}
-                    {" "}in {currentFile}
+                    {parsedQuery.lineEnd != null && `-${parsedQuery.lineEnd}`} in {currentFile}
                   </span>
                 </CommandItem>
               </CommandGroup>
             ) : (
-            <>
-            <CommandEmpty>{loading ? "Searching..." : "No files found."}</CommandEmpty>
-            <CommandGroup>
-              {files.map((file) => {
-                const fileName = file.split("/").pop() || file;
-                const Icon = getFileIcon(fileName);
-                return (
-                  <CommandItem key={file} value={file} onSelect={() => handleSelect(file)}>
-                    <Icon className="size-4 shrink-0 text-muted-foreground" />
-                    <div className="flex min-w-0 flex-1 items-baseline gap-2">
-                      <span className="shrink-0 text-sm font-medium">{fileName}</span>
-                      <span className="min-w-0 truncate text-xs text-muted-foreground">{file}</span>
-                    </div>
-                  </CommandItem>
-                );
-              })}
-            </CommandGroup>
-            </>
+              <>
+                <CommandEmpty>{loading ? "Searching..." : "No files found."}</CommandEmpty>
+                <CommandGroup>
+                  {files.map((file) => {
+                    const fileName = file.split("/").pop() || file;
+                    const Icon = getFileIcon(fileName);
+                    return (
+                      <CommandItem key={file} value={file} onSelect={() => handleSelect(file)}>
+                        <Icon className="size-4 shrink-0 text-muted-foreground" />
+                        <div className="flex min-w-0 flex-1 items-baseline gap-2">
+                          <span className="shrink-0 text-sm font-medium">{fileName}</span>
+                          <span className="min-w-0 truncate text-xs text-muted-foreground">
+                            {file}
+                          </span>
+                        </div>
+                      </CommandItem>
+                    );
+                  })}
+                </CommandGroup>
+              </>
             )}
           </CommandList>
         </Command>
