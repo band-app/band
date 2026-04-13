@@ -11,9 +11,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@band-app/ui";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAdapter } from "../context";
 import { getFileIcon } from "../lib/file-icon";
+import { formatFileLocation, parseFileLocation } from "../lib/file-location";
 
 interface QuickOpenDialogProps {
   workspaceId: string;
@@ -34,6 +35,10 @@ export function QuickOpenDialog({
   const [loading, setLoading] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Parse line/column reference from the query (e.g. "src/main.rs:42" -> line 42)
+  const parsedQuery = useMemo(() => parseFileLocation(query), [query]);
+  const searchQuery = parsedQuery.filePath;
+
   useEffect(() => {
     if (!open || !adapter.searchWorkspaceFiles) return;
 
@@ -42,9 +47,9 @@ export function QuickOpenDialog({
 
     if (debounceRef.current) clearTimeout(debounceRef.current);
 
-    const delay = query ? 150 : 0;
+    const delay = searchQuery ? 150 : 0;
     debounceRef.current = setTimeout(() => {
-      adapter.searchWorkspaceFiles!(workspaceId, query, 50)
+      adapter.searchWorkspaceFiles!(workspaceId, searchQuery, 50)
         .then((result) => {
           if (!cancelled) setFiles(result.files);
         })
@@ -58,7 +63,7 @@ export function QuickOpenDialog({
       cancelled = true;
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [adapter, workspaceId, query, open]);
+  }, [adapter, workspaceId, searchQuery, open]);
 
   // Reset on close
   useEffect(() => {
@@ -70,10 +75,14 @@ export function QuickOpenDialog({
 
   const handleSelect = useCallback(
     (filePath: string) => {
-      onOpenFile(filePath);
+      const location = formatFileLocation(filePath, parsedQuery.line, {
+        lineEnd: parsedQuery.lineEnd,
+        column: parsedQuery.column,
+      });
+      onOpenFile(location);
       onOpenChange(false);
     },
-    [onOpenFile, onOpenChange],
+    [onOpenFile, onOpenChange, parsedQuery],
   );
 
   return (
@@ -89,6 +98,13 @@ export function QuickOpenDialog({
             value={query}
             onValueChange={setQuery}
           />
+          {parsedQuery.line != null && (
+            <div className="border-b px-3 py-1.5 text-xs text-muted-foreground">
+              Go to line {parsedQuery.line}
+              {parsedQuery.lineEnd != null && `-${parsedQuery.lineEnd}`}
+              {parsedQuery.column != null && `, column ${parsedQuery.column}`}
+            </div>
+          )}
           <CommandList className="max-h-[360px]">
             <CommandEmpty>{loading ? "Searching..." : "No files found."}</CommandEmpty>
             <CommandGroup>
