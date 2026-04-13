@@ -14,6 +14,7 @@ import { File } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Streamdown } from "streamdown";
 import { useIsDesktop } from "../hooks/useIsDesktop";
+import { streamdownComponents } from "./streamdown-components";
 
 const streamdownPlugins = { cjk, code, math, mermaid };
 
@@ -25,6 +26,7 @@ function renderMarkdown(content: string) {
         "[&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
       )}
       plugins={streamdownPlugins}
+      components={streamdownComponents}
     >
       {content}
     </Streamdown>

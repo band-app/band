@@ -1,7 +1,7 @@
 import type { FitAddon } from "@xterm/addon-fit";
 import type { Terminal } from "@xterm/xterm";
 import { useEffect, useRef } from "react";
-import { isTauri } from "../lib/is-tauri";
+import { openExternalUrl } from "../lib/open-external-url";
 
 interface TerminalPanelProps {
   workspaceId: string;
@@ -49,17 +49,7 @@ export function TerminalPanel({ workspaceId, terminalId, visible }: TerminalPane
       const fitAddon = new XFitAddon();
       terminal.loadAddon(fitAddon);
       terminal.loadAddon(
-        new XWebLinksAddon((_event, uri) => {
-          // In Tauri, window.open() doesn't open the system browser.
-          // Use the shell plugin to open URLs externally.
-          if (isTauri) {
-            import("@tauri-apps/plugin-shell")
-              .then(({ open }) => open(uri))
-              .catch(() => window.open(uri));
-          } else {
-            window.open(uri, "_blank", "noopener");
-          }
-        }),
+        new XWebLinksAddon((_event, uri) => openExternalUrl(uri)),
       );
       terminal.open(containerRef.current!);
 
