@@ -2,7 +2,12 @@ import { parseFileLocation } from "@band-app/dashboard-core";
 import { cn } from "@band-app/ui";
 import type { ComponentProps } from "react";
 import { useCallback } from "react";
-import { type Components, defaultUrlTransform, type ExtraProps, type UrlTransform } from "streamdown";
+import {
+  type Components,
+  defaultUrlTransform,
+  type ExtraProps,
+  type UrlTransform,
+} from "streamdown";
 
 // ---------------------------------------------------------------------------
 // Known file extensions (derived from dashboard-core file-icon.ts)
@@ -10,37 +15,127 @@ import { type Components, defaultUrlTransform, type ExtraProps, type UrlTransfor
 
 const KNOWN_EXTENSIONS = new Set([
   // Code
-  "ts", "tsx", "js", "jsx", "mjs", "cjs", "py", "rb", "go", "rs",
-  "java", "kt", "swift", "c", "cpp", "h", "hpp", "cs", "php", "r",
-  "lua", "zig", "mts", "cts", "ex", "exs", "erl", "hs", "scala",
-  "clj", "dart", "vue", "svelte",
+  "ts",
+  "tsx",
+  "js",
+  "jsx",
+  "mjs",
+  "cjs",
+  "py",
+  "rb",
+  "go",
+  "rs",
+  "java",
+  "kt",
+  "swift",
+  "c",
+  "cpp",
+  "h",
+  "hpp",
+  "cs",
+  "php",
+  "r",
+  "lua",
+  "zig",
+  "mts",
+  "cts",
+  "ex",
+  "exs",
+  "erl",
+  "hs",
+  "scala",
+  "clj",
+  "dart",
+  "vue",
+  "svelte",
   // Web / markup
-  "html", "htm", "css", "scss", "less", "sass",
+  "html",
+  "htm",
+  "css",
+  "scss",
+  "less",
+  "sass",
   // Data / config
-  "json", "jsonc", "json5", "yaml", "yml", "toml", "ini", "xml", "csv",
-  "graphql", "gql", "tf", "hcl", "env", "proto",
+  "json",
+  "jsonc",
+  "json5",
+  "yaml",
+  "yml",
+  "toml",
+  "ini",
+  "xml",
+  "csv",
+  "graphql",
+  "gql",
+  "tf",
+  "hcl",
+  "env",
+  "proto",
   // Text / docs
-  "md", "mdx", "txt", "rst", "tex", "log",
+  "md",
+  "mdx",
+  "txt",
+  "rst",
+  "tex",
+  "log",
   // Shell
-  "sh", "bash", "zsh", "fish", "ps1", "bat", "cmd",
+  "sh",
+  "bash",
+  "zsh",
+  "fish",
+  "ps1",
+  "bat",
+  "cmd",
   // Images
-  "png", "jpg", "jpeg", "gif", "svg", "webp", "ico", "bmp", "avif",
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "svg",
+  "webp",
+  "ico",
+  "bmp",
+  "avif",
   // Database
-  "sql", "sqlite", "db",
+  "sql",
+  "sqlite",
+  "db",
   // Config
-  "editorconfig", "prettierrc", "eslintrc", "lock",
+  "editorconfig",
+  "prettierrc",
+  "eslintrc",
+  "lock",
   // Package / archive
-  "zip", "tar", "gz", "tgz", "wasm",
+  "zip",
+  "tar",
+  "gz",
+  "tgz",
+  "wasm",
   // Misc
-  "diff", "patch",
+  "diff",
+  "patch",
 ]);
 
 const KNOWN_FILENAMES = new Set([
-  "dockerfile", "docker-compose.yml", "docker-compose.yaml",
-  "makefile", "rakefile", "procfile", "gemfile", "vagrantfile",
-  ".gitignore", ".gitattributes", ".npmrc", ".nvmrc",
-  ".prettierrc", ".eslintrc", ".editorconfig",
-  ".env", ".env.local", ".env.development", ".env.production",
+  "dockerfile",
+  "docker-compose.yml",
+  "docker-compose.yaml",
+  "makefile",
+  "rakefile",
+  "procfile",
+  "gemfile",
+  "vagrantfile",
+  ".gitignore",
+  ".gitattributes",
+  ".npmrc",
+  ".nvmrc",
+  ".prettierrc",
+  ".eslintrc",
+  ".editorconfig",
+  ".env",
+  ".env.local",
+  ".env.development",
+  ".env.production",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -100,9 +195,7 @@ export function isFilePath(text: string): boolean {
 // ---------------------------------------------------------------------------
 
 function dispatchOpenFile(filename: string) {
-  window.dispatchEvent(
-    new CustomEvent("band:open-file", { detail: { filename } }),
-  );
+  window.dispatchEvent(new CustomEvent("band:open-file", { detail: { filename } }));
 }
 
 // ---------------------------------------------------------------------------
@@ -302,9 +395,9 @@ function remarkFileLinks() {
       FILE_PATH_WITH_LINE_RE.lastIndex = 0;
       const parts: MdastNode[] = [];
       let lastIndex = 0;
-      let match: RegExpExecArray | null;
+      let match: RegExpExecArray | null = FILE_PATH_WITH_LINE_RE.exec(value);
 
-      while ((match = FILE_PATH_WITH_LINE_RE.exec(value)) !== null) {
+      while (match !== null) {
         const matchText = match[0];
 
         // Quick sanity check — must parse as a valid file path
@@ -323,6 +416,7 @@ function remarkFileLinks() {
         });
 
         lastIndex = match.index + matchText.length;
+        match = FILE_PATH_WITH_LINE_RE.exec(value);
       }
 
       // No matches — leave the text node unchanged

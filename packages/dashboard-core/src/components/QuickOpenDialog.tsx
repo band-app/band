@@ -120,7 +120,7 @@ export function QuickOpenDialog({
       // 0 or 2+ results — reveal the dialog so the user can pick
       setDialogVisible(true);
     }
-  }, [autoOpen, loading, files, open, parsedQuery, onOpenFile, onOpenChange]);
+  }, [autoOpen, files, open, parsedQuery, onOpenFile, onOpenChange]);
 
   // Reset on close
   useEffect(() => {
