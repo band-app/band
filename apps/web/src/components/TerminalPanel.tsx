@@ -51,16 +51,25 @@ export function TerminalPanel({ workspaceId, terminalId, visible }: TerminalPane
       terminal.loadAddon(new XWebLinksAddon((_event, uri) => openExternalUrl(uri)));
       terminal.open(containerRef.current!);
 
-      // Alt+Arrow → word navigation (send ESC+b / ESC+f that shells understand)
+      // Custom key bindings:
+      // - Shift+Enter → CSI u sequence so shells/tools receive a distinct keycode
+      // - Alt+Arrow   → word navigation (ESC+b / ESC+f)
       terminal.attachCustomKeyEventHandler((e) => {
-        if (e.type === "keydown" && e.altKey && !e.metaKey && !e.ctrlKey) {
-          if (e.key === "ArrowLeft") {
-            terminal.input("\x1bb");
+        if (e.type === "keydown") {
+          // Shift+Enter → send CSI 13;2u (kitty/fixterms keyboard protocol)
+          if (e.key === "Enter" && e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
+            terminal.input("\x1b[13;2u");
             return false;
           }
-          if (e.key === "ArrowRight") {
-            terminal.input("\x1bf");
-            return false;
+          if (e.altKey && !e.metaKey && !e.ctrlKey) {
+            if (e.key === "ArrowLeft") {
+              terminal.input("\x1bb");
+              return false;
+            }
+            if (e.key === "ArrowRight") {
+              terminal.input("\x1bf");
+              return false;
+            }
           }
         }
         return true;
