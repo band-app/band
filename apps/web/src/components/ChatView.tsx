@@ -147,6 +147,8 @@ interface ChatViewProps {
   agentType?: string;
   codingAgentId?: string;
   visible?: boolean;
+  /** Workspace is active (even if the chat tab isn't the focused tab). */
+  wsActive?: boolean;
 }
 
 export function ChatView({
@@ -163,6 +165,7 @@ export function ChatView({
   agentType,
   codingAgentId,
   visible,
+  wsActive,
 }: ChatViewProps) {
   const sessionIdRef = useRef<string | undefined>(undefined);
   const lastEventIdRef = useRef<number | undefined>(undefined);
@@ -907,7 +910,12 @@ export function ChatView({
 
       <div className="mx-auto w-full max-w-3xl shrink-0 px-3 lg:px-4 pt-2 pb-4 standalone:pb-[env(safe-area-inset-bottom)]">
         <TaskListWidget tasks={taskMap} workspaceId={workspaceId} />
-        <PromptInput onSubmit={handleSubmit} draftKey={workspaceId} visible={visible}>
+        <PromptInput
+          onSubmit={handleSubmit}
+          draftKey={workspaceId}
+          visible={visible}
+          wsActive={wsActive}
+        >
           <SlashCommandSuggestions skills={skills} />
           <FileMentionSuggestions workspaceId={workspaceId} />
           <PromptInputTextarea

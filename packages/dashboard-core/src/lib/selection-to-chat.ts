@@ -31,8 +31,12 @@ const setSelectionTooltip = StateEffect.define<Tooltip | null>();
  * {@link SelectionToChatDetail} payload.
  *
  * @param filePath - The workspace-relative file path shown in the reference.
+ * @param lineNumberMap - Optional 0-indexed array mapping document line numbers
+ *   to actual file line numbers. When provided, the dispatched event will use
+ *   the mapped line numbers instead of the raw document line numbers. This is
+ *   used by the diff view where trimmed content starts at a line offset.
  */
-export function selectionToChatExtension(filePath: string): Extension {
+export function selectionToChatExtension(filePath: string, lineNumberMap?: number[]): Extension {
   // --- StateField: holds the current tooltip (set via effect) ----------------
 
   const tooltipField = StateField.define<Tooltip | null>({
@@ -107,8 +111,18 @@ export function selectionToChatExtension(filePath: string): Extension {
             if (from === to) return;
 
             const selectedText = view.state.sliceDoc(from, to);
-            const startLine = view.state.doc.lineAt(from).number;
-            const endLine = view.state.doc.lineAt(to).number;
+            const docStartLine = view.state.doc.lineAt(from).number;
+            const docEndLine = view.state.doc.lineAt(to).number;
+            // When a line number map is provided (e.g. diff view with trimmed
+            // content), translate document line numbers to actual file lines.
+            const startLine =
+              lineNumberMap && docStartLine >= 1 && docStartLine <= lineNumberMap.length
+                ? lineNumberMap[docStartLine - 1]
+                : docStartLine;
+            const endLine =
+              lineNumberMap && docEndLine >= 1 && docEndLine <= lineNumberMap.length
+                ? lineNumberMap[docEndLine - 1]
+                : docEndLine;
 
             const detail: SelectionToChatDetail = {
               filePath,

@@ -142,12 +142,17 @@ export async function loadLanguage(lang: string): Promise<LanguageSupport | null
 /**
  * Base extensions for a read-only CodeMirror viewer.
  * @param isDark - Whether to use dark theme colours. Defaults to true for backwards compat.
+ * @param opts.skipLineNumbers - When true, omit the default lineNumbers() extension
+ *   so callers can supply a custom one (e.g. with remapped line numbers for diffs).
  */
-export function baseViewerExtensions(isDark = true): Extension[] {
+export function baseViewerExtensions(
+  isDark = true,
+  opts?: { skipLineNumbers?: boolean },
+): Extension[] {
   return [
     EditorState.readOnly.of(true),
     EditorView.editable.of(false),
-    lineNumbers(),
+    ...(opts?.skipLineNumbers ? [] : [lineNumbers()]),
     bracketMatching(),
     highlightSelectionMatches(),
     ...(isDark

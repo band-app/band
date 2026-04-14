@@ -2,7 +2,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { MergeView, unifiedMergeView } from "@codemirror/merge";
 import { SearchQuery } from "@codemirror/search";
 import { EditorState, Text } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
+import { EditorView, lineNumbers } from "@codemirror/view";
 import {
   ChevronsDownUp,
   ChevronsUpDown,
@@ -113,48 +113,66 @@ function detectLanguage(filePath: string): string {
   return extensionToLanguage(ext) || filenameToLanguage(name) || "plaintext";
 }
 
-interface DiffLine {
-  type: "add" | "del" | "context";
-  text: string;
+interface ParsedDiff {
+  oldText: string;
+  newText: string;
+  /** Actual file line number for each line in oldText (0-indexed array, values are 1-based line numbers). */
+  oldLineNumbers: number[];
+  /** Actual file line number for each line in newText (0-indexed array, values are 1-based line numbers). */
+  newLineNumbers: number[];
 }
 
-function parseDiffLines(hunks: string): DiffLine[] {
+/**
+ * Parses a unified diff string into old/new text with their actual file line numbers.
+ * Hunk headers (@@ -oldStart,count +newStart,count @@) are used to track the real
+ * line offsets so that trimmed/collapsed diffs display correct line numbers.
+ */
+function parseDiff(hunks: string): ParsedDiff {
   const lines = hunks.split("\n");
-  const result: DiffLine[] = [];
+  const oldLines: string[] = [];
+  const newLines: string[] = [];
+  const oldLineNumbers: number[] = [];
+  const newLineNumbers: number[] = [];
+
   let inHunk = false;
+  let oldLineNum = 1;
+  let newLineNum = 1;
+
   for (const line of lines) {
     if (line.startsWith("@@")) {
       inHunk = true;
-      // Skip hunk headers — the merge view shows its own markers
+      const match = line.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+      if (match) {
+        oldLineNum = parseInt(match[1], 10);
+        newLineNum = parseInt(match[2], 10);
+      }
     } else if (inHunk) {
       if (line.startsWith("+")) {
-        result.push({ type: "add", text: line.slice(1) });
+        newLines.push(line.slice(1));
+        newLineNumbers.push(newLineNum);
+        newLineNum++;
       } else if (line.startsWith("-")) {
-        result.push({ type: "del", text: line.slice(1) });
+        oldLines.push(line.slice(1));
+        oldLineNumbers.push(oldLineNum);
+        oldLineNum++;
       } else if (line.startsWith(" ") || line === "") {
-        result.push({ type: "context", text: line.slice(1) || "" });
+        const text = line.slice(1) || "";
+        oldLines.push(text);
+        newLines.push(text);
+        oldLineNumbers.push(oldLineNum);
+        newLineNumbers.push(newLineNum);
+        oldLineNum++;
+        newLineNum++;
       }
     }
   }
-  return result;
-}
 
-function buildOldNew(diffLines: DiffLine[]): { oldText: string; newText: string } {
-  const oldLines: string[] = [];
-  const newLines: string[] = [];
-
-  for (const line of diffLines) {
-    if (line.type === "context") {
-      oldLines.push(line.text);
-      newLines.push(line.text);
-    } else if (line.type === "add") {
-      newLines.push(line.text);
-    } else if (line.type === "del") {
-      oldLines.push(line.text);
-    }
-  }
-
-  return { oldText: oldLines.join("\n"), newText: newLines.join("\n") };
+  return {
+    oldText: oldLines.join("\n"),
+    newText: newLines.join("\n"),
+    oldLineNumbers,
+    newLineNumbers,
+  };
 }
 
 const diffTheme = EditorView.theme({
@@ -198,16 +216,21 @@ function DiffFileContent({
         viewRef.current = null;
       }
 
-      const diffLines = parseDiffLines(hunks);
-      const { oldText, newText } = buildOldNew(diffLines);
+      const { oldText, newText, oldLineNumbers, newLineNumbers } = parseDiff(hunks);
+
+      /** Creates a lineNumbers extension that maps document lines to actual file line numbers. */
+      const makeLineNumbers = (lineMap: number[]) =>
+        lineNumbers({
+          formatNumber: (n) => {
+            if (n >= 1 && n <= lineMap.length) {
+              return String(lineMap[n - 1]);
+            }
+            return String(n);
+          },
+        });
 
       if (viewMode === "split") {
-        const sharedExtensions = [
-          ...baseViewerExtensions(isDark),
-          searchHighlightOnly(),
-          selectionToChatExtension(filename),
-          diffTheme,
-        ];
+        const sharedExtensions = [searchHighlightOnly(), diffTheme];
         if (langSupport) {
           sharedExtensions.push(langSupport);
         }
@@ -215,11 +238,21 @@ function DiffFileContent({
         viewRef.current = new MergeView({
           a: {
             doc: oldText,
-            extensions: sharedExtensions,
+            extensions: [
+              ...baseViewerExtensions(isDark, { skipLineNumbers: true }),
+              makeLineNumbers(oldLineNumbers),
+              selectionToChatExtension(filename, oldLineNumbers),
+              ...sharedExtensions,
+            ],
           },
           b: {
             doc: newText,
-            extensions: sharedExtensions,
+            extensions: [
+              ...baseViewerExtensions(isDark, { skipLineNumbers: true }),
+              makeLineNumbers(newLineNumbers),
+              selectionToChatExtension(filename, newLineNumbers),
+              ...sharedExtensions,
+            ],
           },
           parent: container,
           highlightChanges: false,
@@ -229,9 +262,10 @@ function DiffFileContent({
         onEditorViewsRef.current?.([viewRef.current.a, viewRef.current.b]);
       } else {
         const extensions = [
-          ...baseViewerExtensions(isDark),
+          ...baseViewerExtensions(isDark, { skipLineNumbers: true }),
+          makeLineNumbers(newLineNumbers),
           searchHighlightOnly(),
-          selectionToChatExtension(filename),
+          selectionToChatExtension(filename, newLineNumbers),
           unifiedMergeView({
             original: Text.of(oldText.split("\n")),
             mergeControls: false,

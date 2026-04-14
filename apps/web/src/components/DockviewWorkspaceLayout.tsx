@@ -118,13 +118,19 @@ function ChatPanelComponent({ params, api }: IDockviewPanelProps<ChatParams>) {
 
   // Chat is visible only when both the workspace is active AND the tab is active
   const visible = params.wsActive !== false && tabActive;
+  // Workspace is active (but the chat tab may not be the focused tab).
+  // Used by PromptInput to accept "Add to Chat" events from sibling panels
+  // (e.g. Changes, Files) even when the Chat tab isn't in front.
+  const wsActive = params.wsActive !== false;
 
   // Don't render until workspaceId is injected — during layout sync fromJSON
   // recreates panels with empty params before injectParams runs a tick later.
   // Rendering with undefined workspaceId would cause draft/session state issues.
   if (!params.workspaceId) return null;
 
-  return <WorkspaceChatPanel workspaceId={params.workspaceId} visible={visible} />;
+  return (
+    <WorkspaceChatPanel workspaceId={params.workspaceId} visible={visible} wsActive={wsActive} />
+  );
 }
 
 function ChangesPanelComponent({ params }: IDockviewPanelProps<ChangesParams>) {

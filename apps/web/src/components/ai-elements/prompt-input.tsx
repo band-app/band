@@ -50,6 +50,10 @@ export type PromptInputProps = Omit<HTMLAttributes<HTMLFormElement>, "onSubmit">
   /** Whether the prompt input is currently visible/active. Used to gate global
    *  event handlers so hidden workspaces' textareas aren't modified. */
   visible?: boolean;
+  /** Whether the workspace is active (even if the chat tab isn't focused).
+   *  Used to accept "Add to Chat" events from sibling panels (Changes, Files)
+   *  when the Chat tab isn't in front. Falls back to `visible` if not set. */
+  wsActive?: boolean;
 };
 
 function readDraft(key: string | null): string {
@@ -66,6 +70,7 @@ export const PromptInput = ({
   onSubmit,
   draftKey,
   visible,
+  wsActive,
   children,
   ...props
 }: PromptInputProps) => {
@@ -104,6 +109,11 @@ export const PromptInput = ({
   // process events that would modify their textarea.
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
+  // wsActive gates the "Add to Chat" handler: true when the workspace is active
+  // even if the chat tab isn't the focused tab, so events from sibling panels
+  // (Changes, Files) are still processed.
+  const wsActiveRef = useRef(wsActive ?? visible);
+  wsActiveRef.current = wsActive ?? visible;
 
   const addFiles = useCallback((newFiles: FileList | File[]) => {
     const valid = Array.from(newFiles).filter((f) => f.size <= MAX_FILE_SIZE);
@@ -198,12 +208,14 @@ export const PromptInput = ({
   }, []);
 
   // Listen for "Add to Chat" events from CodeMirror editors.
-  // Only process the event when this prompt is visible — with workspace
+  // Only process the event when this workspace is active — with workspace
   // show/hide, multiple PromptInput instances are mounted simultaneously
-  // and we must not modify hidden workspaces' textareas.
+  // and we must not modify hidden workspaces' textareas.  We gate on
+  // wsActive (not visible) so that events from sibling panels like
+  // Changes or Files are still processed even when the Chat tab isn't focused.
   useEffect(() => {
     const handler = (e: Event) => {
-      if (visibleRef.current === false) return;
+      if (wsActiveRef.current === false) return;
       const { filePath, startLine, endLine } = (e as CustomEvent<SelectionToChatDetail>).detail;
 
       const lineRef =

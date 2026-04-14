@@ -13,9 +13,11 @@ interface CodingAgentDef {
 interface WorkspaceChatPanelProps {
   workspaceId: string;
   visible?: boolean;
+  /** Workspace is active (even if the chat tab isn't the focused tab). */
+  wsActive?: boolean;
 }
 
-export function WorkspaceChatPanel({ workspaceId, visible }: WorkspaceChatPanelProps) {
+export function WorkspaceChatPanel({ workspaceId, visible, wsActive }: WorkspaceChatPanelProps) {
   const [supportsSessionListing, setSupportsSessionListing] = useState(false);
   const [initialSessionId, setInitialSessionId] = useState<string | undefined>(undefined);
   const [sessionQueryDone, setSessionQueryDone] = useState(false);
@@ -226,6 +228,7 @@ export function WorkspaceChatPanel({ workspaceId, visible }: WorkspaceChatPanelP
           agentType={currentAgent?.type}
           codingAgentId={currentAgentId}
           visible={visible}
+          wsActive={wsActive}
         />
       </div>
     </div>
