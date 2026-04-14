@@ -8,6 +8,8 @@ import {
   ChevronsUpDown,
   Columns2,
   Loader2,
+  PanelLeftClose,
+  PanelLeftOpen,
   Rows2,
   Search,
   SquareArrowOutUpRight,
@@ -22,6 +24,8 @@ import { extensionToLanguage, filenameToLanguage } from "../lib/language-map";
 import { selectionToChatExtension } from "../lib/selection-to-chat";
 import type { SSEEvent } from "../lib/sse";
 import type { DiffMode, FileStatus, WorkspaceDiffSummary } from "../types";
+import { ChangesFileTree } from "./ChangesFileTree";
+import { FileStatusBadge } from "./FileStatusBadge";
 import { SearchBar, type SearchOptions } from "./SearchBar";
 
 export interface DiffStats {
@@ -79,6 +83,44 @@ function storeExpandAll(v: boolean) {
   } catch {}
 }
 
+const SIDEBAR_OPEN_KEY = "band:diff-sidebar-open";
+
+function getStoredSidebarOpen(): boolean {
+  try {
+    const v = localStorage.getItem(SIDEBAR_OPEN_KEY);
+    if (v === "false") return false;
+  } catch {}
+  return true;
+}
+
+function storeSidebarOpen(v: boolean) {
+  try {
+    localStorage.setItem(SIDEBAR_OPEN_KEY, v ? "true" : "false");
+  } catch {}
+}
+
+const SIDEBAR_WIDTH_KEY = "band:diff-sidebar-width";
+const SIDEBAR_DEFAULT_WIDTH = 220;
+const SIDEBAR_MIN_WIDTH = 120;
+const SIDEBAR_MAX_WIDTH = 500;
+
+function getStoredSidebarWidth(): number {
+  try {
+    const v = localStorage.getItem(SIDEBAR_WIDTH_KEY);
+    if (v) {
+      const n = parseInt(v, 10);
+      if (n >= SIDEBAR_MIN_WIDTH && n <= SIDEBAR_MAX_WIDTH) return n;
+    }
+  } catch {}
+  return SIDEBAR_DEFAULT_WIDTH;
+}
+
+function storeSidebarWidth(v: number) {
+  try {
+    localStorage.setItem(SIDEBAR_WIDTH_KEY, String(v));
+  } catch {}
+}
+
 interface DiffViewProps {
   workspaceId: string;
   active?: boolean;
@@ -91,19 +133,6 @@ interface DiffViewProps {
 function firstChangeLine(hunks: string): number | undefined {
   const match = hunks.match(/@@ [^ ]+ \+(\d+)/);
   return match ? parseInt(match[1], 10) : undefined;
-}
-
-const statusColors: Record<FileStatus, string> = {
-  A: "text-green-600 dark:text-green-400",
-  M: "text-blue-600 dark:text-blue-400",
-  D: "text-red-600 dark:text-red-400",
-  R: "text-purple-600 dark:text-purple-400",
-  U: "text-yellow-600 dark:text-yellow-400",
-};
-
-function FileStatusBadge({ status }: { status: FileStatus | undefined }) {
-  if (!status) return null;
-  return <span className={`shrink-0 text-xs font-bold ${statusColors[status]}`}>{status}</span>;
 }
 
 function detectLanguage(filePath: string): string {
@@ -378,6 +407,7 @@ interface LazyFileRowProps {
   mergeBase: string;
   viewMode: ViewMode;
   expandAll: boolean;
+  focusedFile: { path: string; seq: number } | null;
   onOpenFile?: (filename: string) => void;
   onEditorViews?: (filename: string, views: EditorView[]) => void;
 }
@@ -389,6 +419,7 @@ function LazyFileRow({
   mergeBase,
   viewMode,
   expandAll,
+  focusedFile,
   onOpenFile,
   onEditorViews,
 }: LazyFileRowProps) {
@@ -424,6 +455,21 @@ function LazyFileRow({
   useEffect(() => {
     setIsOpen(expandAll);
   }, [expandAll]);
+
+  // Open and scroll into view when focused from the file tree sidebar
+  useEffect(() => {
+    if (focusedFile && focusedFile.path === filename) {
+      setIsOpen(true);
+      // Defer scroll to allow the DOM to update after opening
+      requestAnimationFrame(() => {
+        const elementId = `diff-file-${encodeURIComponent(filename)}`;
+        const element = document.getElementById(elementId);
+        if (element) {
+          element.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      });
+    }
+  }, [focusedFile, filename]);
 
   // Fetch diff when expanded and not cached (or mergeBase/contextLines changed)
   useEffect(() => {
@@ -624,6 +670,41 @@ export function DiffView({
     setExpandAllState(v);
     storeExpandAll(v);
   }, []);
+  const [sidebarOpen, setSidebarOpenState] = useState(getStoredSidebarOpen);
+  const setSidebarOpen = useCallback((v: boolean) => {
+    setSidebarOpenState(v);
+    storeSidebarOpen(v);
+  }, []);
+  const [sidebarWidth, setSidebarWidth] = useState(getStoredSidebarWidth);
+
+  const handleResizeStart = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const startWidth = sidebarWidth;
+      let lastWidth = startWidth;
+
+      const handleMouseMove = (ev: MouseEvent) => {
+        const delta = ev.clientX - startX;
+        lastWidth = Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, startWidth + delta));
+        setSidebarWidth(lastWidth);
+      };
+
+      const handleMouseUp = () => {
+        document.removeEventListener("mousemove", handleMouseMove);
+        document.removeEventListener("mouseup", handleMouseUp);
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        storeSidebarWidth(lastWidth);
+      };
+
+      document.addEventListener("mousemove", handleMouseMove);
+      document.addEventListener("mouseup", handleMouseUp);
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+    },
+    [sidebarWidth],
+  );
 
   // -------------------------------------------------------------------------
   // Find-in-diff state
@@ -641,6 +722,16 @@ export function DiffView({
   );
 
   const search = useSearch({ getViews, collectMatches, onFindInFile });
+
+  // Track which file was clicked in the file tree sidebar so LazyFileRow can
+  // expand and scroll to it. We use a counter to allow re-clicking the same file.
+  const [focusedFile, setFocusedFile] = useState<{ path: string; seq: number } | null>(null);
+  const focusSeqRef = useRef(0);
+
+  const handleScrollToFile = useCallback((filePath: string) => {
+    focusSeqRef.current += 1;
+    setFocusedFile({ path: filePath, seq: focusSeqRef.current });
+  }, []);
 
   // Editor views registry — also dispatches active search to newly registered views
   const handleEditorViews = useCallback(
@@ -750,119 +841,166 @@ export function DiffView({
   filenamesRef.current = filenames;
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
-      <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-2">
-        <div className="flex items-center gap-3">
-          <div>
-            <div className="text-sm text-muted-foreground">
-              <span className="font-medium text-foreground">{summary.stats.filesChanged}</span>{" "}
-              {summary.stats.filesChanged === 1 ? "file" : "files"} changed
-              {summary.stats.insertions > 0 && (
-                <span className="ml-2 text-green-600 dark:text-green-400">
-                  +{summary.stats.insertions}
-                </span>
-              )}
-              {summary.stats.deletions > 0 && (
-                <span className="ml-1 text-red-600 dark:text-red-400">
-                  -{summary.stats.deletions}
-                </span>
-              )}
-            </div>
-            <div className="mt-0.5 text-xs text-muted-foreground">
-              {summary.baseBranch} &larr; {summary.headBranch}
-            </div>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={search.handleOpenSearch}
-            className="inline-flex items-center rounded-md border border-border/50 bg-muted/50 px-2 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
-            title="Find in changes (⌘F)"
-          >
-            <Search className="size-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => setExpandAll(!expandAll)}
-            className={`inline-flex items-center rounded-md border border-border/50 px-2 py-1 text-xs transition-colors ${
-              expandAll
-                ? "bg-accent text-foreground"
-                : "bg-muted/50 text-muted-foreground hover:text-foreground"
-            }`}
-            title={expandAll ? "Collapse all files" : "Expand all files"}
-          >
-            {expandAll ? (
-              <ChevronsDownUp className="size-3.5" />
-            ) : (
-              <ChevronsUpDown className="size-3.5" />
-            )}
-          </button>
-          <Select value={diffMode} onValueChange={(v) => setDiffMode(v as DiffMode)}>
-            <SelectTrigger className="h-7 w-auto gap-1 rounded-md border-border/50 bg-muted/50 px-2.5 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="uncommitted">Uncommitted</SelectItem>
-              <SelectItem value="branch">{baseBranch ?? "base"}</SelectItem>
-            </SelectContent>
-          </Select>
-          <div className="hidden items-center rounded-md border border-border/50 bg-muted/50 md:flex">
+    <div className="flex h-full overflow-hidden">
+      {/* LEFT: File tree sidebar — desktop only */}
+      {sidebarOpen && (
+        <div
+          data-diff-sidebar
+          className="hidden shrink-0 flex-col md:flex"
+          style={{ width: sidebarWidth }}
+        >
+          <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-2">
+            <span className="text-xs font-medium text-muted-foreground">Files</span>
             <button
               type="button"
-              onClick={() => setViewMode("unified")}
-              className={`inline-flex items-center gap-1 rounded-l-md px-2 py-1 text-xs transition-colors ${
-                viewMode === "unified"
-                  ? "bg-accent text-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-              title="Unified view"
+              onClick={() => setSidebarOpen(false)}
+              className="rounded p-0.5 text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+              title="Hide file tree"
             >
-              <Rows2 className="size-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode("split")}
-              className={`inline-flex items-center gap-1 rounded-r-md px-2 py-1 text-xs transition-colors ${
-                viewMode === "split"
-                  ? "bg-accent text-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-              title="Split view"
-            >
-              <Columns2 className="size-3.5" />
+              <PanelLeftClose className="size-3.5" />
             </button>
           </div>
+          <div className="min-h-0 flex-1 overflow-y-auto py-1">
+            <ChangesFileTree fileStatuses={fileStatuses} onSelectFile={handleScrollToFile} />
+          </div>
         </div>
-      </div>
-      {search.searchOpen && (
-        <SearchBar
-          ref={search.searchBarRef}
-          query={search.searchQuery}
-          onQueryChange={search.setSearchQuery}
-          options={search.searchOptions}
-          onOptionsChange={search.setSearchOptions}
-          placeholder="Find in changes..."
-          matchInfo={search.matchInfo}
-          onNext={search.handleNext}
-          onPrevious={search.handlePrevious}
-          onClose={search.handleCloseSearch}
+      )}
+
+      {/* Resize handle between sidebar and main content */}
+      {sidebarOpen && (
+        <div
+          onMouseDown={handleResizeStart}
+          className="hidden w-[3px] shrink-0 cursor-col-resize bg-border/50 transition-colors hover:bg-accent-foreground/20 active:bg-accent-foreground/30 md:block"
         />
       )}
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        {filenames.map((filename) => (
-          <LazyFileRow
-            key={filename}
-            filename={filename}
-            status={fileStatuses[filename]}
-            workspaceId={workspaceId}
-            mergeBase={summary.mergeBase}
-            viewMode={viewMode}
-            expandAll={expandAll}
-            onOpenFile={onOpenFile}
-            onEditorViews={handleEditorViews}
+
+      {/* RIGHT: Main content (toolbar + file list) */}
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-2">
+          <div className="flex items-center gap-3">
+            {/* Sidebar toggle — only visible on desktop when sidebar is closed */}
+            {!sidebarOpen && (
+              <button
+                type="button"
+                onClick={() => setSidebarOpen(true)}
+                className="hidden items-center rounded-md border border-border/50 bg-muted/50 px-2 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground md:inline-flex"
+                title="Show file tree"
+              >
+                <PanelLeftOpen className="size-3.5" />
+              </button>
+            )}
+            <div>
+              <div className="text-sm text-muted-foreground">
+                <span className="font-medium text-foreground">{summary.stats.filesChanged}</span>{" "}
+                {summary.stats.filesChanged === 1 ? "file" : "files"} changed
+                {summary.stats.insertions > 0 && (
+                  <span className="ml-2 text-green-600 dark:text-green-400">
+                    +{summary.stats.insertions}
+                  </span>
+                )}
+                {summary.stats.deletions > 0 && (
+                  <span className="ml-1 text-red-600 dark:text-red-400">
+                    -{summary.stats.deletions}
+                  </span>
+                )}
+              </div>
+              <div className="mt-0.5 text-xs text-muted-foreground">
+                {summary.baseBranch} &larr; {summary.headBranch}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={search.handleOpenSearch}
+              className="inline-flex items-center rounded-md border border-border/50 bg-muted/50 px-2 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+              title="Find in changes (⌘F)"
+            >
+              <Search className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setExpandAll(!expandAll)}
+              className={`inline-flex items-center rounded-md border border-border/50 px-2 py-1 text-xs transition-colors ${
+                expandAll
+                  ? "bg-accent text-foreground"
+                  : "bg-muted/50 text-muted-foreground hover:text-foreground"
+              }`}
+              title={expandAll ? "Collapse all files" : "Expand all files"}
+            >
+              {expandAll ? (
+                <ChevronsDownUp className="size-3.5" />
+              ) : (
+                <ChevronsUpDown className="size-3.5" />
+              )}
+            </button>
+            <Select value={diffMode} onValueChange={(v) => setDiffMode(v as DiffMode)}>
+              <SelectTrigger className="h-7 w-auto gap-1 rounded-md border-border/50 bg-muted/50 px-2.5 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="uncommitted">Uncommitted</SelectItem>
+                <SelectItem value="branch">{baseBranch ?? "base"}</SelectItem>
+              </SelectContent>
+            </Select>
+            <div className="hidden items-center rounded-md border border-border/50 bg-muted/50 md:flex">
+              <button
+                type="button"
+                onClick={() => setViewMode("unified")}
+                className={`inline-flex items-center gap-1 rounded-l-md px-2 py-1 text-xs transition-colors ${
+                  viewMode === "unified"
+                    ? "bg-accent text-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+                title="Unified view"
+              >
+                <Rows2 className="size-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode("split")}
+                className={`inline-flex items-center gap-1 rounded-r-md px-2 py-1 text-xs transition-colors ${
+                  viewMode === "split"
+                    ? "bg-accent text-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+                title="Split view"
+              >
+                <Columns2 className="size-3.5" />
+              </button>
+            </div>
+          </div>
+        </div>
+        {search.searchOpen && (
+          <SearchBar
+            ref={search.searchBarRef}
+            query={search.searchQuery}
+            onQueryChange={search.setSearchQuery}
+            options={search.searchOptions}
+            onOptionsChange={search.setSearchOptions}
+            placeholder="Find in changes..."
+            matchInfo={search.matchInfo}
+            onNext={search.handleNext}
+            onPrevious={search.handlePrevious}
+            onClose={search.handleCloseSearch}
           />
-        ))}
+        )}
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {filenames.map((filename) => (
+            <LazyFileRow
+              key={filename}
+              filename={filename}
+              status={fileStatuses[filename]}
+              workspaceId={workspaceId}
+              mergeBase={summary.mergeBase}
+              viewMode={viewMode}
+              expandAll={expandAll}
+              focusedFile={focusedFile}
+              onOpenFile={onOpenFile}
+              onEditorViews={handleEditorViews}
+            />
+          ))}
+        </div>
       </div>
     </div>
   );
