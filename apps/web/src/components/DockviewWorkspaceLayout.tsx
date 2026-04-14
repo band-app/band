@@ -91,6 +91,8 @@ interface FilesParams {
   onSelectFile: (filePath: string | null) => void;
   onFileOpened: () => void;
   onFindInFile: (fn: (() => void) | null) => void;
+  onQuickOpen: () => void;
+  onSearchFiles: () => void;
 }
 
 interface TerminalParams {
@@ -156,6 +158,8 @@ function FilesPanelComponent({ params }: IDockviewPanelProps<FilesParams>) {
       openFilePath={params.openFilePath}
       onFileOpened={params.onFileOpened}
       onFindInFile={params.onFindInFile}
+      onQuickOpen={params.onQuickOpen}
+      onSearchFiles={params.onSearchFiles}
     />
   );
 }
@@ -698,6 +702,8 @@ export function DockviewWorkspaceLayout({
         onSelectFile: handleSelectFile,
         onFileOpened: handleFileOpened,
         onFindInFile: setFindInFile,
+        onQuickOpen: () => setQuickOpenOpen(true),
+        onSearchFiles: () => setSearchFilesOpen(true),
       });
       api.getPanel("terminal")?.api.updateParameters({
         workspaceId,
