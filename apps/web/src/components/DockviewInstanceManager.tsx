@@ -24,7 +24,7 @@ function parseWorkspaceFromPath(pathname: string): string | null {
  *
  * Instead of destroying and recreating dockview on workspace switch, this
  * component keeps each visited workspace's dockview alive (hidden via CSS
- * `display: none`) and shows the active one. An LRU strategy evicts the
+ * `opacity: 0`) and shows the active one. An LRU strategy evicts the
  * oldest cached instance when the cache exceeds MAX_CACHED_WORKSPACES.
  *
  * IMPORTANT: `activeWorkspaceId` is derived synchronously from pathname (not
@@ -123,9 +123,9 @@ export function DockviewInstanceManager() {
         <div
           key={workspaceId}
           className="absolute inset-0"
-          style={{
-            display: workspaceId === activeWorkspaceId ? "block" : "none",
-          }}
+          style={
+            workspaceId === activeWorkspaceId ? undefined : { opacity: 0, pointerEvents: "none" }
+          }
         >
           <DockviewWorkspaceLayout
             workspaceId={workspaceId}
