@@ -99,7 +99,9 @@ export function CodeMirrorEditor({
         ...baseEditorExtensions(isDark, () => onSaveRef.current?.()),
         searchHighlightOnly(),
         ...lineHighlightExtension(isDark),
-        cursorLineTracker((departureLine, arrivalLine) => onCursorLineChangeRef.current?.(departureLine, arrivalLine)),
+        cursorLineTracker((departureLine, arrivalLine) =>
+          onCursorLineChangeRef.current?.(departureLine, arrivalLine),
+        ),
         // Listener for content changes
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {

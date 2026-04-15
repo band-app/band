@@ -2,8 +2,8 @@ import {
   FileBrowser,
   FileViewer,
   parseFileLocation,
-  scrollToLine,
   SearchBar,
+  scrollToLine,
   useEditorHistory,
   useSearch,
 } from "@band-app/dashboard-core";

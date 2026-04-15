@@ -80,7 +80,9 @@ export function CodeMirrorViewer({
         ...baseViewerExtensions(isDark),
         searchHighlightOnly(),
         ...lineHighlightExtension(isDark),
-        cursorLineTracker((departureLine, arrivalLine) => onCursorLineChangeRef.current?.(departureLine, arrivalLine)),
+        cursorLineTracker((departureLine, arrivalLine) =>
+          onCursorLineChangeRef.current?.(departureLine, arrivalLine),
+        ),
       ];
       if (filePath) {
         extensions.push(selectionToChatExtension(filePath));

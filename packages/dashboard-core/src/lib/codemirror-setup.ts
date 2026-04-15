@@ -508,7 +508,9 @@ const CURSOR_JUMP_THRESHOLD = 10;
  * cursor changes (scrollToLine, goBack/goForward) are ignored because they
  * don't carry `isUserEvent("select")` annotations.
  */
-export function cursorLineTracker(onSignificantJump: (departureLine: number, arrivalLine: number) => void): Extension {
+export function cursorLineTracker(
+  onSignificantJump: (departureLine: number, arrivalLine: number) => void,
+): Extension {
   let lastLine = -1;
   return EditorView.updateListener.of((update) => {
     if (!update.selectionSet) return;
