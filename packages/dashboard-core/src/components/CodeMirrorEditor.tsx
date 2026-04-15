@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { useIsDark } from "../hooks/use-is-dark";
 import {
   baseEditorExtensions,
+  cursorLineTracker,
   lineHighlightExtension,
   loadLanguage,
   scrollToLine,
@@ -31,6 +32,8 @@ interface CodeMirrorEditorProps {
   onContentChange?: (content: string) => void;
   /** Called when Cmd/Ctrl+S is pressed */
   onSave?: () => void;
+  /** Called when the user jumps the cursor ≥10 lines (click, Page Up/Down, etc.) */
+  onCursorLineChange?: (departureLine: number, arrivalLine: number) => void;
 }
 
 export function CodeMirrorEditor({
@@ -44,6 +47,7 @@ export function CodeMirrorEditor({
   onEditorView,
   onContentChange,
   onSave,
+  onCursorLineChange,
 }: CodeMirrorEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -53,6 +57,8 @@ export function CodeMirrorEditor({
   onContentChangeRef.current = onContentChange;
   const onSaveRef = useRef(onSave);
   onSaveRef.current = onSave;
+  const onCursorLineChangeRef = useRef(onCursorLineChange);
+  onCursorLineChangeRef.current = onCursorLineChange;
   const isDark = useIsDark();
 
   // Store line props in refs so the creation effect can read them without re-running
@@ -93,6 +99,7 @@ export function CodeMirrorEditor({
         ...baseEditorExtensions(isDark, () => onSaveRef.current?.()),
         searchHighlightOnly(),
         ...lineHighlightExtension(isDark),
+        cursorLineTracker((departureLine, arrivalLine) => onCursorLineChangeRef.current?.(departureLine, arrivalLine)),
         // Listener for content changes
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {

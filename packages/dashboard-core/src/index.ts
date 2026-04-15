@@ -27,6 +27,11 @@ export { WorkspaceCard } from "./components/WorkspaceCard";
 export { type WorkspaceTab, WorkspaceTabNav } from "./components/WorkspaceTabNav";
 // Context
 export { DashboardProvider, useAdapter, useCapabilities } from "./context";
+export {
+  type EditorHistoryEntry,
+  type UseEditorHistoryReturn,
+  useEditorHistory,
+} from "./hooks/use-editor-history";
 export { type HooksSetupState, useHooksSetup } from "./hooks/use-hooks-setup";
 export { useIsDark } from "./hooks/use-is-dark";
 export {
@@ -51,7 +56,9 @@ export {
 export {
   clearSearch,
   collectSearchMatches,
+  cursorLineTracker,
   dispatchSearch,
+  scrollToLine,
   scrollToSearchMatch,
 } from "./lib/codemirror-setup";
 export { getFileIcon } from "./lib/file-icon";

@@ -466,7 +466,8 @@ export function lineHighlightExtension(isDark = true): Extension[] {
 }
 
 /**
- * Scrolls the editor to the given 1-based line and highlights the range.
+ * Scrolls the editor to the given 1-based line, highlights the range,
+ * and places the cursor at the target position.
  * Optionally positions cursor at a specific column.
  */
 export function scrollToLine(
@@ -479,16 +480,47 @@ export function scrollToLine(
   const clampedLine = Math.max(1, Math.min(line, doc.lines));
   const clampedEnd = lineEnd ? Math.max(clampedLine, Math.min(lineEnd, doc.lines)) : clampedLine;
 
-  // Set highlight decorations
-  view.dispatch({
-    effects: setHighlightLines.of({ from: clampedLine, to: clampedEnd }),
-  });
-
-  // Scroll the target line into view (centered)
   const lineObj = doc.line(clampedLine);
-  const scrollPos = column != null ? Math.min(lineObj.from + column - 1, lineObj.to) : lineObj.from;
+  const cursorPos = column != null ? Math.min(lineObj.from + column - 1, lineObj.to) : lineObj.from;
 
+  // Set highlight, move cursor, and scroll in a single dispatch
   view.dispatch({
-    effects: EditorView.scrollIntoView(scrollPos, { y: "center" }),
+    selection: { anchor: cursorPos },
+    effects: [
+      setHighlightLines.of({ from: clampedLine, to: clampedEnd }),
+      EditorView.scrollIntoView(cursorPos, { y: "center" }),
+    ],
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Cursor line tracker extension
+// ---------------------------------------------------------------------------
+
+const CURSOR_JUMP_THRESHOLD = 10;
+
+/**
+ * Extension that detects user-initiated cursor jumps across distant lines
+ * (e.g. clicking a far-away line, Page Up/Down). Fires the callback with the
+ * departure line when the cursor moves ≥ CURSOR_JUMP_THRESHOLD lines.
+ *
+ * Only reacts to user events (mouse clicks, keyboard navigation) — programmatic
+ * cursor changes (scrollToLine, goBack/goForward) are ignored because they
+ * don't carry `isUserEvent("select")` annotations.
+ */
+export function cursorLineTracker(onSignificantJump: (departureLine: number, arrivalLine: number) => void): Extension {
+  let lastLine = -1;
+  return EditorView.updateListener.of((update) => {
+    if (!update.selectionSet) return;
+    // Only track user-initiated cursor moves (clicks, keyboard nav).
+    // Programmatic dispatches (scrollToLine, history navigation) don't
+    // carry user-event annotations and are silently ignored.
+    if (!update.transactions.some((t) => t.isUserEvent("select"))) return;
+
+    const newLine = update.state.doc.lineAt(update.state.selection.main.head).number;
+    if (lastLine >= 0 && Math.abs(newLine - lastLine) >= CURSOR_JUMP_THRESHOLD) {
+      onSignificantJump(lastLine, newLine);
+    }
+    lastLine = newLine;
   });
 }

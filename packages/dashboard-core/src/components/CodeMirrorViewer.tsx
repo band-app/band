@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { useIsDark } from "../hooks/use-is-dark";
 import {
   baseViewerExtensions,
+  cursorLineTracker,
   lineHighlightExtension,
   loadLanguage,
   scrollToLine,
@@ -26,6 +27,8 @@ interface CodeMirrorViewerProps {
   column?: number;
   /** Called when the EditorView is created or destroyed */
   onEditorView?: (view: EditorView | null) => void;
+  /** Called when the user jumps the cursor ≥10 lines (click, Page Up/Down, etc.) */
+  onCursorLineChange?: (departureLine: number, arrivalLine: number) => void;
 }
 
 export function CodeMirrorViewer({
@@ -37,11 +40,14 @@ export function CodeMirrorViewer({
   lineEnd,
   column,
   onEditorView,
+  onCursorLineChange,
 }: CodeMirrorViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const onEditorViewRef = useRef(onEditorView);
   onEditorViewRef.current = onEditorView;
+  const onCursorLineChangeRef = useRef(onCursorLineChange);
+  onCursorLineChangeRef.current = onCursorLineChange;
   const isDark = useIsDark();
 
   // Store line props in refs so the creation effect can read them without re-running
@@ -74,6 +80,7 @@ export function CodeMirrorViewer({
         ...baseViewerExtensions(isDark),
         searchHighlightOnly(),
         ...lineHighlightExtension(isDark),
+        cursorLineTracker((departureLine, arrivalLine) => onCursorLineChangeRef.current?.(departureLine, arrivalLine)),
       ];
       if (filePath) {
         extensions.push(selectionToChatExtension(filePath));

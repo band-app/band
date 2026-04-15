@@ -1,5 +1,15 @@
+import { Tooltip, TooltipContent, TooltipTrigger } from "@band-app/ui";
 import type { EditorView } from "@codemirror/view";
-import { ArrowLeft, Code, Eye, FileWarning, Loader2, Save } from "lucide-react";
+import {
+  ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
+  Code,
+  Eye,
+  FileWarning,
+  Loader2,
+  Save,
+} from "lucide-react";
 import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAdapter } from "../context";
@@ -29,6 +39,16 @@ interface FileViewerProps {
   renderMarkdown?: (content: string) => React.ReactNode;
   /** When true, code files open in an editable editor instead of read-only viewer */
   editable?: boolean;
+  /** Called when user clicks the back navigation button */
+  onGoBack?: () => void;
+  /** Called when user clicks the forward navigation button */
+  onGoForward?: () => void;
+  /** Whether the back navigation button is enabled */
+  canGoBack?: boolean;
+  /** Whether the forward navigation button is enabled */
+  canGoForward?: boolean;
+  /** Called when the user jumps the cursor ≥10 lines (click, Page Up/Down, etc.) */
+  onCursorLineChange?: (departureLine: number, arrivalLine: number) => void;
 }
 
 // localStorage-backed cache for unsaved edits — survives page reloads
@@ -92,6 +112,11 @@ export function FileViewer({
   toolbar,
   renderMarkdown,
   editable,
+  onGoBack,
+  onGoForward,
+  canGoBack,
+  canGoForward,
+  onCursorLineChange,
 }: FileViewerProps) {
   const adapter = useAdapter();
   const [data, setData] = useState<FileContentResult | null>(null);
@@ -243,6 +268,47 @@ export function FileViewer({
             <ArrowLeft className="size-3.5" />
           </button>
         )}
+        {/* Editor navigation history buttons */}
+        {(onGoBack || onGoForward) && (
+          <div className="flex items-center gap-0.5">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={onGoBack}
+                  disabled={!canGoBack}
+                  className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-30 disabled:pointer-events-none"
+                >
+                  <ChevronLeft className="size-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="text-xs">
+                Go Back{" "}
+                <kbd className="ml-1.5 rounded border border-popover-foreground/25 bg-popover-foreground/10 px-1 py-0.5 font-mono text-[14px]">
+                  ⌃-
+                </kbd>
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={onGoForward}
+                  disabled={!canGoForward}
+                  className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-30 disabled:pointer-events-none"
+                >
+                  <ChevronRight className="size-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="text-xs">
+                Go Forward{" "}
+                <kbd className="ml-1.5 rounded border border-popover-foreground/25 bg-popover-foreground/10 px-1 py-0.5 font-mono text-[14px]">
+                  ⌃⇧-
+                </kbd>
+              </TooltipContent>
+            </Tooltip>
+          </div>
+        )}
         <span className="min-w-0 flex-1 truncate font-mono text-xs">
           {filePath}
           {isDirty && <span className="ml-1 text-muted-foreground">(modified)</span>}
@@ -351,6 +417,7 @@ export function FileViewer({
               onEditorView={onEditorView}
               onContentChange={handleContentChange}
               onSave={handleSave}
+              onCursorLineChange={onCursorLineChange}
             />
           ) : (
             <CodeMirrorViewer
@@ -362,6 +429,7 @@ export function FileViewer({
               lineEnd={lineEnd}
               column={column}
               onEditorView={onEditorView}
+              onCursorLineChange={onCursorLineChange}
             />
           ))}
 

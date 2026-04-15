@@ -660,6 +660,13 @@ export function DockviewWorkspaceLayout({
       } else if (key === "b" && !e.shiftKey && api && isTauri) {
         e.preventDefault();
         api.getPanel("browser")?.api.setActive();
+      } else if (key === "-") {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent("band:editor-go-back"));
+      } else if (key === "_") {
+        // Ctrl+Shift+- produces key="_" (underscore) in the browser
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent("band:editor-go-forward"));
       }
     };
     window.addEventListener("keydown", handler, true);

@@ -2,7 +2,9 @@ import {
   FileBrowser,
   FileViewer,
   parseFileLocation,
+  scrollToLine,
   SearchBar,
+  useEditorHistory,
   useSearch,
 } from "@band-app/dashboard-core";
 import { cn, Tooltip, TooltipContent, TooltipTrigger } from "@band-app/ui";
@@ -225,10 +227,63 @@ export function CodeBrowserView({
     return parseFileLocation(file).column;
   });
 
-  // Sync when the file prop changes (e.g. navigating from diff view)
+  // -------------------------------------------------------------------------
+  // CodeMirror editor view ref (shared by find-in-file and navigation history)
+  // -------------------------------------------------------------------------
+  // biome-ignore lint/suspicious/noExplicitAny: EditorView type from @codemirror/view — kept untyped to avoid cross-package dependency
+  const editorViewRef = useRef<any>(null);
+
+  // -------------------------------------------------------------------------
+  // Editor navigation history (back/forward)
+  // -------------------------------------------------------------------------
+  const editorHistory = useEditorHistory();
+  // When true, the `file` prop effect skips overwriting viewLine/viewColumn.
+  // Set by navigateToEntry to prevent the route round-trip from clobbering
+  // the line the user is navigating to (the route only carries the file path).
+  const skipFileEffectRef = useRef(false);
+
+  // Read the current cursor position from CodeMirror so we can record where
+  // the user is *departing from* before a synchronous navigation handler runs.
+  // Only meaningful when called synchronously (e.g. from handleSelectFile) —
+  // in effects the CM view may already have scrolled.
+  const pushDepartureAndArrival = useCallback(
+    (target: { filePath: string; line?: number; column?: number }) => {
+      const view = editorViewRef.current;
+      if (view && viewFilePath) {
+        try {
+          const pos = view.state.selection.main.head;
+          const lineInfo = view.state.doc.lineAt(pos);
+          editorHistory.push({
+            filePath: viewFilePath,
+            line: lineInfo.number,
+            column: pos - lineInfo.from + 1,
+          });
+        } catch {
+          // CM view not ready — skip departure
+        }
+      }
+      editorHistory.push({ ...target, line: target.line ?? 1 });
+    },
+    [viewFilePath, editorHistory.push],
+  );
+
+  // Sync when the file prop changes (e.g. navigating from diff view).
+  // The file prop also changes after handleSelectFile navigates the route,
+  // but that navigation is already recorded synchronously, so the sentinel
+  // inside the hook deduplicates it.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: editorHistory.push is stable (ref-based)
   useEffect(() => {
+    if (skipFileEffectRef.current) {
+      skipFileEffectRef.current = false;
+      return;
+    }
     if (file) {
       const loc = parseFileLocation(file);
+      editorHistory.push({
+        filePath: loc.filePath,
+        line: loc.line ?? 1,
+        column: loc.column,
+      });
       setViewFilePath(loc.filePath);
       setViewLine(loc.line);
       setViewLineEnd(loc.lineEnd);
@@ -236,10 +291,16 @@ export function CodeBrowserView({
     }
   }, [file]);
 
-  // Handle externally triggered file open
+  // Handle externally triggered file open (Quick Open, Search, chat links)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: editorHistory.push is stable (ref-based)
   useEffect(() => {
     if (openFilePath) {
       const loc = parseFileLocation(openFilePath);
+      editorHistory.push({
+        filePath: loc.filePath,
+        line: loc.line ?? 1,
+        column: loc.column,
+      });
       setViewFilePath(loc.filePath);
       setViewLine(loc.line);
       setViewLineEnd(loc.lineEnd);
@@ -248,15 +309,28 @@ export function CodeBrowserView({
     }
   }, [openFilePath, onFileOpened]);
 
+  // Called by the cursorLineTracker CM extension when the user jumps ≥10 lines
+  // (clicking a distant line, Page Up/Down, etc.). Records both the departure
+  // and arrival lines so the user can navigate back and forward between them.
+  const handleCursorLineChange = useCallback(
+    (departureLine: number, arrivalLine: number) => {
+      if (viewFilePath) {
+        editorHistory.push({ filePath: viewFilePath, line: departureLine });
+        editorHistory.push({ filePath: viewFilePath, line: arrivalLine });
+      }
+    },
+    [viewFilePath, editorHistory.push],
+  );
+
   // -------------------------------------------------------------------------
   // Find-in-file state
   // -------------------------------------------------------------------------
-  // biome-ignore lint/suspicious/noExplicitAny: EditorView type from @codemirror/view — kept untyped to avoid cross-package dependency
-  const editorViewRef = useRef<any>(null);
-
   const getViews = useCallback(() => (editorViewRef.current ? [editorViewRef.current] : []), []);
 
   const search = useSearch({ getViews, onFindInFile });
+
+  // Flag: focus the editor once the next view is ready (after cross-file nav)
+  const focusOnViewReadyRef = useRef(false);
 
   const handleEditorView = useCallback(
     // biome-ignore lint/suspicious/noExplicitAny: EditorView from @codemirror/view — kept untyped to avoid cross-package dependency
@@ -264,6 +338,10 @@ export function CodeBrowserView({
       editorViewRef.current = view;
       if (view) {
         search.dispatchToViews([view]);
+        if (focusOnViewReadyRef.current) {
+          focusOnViewReadyRef.current = false;
+          view.focus();
+        }
       }
     },
     [search.dispatchToViews],
@@ -277,13 +355,14 @@ export function CodeBrowserView({
 
   const handleSelectFile = useCallback(
     (filePath: string) => {
+      pushDepartureAndArrival({ filePath });
       setViewFilePath(filePath);
       setViewLine(undefined);
       setViewLineEnd(undefined);
       setViewColumn(undefined);
       onSelectFile?.(filePath);
     },
-    [onSelectFile],
+    [onSelectFile, pushDepartureAndArrival],
   );
 
   const handleBack = useCallback(() => {
@@ -293,6 +372,56 @@ export function CodeBrowserView({
     setViewColumn(undefined);
     onSelectFile?.(null);
   }, [onSelectFile]);
+
+  const navigateToEntry = useCallback(
+    (entry: { filePath: string; line?: number; column?: number }) => {
+      const sameFile = entry.filePath === viewFilePath;
+      // Prevent the file prop effect from overwriting the line we're about to set.
+      // The route round-trip only carries the file path, not the line.
+      if (!sameFile) skipFileEffectRef.current = true;
+      setViewFilePath(entry.filePath);
+      setViewLine(entry.line);
+      setViewLineEnd(undefined);
+      setViewColumn(entry.column);
+      onSelectFile?.(entry.filePath);
+
+      if (sameFile && editorViewRef.current) {
+        // Same file: directly scroll + focus the editor view.
+        // React state dedup would skip the effect if the line value is unchanged.
+        if (entry.line) {
+          scrollToLine(editorViewRef.current, entry.line, undefined, entry.column);
+        }
+        editorViewRef.current.focus();
+      } else {
+        // Cross-file: the editor view will be recreated — focus it once ready.
+        focusOnViewReadyRef.current = true;
+      }
+    },
+    [viewFilePath, onSelectFile],
+  );
+
+  const handleEditorGoBack = useCallback(() => {
+    const entry = editorHistory.goBack();
+    if (entry) navigateToEntry(entry);
+  }, [editorHistory.goBack, navigateToEntry]);
+
+  const handleEditorGoForward = useCallback(() => {
+    const entry = editorHistory.goForward();
+    if (entry) navigateToEntry(entry);
+  }, [editorHistory.goForward, navigateToEntry]);
+
+  // Listen for keyboard shortcut events dispatched from DockviewWorkspaceLayout
+  useEffect(() => {
+    const handleGoBack = () => handleEditorGoBack();
+    const handleGoForward = () => handleEditorGoForward();
+
+    window.addEventListener("band:editor-go-back", handleGoBack);
+    window.addEventListener("band:editor-go-forward", handleGoForward);
+    return () => {
+      window.removeEventListener("band:editor-go-back", handleGoBack);
+      window.removeEventListener("band:editor-go-forward", handleGoForward);
+    };
+  }, [handleEditorGoBack, handleEditorGoForward]);
 
   // -------------------------------------------------------------------------
   // Resizable file tree panel
@@ -350,6 +479,11 @@ export function CodeBrowserView({
           lineEnd={viewLineEnd}
           column={viewColumn}
           onBack={handleBack}
+          onGoBack={handleEditorGoBack}
+          onGoForward={handleEditorGoForward}
+          canGoBack={editorHistory.canGoBack}
+          canGoForward={editorHistory.canGoForward}
+          onCursorLineChange={handleCursorLineChange}
           renderMarkdown={renderMarkdown}
           editable
         />
@@ -442,6 +576,11 @@ export function CodeBrowserView({
                 lineEnd={viewLineEnd}
                 column={viewColumn}
                 onEditorView={handleEditorView}
+                onGoBack={handleEditorGoBack}
+                onGoForward={handleEditorGoForward}
+                canGoBack={editorHistory.canGoBack}
+                canGoForward={editorHistory.canGoForward}
+                onCursorLineChange={handleCursorLineChange}
                 renderMarkdown={renderMarkdown}
                 editable
                 toolbar={
