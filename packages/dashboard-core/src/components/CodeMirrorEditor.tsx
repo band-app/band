@@ -31,6 +31,8 @@ interface CodeMirrorEditorProps {
   onContentChange?: (content: string) => void;
   /** Called when Cmd/Ctrl+S is pressed */
   onSave?: () => void;
+  /** Called when Cmd/Ctrl+Z is pressed but undo history is empty (revert to disk) */
+  onRevert?: () => void;
 }
 
 export function CodeMirrorEditor({
@@ -44,6 +46,7 @@ export function CodeMirrorEditor({
   onEditorView,
   onContentChange,
   onSave,
+  onRevert,
 }: CodeMirrorEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -53,6 +56,8 @@ export function CodeMirrorEditor({
   onContentChangeRef.current = onContentChange;
   const onSaveRef = useRef(onSave);
   onSaveRef.current = onSave;
+  const onRevertRef = useRef(onRevert);
+  onRevertRef.current = onRevert;
   const isDark = useIsDark();
 
   // Store line props in refs so the creation effect can read them without re-running
@@ -90,7 +95,11 @@ export function CodeMirrorEditor({
       }
 
       const extensions = [
-        ...baseEditorExtensions(isDark, () => onSaveRef.current?.()),
+        ...baseEditorExtensions(
+          isDark,
+          () => onSaveRef.current?.(),
+          () => onRevertRef.current?.(),
+        ),
         searchHighlightOnly(),
         ...lineHighlightExtension(isDark),
         // Listener for content changes

@@ -1,4 +1,4 @@
-import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
+import { defaultKeymap, history, historyKeymap, undo, undoDepth } from "@codemirror/commands";
 import {
   bracketMatching,
   defaultHighlightStyle,
@@ -219,19 +219,43 @@ export function baseViewerExtensions(
  * Does NOT include readOnly or editable(false).
  * @param isDark - Whether to use dark theme colours. Defaults to true for backwards compat.
  * @param onSave - Optional callback invoked on Cmd/Ctrl+S.
+ * @param onRevert - Optional callback invoked on Cmd/Ctrl+Z when the undo history is empty.
+ *                   Typically used to reload the file from disk when no more undos are available.
  */
-export function baseEditorExtensions(isDark = true, onSave?: () => void): Extension[] {
-  const saveKeyBinding: KeyBinding[] = onSave
-    ? [
-        {
-          key: "Mod-s",
-          run: () => {
-            onSave();
-            return true;
-          },
-        },
-      ]
-    : [];
+export function baseEditorExtensions(
+  isDark = true,
+  onSave?: () => void,
+  onRevert?: () => void,
+): Extension[] {
+  const customKeyBindings: KeyBinding[] = [
+    ...(onSave
+      ? [
+          {
+            key: "Mod-s",
+            run: () => {
+              onSave();
+              return true;
+            },
+          } satisfies KeyBinding,
+        ]
+      : []),
+    ...(onRevert
+      ? [
+          {
+            key: "Mod-z",
+            run: (view: EditorView) => {
+              // If there are undoable changes, do a normal undo
+              if (undoDepth(view.state) > 0) {
+                return undo(view);
+              }
+              // Otherwise revert to the on-disk version
+              onRevert();
+              return true;
+            },
+          } satisfies KeyBinding,
+        ]
+      : []),
+  ];
 
   return [
     lineNumbers(),
@@ -251,7 +275,7 @@ export function baseEditorExtensions(isDark = true, onSave?: () => void): Extens
           syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
         ]
       : [syntaxHighlighting(defaultHighlightStyle)]),
-    keymap.of([...saveKeyBinding, ...defaultKeymap, ...historyKeymap, ...foldKeymap]),
+    keymap.of([...customKeyBindings, ...defaultKeymap, ...historyKeymap, ...foldKeymap]),
     EditorView.theme(
       isDark
         ? {
