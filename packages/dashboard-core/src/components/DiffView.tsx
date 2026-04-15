@@ -10,6 +10,7 @@ import {
   Loader2,
   PanelLeftClose,
   PanelLeftOpen,
+  RefreshCw,
   Rows2,
   Search,
   SquareArrowOutUpRight,
@@ -655,6 +656,7 @@ export function DiffView({
   const [baseBranch, setBaseBranch] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const fetchSummaryRef = useRef<(() => void) | null>(null);
   const [viewMode, setViewModeState] = useState<ViewMode>(getStoredViewMode);
   const [diffMode, setDiffModeState] = useState<DiffMode>(getStoredDiffMode);
   const [expandAll, setExpandAllState] = useState(getStoredExpandAll);
@@ -778,6 +780,7 @@ export function DiffView({
         });
     };
 
+    fetchSummaryRef.current = fetchSummary;
     fetchSummary();
 
     // Subscribe to branch-status events to auto-refresh when files change.
@@ -795,6 +798,7 @@ export function DiffView({
 
     return () => {
       cancelled = true;
+      fetchSummaryRef.current = null;
       unsubscribe?.();
     };
   }, [adapter, workspaceId, active, onStatsChange, diffMode]);
@@ -910,6 +914,14 @@ export function DiffView({
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => fetchSummaryRef.current?.()}
+              className="inline-flex items-center rounded-md border border-border/50 bg-muted/50 px-2 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+              title="Reload changes"
+            >
+              <RefreshCw className="size-3.5" />
+            </button>
             <button
               type="button"
               onClick={search.handleOpenSearch}

@@ -34,6 +34,8 @@ interface CodeMirrorEditorProps {
   onSave?: () => void;
   /** Called when the user jumps the cursor ≥10 lines (click, Page Up/Down, etc.) */
   onCursorLineChange?: (departureLine: number, arrivalLine: number) => void;
+  /** Called when Cmd/Ctrl+Z is pressed but undo history is empty (revert to disk) */
+  onRevert?: () => void;
 }
 
 export function CodeMirrorEditor({
@@ -48,6 +50,7 @@ export function CodeMirrorEditor({
   onContentChange,
   onSave,
   onCursorLineChange,
+  onRevert,
 }: CodeMirrorEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -59,6 +62,8 @@ export function CodeMirrorEditor({
   onSaveRef.current = onSave;
   const onCursorLineChangeRef = useRef(onCursorLineChange);
   onCursorLineChangeRef.current = onCursorLineChange;
+  const onRevertRef = useRef(onRevert);
+  onRevertRef.current = onRevert;
   const isDark = useIsDark();
 
   // Store line props in refs so the creation effect can read them without re-running
@@ -96,7 +101,11 @@ export function CodeMirrorEditor({
       }
 
       const extensions = [
-        ...baseEditorExtensions(isDark, () => onSaveRef.current?.()),
+        ...baseEditorExtensions(
+          isDark,
+          () => onSaveRef.current?.(),
+          () => onRevertRef.current?.(),
+        ),
         searchHighlightOnly(),
         ...lineHighlightExtension(isDark),
         cursorLineTracker((departureLine, arrivalLine) =>

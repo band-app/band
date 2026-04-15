@@ -129,6 +129,8 @@ export function FileViewer({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
+  const editorViewRef = useRef<EditorView | null>(null);
+
   const isDirty = editedContent !== null && editedContent !== data?.content;
 
   const canEdit = editable && !!adapter.saveWorkspaceFile;
@@ -244,6 +246,37 @@ export function FileViewer({
   const handleContentChange = useCallback((newContent: string) => {
     setEditedContent(newContent);
   }, []);
+
+  // Capture the EditorView locally (for revert) while forwarding to the parent
+  const handleEditorView = useCallback(
+    (view: EditorView | null) => {
+      editorViewRef.current = view;
+      onEditorView?.(view);
+    },
+    [onEditorView],
+  );
+
+  // Revert to on-disk version: refetch, replace editor content, clear draft cache.
+  // Called by Cmd/Ctrl+Z when the CodeMirror undo history is empty.
+  const handleRevert = useCallback(async () => {
+    if (!adapter.getWorkspaceFile) return;
+    try {
+      const result = await adapter.getWorkspaceFile(workspaceId, filePath);
+      setData(result);
+      setEditedContent(null);
+      editedContentRef.current = null;
+      unsavedEditsCache.delete(editsCacheKey(workspaceId, filePath));
+      // Replace the editor document in-place
+      const view = editorViewRef.current;
+      if (view && result.content != null) {
+        view.dispatch({
+          changes: { from: 0, to: view.state.doc.length, insert: result.content },
+        });
+      }
+    } catch {
+      // Fetch error — leave current content as-is
+    }
+  }, [adapter, workspaceId, filePath]);
 
   const handleBack = useCallback(() => {
     if (isDirty && !window.confirm("You have unsaved changes. Discard?")) {
@@ -414,10 +447,11 @@ export function FileViewer({
               line={line}
               lineEnd={lineEnd}
               column={column}
-              onEditorView={onEditorView}
+              onEditorView={handleEditorView}
               onContentChange={handleContentChange}
               onSave={handleSave}
               onCursorLineChange={onCursorLineChange}
+              onRevert={handleRevert}
             />
           ) : (
             <CodeMirrorViewer

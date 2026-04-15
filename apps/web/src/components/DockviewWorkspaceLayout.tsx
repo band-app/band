@@ -21,7 +21,7 @@ import {
   MessageSquare,
   Terminal as TerminalIcon,
 } from "lucide-react";
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { isTauri } from "../lib/is-tauri";
 import { trpc } from "../lib/trpc-client";
 import { CodeBrowserView } from "./CodeBrowserView";
@@ -541,12 +541,13 @@ interface DockviewWorkspaceLayoutProps {
   onLayoutChange?: () => void;
 }
 
-export function DockviewWorkspaceLayout({
+export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
   workspaceId,
   isActive,
   onLayoutChange,
 }: DockviewWorkspaceLayoutProps) {
   const apiRef = useRef<DockviewApi | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // Ref so the onDidLayoutChange handler always sees the latest callback
   // without needing to re-subscribe.
@@ -936,21 +937,20 @@ export function DockviewWorkspaceLayout({
     api.getPanel("browser")?.api.updateParameters({ wsActive: isActive });
   }, [isActive]);
 
-  // Force dockview to recalculate layout after becoming visible.
-  // When switching from display:none → display:block, dockview may have
-  // stale size info.  Calling layout() triggers a proper resize.
-  //
-  // No isResizingRef guard is needed here: the onDidLayoutChange handler
-  // uses a structural fingerprint comparison to detect real layout changes.
-  // A programmatic layout() with the same container dimensions produces
-  // the same fingerprint — no eviction is triggered.
+  // Recalculate dockview layout after becoming visible, but only if the
+  // container actually resized (e.g. a window resize while this workspace
+  // was hidden).  With visibility:hidden the container keeps its dimensions,
+  // so most workspace switches skip this entirely — no reflow, no flash.
   useEffect(() => {
-    if (isActive && apiRef.current) {
-      const api = apiRef.current;
-      requestAnimationFrame(() => {
-        api.layout(api.width, api.height);
-      });
-    }
+    if (!isActive || !apiRef.current || !containerRef.current) return;
+    const api = apiRef.current;
+    const el = containerRef.current;
+    requestAnimationFrame(() => {
+      const { clientWidth, clientHeight } = el;
+      if (clientWidth !== api.width || clientHeight !== api.height) {
+        api.layout(clientWidth, clientHeight);
+      }
+    });
   }, [isActive]);
 
   // Hide the browser webview when a dialog is open (z-ordering: native webview
@@ -975,14 +975,16 @@ export function DockviewWorkspaceLayout({
 
   return (
     <>
-      <DockviewReact
-        theme={bandTheme}
-        className="h-full"
-        components={components}
-        tabComponents={tabComponents}
-        defaultTabComponent={DefaultTab}
-        onReady={onReady}
-      />
+      <div ref={containerRef} className="h-full">
+        <DockviewReact
+          theme={bandTheme}
+          className="h-full"
+          components={components}
+          tabComponents={tabComponents}
+          defaultTabComponent={DefaultTab}
+          onReady={onReady}
+        />
+      </div>
 
       <QuickOpenDialog
         workspaceId={workspaceId}
@@ -1004,4 +1006,4 @@ export function DockviewWorkspaceLayout({
       />
     </>
   );
-}
+});
