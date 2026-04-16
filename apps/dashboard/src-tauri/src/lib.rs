@@ -208,8 +208,7 @@ pub fn run() {
                     // Side panel: narrow width at left edge, full height
                     let current_width = window
                         .outer_size()
-                        .map(|s| (f64::from(s.width) / scale_factor) as u32)
-                        .unwrap_or(400);
+                        .map_or(400, |s| (f64::from(s.width) / scale_factor) as u32);
 
                     let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(
                         f64::from(current_width),

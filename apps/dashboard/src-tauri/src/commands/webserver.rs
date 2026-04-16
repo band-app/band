@@ -87,7 +87,7 @@ fn kill_process_tree(child: &mut Child) {
         libc::kill(-pid, libc::SIGTERM);
     }
     // Give the process time to run shutdown hooks (e.g. tunnel cleanup)
-    std::thread::sleep(std::time::Duration::from_millis(3000));
+    std::thread::sleep(std::time::Duration::from_secs(3));
     // Fallback: force-kill the child itself if still alive
     let _ = child.kill();
     let _ = child.wait();
