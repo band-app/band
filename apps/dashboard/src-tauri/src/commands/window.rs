@@ -1,3 +1,5 @@
+use crate::state::FocusManagementState;
+use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
 /// Derives a URL for a secondary window by taking the main window's origin
@@ -94,6 +96,14 @@ pub async fn set_app_mode(app: AppHandle, mode: String) -> Result<(), String> {
         .get_webview_window("main")
         .ok_or("Main window not found")?;
 
+    // Toggle focus management based on the new mode.
+    // In full-editor mode, the Tauri app IS the editor, so focus polling
+    // and automatic window raising must be disabled.
+    let focus_state = app.state::<FocusManagementState>();
+    let was_enabled = focus_state.0.load(Ordering::SeqCst);
+    let should_enable = mode != "full-editor";
+    focus_state.0.store(should_enable, Ordering::SeqCst);
+
     let monitor = window
         .current_monitor()
         .map_err(|e| format!("Failed to get monitor: {e}"))?
@@ -120,6 +130,14 @@ pub async fn set_app_mode(app: AppHandle, mode: String) -> Result<(), String> {
         let _ = window.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(
             0.0, 0.0,
         )));
+    }
+
+    // Start focus polling if switching from full-editor to side-panel.
+    // The old polling thread (if any) already exited when the flag was
+    // set to false.
+    if should_enable && !was_enabled {
+        let flag = focus_state.inner().0.clone();
+        crate::commands::ide::start_focus_polling(app.clone(), flag);
     }
 
     // Reload the main webview so it picks up the new app mode from settings

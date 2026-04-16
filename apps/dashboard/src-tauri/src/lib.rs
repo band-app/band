@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use commands::browser::BrowserState;
 use commands::webserver::{self as webserver, ManagedProcess, WebServerState};
-use state::{ActiveWorkspaceState, ProjectCache};
+use state::{ActiveWorkspaceState, FocusManagementState, ProjectCache};
 use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
 use tauri::Manager;
 
@@ -64,6 +64,7 @@ pub fn run() {
         .manage(ActiveWorkspaceState::new())
         .manage(ProjectCache::new())
         .manage(BrowserState::new())
+        .manage(FocusManagementState::new(true))
         .invoke_handler(tauri::generate_handler![
             commands::ide::workspace_focus,
             commands::ide::workspace_close,
@@ -218,10 +219,20 @@ pub fn run() {
                 }
             }
 
+            // Update the focus-management flag based on the persisted app mode.
+            // Default is `true` (enabled); disable it in full-editor mode.
+            let focus_state = app.state::<FocusManagementState>();
+            if app_mode == "full-editor" {
+                focus_state
+                    .0
+                    .store(false, std::sync::atomic::Ordering::SeqCst);
+            }
+
             // Poll the frontmost VS Code window to track active workspace.
             // Only needed in side-panel mode where we manage external IDE windows.
             if app_mode != "full-editor" {
-                commands::ide::start_focus_polling(app.handle().clone());
+                let focus_flag = focus_state.inner().0.clone();
+                commands::ide::start_focus_polling(app.handle().clone(), focus_flag);
             }
 
             // Kill web server and close secondary windows on app exit.
@@ -265,15 +276,24 @@ pub fn run() {
                 }
             });
 
-            // Raise the active workspace's app windows when dashboard gains focus.
-            // Only in side-panel mode where external IDE windows are managed.
-            if app_mode != "full-editor" {
+            // Raise the active workspace's app windows when the dashboard gains focus.
+            // The handler is always registered but checks the focus-management flag
+            // at runtime so it becomes a no-op in full-editor mode (and respects
+            // runtime mode switches via `set_app_mode`).
+            {
+                let focus_flag = app.state::<FocusManagementState>().inner().0.clone();
                 let active_ws_state: std::sync::Arc<std::sync::Mutex<Option<String>>> =
                     app.state::<ActiveWorkspaceState>().inner().0.clone();
                 let raise_cache = app.state::<ProjectCache>().inner().clone();
                 let window_ref = app.get_webview_window("main").unwrap();
                 window_ref.on_window_event(move |event| {
                     if let tauri::WindowEvent::Focused(true) = event {
+                        // Skip window raising when focus management is disabled
+                        // (full-editor mode).
+                        if !focus_flag.load(std::sync::atomic::Ordering::SeqCst) {
+                            return;
+                        }
+
                         let workspace_id: Option<String> =
                             active_ws_state.lock().ok().and_then(|guard| guard.clone());
 

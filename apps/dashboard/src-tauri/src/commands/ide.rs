@@ -1,9 +1,11 @@
 use crate::api::ApiClient;
 use crate::state;
-use crate::state::{ActiveWorkspaceState, ProjectCache};
+use crate::state::{ActiveWorkspaceState, FocusManagementState, ProjectCache};
 use std::collections::{HashMap, VecDeque};
 use std::ffi::c_void;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use std::time::Duration;
 use tauri::{Emitter, Manager};
 
@@ -403,7 +405,9 @@ pub fn raise_workspace_windows(workspace_id: &str, cache: &ProjectCache) {
 
 /// Start a background thread that polls the frontmost window
 /// and updates active workspace state when the focused workspace changes.
-pub fn start_focus_polling(app_handle: tauri::AppHandle) {
+/// The thread exits when `enabled` is set to `false` (e.g. when the app
+/// switches to full-editor mode).
+pub fn start_focus_polling(app_handle: tauri::AppHandle, enabled: Arc<AtomicBool>) {
     let active_state = {
         let s = app_handle.state::<ActiveWorkspaceState>();
         s.inner().0.clone()
@@ -430,6 +434,12 @@ pub fn start_focus_polling(app_handle: tauri::AppHandle) {
 
         loop {
             std::thread::sleep(Duration::from_millis(500));
+
+            // Exit the polling thread when focus management is disabled
+            // (e.g. user switched to full-editor mode at runtime).
+            if !enabled.load(std::sync::atomic::Ordering::SeqCst) {
+                break;
+            }
 
             // Refresh project cache from web server every 5 seconds
             if last_cache_refresh.elapsed() >= Duration::from_secs(5) {
@@ -503,7 +513,18 @@ pub fn workspace_focus(
     app_handle: tauri::AppHandle,
     active_state: tauri::State<'_, ActiveWorkspaceState>,
     project_cache: tauri::State<'_, ProjectCache>,
+    focus_state: tauri::State<'_, FocusManagementState>,
 ) -> Result<(), String> {
+    // In full-editor mode, external window management is disabled.
+    // The frontend adapter already guards this, but we check here as
+    // defense in depth.
+    if !focus_state
+        .0
+        .load(std::sync::atomic::Ordering::SeqCst)
+    {
+        return Ok(());
+    }
+
     use std::sync::Mutex;
     use std::time::Instant;
 

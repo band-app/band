@@ -1,9 +1,11 @@
 //! Stub implementations of the IDE commands for non-macOS platforms.
 //! The real implementation lives in `ide.rs` and uses macOS-specific APIs.
 
-use crate::state::{ActiveWorkspaceState, ProjectCache};
+use crate::state::{ActiveWorkspaceState, FocusManagementState, ProjectCache};
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
-pub fn start_focus_polling(_app_handle: tauri::AppHandle) {}
+pub fn start_focus_polling(_app_handle: tauri::AppHandle, _enabled: Arc<AtomicBool>) {}
 
 pub fn raise_workspace_windows(_workspace_id: &str, _cache: &ProjectCache) {}
 
@@ -12,6 +14,7 @@ pub fn workspace_focus(
     _workspace_id: String,
     _active_state: tauri::State<'_, ActiveWorkspaceState>,
     _project_cache: tauri::State<'_, ProjectCache>,
+    _focus_state: tauri::State<'_, FocusManagementState>,
 ) -> Result<(), String> {
     Err("Not supported on this platform".to_string())
 }
