@@ -518,10 +518,7 @@ pub fn workspace_focus(
     // In full-editor mode, external window management is disabled.
     // The frontend adapter already guards this, but we check here as
     // defense in depth.
-    if !focus_state
-        .0
-        .load(std::sync::atomic::Ordering::SeqCst)
-    {
+    if !focus_state.0.load(std::sync::atomic::Ordering::SeqCst) {
         return Ok(());
     }
 
