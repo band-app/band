@@ -12,7 +12,7 @@ fn main() {
     let mut entries: Vec<_> = std::fs::read_dir(scripts_dir)
         .expect("scripts/ directory must exist")
         .filter_map(Result::ok)
-        .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
         .collect();
     entries.sort_by_key(std::fs::DirEntry::file_name);
 
