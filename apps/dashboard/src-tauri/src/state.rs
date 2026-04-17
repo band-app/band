@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 // --- Data types for API responses ---
@@ -91,6 +92,19 @@ pub fn load_settings() -> Result<Settings, String> {
     }
     let data = fs::read_to_string(&path).map_err(|e| format!("Failed to read settings: {e}"))?;
     serde_json::from_str(&data).map_err(|e| format!("Failed to parse settings: {e}"))
+}
+
+// --- Focus management state (shared flag for runtime mode toggling) ---
+
+/// Tracks whether focus management (polling, window raising) is enabled.
+/// Set to `false` in full-editor mode so the Tauri app does not interfere
+/// with the user's window arrangement.
+pub struct FocusManagementState(pub Arc<AtomicBool>);
+
+impl FocusManagementState {
+    pub fn new(enabled: bool) -> Self {
+        Self(Arc::new(AtomicBool::new(enabled)))
+    }
 }
 
 // --- In-memory active workspace state ---
