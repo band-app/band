@@ -85,7 +85,7 @@ export const WorkspaceCard = memo(function WorkspaceCard({
     }
   };
 
-  const className = `@container group flex flex-row items-center justify-between px-3 py-2 min-w-0 overflow-hidden cursor-pointer select-none transition-colors hover:bg-accent/50 ${isActive ? "bg-accent/50 border-l-2 border-l-primary" : ""} ${isFocused ? "ring-2 ring-inset ring-ring" : ""} ${href ? "no-underline text-inherit" : ""}`;
+  const className = `@container group flex flex-row items-center justify-between px-3 py-1 min-w-0 overflow-hidden cursor-pointer select-none transition-colors hover:bg-accent/50 ${isActive ? "bg-accent/50 border-l-2 border-l-primary" : ""} ${isFocused ? "ring-2 ring-inset ring-ring" : ""} ${href ? "no-underline text-inherit" : ""}`;
 
   const containerProps = {
     ref: cardRef,
