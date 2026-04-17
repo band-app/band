@@ -21,6 +21,7 @@ import { TauriTitleBar } from "../components/TauriTitleBar";
 import { ToolbarButtons } from "../components/ToolbarButtons";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useNavigationHistory } from "../hooks/useNavigationHistory";
+import { useZoom } from "../hooks/useZoom";
 import { isTauri } from "../lib/is-tauri";
 import {
   loadSidebarWidth,
@@ -28,6 +29,7 @@ import {
   SIDEBAR_MIN_SIZE,
   saveSidebarWidth,
 } from "../lib/sidebar-width";
+import { applyZoomLevel, loadZoomLevel, zoomIn, zoomOut, zoomReset } from "../lib/zoom";
 import "../styles/globals.css";
 
 const adapter = isTauri ? new HybridDashboardAdapter() : new WebDashboardAdapter();
@@ -69,6 +71,10 @@ function NotFound() {
 /** Blocking script injected into <head> to apply the theme before first paint.
  *  Reads a cached theme value from localStorage (written by ThemeSync). */
 const THEME_INIT_SCRIPT = `(function(){try{var t=localStorage.getItem("band-theme")||"dark";var d=document.documentElement;if(t==="system"){if(window.matchMedia("(prefers-color-scheme:dark)").matches)d.classList.add("dark");else d.classList.remove("dark")}else if(t==="dark"){d.classList.add("dark")}else{d.classList.remove("dark")}}catch(e){document.documentElement.classList.add("dark")}})()`;
+
+/** Blocking script injected into <head> to apply the zoom level before first paint.
+ *  Reads a cached zoom value from localStorage (written by ZoomSync / zoom.ts). */
+const ZOOM_INIT_SCRIPT = `(function(){try{var z=localStorage.getItem("band:zoom-level");if(z){var n=parseFloat(z);if(!isNaN(n)&&n>=0.5&&n<=2)document.documentElement.style.zoom=String(n)}}catch(e){}})()`;
 
 /** Applies a theme value ("dark", "light", or "system") to the document root. */
 function applyTheme(theme: string) {
@@ -124,6 +130,47 @@ function ThemeSync() {
   return null;
 }
 
+/** Syncs the zoom level across windows and exposes a global function
+ *  for the Tauri menu handler to call via window.eval(). */
+function ZoomSync() {
+  useEffect(() => {
+    // Safety net: apply the persisted zoom level on mount.
+    // The blocking script should have already set it, but this
+    // handles edge cases (e.g., new secondary window created later).
+    applyZoomLevel(loadZoomLevel());
+
+    // Expose a global function that the Rust menu event handler can call
+    // via webview.eval("if(window.__bandZoom)window.__bandZoom('in')").
+    (window as unknown as Record<string, unknown>).__bandZoom = (action: string) => {
+      if (action === "in") zoomIn();
+      else if (action === "out") zoomOut();
+      else zoomReset();
+    };
+
+    return () => {
+      delete (window as unknown as Record<string, unknown>).__bandZoom;
+    };
+  }, []);
+
+  // Cross-window zoom sync via the storage event.
+  // When another window updates "band:zoom-level" in localStorage,
+  // apply the change immediately to this window's DOM.
+  useEffect(() => {
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key !== "band:zoom-level" || !e.newValue) return;
+      const level = Number.parseFloat(e.newValue);
+      if (!Number.isNaN(level) && level >= 0.5 && level <= 2) {
+        document.documentElement.style.zoom = String(level);
+      }
+    };
+
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, []);
+
+  return null;
+}
+
 const STANDALONE_ROUTES = ["/tasks", "/cronjobs", "/settings"];
 
 /**
@@ -169,6 +216,10 @@ function AppShell() {
   // Cmd+[ / Cmd+] — back/forward through workspace history
   const routerNavigate = useCallback((href: string) => router.navigate({ to: href }), [router]);
   useNavigationHistory(routerNavigate, capabilities);
+
+  // Cmd+= / Cmd+- / Cmd+0 — zoom in/out/reset (browser mode only;
+  // in Tauri the View menu accelerators handle these keys)
+  useZoom();
 
   // Resizable sidebar: load persisted width and skip the first layout callback
   // (react-resizable-panels fires it on mount with a computed layout that may
@@ -255,10 +306,13 @@ function RootLayout() {
         <HeadContent />
         {/* biome-ignore lint/security/noDangerouslySetInnerHtml: static inline script to prevent theme flash */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: static inline script to prevent zoom layout flash */}
+        <script dangerouslySetInnerHTML={{ __html: ZOOM_INIT_SCRIPT }} />
       </head>
       <body>
         <DashboardProvider adapter={adapter} capabilities={capabilities}>
           <ThemeSync />
+          <ZoomSync />
           <ModeSync />
           <TooltipProvider>
             <AppShell />

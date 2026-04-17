@@ -107,11 +107,24 @@ pub fn run() {
             let reload_item = MenuItemBuilder::with_id("reload", "Reload")
                 .accelerator("CmdOrCtrl+R")
                 .build(app)?;
+            let zoom_in_item = MenuItemBuilder::with_id("zoom_in", "Zoom In")
+                .accelerator("CmdOrCtrl+=")
+                .build(app)?;
+            let zoom_out_item = MenuItemBuilder::with_id("zoom_out", "Zoom Out")
+                .accelerator("CmdOrCtrl+-")
+                .build(app)?;
+            let zoom_reset_item = MenuItemBuilder::with_id("zoom_reset", "Actual Size")
+                .accelerator("CmdOrCtrl+0")
+                .build(app)?;
             let settings_item = MenuItemBuilder::with_id("settings", "Settings...")
                 .accelerator("CmdOrCtrl+Comma")
                 .build(app)?;
             let view_menu = SubmenuBuilder::new(app, "View")
                 .item(&reload_item)
+                .separator()
+                .item(&zoom_in_item)
+                .item(&zoom_out_item)
+                .item(&zoom_reset_item)
                 .separator()
                 .item(&settings_item)
                 .build()?;
@@ -138,6 +151,28 @@ pub fn run() {
                         if let Ok(url) = win.url() {
                             let _ = win.navigate(url);
                         }
+                    }
+                } else if event.id() == "zoom_in"
+                    || event.id() == "zoom_out"
+                    || event.id() == "zoom_reset"
+                {
+                    let action = match event.id().0.as_str() {
+                        "zoom_in" => "in",
+                        "zoom_out" => "out",
+                        _ => "reset",
+                    };
+                    // Apply zoom to the focused window (or main as fallback).
+                    // The JS function is registered by ZoomSync in __root.tsx.
+                    let target = app_handle
+                        .webview_windows()
+                        .values()
+                        .find(|w| w.is_focused().unwrap_or(false))
+                        .cloned()
+                        .or_else(|| app_handle.get_webview_window("main"));
+                    if let Some(win) = target {
+                        let _ = win.eval(&format!(
+                            "if(window.__bandZoom)window.__bandZoom('{action}')"
+                        ));
                     }
                 } else if event.id() == "settings" {
                     let handle = app_handle.clone();
