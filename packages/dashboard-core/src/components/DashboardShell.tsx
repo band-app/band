@@ -211,7 +211,7 @@ export function DashboardShell({ toolbarExtra, hideTitleBar }: DashboardShellPro
           list?.focus({ preventScroll: true });
         }}
       >
-        <main className="px-2 py-2 overflow-hidden">
+        <main className="overflow-hidden">
           {loading ? (
             <div className="flex items-center justify-center py-12">
               <Spinner className="size-5 text-muted-foreground" />

@@ -494,7 +494,9 @@ export function ProjectList({ labelFilter, editMode }: ProjectListProps) {
           <SortableContext items={allProjectNames} strategy={verticalListSortingStrategy}>
             {visibleGroups.map((group, groupIndex) => (
               <div key={group.labelId ?? "__unlabeled"}>
-                {groupIndex > 0 && !labels.length && <hr className="border-border my-0.5 mx-2" />}
+                {groupIndex > 0 && !labels.length && (
+                  <hr className="border-border mt-1 mb-0.5 mx-2" />
+                )}
                 {labels.length > 0 &&
                   !labelFilter &&
                   (group.label ? (
@@ -504,7 +506,7 @@ export function ProjectList({ labelFilter, editMode }: ProjectListProps) {
                   ))}
                 {group.projects.map((project, index) => (
                   <div key={project.name}>
-                    {index > 0 && <hr className="border-border mb-0.5 mx-2" />}
+                    {index > 0 && <hr className="border-border mt-1 mb-0.5 mx-2" />}
                     <SortableProject
                       project={project}
                       statuses={statuses}
