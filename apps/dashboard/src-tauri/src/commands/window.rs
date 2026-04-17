@@ -145,8 +145,7 @@ pub async fn set_app_mode(app: AppHandle, mode: String) -> Result<(), String> {
             .unwrap_or(DEFAULT_SIDE_PANEL_WIDTH)
             .max(MIN_SIDE_PANEL_WIDTH);
         let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(
-            side_width,
-            screen_h,
+            side_width, screen_h,
         )));
         let _ = window.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(
             0.0, 0.0,
