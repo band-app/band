@@ -79,7 +79,7 @@ jobs:
         run: pnpm --filter @band-app/server test:e2e
 
       - name: Test (CLI)
-        run: cargo test --manifest-path apps/cli/Cargo.toml
+        run: cargo test --manifest-path apps/cli/Cargo.toml -- --test-threads=4
 
       - name: Test (Dashboard)
         run: cargo test --manifest-path apps/dashboard/src-tauri/Cargo.toml
