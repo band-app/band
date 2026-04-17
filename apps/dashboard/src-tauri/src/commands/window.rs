@@ -88,7 +88,8 @@ pub fn get_app_title() -> String {
     }
 }
 
-const SIDE_PANEL_WIDTH: f64 = 400.0;
+const DEFAULT_SIDE_PANEL_WIDTH: f64 = 400.0;
+const MIN_SIDE_PANEL_WIDTH: f64 = 240.0;
 
 #[tauri::command]
 pub async fn set_app_mode(app: AppHandle, mode: String) -> Result<(), String> {
@@ -103,6 +104,22 @@ pub async fn set_app_mode(app: AppHandle, mode: String) -> Result<(), String> {
     let was_enabled = focus_state.0.load(Ordering::SeqCst);
     let should_enable = mode != "full-editor";
     focus_state.0.store(should_enable, Ordering::SeqCst);
+
+    // Save current window width before switching away from side-panel mode
+    if mode == "full-editor" {
+        if let Ok(size) = window.outer_size() {
+            let scale = window
+                .current_monitor()
+                .ok()
+                .flatten()
+                .map(|m| m.scale_factor())
+                .unwrap_or(1.0);
+            let width = f64::from(size.width) / scale;
+            let mut ws = crate::state::load_window_state();
+            ws.sidebar_width = Some(width);
+            crate::state::save_window_state(&ws);
+        }
+    }
 
     let monitor = window
         .current_monitor()
@@ -122,9 +139,13 @@ pub async fn set_app_mode(app: AppHandle, mode: String) -> Result<(), String> {
             0.0, 0.0,
         )));
     } else {
-        // Side panel: narrow width, full height, left edge
+        // Side panel: restore saved width, or default
+        let side_width = crate::state::load_window_state()
+            .sidebar_width
+            .unwrap_or(DEFAULT_SIDE_PANEL_WIDTH)
+            .max(MIN_SIDE_PANEL_WIDTH);
         let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(
-            SIDE_PANEL_WIDTH,
+            side_width,
             screen_h,
         )));
         let _ = window.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(

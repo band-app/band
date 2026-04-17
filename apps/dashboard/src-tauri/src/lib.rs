@@ -241,13 +241,14 @@ pub fn run() {
                         screen_height,
                     )));
                 } else {
-                    // Side panel: narrow width at left edge, full height
-                    let current_width = window
-                        .outer_size()
-                        .map_or(400, |s| (f64::from(s.width) / scale_factor) as u32);
+                    // Side panel: use saved width, or default to 400
+                    let saved_width = state::load_window_state()
+                        .sidebar_width
+                        .unwrap_or(400.0)
+                        .max(240.0); // enforce minimum
 
                     let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(
-                        f64::from(current_width),
+                        saved_width,
                         screen_height,
                     )));
                 }
@@ -275,7 +276,26 @@ pub fn run() {
             let web_proc = app.state::<WebServerState>().inner().0.clone();
             let app_handle_for_close = app.handle().clone();
             let cleaned_up_close = cleaned_up;
+            let resize_focus_flag = app.state::<FocusManagementState>().inner().0.clone();
+            let resize_window = app.get_webview_window("main").unwrap();
             window.on_window_event(move |event| {
+                // Persist sidebar width when the window is resized in side-panel mode.
+                if let tauri::WindowEvent::Resized(_) = event {
+                    if resize_focus_flag.load(Ordering::SeqCst) {
+                        if let Ok(size) = resize_window.outer_size() {
+                            let scale = resize_window
+                                .current_monitor()
+                                .ok()
+                                .flatten()
+                                .map(|m| m.scale_factor())
+                                .unwrap_or(1.0);
+                            let width = f64::from(size.width) / scale;
+                            let mut ws = state::load_window_state();
+                            ws.sidebar_width = Some(width);
+                            state::save_window_state(&ws);
+                        }
+                    }
+                }
                 if let tauri::WindowEvent::CloseRequested { .. } = event {
                     if cleaned_up_close
                         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)

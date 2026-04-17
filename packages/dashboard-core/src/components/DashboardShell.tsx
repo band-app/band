@@ -156,14 +156,14 @@ export function DashboardShell({ toolbarExtra, hideTitleBar }: DashboardShellPro
                           backgroundColor: labels.find((l) => l.id === labelFilter)?.color,
                         }}
                       />
-                      <span className="hidden @[20rem]/toolbar:inline">
+                      <span className="hidden @[19rem]/toolbar:inline">
                         {labels.find((l) => l.id === labelFilter)?.name}
                       </span>
                     </>
                   ) : (
                     <>
                       <Tag className="size-5" />
-                      <span className="hidden @[20rem]/toolbar:inline">All</span>
+                      <span className="hidden @[19rem]/toolbar:inline">All</span>
                     </>
                   )}
                 </Button>

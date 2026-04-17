@@ -94,6 +94,35 @@ pub fn load_settings() -> Result<Settings, String> {
     serde_json::from_str(&data).map_err(|e| format!("Failed to parse settings: {e}"))
 }
 
+// --- Window state persistence ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct WindowState {
+    #[serde(rename = "sidebarWidth", skip_serializing_if = "Option::is_none")]
+    pub sidebar_width: Option<f64>,
+}
+
+fn window_state_file() -> PathBuf {
+    band_home().join("window-state.json")
+}
+
+pub fn load_window_state() -> WindowState {
+    let path = window_state_file();
+    if !path.exists() {
+        return WindowState::default();
+    }
+    fs::read_to_string(&path)
+        .ok()
+        .and_then(|data| serde_json::from_str(&data).ok())
+        .unwrap_or_default()
+}
+
+pub fn save_window_state(state: &WindowState) {
+    if let Ok(data) = serde_json::to_string_pretty(state) {
+        let _ = fs::write(window_state_file(), data);
+    }
+}
+
 // --- Focus management state (shared flag for runtime mode toggling) ---
 
 /// Tracks whether focus management (polling, window raising) is enabled.
