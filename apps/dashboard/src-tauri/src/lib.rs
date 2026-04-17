@@ -170,7 +170,7 @@ pub fn run() {
                         .cloned()
                         .or_else(|| app_handle.get_webview_window("main"));
                     if let Some(win) = target {
-                        let _ = win.eval(&format!(
+                        let _ = win.eval(format!(
                             "if(window.__bandZoom)window.__bandZoom('{action}')"
                         ));
                     }
