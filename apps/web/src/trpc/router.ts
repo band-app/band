@@ -1,7 +1,8 @@
 import { execFile, execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, unlinkSync } from "node:fs";
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { existsSync, mkdirSync, unlinkSync } from "node:fs";
+import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { basename, extname, join, resolve } from "node:path";
+import { promisify } from "node:util";
 import { toWorkspaceId } from "@band-app/dashboard-core";
 import { createLogger } from "@band-app/logger";
 import { initTRPC, TRPCError } from "@trpc/server";
@@ -74,6 +75,7 @@ import { emit, subscribe as subscribeStatus } from "../lib/watcher";
 import { resolveWorkspace } from "../lib/workspace";
 import type { Context } from "./context";
 
+const execFileAsync = promisify(execFile);
 const log = createLogger("trpc");
 
 const t = initTRPC.context<Context>().create();
@@ -334,11 +336,11 @@ const workspacesRouter = t.router({
         throw new Error(`Project "${input.project}" not found`);
       }
 
-      const { command, env } = gitCmd();
+      const { command, env: gitEnv } = gitCmd();
 
       const output = execFileSync(command, ["worktree", "list", "--porcelain"], {
         cwd: proj.path,
-        env,
+        env: gitEnv,
         encoding: "utf-8",
       });
 
@@ -356,49 +358,19 @@ const workspacesRouter = t.router({
           if (currentBranch === input.branch) {
             const worktreePath = currentPath;
 
-            // Run teardown script before removing worktree so it can access project files
+            // Capture config before returning — the directory may be removed
+            // by background cleanup before loadProjectConfig can read it.
+            let teardownCmd: string | undefined;
             try {
               const config = loadProjectConfig(worktreePath, proj.path);
               if (config?.teardown && typeof config.teardown === "string") {
-                execFileSync("bash", ["-c", config.teardown], {
-                  cwd: worktreePath,
-                  env: {
-                    ...process.env,
-                    PATH: `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH}`,
-                  },
-                  encoding: "utf-8",
-                  timeout: 60_000,
-                });
+                teardownCmd = config.teardown;
               }
             } catch {
-              // Teardown script failure is non-fatal
+              // Config may not exist
             }
 
-            try {
-              execFileSync(command, ["worktree", "remove", "--force", worktreePath], {
-                cwd: proj.path,
-                env,
-                encoding: "utf-8",
-              });
-            } catch {
-              // Worktree may be corrupted (e.g. missing .git file).
-              // Manually remove the directory and prune stale entries.
-              rmSync(worktreePath, { recursive: true, force: true });
-              execFileSync(command, ["worktree", "prune"], {
-                cwd: proj.path,
-                env,
-                encoding: "utf-8",
-              });
-            }
-            try {
-              execFileSync(command, ["branch", "-D", input.branch], {
-                cwd: proj.path,
-                env,
-                encoding: "utf-8",
-              });
-            } catch {
-              // Branch may already be deleted
-            }
+            // ── Fast path: update state and return immediately ──
             proj.worktrees = proj.worktrees.filter((wt) => wt.branch !== input.branch);
             saveState(state);
 
@@ -420,6 +392,65 @@ const workspacesRouter = t.router({
             // Clean up workspace-scoped cronjobs
             stopJobsForKey(workspaceId);
             deleteCronjobFile(workspaceId);
+
+            // Notify subscribers (dashboard status stream) that this workspace is gone
+            emit({ kind: "remove", workspaceId });
+
+            // ── Background cleanup: slow git/fs operations ──
+            const projPath = proj.path;
+            setImmediate(() => {
+              (async () => {
+                // Run teardown script before removing worktree so it can access project files
+                if (teardownCmd) {
+                  try {
+                    await execFileAsync("bash", ["-c", teardownCmd], {
+                      cwd: worktreePath,
+                      env: {
+                        ...process.env,
+                        PATH: `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH}`,
+                      },
+                      encoding: "utf-8",
+                      timeout: 60_000,
+                    });
+                  } catch (err) {
+                    log.warn({ err, workspaceId }, "teardown script failed");
+                  }
+                }
+
+                try {
+                  await execFileAsync(command, ["worktree", "remove", "--force", worktreePath], {
+                    cwd: projPath,
+                    env: gitEnv,
+                    encoding: "utf-8",
+                  });
+                } catch {
+                  // Worktree may be corrupted (e.g. missing .git file).
+                  // Manually remove the directory and prune stale entries.
+                  await rm(worktreePath, { recursive: true, force: true });
+                  try {
+                    await execFileAsync(command, ["worktree", "prune"], {
+                      cwd: projPath,
+                      env: gitEnv,
+                      encoding: "utf-8",
+                    });
+                  } catch (err) {
+                    log.warn({ err, workspaceId }, "git worktree prune failed");
+                  }
+                }
+
+                try {
+                  await execFileAsync(command, ["branch", "-D", input.branch], {
+                    cwd: projPath,
+                    env: gitEnv,
+                    encoding: "utf-8",
+                  });
+                } catch {
+                  // Branch may already be deleted
+                }
+              })().catch((err) => {
+                log.error({ err, workspaceId }, "background workspace cleanup failed");
+              });
+            });
 
             return { ok: true };
           }
