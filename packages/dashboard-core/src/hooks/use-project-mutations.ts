@@ -136,44 +136,20 @@ export function useRemoveWorkspace() {
   return useMutation({
     mutationFn: ({ project, branch }: { project: string; branch: string }) =>
       adapter.removeWorkspace(project, branch),
-    onMutate: async ({ project, branch }) => {
-      // Capture whether the deleted workspace is currently active BEFORE the
-      // mutation runs. The Hybrid adapter closes IDE windows during
-      // removeWorkspace, which can trigger focus polling to update
-      // activeWorkspaceId to a different workspace before onSuccess fires.
-      const deletedWorkspaceId = toWorkspaceId(project, branch);
-      const wasActive = store.getState().activeWorkspaceId === deletedWorkspaceId;
+    onSuccess: (_data, { project, branch }) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects });
 
-      await queryClient.cancelQueries({ queryKey: queryKeys.projects });
-      const previous = queryClient.getQueryData<ProjectInfo[]>(queryKeys.projects);
-      if (previous) {
-        const updated = previous.map((p) =>
-          p.name === project
-            ? { ...p, worktrees: p.worktrees.filter((wt) => wt.branch !== branch) }
-            : p,
-        );
-        queryClient.setQueryData(queryKeys.projects, updated);
-      }
-      return { previous, wasActive };
-    },
-    onSuccess: (_data, { project }, context) => {
-      if (context?.wasActive) {
+      const deletedWorkspaceId = toWorkspaceId(project, branch);
+      if (store.getState().activeWorkspaceId === deletedWorkspaceId) {
         const projects = queryClient.getQueryData<ProjectInfo[]>(queryKeys.projects);
         const projectInfo = projects?.find((p) => p.name === project);
         if (projectInfo) {
-          const mainWorkspaceId = toWorkspaceId(project, projectInfo.defaultBranch);
-          openWorkspace(mainWorkspaceId);
+          openWorkspace(toWorkspaceId(project, projectInfo.defaultBranch));
         }
       }
     },
-    onError: (err, _vars, context) => {
-      if (context?.previous) {
-        queryClient.setQueryData(queryKeys.projects, context.previous);
-      }
+    onError: (err) => {
       setError(String(err));
-    },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.projects });
     },
   });
 }
