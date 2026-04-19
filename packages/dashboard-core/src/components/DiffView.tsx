@@ -841,9 +841,7 @@ export function DiffView({
   }
 
   const fileStatuses = summary.fileStatuses || {};
-  const filenames = Object.keys(fileStatuses).sort((a, b) =>
-    a.localeCompare(b)
-  );
+  const filenames = Object.keys(fileStatuses).sort((a, b) => a.localeCompare(b));
   filenamesRef.current = filenames;
 
   return (
