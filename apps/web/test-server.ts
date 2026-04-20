@@ -13,6 +13,7 @@ import { createContext } from "./src/trpc/context.ts";
 import { appRouter } from "./src/trpc/router.ts";
 
 const port = parseInt(process.env.PORT || "0", 10);
+delete process.env.PORT;
 
 const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
   const url = new URL(req.url!, `http://${req.headers.host}`);
