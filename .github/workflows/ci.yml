@@ -72,6 +72,9 @@ jobs:
       - name: Test (web)
         run: pnpm --filter @band-app/server test
 
+      - name: Wait for apt lock
+        run: while sudo fuser /var/lib/apt/lists/lock /var/lib/dpkg/lock /var/lib/dpkg/lock-frontend 2>/dev/null; do echo "Waiting for apt lock..."; sleep 5; done
+
       - name: Install Playwright Chromium
         run: pnpm --filter @band-app/server exec playwright install --with-deps chromium
 
