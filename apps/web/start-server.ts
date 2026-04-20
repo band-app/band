@@ -62,6 +62,10 @@ process.on("uncaughtException", (error: Error) => {
 // so paths are relative to dist/.
 const clientDir = join(import.meta.dirname, "client");
 const port = parseInt(process.env.PORT || "3456", 10);
+// Remove PORT so child processes don't inherit it (issue #269).
+// Store as BAND_PORT for internal re-reads (e.g. tunnel start).
+delete process.env.PORT;
+process.env.BAND_PORT = String(port);
 
 const { handleAuth, expectedToken } = createAuthMiddleware(getOrCreateToken());
 

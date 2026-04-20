@@ -1088,7 +1088,7 @@ const tunnelRouter = t.router({
 
   start: publicProcedure.input(z.object({}).optional()).mutation(async () => {
     log.debug("tunnel.start called");
-    const port = parseInt(process.env.PORT || "3456", 10);
+    const port = parseInt(process.env.BAND_PORT || "3456", 10);
     log.debug("tunnel.start: port=%d", port);
     try {
       await startTunnel({ port });
