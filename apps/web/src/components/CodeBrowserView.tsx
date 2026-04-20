@@ -1,10 +1,13 @@
 import {
   FileBrowser,
   FileViewer,
+  getFilePreviewType,
   parseFileLocation,
   SearchBar,
   scrollToLine,
+  toWorkspaceId,
   useEditorHistory,
+  useProjects,
   useSearch,
 } from "@band-app/dashboard-core";
 import { cn, Tooltip, TooltipContent, TooltipTrigger } from "@band-app/ui";
@@ -15,6 +18,8 @@ import { mermaid } from "@streamdown/mermaid";
 import {
   ChevronLeft,
   ChevronRight,
+  Code,
+  Eye,
   File,
   PanelLeftClose,
   PanelLeftOpen,
@@ -24,7 +29,9 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Group, Panel, Separator, usePanelRef } from "react-resizable-panels";
 import { Streamdown } from "streamdown";
+import { useFileTabs } from "../hooks/useFileTabs";
 import { useIsDesktop } from "../hooks/useIsDesktop";
+import { FileTabBar } from "./FileTabBar";
 import { streamdownComponents } from "./streamdown-components";
 
 const streamdownPlugins = { cjk, code, math, mermaid };
@@ -210,6 +217,18 @@ export function CodeBrowserView({
   onSearchFiles,
 }: CodeBrowserViewProps) {
   const isDesktop = useIsDesktop();
+  const fileTabs = useFileTabs(workspaceId);
+  const { projects } = useProjects();
+  const workspacePath = (() => {
+    for (const proj of projects) {
+      for (const wt of proj.worktrees) {
+        if (toWorkspaceId(proj.name, wt.branch) === workspaceId) {
+          return wt.path;
+        }
+      }
+    }
+    return undefined;
+  })();
   const [viewFilePath, setViewFilePath] = useState(() => {
     if (!file) return "";
     return parseFileLocation(file).filePath;
@@ -226,6 +245,25 @@ export function CodeBrowserView({
     if (!file) return undefined;
     return parseFileLocation(file).column;
   });
+
+  // Markdown view mode (controlled from here, rendered in tab bar actions)
+  const [mdViewMode, setMdViewMode] = useState<"preview" | "source">("preview");
+  const isMarkdown = viewFilePath ? getFilePreviewType(viewFilePath) === "markdown" : false;
+
+  // Reset to preview when switching to a different file
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset on file change only
+  useEffect(() => {
+    setMdViewMode("preview");
+  }, [viewFilePath]);
+
+  // Open initial file as a tab (desktop only)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only on mount
+  useEffect(() => {
+    if (file) {
+      const loc = parseFileLocation(file);
+      fileTabs.openTab(loc.filePath);
+    }
+  }, []);
 
   // -------------------------------------------------------------------------
   // CodeMirror editor view ref (shared by find-in-file and navigation history)
@@ -284,6 +322,7 @@ export function CodeBrowserView({
         line: loc.line ?? 1,
         column: loc.column,
       });
+      fileTabs.openTab(loc.filePath);
       setViewFilePath(loc.filePath);
       setViewLine(loc.line);
       setViewLineEnd(loc.lineEnd);
@@ -301,6 +340,7 @@ export function CodeBrowserView({
         line: loc.line ?? 1,
         column: loc.column,
       });
+      fileTabs.openTab(loc.filePath);
       setViewFilePath(loc.filePath);
       setViewLine(loc.line);
       setViewLineEnd(loc.lineEnd);
@@ -356,13 +396,14 @@ export function CodeBrowserView({
   const handleSelectFile = useCallback(
     (filePath: string) => {
       pushDepartureAndArrival({ filePath });
+      fileTabs.openTab(filePath);
       setViewFilePath(filePath);
       setViewLine(undefined);
       setViewLineEnd(undefined);
       setViewColumn(undefined);
       onSelectFile?.(filePath);
     },
-    [onSelectFile, pushDepartureAndArrival],
+    [onSelectFile, pushDepartureAndArrival, fileTabs.openTab],
   );
 
   const handleBack = useCallback(() => {
@@ -373,12 +414,65 @@ export function CodeBrowserView({
     onSelectFile?.(null);
   }, [onSelectFile]);
 
+  // -------------------------------------------------------------------------
+  // Tab handlers
+  // -------------------------------------------------------------------------
+  const handleTabSelect = useCallback(
+    (filePath: string) => {
+      fileTabs.setActiveTab(filePath);
+      setViewFilePath(filePath);
+      setViewLine(undefined);
+      setViewLineEnd(undefined);
+      setViewColumn(undefined);
+      onSelectFile?.(filePath);
+    },
+    [fileTabs.setActiveTab, onSelectFile],
+  );
+
+  const handleTabClose = useCallback(
+    (filePath: string) => {
+      // Clear the unsaved edits cache so the file reloads fresh from
+      // the server when reopened (same key format as FileViewer).
+      try {
+        localStorage.removeItem(`band-edits:${workspaceId}\0${filePath}`);
+      } catch {
+        // storage unavailable
+      }
+      fileTabs.closeTab(filePath);
+    },
+    [fileTabs.closeTab, workspaceId],
+  );
+
+  // Sync viewFilePath when active tab changes due to a close.
+  // Only reacts to tab state changes — onSelectFile and viewFilePath are
+  // intentionally read as latest values to avoid re-triggering on every
+  // parent render or file navigation.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: onSelectFile and viewFilePath are intentionally excluded to prevent feedback loops
+  useEffect(() => {
+    if (fileTabs.activeTabPath === null && fileTabs.openTabs.length === 0) {
+      // All tabs closed — show empty state
+      setViewFilePath("");
+      setViewLine(undefined);
+      setViewLineEnd(undefined);
+      setViewColumn(undefined);
+      onSelectFile?.(null);
+    } else if (fileTabs.activeTabPath && fileTabs.activeTabPath !== viewFilePath) {
+      // Active tab changed (e.g. after closing) — sync to new active tab
+      setViewFilePath(fileTabs.activeTabPath);
+      setViewLine(undefined);
+      setViewLineEnd(undefined);
+      setViewColumn(undefined);
+      onSelectFile?.(fileTabs.activeTabPath);
+    }
+  }, [fileTabs.activeTabPath, fileTabs.openTabs.length]);
+
   const navigateToEntry = useCallback(
     (entry: { filePath: string; line?: number; column?: number }) => {
       const sameFile = entry.filePath === viewFilePath;
       // Prevent the file prop effect from overwriting the line we're about to set.
       // The route round-trip only carries the file path, not the line.
       if (!sameFile) skipFileEffectRef.current = true;
+      fileTabs.openTab(entry.filePath);
       setViewFilePath(entry.filePath);
       setViewLine(entry.line);
       setViewLineEnd(undefined);
@@ -397,7 +491,7 @@ export function CodeBrowserView({
         focusOnViewReadyRef.current = true;
       }
     },
-    [viewFilePath, onSelectFile],
+    [viewFilePath, onSelectFile, fileTabs.openTab],
   );
 
   const handleEditorGoBack = useCallback(() => {
@@ -422,6 +516,21 @@ export function CodeBrowserView({
       window.removeEventListener("band:editor-go-forward", handleGoForward);
     };
   }, [handleEditorGoBack, handleEditorGoForward]);
+
+  // Cmd+W / Ctrl+W to close active tab
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "w") {
+        if (fileTabs.activeTabPath) {
+          e.preventDefault();
+          e.stopPropagation();
+          handleTabClose(fileTabs.activeTabPath);
+        }
+      }
+    };
+    window.addEventListener("keydown", handler, { capture: true });
+    return () => window.removeEventListener("keydown", handler, { capture: true });
+  }, [fileTabs.activeTabPath, handleTabClose]);
 
   // -------------------------------------------------------------------------
   // Resizable file tree panel
@@ -548,9 +657,9 @@ export function CodeBrowserView({
         </button>
       </Separator>
 
-      {/* Right panel — file content */}
+      {/* Right panel — file tabs + content */}
       <Panel id="file-viewer" minSize="20%">
-        <div className="relative h-full overflow-hidden">
+        <div className="relative flex h-full flex-col overflow-hidden">
           {treeCollapsed && (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -567,7 +676,67 @@ export function CodeBrowserView({
               </TooltipContent>
             </Tooltip>
           )}
-          <div className={treeCollapsed ? "h-full [&>div>div:first-child]:pl-8" : "h-full"}>
+
+          {/* Tab bar */}
+          <div className={treeCollapsed ? "[&>div]:pl-7" : ""}>
+            <FileTabBar
+              workspaceId={workspaceId}
+              workspacePath={workspacePath}
+              tabs={fileTabs.openTabs}
+              activeTabPath={fileTabs.activeTabPath}
+              onSelectTab={handleTabSelect}
+              onCloseTab={handleTabClose}
+              onGoBack={handleEditorGoBack}
+              onGoForward={handleEditorGoForward}
+              canGoBack={editorHistory.canGoBack}
+              canGoForward={editorHistory.canGoForward}
+              actions={
+                isMarkdown ? (
+                  <div className="flex items-center gap-0.5">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          onClick={() => setMdViewMode("preview")}
+                          className={`inline-flex size-6 items-center justify-center rounded-md transition-colors ${
+                            mdViewMode === "preview"
+                              ? "bg-accent text-accent-foreground"
+                              : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                          }`}
+                        >
+                          <Eye className="size-3.5" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom" className="text-xs">
+                        Preview
+                      </TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          onClick={() => setMdViewMode("source")}
+                          className={`inline-flex size-6 items-center justify-center rounded-md transition-colors ${
+                            mdViewMode === "source"
+                              ? "bg-accent text-accent-foreground"
+                              : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                          }`}
+                        >
+                          <Code className="size-3.5" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom" className="text-xs">
+                        Source
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                ) : undefined
+              }
+            />
+          </div>
+
+          {/* File content */}
+          <div className="min-h-0 flex-1">
             {viewFilePath ? (
               <FileViewer
                 workspaceId={workspaceId}
@@ -576,13 +745,12 @@ export function CodeBrowserView({
                 lineEnd={viewLineEnd}
                 column={viewColumn}
                 onEditorView={handleEditorView}
-                onGoBack={handleEditorGoBack}
-                onGoForward={handleEditorGoForward}
-                canGoBack={editorHistory.canGoBack}
-                canGoForward={editorHistory.canGoForward}
                 onCursorLineChange={handleCursorLineChange}
                 renderMarkdown={renderMarkdown}
                 editable
+                hideTitleBar
+                viewMode={isMarkdown ? mdViewMode : undefined}
+                onViewModeChange={isMarkdown ? setMdViewMode : undefined}
                 toolbar={
                   search.searchOpen ? (
                     <SearchBar

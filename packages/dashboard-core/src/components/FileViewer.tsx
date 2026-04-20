@@ -49,6 +49,12 @@ interface FileViewerProps {
   canGoForward?: boolean;
   /** Called when the user jumps the cursor ≥10 lines (click, Page Up/Down, etc.) */
   onCursorLineChange?: (departureLine: number, arrivalLine: number) => void;
+  /** When true, hides the title bar (path, size, nav arrows). */
+  hideTitleBar?: boolean;
+  /** Controlled view mode for markdown files (preview vs source). When provided, FileViewer uses this instead of internal state. */
+  viewMode?: "preview" | "source";
+  /** Called when the user toggles between preview and source mode. */
+  onViewModeChange?: (mode: "preview" | "source") => void;
 }
 
 // localStorage-backed cache for unsaved edits — survives page reloads
@@ -117,12 +123,19 @@ export function FileViewer({
   canGoBack,
   canGoForward,
   onCursorLineChange,
+  hideTitleBar,
+  viewMode: controlledViewMode,
+  onViewModeChange,
 }: FileViewerProps) {
   const adapter = useAdapter();
   const [data, setData] = useState<FileContentResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<"preview" | "source">("preview");
+  const [internalViewMode, setInternalViewMode] = useState<"preview" | "source">("preview");
+
+  // Support both controlled and uncontrolled view mode
+  const viewMode = controlledViewMode ?? internalViewMode;
+  const setViewMode = onViewModeChange ?? setInternalViewMode;
 
   // Editing state
   const [editedContent, setEditedContent] = useState<string | null>(null);
@@ -142,7 +155,8 @@ export function FileViewer({
   useEffect(() => {
     const key = editsCacheKey(workspaceId, filePath);
     const cached = unsavedEditsCache.get(key);
-    setViewMode("preview");
+    // Only reset internal view mode when uncontrolled
+    if (!controlledViewMode) setInternalViewMode("preview");
     setEditedContent(cached ?? null);
     setSaveError(null);
 
@@ -290,108 +304,109 @@ export function FileViewer({
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      {/* Title bar */}
-      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border/50 px-3">
-        {onBack && (
-          <button
-            type="button"
-            onClick={handleBack}
-            className="inline-flex size-6 items-center justify-center rounded-md hover:bg-accent"
-          >
-            <ArrowLeft className="size-3.5" />
-          </button>
-        )}
-        {/* Editor navigation history buttons */}
-        {(onGoBack || onGoForward) && (
-          <div className="flex items-center gap-0.5">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={onGoBack}
-                  disabled={!canGoBack}
-                  className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-30 disabled:pointer-events-none"
-                >
-                  <ChevronLeft className="size-3.5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" className="text-xs">
-                Go Back{" "}
-                <kbd className="ml-1.5 rounded border border-popover-foreground/25 bg-popover-foreground/10 px-1 py-0.5 font-mono text-[14px]">
-                  ⌃-
-                </kbd>
-              </TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={onGoForward}
-                  disabled={!canGoForward}
-                  className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-30 disabled:pointer-events-none"
-                >
-                  <ChevronRight className="size-3.5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" className="text-xs">
-                Go Forward{" "}
-                <kbd className="ml-1.5 rounded border border-popover-foreground/25 bg-popover-foreground/10 px-1 py-0.5 font-mono text-[14px]">
-                  ⌃⇧-
-                </kbd>
-              </TooltipContent>
-            </Tooltip>
-          </div>
-        )}
-        <span className="min-w-0 flex-1 truncate font-mono text-xs">
-          {filePath}
-          {isDirty && <span className="ml-1 text-muted-foreground">(modified)</span>}
-        </span>
-        {saveError && <span className="shrink-0 text-xs text-destructive">{saveError}</span>}
-        {canEdit && isDirty && (
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={saving}
-            title="Save (Cmd+S)"
-            className="inline-flex size-6 items-center justify-center rounded-md hover:bg-accent disabled:opacity-50"
-          >
-            {saving ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
-          </button>
-        )}
-        {/* Markdown preview/source toggle icons */}
-        {showMarkdownToggle && (
-          <div className="flex shrink-0 items-center gap-0.5">
+      {/* Title bar — full version (mobile / non-tab views) */}
+      {!hideTitleBar && (
+        <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border/50 px-3">
+          {onBack && (
             <button
               type="button"
-              onClick={() => setViewMode("preview")}
-              title="Preview"
-              className={`inline-flex size-6 items-center justify-center rounded-md transition-colors ${
-                viewMode === "preview"
-                  ? "bg-accent text-accent-foreground"
-                  : "text-muted-foreground hover:bg-accent hover:text-foreground"
-              }`}
+              onClick={handleBack}
+              className="inline-flex size-6 items-center justify-center rounded-md hover:bg-accent"
             >
-              <Eye className="size-3.5" />
+              <ArrowLeft className="size-3.5" />
             </button>
+          )}
+          {/* Editor navigation history buttons */}
+          {(onGoBack || onGoForward) && (
+            <div className="flex items-center gap-0.5">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={onGoBack}
+                    disabled={!canGoBack}
+                    className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-30 disabled:pointer-events-none"
+                  >
+                    <ChevronLeft className="size-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="text-xs">
+                  Go Back{" "}
+                  <kbd className="ml-1.5 rounded border border-popover-foreground/25 bg-popover-foreground/10 px-1 py-0.5 font-mono text-[14px]">
+                    ⌃-
+                  </kbd>
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={onGoForward}
+                    disabled={!canGoForward}
+                    className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors disabled:opacity-30 disabled:pointer-events-none"
+                  >
+                    <ChevronRight className="size-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="text-xs">
+                  Go Forward{" "}
+                  <kbd className="ml-1.5 rounded border border-popover-foreground/25 bg-popover-foreground/10 px-1 py-0.5 font-mono text-[14px]">
+                    ⌃⇧-
+                  </kbd>
+                </TooltipContent>
+              </Tooltip>
+            </div>
+          )}
+          <span className="min-w-0 flex-1 truncate font-mono text-xs">
+            {filePath}
+            {isDirty && <span className="ml-1 text-muted-foreground">(modified)</span>}
+          </span>
+          {saveError && <span className="shrink-0 text-xs text-destructive">{saveError}</span>}
+          {canEdit && isDirty && (
             <button
               type="button"
-              onClick={() => setViewMode("source")}
-              title="Source"
-              className={`inline-flex size-6 items-center justify-center rounded-md transition-colors ${
-                viewMode === "source"
-                  ? "bg-accent text-accent-foreground"
-                  : "text-muted-foreground hover:bg-accent hover:text-foreground"
-              }`}
+              onClick={handleSave}
+              disabled={saving}
+              title="Save (Cmd+S)"
+              className="inline-flex size-6 items-center justify-center rounded-md hover:bg-accent disabled:opacity-50"
             >
-              <Code className="size-3.5" />
+              {saving ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
             </button>
-          </div>
-        )}
-        {data && (
-          <span className="shrink-0 text-xs text-muted-foreground">{formatSize(data.size)}</span>
-        )}
-      </div>
-
+          )}
+          {/* Markdown preview/source toggle icons */}
+          {showMarkdownToggle && (
+            <div className="flex shrink-0 items-center gap-0.5">
+              <button
+                type="button"
+                onClick={() => setViewMode("preview")}
+                title="Preview"
+                className={`inline-flex size-6 items-center justify-center rounded-md transition-colors ${
+                  viewMode === "preview"
+                    ? "bg-accent text-accent-foreground"
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                }`}
+              >
+                <Eye className="size-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode("source")}
+                title="Source"
+                className={`inline-flex size-6 items-center justify-center rounded-md transition-colors ${
+                  viewMode === "source"
+                    ? "bg-accent text-accent-foreground"
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                }`}
+              >
+                <Code className="size-3.5" />
+              </button>
+            </div>
+          )}
+          {data && (
+            <span className="shrink-0 text-xs text-muted-foreground">{formatSize(data.size)}</span>
+          )}
+        </div>
+      )}
       {toolbar}
 
       {/* Content area */}
