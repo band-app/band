@@ -1,12 +1,12 @@
 import { getFileIcon } from "@band-app/dashboard-core";
 import {
   Button,
-  cn,
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
   ContextMenuTrigger,
+  cn,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -85,6 +85,7 @@ export function FileTabBar({
   const [confirmClosePath, setConfirmClosePath] = useState<string | null>(null);
 
   // Auto-scroll active tab into view
+  // biome-ignore lint/correctness/useExhaustiveDependencies: activeTabPath triggers re-scroll when tab changes
   useEffect(() => {
     if (activeRef.current) {
       activeRef.current.scrollIntoView({ inline: "nearest", block: "nearest" });
@@ -232,19 +233,13 @@ export function FileTabBar({
                     <span className="min-w-0 flex-1 truncate">{basename}</span>
 
                     {/* Dirty indicator dot OR close button */}
-                    <span
-                      className="relative flex size-4 shrink-0 items-center justify-center"
+                    <button
+                      type="button"
+                      className="relative flex size-4 shrink-0 items-center justify-center bg-transparent border-none p-0"
                       onClick={(e) => {
                         e.stopPropagation();
                         handleClose(tab.filePath);
                       }}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.stopPropagation();
-                          handleClose(tab.filePath);
-                        }
-                      }}
-                      role="button"
                       tabIndex={-1}
                       aria-label={`Close ${basename}`}
                     >
@@ -259,7 +254,7 @@ export function FileTabBar({
                         /* Close icon — subtle, visible on tab hover */
                         <X className="size-3.5 rounded-sm opacity-0 hover:bg-accent group-hover:opacity-100 transition-opacity" />
                       )}
-                    </span>
+                    </button>
                   </button>
                 </ContextMenuTrigger>
 
@@ -288,7 +283,10 @@ export function FileTabBar({
       </div>
 
       {/* Unsaved changes confirmation dialog */}
-      <Dialog open={confirmClosePath !== null} onOpenChange={(open) => !open && setConfirmClosePath(null)}>
+      <Dialog
+        open={confirmClosePath !== null}
+        onOpenChange={(open) => !open && setConfirmClosePath(null)}
+      >
         <DialogContent showCloseButton={false}>
           <DialogHeader>
             <DialogTitle>Unsaved Changes</DialogTitle>

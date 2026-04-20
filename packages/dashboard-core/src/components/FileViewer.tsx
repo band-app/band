@@ -152,6 +152,7 @@ export function FileViewer({
 
   // Persist unsaved edits to cache when leaving a file (navigation or unmount),
   // and restore them when returning.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: controlledViewMode is intentionally excluded — we only reset internal view mode on file change, not when controlled prop changes
   useEffect(() => {
     const key = editsCacheKey(workspaceId, filePath);
     const cached = unsavedEditsCache.get(key);
@@ -370,7 +371,11 @@ export function FileViewer({
               title="Save (Cmd+S)"
               className="inline-flex size-6 items-center justify-center rounded-md hover:bg-accent disabled:opacity-50"
             >
-              {saving ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
+              {saving ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Save className="size-3.5" />
+              )}
             </button>
           )}
           {/* Markdown preview/source toggle icons */}
