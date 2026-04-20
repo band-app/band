@@ -398,17 +398,26 @@ function ContextToolbar({
 }
 
 // ---------------------------------------------------------------------------
-// Lazy file row — fetches diff on first expand
+// Lazy file row — renders diff from parent-provided cache
 // ---------------------------------------------------------------------------
+
+interface FileDiffCacheEntry {
+  diff: string | null;
+  loadingDiff: boolean;
+  diffError: string | null;
+  contextLines: number;
+}
 
 interface LazyFileRowProps {
   filename: string;
   status: FileStatus | undefined;
-  workspaceId: string;
-  mergeBase: string;
+  cacheEntry: FileDiffCacheEntry | undefined;
   viewMode: ViewMode;
   expandAll: boolean;
   focusedFile: { path: string; seq: number } | null;
+  onToggleFile: (filename: string, isOpen: boolean) => void;
+  onLoadMoreContext: (filename: string) => void;
+  onShowFullFile: (filename: string) => void;
   onOpenFile?: (filename: string) => void;
   onEditorViews?: (filename: string, views: EditorView[]) => void;
 }
@@ -416,23 +425,17 @@ interface LazyFileRowProps {
 function LazyFileRow({
   filename,
   status,
-  workspaceId,
-  mergeBase,
+  cacheEntry,
   viewMode,
   expandAll,
   focusedFile,
+  onToggleFile,
+  onLoadMoreContext,
+  onShowFullFile,
   onOpenFile,
   onEditorViews,
 }: LazyFileRowProps) {
-  const adapter = useAdapter();
   const [isOpen, setIsOpen] = useState(expandAll);
-  const [diff, setDiff] = useState<string | null>(null);
-  const [loadingDiff, setLoadingDiff] = useState(false);
-  const [diffError, setDiffError] = useState<string | null>(null);
-  const [contextLines, setContextLines] = useState(3);
-  // Track which mergeBase + contextLines the cached diff belongs to
-  const cachedMergeBaseRef = useRef<string | null>(null);
-  const cachedContextRef = useRef<number | null>(null);
 
   const handleEditorViews = useCallback(
     (views: EditorView[]) => {
@@ -447,6 +450,11 @@ function LazyFileRow({
       onEditorViews?.(filename, []);
     }
   }, [isOpen, filename, onEditorViews]);
+
+  // Notify parent of expansion state changes (triggers diff fetch for newly opened files)
+  useEffect(() => {
+    onToggleFile(filename, isOpen);
+  }, [isOpen, filename, onToggleFile]);
 
   const toggle = useCallback(() => {
     setIsOpen((prev) => !prev);
@@ -472,70 +480,13 @@ function LazyFileRow({
     }
   }, [focusedFile, filename]);
 
-  // Fetch diff when expanded and not cached (or mergeBase/contextLines changed)
-  useEffect(() => {
-    if (!isOpen) return;
-    if (
-      diff !== null &&
-      cachedMergeBaseRef.current === mergeBase &&
-      cachedContextRef.current === contextLines
-    ) {
-      return;
-    }
-
-    const getFileDiff = adapter.getFileDiff;
-    if (!getFileDiff) return;
-
-    let cancelled = false;
-    setLoadingDiff(true);
-    setDiffError(null);
-
-    getFileDiff
-      .call(adapter, workspaceId, filename, mergeBase, contextLines > 3 ? contextLines : undefined)
-      .then((result) => {
-        if (!cancelled) {
-          setDiff(result.diff);
-          cachedMergeBaseRef.current = mergeBase;
-          cachedContextRef.current = contextLines;
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) setDiffError(err instanceof Error ? err.message : "Failed to load diff");
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingDiff(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isOpen, adapter, workspaceId, filename, mergeBase, contextLines, diff]);
-
-  // Invalidate cache when mergeBase changes
-  useEffect(() => {
-    if (cachedMergeBaseRef.current && cachedMergeBaseRef.current !== mergeBase) {
-      setDiff(null);
-      cachedMergeBaseRef.current = null;
-      cachedContextRef.current = null;
-      setContextLines(3);
-    }
-  }, [mergeBase]);
+  const diff = cacheEntry?.diff ?? null;
+  const loadingDiff = cacheEntry?.loadingDiff ?? false;
+  const diffError = cacheEntry?.diffError ?? null;
+  const contextLines = cacheEntry?.contextLines ?? 3;
 
   const isUntracked = status === "U";
   const canLoadMore = !isUntracked && getNextContextStep(contextLines) !== null;
-
-  const handleLoadMore = useCallback(() => {
-    const next = getNextContextStep(contextLines);
-    if (next !== null) {
-      setDiff(null);
-      setContextLines(next);
-    }
-  }, [contextLines]);
-
-  const handleShowFullFile = useCallback(() => {
-    setDiff(null);
-    setContextLines(99999);
-  }, []);
 
   return (
     <div id={`diff-file-${encodeURIComponent(filename)}`} className="border-b border-border/30">
@@ -588,8 +539,8 @@ function LazyFileRow({
               {canLoadMore && (
                 <ContextToolbar
                   contextLines={contextLines}
-                  onLoadMore={handleLoadMore}
-                  onShowFullFile={handleShowFullFile}
+                  onLoadMore={() => onLoadMoreContext(filename)}
+                  onShowFullFile={() => onShowFullFile(filename)}
                 />
               )}
               <DiffFileContent
@@ -653,10 +604,19 @@ export function DiffView({
 }: DiffViewProps) {
   const adapter = useAdapter();
   const [summary, setSummary] = useState<WorkspaceDiffSummary | null>(null);
+  const summaryRef = useRef<WorkspaceDiffSummary | null>(null);
   const [baseBranch, setBaseBranch] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const fetchSummaryRef = useRef<(() => void) | null>(null);
+  const fetchSummaryRef = useRef<((force?: boolean) => void) | null>(null);
+  // Per-file diff cache owned by the parent — eliminates child-level caching
+  const [diffCache, setDiffCache] = useState<Map<string, FileDiffCacheEntry>>(new Map());
+  const diffCacheRef = useRef<Map<string, FileDiffCacheEntry>>(new Map());
+  diffCacheRef.current = diffCache;
+  // Tracks which files are currently expanded (ref to avoid stale closures)
+  const expandedFilesRef = useRef<Set<string>>(new Set());
+  // Fingerprint of the last fetched summary to detect actual data changes from SSE polls
+  const prevFingerprintRef = useRef<string>("");
   const [viewMode, setViewModeState] = useState<ViewMode>(getStoredViewMode);
   const [diffMode, setDiffModeState] = useState<DiffMode>(getStoredDiffMode);
   const [expandAll, setExpandAllState] = useState(getStoredExpandAll);
@@ -749,6 +709,99 @@ export function DiffView({
   );
 
   // -------------------------------------------------------------------------
+  // Per-file diff cache callbacks
+  // -------------------------------------------------------------------------
+
+  const fetchFileDiff = useCallback(
+    (filename: string, mergeBase?: string, contextLines = 3) => {
+      const getFileDiff = adapter.getFileDiff;
+      if (!getFileDiff) return;
+
+      const effectiveMergeBase = mergeBase ?? summaryRef.current?.mergeBase;
+      if (!effectiveMergeBase) return;
+
+      setDiffCache((prev) => {
+        const next = new Map(prev);
+        next.set(filename, {
+          diff: prev.get(filename)?.diff ?? null,
+          loadingDiff: true,
+          diffError: null,
+          contextLines,
+        });
+        return next;
+      });
+
+      getFileDiff
+        .call(
+          adapter,
+          workspaceId,
+          filename,
+          effectiveMergeBase,
+          contextLines > 3 ? contextLines : undefined,
+        )
+        .then((result) => {
+          setDiffCache((prev) => {
+            const next = new Map(prev);
+            next.set(filename, {
+              diff: result.diff,
+              loadingDiff: false,
+              diffError: null,
+              contextLines,
+            });
+            return next;
+          });
+        })
+        .catch((err) => {
+          setDiffCache((prev) => {
+            const next = new Map(prev);
+            const existing = prev.get(filename);
+            next.set(filename, {
+              diff: existing?.diff ?? null,
+              loadingDiff: false,
+              diffError: err instanceof Error ? err.message : "Failed to load diff",
+              contextLines: existing?.contextLines ?? contextLines,
+            });
+            return next;
+          });
+        });
+    },
+    [adapter, workspaceId],
+  );
+
+  const handleToggleFile = useCallback(
+    (filename: string, isOpen: boolean) => {
+      if (isOpen) {
+        expandedFilesRef.current.add(filename);
+        if (!diffCacheRef.current.has(filename)) {
+          fetchFileDiff(filename);
+        }
+      } else {
+        expandedFilesRef.current.delete(filename);
+      }
+    },
+    [fetchFileDiff],
+  );
+
+  const handleLoadMoreContext = useCallback(
+    (filename: string) => {
+      const entry = diffCacheRef.current.get(filename);
+      const current = entry?.contextLines ?? 3;
+      const next = getNextContextStep(current);
+      if (next !== null) {
+        fetchFileDiff(filename, undefined, next);
+      }
+    },
+    [fetchFileDiff],
+  );
+
+  const handleShowFullFile = useCallback(
+    (filename: string) => {
+      fetchFileDiff(filename, undefined, 99999);
+    },
+    [fetchFileDiff],
+  );
+
+  // -------------------------------------------------------------------------
   // Fetch diff summary
   // -------------------------------------------------------------------------
 
@@ -759,15 +812,56 @@ export function DiffView({
     let cancelled = false;
     setLoading(true);
     setSummary(null);
+    summaryRef.current = null;
+    // Clear diff cache when this effect re-runs (e.g. diffMode change)
+    setDiffCache(new Map());
+    expandedFilesRef.current = new Set();
+    prevFingerprintRef.current = "";
 
-    const fetchSummary = () => {
+    const fetchSummary = (forceRefresh = false) => {
       getWorkspaceDiffSummary
         .call(adapter, workspaceId, diffMode)
         .then((result) => {
           if (!cancelled) {
+            const fingerprint = JSON.stringify({
+              fileStatuses: result.fileStatuses,
+              stats: result.stats,
+              mergeBase: result.mergeBase,
+            });
+
+            const dataChanged = fingerprint !== prevFingerprintRef.current;
+            prevFingerprintRef.current = fingerprint;
+
+            // Update summary ref before triggering re-fetches so fetchFileDiff
+            // reads the new mergeBase
+            summaryRef.current = result;
             setSummary(result);
             setBaseBranch(result.baseBranch);
             setError(null);
+
+            // Clear diff cache and re-fetch expanded files when data changed or forced
+            if (forceRefresh || dataChanged) {
+              // Save current contextLines before clearing
+              const expandedContextLines = new Map<string, number>();
+              for (const filename of expandedFilesRef.current) {
+                const entry = diffCacheRef.current.get(filename);
+                if (entry) expandedContextLines.set(filename, entry.contextLines);
+              }
+
+              setDiffCache(new Map());
+
+              // Re-fetch for currently expanded files with preserved context levels
+              for (const filename of expandedFilesRef.current) {
+                if (result.fileStatuses[filename]) {
+                  fetchFileDiff(
+                    filename,
+                    result.mergeBase,
+                    expandedContextLines.get(filename) ?? 3,
+                  );
+                }
+              }
+            }
+
             const hasChanges = result.stats.filesChanged > 0;
             onStatsChange?.(hasChanges ? result.stats : null);
           }
@@ -801,7 +895,7 @@ export function DiffView({
       fetchSummaryRef.current = null;
       unsubscribe?.();
     };
-  }, [adapter, workspaceId, active, onStatsChange, diffMode]);
+  }, [adapter, workspaceId, active, onStatsChange, diffMode, fetchFileDiff]);
 
   if (loading) {
     return (
@@ -916,7 +1010,7 @@ export function DiffView({
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => fetchSummaryRef.current?.()}
+              onClick={() => fetchSummaryRef.current?.(true)}
               className="inline-flex items-center rounded-md border border-border/50 bg-muted/50 px-2 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
               title="Reload changes"
             >
@@ -1003,11 +1097,13 @@ export function DiffView({
               key={filename}
               filename={filename}
               status={fileStatuses[filename]}
-              workspaceId={workspaceId}
-              mergeBase={summary.mergeBase}
+              cacheEntry={diffCache.get(filename)}
               viewMode={viewMode}
               expandAll={expandAll}
               focusedFile={focusedFile}
+              onToggleFile={handleToggleFile}
+              onLoadMoreContext={handleLoadMoreContext}
+              onShowFullFile={handleShowFullFile}
               onOpenFile={onOpenFile}
               onEditorViews={handleEditorViews}
             />
