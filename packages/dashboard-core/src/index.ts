@@ -61,6 +61,17 @@ export {
   scrollToLine,
   scrollToSearchMatch,
 } from "./lib/codemirror-setup";
+export {
+  buildLspWsUrl,
+  createLspExtension,
+  getLspLanguageId,
+  hasPendingNavigation,
+  LSP_SUPPORTED_LANGUAGES,
+  releaseLspClient,
+  resolveNavigation,
+  toFileUri,
+  toLspServerLang,
+} from "./lib/codemirror-lsp";
 export { getFileIcon } from "./lib/file-icon";
 export { type FileLocation, formatFileLocation, parseFileLocation } from "./lib/file-location";
 export { type FilePreviewType, getFilePreviewType } from "./lib/file-type";

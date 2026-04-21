@@ -1,14 +1,23 @@
 import {
+  buildLspWsUrl,
+  createLspExtension,
   FileBrowser,
   FileViewer,
   getFilePreviewType,
+  getLspLanguageId,
+  hasPendingNavigation,
   parseFileLocation,
+  releaseLspClient,
+  resolveNavigation,
   SearchBar,
   scrollToLine,
+  toFileUri,
+  toLspServerLang,
   toWorkspaceId,
   useEditorHistory,
   useProjects,
   useSearch,
+  useSettingsQuery,
 } from "@band-app/dashboard-core";
 import { cn, Tooltip, TooltipContent, TooltipTrigger } from "@band-app/ui";
 import { cjk } from "@streamdown/cjk";
@@ -26,7 +35,8 @@ import {
   Search,
   TextSearch,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import type { Extension } from "@codemirror/state";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Group, Panel, Separator, usePanelRef } from "react-resizable-panels";
 import { Streamdown } from "streamdown";
 import { useFileTabs } from "../hooks/useFileTabs";
@@ -218,6 +228,7 @@ export function CodeBrowserView({
 }: CodeBrowserViewProps) {
   const isDesktop = useIsDesktop();
   const fileTabs = useFileTabs(workspaceId);
+  const { settings } = useSettingsQuery();
   const { projects } = useProjects();
   const workspacePath = (() => {
     for (const proj of projects) {
@@ -264,6 +275,85 @@ export function CodeBrowserView({
       fileTabs.openTab(loc.filePath);
     }
   }, []);
+
+  // -------------------------------------------------------------------------
+  // LSP extension for code intelligence (hover, go-to-definition, etc.)
+  // -------------------------------------------------------------------------
+  const [lspExtension, setLspExtension] = useState<Extension | null>(null);
+
+  // Detect the language of the current file and build the LSP WebSocket URL
+  const lspServerLang = useMemo(() => {
+    if (!settings.enableLSP) return null;
+    if (!viewFilePath) return null;
+    const ext = viewFilePath.split(".").pop()?.toLowerCase();
+    if (!ext) return null;
+    // Map file extension to CodeMirror language name, then to LSP server lang
+    const langMap: Record<string, string> = {
+      ts: "typescript",
+      tsx: "tsx",
+      js: "javascript",
+      jsx: "jsx",
+      mts: "typescript",
+      cts: "typescript",
+      mjs: "javascript",
+      cjs: "javascript",
+    };
+    const cmLang = langMap[ext];
+    return cmLang ? toLspServerLang(cmLang) : null;
+  }, [viewFilePath, settings.enableLSP]);
+
+  const lspWsUrl = useMemo(
+    () => (lspServerLang ? buildLspWsUrl(workspaceId, lspServerLang) : null),
+    [workspaceId, lspServerLang],
+  );
+
+  // Create/release LSP extension when the file changes
+  useEffect(() => {
+    if (!lspWsUrl || !workspacePath || !viewFilePath) {
+      setLspExtension(null);
+      return;
+    }
+
+    let cancelled = false;
+    const rootUri = toFileUri(workspacePath);
+    const documentUri = toFileUri(workspacePath, viewFilePath);
+
+    // Detect the LSP language ID for this file
+    const ext = viewFilePath.split(".").pop()?.toLowerCase();
+    const langMap: Record<string, string> = {
+      ts: "typescript",
+      tsx: "tsx",
+      js: "javascript",
+      jsx: "jsx",
+      mts: "typescript",
+      cts: "typescript",
+      mjs: "javascript",
+      cjs: "javascript",
+    };
+    const cmLang = langMap[ext ?? ""];
+    const languageId = cmLang ? getLspLanguageId(cmLang) : undefined;
+
+    createLspExtension(lspWsUrl, rootUri, documentUri, languageId)
+      .then((ext) => {
+        if (!cancelled) setLspExtension(ext);
+      })
+      .catch((err) => {
+        console.warn("LSP extension creation failed:", err);
+        if (!cancelled) setLspExtension(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [lspWsUrl, workspacePath, viewFilePath]);
+
+  // Clean up LSP client when the WebSocket URL changes or on unmount.
+  // Runs the cleanup for the *previous* lspWsUrl on each change.
+  useEffect(() => {
+    return () => {
+      if (lspWsUrl) releaseLspClient(lspWsUrl);
+    };
+  }, [lspWsUrl]);
 
   // -------------------------------------------------------------------------
   // CodeMirror editor view ref (shared by find-in-file and navigation history)
@@ -381,6 +471,10 @@ export function CodeBrowserView({
         if (focusOnViewReadyRef.current) {
           focusOnViewReadyRef.current = false;
           view.focus();
+        }
+        // Resolve pending LSP cross-file navigation (e.g., go-to-definition)
+        if (hasPendingNavigation()) {
+          resolveNavigation(view);
         }
       }
     },
@@ -517,6 +611,29 @@ export function CodeBrowserView({
     };
   }, [handleEditorGoBack, handleEditorGoForward]);
 
+  // Listen for LSP cross-file navigation events (e.g., go-to-definition)
+  useEffect(() => {
+    const handleLspNavigate = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.filePath) {
+        pushDepartureAndArrival({ filePath: detail.filePath });
+        // Use skipFileEffectRef to prevent the route change from clobbering nav
+        skipFileEffectRef.current = true;
+        fileTabs.openTab(detail.filePath);
+        setViewFilePath(detail.filePath);
+        setViewLine(undefined);
+        setViewLineEnd(undefined);
+        setViewColumn(undefined);
+        onSelectFile?.(detail.filePath);
+        // The LSP library will position the cursor once resolveNavigation provides the view
+        focusOnViewReadyRef.current = true;
+      }
+    };
+
+    window.addEventListener("band:lsp-navigate", handleLspNavigate);
+    return () => window.removeEventListener("band:lsp-navigate", handleLspNavigate);
+  }, [pushDepartureAndArrival, fileTabs.openTab, onSelectFile]);
+
   // Cmd+W / Ctrl+W to close active tab
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -595,6 +712,7 @@ export function CodeBrowserView({
           onCursorLineChange={handleCursorLineChange}
           renderMarkdown={renderMarkdown}
           editable
+          lspExtension={lspExtension}
         />
       );
     }
@@ -749,6 +867,7 @@ export function CodeBrowserView({
                 renderMarkdown={renderMarkdown}
                 editable
                 hideTitleBar
+                lspExtension={lspExtension}
                 viewMode={isMarkdown ? mdViewMode : undefined}
                 onViewModeChange={isMarkdown ? setMdViewMode : undefined}
                 toolbar={

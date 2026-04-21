@@ -135,6 +135,7 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
   );
   const [labels, setLabels] = useState<LabelDefinition[]>(settings.labels ?? []);
   const [autoStartTunnel, setAutoStartTunnel] = useState(settings.autoStartTunnel ?? false);
+  const [enableLSP, setEnableLSP] = useState(settings.enableLSP ?? false);
   const [selectedTheme, setSelectedTheme] = useState<Theme>(settings.theme ?? "system");
   const [appMode, setAppMode] = useState<AppMode>(settings.appMode ?? "side-panel");
 
@@ -156,6 +157,7 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
     if (selectedSound !== ((settings.notifications?.sound as SoundId) ?? "chime")) return true;
     if (JSON.stringify(labels) !== JSON.stringify(settings.labels ?? [])) return true;
     if (autoStartTunnel !== (settings.autoStartTunnel ?? false)) return true;
+    if (enableLSP !== (settings.enableLSP ?? false)) return true;
     if (selectedTheme !== (settings.theme ?? "system")) return true;
     if (appMode !== (settings.appMode ?? "side-panel")) return true;
     return false;
@@ -169,6 +171,7 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
     selectedSound,
     labels,
     autoStartTunnel,
+    enableLSP,
     selectedTheme,
     appMode,
     settings,
@@ -184,6 +187,7 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
     setSelectedSound((settings.notifications?.sound as SoundId) ?? "chime");
     setLabels(settings.labels ?? []);
     setAutoStartTunnel(settings.autoStartTunnel ?? false);
+    setEnableLSP(settings.enableLSP ?? false);
     setSelectedTheme(settings.theme ?? "system");
     setAppMode(settings.appMode ?? "side-panel");
   }, [
@@ -195,6 +199,7 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
     settings.notifications,
     settings.labels,
     settings.autoStartTunnel,
+    settings.enableLSP,
     settings.theme,
     settings.appMode,
   ]);
@@ -254,6 +259,7 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
       labels: labels.length > 0 ? labels : undefined,
       tokenSecret: settings.tokenSecret,
       autoStartTunnel: autoStartTunnel || undefined,
+      enableLSP: enableLSP || undefined,
       theme: selectedTheme,
       appMode,
     });
@@ -417,6 +423,20 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
             </div>
             <p className="text-xs text-muted-foreground">
               Directory where new worktrees are created. Leave empty for the default location.
+            </p>
+          </div>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="enable-lsp">Code intelligence (LSP)</Label>
+              <Switch
+                id="enable-lsp"
+                checked={enableLSP}
+                onCheckedChange={setEnableLSP}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Enable hover type info and go-to-definition in the code browser. Currently supports
+              TypeScript and JavaScript. Uses additional memory per workspace.
             </p>
           </div>
         </div>

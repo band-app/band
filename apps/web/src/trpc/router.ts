@@ -69,6 +69,7 @@ import {
   TaskConflictError,
 } from "../lib/task-runner";
 import { listTasks, loadTask } from "../lib/task-store";
+import { killWorkspaceServers } from "../lib/lsp-manager";
 import { killWorkspaceTerminals } from "../lib/terminal-manager";
 import { getTunnelStatus, startTunnel, stopTunnel } from "../lib/tunnel";
 import { emit, subscribe as subscribeStatus } from "../lib/watcher";
@@ -388,6 +389,9 @@ const workspacesRouter = t.router({
 
             // Kill any running terminal PTY sessions
             killWorkspaceTerminals(workspaceId);
+
+            // Kill any running language server processes
+            killWorkspaceServers(workspaceId);
 
             // Clean up workspace-scoped cronjobs
             stopJobsForKey(workspaceId);

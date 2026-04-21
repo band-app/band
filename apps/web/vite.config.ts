@@ -183,6 +183,7 @@ function trpcDevPlugin(): Plugin {
       // WebSocket server for tRPC subscriptions (no auth in dev mode)
       const wss = new WebSocketServer({ noServer: true });
       const terminalWss = new WebSocketServer({ noServer: true });
+      const lspWss = new WebSocketServer({ noServer: true });
       let wssHandlerInitialized = false;
 
       server.httpServer?.on("upgrade", async (req, socket, head) => {
@@ -190,6 +191,24 @@ function trpcDevPlugin(): Plugin {
         if (req.headers["sec-websocket-protocol"]?.includes("vite-hmr")) return;
 
         const url = new URL(req.url!, `http://${req.headers.host}`);
+
+        // LSP WebSocket
+        if (url.pathname === "/lsp") {
+          try {
+            const { handleLspConnection } =
+              await server.ssrLoadModule("./src/lib/lsp-proxy");
+            // biome-ignore lint/suspicious/noExplicitAny: ssrLoadModule returns untyped modules
+            lspWss.handleUpgrade(req, socket, head, (ws: any) => {
+              handleLspConnection(ws, req).catch((err: Error) => {
+                log.error("LSP connection error: %s", err.message);
+              });
+            });
+          } catch (err) {
+            log.error("Failed to load LSP module: %s", err);
+            socket.destroy();
+          }
+          return;
+        }
 
         // Terminal WebSocket
         if (url.pathname === "/terminal") {
@@ -246,8 +265,12 @@ function trpcDevPlugin(): Plugin {
       server.httpServer?.on("close", () => {
         wss.close();
         terminalWss.close();
+        lspWss.close();
         server.ssrLoadModule("./src/lib/terminal-manager").then(({ killAllTerminals }) => {
           killAllTerminals();
+        });
+        server.ssrLoadModule("./src/lib/lsp-manager").then(({ killAllServers }) => {
+          killAllServers();
         });
         server.ssrLoadModule("./src/lib/tunnel").then(({ stopTunnel }) => {
           stopTunnel().catch(() => {});
@@ -265,6 +288,15 @@ export default defineConfig(({ command }) => ({
   resolve: {
     alias: {
       "@": resolve(import.meta.dirname, "./src"),
+      // langium (transitive dep via mermaid) imports deep paths from
+      // vscode-jsonrpc, but under pnpm strict node_modules the package
+      // isn't reachable from langium's physical location. Point the bare
+      // specifier at the installed copy so both Vite dev and Rollup build
+      // can resolve it.
+      "vscode-jsonrpc": resolve(
+        import.meta.dirname,
+        "node_modules/vscode-jsonrpc",
+      ),
     },
   },
   ssr:

@@ -1,4 +1,5 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@band-app/ui";
+import type { Extension } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 import {
   ArrowLeft,
@@ -55,6 +56,8 @@ interface FileViewerProps {
   viewMode?: "preview" | "source";
   /** Called when the user toggles between preview and source mode. */
   onViewModeChange?: (mode: "preview" | "source") => void;
+  /** Optional LSP extension to wire into the editor for code intelligence */
+  lspExtension?: Extension | null;
 }
 
 // localStorage-backed cache for unsaved edits — survives page reloads
@@ -126,6 +129,7 @@ export function FileViewer({
   hideTitleBar,
   viewMode: controlledViewMode,
   onViewModeChange,
+  lspExtension,
 }: FileViewerProps) {
   const adapter = useAdapter();
   const [data, setData] = useState<FileContentResult | null>(null);
@@ -472,6 +476,7 @@ export function FileViewer({
               onSave={handleSave}
               onCursorLineChange={onCursorLineChange}
               onRevert={handleRevert}
+              lspExtension={lspExtension}
             />
           ) : (
             <CodeMirrorViewer

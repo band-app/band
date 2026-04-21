@@ -130,6 +130,7 @@ export interface Settings {
   labels?: LabelDefinition[];
   tokenSecret?: string;
   autoStartTunnel?: boolean;
+  enableLSP?: boolean;
   theme?: Theme;
   appMode?: AppMode;
 }

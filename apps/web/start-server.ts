@@ -14,6 +14,8 @@ import { mimeTypeFromFilename } from "./src/lib/mime-types.ts";
 import { checkPrereqs } from "./src/lib/process-utils.ts";
 import { bandHome, getOrCreateToken, loadSettings, resetAgentStatuses } from "./src/lib/state.ts";
 import { cleanupStaleTasks } from "./src/lib/task-store.ts";
+import { killAllServers } from "./src/lib/lsp-manager.ts";
+import { handleLspConnection } from "./src/lib/lsp-proxy.ts";
 import { killAllTerminals } from "./src/lib/terminal-manager.ts";
 import { handleTerminalConnection } from "./src/lib/terminal-ws.ts";
 import { startTunnel, stopTunnel } from "./src/lib/tunnel.ts";
@@ -347,6 +349,11 @@ async function main() {
   // ---------------------------------------------------------------------------
   const terminalWss = new WebSocketServer({ noServer: true });
 
+  // ---------------------------------------------------------------------------
+  // WebSocket server for LSP connections
+  // ---------------------------------------------------------------------------
+  const lspWss = new WebSocketServer({ noServer: true });
+
   httpServer.on("upgrade", (req, socket, head) => {
     // Auth check: validate band_token cookie (skip if no token configured)
     if (expectedToken) {
@@ -358,6 +365,13 @@ async function main() {
     }
 
     const url = new URL(req.url!, `http://${req.headers.host}`);
+
+    if (url.pathname === "/lsp") {
+      lspWss.handleUpgrade(req, socket, head, (ws) => {
+        handleLspConnection(ws, req);
+      });
+      return;
+    }
 
     if (url.pathname === "/terminal") {
       terminalWss.handleUpgrade(req, socket, head, (ws) => {
@@ -397,10 +411,12 @@ async function main() {
     stopBranchStatusPoller();
     stopCronjobScheduler();
     killAllTerminals();
+    killAllServers();
     await stopTunnel().catch(() => {});
     wssHandler.broadcastReconnectNotification();
     wss.close();
     terminalWss.close();
+    lspWss.close();
     httpServer.close();
     closeDb();
     process.exit(0);
