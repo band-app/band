@@ -637,7 +637,13 @@ const workspaceRouter = t.router({
       const cwd = workspace.worktree.path;
       const defaultBranch = workspace.project.defaultBranch;
 
-      const headBranch = (await execGit(["rev-parse", "--abbrev-ref", "HEAD"], cwd)).trim();
+      let headBranch: string;
+      try {
+        headBranch = (await execGit(["rev-parse", "--abbrev-ref", "HEAD"], cwd)).trim();
+      } catch {
+        // No commits yet — HEAD doesn't exist
+        headBranch = defaultBranch;
+      }
 
       let mergeBase: string;
       if (input.diffMode === "uncommitted") {
@@ -740,7 +746,13 @@ const workspaceRouter = t.router({
       const cwd = workspace.worktree.path;
       const defaultBranch = workspace.project.defaultBranch;
 
-      const headBranch = (await execGit(["rev-parse", "--abbrev-ref", "HEAD"], cwd)).trim();
+      let headBranch: string;
+      try {
+        headBranch = (await execGit(["rev-parse", "--abbrev-ref", "HEAD"], cwd)).trim();
+      } catch {
+        // No commits yet — HEAD doesn't exist
+        headBranch = defaultBranch;
+      }
 
       let mergeBase: string;
       if (input.diffMode === "uncommitted") {
