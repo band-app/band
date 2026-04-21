@@ -32,7 +32,9 @@
         "@dnd-kit/sortable",
         "@dnd-kit/utilities",
         "@tanstack/router-plugin",
-        "nanoid"
+        "nanoid",
+        "typescript-language-server",
+        "vscode-jsonrpc"
       ]
     },
     "apps/dashboard": {
@@ -52,7 +54,7 @@
     "packages/dashboard-core": {
       "entry": ["src/index.ts", "src/adapters/web.ts", "src/adapters/hybrid.ts"],
       "project": ["src/**/*.{ts,tsx}"],
-      "ignoreDependencies": ["@babel/runtime"]
+      "ignoreDependencies": ["@babel/runtime", "@codemirror/autocomplete", "@codemirror/lint"]
     },
     "packages/coding-agent": {
       "entry": ["src/index.ts", "tests/mocks/*.mjs"],
