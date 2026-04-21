@@ -2,7 +2,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { MergeView, unifiedMergeView } from "@codemirror/merge";
 import { SearchQuery } from "@codemirror/search";
 import { EditorState, RangeSetBuilder, Text } from "@codemirror/state";
-import { Decoration, EditorView, WidgetType, lineNumbers } from "@codemirror/view";
+import { Decoration, EditorView, lineNumbers, WidgetType } from "@codemirror/view";
 import {
   Check,
   ChevronsDownUp,
