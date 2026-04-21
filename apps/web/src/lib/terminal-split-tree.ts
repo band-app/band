@@ -1,5 +1,18 @@
 // Pure functions + types for the binary split tree used by terminal splits.
 
+/** crypto.randomUUID() is unavailable in insecure contexts (plain HTTP on non-localhost). */
+function uuid(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  // Fallback: build a v4 UUID from crypto.getRandomValues (available in all browsers)
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
+  bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant 1
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 export type SplitDirection = "horizontal" | "vertical";
 
 export interface SplitNode {
@@ -21,7 +34,7 @@ export type TreeNode = SplitNode | LeafNode;
  * Create a new leaf node with a random terminalId.
  */
 export function createLeaf(): LeafNode {
-  return { type: "leaf", terminalId: crypto.randomUUID() };
+  return { type: "leaf", terminalId: uuid() };
 }
 
 /**
@@ -34,7 +47,7 @@ export function splitLeaf(tree: TreeNode, targetId: string, direction: SplitDire
     if (tree.terminalId === targetId) {
       return {
         type: "split",
-        nodeId: crypto.randomUUID(),
+        nodeId: uuid(),
         direction,
         children: [tree, createLeaf()],
         sizes: [50, 50],

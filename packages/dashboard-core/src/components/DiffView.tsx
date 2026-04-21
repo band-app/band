@@ -1,4 +1,13 @@
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@band-app/ui";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@band-app/ui";
 import { MergeView, unifiedMergeView } from "@codemirror/merge";
 import { SearchQuery } from "@codemirror/search";
 import { EditorState, RangeSetBuilder, Text } from "@codemirror/state";
@@ -15,6 +24,7 @@ import {
   Rows2,
   Search,
   SquareArrowOutUpRight,
+  Undo2,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAdapter } from "../context";
@@ -29,6 +39,7 @@ import type { SSEEvent } from "../lib/sse";
 import type { DiffMode, FileStatus, WorkspaceDiffSummary } from "../types";
 import { ChangesFileTree } from "./ChangesFileTree";
 import { FileStatusBadge } from "./FileStatusBadge";
+import { RevertFileDialog } from "./RevertFileDialog";
 import { SearchBar, type SearchOptions } from "./SearchBar";
 
 export interface DiffStats {
@@ -524,6 +535,7 @@ interface LazyFileRowProps {
   onLoadMoreContext: (filename: string) => void;
   onShowFullFile: (filename: string) => void;
   onOpenFile?: (filename: string) => void;
+  onRevertFile?: (filename: string) => void;
   onEditorViews?: (filename: string, views: EditorView[]) => void;
 }
 
@@ -538,10 +550,12 @@ function LazyFileRow({
   onLoadMoreContext,
   onShowFullFile,
   onOpenFile,
+  onRevertFile,
   onEditorViews,
 }: LazyFileRowProps) {
   const [isOpen, setIsOpen] = useState(expandAll);
   const [copied, setCopied] = useState(false);
+  const [revertDialogOpen, setRevertDialogOpen] = useState(false);
 
   const handleEditorViews = useCallback(
     (views: EditorView[]) => {
@@ -611,53 +625,96 @@ function LazyFileRow({
         <span className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-mono [scrollbar-width:none]">
           {filename} <FileStatusBadge status={status} />
         </span>
-        <span
-          title="Copy file path"
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            navigator.clipboard.writeText(filename).catch(() => {});
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1500);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.stopPropagation();
-              navigator.clipboard.writeText(filename).catch(() => {});
-              setCopied(true);
-              setTimeout(() => setCopied(false), 1500);
-            }
-          }}
-          className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-        >
-          {copied ? (
-            <Check className="size-3.5 text-green-600 dark:text-green-400" />
-          ) : (
-            <Copy className="size-3.5" />
-          )}
-        </span>
-        {onOpenFile && (
-          <span
-            title="Open in code browser"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              const line = diff ? firstChangeLine(diff) : undefined;
-              onOpenFile(formatFileLocation(filename, line));
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span
+              onClick={(e) => {
+                e.preventDefault();
                 e.stopPropagation();
-                const line = diff ? firstChangeLine(diff) : undefined;
-                onOpenFile(formatFileLocation(filename, line));
-              }
-            }}
-            className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-          >
-            <SquareArrowOutUpRight className="size-3.5" />
-          </span>
+                navigator.clipboard.writeText(filename).catch(() => {});
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1500);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.stopPropagation();
+                  navigator.clipboard.writeText(filename).catch(() => {});
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1500);
+                }
+              }}
+              className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              {copied ? (
+                <Check className="size-3.5 text-green-600 dark:text-green-400" />
+              ) : (
+                <Copy className="size-3.5" />
+              )}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">Copy file path</TooltipContent>
+        </Tooltip>
+        {onRevertFile && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setRevertDialogOpen(true);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.stopPropagation();
+                    setRevertDialogOpen(true);
+                  }
+                }}
+                className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+              >
+                <Undo2 className="size-3.5" />
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Revert file</TooltipContent>
+          </Tooltip>
+        )}
+        {onOpenFile && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const line = diff ? firstChangeLine(diff) : undefined;
+                  onOpenFile(formatFileLocation(filename, line));
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.stopPropagation();
+                    const line = diff ? firstChangeLine(diff) : undefined;
+                    onOpenFile(formatFileLocation(filename, line));
+                  }
+                }}
+                className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+              >
+                <SquareArrowOutUpRight className="size-3.5" />
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Open in code browser</TooltipContent>
+          </Tooltip>
         )}
       </button>
+      {onRevertFile && (
+        <RevertFileDialog
+          open={revertDialogOpen}
+          onOpenChange={setRevertDialogOpen}
+          onConfirm={() => {
+            setRevertDialogOpen(false);
+            onRevertFile(filename);
+          }}
+          filename={filename}
+          fileStatus={status}
+        />
+      )}
       {isOpen && (
         <div className="border-t border-border/20 bg-muted/30">
           {diffError && <div className="px-4 py-4 text-sm text-destructive">{diffError}</div>}
@@ -947,6 +1004,31 @@ export function DiffView({
       fetchFileDiff(filename, undefined, 99999);
     },
     [fetchFileDiff],
+  );
+
+  const handleRevertFile = useCallback(
+    (filename: string) => {
+      const revertFile = adapter.revertFile;
+      if (!revertFile) return;
+
+      revertFile
+        .call(adapter, workspaceId, filename, diffMode)
+        .then(() => {
+          // Remove from diff cache
+          setDiffCache((prev) => {
+            const next = new Map(prev);
+            next.delete(filename);
+            return next;
+          });
+          expandedFilesRef.current.delete(filename);
+          // Force refresh to update the file list
+          fetchSummaryRef.current?.(true);
+        })
+        .catch((err) => {
+          console.error("Failed to revert file:", err);
+        });
+    },
+    [adapter, workspaceId, diffMode],
   );
 
   // -------------------------------------------------------------------------
@@ -1261,6 +1343,7 @@ export function DiffView({
                 onLoadMoreContext={handleLoadMoreContext}
                 onShowFullFile={handleShowFullFile}
                 onOpenFile={onOpenFile}
+                onRevertFile={adapter.revertFile ? handleRevertFile : undefined}
                 onEditorViews={handleEditorViews}
               />
             ))}
