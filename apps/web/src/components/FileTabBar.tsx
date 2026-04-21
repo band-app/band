@@ -19,7 +19,7 @@ import {
 } from "@band-app/ui";
 import { ChevronLeft, ChevronRight, Clipboard, Copy, X } from "lucide-react";
 import type React from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { FileTab } from "../hooks/useFileTabs";
 
 // ---------------------------------------------------------------------------
@@ -83,6 +83,13 @@ export function FileTabBar({
 
   // State for the unsaved-changes confirmation dialog
   const [confirmClosePath, setConfirmClosePath] = useState<string | null>(null);
+
+  // Re-render when dirty state changes (FileViewer dispatches "band:dirty-change")
+  const [, forceUpdate] = useReducer((x: number) => x + 1, 0);
+  useEffect(() => {
+    window.addEventListener("band:dirty-change", forceUpdate);
+    return () => window.removeEventListener("band:dirty-change", forceUpdate);
+  }, []);
 
   // Auto-scroll active tab into view
   // biome-ignore lint/correctness/useExhaustiveDependencies: activeTabPath triggers re-scroll when tab changes

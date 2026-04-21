@@ -1,16 +1,25 @@
-import { defaultKeymap, history, historyKeymap, undo, undoDepth } from "@codemirror/commands";
+import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
+import {
+  defaultKeymap,
+  history,
+  historyKeymap,
+  indentLess,
+  indentMore,
+} from "@codemirror/commands";
 import {
   bracketMatching,
   defaultHighlightStyle,
   foldGutter,
   foldKeymap,
   indentOnInput,
+  indentUnit,
   LanguageSupport,
   StreamLanguage,
   syntaxHighlighting,
 } from "@codemirror/language";
 import { highlightSelectionMatches, SearchQuery } from "@codemirror/search";
 import {
+  EditorSelection,
   EditorState,
   type Extension,
   type Range,
@@ -214,19 +223,87 @@ export function baseViewerExtensions(
 }
 
 /**
+ * Custom Enter handler that provides reliable continuation indentation.
+ *
+ * Several CodeMirror language packages have incomplete or misleading
+ * `indentNodeProp` rules.  For example `@codemirror/lang-rust` defines
+ * `continuedIndent()` on `Statement` but has no `delimitedIndent` for
+ * brace-delimited blocks.  This causes two failure modes:
+ *
+ *  • `getIndentation` returns **0** inside a block → cursor jumps to col 1.
+ *  • `getIndentation` returns a **false-positive continuation indent**
+ *    (e.g. +1 level after a completed `let … ;`) → cursor over-indents.
+ *
+ * Rather than trying to distinguish correct vs. incorrect language values,
+ * this handler uses simple heuristics that are reliable across every
+ * language:
+ *
+ *  1. Copy the current line's leading whitespace.
+ *  2. Add one indent level when the line ends with `{`, `(`, or `[`.
+ *  3. Handle the "between brackets" case (`{|}` → `{\n  |\n}`).
+ *
+ * Language-specific re-indentation (e.g. auto-dedent when typing `}`) is
+ * still handled by `indentOnInput()` which runs independently.
+ */
+function smartNewlineAndIndent(view: EditorView): boolean {
+  const { state } = view;
+
+  // For multiple cursors, defer to the default handler.
+  if (state.selection.ranges.length > 1) return false;
+
+  const { from, to } = state.selection.main;
+  const line = state.doc.lineAt(from);
+  const leadingWS = /^\s*/.exec(line.text)![0];
+  const textBeforeCursor = line.text.slice(0, from - line.from).trimEnd();
+  const opensBlock = /[{(\[]$/.test(textBeforeCursor);
+
+  const afterLine = state.doc.lineAt(to);
+  const textAfterCursor = afterLine.text.slice(to - afterLine.from).trimStart();
+  const closesBlock = /^[})\]]/.test(textAfterCursor);
+  const unit = state.facet(indentUnit);
+
+  if (opensBlock && closesBlock) {
+    // Between brackets:  {|}  →  {\n  |\n}
+    const inner = "\n" + leadingWS + unit;
+    const outer = "\n" + leadingWS;
+    view.dispatch(
+      state.update({
+        changes: { from, to, insert: inner + outer },
+        selection: EditorSelection.cursor(from + inner.length),
+        userEvent: "input",
+      }),
+    );
+    return true;
+  }
+
+  const extra = opensBlock ? unit : "";
+  const insert = "\n" + leadingWS + extra;
+  view.dispatch(
+    state.update({
+      changes: { from, to, insert },
+      selection: EditorSelection.cursor(from + insert.length),
+      userEvent: "input",
+    }),
+  );
+  return true;
+}
+
+/**
  * Base extensions for an editable CodeMirror editor.
  * Includes editing features: undo/redo, indent-on-input, fold gutter.
  * Does NOT include readOnly or editable(false).
  * @param isDark - Whether to use dark theme colours. Defaults to true for backwards compat.
  * @param onSave - Optional callback invoked on Cmd/Ctrl+S.
- * @param onRevert - Optional callback invoked on Cmd/Ctrl+Z when the undo history is empty.
- *                   Typically used to reload the file from disk when no more undos are available.
+ * @param opts.indent - Indentation string: `"  "` (2 spaces), `"    "` (4 spaces), or `"\t"`. Defaults to `"  "`.
+ * @param opts.tabSize - Display width of a tab character. Defaults to the indent string length, or 4 for tabs.
  */
 export function baseEditorExtensions(
   isDark = true,
   onSave?: () => void,
-  onRevert?: () => void,
+  opts?: { indent?: string; tabSize?: number },
 ): Extension[] {
+  const indent = opts?.indent ?? "  ";
+  const tabSize = opts?.tabSize ?? (indent === "\t" ? 4 : indent.length);
   const customKeyBindings: KeyBinding[] = [
     ...(onSave
       ? [
@@ -239,22 +316,6 @@ export function baseEditorExtensions(
           } satisfies KeyBinding,
         ]
       : []),
-    ...(onRevert
-      ? [
-          {
-            key: "Mod-z",
-            run: (view: EditorView) => {
-              // If there are undoable changes, do a normal undo
-              if (undoDepth(view.state) > 0) {
-                return undo(view);
-              }
-              // Otherwise revert to the on-disk version
-              onRevert();
-              return true;
-            },
-          } satisfies KeyBinding,
-        ]
-      : []),
   ];
 
   return [
@@ -262,7 +323,10 @@ export function baseEditorExtensions(
     history(),
     foldGutter(),
     bracketMatching(),
+    closeBrackets(),
     indentOnInput(),
+    indentUnit.of(indent),
+    EditorState.tabSize.of(tabSize),
     highlightSelectionMatches(),
     ...(isDark
       ? [
@@ -275,7 +339,39 @@ export function baseEditorExtensions(
           syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
         ]
       : [syntaxHighlighting(defaultHighlightStyle)]),
-    keymap.of([...customKeyBindings, ...defaultKeymap, ...historyKeymap, ...foldKeymap]),
+    keymap.of([
+      ...customKeyBindings,
+      { key: "Enter", run: smartNewlineAndIndent },
+      { key: "Tab", run: indentMore },
+      { key: "Shift-Tab", run: indentLess },
+      ...closeBracketsKeymap,
+      ...defaultKeymap,
+      ...historyKeymap,
+      ...foldKeymap,
+      // Catch-all: absorb undo/redo when the history is empty so the
+      // event is preventDefault-ed and doesn't trigger parent handlers.
+      { key: "Mod-z", run: () => true },
+      { key: "Mod-Shift-z", run: () => true },
+      { key: "Mod-y", run: () => true },
+    ]),
+    // CodeMirror calls preventDefault() on handled keys but never
+    // stopPropagation(), so keyboard events always bubble to parent
+    // DOM elements (React components, global listeners, etc.).
+    // Explicitly stop propagation for keys the editor owns.
+    EditorView.domEventHandlers({
+      keydown(event) {
+        const mod = event.metaKey || event.ctrlKey;
+        if (
+          event.key === "Tab" ||
+          (mod && event.key.toLowerCase() === "z") ||
+          (mod && event.key.toLowerCase() === "y")
+        ) {
+          event.stopPropagation();
+        }
+        // Return false so CM's own keymap processing still runs.
+        return false;
+      },
+    }),
     EditorView.theme(
       isDark
         ? {

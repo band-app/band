@@ -143,6 +143,8 @@ export function FileViewer({
   const [saveError, setSaveError] = useState<string | null>(null);
 
   const editorViewRef = useRef<EditorView | null>(null);
+  const dataRef = useRef(data);
+  dataRef.current = data;
 
   const isDirty = editedContent !== null && editedContent !== data?.content;
 
@@ -251,6 +253,7 @@ export function FileViewer({
       setData((prev) => (prev ? { ...prev, content: savedContent } : prev));
       // Clear cache — saved content is now on disk
       unsavedEditsCache.delete(editsCacheKey(workspaceId, filePath));
+      window.dispatchEvent(new CustomEvent("band:dirty-change"));
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Failed to save");
     } finally {
@@ -258,9 +261,26 @@ export function FileViewer({
     }
   }, [adapter, workspaceId, filePath]);
 
-  const handleContentChange = useCallback((newContent: string) => {
-    setEditedContent(newContent);
-  }, []);
+  const handleContentChange = useCallback(
+    (newContent: string) => {
+      const key = editsCacheKey(workspaceId, filePath);
+      // When undo brings the content back to the on-disk version, clear
+      // the edited state entirely so the dirty indicators (title bar +
+      // tab dot) disappear and the localStorage cache is cleaned up.
+      if (newContent === dataRef.current?.content) {
+        setEditedContent(null);
+        unsavedEditsCache.delete(key);
+      } else {
+        setEditedContent(newContent);
+        // Write to localStorage immediately so FileTabBar's hasDirtyEdits()
+        // returns the correct value when it re-renders.
+        unsavedEditsCache.set(key, newContent);
+      }
+      // Notify FileTabBar (and any other listener) that dirty state changed
+      window.dispatchEvent(new CustomEvent("band:dirty-change"));
+    },
+    [workspaceId, filePath],
+  );
 
   // Capture the EditorView locally (for revert) while forwarding to the parent
   const handleEditorView = useCallback(
@@ -270,28 +290,6 @@ export function FileViewer({
     },
     [onEditorView],
   );
-
-  // Revert to on-disk version: refetch, replace editor content, clear draft cache.
-  // Called by Cmd/Ctrl+Z when the CodeMirror undo history is empty.
-  const handleRevert = useCallback(async () => {
-    if (!adapter.getWorkspaceFile) return;
-    try {
-      const result = await adapter.getWorkspaceFile(workspaceId, filePath);
-      setData(result);
-      setEditedContent(null);
-      editedContentRef.current = null;
-      unsavedEditsCache.delete(editsCacheKey(workspaceId, filePath));
-      // Replace the editor document in-place
-      const view = editorViewRef.current;
-      if (view && result.content != null) {
-        view.dispatch({
-          changes: { from: 0, to: view.state.doc.length, insert: result.content },
-        });
-      }
-    } catch {
-      // Fetch error — leave current content as-is
-    }
-  }, [adapter, workspaceId, filePath]);
 
   const handleBack = useCallback(() => {
     if (isDirty && !window.confirm("You have unsaved changes. Discard?")) {
@@ -461,6 +459,7 @@ export function FileViewer({
           (canEdit ? (
             <CodeMirrorEditor
               content={displayContent!}
+              originalContent={data?.content}
               language={lang}
               className="h-full"
               filePath={filePath}
@@ -471,7 +470,6 @@ export function FileViewer({
               onContentChange={handleContentChange}
               onSave={handleSave}
               onCursorLineChange={onCursorLineChange}
-              onRevert={handleRevert}
             />
           ) : (
             <CodeMirrorViewer

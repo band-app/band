@@ -16,6 +16,13 @@ import { selectionToChatExtension } from "../lib/selection-to-chat";
 interface CodeMirrorEditorProps {
   /** Initial content to populate the editor with */
   content: string;
+  /**
+   * Original on-disk content. When provided and differs from `content`,
+   * the editor initializes with this first, then applies `content` as an
+   * undoable transaction so Cmd+Z can revert to the original.
+   * This is used when restoring cached edits after page reload.
+   */
+  originalContent?: string;
   language: string;
   className?: string;
   /** Workspace-relative file path — enables "Add to Chat" on text selection */
@@ -34,12 +41,11 @@ interface CodeMirrorEditorProps {
   onSave?: () => void;
   /** Called when the user jumps the cursor ≥10 lines (click, Page Up/Down, etc.) */
   onCursorLineChange?: (departureLine: number, arrivalLine: number) => void;
-  /** Called when Cmd/Ctrl+Z is pressed but undo history is empty (revert to disk) */
-  onRevert?: () => void;
 }
 
 export function CodeMirrorEditor({
   content,
+  originalContent,
   language,
   className,
   filePath,
@@ -50,7 +56,6 @@ export function CodeMirrorEditor({
   onContentChange,
   onSave,
   onCursorLineChange,
-  onRevert,
 }: CodeMirrorEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -62,8 +67,6 @@ export function CodeMirrorEditor({
   onSaveRef.current = onSave;
   const onCursorLineChangeRef = useRef(onCursorLineChange);
   onCursorLineChangeRef.current = onCursorLineChange;
-  const onRevertRef = useRef(onRevert);
-  onRevertRef.current = onRevert;
   const isDark = useIsDark();
 
   // Store line props in refs so the creation effect can read them without re-running
@@ -79,6 +82,14 @@ export function CodeMirrorEditor({
   const initialContentRef = useRef(content);
   initialContentRef.current = content;
 
+  const originalContentRef = useRef(originalContent);
+  originalContentRef.current = originalContent;
+
+  // On recreation (theme/language change), we save the editor's current
+  // document here so the new instance preserves the user's edits.
+  // null = first creation (use props instead).
+  const recreationDocRef = useRef<string | null>(null);
+
   // Create/recreate the editor when language or theme changes.
   // We intentionally do NOT depend on `content` — the editor owns
   // the document once created. Only language/theme/filePath changes
@@ -93,7 +104,7 @@ export function CodeMirrorEditor({
       const langSupport = await loadLanguage(language);
       if (cancelled) return;
 
-      // Destroy previous instance
+      // Destroy previous instance — current doc was already saved in cleanup
       if (viewRef.current) {
         viewRef.current.destroy();
         viewRef.current = null;
@@ -104,7 +115,6 @@ export function CodeMirrorEditor({
         ...baseEditorExtensions(
           isDark,
           () => onSaveRef.current?.(),
-          () => onRevertRef.current?.(),
         ),
         searchHighlightOnly(),
         ...lineHighlightExtension(isDark),
@@ -125,8 +135,35 @@ export function CodeMirrorEditor({
         extensions.push(langSupport);
       }
 
+      // Determine the initial document:
+      // 1. Recreation (theme/language change) → use the saved document
+      // 2. First creation with cached edits → start with original so cached
+      //    edits become an undoable transaction (Cmd+Z reverts to original)
+      // 3. Normal first creation → use content prop directly
+      const savedDoc = recreationDocRef.current;
+      recreationDocRef.current = null;
+
+      let initDoc: string;
+      let pendingReplace: string | null = null;
+
+      if (savedDoc !== null) {
+        // Recreation — preserve the user's current document
+        initDoc = savedDoc;
+      } else if (
+        originalContentRef.current != null &&
+        originalContentRef.current !== initialContentRef.current
+      ) {
+        // First creation with cached edits — start with original content
+        // and queue the cached edits as an undoable transaction
+        initDoc = originalContentRef.current;
+        pendingReplace = initialContentRef.current;
+      } else {
+        // Normal creation — no cached edits
+        initDoc = initialContentRef.current;
+      }
+
       const state = EditorState.create({
-        doc: initialContentRef.current,
+        doc: initDoc,
         extensions,
       });
 
@@ -134,6 +171,14 @@ export function CodeMirrorEditor({
         state,
         parent: container,
       });
+
+      // Apply cached edits as a transaction so they appear in undo history.
+      // After this, Cmd+Z will revert back to the original disk content.
+      if (pendingReplace !== null) {
+        viewRef.current.dispatch({
+          changes: { from: 0, to: initDoc.length, insert: pendingReplace },
+        });
+      }
 
       // Scroll to line after creation
       if (lineRef.current) {
@@ -148,6 +193,8 @@ export function CodeMirrorEditor({
     return () => {
       cancelled = true;
       if (viewRef.current) {
+        // Save current document so recreation preserves user edits
+        recreationDocRef.current = viewRef.current.state.doc.toString();
         viewRef.current.destroy();
         viewRef.current = null;
         onEditorViewRef.current?.(null);
