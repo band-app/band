@@ -110,6 +110,13 @@ export async function handleLspConnection(ws: WebSocket, req: IncomingMessage): 
 
   log.debug("LSP client connected: %s/%s", workspaceId, lang);
 
+  // Track pending requests so we can retry on transient "No Project" errors.
+  // This happens when a definition request arrives before tsserver has finished
+  // loading the configured project for the file (race condition after didOpen).
+  const pendingRequests = new Map<number, string>();
+  const retriedIds = new Set<number>();
+  const RETRY_DELAY_MS = 2000;
+
   // Server stdout -> WebSocket (Content-Length framed -> raw JSON)
   const parseFrame = createFrameParser((json: string) => {
     log.debug(
@@ -118,6 +125,41 @@ export async function handleLspConnection(ws: WebSocket, req: IncomingMessage): 
       lang,
       json.length > 200 ? `${json.slice(0, 200)}…` : json,
     );
+
+    // Check for "No Project" error responses and retry the original request.
+    try {
+      const msg = JSON.parse(json) as {
+        id?: number;
+        error?: { message?: string };
+      };
+      if (
+        msg.id != null &&
+        msg.error?.message?.includes("No Project") &&
+        !retriedIds.has(msg.id) &&
+        pendingRequests.has(msg.id)
+      ) {
+        const originalRequest = pendingRequests.get(msg.id)!;
+        retriedIds.add(msg.id);
+        pendingRequests.delete(msg.id);
+        log.debug(
+          "LSP retrying request %d after 'No Project' error [%s/%s]",
+          msg.id,
+          workspaceId,
+          lang,
+        );
+        // Retry after a delay to give tsserver time to load the project.
+        setTimeout(() => forwardToStdin(originalRequest), RETRY_DELAY_MS);
+        return; // Don't forward the error to the client yet
+      }
+      // Clean up tracking for completed requests
+      if (msg.id != null) {
+        pendingRequests.delete(msg.id);
+        retriedIds.delete(msg.id);
+      }
+    } catch {
+      // Not valid JSON or missing fields — forward as-is
+    }
+
     if (ws.readyState === ws.OPEN) {
       ws.send(json);
     }
@@ -143,6 +185,18 @@ export async function handleLspConnection(ws: WebSocket, req: IncomingMessage): 
       lang,
       json.length > 200 ? `${json.slice(0, 200)}…` : json,
     );
+
+    // Track requests (messages with an "id" field) so we can retry on
+    // transient errors from the language server.
+    try {
+      const msg = JSON.parse(json) as { id?: number; method?: string };
+      if (msg.id != null && msg.method) {
+        pendingRequests.set(msg.id, json);
+      }
+    } catch {
+      // Not valid JSON — forward as-is
+    }
+
     if (lspProcess.stdin?.writable) {
       lspProcess.stdin.write(frameMessage(json));
     }
