@@ -1,7 +1,7 @@
 import type { IncomingMessage } from "node:http";
 import { createLogger } from "@band-app/logger";
 import type { WebSocket } from "ws";
-import { getOrSpawnServer } from "./lsp-manager";
+import { getOrSpawnServer, type LspServerSession } from "./lsp-manager";
 
 const log = createLogger("lsp-proxy");
 
@@ -24,9 +24,7 @@ export function frameMessage(json: string): Buffer {
  * server's stdout stream. Handles partial headers, partial bodies, and
  * multiple messages in a single chunk.
  */
-export function createFrameParser(
-  onMessage: (json: string) => void,
-): (chunk: Buffer) => void {
+export function createFrameParser(onMessage: (json: string) => void): (chunk: Buffer) => void {
   let buffer = Buffer.alloc(0);
 
   return (chunk: Buffer) => {
@@ -69,10 +67,7 @@ export function createFrameParser(
 // WebSocket connection handler
 // ---------------------------------------------------------------------------
 
-export async function handleLspConnection(
-  ws: WebSocket,
-  req: IncomingMessage,
-): Promise<void> {
+export async function handleLspConnection(ws: WebSocket, req: IncomingMessage): Promise<void> {
   const url = new URL(req.url!, `http://${req.headers.host}`);
   const workspaceId = url.searchParams.get("workspaceId");
   const lang = url.searchParams.get("lang");
@@ -91,7 +86,7 @@ export async function handleLspConnection(
     pendingMessages.push(data.toString());
   });
 
-  let session;
+  let session: LspServerSession;
   try {
     session = await getOrSpawnServer(workspaceId, lang);
   } catch (err) {

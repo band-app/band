@@ -28,6 +28,7 @@ import type { CronjobDefinition } from "../lib/cronjob-types";
 import { fuzzyScore } from "../lib/fuzzy-score";
 import { execGit, gitCmd, listWorktrees } from "../lib/git";
 import { checkHooks, installHooks } from "../lib/hooks";
+import { killWorkspaceServers } from "../lib/lsp-manager";
 import { resolvePendingInput } from "../lib/pending-inputs";
 import { checkPrereqs, shellPath } from "../lib/process-utils";
 import { loadProjectConfig } from "../lib/project-config";
@@ -69,7 +70,6 @@ import {
   TaskConflictError,
 } from "../lib/task-runner";
 import { listTasks, loadTask } from "../lib/task-store";
-import { killWorkspaceServers } from "../lib/lsp-manager";
 import { killWorkspaceTerminals } from "../lib/terminal-manager";
 import { getTunnelStatus, startTunnel, stopTunnel } from "../lib/tunnel";
 import { emit, subscribe as subscribeStatus } from "../lib/watcher";

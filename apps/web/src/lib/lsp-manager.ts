@@ -80,20 +80,13 @@ export async function getOrSpawnServer(
   const pathSep = process.platform === "win32" ? ";" : ":";
   const combinedPath = [appBin, workspaceBin, resolvedPath].join(pathSep);
 
-  log.debug(
-    "Spawning %s language server in %s for workspace %s",
-    lang,
-    cwd,
-    workspaceId,
-  );
+  log.debug("Spawning %s language server in %s for workspace %s", lang, cwd, workspaceId);
 
   const child = spawn(config.command, config.args, {
     cwd,
     stdio: ["pipe", "pipe", "pipe"],
     env: {
-      ...Object.fromEntries(
-        Object.entries(process.env).filter(([, v]) => v != null),
-      ),
+      ...Object.fromEntries(Object.entries(process.env).filter(([, v]) => v != null)),
       PATH: combinedPath,
     },
   });
@@ -130,11 +123,7 @@ export async function getOrSpawnServer(
   // Handle spawn errors (e.g. ENOENT when the command is not found).
   // Without this listener the error event crashes the host process.
   child.on("error", (err) => {
-    log.error(
-      "Language server error: %s — %s",
-      serverId,
-      err.message,
-    );
+    log.error("Language server error: %s — %s", serverId, err.message);
     removeSession();
   });
 

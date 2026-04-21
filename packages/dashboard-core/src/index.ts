@@ -54,14 +54,6 @@ export {
   useStatusWatcher,
 } from "./hooks/use-status";
 export {
-  clearSearch,
-  collectSearchMatches,
-  cursorLineTracker,
-  dispatchSearch,
-  scrollToLine,
-  scrollToSearchMatch,
-} from "./lib/codemirror-setup";
-export {
   buildLspWsUrl,
   createLspExtension,
   getLspLanguageId,
@@ -72,6 +64,14 @@ export {
   toFileUri,
   toLspServerLang,
 } from "./lib/codemirror-lsp";
+export {
+  clearSearch,
+  collectSearchMatches,
+  cursorLineTracker,
+  dispatchSearch,
+  scrollToLine,
+  scrollToSearchMatch,
+} from "./lib/codemirror-setup";
 export { getFileIcon } from "./lib/file-icon";
 export { type FileLocation, formatFileLocation, parseFileLocation } from "./lib/file-location";
 export { type FilePreviewType, getFilePreviewType } from "./lib/file-type";

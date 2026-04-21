@@ -195,8 +195,7 @@ function trpcDevPlugin(): Plugin {
         // LSP WebSocket
         if (url.pathname === "/lsp") {
           try {
-            const { handleLspConnection } =
-              await server.ssrLoadModule("./src/lib/lsp-proxy");
+            const { handleLspConnection } = await server.ssrLoadModule("./src/lib/lsp-proxy");
             // biome-ignore lint/suspicious/noExplicitAny: ssrLoadModule returns untyped modules
             lspWss.handleUpgrade(req, socket, head, (ws: any) => {
               handleLspConnection(ws, req).catch((err: Error) => {
@@ -293,10 +292,7 @@ export default defineConfig(({ command }) => ({
       // isn't reachable from langium's physical location. Point the bare
       // specifier at the installed copy so both Vite dev and Rollup build
       // can resolve it.
-      "vscode-jsonrpc": resolve(
-        import.meta.dirname,
-        "node_modules/vscode-jsonrpc",
-      ),
+      "vscode-jsonrpc": resolve(import.meta.dirname, "node_modules/vscode-jsonrpc"),
     },
   },
   ssr:

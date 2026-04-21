@@ -1,14 +1,20 @@
 import {
-  type Transport,
+  jumpToDefinition,
   LSPClient,
   LSPPlugin,
+  languageServerExtensions,
+  type Transport,
   Workspace,
   type WorkspaceFile,
-  jumpToDefinition,
-  languageServerExtensions,
 } from "@codemirror/lsp-client";
-import { type ChangeSet, type Extension, Text } from "@codemirror/state";
-import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
+import type { ChangeSet, Extension, Text } from "@codemirror/state";
+import {
+  Decoration,
+  type DecorationSet,
+  EditorView,
+  ViewPlugin,
+  type ViewUpdate,
+} from "@codemirror/view";
 
 // ---------------------------------------------------------------------------
 // LSP language ID mapping (CodeMirror language name -> LSP languageId)
@@ -120,7 +126,9 @@ class BandWorkspace extends Workspace {
   }
 
   private nextFileVersion(uri: string): number {
-    return (this.fileVersions[uri] = (this.fileVersions[uri] ?? -1) + 1);
+    const next = (this.fileVersions[uri] ?? -1) + 1;
+    this.fileVersions[uri] = next;
+    return next;
   }
 
   syncFiles(): readonly { file: WorkspaceFile; prevDoc: Text; changes: ChangeSet }[] {
@@ -284,10 +292,7 @@ const clientCache = new Map<string, CachedClient>();
  * Get or create an LSP client for the given WebSocket URL.
  * The client is cached per URL (effectively per workspace+language).
  */
-async function getOrCreateClient(
-  wsUrl: string,
-  rootUri: string,
-): Promise<LSPClient> {
+async function getOrCreateClient(wsUrl: string, rootUri: string): Promise<LSPClient> {
   const cached = clientCache.get(wsUrl);
   if (cached) {
     cached.refCount++;
@@ -323,9 +328,7 @@ export function releaseLspClient(wsUrl: string): void {
     cached.client
       .request("shutdown", null)
       .then(() => {
-        cached.transport.send(
-          JSON.stringify({ jsonrpc: "2.0", method: "exit", params: null }),
-        );
+        cached.transport.send(JSON.stringify({ jsonrpc: "2.0", method: "exit", params: null }));
       })
       .catch(() => {
         // Server may already be gone — that's fine
@@ -498,10 +501,7 @@ export async function createLspExtension(
 /**
  * Build the WebSocket URL for connecting to the LSP proxy.
  */
-export function buildLspWsUrl(
-  workspaceId: string,
-  lang: string,
-): string {
+export function buildLspWsUrl(workspaceId: string, lang: string): string {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   return `${protocol}//${window.location.host}/lsp?workspaceId=${encodeURIComponent(workspaceId)}&lang=${encodeURIComponent(lang)}`;
 }

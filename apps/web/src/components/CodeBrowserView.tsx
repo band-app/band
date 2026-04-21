@@ -20,6 +20,7 @@ import {
   useSettingsQuery,
 } from "@band-app/dashboard-core";
 import { cn, Tooltip, TooltipContent, TooltipTrigger } from "@band-app/ui";
+import type { Extension } from "@codemirror/state";
 import { cjk } from "@streamdown/cjk";
 import { code } from "@streamdown/code";
 import { math } from "@streamdown/math";
@@ -35,7 +36,6 @@ import {
   Search,
   TextSearch,
 } from "lucide-react";
-import type { Extension } from "@codemirror/state";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Group, Panel, Separator, usePanelRef } from "react-resizable-panels";
 import { Streamdown } from "streamdown";

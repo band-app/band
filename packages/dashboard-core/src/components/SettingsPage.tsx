@@ -428,11 +428,7 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label htmlFor="enable-lsp">Code intelligence (LSP)</Label>
-              <Switch
-                id="enable-lsp"
-                checked={enableLSP}
-                onCheckedChange={setEnableLSP}
-              />
+              <Switch id="enable-lsp" checked={enableLSP} onCheckedChange={setEnableLSP} />
             </div>
             <p className="text-xs text-muted-foreground">
               Enable hover type info and go-to-definition in the code browser. Currently supports
