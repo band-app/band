@@ -152,11 +152,12 @@ function WorkspaceLayout() {
 
   // Persist the full sub-path (e.g. "/code/src/index.ts") so it can be
   // restored when navigating back — this remembers both the active tab
-  // and the specific file the user was viewing.
+  // and the specific file the user was viewing.  An empty string means
+  // the Chat tab (the workspace index route).
   useEffect(() => {
     const prefix = `/workspace/${workspaceId}`;
-    if (pathname.length > prefix.length && pathname.startsWith(prefix)) {
-      const subPath = pathname.slice(prefix.length); // e.g. "/code/src/index.ts"
+    if (pathname.startsWith(prefix)) {
+      const subPath = pathname.slice(prefix.length); // e.g. "/code/src/index.ts", "" for chat
       try {
         sessionStorage.setItem(`band-tab:${decoded}`, subPath);
       } catch {}

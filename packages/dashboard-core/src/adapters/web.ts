@@ -316,8 +316,12 @@ export class WebCapabilities implements PlatformCapabilities {
     const base = `/workspace/${encodeURIComponent(workspaceId)}`;
     try {
       const stored = sessionStorage.getItem(`band-tab:${workspaceId}`);
-      if (stored && VALID_TAB_PREFIXES.some((p) => stored.startsWith(p))) {
-        return `${base}${stored}`;
+      if (stored !== null) {
+        // Empty string means the Chat tab (workspace index route);
+        // non-empty values must match a known sub-path prefix.
+        if (stored === "" || VALID_TAB_PREFIXES.some((p) => stored.startsWith(p))) {
+          return `${base}${stored}`;
+        }
       }
     } catch {}
     return base;
