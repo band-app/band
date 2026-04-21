@@ -417,6 +417,13 @@ export function CodeBrowserView({
       setViewLine(loc.line);
       setViewLineEnd(loc.lineEnd);
       setViewColumn(loc.column);
+    } else {
+      // File prop removed (e.g. route changed via back navigation) — clear
+      // view state so the mobile layout switches back to FileBrowser.
+      setViewFilePath("");
+      setViewLine(undefined);
+      setViewLineEnd(undefined);
+      setViewColumn(undefined);
     }
   }, [file]);
 
