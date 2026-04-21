@@ -20,11 +20,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAdapter } from "../context";
 import { useIsDark } from "../hooks/use-is-dark";
 import { useSearch } from "../hooks/use-search";
+import { buildFileTree, flattenFileTreeOrder } from "../lib/build-file-tree";
 import { baseViewerExtensions, loadLanguage, searchHighlightOnly } from "../lib/codemirror-setup";
 import { formatFileLocation } from "../lib/file-location";
 import { extensionToLanguage, filenameToLanguage } from "../lib/language-map";
 import { selectionToChatExtension } from "../lib/selection-to-chat";
-import { buildFileTree, flattenFileTreeOrder } from "../lib/build-file-tree";
 import type { SSEEvent } from "../lib/sse";
 import type { DiffMode, FileStatus, WorkspaceDiffSummary } from "../types";
 import { ChangesFileTree } from "./ChangesFileTree";
@@ -594,7 +594,10 @@ function LazyFileRow({
   const canLoadMore = !isUntracked && getNextContextStep(contextLines) !== null;
 
   return (
-    <div id={`diff-file-${encodeURIComponent(filename)}`} className="overflow-hidden rounded-lg border-2 border-border">
+    <div
+      id={`diff-file-${encodeURIComponent(filename)}`}
+      className="overflow-hidden rounded-lg border-2 border-border"
+    >
       <button
         type="button"
         onClick={toggle}
@@ -657,7 +660,7 @@ function LazyFileRow({
       </button>
       {isOpen && (
         <div className="border-t border-border/20 bg-muted/30">
-{diffError && <div className="px-4 py-4 text-sm text-destructive">{diffError}</div>}
+          {diffError && <div className="px-4 py-4 text-sm text-destructive">{diffError}</div>}
           {diff !== null && (
             <>
               {canLoadMore && (
@@ -1009,11 +1012,7 @@ export function DiffView({
               for (const filename of expandedFilesRef.current) {
                 if (result.fileStatuses[filename]) {
                   const entry = diffCacheRef.current.get(filename);
-                  fetchFileDiff(
-                    filename,
-                    result.mergeBase,
-                    entry?.contextLines ?? 3,
-                  );
+                  fetchFileDiff(filename, result.mergeBase, entry?.contextLines ?? 3);
                 }
               }
             }
@@ -1249,22 +1248,22 @@ export function DiffView({
         )}
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="flex flex-col gap-3 p-3">
-          {filenames.map((filename) => (
-            <LazyFileRow
-              key={filename}
-              filename={filename}
-              status={fileStatuses[filename]}
-              cacheEntry={diffCache.get(filename)}
-              viewMode={viewMode}
-              expandAll={expandAll}
-              focusedFile={focusedFile}
-              onToggleFile={handleToggleFile}
-              onLoadMoreContext={handleLoadMoreContext}
-              onShowFullFile={handleShowFullFile}
-              onOpenFile={onOpenFile}
-              onEditorViews={handleEditorViews}
-            />
-          ))}
+            {filenames.map((filename) => (
+              <LazyFileRow
+                key={filename}
+                filename={filename}
+                status={fileStatuses[filename]}
+                cacheEntry={diffCache.get(filename)}
+                viewMode={viewMode}
+                expandAll={expandAll}
+                focusedFile={focusedFile}
+                onToggleFile={handleToggleFile}
+                onLoadMoreContext={handleLoadMoreContext}
+                onShowFullFile={handleShowFullFile}
+                onOpenFile={onOpenFile}
+                onEditorViews={handleEditorViews}
+              />
+            ))}
           </div>
         </div>
       </div>
