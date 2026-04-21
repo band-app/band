@@ -1,13 +1,14 @@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@band-app/ui";
 import { MergeView, unifiedMergeView } from "@codemirror/merge";
 import { SearchQuery } from "@codemirror/search";
-import { EditorState, Text } from "@codemirror/state";
-import { EditorView, lineNumbers } from "@codemirror/view";
+import { EditorState, RangeSetBuilder, Text } from "@codemirror/state";
+import { Decoration, EditorView, WidgetType, lineNumbers } from "@codemirror/view";
 import {
+  Check,
   ChevronsDownUp,
   ChevronsUpDown,
   Columns2,
-  Loader2,
+  Copy,
   PanelLeftClose,
   PanelLeftOpen,
   RefreshCw,
@@ -23,6 +24,7 @@ import { baseViewerExtensions, loadLanguage, searchHighlightOnly } from "../lib/
 import { formatFileLocation } from "../lib/file-location";
 import { extensionToLanguage, filenameToLanguage } from "../lib/language-map";
 import { selectionToChatExtension } from "../lib/selection-to-chat";
+import { buildFileTree, flattenFileTreeOrder } from "../lib/build-file-tree";
 import type { SSEEvent } from "../lib/sse";
 import type { DiffMode, FileStatus, WorkspaceDiffSummary } from "../types";
 import { ChangesFileTree } from "./ChangesFileTree";
@@ -150,6 +152,10 @@ interface ParsedDiff {
   oldLineNumbers: number[];
   /** Actual file line number for each line in newText (0-indexed array, values are 1-based line numbers). */
   newLineNumbers: number[];
+  /** 1-based line numbers in newText where each hunk after the first begins. */
+  newHunkBoundaryLines: number[];
+  /** 1-based line numbers in oldText where each hunk after the first begins. */
+  oldHunkBoundaryLines: number[];
 }
 
 /**
@@ -163,13 +169,22 @@ function parseDiff(hunks: string): ParsedDiff {
   const newLines: string[] = [];
   const oldLineNumbers: number[] = [];
   const newLineNumbers: number[] = [];
+  const newHunkBoundaryLines: number[] = [];
+  const oldHunkBoundaryLines: number[] = [];
 
   let inHunk = false;
   let oldLineNum = 1;
   let newLineNum = 1;
+  let hunkCount = 0;
 
   for (const line of lines) {
     if (line.startsWith("@@")) {
+      hunkCount++;
+      if (hunkCount > 1) {
+        // Record the boundary: the next content line will start a new hunk
+        newHunkBoundaryLines.push(newLines.length + 1);
+        oldHunkBoundaryLines.push(oldLines.length + 1);
+      }
       inHunk = true;
       const match = line.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
       if (match) {
@@ -202,12 +217,133 @@ function parseDiff(hunks: string): ParsedDiff {
     newText: newLines.join("\n"),
     oldLineNumbers,
     newLineNumbers,
+    newHunkBoundaryLines,
+    oldHunkBoundaryLines,
   };
+}
+
+// SVG chevron icons (24x24 viewBox, rendered at 14px)
+const CHEVRON_UP =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>';
+const CHEVRON_DOWN =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>';
+
+class HunkSeparatorWidget extends WidgetType {
+  private onLoadMore: () => void;
+
+  constructor(onLoadMore: () => void) {
+    super();
+    this.onLoadMore = onLoadMore;
+  }
+
+  toDOM() {
+    const wrapper = document.createElement("div");
+    wrapper.className = "cm-hunk-separator";
+    wrapper.title = "Expand context";
+    wrapper.addEventListener("click", (e) => {
+      e.preventDefault();
+      this.onLoadMore();
+    });
+
+    // Arrow indicators in gutter area
+    const gutter = document.createElement("div");
+    gutter.className = "cm-hunk-separator-gutter";
+
+    const upIcon = document.createElement("span");
+    upIcon.className = "cm-hunk-separator-arrow";
+    upIcon.innerHTML = CHEVRON_UP;
+
+    const downIcon = document.createElement("span");
+    downIcon.className = "cm-hunk-separator-arrow";
+    downIcon.innerHTML = CHEVRON_DOWN;
+
+    gutter.appendChild(upIcon);
+    gutter.appendChild(downIcon);
+    wrapper.appendChild(gutter);
+
+    // Dashed line area
+    const line = document.createElement("div");
+    line.className = "cm-hunk-separator-line";
+    wrapper.appendChild(line);
+
+    return wrapper;
+  }
+
+  ignoreEvent() {
+    return false;
+  }
+}
+
+/**
+ * Creates a CodeMirror extension that inserts a clickable separator widget at
+ * hunk boundaries. Clicking anywhere on the widget loads more context.
+ */
+function hunkSeparatorExtension(boundaryLines: number[], onLoadMore: () => void) {
+  if (boundaryLines.length === 0) return [];
+  return EditorView.decorations.compute(["doc"], (state) => {
+    const builder = new RangeSetBuilder<Decoration>();
+    for (const lineNum of boundaryLines) {
+      if (lineNum >= 1 && lineNum <= state.doc.lines) {
+        const lineStart = state.doc.line(lineNum).from;
+        builder.add(
+          lineStart,
+          lineStart,
+          Decoration.widget({ widget: new HunkSeparatorWidget(onLoadMore), side: -1, block: true }),
+        );
+      }
+    }
+    return builder.finish();
+  });
 }
 
 const diffTheme = EditorView.theme({
   ".cm-insertedLine": { backgroundColor: "rgba(34, 197, 94, 0.1)" },
   ".cm-deletedLine": { backgroundColor: "rgba(239, 68, 68, 0.1)" },
+  ".cm-hunk-separator": {
+    display: "flex",
+    alignItems: "stretch",
+    height: "32px",
+    cursor: "pointer",
+    transition: "background-color 0.15s",
+    "&:hover": {
+      backgroundColor: "color-mix(in srgb, currentColor 5%, transparent)",
+    },
+    "&:hover .cm-hunk-separator-arrow": {
+      color: "color-mix(in srgb, currentColor 70%, transparent)",
+    },
+    "&:hover .cm-hunk-separator-line": {
+      backgroundImage:
+        "linear-gradient(to right, color-mix(in srgb, currentColor 35%, transparent) 50%, transparent 50%)",
+    },
+  },
+  ".cm-hunk-separator-gutter": {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingLeft: "4px",
+    paddingRight: "4px",
+    flexShrink: "0",
+  },
+  ".cm-hunk-separator-arrow": {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    height: "14px",
+    color: "color-mix(in srgb, currentColor 30%, transparent)",
+    transition: "color 0.15s",
+  },
+  ".cm-hunk-separator-line": {
+    flex: "1",
+    alignSelf: "center",
+    height: "3px",
+    backgroundImage:
+      "linear-gradient(to right, color-mix(in srgb, currentColor 20%, transparent) 50%, transparent 50%)",
+    backgroundSize: "8px 3px",
+    backgroundRepeat: "repeat-x",
+    backgroundPosition: "center",
+    transition: "background-image 0.15s",
+  },
 });
 
 function DiffFileContent({
@@ -215,11 +351,13 @@ function DiffFileContent({
   filename,
   viewMode,
   onEditorViews,
+  onLoadMoreContext,
 }: {
   hunks: string;
   filename: string;
   viewMode: ViewMode;
   onEditorViews?: (views: EditorView[]) => void;
+  onLoadMoreContext?: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | MergeView | null>(null);
@@ -228,6 +366,8 @@ function DiffFileContent({
   // Use ref pattern so callback identity changes don't re-run the setup effect
   const onEditorViewsRef = useRef(onEditorViews);
   onEditorViewsRef.current = onEditorViews;
+  const onLoadMoreRef = useRef(onLoadMoreContext);
+  onLoadMoreRef.current = onLoadMoreContext;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -246,7 +386,16 @@ function DiffFileContent({
         viewRef.current = null;
       }
 
-      const { oldText, newText, oldLineNumbers, newLineNumbers } = parseDiff(hunks);
+      const {
+        oldText,
+        newText,
+        oldLineNumbers,
+        newLineNumbers,
+        newHunkBoundaryLines,
+        oldHunkBoundaryLines,
+      } = parseDiff(hunks);
+
+      const loadMore = () => onLoadMoreRef.current?.();
 
       /** Creates a lineNumbers extension that maps document lines to actual file line numbers. */
       const makeLineNumbers = (lineMap: number[]) =>
@@ -271,6 +420,7 @@ function DiffFileContent({
             extensions: [
               ...baseViewerExtensions(isDark, { skipLineNumbers: true }),
               makeLineNumbers(oldLineNumbers),
+              hunkSeparatorExtension(oldHunkBoundaryLines, loadMore),
               selectionToChatExtension(filename, oldLineNumbers),
               ...sharedExtensions,
             ],
@@ -280,6 +430,7 @@ function DiffFileContent({
             extensions: [
               ...baseViewerExtensions(isDark, { skipLineNumbers: true }),
               makeLineNumbers(newLineNumbers),
+              hunkSeparatorExtension(newHunkBoundaryLines, loadMore),
               selectionToChatExtension(filename, newLineNumbers),
               ...sharedExtensions,
             ],
@@ -294,6 +445,7 @@ function DiffFileContent({
         const extensions = [
           ...baseViewerExtensions(isDark, { skipLineNumbers: true }),
           makeLineNumbers(newLineNumbers),
+          hunkSeparatorExtension(newHunkBoundaryLines, loadMore),
           searchHighlightOnly(),
           selectionToChatExtension(filename, newLineNumbers),
           unifiedMergeView({
@@ -350,53 +502,6 @@ function getNextContextStep(current: number): number | null {
   return null;
 }
 
-function ContextToolbar({
-  contextLines,
-  onLoadMore,
-  onShowFullFile,
-}: {
-  contextLines: number;
-  onLoadMore: () => void;
-  onShowFullFile: () => void;
-}) {
-  const nextStep = getNextContextStep(contextLines);
-  if (nextStep === null) return null;
-
-  const isLastStep = nextStep >= 99999;
-
-  return (
-    <div className="flex items-center justify-center gap-2 border-b border-border/20 px-4 py-1.5">
-      {isLastStep ? (
-        <button
-          type="button"
-          onClick={onShowFullFile}
-          className="text-xs text-muted-foreground transition-colors hover:text-foreground"
-        >
-          Show full file
-        </button>
-      ) : (
-        <>
-          <button
-            type="button"
-            onClick={onLoadMore}
-            className="text-xs text-muted-foreground transition-colors hover:text-foreground"
-          >
-            Load more context
-          </button>
-          <span className="text-muted-foreground/50">|</span>
-          <button
-            type="button"
-            onClick={onShowFullFile}
-            className="text-xs text-muted-foreground transition-colors hover:text-foreground"
-          >
-            Show full file
-          </button>
-        </>
-      )}
-    </div>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Lazy file row — renders diff from parent-provided cache
 // ---------------------------------------------------------------------------
@@ -436,6 +541,7 @@ function LazyFileRow({
   onEditorViews,
 }: LazyFileRowProps) {
   const [isOpen, setIsOpen] = useState(expandAll);
+  const [copied, setCopied] = useState(false);
 
   const handleEditorViews = useCallback(
     (views: EditorView[]) => {
@@ -481,7 +587,6 @@ function LazyFileRow({
   }, [focusedFile, filename]);
 
   const diff = cacheEntry?.diff ?? null;
-  const loadingDiff = cacheEntry?.loadingDiff ?? false;
   const diffError = cacheEntry?.diffError ?? null;
   const contextLines = cacheEntry?.contextLines ?? 3;
 
@@ -489,11 +594,11 @@ function LazyFileRow({
   const canLoadMore = !isUntracked && getNextContextStep(contextLines) !== null;
 
   return (
-    <div id={`diff-file-${encodeURIComponent(filename)}`} className="border-b border-border/30">
+    <div id={`diff-file-${encodeURIComponent(filename)}`} className="overflow-hidden rounded-lg border-2 border-border">
       <button
         type="button"
         onClick={toggle}
-        className="sticky top-0 z-10 flex w-full items-center gap-2 bg-background px-4 py-2.5 text-left text-sm hover:bg-accent/50"
+        className="sticky top-0 z-10 flex w-full items-center gap-2 bg-muted/20 px-4 py-2.5 text-left text-sm hover:bg-accent/50"
       >
         <span
           className={`shrink-0 text-muted-foreground transition-transform ${isOpen ? "rotate-90" : ""}`}
@@ -502,6 +607,31 @@ function LazyFileRow({
         </span>
         <span className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-mono [scrollbar-width:none]">
           {filename} <FileStatusBadge status={status} />
+        </span>
+        <span
+          title="Copy file path"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            navigator.clipboard.writeText(filename).catch(() => {});
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.stopPropagation();
+              navigator.clipboard.writeText(filename).catch(() => {});
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1500);
+            }
+          }}
+          className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+        >
+          {copied ? (
+            <Check className="size-3.5 text-green-600 dark:text-green-400" />
+          ) : (
+            <Copy className="size-3.5" />
+          )}
         </span>
         {onOpenFile && (
           <span
@@ -527,27 +657,26 @@ function LazyFileRow({
       </button>
       {isOpen && (
         <div className="border-t border-border/20 bg-muted/30">
-          {loadingDiff && (
-            <div className="flex items-center justify-center py-6 text-sm text-muted-foreground">
-              <Loader2 className="mr-2 size-4 animate-spin" />
-              Loading diff...
-            </div>
-          )}
-          {diffError && <div className="px-4 py-4 text-sm text-destructive">{diffError}</div>}
-          {diff !== null && !loadingDiff && (
+{diffError && <div className="px-4 py-4 text-sm text-destructive">{diffError}</div>}
+          {diff !== null && (
             <>
               {canLoadMore && (
-                <ContextToolbar
-                  contextLines={contextLines}
-                  onLoadMore={() => onLoadMoreContext(filename)}
-                  onShowFullFile={() => onShowFullFile(filename)}
-                />
+                <div className="flex items-center justify-center border-b border-border/20 px-4 py-1.5">
+                  <button
+                    type="button"
+                    onClick={() => onShowFullFile(filename)}
+                    className="text-xs text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    Show full file
+                  </button>
+                </div>
               )}
               <DiffFileContent
                 hunks={diff}
                 filename={filename}
                 viewMode={viewMode}
                 onEditorViews={handleEditorViews}
+                onLoadMoreContext={canLoadMore ? () => onLoadMoreContext(filename) : undefined}
               />
             </>
           )}
@@ -720,16 +849,21 @@ export function DiffView({
       const effectiveMergeBase = mergeBase ?? summaryRef.current?.mergeBase;
       if (!effectiveMergeBase) return;
 
-      setDiffCache((prev) => {
-        const next = new Map(prev);
-        next.set(filename, {
-          diff: prev.get(filename)?.diff ?? null,
-          loadingDiff: true,
-          diffError: null,
-          contextLines,
+      // Only mark as loading when there's no cached diff yet (initial load).
+      // During refresh the existing content stays visible.
+      const existingDiff = diffCacheRef.current.get(filename)?.diff ?? null;
+      if (existingDiff === null) {
+        setDiffCache((prev) => {
+          const next = new Map(prev);
+          next.set(filename, {
+            diff: null,
+            loadingDiff: true,
+            diffError: null,
+            contextLines,
+          });
+          return next;
         });
-        return next;
-      });
+      }
 
       getFileDiff
         .call(
@@ -741,6 +875,17 @@ export function DiffView({
         )
         .then((result) => {
           setDiffCache((prev) => {
+            const existing = prev.get(filename);
+            // Skip state update if the diff content hasn't changed
+            if (
+              existing &&
+              existing.diff === result.diff &&
+              !existing.loadingDiff &&
+              !existing.diffError &&
+              existing.contextLines === contextLines
+            ) {
+              return prev;
+            }
             const next = new Map(prev);
             next.set(filename, {
               diff: result.diff,
@@ -835,28 +980,39 @@ export function DiffView({
             // Update summary ref before triggering re-fetches so fetchFileDiff
             // reads the new mergeBase
             summaryRef.current = result;
-            setSummary(result);
-            setBaseBranch(result.baseBranch);
+            // Only update state when the summary actually changed to avoid
+            // re-rendering the entire file list with identical content.
+            if (dataChanged) {
+              setSummary(result);
+              setBaseBranch(result.baseBranch);
+            }
             setError(null);
 
-            // Clear diff cache and re-fetch expanded files when data changed or forced
+            // Re-fetch expanded files when data changed or forced.
+            // Keep existing cache entries so content doesn't flash —
+            // fetchFileDiff will skip the state update if the diff is unchanged.
             if (forceRefresh || dataChanged) {
-              // Save current contextLines before clearing
-              const expandedContextLines = new Map<string, number>();
-              for (const filename of expandedFilesRef.current) {
-                const entry = diffCacheRef.current.get(filename);
-                if (entry) expandedContextLines.set(filename, entry.contextLines);
-              }
-
-              setDiffCache(new Map());
+              // Remove cache entries for files that no longer exist in the summary
+              setDiffCache((prev) => {
+                let changed = false;
+                const next = new Map(prev);
+                for (const key of next.keys()) {
+                  if (!result.fileStatuses[key]) {
+                    next.delete(key);
+                    changed = true;
+                  }
+                }
+                return changed ? next : prev;
+              });
 
               // Re-fetch for currently expanded files with preserved context levels
               for (const filename of expandedFilesRef.current) {
                 if (result.fileStatuses[filename]) {
+                  const entry = diffCacheRef.current.get(filename);
                   fetchFileDiff(
                     filename,
                     result.mergeBase,
-                    expandedContextLines.get(filename) ?? 3,
+                    entry?.contextLines ?? 3,
                   );
                 }
               }
@@ -935,7 +1091,7 @@ export function DiffView({
   }
 
   const fileStatuses = summary.fileStatuses || {};
-  const filenames = Object.keys(fileStatuses).sort((a, b) => a.localeCompare(b));
+  const filenames = flattenFileTreeOrder(buildFileTree(fileStatuses));
   filenamesRef.current = filenames;
 
   return (
@@ -1092,6 +1248,7 @@ export function DiffView({
           />
         )}
         <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="flex flex-col gap-3 p-3">
           {filenames.map((filename) => (
             <LazyFileRow
               key={filename}
@@ -1108,6 +1265,7 @@ export function DiffView({
               onEditorViews={handleEditorViews}
             />
           ))}
+          </div>
         </div>
       </div>
     </div>

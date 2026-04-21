@@ -93,3 +93,23 @@ function trieToNodes(trie: TrieNode, parentPath: string): FileTreeNode[] {
 
   return nodes;
 }
+
+/**
+ * Flattens a file tree into a list of file paths in tree order
+ * (directories first, alphabetical within each group, depth-first).
+ * This produces the same ordering as the tree sidebar for use in the flat file list.
+ */
+export function flattenFileTreeOrder(nodes: FileTreeNode[]): string[] {
+  const result: string[] = [];
+  function walk(nodeList: FileTreeNode[]) {
+    for (const node of nodeList) {
+      if (node.children) {
+        walk(node.children);
+      } else {
+        result.push(node.path);
+      }
+    }
+  }
+  walk(nodes);
+  return result;
+}
