@@ -255,7 +255,7 @@ function smartNewlineAndIndent(view: EditorView): boolean {
   const line = state.doc.lineAt(from);
   const leadingWS = /^\s*/.exec(line.text)![0];
   const textBeforeCursor = line.text.slice(0, from - line.from).trimEnd();
-  const opensBlock = /[{(\[]$/.test(textBeforeCursor);
+  const opensBlock = /[{([]$/.test(textBeforeCursor);
 
   const afterLine = state.doc.lineAt(to);
   const textAfterCursor = afterLine.text.slice(to - afterLine.from).trimStart();
@@ -264,8 +264,8 @@ function smartNewlineAndIndent(view: EditorView): boolean {
 
   if (opensBlock && closesBlock) {
     // Between brackets:  {|}  →  {\n  |\n}
-    const inner = "\n" + leadingWS + unit;
-    const outer = "\n" + leadingWS;
+    const inner = `\n${leadingWS}${unit}`;
+    const outer = `\n${leadingWS}`;
     view.dispatch(
       state.update({
         changes: { from, to, insert: inner + outer },
@@ -277,7 +277,7 @@ function smartNewlineAndIndent(view: EditorView): boolean {
   }
 
   const extra = opensBlock ? unit : "";
-  const insert = "\n" + leadingWS + extra;
+  const insert = `\n${leadingWS}${extra}`;
   view.dispatch(
     state.update({
       changes: { from, to, insert },

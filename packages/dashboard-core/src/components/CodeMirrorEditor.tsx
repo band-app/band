@@ -112,10 +112,7 @@ export function CodeMirrorEditor({
       }
 
       const extensions = [
-        ...baseEditorExtensions(
-          isDark,
-          () => onSaveRef.current?.(),
-        ),
+        ...baseEditorExtensions(isDark, () => onSaveRef.current?.()),
         searchHighlightOnly(),
         ...lineHighlightExtension(isDark),
         cursorLineTracker((departureLine, arrivalLine) =>
