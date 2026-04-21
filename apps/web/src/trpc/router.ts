@@ -637,7 +637,12 @@ const workspaceRouter = t.router({
 
       let mergeBase: string;
       if (input.diffMode === "uncommitted") {
-        mergeBase = (await execGit(["rev-parse", "HEAD"], cwd)).trim();
+        try {
+          mergeBase = (await execGit(["rev-parse", "HEAD"], cwd)).trim();
+        } catch {
+          // No commits yet — diff against the empty tree so all staged files appear as new
+          mergeBase = (await execGit(["hash-object", "-t", "tree", "/dev/null"], cwd)).trim();
+        }
       } else {
         try {
           mergeBase = (await execGit(["merge-base", defaultBranch, "HEAD"], cwd)).trim();
@@ -735,7 +740,12 @@ const workspaceRouter = t.router({
 
       let mergeBase: string;
       if (input.diffMode === "uncommitted") {
-        mergeBase = (await execGit(["rev-parse", "HEAD"], cwd)).trim();
+        try {
+          mergeBase = (await execGit(["rev-parse", "HEAD"], cwd)).trim();
+        } catch {
+          // No commits yet — diff against the empty tree so all staged files appear as new
+          mergeBase = (await execGit(["hash-object", "-t", "tree", "/dev/null"], cwd)).trim();
+        }
       } else {
         try {
           mergeBase = (await execGit(["merge-base", defaultBranch, "HEAD"], cwd)).trim();
