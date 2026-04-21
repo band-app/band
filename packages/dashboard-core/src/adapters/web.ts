@@ -270,6 +270,10 @@ export class WebDashboardAdapter implements DashboardAdapter {
     await this.trpc.workspace.saveFile.mutate({ workspaceId, path, content });
   }
 
+  async revertFile(workspaceId: string, filePath: string, diffMode: string): Promise<void> {
+    await this.trpc.workspace.revertFile.mutate({ workspaceId, filePath, diffMode });
+  }
+
   getWorkspaceFileUrl(workspaceId: string, path: string): string {
     return `/api/workspace-file/${encodeURIComponent(workspaceId)}/${path
       .split("/")

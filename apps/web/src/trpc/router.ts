@@ -865,6 +865,66 @@ const workspaceRouter = t.router({
       return { diff };
     }),
 
+  revertFile: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        filePath: z.string(),
+        diffMode: z.enum(["uncommitted", "branch"]),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const workspace = resolveWorkspace(input.workspaceId);
+      if (!workspace) {
+        throw new Error("Workspace not found");
+      }
+
+      const cwd = workspace.worktree.path;
+      const { filePath, diffMode } = input;
+
+      // Determine the file status server-side
+      const untrackedOutput = await execGit(["ls-files", "--others", "--exclude-standard"], cwd);
+      const untrackedFiles = untrackedOutput.trim().split("\n").filter(Boolean);
+
+      if (untrackedFiles.includes(filePath)) {
+        // Untracked file — just delete it
+        await rm(join(cwd, filePath), { force: true });
+        return { ok: true };
+      }
+
+      // Resolve the reference commit for the diff mode
+      let ref: string;
+      if (diffMode === "uncommitted") {
+        try {
+          ref = (await execGit(["rev-parse", "HEAD"], cwd)).trim();
+        } catch {
+          ref = (await execGit(["hash-object", "-t", "tree", "/dev/null"], cwd)).trim();
+        }
+      } else {
+        const defaultBranch = workspace.project.defaultBranch;
+        try {
+          ref = (await execGit(["merge-base", defaultBranch, "HEAD"], cwd)).trim();
+        } catch {
+          ref = (await execGit(["hash-object", "-t", "tree", "/dev/null"], cwd)).trim();
+        }
+      }
+
+      // Determine the tracked file status from the diff
+      const nameStatusOutput = await execGit(["diff", "--name-status", ref, "--", filePath], cwd);
+      const statusLine = nameStatusOutput.trim().split("\n").filter(Boolean)[0];
+      const fileStatus = statusLine ? statusLine[0] : null;
+
+      if (fileStatus === "A") {
+        // Added (staged) file — remove from index and delete from working tree
+        await execGit(["rm", "-f", "--", filePath], cwd);
+      } else {
+        // Modified, Deleted, or Renamed — restore to the reference commit
+        await execGit(["checkout", ref, "--", filePath], cwd);
+      }
+
+      return { ok: true };
+    }),
+
   listFiles: publicProcedure
     .input(z.object({ workspaceId: z.string(), path: z.string().default("") }))
     .query(async ({ input }) => {
