@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { createLogger } from "@band-app/logger";
 import type { UIMessageChunk } from "ai";
@@ -12,27 +12,6 @@ import { emit as emitStatusEvent } from "./watcher";
 import { resolveWorkspace } from "./workspace";
 
 const log = createLogger("task-runner");
-
-/**
- * Read the most recently modified plan file from ~/.band/plans/.
- * Returns the markdown content or undefined if no plan files exist.
- */
-function readLatestPlan(): string | undefined {
-  const plansDir = join(bandHome(), "plans");
-  try {
-    const files = readdirSync(plansDir)
-      .filter((f) => f.endsWith(".md"))
-      .map((f) => {
-        const fullPath = join(plansDir, f);
-        return { path: fullPath, mtime: statSync(fullPath).mtimeMs };
-      })
-      .sort((a, b) => b.mtime - a.mtime);
-    if (files.length === 0) return undefined;
-    return readFileSync(files[0].path, "utf-8");
-  } catch {
-    return undefined;
-  }
-}
 
 /**
  * List filenames in a directory. Returns a Set for quick membership checks.
@@ -373,20 +352,11 @@ async function runTask(workspaceId: string, task: InternalTask) {
         case "tool-use": {
           endText();
           announcedToolCalls.add(event.toolCallId);
-          // ExitPlanMode input is {} — enrich it with the plan file content
-          // so the frontend can render the plan preview.
-          let enrichedInput = event.input;
-          if (event.toolName === "ExitPlanMode") {
-            const planContent = readLatestPlan();
-            if (planContent) {
-              enrichedInput = { ...(event.input as Record<string, unknown>), plan: planContent };
-            }
-          }
           broadcast(workspaceId, {
             type: "tool-input-available",
             toolCallId: event.toolCallId,
             toolName: event.toolName,
-            input: enrichedInput,
+            input: event.input,
             ...(event.displayTitle ? { title: event.displayTitle } : {}),
           });
           break;

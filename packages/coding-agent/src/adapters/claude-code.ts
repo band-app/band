@@ -1,3 +1,4 @@
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type {
@@ -25,6 +26,27 @@ import type {
 const log = createLogger("coding-agent:claude-code");
 
 const ASK_USER_QUESTION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Read the most recently modified plan file from ~/.band/plans/.
+ * Returns the markdown content or undefined if no plan files exist.
+ */
+function readLatestPlanFile(): string | undefined {
+  const plansDir = join(homedir(), ".band", "plans");
+  try {
+    const files = readdirSync(plansDir)
+      .filter((f) => f.endsWith(".md"))
+      .map((f) => {
+        const fullPath = join(plansDir, f);
+        return { path: fullPath, mtime: statSync(fullPath).mtimeMs };
+      })
+      .sort((a, b) => b.mtime - a.mtime);
+    if (files.length === 0) return undefined;
+    return readFileSync(files[0].path, "utf-8");
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * Build a human-readable display title for a Claude Code tool call.
@@ -121,13 +143,24 @@ export class ClaudeCodeAdapter implements CodingAgent {
       const approvalId = options.toolUseID;
       log.info({ toolName, approvalId, toolUseID: options.toolUseID }, `${toolName} intercepted`);
 
+      // ExitPlanMode input is {} — the plan content lives in a file written
+      // by a preceding Write tool call. Read it and inject into the input so
+      // the UI can render a plan preview.
+      let enrichedInput = input as Record<string, unknown>;
+      if (toolName === "ExitPlanMode") {
+        const planContent = readLatestPlanFile();
+        if (planContent) {
+          enrichedInput = { ...enrichedInput, plan: planContent };
+        }
+      }
+
       try {
         const answers = await Promise.race([
           this.onUserInputNeeded({
             approvalId,
             toolCallId: options.toolUseID,
             toolName,
-            input: input as Record<string, unknown>,
+            input: enrichedInput,
           }),
           new Promise<never>((_, reject) =>
             setTimeout(() => reject(new Error("User input timeout")), ASK_USER_QUESTION_TIMEOUT_MS),
