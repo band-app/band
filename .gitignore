@@ -3,6 +3,8 @@ dist/
 band
 *.tgz
 .DS_Store
+.env
+.env.*
 __pycache__/
 target/
 *.vsix
