@@ -87,7 +87,12 @@ Then open a Pull Request against `band-app/band:main` from your fork.
 
 ## CI on Pull Requests
 
-CI runs automatically on all pull requests. Every push to your PR branch triggers the full lint, test, and build pipeline.
+CI does not run automatically on fork PRs to keep costs under control. Here's how it works:
+
+1. You open a PR from your fork.
+2. A maintainer reviews the code.
+3. The maintainer adds the `ci:approved` label to trigger CI.
+4. CI runs. If you push new commits, CI re-runs automatically while the label is present.
 
 ## What to Contribute
 
