@@ -31,8 +31,7 @@ import {
   Code,
   Eye,
   File,
-  PanelLeftClose,
-  PanelLeftOpen,
+  PanelLeft,
   Search,
   TextSearch,
 } from "lucide-react";
@@ -160,9 +159,9 @@ function FileTreeToolbar({
             className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
           >
             {treeCollapsed ? (
-              <PanelLeftOpen className="size-3.5" />
+              <PanelLeft className="size-3.5" />
             ) : (
-              <PanelLeftClose className="size-3.5" />
+              <PanelLeft className="size-3.5" />
             )}
           </button>
         </TooltipTrigger>
@@ -793,7 +792,7 @@ export function CodeBrowserView({
                   onClick={toggleTree}
                   className="absolute left-1 top-0 z-10 inline-flex h-9 w-7 items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
                 >
-                  <PanelLeftOpen className="size-4" />
+                  <PanelLeft className="size-4" />
                 </button>
               </TooltipTrigger>
               <TooltipContent side="bottom" className="text-xs">

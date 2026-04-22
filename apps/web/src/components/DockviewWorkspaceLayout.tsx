@@ -4,6 +4,7 @@ import {
   parseFileLocation,
   QuickOpenDialog,
   SearchFilesDialog,
+  useSettingsQuery,
 } from "@band-app/dashboard-core";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@band-app/ui";
 import {
@@ -21,7 +22,7 @@ import {
   MessageSquare,
   Terminal as TerminalIcon,
 } from "lucide-react";
-import { lazy, memo, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isTauri } from "../lib/is-tauri";
 import { trpc } from "../lib/trpc-client";
 import { CodeBrowserView } from "./CodeBrowserView";
@@ -549,6 +550,16 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
   const apiRef = useRef<DockviewApi | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // Hidden panels from settings — used to gate panel operations
+  const { settings } = useSettingsQuery();
+  const hiddenPanels = useMemo(
+    () =>
+      ((settings as unknown as Record<string, unknown>).hiddenPanels as string[] | undefined) ?? [],
+    [settings],
+  );
+  const hiddenPanelsRef = useRef(hiddenPanels);
+  hiddenPanelsRef.current = hiddenPanels;
+
   // Ref so the onDidLayoutChange handler always sees the latest callback
   // without needing to re-subscribe.
   const onLayoutChangeRef = useRef(onLayoutChange);
@@ -651,16 +662,17 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
         }
       } else if (key === "e" && !e.shiftKey && api) {
         e.preventDefault();
-        api.getPanel("changes")?.api.setActive();
+        if (!hiddenPanelsRef.current.includes("changes")) api.getPanel("changes")?.api.setActive();
       } else if (key === "j" && !e.shiftKey && api) {
         e.preventDefault();
-        api.getPanel("terminal")?.api.setActive();
+        if (!hiddenPanelsRef.current.includes("terminal"))
+          api.getPanel("terminal")?.api.setActive();
       } else if (key === "g" && !e.shiftKey && api) {
         e.preventDefault();
-        api.getPanel("files")?.api.setActive();
+        if (!hiddenPanelsRef.current.includes("files")) api.getPanel("files")?.api.setActive();
       } else if (key === "b" && !e.shiftKey && api && isTauri) {
         e.preventDefault();
-        api.getPanel("browser")?.api.setActive();
+        if (!hiddenPanelsRef.current.includes("browser")) api.getPanel("browser")?.api.setActive();
       } else if (key === "-") {
         e.preventDefault();
         window.dispatchEvent(new CustomEvent("band:editor-go-back"));
@@ -686,6 +698,19 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
     };
     window.addEventListener("band:open-file", handler);
     return () => window.removeEventListener("band:open-file", handler);
+  }, [isActive]);
+
+  // Listen for panel activation events from the title bar panel switcher
+  useEffect(() => {
+    if (!isActive) return;
+    const handler = (e: Event) => {
+      const panelId = (e as CustomEvent<{ panelId: string }>).detail?.panelId;
+      if (panelId && apiRef.current && !hiddenPanelsRef.current.includes(panelId)) {
+        apiRef.current.getPanel(panelId)?.api.setActive();
+      }
+    };
+    window.addEventListener("band:activate-panel", handler);
+    return () => window.removeEventListener("band:activate-panel", handler);
   }, [isActive]);
 
   // Wire callbacks into panels after layout restore (functions cannot be serialized).
@@ -780,6 +805,8 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
   // Build the default layout from scratch
   const buildDefaultLayout = useCallback(
     (api: DockviewApi) => {
+      const hidden = hiddenPanelsRef.current;
+
       api.addPanel({
         id: "chat",
         component: "chat",
@@ -787,42 +814,84 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
         params: { workspaceId },
       });
 
-      api.addPanel({
-        id: "changes",
-        component: "changes",
-        tabComponent: "badge",
-        title: "Changes",
-        params: { workspaceId },
-        position: { referencePanel: "chat", direction: "right" },
-      });
+      // Track which panel to use as a reference for "within" positioning
+      let rightGroupRef: string | null = null;
 
-      api.addPanel({
-        id: "files",
-        component: "files",
-        title: "Files",
-        params: { workspaceId },
-        position: { referencePanel: "changes", direction: "within" },
-        inactive: true,
-      });
-
-      api.addPanel({
-        id: "terminal",
-        component: "terminal",
-        title: "Terminal",
-        params: { workspaceId },
-        position: { referencePanel: "changes", direction: "within" },
-        inactive: true,
-      });
-
-      if (isTauri) {
+      if (!hidden.includes("changes")) {
         api.addPanel({
-          id: "browser",
-          component: "browser",
-          title: "Browser",
+          id: "changes",
+          component: "changes",
+          tabComponent: "badge",
+          title: "Changes",
           params: { workspaceId },
-          position: { referencePanel: "changes", direction: "within" },
-          inactive: true,
+          position: { referencePanel: "chat", direction: "right" },
         });
+        rightGroupRef = "changes";
+      }
+
+      if (!hidden.includes("files")) {
+        if (rightGroupRef) {
+          api.addPanel({
+            id: "files",
+            component: "files",
+            title: "Files",
+            params: { workspaceId },
+            position: { referencePanel: rightGroupRef, direction: "within" },
+            inactive: true,
+          });
+        } else {
+          api.addPanel({
+            id: "files",
+            component: "files",
+            title: "Files",
+            params: { workspaceId },
+            position: { referencePanel: "chat", direction: "right" },
+          });
+          rightGroupRef = "files";
+        }
+      }
+
+      if (!hidden.includes("terminal")) {
+        if (rightGroupRef) {
+          api.addPanel({
+            id: "terminal",
+            component: "terminal",
+            title: "Terminal",
+            params: { workspaceId },
+            position: { referencePanel: rightGroupRef, direction: "within" },
+            inactive: true,
+          });
+        } else {
+          api.addPanel({
+            id: "terminal",
+            component: "terminal",
+            title: "Terminal",
+            params: { workspaceId },
+            position: { referencePanel: "chat", direction: "right" },
+          });
+          rightGroupRef = "terminal";
+        }
+      }
+
+      if (isTauri && !hidden.includes("browser")) {
+        if (rightGroupRef) {
+          api.addPanel({
+            id: "browser",
+            component: "browser",
+            title: "Browser",
+            params: { workspaceId },
+            position: { referencePanel: rightGroupRef, direction: "within" },
+            inactive: true,
+          });
+        } else {
+          api.addPanel({
+            id: "browser",
+            component: "browser",
+            title: "Browser",
+            params: { workspaceId },
+            position: { referencePanel: "chat", direction: "right" },
+          });
+        }
       }
 
       // Set chat panel to ~50% width
@@ -857,9 +926,18 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
       }
 
       // Self-heal: re-add any panels that are missing from the restored layout
+      // (skip panels that are intentionally hidden by the user)
       for (const id of REQUIRED_PANEL_IDS) {
-        if (!event.api.getPanel(id)) {
+        if (!event.api.getPanel(id) && !hiddenPanelsRef.current.includes(id)) {
           addMissingPanel(event.api, id);
+        }
+      }
+
+      // Remove panels that should be hidden (e.g. layout was saved before they were hidden)
+      for (const id of hiddenPanelsRef.current) {
+        const panel = event.api.getPanel(id);
+        if (panel) {
+          event.api.removePanel(panel);
         }
       }
 
@@ -874,10 +952,13 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
       // store the disposable.
       event.api.onDidRemovePanel((panel) => {
         const id = panel.id;
-        if ((REQUIRED_PANEL_IDS as readonly string[]).includes(id)) {
+        if (
+          (REQUIRED_PANEL_IDS as readonly string[]).includes(id) &&
+          !hiddenPanelsRef.current.includes(id)
+        ) {
           // Re-add on next tick so dockview finishes its removal first
           setTimeout(() => {
-            if (!event.api.getPanel(id)) {
+            if (!event.api.getPanel(id) && !hiddenPanelsRef.current.includes(id)) {
               addMissingPanel(event.api, id);
               injectParamsRef.current(event.api);
             }
@@ -936,6 +1017,34 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
     api.getPanel("terminal")?.api.updateParameters({ wsActive: isActive });
     api.getPanel("browser")?.api.updateParameters({ wsActive: isActive });
   }, [isActive]);
+
+  // React to hiddenPanels changes: remove newly-hidden panels, add newly-shown ones
+  const prevHiddenRef = useRef<string[]>(hiddenPanels);
+  useEffect(() => {
+    const api = apiRef.current;
+    if (!api) return;
+    const prev = prevHiddenRef.current;
+    prevHiddenRef.current = hiddenPanels;
+
+    // Panels that were just hidden (not in prev, now in hiddenPanels)
+    const nowHidden = hiddenPanels.filter((id) => !prev.includes(id));
+    // Panels that were just shown (in prev, not in hiddenPanels)
+    const nowShown = prev.filter((id) => !hiddenPanels.includes(id));
+
+    for (const id of nowHidden) {
+      const panel = api.getPanel(id);
+      if (panel) {
+        api.removePanel(panel);
+      }
+    }
+
+    for (const id of nowShown) {
+      if (!api.getPanel(id)) {
+        addMissingPanel(api, id);
+        injectParamsRef.current(api);
+      }
+    }
+  }, [hiddenPanels, addMissingPanel]);
 
   // Recalculate dockview layout after becoming visible, but only if the
   // container actually resized (e.g. a window resize while this workspace

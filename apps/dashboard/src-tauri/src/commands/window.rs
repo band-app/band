@@ -52,7 +52,8 @@ fn build_secondary_window(
     #[cfg(target_os = "macos")]
     let builder = builder
         .title_bar_style(tauri::TitleBarStyle::Overlay)
-        .hidden_title(true);
+        .hidden_title(true)
+        .traffic_light_position(tauri::LogicalPosition::new(13.0, 16.0));
 
     #[allow(unused_variables)]
     let window = builder

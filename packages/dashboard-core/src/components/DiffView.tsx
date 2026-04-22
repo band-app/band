@@ -18,8 +18,7 @@ import {
   ChevronsUpDown,
   Columns2,
   Copy,
-  PanelLeftClose,
-  PanelLeftOpen,
+  PanelLeft,
   RefreshCw,
   Rows2,
   Search,
@@ -1192,7 +1191,7 @@ export function DiffView({
               className="rounded p-0.5 text-muted-foreground hover:bg-accent/50 hover:text-foreground"
               title="Hide file tree"
             >
-              <PanelLeftClose className="size-3.5" />
+              <PanelLeft className="size-3.5" />
             </button>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto py-1">
@@ -1221,7 +1220,7 @@ export function DiffView({
                 className="hidden items-center rounded-md border border-border/50 bg-muted/50 px-2 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground md:inline-flex"
                 title="Show file tree"
               >
-                <PanelLeftOpen className="size-3.5" />
+                <PanelLeft className="size-3.5" />
               </button>
             )}
             <div>

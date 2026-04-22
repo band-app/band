@@ -1,4 +1,10 @@
-import { DashboardProvider, DashboardShell, useSettingsQuery } from "@band-app/dashboard-core";
+import {
+  DashboardProvider,
+  DashboardShell,
+  useDashboardStore,
+  useSettingsQuery,
+  useUpdateSettings,
+} from "@band-app/dashboard-core";
 import {
   HybridDashboardAdapter,
   NativeShellCapabilities,
@@ -14,15 +20,23 @@ import {
   useRouter,
   useRouterState,
 } from "@tanstack/react-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  FolderOpen,
+  GitCompare,
+  Globe,
+  MessageSquare,
+  Terminal as TerminalIcon,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Group, Panel, Separator, usePanelRef } from "react-resizable-panels";
 import { DockviewInstanceManager } from "../components/DockviewInstanceManager";
-import { TauriTitleBar } from "../components/TauriTitleBar";
+import { type PanelItem, TauriTitleBar } from "../components/TauriTitleBar";
 import { ToolbarButtons } from "../components/ToolbarButtons";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useNavigationHistory } from "../hooks/useNavigationHistory";
 import { useZoom } from "../hooks/useZoom";
 import { isTauri } from "../lib/is-tauri";
+import { parseWorkspaceFromPath } from "../lib/parse-workspace";
 import {
   loadSidebarWidth,
   SIDEBAR_MAX_SIZE,
@@ -193,7 +207,13 @@ function ModeSync() {
 
 function AppShell() {
   const { settings } = useSettingsQuery();
+  const updateSettings = useUpdateSettings();
   const appMode = settings.appMode ?? "side-panel";
+  const hiddenPanels = useMemo(
+    () =>
+      ((settings as unknown as Record<string, unknown>).hiddenPanels as string[] | undefined) ?? [],
+    [settings],
+  );
   // Show desktop split layout when:
   // - In a regular browser on a wide screen, OR
   // - In Tauri with "full-editor" mode
@@ -252,6 +272,55 @@ function AppShell() {
   const handleSidebarCollapse = useCallback(() => setSidebarCollapsed(true), []);
   const handleSidebarExpand = useCallback(() => setSidebarCollapsed(false), []);
 
+  // Derive active workspace from pathname for title bar display
+  const activeWorkspaceId = parseWorkspaceFromPath(pathname);
+
+  // Get the workspace path from the statuses store (for Finder / copy path)
+  const workspacePath = useDashboardStore((s) =>
+    activeWorkspaceId ? s.statuses.get(activeWorkspaceId)?.worktreePath : undefined,
+  );
+
+  // Panel items for the title bar panel switcher dropdown
+  const panelItems: PanelItem[] = useMemo(
+    () => [
+      { id: "chat", label: "Chat", icon: MessageSquare },
+      { id: "changes", label: "Changes", icon: GitCompare, shortcut: "⌘E" },
+      { id: "files", label: "Files", icon: FolderOpen, shortcut: "⌘G" },
+      { id: "terminal", label: "Terminal", icon: TerminalIcon, shortcut: "⌘J" },
+      ...(isTauri ? [{ id: "browser", label: "Browser", icon: Globe, shortcut: "⌘B" }] : []),
+    ],
+    [],
+  );
+
+  // Copy the workspace path to clipboard
+  const handleCopyPath = useCallback(() => {
+    if (!workspacePath) return;
+    navigator.clipboard.writeText(workspacePath).catch(() => {});
+  }, [workspacePath]);
+
+  // Toggle panel visibility on/off (persisted in settings)
+  const handleTogglePanelVisibility = useCallback(
+    (panelId: string) => {
+      const current =
+        ((settings as unknown as Record<string, unknown>).hiddenPanels as string[] | undefined) ??
+        [];
+      const isHidden = current.includes(panelId);
+      const next = isHidden ? current.filter((id) => id !== panelId) : [...current, panelId];
+      updateSettings.mutate({
+        ...settings,
+        hiddenPanels: next,
+      } as typeof settings);
+      // If the panel is being shown, activate it
+      if (isHidden) {
+        // Dispatch after a tick so the layout has time to add the panel
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent("band:activate-panel", { detail: { panelId } }));
+        }, 100);
+      }
+    },
+    [settings, updateSettings],
+  );
+
   if (!isDesktop || isStandalone) {
     return <Outlet />;
   }
@@ -261,7 +330,16 @@ function AppShell() {
   return (
     <div className="flex flex-col h-dvh w-full overflow-hidden bg-background text-foreground">
       {isTauriFullEditor && (
-        <TauriTitleBar onToggleSidebar={toggleSidebar} sidebarCollapsed={sidebarCollapsed} />
+        <TauriTitleBar
+          onToggleSidebar={toggleSidebar}
+          sidebarCollapsed={sidebarCollapsed}
+          workspaceName={activeWorkspaceId ?? undefined}
+          workspacePath={activeWorkspaceId ? workspacePath : undefined}
+          onCopyPath={activeWorkspaceId ? handleCopyPath : undefined}
+          panelItems={activeWorkspaceId ? panelItems : undefined}
+          hiddenPanels={activeWorkspaceId ? hiddenPanels : undefined}
+          onTogglePanelVisibility={activeWorkspaceId ? handleTogglePanelVisibility : undefined}
+        />
       )}
       <div className="flex-1 min-h-0 overflow-hidden">
         <Group

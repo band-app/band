@@ -107,7 +107,7 @@ export function DashboardShell({ toolbarExtra, hideTitleBar }: DashboardShellPro
         <div
           ref={titleBarRef}
           data-tauri-drag-region
-          className="h-[28px] shrink-0 flex items-center justify-center"
+          className="h-[38px] shrink-0 flex items-center justify-center"
         >
           <span className="text-xs font-medium text-muted-foreground select-none pointer-events-none">
             {appTitle}

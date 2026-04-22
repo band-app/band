@@ -1,5 +1,6 @@
 import { useRouterState } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { parseWorkspaceFromPath } from "../lib/parse-workspace";
 import { DockviewWorkspaceLayout } from "./DockviewWorkspaceLayout";
 
 // ---------------------------------------------------------------------------
@@ -12,12 +13,6 @@ interface CachedWorkspace {
 }
 
 const MAX_CACHED_WORKSPACES = 5;
-
-function parseWorkspaceFromPath(pathname: string): string | null {
-  const match = pathname.match(/^\/workspace\/([^/]+)/);
-  if (!match) return null;
-  return decodeURIComponent(match[1]);
-}
 
 /**
  * Manages multiple DockviewWorkspaceLayout instances with show/hide semantics.

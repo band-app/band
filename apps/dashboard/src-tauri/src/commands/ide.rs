@@ -699,3 +699,42 @@ pub fn reveal_in_finder(path: String) -> Result<(), String> {
         .map_err(|e| format!("Failed to open Finder: {e}"))?;
     Ok(())
 }
+
+/// Checks whether a macOS application is installed by looking in common
+/// locations (/Applications, /System/Applications, ~/Applications) and
+/// falling back to `which` for CLI tools.
+#[tauri::command]
+pub fn check_app_exists(app_name: String) -> bool {
+    let mut locations = vec![
+        format!("/Applications/{app_name}.app"),
+        format!("/System/Applications/{app_name}.app"),
+    ];
+
+    if let Ok(home) = std::env::var("HOME") {
+        locations.push(format!("{home}/Applications/{app_name}.app"));
+    }
+
+    for location in &locations {
+        if std::path::Path::new(location).exists() {
+            return true;
+        }
+    }
+
+    // Fallback: check if a CLI binary exists in PATH
+    std::process::Command::new("which")
+        .arg(&app_name)
+        .output()
+        .map_or(false, |output| output.status.success())
+}
+
+/// Opens a path with a specific macOS application.
+#[tauri::command]
+pub fn open_with_app(path: String, app_name: String) -> Result<(), String> {
+    std::process::Command::new("open")
+        .arg("-a")
+        .arg(&app_name)
+        .arg(&path)
+        .output()
+        .map_err(|e| format!("Failed to open with {app_name}: {e}"))?;
+    Ok(())
+}
