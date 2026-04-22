@@ -28,21 +28,38 @@ const log = createLogger("coding-agent:claude-code");
 const ASK_USER_QUESTION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
 /**
- * Read the most recently modified plan file from ~/.claude/plans/.
- * Returns the markdown content or undefined if no plan files exist.
+ * Read the most recently modified plan file.
+ *
+ * Claude Code stores plans under `<CLAUDE_CONFIG_DIR>/plans/` which
+ * defaults to `~/.claude/plans/` but can be overridden via the
+ * `CLAUDE_CONFIG_DIR` env var. We check both the configured/default
+ * location and `~/.band/plans/` (legacy) and return whichever has
+ * the newest file.
  */
 function readLatestPlanFile(): string | undefined {
-  const plansDir = join(homedir(), ".claude", "plans");
+  const home = homedir();
+  const configDir = process.env.CLAUDE_CONFIG_DIR || join(home, ".claude");
+  const plansDirs = [join(configDir, "plans"), join(home, ".band", "plans")];
+
+  let newest: { path: string; mtime: number } | undefined;
+  for (const dir of plansDirs) {
+    try {
+      for (const f of readdirSync(dir)) {
+        if (!f.endsWith(".md")) continue;
+        const fullPath = join(dir, f);
+        const mtime = statSync(fullPath).mtimeMs;
+        if (!newest || mtime > newest.mtime) {
+          newest = { path: fullPath, mtime };
+        }
+      }
+    } catch {
+      // Directory may not exist — skip.
+    }
+  }
+
+  if (!newest) return undefined;
   try {
-    const files = readdirSync(plansDir)
-      .filter((f) => f.endsWith(".md"))
-      .map((f) => {
-        const fullPath = join(plansDir, f);
-        return { path: fullPath, mtime: statSync(fullPath).mtimeMs };
-      })
-      .sort((a, b) => b.mtime - a.mtime);
-    if (files.length === 0) return undefined;
-    return readFileSync(files[0].path, "utf-8");
+    return readFileSync(newest.path, "utf-8");
   } catch {
     return undefined;
   }
