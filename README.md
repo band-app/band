@@ -1,24 +1,26 @@
 # Band
 
-IDE-agnostic agent orchestrator. A central dashboard for managing AI coding agents across multiple workspaces and projects, with IDE extensions that report agent status in real time.
+IDE-agnostic agent orchestrator — dashboard + VS Code extension. A desktop app for managing AI coding agents across multiple workspaces and projects, with a built-in code editor, terminal, chat, LSP support, and a CLI for programmatic control.
 
 ```
-┌─────────────────────────────────────┐
-│  Dashboard (Tauri + React)          │
-│  - Project & worktree management    │
-│  - Agent status overview            │
-│  - Click to launch/focus IDE        │
-│  - Watches ~/.band/status/*.json    │
-└──────────────┬──────────────────────┘
+┌──────────────────────────────────────────┐
+│  Dashboard (Tauri v2 + React 19)         │
+│  - Project & workspace management        │
+│  - Code editor (CodeMirror 6 + LSP)      │
+│  - Integrated terminal & chat            │
+│  - Agent status overview                 │
+│  - Window management (focus, positioning)│
+└──────────────┬───────────────────────────┘
                │
-    Shared Status Protocol
-  (~/.band/status/{workspaceId}.json)
+       Web Server (Node.js)
+   (data, state, git, LSP, agents)
+        http://localhost:3456
                │
        ┌───────┴───────┐
        ▼               ▼
   ┌─────────┐    ┌─────────┐
-  │ VS Code │    │ (future │
-  │  Ext.   │    │  IDEs)  │
+  │ VS Code │    │  Band   │
+  │  Ext.   │    │   CLI   │
   └────┬────┘    └─────────┘
        ▼
    AI Agent (claude, cursor, etc.)
@@ -28,22 +30,25 @@ IDE-agnostic agent orchestrator. A central dashboard for managing AI coding agen
 
 ```
 apps/
-  dashboard/          Tauri + React desktop app
-    src/              React frontend (TailwindCSS v4, Zustand)
-    src-tauri/        Rust backend (git ops, file watcher, process spawning)
+  dashboard/          Tauri v2 desktop app (Rust backend + React frontend)
+  web/                Node.js web server (tRPC, git ops, LSP, coding agents)
+  cli/                Band CLI (Rust) — programmatic workspace management
+  website/            Marketing website (Astro)
 extensions/
   vscode/             VS Code extension
-    src/              TypeScript source
 packages/
-  shared/             Shared TypeScript types (status protocol)
+  dashboard-core/     Shared dashboard UI (CodeMirror, components)
+  coding-agent/       Coding agent integration
+  logger/             Shared logging (pino)
+  ui/                 Shared UI components
 ```
 
 ## Prerequisites
 
-- [Node.js](https://nodejs.org) v18+
-- [pnpm](https://pnpm.io) v9+
-- [Rust](https://rustup.rs) (for Tauri dashboard)
-- macOS (dashboard uses AppleScript for window focus)
+- [Node.js](https://nodejs.org) v22+
+- [pnpm](https://pnpm.io) v10+
+- [Rust](https://rustup.rs) (for Tauri dashboard and CLI)
+- macOS (dashboard uses native window management)
 
 ### Install Rust (if not already installed)
 
@@ -73,7 +78,7 @@ cd apps/dashboard
 pnpm tauri dev
 ```
 
-This starts the Vite dev server on `http://localhost:1420` and opens the Tauri window. Hot-reloading is enabled for both the React frontend and Rust backend.
+This builds the CLI and web server, then starts the Tauri app. Hot-reloading is enabled for the React frontend and Rust backend.
 
 ### Production Build
 
@@ -83,7 +88,41 @@ pnpm build:dashboard
 
 This produces a `.dmg` installer at `apps/dashboard/src-tauri/target/release/bundle/dmg/`.
 
-## Running the VS Code Extension
+## Web Server
+
+The web server (`apps/web`) is the backend for the dashboard. It handles:
+
+- **Git operations** — diff, commit, branch management via tRPC
+- **LSP** — spawns and proxies language servers (TypeScript, etc.) over WebSocket
+- **Coding agents** — manages agent sessions and task execution
+- **File serving** — serves the dashboard frontend
+
+```bash
+# Development:
+pnpm dev:web
+
+# Build:
+pnpm build:web
+```
+
+The server runs on `http://localhost:3456` by default (configurable via `PORT` env var). It is started automatically by the Tauri dashboard in production.
+
+## Band CLI
+
+The CLI is a thin client for the web server, used for programmatic workspace management:
+
+```bash
+band projects list              # List registered projects
+band workspaces list            # List workspaces
+band workspaces create          # Create a new workspace (git worktree)
+band tasks list                 # List coding agent tasks
+band tunnels start              # Start a tunnel
+band settings                   # View settings
+```
+
+All state and operations happen server-side. The CLI connects to the running Band server.
+
+## VS Code Extension
 
 ### Build
 
@@ -103,7 +142,6 @@ pnpm build
 
 ```bash
 cd extensions/vscode
-# Launch a new VS Code window with the extension loaded:
 code --extensionDevelopmentPath="$(pwd)"
 ```
 
@@ -117,106 +155,31 @@ The extension activates when it detects a `.band/config.yaml` in the workspace. 
 4. Monitors terminal output for agent status changes
 5. Writes status to `~/.band/status/{workspaceId}.json`
 
-## Usage
-
-### 1. Register a Project
-
-Open the dashboard and click **"+ New"**. Browse to a git repository or paste its path. This registers the repo and discovers existing worktrees.
-
-### 2. Create a Workspace
-
-Click **"+ workspace"** next to a project name. Enter a branch name and optionally a base branch. This creates a new git worktree at `~/.band/worktrees/{project}/{branch}/`.
-
-### 3. Open in VS Code
-
-Click any workspace row in the dashboard. This opens VS Code at the worktree path. If the worktree has a `.band/config.yaml`, the VS Code extension will automatically set up terminals, browser, and start monitoring.
-
-### 4. Monitor Agent Status
-
-Once an AI agent is running in a monitored terminal, the VS Code extension detects status changes and writes them to `~/.band/status/`. The dashboard watches this directory and updates in real time:
-
-| Status | Icon | Meaning |
-|--------|------|---------|
-| idle | − | No agent activity |
-| working | ● | Agent is actively processing |
-| needs_input | ⚠ | Agent is waiting for user input |
-| done | ✓ | Agent finished its task |
-| error | ✗ | Agent encountered an error |
-
-## Workspace Config
-
-Create a `.band/config.yaml` in any worktree to configure the VS Code extension:
-
-```yaml
-workspaceId: "my-app-feature-auth"
-project: "my-app"
-
-layout:
-  orientation: horizontal
-  groups:
-    - size: 0.6               # left: code editing
-    - size: 0.4               # right: browser preview
-      browser:
-        url: "http://localhost:3000"
-        pinned: true
-
-terminals:
-  - name: "dev server"
-    command: "pnpm dev"
-  - name: "claude"
-    command: "claude"
-    monitor: true             # enable agent status detection
-
-agent:
-  name: "claude-code"
-  patterns:                   # regex patterns for status detection
-    working: "\\b(Thinking|Reading|Writing|Searching)\\b"
-    needs_input: "\\b(Y/n|yes/no|approve|deny|permission)\\b"
-    error: "\\b(Error|Failed|error:)\\b"
-    done: "\\b(Done|Completed|finished)\\b"
-```
-
-## Shared Status Protocol
-
-IDE extensions communicate with the dashboard via JSON files in `~/.band/status/`:
-
-```
-~/.band/
-  state.json              # Registered projects and worktrees
-  status/                 # Agent status files (one per workspace)
-    {workspaceId}.json
-```
-
-Each status file:
-
-```json
-{
-  "workspaceId": "my-app-feature-auth",
-  "project": "my-app",
-  "branch": "feature-auth",
-  "worktreePath": "/Users/you/.band/worktrees/my-app/feature-auth",
-  "ide": "vscode",
-  "pid": 12345,
-  "agent": {
-    "name": "claude-code",
-    "status": "working",
-    "lastActivity": "2026-03-03T10:30:00Z",
-    "summary": "Reading src/auth.ts"
-  }
-}
-```
-
-Any IDE extension can write to this directory using the same schema. The dashboard watches it with a file system watcher and emits real-time events to the React frontend.
-
 ## Development
+
+### Lint & Format
+
+```bash
+# Check
+pnpm check
+
+# Fix
+pnpm lint:fix
+pnpm format:fix
+```
+
+### Testing
+
+```bash
+pnpm test
+```
+
+This project uses integration tests as the primary testing approach — see `CLAUDE.md` for the testing strategy.
 
 ### Dashboard (Tauri + React)
 
 ```bash
 cd apps/dashboard
-
-# Frontend dev server only (no Tauri window):
-pnpm dev
 
 # Full Tauri dev (frontend + Rust backend + native window):
 pnpm tauri dev
