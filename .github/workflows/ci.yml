@@ -3,41 +3,56 @@ name: CI
 on:
   push:
     branches: [main]
-  pull_request_target:
-    types: [labeled, synchronize]
+  pull_request:
     branches: [main]
 
 concurrency:
-  group: ci-${{ github.event.pull_request.head.sha || github.sha }}
+  group: ci-${{ github.head_ref || github.sha }}
   cancel-in-progress: true
 
 jobs:
   check:
     name: Lint, Test & Build
-    runs-on: [self-hosted]
-
-    # Always run on push to main.
-    # For PRs, only run when the 'ci:approved' label is present.
-    # Maintainers: review the PR, then add the label to trigger CI.
-    # New commits (synchronize) re-run automatically while the label is present.
-    if: >
-      github.event_name == 'push' ||
-      contains(github.event.pull_request.labels.*.name, 'ci:approved')
-
+    runs-on: ubuntu-latest
     env:
       NODE_OPTIONS: "--max-old-space-size=6144"
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          # For PRs, checkout the PR head commit (safe because label gates access)
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-registry-${{ runner.os }}-
+
+      - name: Cache CLI target
+        uses: actions/cache@v4
+        with:
+          path: apps/cli/target
+          key: cargo-cli-${{ runner.os }}-${{ hashFiles('apps/cli/Cargo.lock') }}
+          restore-keys: cargo-cli-${{ runner.os }}-
+
+      - name: Cache Dashboard target
+        uses: actions/cache@v4
+        with:
+          path: apps/dashboard/src-tauri/target
+          key: cargo-dashboard-${{ runner.os }}-${{ hashFiles('apps/dashboard/src-tauri/Cargo.lock') }}
+          restore-keys: cargo-dashboard-${{ runner.os }}-
+
+      - name: Install Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -84,9 +99,6 @@ jobs:
 
       - name: Test (web)
         run: pnpm --filter @band-app/server test
-
-      - name: Wait for apt lock
-        run: while sudo fuser /var/lib/apt/lists/lock /var/lib/dpkg/lock /var/lib/dpkg/lock-frontend 2>/dev/null; do echo "Waiting for apt lock..."; sleep 5; done
 
       - name: Install Playwright Chromium
         run: pnpm --filter @band-app/server exec playwright install --with-deps chromium

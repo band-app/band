@@ -22,7 +22,7 @@ See `.claude/skills/integration-tests.md` for the full set of rules and examples
 
 ## Project Tracking
 
-All issues are created in the `topdev1de/band` GitHub repo.
+All issues are created in the `band-app/band` GitHub repo.
 
 ## Architecture: Web Server vs Tauri App
 

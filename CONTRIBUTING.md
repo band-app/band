@@ -6,7 +6,7 @@ Thanks for your interest in contributing to Band! This guide will help you get s
 
 ### 1. Fork the Repository
 
-Click the **Fork** button on the [GitHub repo](https://github.com/topdev1de/band) to create your own copy.
+Click the **Fork** button on the [GitHub repo](https://github.com/band-app/band) to create your own copy.
 
 ### 2. Clone Your Fork
 
@@ -18,7 +18,7 @@ cd band
 ### 3. Add the Upstream Remote
 
 ```bash
-git remote add upstream https://github.com/topdev1de/band.git
+git remote add upstream https://github.com/band-app/band.git
 ```
 
 ### 4. Install Dependencies
@@ -76,7 +76,7 @@ Update dashboard panel layout
 git push origin my-feature
 ```
 
-Then open a Pull Request against `topdev1de/band:main` from your fork.
+Then open a Pull Request against `band-app/band:main` from your fork.
 
 ## Pull Request Guidelines
 
@@ -87,19 +87,11 @@ Then open a Pull Request against `topdev1de/band:main` from your fork.
 
 ## CI on Pull Requests
 
-We use self-hosted runners for CI. To protect them, **CI does not run automatically on PRs from forks**. Here's how it works:
-
-1. You open a PR from your fork.
-2. A maintainer reviews the code.
-3. The maintainer adds the `ci:approved` label to trigger CI.
-4. CI runs. If you push new commits, CI re-runs automatically while the label is present.
-5. If a maintainer removes the label (e.g. after significant changes that need re-review), you'll need another approval.
-
-Please don't ask maintainers to add the label — they'll do it once they've reviewed the changes.
+CI runs automatically on all pull requests. Every push to your PR branch triggers the full lint, test, and build pipeline.
 
 ## What to Contribute
 
-- **Bug fixes** — check [open issues](https://github.com/topdev1de/band/issues) or report a new one.
+- **Bug fixes** — check [open issues](https://github.com/band-app/band/issues) or report a new one.
 - **Features** — open an issue first to discuss the approach before investing time in a large PR.
 - **Documentation** — improvements to README, CONTRIBUTING, or code comments are always welcome.
 - **Tests** — we use integration tests (see below). Adding test coverage is a great way to contribute.
