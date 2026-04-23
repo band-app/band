@@ -218,29 +218,10 @@ export function ChatView({
   }, [workspaceId]);
 
   const [modes, setModes] = useState<{ id: string; name: string; description?: string }[]>([]);
-  const modeStorageKey = `band-mode:${workspaceId}`;
-  const [selectedMode, setSelectedMode] = useState<string | undefined>(() => {
-    try {
-      return sessionStorage.getItem(modeStorageKey) ?? undefined;
-    } catch {
-      return undefined;
-    }
-  });
-  const handleModeSelect = useCallback(
-    (mode: string | undefined) => {
-      setSelectedMode(mode);
-      try {
-        if (mode) {
-          sessionStorage.setItem(modeStorageKey, mode);
-        } else {
-          sessionStorage.removeItem(modeStorageKey);
-        }
-      } catch {
-        // ignore storage errors
-      }
-    },
-    [modeStorageKey],
-  );
+  const [selectedMode, setSelectedMode] = useState<string | undefined>();
+  const handleModeSelect = useCallback((mode: string | undefined) => {
+    setSelectedMode(mode);
+  }, []);
   useEffect(() => {
     trpc.modes.list
       .query({ agentId: codingAgentId || undefined })
@@ -270,32 +251,22 @@ export function ChatView({
   }, [modes, selectedMode, handleModeSelect]);
 
   const [models, setModels] = useState<{ id: string; name: string; description?: string }[]>([]);
-  const [selectedModel, setSelectedModel] = useState<string | undefined>(() => {
-    try {
-      return sessionStorage.getItem(`band-model:${workspaceId}`) ?? undefined;
-    } catch {
-      return undefined;
-    }
-  });
+  // Default model from agent settings (per agent type)
+  const [agentDefaultModel, setAgentDefaultModel] = useState<string | undefined>();
+  // Explicit user override from the model dropdown
+  const [userModelOverride, setUserModelOverride] = useState<string | undefined>();
+  // Effective model: user override takes precedence, then agent default
+  const selectedModel = userModelOverride ?? agentDefaultModel;
+
   useEffect(() => {
     trpc.models.list
       .query({ agentId: codingAgentId || undefined })
-      .then((data) =>
-        setModels(data.models as { id: string; name: string; description?: string }[]),
-      )
+      .then((data) => {
+        setModels(data.models as { id: string; name: string; description?: string }[]);
+        setAgentDefaultModel((data.defaultModel as string) || undefined);
+      })
       .catch(() => setModels([]));
   }, [codingAgentId]);
-  useEffect(() => {
-    try {
-      if (selectedModel) {
-        sessionStorage.setItem(`band-model:${workspaceId}`, selectedModel);
-      } else {
-        sessionStorage.removeItem(`band-model:${workspaceId}`);
-      }
-    } catch {
-      // sessionStorage may not be available
-    }
-  }, [selectedModel, workspaceId]);
 
   const [queuedMessages, setQueuedMessages] = useState<string[]>([]);
 
@@ -330,8 +301,8 @@ export function ChatView({
   }, [transport, selectedMode]);
 
   useEffect(() => {
-    transport.model = selectedModel;
-  }, [transport, selectedModel]);
+    transport.model = userModelOverride ?? agentDefaultModel;
+  }, [transport, userModelOverride, agentDefaultModel]);
 
   useEffect(() => {
     transport.codingAgentId = codingAgentId;
@@ -930,7 +901,7 @@ export function ChatView({
                 <ModelMenu
                   models={models}
                   selected={selectedModel}
-                  onSelect={setSelectedModel}
+                  onSelect={setUserModelOverride}
                   agentType={agentType}
                 />
               )}
@@ -1023,6 +994,7 @@ function ModelMenu({
   agentType?: string;
 }) {
   const current = models.find((m) => m.id === selected) ?? models[0];
+  const displayName = current?.name ?? "Model";
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -1035,7 +1007,7 @@ function ModelMenu({
           ) : (
             <ChevronDown className="size-3" />
           )}
-          {current?.name ?? "Model"}
+          {displayName}
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="min-w-[140px]">
@@ -1045,7 +1017,7 @@ function ModelMenu({
             onClick={() => onSelect(model.id)}
             className={cn(
               "flex flex-col items-start gap-0.5",
-              model.id === (selected ?? models[0]?.id) ? "bg-accent" : "",
+              model.id === selected ? "bg-accent" : "",
             )}
           >
             <span className="text-sm font-medium">{model.name}</span>

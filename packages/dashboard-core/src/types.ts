@@ -101,6 +101,7 @@ export interface CodingAgentDefinition {
   type: CodingAgentType;
   label: string;
   command?: string;
+  model?: string;
 }
 
 export interface NotificationSettings {

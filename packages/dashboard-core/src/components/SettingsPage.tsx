@@ -24,7 +24,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { useCapabilities } from "../context";
+import { useAdapter, useCapabilities } from "../context";
 import { useUpdateSettings } from "../hooks/use-settings-mutations";
 import { useSettingsQuery } from "../hooks/use-settings-query";
 import { playSound, SOUNDS, type SoundId } from "../lib/sounds";
@@ -138,6 +138,26 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
   const [enableLSP, setEnableLSP] = useState(settings.enableLSP ?? false);
   const [selectedTheme, setSelectedTheme] = useState<Theme>(settings.theme ?? "system");
   const [appMode, setAppMode] = useState<AppMode>(settings.appMode ?? "side-panel");
+  const [agentModels, setAgentModels] = useState<
+    Record<string, { id: string; name: string; description?: string }[]>
+  >({});
+
+  const adapter = useAdapter();
+
+  // Fetch available models for each enabled agent type
+  useEffect(() => {
+    if (!adapter.listModels) return;
+    for (const agent of codingAgents) {
+      adapter
+        .listModels(agent.id)
+        .then((models) => {
+          setAgentModels((prev) => ({ ...prev, [agent.type]: models }));
+        })
+        .catch(() => {
+          // Models unavailable for this agent type
+        });
+    }
+  }, [codingAgents, adapter]);
 
   const isTauriApp = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -549,6 +569,46 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
                         className="h-7 text-xs"
                       />
                     </div>
+                    {(agentModels[known.type]?.length ?? 0) > 0 && (
+                      <div className="space-y-1">
+                        <Label className="text-xs text-muted-foreground">Default model</Label>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="w-full justify-between font-normal h-7 text-xs px-2"
+                            >
+                              {agentModels[known.type]?.find((m) => m.id === agent?.model)?.name ??
+                                "Default"}
+                              <ChevronDown className="size-3 opacity-50" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent
+                            align="start"
+                            className="w-[--radix-dropdown-menu-trigger-width]"
+                          >
+                            <DropdownMenuRadioGroup
+                              value={agent?.model ?? ""}
+                              onValueChange={(v: string) =>
+                                setCodingAgents((prev) =>
+                                  prev.map((a) =>
+                                    a.type === known.type ? { ...a, model: v || undefined } : a,
+                                  ),
+                                )
+                              }
+                            >
+                              <DropdownMenuRadioItem value="">Default</DropdownMenuRadioItem>
+                              {agentModels[known.type]?.map((m) => (
+                                <DropdownMenuRadioItem key={m.id} value={m.id}>
+                                  {m.name}
+                                </DropdownMenuRadioItem>
+                              ))}
+                            </DropdownMenuRadioGroup>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

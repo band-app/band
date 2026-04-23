@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import {
   type CodingAgent,
@@ -15,9 +17,29 @@ const g = globalThis as unknown as Record<symbol, unknown>;
 if (!g[POOL_KEY]) g[POOL_KEY] = new Map<string, CodingAgent>();
 const pool = g[POOL_KEY] as Map<string, CodingAgent>;
 
+/**
+ * Read the 'model' field from ~/.claude/settings.json as a fallback
+ * for claude-code agents that don't have a model set in Band settings.
+ */
+function loadClaudeSettingsModel(): string | undefined {
+  try {
+    const data = readFileSync(join(homedir(), ".claude", "settings.json"), "utf-8");
+    const parsed = JSON.parse(data) as Record<string, unknown>;
+    return typeof parsed.model === "string" ? parsed.model : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function getAgentConfig(worktreePath: string, agentId?: string): CodingAgentConfig {
   const settings = loadSettings();
   const agentDef = getAgentDefinition(settings, agentId);
+
+  // Resolve model: prefer Band agent definition, fall back to ~/.claude/settings.json for claude-code
+  let model = agentDef.model;
+  if (!model && agentDef.type === "claude-code") {
+    model = loadClaudeSettingsModel();
+  }
 
   return {
     type: agentDef.type,
@@ -26,6 +48,7 @@ function getAgentConfig(worktreePath: string, agentId?: string): CodingAgentConf
     additionalDirectories: [join(bandHome(), "uploads"), join(bandHome(), "shared")],
     options: {
       executablePath: agentDef.command,
+      model,
     },
   } as CodingAgentConfig;
 }

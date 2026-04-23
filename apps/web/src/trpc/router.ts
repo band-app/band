@@ -51,6 +51,7 @@ import {
   bandHome,
   deleteBranchStatus,
   deleteWorkspaceStatus,
+  getAgentDefinition,
   getWorkspaceStatus,
   loadCurrentStatuses,
   loadSettings,
@@ -1980,10 +1981,11 @@ const modelsRouter = t.router({
     .input(z.object({ agentId: z.string().optional() }))
     .query(async ({ input }) => {
       const agent = await createMetadataAgent(input.agentId);
-      if (agent.listModels) {
-        return { models: await agent.listModels() };
-      }
-      return { models: [] };
+      const models = agent.listModels ? await agent.listModels() : [];
+      // Include the agent's configured default model from Band settings
+      const settings = loadSettings();
+      const agentDef = getAgentDefinition(settings, input.agentId);
+      return { models, defaultModel: agentDef.model };
     }),
 });
 

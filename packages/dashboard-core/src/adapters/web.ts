@@ -113,6 +113,13 @@ export class WebDashboardAdapter implements DashboardAdapter {
     await this.trpc.settings.update.mutate(settings as unknown as Record<string, unknown>);
   }
 
+  async listModels(
+    agentId?: string,
+  ): Promise<{ id: string; name: string; description?: string }[]> {
+    const data = await this.trpc.models.list.query({ agentId });
+    return data.models as { id: string; name: string; description?: string }[];
+  }
+
   private statusHandlers = new Set<(data: SSEEvent) => void>();
   private statusSubscription: { unsubscribe: () => void } | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
