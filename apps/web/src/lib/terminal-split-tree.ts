@@ -143,6 +143,7 @@ export function updateNodeSizes(tree: TreeNode, nodeId: string, sizes: [number, 
 }
 
 const STORAGE_PREFIX = "band:terminal-splits:";
+const PANE_META_PREFIX = "band:terminal-pane-meta:";
 
 /**
  * Persist the split tree for a workspace to localStorage.
@@ -165,5 +166,44 @@ export function loadTree(workspaceId: string): TreeNode | null {
     return raw ? (JSON.parse(raw) as TreeNode) : null;
   } catch {
     return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Pane metadata persistence (command, cwd, env, name, focus per terminal)
+// ---------------------------------------------------------------------------
+
+/**
+ * Persist pane metadata for a workspace to localStorage.
+ */
+export function savePaneMeta(workspaceId: string, meta: Record<string, unknown>): void {
+  try {
+    localStorage.setItem(`${PANE_META_PREFIX}${workspaceId}`, JSON.stringify(meta));
+  } catch {
+    // localStorage may be full or unavailable
+  }
+}
+
+/**
+ * Load persisted pane metadata for a workspace from localStorage.
+ * Returns `null` if nothing is stored or the data is corrupt.
+ */
+export function loadPaneMeta(workspaceId: string): Record<string, unknown> | null {
+  try {
+    const raw = localStorage.getItem(`${PANE_META_PREFIX}${workspaceId}`);
+    return raw ? (JSON.parse(raw) as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Remove persisted pane metadata for a workspace.
+ */
+export function clearPaneMeta(workspaceId: string): void {
+  try {
+    localStorage.removeItem(`${PANE_META_PREFIX}${workspaceId}`);
+  } catch {
+    // ignore
   }
 }

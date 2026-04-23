@@ -5,6 +5,7 @@ import {
   getTerminalSession,
   killTerminal,
   resizeTerminal,
+  type SpawnOptions,
   spawnTerminal,
 } from "./terminal-manager";
 
@@ -20,29 +21,99 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
     return;
   }
 
-  // Try reconnection first, otherwise spawn a new terminal
-  let session = getTerminalSession(terminalId);
-  if (!session) {
-    try {
-      session = await spawnTerminal(workspaceId, terminalId);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      log.error(
-        "Failed to spawn terminal %s for workspace %s: %s",
-        terminalId,
-        workspaceId,
-        message,
-      );
-      ws.close(4001, message);
-      return;
-    }
+  // Reconnection: reuse existing PTY session
+  const existing = getTerminalSession(terminalId);
+  if (existing) {
+    attachSession(ws, terminalId, workspaceId, existing, false);
+    return;
   }
 
-  log.debug("Terminal connected: %s (workspace %s)", terminalId, workspaceId);
+  // New terminal: wait for the first message which may be an `init` with
+  // spawn options (command, cwd, env). If the first message is NOT an init,
+  // spawn with defaults and process the message normally.
+  ws.once("message", async (data: Buffer | string) => {
+    const message = data.toString();
+
+    let spawnOpts: SpawnOptions | undefined;
+    let pendingMessage: string | undefined;
+
+    if (message.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(message);
+        if (parsed.type === "init") {
+          spawnOpts = {
+            command: typeof parsed.command === "string" ? parsed.command : undefined,
+            cwd: typeof parsed.cwd === "string" ? parsed.cwd : undefined,
+            env:
+              parsed.env && typeof parsed.env === "object" && !Array.isArray(parsed.env)
+                ? (parsed.env as Record<string, string>)
+                : undefined,
+          };
+        } else {
+          // Not an init message — spawn with defaults and queue for processing
+          pendingMessage = message;
+        }
+      } catch {
+        // Not valid JSON — treat as raw terminal input
+        pendingMessage = message;
+      }
+    } else {
+      pendingMessage = message;
+    }
+
+    let session: Awaited<ReturnType<typeof spawnTerminal>>;
+    try {
+      session = await spawnTerminal(workspaceId, terminalId, spawnOpts);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      log.error("Failed to spawn terminal %s for workspace %s: %s", terminalId, workspaceId, msg);
+      ws.close(4001, msg);
+      return;
+    }
+
+    attachSession(ws, terminalId, workspaceId, session, true);
+
+    // Process the queued message (resize, close, or raw input)
+    if (pendingMessage) {
+      handleMessage(ws, terminalId, session, pendingMessage);
+    }
+  });
+
+  // If the WebSocket closes before any message arrives, do nothing
+  ws.once("close", () => {
+    ws.removeAllListeners("message");
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Attach a PTY session to a WebSocket
+// ---------------------------------------------------------------------------
+
+interface TerminalSession {
+  pty: {
+    onData: (cb: (data: string) => void) => { dispose: () => void };
+    onExit: (cb: (e: { exitCode: number }) => void) => { dispose: () => void };
+    write: (data: string) => void;
+  };
+  scrollback: string;
+  workspaceId: string;
+}
+
+function attachSession(
+  ws: WebSocket,
+  terminalId: string,
+  workspaceId: string,
+  session: TerminalSession,
+  isNew: boolean,
+): void {
+  log.debug(
+    "Terminal %s: %s (workspace %s)",
+    isNew ? "connected" : "reconnected",
+    terminalId,
+    workspaceId,
+  );
 
   // Replay buffered scrollback so the client sees previous output.
-  // Strip terminal query sequences (e.g. cursor position request \x1b[6n)
-  // that would cause xterm.js to send spurious responses back to the PTY.
   if (session.scrollback.length > 0) {
     ws.send(stripTerminalQueries(session.scrollback));
   }
@@ -64,25 +135,7 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
 
   // WebSocket input -> PTY
   ws.on("message", (data: Buffer | string) => {
-    const message = data.toString();
-    // Check for JSON commands
-    if (message.startsWith("{")) {
-      try {
-        const parsed = JSON.parse(message);
-        if (parsed.type === "resize" && parsed.cols && parsed.rows) {
-          resizeTerminal(terminalId, parsed.cols, parsed.rows);
-          return;
-        }
-        if (parsed.type === "close") {
-          killTerminal(terminalId);
-          ws.close(1000, "Terminal closed by client");
-          return;
-        }
-      } catch {
-        // Not valid JSON, treat as regular input
-      }
-    }
-    session.pty.write(message);
+    handleMessage(ws, terminalId, session, data.toString());
   });
 
   // WebSocket close -> detach listeners but keep PTY alive
@@ -92,6 +145,43 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
     log.debug("Terminal disconnected: %s (PTY kept alive)", terminalId);
   });
 }
+
+// ---------------------------------------------------------------------------
+// Handle a single WebSocket message
+// ---------------------------------------------------------------------------
+
+function handleMessage(
+  ws: WebSocket,
+  terminalId: string,
+  session: TerminalSession,
+  message: string,
+): void {
+  if (message.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(message);
+      if (parsed.type === "resize" && parsed.cols && parsed.rows) {
+        resizeTerminal(terminalId, parsed.cols, parsed.rows);
+        return;
+      }
+      if (parsed.type === "close") {
+        killTerminal(terminalId);
+        ws.close(1000, "Terminal closed by client");
+        return;
+      }
+      if (parsed.type === "init") {
+        // Init after session is already established — ignore
+        return;
+      }
+    } catch {
+      // Not valid JSON, treat as regular input
+    }
+  }
+  session.pty.write(message);
+}
+
+// ---------------------------------------------------------------------------
+// Strip terminal query escape sequences from scrollback
+// ---------------------------------------------------------------------------
 
 /**
  * Strip terminal query/request escape sequences from scrollback so

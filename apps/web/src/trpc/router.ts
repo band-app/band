@@ -70,6 +70,7 @@ import {
   TaskConflictError,
 } from "../lib/task-runner";
 import { listTasks, loadTask } from "../lib/task-store";
+import { loadWorkspaceTerminalConfig } from "../lib/terminal-config";
 import { killWorkspaceTerminals } from "../lib/terminal-manager";
 import { getTunnelStatus, startTunnel, stopTunnel } from "../lib/tunnel";
 import { emit, subscribe as subscribeStatus } from "../lib/watcher";
@@ -620,6 +621,15 @@ const LANG_MAP: Record<string, string> = {
 };
 
 const workspaceRouter = t.router({
+  getTerminalConfig: publicProcedure
+    .input(z.object({ workspaceId: z.string() }))
+    .query(({ input }) => {
+      const workspace = resolveWorkspace(input.workspaceId);
+      if (!workspace) return { config: null };
+      const config = loadWorkspaceTerminalConfig(workspace.worktree.path, workspace.project.path);
+      return { config };
+    }),
+
   getDiff: publicProcedure
     .input(
       z.object({
