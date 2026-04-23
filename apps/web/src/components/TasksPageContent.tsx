@@ -433,6 +433,7 @@ interface CodingAgentDef {
   id: string;
   type: string;
   label: string;
+  model?: string;
 }
 
 function NewTaskDialog({
@@ -509,7 +510,11 @@ function NewTaskDialog({
       .then((data) => {
         const newModels = data.models as ModelInfo[];
         setModels(newModels);
-        setSelectedModel((prev) => (newModels.some((m) => m.id === prev) ? prev : ""));
+        // Pre-select the agent's configured default model from settings
+        const defaultModel = (data.defaultModel as string) ?? "";
+        setSelectedModel((prev) =>
+          prev && newModels.some((m) => m.id === prev) ? prev : defaultModel,
+        );
       })
       .catch(() => setModels([]));
   }, [open, selectedAgent]);

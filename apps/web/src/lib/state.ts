@@ -63,6 +63,7 @@ export interface CodingAgentDefinition {
   type: string;
   label: string;
   command?: string;
+  model?: string;
 }
 
 export interface Settings {

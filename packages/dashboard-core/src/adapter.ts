@@ -39,6 +39,9 @@ export interface DashboardAdapter {
   getSettings(): Promise<Settings>;
   updateSettings(settings: Settings): Promise<void>;
 
+  // Models (for agent configuration)
+  listModels?(agentId?: string): Promise<{ id: string; name: string; description?: string }[]>;
+
   // Event subscriptions (return unsubscribe fn)
   subscribeAgentStatus(
     onSnapshot: (statuses: WorkspaceStatus[]) => void,
