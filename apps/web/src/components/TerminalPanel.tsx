@@ -2,14 +2,25 @@ import type { FitAddon } from "@xterm/addon-fit";
 import type { Terminal } from "@xterm/xterm";
 import { useEffect, useRef } from "react";
 import { openExternalUrl } from "../lib/open-external-url";
+import type { PaneMetadata } from "../lib/terminal-config-utils";
 
 interface TerminalPanelProps {
   workspaceId: string;
   terminalId: string;
   visible: boolean;
+  /** Optional metadata from workspace terminal config (command, cwd, env). */
+  paneMetadata?: PaneMetadata;
+  /** When true, auto-focus this terminal after it opens. */
+  autoFocus?: boolean;
 }
 
-export function TerminalPanel({ workspaceId, terminalId, visible }: TerminalPanelProps) {
+export function TerminalPanel({
+  workspaceId,
+  terminalId,
+  visible,
+  paneMetadata,
+  autoFocus,
+}: TerminalPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -86,6 +97,16 @@ export function TerminalPanel({ workspaceId, terminalId, visible }: TerminalPane
       wsRef.current = ws;
 
       ws.onopen = () => {
+        // Send init message with pane metadata (command, cwd, env) if available.
+        // The server uses this to configure the PTY on first spawn.
+        if (paneMetadata && (paneMetadata.command || paneMetadata.cwd || paneMetadata.env)) {
+          const initMsg: Record<string, unknown> = { type: "init" };
+          if (paneMetadata.command) initMsg.command = paneMetadata.command;
+          if (paneMetadata.cwd) initMsg.cwd = paneMetadata.cwd;
+          if (paneMetadata.env) initMsg.env = paneMetadata.env;
+          ws.send(JSON.stringify(initMsg));
+        }
+
         fitAddon.fit();
         ws.send(
           JSON.stringify({
@@ -94,6 +115,11 @@ export function TerminalPanel({ workspaceId, terminalId, visible }: TerminalPane
             rows: terminal.rows,
           }),
         );
+
+        // Auto-focus this terminal if requested
+        if (autoFocus) {
+          terminal.focus();
+        }
       };
 
       ws.onmessage = (event) => {
@@ -141,7 +167,7 @@ export function TerminalPanel({ workspaceId, terminalId, visible }: TerminalPane
       cancelled = true;
       cleanup?.();
     };
-  }, [terminalId, workspaceId]);
+  }, [terminalId, workspaceId, paneMetadata, autoFocus]);
 
   // Refit when visibility changes and notify server of new size
   useEffect(() => {

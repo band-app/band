@@ -8,6 +8,15 @@ const log = createLogger("terminal");
 
 const MAX_SCROLLBACK_SIZE = 100_000;
 
+export interface SpawnOptions {
+  /** Shell command to auto-run after the PTY spawns. */
+  command?: string;
+  /** Working directory, resolved relative to the workspace root. */
+  cwd?: string;
+  /** Extra environment variables merged into the base env. */
+  env?: Record<string, string>;
+}
+
 interface TerminalSession {
   pty: IPty;
   scrollback: string;
@@ -23,10 +32,14 @@ const workspaceTerminals = new Map<string, Set<string>>();
 /**
  * Spawns a new terminal session for the given workspace and terminalId.
  * Always creates a new PTY (each split pane gets its own shell).
+ *
+ * When `options` is provided, the PTY can use a custom working directory,
+ * extra environment variables, and an initial command written to stdin.
  */
 export async function spawnTerminal(
   workspaceId: string,
   terminalId: string,
+  options?: SpawnOptions,
 ): Promise<TerminalSession> {
   const workspace = resolveWorkspace(workspaceId);
   if (!workspace) {
@@ -48,7 +61,26 @@ export async function spawnTerminal(
   // Remove PORT so workspace dev servers don't inherit the Band server's port
   delete env.PORT;
 
-  const cwd = workspace.worktree.path;
+  // Merge extra env from spawn options
+  if (options?.env) {
+    Object.assign(env, options.env);
+  }
+
+  // Resolve cwd: options.cwd is relative to workspace root
+  const workspaceRoot = workspace.worktree.path;
+  let cwd = workspaceRoot;
+  if (options?.cwd) {
+    const resolved = join(workspaceRoot, options.cwd);
+    // Security: ensure the resolved path stays within the workspace
+    if (!resolved.startsWith(workspaceRoot)) {
+      log.warn("Ignoring cwd %s — resolves outside workspace root %s", options.cwd, workspaceRoot);
+    } else if (existsSync(resolved)) {
+      cwd = resolved;
+    } else {
+      log.warn("Ignoring cwd %s — directory does not exist", options.cwd);
+    }
+  }
+
   if (!existsSync(cwd)) {
     throw new Error(`Workspace directory does not exist: ${cwd}`);
   }
@@ -82,6 +114,11 @@ export async function spawnTerminal(
 
   const session: TerminalSession = { pty: ptyProcess, scrollback: "", workspaceId };
   terminals.set(terminalId, session);
+
+  // Auto-run initial command if provided
+  if (options?.command) {
+    ptyProcess.write(`${options.command}\n`);
+  }
 
   // Register in reverse index
   let ids = workspaceTerminals.get(workspaceId);

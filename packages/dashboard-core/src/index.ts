@@ -117,9 +117,12 @@ export type {
   Settings,
   SetupState,
   SetupStatus,
+  TerminalLayoutNode,
+  TerminalPaneConfig,
   WorkspaceBranchStatus,
   WorkspaceDiff,
   WorkspaceDiffSummary,
   WorkspaceStatus,
+  WorkspaceTerminalConfig,
   WorktreeInfo,
 } from "./types";

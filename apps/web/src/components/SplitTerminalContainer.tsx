@@ -1,18 +1,22 @@
 import { Columns2, Rows2, X } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
+import { buildTreeFromConfig, type PaneMetadata } from "../lib/terminal-config-utils";
 import {
   countLeaves,
   createLeaf,
   type LeafNode,
+  loadPaneMeta,
   loadTree,
   removeLeaf,
   type SplitNode,
+  savePaneMeta,
   saveTree,
   splitLeaf,
   type TreeNode,
   updateNodeSizes,
 } from "../lib/terminal-split-tree";
+import { trpc } from "../lib/trpc-client";
 
 // Lazy-load TerminalPanel to avoid importing @xterm CJS during SSR
 const TerminalPanel = lazy(() =>
@@ -28,21 +32,71 @@ export function SplitTerminalContainer({ workspaceId, visible }: SplitTerminalCo
   const [tree, setTree] = useState<TreeNode>(() => {
     const stored = loadTree(workspaceId);
     if (stored) return stored;
-    const fresh = createLeaf();
-    saveTree(workspaceId, fresh);
-    return fresh;
+    // Temporary leaf — don't save to localStorage yet so the useEffect
+    // can detect "no stored tree" and attempt to fetch server config first.
+    return createLeaf();
   });
 
-  // Reload tree when workspace changes
+  const [paneMetadata, setPaneMetadata] = useState<Record<string, PaneMetadata>>(() => {
+    const stored = loadPaneMeta(workspaceId);
+    return (stored as Record<string, PaneMetadata>) ?? {};
+  });
+
+  const [focusTerminalId, setFocusTerminalId] = useState<string | null>(null);
+
+  // Track whether we've already applied config for this workspace
+  // so we don't re-apply on every re-mount
+  const configAppliedRef = useRef<string | null>(null);
+
+  // On mount or workspace change: check for config-driven layout
   useEffect(() => {
-    const stored = loadTree(workspaceId);
-    if (stored) {
-      setTree(stored);
-    } else {
-      const fresh = createLeaf();
-      saveTree(workspaceId, fresh);
-      setTree(fresh);
+    const storedTree = loadTree(workspaceId);
+    if (storedTree) {
+      // If a tree already exists in localStorage, use it as-is
+      setTree(storedTree);
+      const storedMeta = loadPaneMeta(workspaceId);
+      setPaneMetadata((storedMeta as Record<string, PaneMetadata>) ?? {});
+      setFocusTerminalId(null);
+      return;
     }
+
+    // No stored tree — try to build from server config
+    if (configAppliedRef.current === workspaceId) return;
+
+    let cancelled = false;
+
+    trpc.workspace.getTerminalConfig
+      .query({ workspaceId })
+      .then(({ config }) => {
+        if (cancelled) return;
+        configAppliedRef.current = workspaceId;
+
+        if (config) {
+          const result = buildTreeFromConfig(config);
+          saveTree(workspaceId, result.tree);
+          savePaneMeta(workspaceId, result.paneMetadata);
+          setTree(result.tree);
+          setPaneMetadata(result.paneMetadata);
+          setFocusTerminalId(result.focusTerminalId);
+        } else {
+          // No config — keep the default single leaf
+          const fresh = createLeaf();
+          saveTree(workspaceId, fresh);
+          setTree(fresh);
+          setPaneMetadata({});
+          setFocusTerminalId(null);
+        }
+      })
+      .catch(() => {
+        // Failed to fetch config — keep the default leaf
+        if (!cancelled) {
+          configAppliedRef.current = workspaceId;
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [workspaceId]);
 
   const handleSplit = useCallback(
@@ -83,6 +137,8 @@ export function SplitTerminalContainer({ workspaceId, visible }: SplitTerminalCo
         onSplit={handleSplit}
         onClose={handleClose}
         totalLeaves={totalLeaves}
+        paneMetadata={paneMetadata}
+        focusTerminalId={focusTerminalId}
       />
     </div>
   );
@@ -99,6 +155,8 @@ interface RenderNodeProps {
   onSplit: (terminalId: string, direction: "horizontal" | "vertical") => void;
   onClose: (terminalId: string) => void;
   totalLeaves: number;
+  paneMetadata: Record<string, PaneMetadata>;
+  focusTerminalId: string | null;
 }
 
 function RenderNode({
@@ -108,6 +166,8 @@ function RenderNode({
   onSplit,
   onClose,
   totalLeaves,
+  paneMetadata,
+  focusTerminalId,
 }: RenderNodeProps) {
   if (node.type === "leaf") {
     return (
@@ -118,6 +178,8 @@ function RenderNode({
         onSplit={onSplit}
         onClose={onClose}
         showClose={totalLeaves > 1}
+        metadata={paneMetadata[node.terminalId]}
+        autoFocus={focusTerminalId === node.terminalId}
       />
     );
   }
@@ -131,6 +193,8 @@ function RenderNode({
       onSplit={onSplit}
       onClose={onClose}
       totalLeaves={totalLeaves}
+      paneMetadata={paneMetadata}
+      focusTerminalId={focusTerminalId}
     />
   );
 }
@@ -146,9 +210,20 @@ interface SplitPaneProps {
   onSplit: (terminalId: string, direction: "horizontal" | "vertical") => void;
   onClose: (terminalId: string) => void;
   totalLeaves: number;
+  paneMetadata: Record<string, PaneMetadata>;
+  focusTerminalId: string | null;
 }
 
-function SplitPane({ node, workspaceId, visible, onSplit, onClose, totalLeaves }: SplitPaneProps) {
+function SplitPane({
+  node,
+  workspaceId,
+  visible,
+  onSplit,
+  onClose,
+  totalLeaves,
+  paneMetadata,
+  focusTerminalId,
+}: SplitPaneProps) {
   const orientation = node.direction === "horizontal" ? "horizontal" : "vertical";
 
   const defaultLayout = node.sizes
@@ -195,6 +270,8 @@ function SplitPane({ node, workspaceId, visible, onSplit, onClose, totalLeaves }
           onSplit={onSplit}
           onClose={onClose}
           totalLeaves={totalLeaves}
+          paneMetadata={paneMetadata}
+          focusTerminalId={focusTerminalId}
         />
       </Panel>
       <Separator
@@ -212,6 +289,8 @@ function SplitPane({ node, workspaceId, visible, onSplit, onClose, totalLeaves }
           onSplit={onSplit}
           onClose={onClose}
           totalLeaves={totalLeaves}
+          paneMetadata={paneMetadata}
+          focusTerminalId={focusTerminalId}
         />
       </Panel>
     </Group>
@@ -229,32 +308,57 @@ interface LeafPaneProps {
   onSplit: (terminalId: string, direction: "horizontal" | "vertical") => void;
   onClose: (terminalId: string) => void;
   showClose: boolean;
+  metadata?: PaneMetadata;
+  autoFocus?: boolean;
 }
 
-function LeafPane({ node, workspaceId, visible, onSplit, onClose, showClose }: LeafPaneProps) {
+function LeafPane({
+  node,
+  workspaceId,
+  visible,
+  onSplit,
+  onClose,
+  showClose,
+  metadata,
+  autoFocus,
+}: LeafPaneProps) {
   return (
     <div className="flex h-full w-full flex-col">
       {/* Compact toolbar */}
-      <div className="flex h-7 shrink-0 items-center justify-end gap-0.5 border-b border-neutral-700/50 px-1">
-        <ToolbarButton
-          title="Split Horizontal"
-          onClick={() => onSplit(node.terminalId, "horizontal")}
-        >
-          <Columns2 className="size-3.5" />
-        </ToolbarButton>
-        <ToolbarButton title="Split Vertical" onClick={() => onSplit(node.terminalId, "vertical")}>
-          <Rows2 className="size-3.5" />
-        </ToolbarButton>
-        {showClose && (
-          <ToolbarButton title="Close Terminal" onClick={() => onClose(node.terminalId)}>
-            <X className="size-3.5" />
-          </ToolbarButton>
+      <div className="flex h-7 shrink-0 items-center border-b border-neutral-700/50 px-1">
+        {metadata?.name && (
+          <span className="mr-auto truncate pl-1 text-xs text-neutral-400">{metadata.name}</span>
         )}
+        <div className="ml-auto flex items-center gap-0.5">
+          <ToolbarButton
+            title="Split Horizontal"
+            onClick={() => onSplit(node.terminalId, "horizontal")}
+          >
+            <Columns2 className="size-3.5" />
+          </ToolbarButton>
+          <ToolbarButton
+            title="Split Vertical"
+            onClick={() => onSplit(node.terminalId, "vertical")}
+          >
+            <Rows2 className="size-3.5" />
+          </ToolbarButton>
+          {showClose && (
+            <ToolbarButton title="Close Terminal" onClick={() => onClose(node.terminalId)}>
+              <X className="size-3.5" />
+            </ToolbarButton>
+          )}
+        </div>
       </div>
       {/* Terminal */}
       <div className="min-h-0 flex-1">
         <Suspense fallback={null}>
-          <TerminalPanel workspaceId={workspaceId} terminalId={node.terminalId} visible={visible} />
+          <TerminalPanel
+            workspaceId={workspaceId}
+            terminalId={node.terminalId}
+            visible={visible}
+            paneMetadata={metadata}
+            autoFocus={autoFocus}
+          />
         </Suspense>
       </div>
     </div>

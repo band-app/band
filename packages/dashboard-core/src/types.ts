@@ -89,6 +89,30 @@ export interface BandConfig {
   apps?: AppConfig[];
 }
 
+// ---------------------------------------------------------------------------
+// Workspace terminal configuration (recursive split-tree layout)
+// ---------------------------------------------------------------------------
+
+export interface TerminalPaneConfig {
+  name?: string;
+  command?: string;
+  cwd?: string;
+  env?: Record<string, string>;
+  focus?: boolean;
+}
+
+export type TerminalLayoutNode =
+  | { pane: TerminalPaneConfig }
+  | {
+      direction: "horizontal" | "vertical";
+      split?: number;
+      children: [TerminalLayoutNode, TerminalLayoutNode];
+    };
+
+export interface WorkspaceTerminalConfig {
+  layout: TerminalLayoutNode;
+}
+
 export type CodingAgentType = "claude-code" | "codex" | "gemini-cli" | "cursor-cli" | "opencode";
 
 export interface CodingAgentConfig {
