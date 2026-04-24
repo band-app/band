@@ -127,6 +127,8 @@ jobs:
           cargo clippy --manifest-path apps/dashboard/src-tauri/Cargo.toml -- -D warnings
 
       - name: Test
+        env:
+          NODE_OPTIONS: '--max-old-space-size=4096'
         run: |
           pnpm --filter @band-app/server test
           cargo test --manifest-path apps/cli/Cargo.toml
