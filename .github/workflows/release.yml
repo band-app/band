@@ -138,8 +138,11 @@ jobs:
           pnpm build:web
           pnpm --filter @band-app/dashboard build
 
-      - name: Build DMG
-        run: pnpm --filter @band-app/dashboard tauri build --ci --config '{"build":{"beforeBuildCommand":""}}'
+      - name: Build DMG and updater artifacts
+        run: pnpm --filter @band-app/dashboard tauri build --ci --config '{"build":{"beforeBuildCommand":""}}' --config apps/dashboard/src-tauri/tauri.prod.conf.json
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       - name: Commit and tag
         run: |
@@ -166,13 +169,63 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Generate latest.json update manifest
+        id: manifest
+        run: |
+          VERSION="${{ steps.version.outputs.new_version }}"
+          TAG="v${VERSION}"
+          BUNDLE_DIR="apps/dashboard/src-tauri/target/release/bundle"
+
+          # Find the .app.tar.gz and its signature produced by the updater
+          APP_TAR=$(find "$BUNDLE_DIR/macos" -name '*.app.tar.gz' ! -name '*.sig' | head -1)
+          SIG_FILE="${APP_TAR}.sig"
+
+          if [ ! -f "$APP_TAR" ] || [ ! -f "$SIG_FILE" ]; then
+            echo "Error: updater artifacts not found"
+            echo "  APP_TAR=$APP_TAR"
+            echo "  SIG_FILE=$SIG_FILE"
+            ls -la "$BUNDLE_DIR/macos/" || true
+            exit 1
+          fi
+
+          SIGNATURE=$(cat "$SIG_FILE")
+          APP_TAR_NAME=$(basename "$APP_TAR")
+          PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/${APP_TAR_NAME}"
+
+          # Use jq to safely encode the multi-line signature into valid JSON
+          jq -n \
+            --arg version "$VERSION" \
+            --arg notes "See the release notes on GitHub for details." \
+            --arg pub_date "$PUB_DATE" \
+            --arg sig "$SIGNATURE" \
+            --arg url "$DOWNLOAD_URL" \
+            '{
+              version: $version,
+              notes: $notes,
+              pub_date: $pub_date,
+              platforms: {
+                "darwin-aarch64": { signature: $sig, url: $url },
+                "darwin-x86_64": { signature: $sig, url: $url }
+              }
+            }' > latest.json
+
+          echo "app_tar=$APP_TAR" >> "$GITHUB_OUTPUT"
+          echo "sig_file=$SIG_FILE" >> "$GITHUB_OUTPUT"
+          echo "Generated latest.json for $TAG"
+          cat latest.json
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.new_version }}
           name: v${{ steps.version.outputs.new_version }}
           body: ${{ steps.changelog.outputs.changelog }}
-          files: apps/dashboard/src-tauri/target/release/bundle/dmg/*.dmg
+          files: |
+            apps/dashboard/src-tauri/target/release/bundle/dmg/*.dmg
+            ${{ steps.manifest.outputs.app_tar }}
+            ${{ steps.manifest.outputs.sig_file }}
+            latest.json
 
       - name: Publish to npm
         working-directory: apps/web

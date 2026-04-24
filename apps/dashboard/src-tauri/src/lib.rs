@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use commands::browser::BrowserState;
+use commands::updater::UPDATER_ENABLED;
 use commands::webserver::{self as webserver, ManagedProcess, WebServerState};
 use state::{ActiveWorkspaceState, FocusManagementState, ProjectCache};
 use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
@@ -17,7 +18,7 @@ use tauri::Manager;
 
 const MAX_LOG_SIZE: u64 = 5 * 1024 * 1024; // 5 MB
 
-fn log_to_file(msg: &str) {
+pub(crate) fn log_to_file(msg: &str) {
     let Some(home) = dirs::home_dir() else {
         return;
     };
@@ -33,11 +34,12 @@ fn log_to_file(msg: &str) {
     }
 }
 
+#[macro_export]
 macro_rules! dash_log {
     ($($arg:tt)*) => {{
         let msg = format!($($arg)*);
         eprintln!("{}", msg);
-        crate::log_to_file(&msg);
+        $crate::log_to_file(&msg);
     }};
 }
 
@@ -56,10 +58,17 @@ pub fn run() {
     let cleaned_up = Arc::new(AtomicBool::new(false));
     let cleaned_up_setup = cleaned_up.clone();
 
-    let app = tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_process::init());
+
+    if UPDATER_ENABLED {
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    }
+
+    let app = builder
         .manage(WebServerState(ManagedProcess::new()))
         .manage(ActiveWorkspaceState::new())
         .manage(ProjectCache::new())
@@ -130,7 +139,28 @@ pub fn run() {
                 .item(&settings_item)
                 .build()?;
 
+            // Build the Band application menu with About and Check for Updates.
+            let mut band_menu = SubmenuBuilder::new(app, "Band")
+                .item(&PredefinedMenuItem::about(app, None, None)?);
+
+            if UPDATER_ENABLED {
+                let check_updates_item =
+                    MenuItemBuilder::with_id("check_for_updates", "Check for Updates…")
+                        .build(app)?;
+                band_menu = band_menu.separator().item(&check_updates_item);
+            }
+
+            let band_menu = band_menu
+                .separator()
+                .item(&PredefinedMenuItem::hide(app, None)?)
+                .item(&PredefinedMenuItem::hide_others(app, None)?)
+                .item(&PredefinedMenuItem::show_all(app, None)?)
+                .separator()
+                .item(&PredefinedMenuItem::quit(app, None)?)
+                .build()?;
+
             let menu = MenuBuilder::new(app)
+                .item(&band_menu)
                 .item(&edit_menu)
                 .item(&view_menu)
                 .build()?;
@@ -179,6 +209,11 @@ pub fn run() {
                     let handle = app_handle.clone();
                     tauri::async_runtime::spawn(async move {
                         let _ = commands::window::open_settings_window(handle).await;
+                    });
+                } else if event.id() == "check_for_updates" {
+                    let handle = app_handle.clone();
+                    tauri::async_runtime::spawn(async move {
+                        commands::updater::check_for_update(handle, true).await;
                     });
                 }
             });
@@ -261,6 +296,16 @@ pub fn run() {
                 focus_state
                     .0
                     .store(false, std::sync::atomic::Ordering::SeqCst);
+            }
+
+            // Check for updates silently after a short delay so the app
+            // is fully loaded before we hit the network.
+            if UPDATER_ENABLED {
+                let update_handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                    commands::updater::check_for_update(update_handle, false).await;
+                });
             }
 
             // Poll the frontmost VS Code window to track active workspace.
