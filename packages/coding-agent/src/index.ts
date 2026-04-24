@@ -11,6 +11,7 @@ export {
 export type {
   AgentEvent,
   ErrorEvent,
+  SessionIdResolvedEvent,
   SessionResultEvent,
   SessionStartEvent,
   TextDeltaEvent,

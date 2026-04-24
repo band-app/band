@@ -37,6 +37,11 @@ enum Commands {
         #[command(subcommand)]
         cmd: TasksCmd,
     },
+    /// Manage chat panes (multi-agent)
+    Chats {
+        #[command(subcommand)]
+        cmd: ChatsCmd,
+    },
     /// Manage scheduled cronjobs
     Cronjobs {
         #[command(subcommand)]
@@ -181,6 +186,50 @@ enum TasksCmd {
         /// Tool call visibility: auto (default), off, full
         #[arg(long, default_value = "auto")]
         tools: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum ChatsCmd {
+    /// List chat panes for a workspace
+    List {
+        /// Workspace ID
+        workspace_id: String,
+    },
+    /// Create a new chat pane
+    Create {
+        /// Workspace ID
+        workspace_id: String,
+        /// Display name for the chat pane
+        #[arg(long)]
+        name: Option<String>,
+        /// Coding agent ID (e.g. 'claude-code')
+        #[arg(long)]
+        agent: Option<String>,
+        /// Model override
+        #[arg(long)]
+        model: Option<String>,
+        /// Mode (e.g. 'plan', 'edit')
+        #[arg(long)]
+        mode: Option<String>,
+    },
+    /// Send a message to a chat pane
+    Send {
+        /// Chat pane ID
+        chat_id: String,
+        /// Message text
+        #[arg(long)]
+        message: String,
+    },
+    /// Stop a running chat pane
+    Stop {
+        /// Chat pane ID
+        chat_id: String,
+    },
+    /// Remove a chat pane
+    Remove {
+        /// Chat pane ID
+        chat_id: String,
     },
 }
 
@@ -356,6 +405,25 @@ fn main() {
             TasksCmd::Cancel { task_id } => cmd_tasks_cancel(&task_id),
             TasksCmd::Rerun { task_id } => cmd_tasks_rerun(&task_id),
             TasksCmd::Watch { .. } => unreachable!(),
+        },
+        Commands::Chats { cmd } => match cmd {
+            ChatsCmd::List { workspace_id } => cmd_chats_list(&workspace_id),
+            ChatsCmd::Create {
+                workspace_id,
+                name,
+                agent,
+                model,
+                mode,
+            } => cmd_chats_create(
+                &workspace_id,
+                name.as_deref(),
+                agent.as_deref(),
+                model.as_deref(),
+                mode.as_deref(),
+            ),
+            ChatsCmd::Send { chat_id, message } => cmd_chats_send(&chat_id, &message),
+            ChatsCmd::Stop { chat_id } => cmd_chats_stop(&chat_id),
+            ChatsCmd::Remove { chat_id } => cmd_chats_remove(&chat_id),
         },
         Commands::Cronjobs { cmd } => match cmd {
             CronjobsCmd::List { project, workspace } => {
@@ -762,6 +830,111 @@ fn cmd_tasks_rerun(task_id: &str) -> Result<CommandResult, String> {
     Ok(CommandResult {
         text: format!("Task re-run started for workspace {workspace_id}\n"),
         json: data,
+    })
+}
+
+// --- Chats commands ---
+
+fn cmd_chats_list(workspace_id: &str) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let data = client.trpc_query(
+        "chats.list",
+        &serde_json::json!({"workspaceId": workspace_id}),
+    )?;
+
+    let chats = data
+        .get("chats")
+        .and_then(|c| c.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let mut rows: Vec<[String; 4]> = Vec::new();
+    let mut json_chats = Vec::new();
+    for chat in &chats {
+        let id = chat.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        let name = chat.get("name").and_then(|v| v.as_str()).unwrap_or("");
+        let agent = chat.get("agent").and_then(|v| v.as_str()).unwrap_or("");
+        let status = chat.get("status").and_then(|v| v.as_str()).unwrap_or("");
+        rows.push([
+            id.to_string(),
+            name.to_string(),
+            agent.to_string(),
+            status.to_string(),
+        ]);
+        json_chats.push(chat.clone());
+    }
+
+    let text = format_table(&["ID", "NAME", "AGENT", "STATUS"], &rows);
+
+    Ok(CommandResult {
+        text,
+        json: serde_json::json!({"chats": json_chats}),
+    })
+}
+
+fn cmd_chats_create(
+    workspace_id: &str,
+    name: Option<&str>,
+    agent: Option<&str>,
+    model: Option<&str>,
+    mode: Option<&str>,
+) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let mut input = serde_json::json!({"workspaceId": workspace_id});
+    if let Some(n) = name {
+        input["name"] = serde_json::json!(n);
+    }
+    if let Some(a) = agent {
+        input["agent"] = serde_json::json!(a);
+    }
+    if let Some(m) = model {
+        input["model"] = serde_json::json!(m);
+    }
+    if let Some(m) = mode {
+        input["mode"] = serde_json::json!(m);
+    }
+    let data = client.trpc_mutate("chats.create", &input)?;
+    let chat = data.get("chat").cloned().unwrap_or(serde_json::Value::Null);
+    let id = chat.get("id").and_then(|v| v.as_str()).unwrap_or("");
+
+    Ok(CommandResult {
+        text: format!("{id}\n"),
+        json: serde_json::json!({"chat": chat}),
+    })
+}
+
+fn cmd_chats_send(chat_id: &str, message: &str) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let data = client.trpc_mutate(
+        "chats.send",
+        &serde_json::json!({"chatId": chat_id, "message": message}),
+    )?;
+
+    let task_id = data.get("id").and_then(|v| v.as_str()).unwrap_or("");
+
+    Ok(CommandResult {
+        text: format!("{task_id}\n"),
+        json: data,
+    })
+}
+
+fn cmd_chats_stop(chat_id: &str) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    client.trpc_mutate("chats.stop", &serde_json::json!({"chatId": chat_id}))?;
+
+    Ok(CommandResult {
+        text: format!("Chat {chat_id} stopped\n"),
+        json: serde_json::json!({"ok": true, "chatId": chat_id}),
+    })
+}
+
+fn cmd_chats_remove(chat_id: &str) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    client.trpc_mutate("chats.remove", &serde_json::json!({"chatId": chat_id}))?;
+
+    Ok(CommandResult {
+        text: format!("Chat {chat_id} removed\n"),
+        json: serde_json::json!({"ok": true, "chatId": chat_id}),
     })
 }
 
@@ -1729,6 +1902,51 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "key", "type": "string", "required": true, "positional": true, "description": "Storage key (project name or workspace ID)"},
                 {"name": "id", "type": "string", "required": true, "positional": true, "description": "Cronjob ID (e.g. cj_1234567890)"},
             ]
+        }),
+        serde_json::json!({
+            "name": "chats list",
+            "description": "List chat panes for a workspace",
+            "parameters": [
+                {"name": "workspace_id", "type": "string", "required": true, "positional": true, "description": "Workspace ID"},
+            ],
+            "notes": "Text output: `ID\\tNAME\\tAGENT\\tSTATUS` (tab-separated table).\nJSON output: `{\"chats\": [{\"id\": \"...\", \"name\": \"...\", \"agent\": \"...\", \"status\": \"...\"}]}`"
+        }),
+        serde_json::json!({
+            "name": "chats create",
+            "description": "Create a new chat pane in a workspace",
+            "parameters": [
+                {"name": "workspace_id", "type": "string", "required": true, "positional": true, "description": "Workspace ID"},
+                {"name": "--name", "type": "string", "required": false, "description": "Display name for the chat pane"},
+                {"name": "--agent", "type": "string", "required": false, "description": "Coding agent ID (e.g. 'claude-code')"},
+                {"name": "--model", "type": "string", "required": false, "description": "Model override"},
+                {"name": "--mode", "type": "string", "required": false, "description": "Mode (e.g. 'plan', 'edit')"},
+            ],
+            "notes": "Creates a new independent chat pane with its own agent process. Returns the chat ID.\nJSON output: `{\"chat\": {\"id\": \"...\", \"name\": \"...\", \"agent\": \"...\", \"status\": \"idle\"}}`"
+        }),
+        serde_json::json!({
+            "name": "chats send",
+            "description": "Send a message to a chat pane",
+            "parameters": [
+                {"name": "chat_id", "type": "string", "required": true, "positional": true, "description": "Chat pane ID"},
+                {"name": "--message", "type": "string", "required": true, "description": "Message text"},
+            ],
+            "notes": "Submits a task to the chat pane's agent. Returns the task ID."
+        }),
+        serde_json::json!({
+            "name": "chats stop",
+            "description": "Stop a running chat pane",
+            "parameters": [
+                {"name": "chat_id", "type": "string", "required": true, "positional": true, "description": "Chat pane ID"},
+            ],
+            "notes": "Aborts the running task and sets chat status to stopped."
+        }),
+        serde_json::json!({
+            "name": "chats remove",
+            "description": "Remove a chat pane (kills agent, cleans up state)",
+            "parameters": [
+                {"name": "chat_id", "type": "string", "required": true, "positional": true, "description": "Chat pane ID"},
+            ],
+            "notes": "Removes the chat pane, kills the associated agent process, and cleans up state."
         }),
         serde_json::json!({
             "name": "notify",

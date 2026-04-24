@@ -30,17 +30,40 @@ function WorkspaceIndex() {
 }
 
 function MobileChatContent({ workspaceId }: { workspaceId: string }) {
+  const [chatId, setChatId] = useState<string | undefined>(undefined);
   const [supportsSessionListing, setSupportsSessionListing] = useState(false);
   const [initialSessionId, setInitialSessionId] = useState<string | undefined>(undefined);
   const [sessionQueryDone, setSessionQueryDone] = useState(false);
   const { showSessionList, setShowSessionList } = useSessionListContext();
   const { chatKey, setTaskRunning, agentType, newSessionRef } = useAgentSwitcherContext();
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: chatKey intentionally triggers reload after agent switch
+  // Resolve default chat for mobile view
   useEffect(() => {
     let cancelled = false;
-    trpc.sessions.list
+    trpc.chats.list
       .query({ workspaceId })
+      .then((data) => {
+        if (cancelled) return;
+        if (data.chats.length > 0) {
+          setChatId(data.chats[0].id);
+        } else {
+          return trpc.chats.create.mutate({ workspaceId }).then((result) => {
+            if (!cancelled) setChatId(result.chat.id);
+          });
+        }
+      })
+      .catch((err) => console.error("[MobileChatContent] error resolving chat:", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: chatKey intentionally triggers reload after agent switch
+  useEffect(() => {
+    if (!chatId) return;
+    let cancelled = false;
+    trpc.sessions.list
+      .query({ workspaceId, chatId })
       .then((data) => {
         if (cancelled) return;
         if (data.supported) {
@@ -57,7 +80,9 @@ function MobileChatContent({ workspaceId }: { workspaceId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [workspaceId, chatKey]);
+  }, [workspaceId, chatId, chatKey]);
+
+  if (!chatId) return null;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -65,6 +90,7 @@ function MobileChatContent({ workspaceId }: { workspaceId: string }) {
         key={chatKey}
         chatKey={chatKey}
         workspaceId={workspaceId}
+        chatId={chatId}
         workspaceName={workspaceId}
         supportsSessionListing={supportsSessionListing}
         initialSessionId={initialSessionId}

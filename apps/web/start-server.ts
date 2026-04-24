@@ -15,6 +15,7 @@ import { handleLspConnection } from "./src/lib/lsp-proxy.ts";
 import { mimeTypeFromFilename } from "./src/lib/mime-types.ts";
 import { checkPrereqs } from "./src/lib/process-utils.ts";
 import { bandHome, getOrCreateToken, loadSettings, resetAgentStatuses } from "./src/lib/state.ts";
+import { loadChatsFromDb } from "./src/lib/chat-manager.ts";
 import { cleanupStaleTasks } from "./src/lib/task-store.ts";
 import { killAllTerminals } from "./src/lib/terminal-manager.ts";
 import { handleTerminalConnection } from "./src/lib/terminal-ws.ts";
@@ -157,6 +158,10 @@ function serveWorkspaceFile(res: ServerResponse, workspaceId: string, rawPath: s
 async function main() {
   // Run database migrations before anything else
   runMigrations();
+
+  // Hydrate in-memory chat pane maps from DB, resetting statuses to "idle"
+  // since no agent can be running on a fresh server start.
+  loadChatsFromDb();
 
   // Mark any persisted "running" tasks as "failed" — no agent can be running
   // if the server just started.

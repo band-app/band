@@ -26,7 +26,7 @@ import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState
 import { isTauri } from "../lib/is-tauri";
 import { trpc } from "../lib/trpc-client";
 import { CodeBrowserView } from "./CodeBrowserView";
-import { WorkspaceChatPanel } from "./WorkspaceChatPanel";
+import { DockviewChatContainer } from "./DockviewChatContainer";
 
 // ---------------------------------------------------------------------------
 // Custom dockview theme – prevents the default themeAbyss from being applied
@@ -106,21 +106,18 @@ interface TerminalParams {
 // ---------------------------------------------------------------------------
 
 function ChatPanelComponent({ params, api }: IDockviewPanelProps<ChatParams>) {
-  const [tabActive, setTabActive] = useState(api.isActive);
+  // Track physical visibility (not focus/active state).
+  // In a split layout, the Chat panel remains visible when another panel
+  // (Changes, Files, Terminal) is focused.  `isVisible` is only false when
+  // the panel is behind another tab in a tabbed group.
+  const [isVisible, setIsVisible] = useState(api.isVisible);
 
   useEffect(() => {
-    const d1 = api.onDidActiveChange((e) => setTabActive(e.isActive));
-    const d2 = api.onDidVisibilityChange((e) => {
-      if (e.isVisible && api.isActive) setTabActive(true);
-    });
-    return () => {
-      d1.dispose();
-      d2.dispose();
-    };
+    const d = api.onDidVisibilityChange((e) => setIsVisible(e.isVisible));
+    return () => d.dispose();
   }, [api]);
 
-  // Chat is visible only when both the workspace is active AND the tab is active
-  const visible = params.wsActive !== false && tabActive;
+  const visible = params.wsActive !== false && isVisible;
   // Workspace is active (but the chat tab may not be the focused tab).
   // Used by PromptInput to accept "Add to Chat" events from sibling panels
   // (e.g. Changes, Files) even when the Chat tab isn't in front.
@@ -132,7 +129,7 @@ function ChatPanelComponent({ params, api }: IDockviewPanelProps<ChatParams>) {
   if (!params.workspaceId) return null;
 
   return (
-    <WorkspaceChatPanel workspaceId={params.workspaceId} visible={visible} wsActive={wsActive} />
+    <DockviewChatContainer workspaceId={params.workspaceId} visible={visible} wsActive={wsActive} />
   );
 }
 
@@ -166,21 +163,15 @@ function FilesPanelComponent({ params }: IDockviewPanelProps<FilesParams>) {
 }
 
 function TerminalPanelComponent({ params, api }: IDockviewPanelProps<TerminalParams>) {
-  const [tabActive, setTabActive] = useState(api.isActive);
+  // Track physical visibility — same approach as ChatPanelComponent.
+  const [isVisible, setIsVisible] = useState(api.isVisible);
 
   useEffect(() => {
-    const d1 = api.onDidActiveChange((e) => setTabActive(e.isActive));
-    const d2 = api.onDidVisibilityChange((e) => {
-      if (e.isVisible && api.isActive) setTabActive(true);
-    });
-    return () => {
-      d1.dispose();
-      d2.dispose();
-    };
+    const d = api.onDidVisibilityChange((e) => setIsVisible(e.isVisible));
+    return () => d.dispose();
   }, [api]);
 
-  // Terminal is visible only when both the workspace is active AND the tab is active
-  const visible = params.wsActive !== false && tabActive;
+  const visible = params.wsActive !== false && isVisible;
 
   if (!params.workspaceId) return null;
 
@@ -762,6 +753,12 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
   // Add a single missing panel back into the layout at a sensible position
   const addMissingPanel = useCallback(
     (api: DockviewApi, panelId: string) => {
+      // Guard: only add panels that have a registered component.
+      // Without this check, dockview throws:
+      //   "Only React.memo(...), React.ForwardRef(...) and functional
+      //    components are accepted as components"
+      if (!(panelId in components)) return;
+
       // Find any existing panel to anchor the new one relative to
       const anyExisting =
         api.getPanel("changes") ??

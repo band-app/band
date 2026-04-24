@@ -2,6 +2,7 @@ import { toWorkspaceId } from "@band-app/dashboard-core";
 import { createLogger } from "@band-app/logger";
 import { Cron } from "croner";
 import { eq } from "drizzle-orm";
+import { getOrCreateDefaultChat } from "./chat-manager";
 import { listAllCronjobs, loadCronjobFile } from "./cronjob-store";
 import type { CronjobDefinition } from "./cronjob-types";
 import { getDb } from "./db/connection";
@@ -88,7 +89,8 @@ async function executeCronjob(job: CronjobDefinition, fileKey: string): Promise<
   log.info({ jobId: job.id, name: job.name, workspaceId }, "executing cronjob");
 
   try {
-    submitTask({ workspaceId, prompt: job.prompt });
+    const chat = getOrCreateDefaultChat(workspaceId);
+    submitTask({ workspaceId, chatId: chat.id, prompt: job.prompt });
     updateLastRun(job.id, "completed");
   } catch (err) {
     if (err instanceof TaskConflictError) {

@@ -76,3 +76,44 @@
   padding-left: 1rem;
   padding-right: 1rem;
 }
+
+/* ---------------------------------------------------------------------------
+ * Nested chat tabs — smaller, tighter styling for the inner dockview
+ * instance used for multi-chat tabs within the chat panel.
+ * --------------------------------------------------------------------------- */
+
+.dockview-chat-tabs {
+  --dv-tabs-and-actions-container-height: 32px;
+  --dv-tabs-and-actions-container-font-size: 12px;
+}
+
+.dockview-chat-tabs .dv-tab {
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+  max-width: 180px;
+}
+
+/* Hide the sash/resize handle — tabs, not split panes */
+.dockview-chat-tabs .dv-resize-container > .dv-resize-handle-horizontal,
+.dockview-chat-tabs .dv-resize-container > .dv-resize-handle-vertical {
+  display: none;
+}
+
+/* Disable drag-and-drop reordering in nested chat tabs */
+.dockview-chat-tabs .dv-tab {
+  cursor: default;
+}
+
+/* Hide the built-in tab overflow dropdown — its popup gets clipped by
+   ancestor overflow:hidden in the nested dockview. Tabs are already
+   horizontally scrollable so users can still reach all tabs. */
+.dockview-chat-tabs .dv-tabs-overflow-dropdown-root {
+  display: none;
+}
+
+/* Right-side actions area (the + button) */
+.dockview-chat-tabs .dv-right-actions-container {
+  display: flex;
+  align-items: center;
+  padding-right: 0.25rem;
+}

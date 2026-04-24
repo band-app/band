@@ -11,11 +11,17 @@ import { bandHome, getAgentDefinition, loadSettings } from "./state";
 
 const log = createLogger("agent-pool");
 
+/** Pool entry: agent instance + the definition ID it was created with. */
+interface PoolEntry {
+  agent: CodingAgent;
+  agentDefId: string;
+}
+
 // Use globalThis to ensure a single shared state across multiple bundles
-const POOL_KEY = Symbol.for("band.agent-pool");
+const POOL_KEY = Symbol.for("band.agent-pool.v2");
 const g = globalThis as unknown as Record<symbol, unknown>;
-if (!g[POOL_KEY]) g[POOL_KEY] = new Map<string, CodingAgent>();
-const pool = g[POOL_KEY] as Map<string, CodingAgent>;
+if (!g[POOL_KEY]) g[POOL_KEY] = new Map<string, PoolEntry>();
+const pool = g[POOL_KEY] as Map<string, PoolEntry>;
 
 /**
  * Read the 'model' field from ~/.claude/settings.json as a fallback
@@ -53,34 +59,61 @@ function getAgentConfig(worktreePath: string, agentId?: string): CodingAgentConf
   } as CodingAgentConfig;
 }
 
-export function getAgent(workspaceId: string): CodingAgent | undefined {
-  return pool.get(workspaceId);
-}
-
-export function removeAgent(workspaceId: string): boolean {
-  log.info({ workspaceId }, "removing agent from pool");
-  return pool.delete(workspaceId);
-}
-
-export async function getOrCreateAgent(
-  workspaceId: string,
-  worktreePath: string,
-  agentId?: string,
-): Promise<CodingAgent> {
-  const existing = pool.get(workspaceId);
-  if (existing) return existing;
-
-  const config = getAgentConfig(worktreePath, agentId);
-  log.info({ workspaceId, type: config.type, cwd: worktreePath }, "creating agent");
-  const agent = await createCodingAgent(config);
-  pool.set(workspaceId, agent);
-  return agent;
+/** Resolve the canonical agent definition ID (resolves undefined → default). */
+function resolveAgentDefId(agentId?: string): string {
+  const settings = loadSettings();
+  return getAgentDefinition(settings, agentId).id;
 }
 
 /**
- * Replace the current agent for a workspace with one using a different config.
- * Aborts the existing agent (if any) before creating the new one.
+ * Get an existing agent by chatId.
  */
+export function getAgent(chatId: string): CodingAgent | undefined {
+  return pool.get(chatId)?.agent;
+}
+
+/**
+ * Remove an agent from the pool by chatId.
+ */
+export function removeAgent(chatId: string): boolean {
+  log.info({ chatId }, "removing agent from pool");
+  return pool.delete(chatId);
+}
+
+/**
+ * Get or create an agent for a chat pane.
+ * The pool is keyed by chatId (one agent per chat pane).
+ * If the cached agent was created with a different agentId, it is
+ * replaced so that a chatId reused for a different agent type gets
+ * the correct process.
+ */
+export async function getOrCreateAgent(
+  chatId: string,
+  worktreePath: string,
+  agentId?: string,
+): Promise<CodingAgent> {
+  const existing = pool.get(chatId);
+  if (existing) {
+    // Validate the cached agent matches the requested definition.
+    const requestedDefId = resolveAgentDefId(agentId);
+    if (existing.agentDefId !== requestedDefId) {
+      log.info(
+        { chatId, cached: existing.agentDefId, requested: requestedDefId },
+        "cached agent definition mismatch, replacing",
+      );
+      return replaceAgent(chatId, worktreePath, agentId ?? requestedDefId);
+    }
+    return existing.agent;
+  }
+
+  const defId = resolveAgentDefId(agentId);
+  const config = getAgentConfig(worktreePath, agentId);
+  log.info({ chatId, type: config.type, defId, cwd: worktreePath }, "creating agent");
+  const agent = await createCodingAgent(config);
+  pool.set(chatId, { agent, agentDefId: defId });
+  return agent;
+}
+
 /**
  * Create a short-lived agent for metadata queries (listModes, listModels).
  * Does NOT add it to the pool — caller should discard after use.
@@ -90,15 +123,19 @@ export async function createMetadataAgent(agentId?: string): Promise<CodingAgent
   return createCodingAgent(config);
 }
 
+/**
+ * Replace the current agent for a chat pane with one using a different config.
+ * Aborts the existing agent (if any) before creating the new one.
+ */
 export async function replaceAgent(
-  workspaceId: string,
+  chatId: string,
   worktreePath: string,
   agentId: string,
 ): Promise<CodingAgent> {
-  const existing = pool.get(workspaceId);
-  if (existing?.abort) {
-    existing.abort();
+  const existing = pool.get(chatId);
+  if (existing?.agent.abort) {
+    existing.agent.abort();
   }
-  pool.delete(workspaceId);
-  return getOrCreateAgent(workspaceId, worktreePath, agentId);
+  pool.delete(chatId);
+  return getOrCreateAgent(chatId, worktreePath, agentId);
 }

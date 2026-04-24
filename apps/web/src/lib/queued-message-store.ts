@@ -1,5 +1,5 @@
 /**
- * In-memory store for queued chat messages, keyed by workspaceId.
+ * In-memory store for queued chat messages, keyed by chatId.
  *
  * When a user sends a message while the agent is busy, the frontend
  * persists it here so it survives page navigation. When a task
@@ -20,13 +20,13 @@ if (!g[LISTENERS_KEY]) g[LISTENERS_KEY] = new Set<QueueListener>();
 const store = g[QUEUED_KEY] as Map<string, string[]>;
 const queueListeners = g[LISTENERS_KEY] as Set<QueueListener>;
 
-type QueueListener = (workspaceId: string, messages: string[]) => void;
+type QueueListener = (chatId: string, messages: string[]) => void;
 
-function notify(workspaceId: string): void {
-  const messages = [...(store.get(workspaceId) ?? [])];
+function notify(chatId: string): void {
+  const messages = [...(store.get(chatId) ?? [])];
   for (const listener of queueListeners) {
     try {
-      listener(workspaceId, messages);
+      listener(chatId, messages);
     } catch {
       // listener may have been removed
     }
@@ -41,42 +41,42 @@ export function subscribeQueue(listener: QueueListener): () => void {
   };
 }
 
-/** Append a queued message for a workspace. */
-export function pushQueuedMessage(workspaceId: string, text: string): void {
-  const msgs = store.get(workspaceId);
+/** Append a queued message for a chat pane. */
+export function pushQueuedMessage(chatId: string, text: string): void {
+  const msgs = store.get(chatId);
   if (msgs) {
     msgs.push(text);
   } else {
-    store.set(workspaceId, [text]);
+    store.set(chatId, [text]);
   }
-  notify(workspaceId);
+  notify(chatId);
 }
 
-/** Replace the entire queue for a workspace. */
-export function setQueuedMessages(workspaceId: string, texts: string[]): void {
+/** Replace the entire queue for a chat pane. */
+export function setQueuedMessages(chatId: string, texts: string[]): void {
   if (texts.length === 0) {
-    store.delete(workspaceId);
+    store.delete(chatId);
   } else {
-    store.set(workspaceId, [...texts]);
+    store.set(chatId, [...texts]);
   }
-  notify(workspaceId);
+  notify(chatId);
 }
 
-/** Retrieve all queued messages for a workspace (empty array if none). */
-export function getQueuedMessages(workspaceId: string): string[] {
-  return store.get(workspaceId) ?? [];
+/** Retrieve all queued messages for a chat pane (empty array if none). */
+export function getQueuedMessages(chatId: string): string[] {
+  return store.get(chatId) ?? [];
 }
 
 /**
- * Remove and return the first queued message for a workspace, or null
+ * Remove and return the first queued message for a chat pane, or null
  * if the queue is empty.
  */
-export function shiftQueuedMessage(workspaceId: string): string | null {
-  const msgs = store.get(workspaceId);
+export function shiftQueuedMessage(chatId: string): string | null {
+  const msgs = store.get(chatId);
   if (!msgs || msgs.length === 0) return null;
   const first = msgs.shift()!;
-  if (msgs.length === 0) store.delete(workspaceId);
-  notify(workspaceId);
+  if (msgs.length === 0) store.delete(chatId);
+  notify(chatId);
   return first;
 }
 
@@ -84,19 +84,19 @@ export function shiftQueuedMessage(workspaceId: string): string | null {
  * Remove the first occurrence of a message matching `text` from the queue.
  * Returns true if a message was removed.
  */
-export function removeQueuedMessage(workspaceId: string, text: string): boolean {
-  const msgs = store.get(workspaceId);
+export function removeQueuedMessage(chatId: string, text: string): boolean {
+  const msgs = store.get(chatId);
   if (!msgs) return false;
   const idx = msgs.indexOf(text);
   if (idx === -1) return false;
   msgs.splice(idx, 1);
-  if (msgs.length === 0) store.delete(workspaceId);
-  notify(workspaceId);
+  if (msgs.length === 0) store.delete(chatId);
+  notify(chatId);
   return true;
 }
 
-/** Remove all queued messages for a workspace. */
-export function clearQueuedMessages(workspaceId: string): void {
-  store.delete(workspaceId);
-  notify(workspaceId);
+/** Remove all queued messages for a chat pane. */
+export function clearQueuedMessages(chatId: string): void {
+  store.delete(chatId);
+  notify(chatId);
 }

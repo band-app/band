@@ -12,6 +12,7 @@ interface SessionItem {
 
 interface SessionListProps {
   workspaceId: string;
+  chatId?: string;
   activeSessionId?: string;
   onSelectSession: (sessionId: string) => void;
 }
@@ -29,7 +30,7 @@ function relativeTime(ms: number): string {
   return `${months}mo ago`;
 }
 
-export function SessionList({ workspaceId, activeSessionId, onSelectSession }: SessionListProps) {
+export function SessionList({ workspaceId, chatId, activeSessionId, onSelectSession }: SessionListProps) {
   const [sessions, setSessions] = useState<SessionItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -38,14 +39,14 @@ export function SessionList({ workspaceId, activeSessionId, onSelectSession }: S
     setLoading(true);
     setError(null);
     try {
-      const data = await trpc.sessions.list.query({ workspaceId });
+      const data = await trpc.sessions.list.query({ workspaceId, chatId });
       setSessions(data.sessions as SessionItem[]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load sessions");
     } finally {
       setLoading(false);
     }
-  }, [workspaceId]);
+  }, [workspaceId, chatId]);
 
   useEffect(() => {
     fetchSessions();

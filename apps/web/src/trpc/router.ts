@@ -11,9 +11,20 @@ import { z } from "zod";
 import {
   createMetadataAgent,
   getOrCreateAgent,
-  removeAgent,
   replaceAgent,
 } from "../lib/agent-pool";
+import {
+  createChat,
+  getChat,
+  getOrCreateDefaultChat,
+  listChats,
+  removeChat,
+  removeWorkspaceChats,
+  updateChat,
+  updateChatActiveSession,
+  updateChatStatus,
+} from "../lib/chat-manager";
+import { deleteChatLayout, getChatLayout, saveChatLayout } from "../lib/chat-layout-manager";
 import { checkCli, installCli } from "../lib/cli";
 import { convertEventsToUIMessages, convertHistoryToUIMessages } from "../lib/convert-events";
 import { reloadSchedules, stopJobsForKey } from "../lib/cronjob-scheduler";
@@ -64,6 +75,7 @@ import {
 import {
   abortTask,
   cancelTask,
+  getSessionBuffer,
   getTask,
   type StreamChunk,
   submitTask,
@@ -84,13 +96,6 @@ const log = createLogger("trpc");
 const t = initTRPC.context<Context>().create();
 
 const publicProcedure = t.procedure;
-
-/** Resolve the coding agent for a workspace, respecting the per-workspace agent selection. */
-async function getWorkspaceAgent(workspaceId: string, worktreePath: string) {
-  const wsStatus = getWorkspaceStatus(workspaceId);
-  const codingAgentId = wsStatus?.agent?.codingAgentId;
-  return getOrCreateAgent(workspaceId, worktreePath, codingAgentId);
-}
 
 // ---------------------------------------------------------------------------
 // Projects
@@ -309,10 +314,12 @@ const workspacesRouter = t.router({
       // Run setup script in the background (non-blocking).
       // If a prompt is provided, defer task submission until setup completes
       // so the agent has dependencies installed.
+      const defaultChat = getOrCreateDefaultChat(workspaceId);
       const onSetupComplete = input.prompt
         ? () =>
             submitTask({
               workspaceId,
+              chatId: defaultChat.id,
               prompt: input.prompt!,
               maxTurns: input.maxTurns,
               mode: input.mode,
@@ -386,8 +393,11 @@ const workspacesRouter = t.router({
             deleteWorkspaceStatus(workspaceId);
             deleteBranchStatus(workspaceId);
 
-            // Clean up cached agent from pool
-            removeAgent(workspaceId);
+            // Clean up all chat panes and their agent processes
+            removeWorkspaceChats(workspaceId);
+
+            // Clean up chat layout tree
+            deleteChatLayout(workspaceId);
 
             // Kill any running terminal PTY sessions
             killWorkspaceTerminals(workspaceId);
@@ -1146,6 +1156,7 @@ const workspaceRouter = t.router({
       z.object({
         workspaceId: z.string(),
         agentId: z.string(),
+        chatId: z.string().optional(),
       }),
     )
     .mutation(async ({ input }) => {
@@ -1154,13 +1165,19 @@ const workspaceRouter = t.router({
         throw new TRPCError({ code: "NOT_FOUND", message: "Workspace not found" });
       }
 
+      // Resolve the chat pane (use provided chatId or default)
+      const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
+
       // Abort any running task and clear queued messages so the new agent
       // starts with a clean slate.
-      abortTask(input.workspaceId);
-      clearQueuedMessages(input.workspaceId);
+      abortTask(chatId);
+      clearQueuedMessages(chatId);
 
       // Replace the agent in the pool with the new agent type
-      await replaceAgent(input.workspaceId, workspace.worktree.path, input.agentId);
+      await replaceAgent(chatId, workspace.worktree.path, input.agentId);
+
+      // Update the chat pane's agent config
+      updateChat(chatId, { agent: input.agentId });
 
       // Update workspace status with the new coding agent ID
       upsertWorkspaceStatus(input.workspaceId, {
@@ -1279,6 +1296,7 @@ const tasksRouter = t.router({
           workspaceId: z.string().optional(),
           status: z.enum(["running", "completed", "failed"]).optional(),
           sessionId: z.string().optional(),
+          chatId: z.string().optional(),
         })
         .optional(),
     )
@@ -1303,6 +1321,7 @@ const tasksRouter = t.router({
     .input(
       z.object({
         workspaceId: z.string(),
+        chatId: z.string().optional(),
         prompt: z.string(),
         sessionId: z.string().optional(),
         maxTurns: z.number().int().positive().optional(),
@@ -1321,6 +1340,25 @@ const tasksRouter = t.router({
       }),
     )
     .mutation(async ({ input }) => {
+      // Resolve chatId: if the client provides one, lazily ensure the server
+      // record exists. If not provided, fall back to the default chat.
+      let chatId: string;
+      if (input.chatId) {
+        const existing = getChat(input.chatId);
+        if (!existing) {
+          // Lazily create the chat record.  Preserve the agent from the
+          // task so the correct agent type is used (not the default).
+          createChat(input.workspaceId, {
+            id: input.chatId,
+            name: "Chat",
+            agent: input.codingAgentId,
+          });
+        }
+        chatId = input.chatId;
+      } else {
+        chatId = getOrCreateDefaultChat(input.workspaceId).id;
+      }
+
       let agentPrompt: string | undefined;
       if (input.files && input.files.length > 0) {
         const savedPaths = await saveUploadedFiles(input.files);
@@ -1333,6 +1371,7 @@ const tasksRouter = t.router({
       try {
         const task = submitTask({
           workspaceId: input.workspaceId,
+          chatId,
           prompt: input.prompt,
           sessionId: input.sessionId,
           agentPrompt,
@@ -1341,12 +1380,12 @@ const tasksRouter = t.router({
           model: input.model,
           codingAgentId: input.codingAgentId,
         });
-        return { id: task.id, workspaceId: task.workspaceId, sessionId: task.sessionId };
+        return { id: task.id, workspaceId: task.workspaceId, chatId: task.chatId, sessionId: task.sessionId };
       } catch (err) {
         if (err instanceof TaskConflictError) {
           throw new TRPCError({
             code: "CONFLICT",
-            message: "Task already running for this workspace",
+            message: "Task already running for this chat pane",
           });
         }
         if (err instanceof Error && err.message.startsWith("Workspace not found")) {
@@ -1359,18 +1398,24 @@ const tasksRouter = t.router({
       }
     }),
 
-  get: publicProcedure.input(z.object({ workspaceId: z.string() })).query(({ input }) => {
-    const task = getTask(input.workspaceId);
-    return { task };
-  }),
+  get: publicProcedure
+    .input(z.object({ workspaceId: z.string(), chatId: z.string().optional() }))
+    .query(({ input }) => {
+      const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
+      const task = getTask(chatId);
+      return { task };
+    }),
 
-  abort: publicProcedure.input(z.object({ workspaceId: z.string() })).mutation(({ input }) => {
-    const aborted = abortTask(input.workspaceId);
-    if (!aborted) {
-      throw new TRPCError({ code: "NOT_FOUND", message: "No running task found" });
-    }
-    return { aborted: true };
-  }),
+  abort: publicProcedure
+    .input(z.object({ workspaceId: z.string(), chatId: z.string().optional() }))
+    .mutation(({ input }) => {
+      const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
+      const aborted = abortTask(chatId);
+      if (!aborted) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "No running task found" });
+      }
+      return { aborted: true };
+    }),
 
   cancel: publicProcedure.input(z.object({ taskId: z.string() })).mutation(({ input }) => {
     const result = cancelTask(input.taskId);
@@ -1389,21 +1434,25 @@ const tasksRouter = t.router({
       throw new TRPCError({ code: "NOT_FOUND", message: "Task not found" });
     }
 
+    // Use original chat pane or default for workspace
+    const chatId = record.chatId ?? getOrCreateDefaultChat(record.workspaceId).id;
+
     try {
       const task = submitTask({
         workspaceId: record.workspaceId,
+        chatId,
         prompt: record.prompt,
         maxTurns: record.maxTurns,
         mode: record.mode,
         model: record.model,
         codingAgentId: record.codingAgentId,
       });
-      return { workspaceId: task.workspaceId, sessionId: task.sessionId };
+      return { workspaceId: task.workspaceId, chatId: task.chatId, sessionId: task.sessionId };
     } catch (err) {
       if (err instanceof TaskConflictError) {
         throw new TRPCError({
           code: "CONFLICT",
-          message: "Task already running for this workspace",
+          message: "Task already running for this chat pane",
         });
       }
       throw err;
@@ -1414,12 +1463,16 @@ const tasksRouter = t.router({
     .input(
       z.object({
         workspaceId: z.string(),
+        chatId: z.string().optional(),
         sessionId: z.string().optional(),
         afterEventId: z.number().optional(),
       }),
     )
     .subscription(async function* (opts) {
       const { workspaceId, sessionId, afterEventId } = opts.input;
+      // Backward compat: resolve chatId from workspaceId if not provided
+      const chatId = opts.input.chatId ?? getOrCreateDefaultChat(workspaceId).id;
+      log.info({ chatId, workspaceId, sessionId, afterEventId }, "tasks.stream: subscription opened");
 
       // Register the listener FIRST so we capture events from tasks that
       // are already running (avoids race between submit and subscribe).
@@ -1427,7 +1480,7 @@ const tasksRouter = t.router({
       let resolve: (() => void) | null = null;
       let highWaterMark = afterEventId ?? 0;
 
-      const unsubscribe = subscribeTask(workspaceId, (chunk: StreamChunk) => {
+      const unsubscribe = subscribeTask(chatId, (chunk: StreamChunk) => {
         // Dedup: skip events we already replayed from the buffer
         if (chunk.eventId != null && chunk.eventId <= highWaterMark) return;
         queue.push(chunk);
@@ -1455,21 +1508,55 @@ const tasksRouter = t.router({
       }
 
       // Phase 2: Live events — check if a task is running or wait briefly
-      let task = getTask(workspaceId);
+      let task = getTask(chatId);
       if (!task || task.status !== "running") {
         for (let i = 0; i < 10 && !opts.signal?.aborted; i++) {
           await new Promise((r) => setTimeout(r, 50));
           // If events arrived while waiting, a task started and we caught it
           if (queue.length > 0) break;
-          task = getTask(workspaceId);
+          task = getTask(chatId);
           if (task?.status === "running") break;
         }
       }
 
-      // If still no running task and no events captured, bail out.
-      // This handles both fresh subscriptions (no replay) and gap-fill
-      // subscriptions where the task already finished.
-      if (queue.length === 0 && (!task || task.status !== "running")) {
+      // Phase 2b: Catch-up replay — if a task is running (or just
+      // completed) but no events arrived via the live listener yet, replay
+      // buffered events from the session.  This closes the race window
+      // where broadcast fires *before* the WebSocket subscription opens.
+      let caughtUp = false;
+      if (queue.length === 0 && task?.sessionId) {
+        const buf = getSessionBuffer(task.sessionId);
+        if (buf && buf.events.length > 0) {
+          log.info(
+            { chatId, sessionId: task.sessionId, bufferedCount: buf.events.length },
+            "tasks.stream: replaying buffered events (catch-up)",
+          );
+          for (const buffered of buf.events) {
+            if (buffered.eventId != null && buffered.eventId <= highWaterMark) continue;
+            yield buffered;
+            caughtUp = true;
+            if (buffered.eventId != null) {
+              highWaterMark = Math.max(highWaterMark, buffered.eventId);
+            }
+          }
+        }
+      }
+
+      // If still no running task and no events captured, check if the task
+      // already failed/completed.  If the task failed before the subscription
+      // was opened, broadcast events were lost (no listener registered yet).
+      // Replay the failure to the client so it sees the error.
+      // Skip if we already replayed buffered events above (they include the
+      // error/finish already).
+      if (queue.length === 0 && !caughtUp && (!task || task.status !== "running")) {
+        log.warn(
+          { chatId, taskStatus: task?.status, queueLen: queue.length },
+          "tasks.stream: no running task and no events — closing subscription early",
+        );
+        if (task?.status === "failed") {
+          yield { type: "error", errorText: "Task failed" } as unknown as StreamChunk;
+          yield { type: "finish" } as unknown as StreamChunk;
+        }
         unsubscribe();
         return;
       }
@@ -1485,8 +1572,8 @@ const tasksRouter = t.router({
             // (shiftQueuedMessage may have emptied the queue before we
             // get here, but submitTask already created a new running task).
             if (chunk.type === "finish") {
-              const hasQueued = getQueuedMessages(workspaceId).length > 0;
-              const taskRunning = getTask(workspaceId)?.status === "running";
+              const hasQueued = getQueuedMessages(chatId).length > 0;
+              const taskRunning = getTask(chatId)?.status === "running";
               if (!hasQueued && !taskRunning) {
                 return;
               }
@@ -1508,26 +1595,39 @@ const tasksRouter = t.router({
 // ---------------------------------------------------------------------------
 
 const sessionsRouter = t.router({
-  list: publicProcedure.input(z.object({ workspaceId: z.string() })).query(async ({ input }) => {
-    const workspace = resolveWorkspace(input.workspaceId);
-    if (!workspace) {
-      throw new TRPCError({ code: "NOT_FOUND", message: "Workspace not found" });
-    }
+  list: publicProcedure
+    .input(z.object({ workspaceId: z.string(), chatId: z.string().optional() }))
+    .query(async ({ input }) => {
+      const workspace = resolveWorkspace(input.workspaceId);
+      if (!workspace) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Workspace not found" });
+      }
 
-    const agent = await getWorkspaceAgent(input.workspaceId, workspace.worktree.path);
+      // Resolve the agent from the chat pane if chatId is provided
+      const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
+      const chatSession = getChat(chatId);
+      const agent = await getOrCreateAgent(
+        chatId,
+        workspace.worktree.path,
+        chatSession?.agent,
+      );
 
-    if (!agent.supportedFeatures.sessionListing || !agent.listSessions) {
-      return { sessions: [], supported: false };
-    }
+      if (!agent.supportedFeatures.sessionListing || !agent.listSessions) {
+        return { sessions: [], supported: false };
+      }
 
-    const sessions = await agent.listSessions(workspace.worktree.path);
-    return { sessions, supported: true };
-  }),
+      // Each agent's listSessions() already scopes to the workspace
+      // directory — no additional filtering needed.  This shows all
+      // sessions for the agent type, including ones created outside Band.
+      const allSessions = await agent.listSessions(workspace.worktree.path);
+      return { sessions: allSessions, supported: true };
+    }),
 
   messages: publicProcedure
     .input(
       z.object({
         workspaceId: z.string(),
+        chatId: z.string().optional(),
         sessionId: z.string(),
         beforeEventId: z.number().optional(),
         limit: z.number().min(1).max(200).default(100).optional(),
@@ -1566,7 +1666,13 @@ const sessionsRouter = t.router({
         try {
           const workspace = resolveWorkspace(input.workspaceId);
           if (workspace) {
-            const agent = await getWorkspaceAgent(input.workspaceId, workspace.worktree.path);
+            const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
+            const chatSession = getChat(chatId);
+            const agent = await getOrCreateAgent(
+              chatId,
+              workspace.worktree.path,
+              chatSession?.agent,
+            );
             if (agent.supportedFeatures.sessionListing && agent.getSessionMessages) {
               const rawMessages = await agent.getSessionMessages(
                 input.sessionId,
@@ -1611,7 +1717,13 @@ const sessionsRouter = t.router({
         throw new TRPCError({ code: "NOT_FOUND", message: "Workspace not found" });
       }
 
-      const agent = await getWorkspaceAgent(input.workspaceId, workspace.worktree.path);
+      const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
+      const chatSession = getChat(chatId);
+      const agent = await getOrCreateAgent(
+        chatId,
+        workspace.worktree.path,
+        chatSession?.agent,
+      );
 
       if (!agent.supportedFeatures.sessionListing || !agent.getSessionMessages) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Session listing not supported" });
@@ -1930,14 +2042,15 @@ const cronjobsRouter = t.router({
         workspaceId = toWorkspaceId(project.name, project.defaultBranch);
       }
 
+      const cronChat = getOrCreateDefaultChat(workspaceId);
       try {
-        const task = submitTask({ workspaceId, prompt: job.prompt });
+        const task = submitTask({ workspaceId, chatId: cronChat.id, prompt: job.prompt });
         return { taskId: task.id, workspaceId };
       } catch (err) {
         if (err instanceof TaskConflictError) {
           throw new TRPCError({
             code: "CONFLICT",
-            message: "Task already running for this workspace",
+            message: "Task already running for this chat pane",
           });
         }
         throw err;
@@ -1950,20 +2063,28 @@ const cronjobsRouter = t.router({
 // ---------------------------------------------------------------------------
 
 const skillsRouter = t.router({
-  list: publicProcedure.input(z.object({ workspaceId: z.string() })).query(async ({ input }) => {
-    const workspace = resolveWorkspace(input.workspaceId);
-    if (!workspace) {
+  list: publicProcedure
+    .input(z.object({ workspaceId: z.string(), chatId: z.string().optional() }))
+    .query(async ({ input }) => {
+      const workspace = resolveWorkspace(input.workspaceId);
+      if (!workspace) {
+        return { skills: [] };
+      }
+
+      const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
+      const chatSession = getChat(chatId);
+      const agent = await getOrCreateAgent(
+        chatId,
+        workspace.worktree.path,
+        chatSession?.agent,
+      );
+      if (agent.listSkills) {
+        const skills = await agent.listSkills();
+        return { skills };
+      }
+
       return { skills: [] };
-    }
-
-    const agent = await getWorkspaceAgent(input.workspaceId, workspace.worktree.path);
-    if (agent.listSkills) {
-      const skills = await agent.listSkills();
-      return { skills };
-    }
-
-    return { skills: [] };
-  }),
+    }),
 });
 
 // ---------------------------------------------------------------------------
@@ -2000,57 +2121,222 @@ const modelsRouter = t.router({
 });
 
 // ---------------------------------------------------------------------------
+// Chat Layout (split pane tree persistence)
+// ---------------------------------------------------------------------------
+
+const chatLayoutRouter = t.router({
+  get: publicProcedure
+    .input(z.object({ workspaceId: z.string() }))
+    .query(({ input }) => {
+      return { tree: getChatLayout(input.workspaceId) };
+    }),
+
+  save: publicProcedure
+    .input(z.object({ workspaceId: z.string(), tree: z.unknown() }))
+    .mutation(({ input }) => {
+      saveChatLayout(input.workspaceId, input.tree);
+      return { ok: true };
+    }),
+});
+
+// ---------------------------------------------------------------------------
+// Chats (multi-pane chat management)
+// ---------------------------------------------------------------------------
+
+const chatsRouter = t.router({
+  list: publicProcedure
+    .input(z.object({ workspaceId: z.string() }))
+    .query(({ input }) => {
+      return { chats: listChats(input.workspaceId) };
+    }),
+
+  create: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        id: z.string().optional(),
+        name: z.string().optional(),
+        agent: z.string().optional(),
+        model: z.string().optional(),
+        mode: z.string().optional(),
+      }),
+    )
+    .mutation(({ input }) => {
+      const chat = createChat(input.workspaceId, {
+        id: input.id,
+        name: input.name,
+        agent: input.agent,
+        model: input.model,
+        mode: input.mode,
+      });
+      return { chat };
+    }),
+
+  get: publicProcedure.input(z.object({ chatId: z.string() })).query(({ input }) => {
+    const chat = getChat(input.chatId);
+    return { chat: chat ?? null };
+  }),
+
+  update: publicProcedure
+    .input(
+      z.object({
+        chatId: z.string(),
+        name: z.string().optional(),
+        agent: z.string().optional(),
+        model: z.string().optional(),
+        mode: z.string().optional(),
+      }),
+    )
+    .mutation(({ input }) => {
+      const { chatId, ...updates } = input;
+      const chat = updateChat(chatId, updates);
+      return { chat };
+    }),
+
+  remove: publicProcedure.input(z.object({ chatId: z.string() })).mutation(({ input }) => {
+    removeChat(input.chatId);
+    return { ok: true };
+  }),
+
+  setActiveSession: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        chatId: z.string(),
+        sessionId: z.string().optional(),
+      }),
+    )
+    .mutation(({ input }) => {
+      // Lazily ensure the server-side chat record exists. The client
+      // generates chatIds locally, so setActiveSession may be called
+      // before the first message is sent (which normally creates the record).
+      let chat = getChat(input.chatId);
+      if (!chat) {
+        chat = createChat(input.workspaceId, { id: input.chatId, name: "Chat" });
+      }
+      updateChatActiveSession(input.chatId, input.sessionId);
+      return { ok: true };
+    }),
+
+  send: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        chatId: z.string(),
+        message: z.string(),
+        sessionId: z.string().optional(),
+      }),
+    )
+    .mutation(({ input }) => {
+      // Lazily ensure the server-side chat record exists. The client
+      // generates chatIds locally for instant rendering, so the first
+      // message sent may arrive before a record is created.
+      let chat = getChat(input.chatId);
+      if (!chat) {
+        chat = createChat(input.workspaceId, { id: input.chatId, name: "Chat" });
+      }
+      try {
+        const task = submitTask({
+          workspaceId: chat.workspaceId,
+          chatId: chat.id,
+          prompt: input.message,
+          sessionId: input.sessionId,
+        });
+        return { taskId: task.id, sessionId: task.sessionId };
+      } catch (err) {
+        if (err instanceof TaskConflictError) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "Task already running for this chat pane",
+          });
+        }
+        throw err;
+      }
+    }),
+
+  stop: publicProcedure.input(z.object({ chatId: z.string() })).mutation(({ input }) => {
+    abortTask(input.chatId);
+    updateChatStatus(input.chatId, "stopped");
+    return { ok: true };
+  }),
+
+  resume: publicProcedure.input(z.object({ chatId: z.string() })).mutation(({ input }) => {
+    updateChatStatus(input.chatId, "idle");
+    return { ok: true };
+  }),
+});
+
+// ---------------------------------------------------------------------------
 // Queue (persisted queued messages)
 // ---------------------------------------------------------------------------
 
 const queueRouter = t.router({
   push: publicProcedure
-    .input(z.object({ workspaceId: z.string(), text: z.string() }))
+    .input(z.object({ workspaceId: z.string(), chatId: z.string().optional(), text: z.string() }))
     .mutation(({ input }) => {
-      pushQueuedMessage(input.workspaceId, input.text);
-      return { ok: true, messages: getQueuedMessages(input.workspaceId) };
+      const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
+      pushQueuedMessage(chatId, input.text);
+      return { ok: true, messages: getQueuedMessages(chatId) };
     }),
 
   set: publicProcedure
-    .input(z.object({ workspaceId: z.string(), messages: z.array(z.string()) }))
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        chatId: z.string().optional(),
+        messages: z.array(z.string()),
+      }),
+    )
     .mutation(({ input }) => {
-      setQueuedMessages(input.workspaceId, input.messages);
+      const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
+      setQueuedMessages(chatId, input.messages);
       return { ok: true };
     }),
 
-  get: publicProcedure.input(z.object({ workspaceId: z.string() })).query(({ input }) => {
-    const messages = getQueuedMessages(input.workspaceId);
-    return { messages };
-  }),
-
-  remove: publicProcedure
-    .input(z.object({ workspaceId: z.string(), text: z.string() }))
-    .mutation(({ input }) => {
-      removeQueuedMessage(input.workspaceId, input.text);
-      return { ok: true, messages: getQueuedMessages(input.workspaceId) };
+  get: publicProcedure
+    .input(z.object({ workspaceId: z.string(), chatId: z.string().optional() }))
+    .query(({ input }) => {
+      const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
+      const messages = getQueuedMessages(chatId);
+      return { messages };
     }),
 
-  shift: publicProcedure.input(z.object({ workspaceId: z.string() })).mutation(({ input }) => {
-    const text = shiftQueuedMessage(input.workspaceId);
-    return { text };
-  }),
+  remove: publicProcedure
+    .input(z.object({ workspaceId: z.string(), chatId: z.string().optional(), text: z.string() }))
+    .mutation(({ input }) => {
+      const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
+      removeQueuedMessage(chatId, input.text);
+      return { ok: true, messages: getQueuedMessages(chatId) };
+    }),
 
-  clear: publicProcedure.input(z.object({ workspaceId: z.string() })).mutation(({ input }) => {
-    clearQueuedMessages(input.workspaceId);
-    return { ok: true };
-  }),
+  shift: publicProcedure
+    .input(z.object({ workspaceId: z.string(), chatId: z.string().optional() }))
+    .mutation(({ input }) => {
+      const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
+      const text = shiftQueuedMessage(chatId);
+      return { text };
+    }),
+
+  clear: publicProcedure
+    .input(z.object({ workspaceId: z.string(), chatId: z.string().optional() }))
+    .mutation(({ input }) => {
+      const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
+      clearQueuedMessages(chatId);
+      return { ok: true };
+    }),
 
   stream: publicProcedure
-    .input(z.object({ workspaceId: z.string() }))
+    .input(z.object({ workspaceId: z.string(), chatId: z.string().optional() }))
     .subscription(async function* (opts) {
-      const { workspaceId } = opts.input;
+      const chatId =
+        opts.input.chatId ?? getOrCreateDefaultChat(opts.input.workspaceId).id;
 
       type Update = { messages: string[] };
       const queue: Update[] = [];
       let resolve: (() => void) | null = null;
 
-      const unsubscribe = subscribeQueue((wsId, messages) => {
-        if (wsId !== workspaceId) return;
+      const unsubscribe = subscribeQueue((id, messages) => {
+        if (id !== chatId) return;
         queue.push({ messages });
         resolve?.();
       });
@@ -2061,7 +2347,7 @@ const queueRouter = t.router({
       });
 
       // Emit current state immediately so the client is in sync
-      yield { messages: getQueuedMessages(workspaceId) };
+      yield { messages: getQueuedMessages(chatId) };
 
       // Discard notifications that arrived between listener registration
       // and the initial yield — the initial yield already covers them.
@@ -2100,6 +2386,8 @@ export const appRouter = t.router({
   sessions: sessionsRouter,
   services: servicesRouter,
   chat: chatRouter,
+  chatLayout: chatLayoutRouter,
+  chats: chatsRouter,
   statuses: statusesRouter,
   status: statusRouter,
   cronjobs: cronjobsRouter,

@@ -3,6 +3,7 @@ import { trpc } from "./trpc-client";
 
 function subscriptionToStream(
   workspaceId: string,
+  chatId: string,
   opts?: {
     sessionId?: string;
     afterEventId?: number;
@@ -17,6 +18,7 @@ function subscriptionToStream(
       subscription = trpc.tasks.stream.subscribe(
         {
           workspaceId,
+          chatId,
           ...(opts?.sessionId && { sessionId: opts.sessionId }),
           ...(opts?.afterEventId != null && { afterEventId: opts.afterEventId }),
         },
@@ -76,6 +78,7 @@ function subscriptionToStream(
 
 export class TaskChatTransport implements ChatTransport<UIMessage> {
   private workspaceId: string;
+  private chatId: string;
   private getSessionId: () => string | undefined;
   private getLastEventId: () => number | undefined;
   mode: string | undefined;
@@ -84,16 +87,18 @@ export class TaskChatTransport implements ChatTransport<UIMessage> {
 
   constructor(
     workspaceId: string,
+    chatId: string,
     getSessionId: () => string | undefined,
     getLastEventId: () => number | undefined,
   ) {
     this.workspaceId = workspaceId;
+    this.chatId = chatId;
     this.getSessionId = getSessionId;
     this.getLastEventId = getLastEventId;
   }
 
   abort(): Promise<void> {
-    return trpc.tasks.abort.mutate({ workspaceId: this.workspaceId }).then(
+    return trpc.tasks.abort.mutate({ workspaceId: this.workspaceId, chatId: this.chatId }).then(
       () => {},
       () => {},
     );
@@ -133,6 +138,7 @@ export class TaskChatTransport implements ChatTransport<UIMessage> {
     try {
       await trpc.tasks.submit.mutate({
         workspaceId: this.workspaceId,
+        chatId: this.chatId,
         prompt: userText,
         sessionId: this.getSessionId(),
         ...(files.length > 0 && { files }),
@@ -146,7 +152,11 @@ export class TaskChatTransport implements ChatTransport<UIMessage> {
       // handleSubmit passed but a task started before submit), queue the
       // message instead of failing.
       if (msg.includes("already running") || msg.includes("CONFLICT")) {
-        await trpc.queue.push.mutate({ workspaceId: this.workspaceId, text: userText });
+        await trpc.queue.push.mutate({
+          workspaceId: this.workspaceId,
+          chatId: this.chatId,
+          text: userText,
+        });
         return new ReadableStream<UIMessageChunk>({
           start(controller) {
             controller.close();
@@ -156,7 +166,7 @@ export class TaskChatTransport implements ChatTransport<UIMessage> {
       throw new Error(msg);
     }
 
-    return subscriptionToStream(this.workspaceId, {
+    return subscriptionToStream(this.workspaceId, this.chatId, {
       sessionId: this.getSessionId(),
       abortSignal,
     });
@@ -165,7 +175,10 @@ export class TaskChatTransport implements ChatTransport<UIMessage> {
   async reconnectToStream(
     _options: Parameters<ChatTransport<UIMessage>["reconnectToStream"]>[0],
   ): Promise<ReadableStream<UIMessageChunk> | null> {
-    const task = await trpc.tasks.get.query({ workspaceId: this.workspaceId });
+    const task = await trpc.tasks.get.query({
+      workspaceId: this.workspaceId,
+      chatId: this.chatId,
+    });
     if (!task.task || task.task.status !== "running") return null;
 
     const sessionId = this.getSessionId();
@@ -176,7 +189,7 @@ export class TaskChatTransport implements ChatTransport<UIMessage> {
       taskSessionId: task.task.sessionId,
     });
     console.trace("[reconnect] call stack");
-    return subscriptionToStream(this.workspaceId, {
+    return subscriptionToStream(this.workspaceId, this.chatId, {
       sessionId,
       afterEventId,
     });

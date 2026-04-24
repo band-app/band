@@ -21,6 +21,7 @@ export interface TaskRecord {
   mode?: string;
   model?: string;
   codingAgentId?: string;
+  chatId?: string;
 }
 
 export interface TaskFilters {
@@ -28,6 +29,7 @@ export interface TaskFilters {
   workspaceId?: string;
   status?: TaskStatus;
   sessionId?: string;
+  chatId?: string;
 }
 
 export function generateTaskId(): string {
@@ -51,6 +53,7 @@ export function saveTask(task: TaskRecord): void {
       mode: task.mode ?? null,
       model: task.model ?? null,
       codingAgentId: task.codingAgentId ?? null,
+      chatId: task.chatId ?? null,
     })
     .onConflictDoUpdate({
       target: tasks.id,
@@ -67,6 +70,7 @@ export function saveTask(task: TaskRecord): void {
         mode: task.mode ?? null,
         model: task.model ?? null,
         codingAgentId: task.codingAgentId ?? null,
+        chatId: task.chatId ?? null,
       },
     })
     .run();
@@ -94,6 +98,9 @@ export function listTasks(filters?: TaskFilters): TaskRecord[] {
   }
   if (filters?.sessionId) {
     conditions.push(eq(tasks.sessionId, filters.sessionId));
+  }
+  if (filters?.chatId) {
+    conditions.push(eq(tasks.chatId, filters.chatId));
   }
 
   const query =
@@ -160,5 +167,6 @@ function rowToRecord(row: typeof tasks.$inferSelect): TaskRecord {
     mode: row.mode ?? undefined,
     model: row.model ?? undefined,
     codingAgentId: row.codingAgentId ?? undefined,
+    chatId: row.chatId ?? undefined,
   };
 }

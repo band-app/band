@@ -1,3 +1,7 @@
+/**
+ * @deprecated Use SplitChatContainer instead. This component is kept for
+ * backward compatibility but is no longer imported anywhere.
+ */
 import { AgentIcon } from "@band-app/dashboard-core";
 import { ChevronDown, Clock, Plus } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -18,6 +22,7 @@ interface WorkspaceChatPanelProps {
 }
 
 export function WorkspaceChatPanel({ workspaceId, visible, wsActive }: WorkspaceChatPanelProps) {
+  const [chatId, setChatId] = useState<string | undefined>(undefined);
   const [supportsSessionListing, setSupportsSessionListing] = useState(false);
   const [initialSessionId, setInitialSessionId] = useState<string | undefined>(undefined);
   const [sessionQueryDone, setSessionQueryDone] = useState(false);
@@ -30,11 +35,33 @@ export function WorkspaceChatPanel({ workspaceId, visible, wsActive }: Workspace
   const [chatKey, setChatKey] = useState(0);
   const newSessionRef = useRef<(() => void) | null>(null);
 
+  // Resolve default chat for this workspace
   useEffect(() => {
+    let cancelled = false;
+    trpc.chats.list
+      .query({ workspaceId })
+      .then((data) => {
+        if (cancelled) return;
+        if (data.chats.length > 0) {
+          setChatId(data.chats[0].id);
+        } else {
+          return trpc.chats.create.mutate({ workspaceId }).then((result) => {
+            if (!cancelled) setChatId(result.chat.id);
+          });
+        }
+      })
+      .catch((err) => console.error("[WorkspaceChatPanel] error resolving chat:", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId]);
+
+  useEffect(() => {
+    if (!chatId) return;
     let cancelled = false;
 
     trpc.sessions.list
-      .query({ workspaceId })
+      .query({ workspaceId, chatId })
       .then((data) => {
         if (cancelled) return;
         if (data.supported) {
@@ -54,7 +81,7 @@ export function WorkspaceChatPanel({ workspaceId, visible, wsActive }: Workspace
     return () => {
       cancelled = true;
     };
-  }, [workspaceId]);
+  }, [workspaceId, chatId]);
 
   // Load available agents from settings and current workspace agent.
   // Workspace status takes precedence over the settings default, so we
@@ -213,23 +240,26 @@ export function WorkspaceChatPanel({ workspaceId, visible, wsActive }: Workspace
         )}
       </header>
       <div className="flex min-h-0 flex-1 flex-col">
-        <ChatView
-          key={chatKey}
-          chatKey={chatKey}
-          workspaceId={workspaceId}
-          workspaceName={workspaceId}
-          supportsSessionListing={supportsSessionListing}
-          initialSessionId={initialSessionId}
-          sessionQueryDone={sessionQueryDone}
-          showSessionList={showSessionList}
-          onShowSessionListChange={setShowSessionList}
-          onStreamingChange={setTaskRunning}
-          onNewSessionRef={newSessionRef}
-          agentType={currentAgent?.type}
-          codingAgentId={currentAgentId}
-          visible={visible}
-          wsActive={wsActive}
-        />
+        {chatId && (
+          <ChatView
+            key={chatKey}
+            chatKey={chatKey}
+            workspaceId={workspaceId}
+            chatId={chatId}
+            workspaceName={workspaceId}
+            supportsSessionListing={supportsSessionListing}
+            initialSessionId={initialSessionId}
+            sessionQueryDone={sessionQueryDone}
+            showSessionList={showSessionList}
+            onShowSessionListChange={setShowSessionList}
+            onStreamingChange={setTaskRunning}
+            onNewSessionRef={newSessionRef}
+            agentType={currentAgent?.type}
+            codingAgentId={currentAgentId}
+            visible={visible}
+            wsActive={wsActive}
+          />
+        )}
       </div>
     </div>
   );

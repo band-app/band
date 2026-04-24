@@ -50,7 +50,15 @@ export class OpenCodeAdapter implements CodingAgent {
     sessionId?: string,
     options?: RunSessionOptions,
   ): AsyncGenerator<AgentEvent> {
-    const effectiveModel = options?.model ?? this.model;
+    const requestedModel = options?.model ?? this.model;
+    // Only pass models that OpenCode actually supports. Ignore models from
+    // other providers (e.g. Claude) to let OpenCode use its own default.
+    // Use the cached models list if available; fall back to the hardcoded default list.
+    const knownModelIds = new Set(
+      (this.cachedModels ?? DEFAULT_MODELS).map((m) => m.id),
+    );
+    const effectiveModel =
+      requestedModel && knownModelIds.has(requestedModel) ? requestedModel : undefined;
 
     log.info(
       {
@@ -90,6 +98,15 @@ export class OpenCodeAdapter implements CodingAgent {
         env: { ...process.env },
       });
       this.activeChild = child;
+
+      // Capture spawn errors (e.g. ENOENT when binary is not found).
+      // Without this listener an unhandled 'error' event on the child
+      // process would crash the server.
+      let spawnError: Error | null = null;
+      child.on("error", (err) => {
+        spawnError = err;
+        log.error({ err, executable: this.executablePath }, "opencode spawn error");
+      });
 
       const stderrChunks: string[] = [];
       child.stderr.on("data", (chunk: Buffer) => {
@@ -148,9 +165,13 @@ export class OpenCodeAdapter implements CodingAgent {
 
             case "error": {
               gotOutput = true;
+              const errMsg = String(
+                parsed.message ?? parsed.error ?? part?.text ?? part?.message ?? "",
+              );
+              log.error({ event: parsed }, "opencode error event");
               yield {
                 type: "error",
-                message: String(parsed.message ?? part?.text ?? "Unknown OpenCode error"),
+                message: errMsg || `OpenCode error (raw: ${JSON.stringify(parsed)})`,
               };
               break;
             }
@@ -180,7 +201,13 @@ export class OpenCodeAdapter implements CodingAgent {
       }
     }
 
-    if (!gotOutput && lastStderr) {
+    if (spawnError) {
+      const errMsg =
+        (spawnError as NodeJS.ErrnoException).code === "ENOENT"
+          ? `OpenCode executable not found: "${this.executablePath}". Is it installed and on your PATH?`
+          : `OpenCode failed to start: ${spawnError.message}`;
+      yield { type: "error", message: errMsg };
+    } else if (!gotOutput && lastStderr) {
       yield {
         type: "error",
         message: `OpenCode produced no output: ${lastStderr.trim()}`,
@@ -191,19 +218,59 @@ export class OpenCodeAdapter implements CodingAgent {
       log.warn({ exitCode: lastExitCode }, "opencode process exited with non-zero code");
     }
 
-    const success = lastExitCode === 0 && gotOutput;
+    // Resolve the real OpenCode session ID (OpenCode creates its own IDs internally).
+    // The session-start event used a placeholder UUID; now we look up the actual ID
+    // so that session listing and resumption work correctly.
+    let resolvedSessionId = generatedSessionId;
+    if (!sessionId) {
+      // Only resolve for NEW sessions (not resumptions where we already have the ID)
+      try {
+        // `opencode session list` already filters by CWD, so passing
+        // workspaceDir as cwd gives us only sessions for this project.
+        const sessions = await fetchOpenCodeSessions(this.executablePath, this.workspaceDir);
+        const sorted = sessions.sort((a, b) => b.updated - a.updated);
+        log.info(
+          { placeholder: generatedSessionId, sessionCount: sessions.length },
+          "resolving OpenCode session ID",
+        );
+        if (sorted.length > 0 && sorted[0].id) {
+          resolvedSessionId = sorted[0].id;
+          log.info(
+            { placeholder: generatedSessionId, resolved: resolvedSessionId },
+            "resolved real OpenCode session ID",
+          );
+          yield {
+            type: "session-id-resolved",
+            previousSessionId: generatedSessionId,
+            resolvedSessionId,
+          };
+        } else {
+          log.warn(
+            { placeholder: generatedSessionId, workspaceDir: this.workspaceDir },
+            "could NOT resolve real OpenCode session ID — no matching sessions found",
+          );
+        }
+      } catch (err) {
+        log.warn({ err }, "failed to resolve real OpenCode session ID");
+      }
+    }
+
+    const success = lastExitCode === 0 && gotOutput && !spawnError;
     const errors: string[] = [];
+    if (spawnError) {
+      errors.push(spawnError.message);
+    }
     if (lastExitCode !== 0) {
       errors.push(`OpenCode exited with code ${lastExitCode}`);
     }
-    if (!gotOutput) {
+    if (!gotOutput && !spawnError) {
       errors.push("OpenCode produced no output");
     }
 
     yield {
       type: "session-result",
       success,
-      sessionId: generatedSessionId,
+      sessionId: resolvedSessionId,
       durationMs: Date.now() - startMs,
       numTurns: turnCount,
       costUsd: 0,
@@ -236,10 +303,11 @@ export class OpenCodeAdapter implements CodingAgent {
   }
 
   async listSessions(dir: string): Promise<SessionListItem[]> {
-    log.info({ dir }, "listSessions");
+    // `opencode session list` already filters by CWD, so we just
+    // pass `dir` as the working directory — no extra filtering needed.
     const sessions = await fetchOpenCodeSessions(this.executablePath, dir);
+    log.info({ dir, count: sessions.length }, "listSessions");
     return sessions
-      .filter((s) => s.directory === dir)
       .map((s) => ({
         sessionId: s.id,
         summary: s.title || "Untitled session",

@@ -47,6 +47,20 @@ export interface ErrorEvent {
   message: string;
 }
 
+/**
+ * Emitted when the agent resolves the real session ID after a run.
+ * Some agents (e.g. OpenCode) create their own session IDs internally.
+ * The adapter emits session-start with a temporary ID early (so the UI
+ * can show the user message), then emits this event once the real ID is known.
+ */
+export interface SessionIdResolvedEvent {
+  type: "session-id-resolved";
+  /** The temporary/placeholder session ID that was used in session-start. */
+  previousSessionId: string;
+  /** The agent's real session ID. */
+  resolvedSessionId: string;
+}
+
 export type AgentEvent =
   | SessionStartEvent
   | TextDeltaEvent
@@ -54,4 +68,5 @@ export type AgentEvent =
   | ToolResultEvent
   | FileEvent
   | SessionResultEvent
+  | SessionIdResolvedEvent
   | ErrorEvent;

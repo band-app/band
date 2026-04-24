@@ -3,10 +3,11 @@ import { join } from "node:path";
 import { createLogger } from "@band-app/logger";
 import type { UIMessageChunk } from "ai";
 import { getAgent, getOrCreateAgent, replaceAgent } from "./agent-pool";
+import { getChat, updateChatStatus } from "./chat-manager";
 import { mimeTypeFromFilename } from "./mime-types";
 import { createPendingInput } from "./pending-inputs";
 import { shiftQueuedMessage } from "./queued-message-store";
-import { bandHome, getWorkspaceStatus, upsertWorkspaceStatus } from "./state";
+import { bandHome, upsertWorkspaceStatus } from "./state";
 import { generateTaskId, markTaskFailed, saveTask } from "./task-store";
 import { emit as emitStatusEvent } from "./watcher";
 import { resolveWorkspace } from "./workspace";
@@ -36,6 +37,7 @@ export type TaskStatus = "running" | "completed" | "failed";
 export interface TaskInfo {
   id: string;
   workspaceId: string;
+  chatId: string;
   sessionId?: string;
   status: TaskStatus;
   startedAt: number;
@@ -49,6 +51,7 @@ export interface TaskInfo {
 
 export interface SubmitTaskOptions {
   workspaceId: string;
+  chatId: string;
   prompt: string;
   sessionId?: string;
   agentPrompt?: string;
@@ -87,7 +90,9 @@ if (!g[TASKS_KEY]) g[TASKS_KEY] = new Map<string, InternalTask>();
 if (!g[LISTENERS_KEY]) g[LISTENERS_KEY] = new Map<string, Set<Listener>>();
 if (!g[BUFFERS_KEY]) g[BUFFERS_KEY] = new Map<string, SessionBuffer>();
 
+/** Tasks keyed by chatId — one running task per chat pane. */
 const tasks = g[TASKS_KEY] as Map<string, InternalTask>;
+/** Event listeners keyed by chatId. */
 const listeners = g[LISTENERS_KEY] as Map<string, Set<Listener>>;
 const sessionBuffers = g[BUFFERS_KEY] as Map<string, SessionBuffer>;
 
@@ -108,14 +113,15 @@ function persistTask(task: InternalTask): void {
       mode: task.mode,
       model: task.model,
       codingAgentId: task.codingAgentId,
+      chatId: task.chatId,
     });
   } catch (err) {
     log.warn({ err, taskId: task.taskRecordId }, "failed to persist task");
   }
 }
 
-function broadcast(workspaceId: string, chunk: UIMessageChunk) {
-  const task = tasks.get(workspaceId);
+function broadcast(chatId: string, chunk: UIMessageChunk) {
+  const task = tasks.get(chatId);
   let enrichedChunk: StreamChunk = chunk;
 
   // Buffer the event in-memory for gap-fill replay
@@ -133,8 +139,15 @@ function broadcast(workspaceId: string, chunk: UIMessageChunk) {
     }
   }
 
-  const subs = listeners.get(workspaceId);
-  if (!subs) return;
+  const subs = listeners.get(chatId);
+  if (!subs || subs.size === 0) {
+    log.warn({ chatId, chunkType: (chunk as { type?: string }).type }, "broadcast: no listeners");
+    return;
+  }
+  log.info(
+    { chatId, chunkType: (chunk as { type?: string }).type, listenerCount: subs.size },
+    "broadcast: delivering to listeners",
+  );
   for (const listener of subs) {
     try {
       listener(enrichedChunk);
@@ -145,7 +158,7 @@ function broadcast(workspaceId: string, chunk: UIMessageChunk) {
 }
 
 export function submitTask(options: SubmitTaskOptions): TaskInfo {
-  const { workspaceId, prompt, sessionId, agentPrompt, maxTurns, mode, model, codingAgentId } =
+  const { workspaceId, chatId, prompt, sessionId, agentPrompt, maxTurns, mode, model, codingAgentId } =
     options;
 
   const workspace = resolveWorkspace(workspaceId);
@@ -153,15 +166,16 @@ export function submitTask(options: SubmitTaskOptions): TaskInfo {
     throw new Error(`Workspace not found: ${workspaceId}`);
   }
 
-  const existing = tasks.get(workspaceId);
+  const existing = tasks.get(chatId);
   if (existing?.status === "running") {
-    throw new TaskConflictError(workspaceId);
+    throw new TaskConflictError(chatId);
   }
 
   const taskRecordId = generateTaskId();
   const task: InternalTask = {
     id: taskRecordId,
     workspaceId,
+    chatId,
     sessionId,
     status: "running",
     startedAt: Date.now(),
@@ -173,24 +187,37 @@ export function submitTask(options: SubmitTaskOptions): TaskInfo {
     model,
     codingAgentId,
   };
-  tasks.set(workspaceId, task);
+  tasks.set(chatId, task);
   persistTask(task);
 
   // Fire-and-forget async execution
-  runTask(workspaceId, task).catch((err) => {
-    log.error({ workspaceId, err }, "task execution failed");
+  runTask(chatId, task).catch((err) => {
+    log.error({ chatId, err }, "task execution failed");
+    // Ensure the task is marked as failed and the client is notified even if
+    // runTask throws before reaching its own try/catch (e.g. agent creation fails).
+    if (task.status === "running") {
+      task.status = "failed";
+      task.completedAt = Date.now();
+      persistTask(task);
+      broadcast(chatId, {
+        type: "error",
+        errorText: err instanceof Error ? err.message : "Task execution failed",
+      });
+      broadcast(chatId, { type: "finish" });
+      updateChatStatus(chatId, "error");
+    }
   });
 
   return toTaskInfo(task);
 }
 
-export function abortTask(workspaceId: string): boolean {
-  const task = tasks.get(workspaceId);
+export function abortTask(chatId: string): boolean {
+  const task = tasks.get(chatId);
   if (!task || task.status !== "running") {
     return false;
   }
 
-  const agent = getAgent(workspaceId);
+  const agent = getAgent(chatId);
   if (agent?.abort) {
     agent.abort();
   }
@@ -198,22 +225,24 @@ export function abortTask(workspaceId: string): boolean {
   task.status = "failed";
   task.completedAt = Date.now();
   persistTask(task);
-  broadcast(workspaceId, { type: "error", errorText: "Task aborted by user" });
-  broadcast(workspaceId, { type: "finish" });
-  tasks.delete(workspaceId);
+  broadcast(chatId, { type: "error", errorText: "Task aborted by user" });
+  broadcast(chatId, { type: "finish" });
+  tasks.delete(chatId);
 
-  const updated = upsertWorkspaceStatus(workspaceId, { status: "waiting" });
+  updateChatStatus(chatId, "idle");
+
+  const updated = upsertWorkspaceStatus(task.workspaceId, { status: "waiting" });
   emitStatusEvent({ kind: "update", status: updated });
 
-  log.info({ workspaceId }, "task aborted by user");
+  log.info({ chatId }, "task aborted by user");
   return true;
 }
 
 export function cancelTask(taskId: string): { cancelled: boolean; workspaceId?: string } {
   // Search in-memory tasks for a running task with this record ID
-  for (const [workspaceId, task] of tasks) {
+  for (const [chatId, task] of tasks) {
     if (task.taskRecordId === taskId && task.status === "running") {
-      const agent = getAgent(workspaceId);
+      const agent = getAgent(chatId);
       if (agent?.abort) {
         agent.abort();
       }
@@ -221,15 +250,17 @@ export function cancelTask(taskId: string): { cancelled: boolean; workspaceId?: 
       task.status = "failed";
       task.completedAt = Date.now();
       persistTask(task);
-      broadcast(workspaceId, { type: "error", errorText: "Task cancelled" });
-      broadcast(workspaceId, { type: "finish" });
-      tasks.delete(workspaceId);
+      broadcast(chatId, { type: "error", errorText: "Task cancelled" });
+      broadcast(chatId, { type: "finish" });
+      tasks.delete(chatId);
 
-      const updated = upsertWorkspaceStatus(workspaceId, { status: "waiting" });
+      updateChatStatus(chatId, "idle");
+
+      const updated = upsertWorkspaceStatus(task.workspaceId, { status: "waiting" });
       emitStatusEvent({ kind: "update", status: updated });
 
-      log.info({ workspaceId, taskId }, "task cancelled (was running in-memory)");
-      return { cancelled: true, workspaceId };
+      log.info({ chatId, taskId }, "task cancelled (was running in-memory)");
+      return { cancelled: true, workspaceId: task.workspaceId };
     }
   }
 
@@ -245,45 +276,58 @@ export function cancelTask(taskId: string): { cancelled: boolean; workspaceId?: 
   return { cancelled: false };
 }
 
-async function runTask(workspaceId: string, task: InternalTask) {
-  const workspace = resolveWorkspace(workspaceId);
+async function runTask(chatId: string, task: InternalTask) {
+  const workspace = resolveWorkspace(task.workspaceId);
   if (!workspace) {
     task.status = "failed";
     task.completedAt = Date.now();
     persistTask(task);
-    broadcast(workspaceId, { type: "error", errorText: "Workspace not found" });
-    tasks.delete(workspaceId);
+    broadcast(chatId, { type: "error", errorText: "Workspace not found" });
+    tasks.delete(chatId);
+    updateChatStatus(chatId, "error");
     return;
   }
 
-  // Prefer task-level coding agent; fall back to workspace's preferred agent
+  // Resolve agent from chat pane config, with task-level override.
+  // Only replace the agent when the requested type actually differs from
+  // the chat record's agent — otherwise reuse the existing pool entry.
+  // This avoids aborting/recreating the agent process on every message
+  // which was breaking non-default agents (OpenCode, Codex).
+  const chatSession = getChat(chatId);
   const taskAgentId = task.codingAgentId;
-  const wsStatus = getWorkspaceStatus(workspaceId);
-  const resolvedAgentId = taskAgentId ?? wsStatus?.agent?.codingAgentId;
-  const agent = taskAgentId
-    ? await replaceAgent(workspaceId, workspace.worktree.path, taskAgentId)
-    : await getOrCreateAgent(workspaceId, workspace.worktree.path, resolvedAgentId);
+  const resolvedAgentId = taskAgentId ?? chatSession?.agent;
+  const needsReplace = taskAgentId && taskAgentId !== chatSession?.agent;
+  log.info(
+    { chatId, taskAgentId, chatAgent: chatSession?.agent, resolvedAgentId, needsReplace },
+    "resolving agent for task",
+  );
+  const agent = needsReplace
+    ? await replaceAgent(chatId, workspace.worktree.path, taskAgentId)
+    : await getOrCreateAgent(chatId, workspace.worktree.path, resolvedAgentId);
+
+  // Mark chat pane as running
+  updateChatStatus(chatId, "running");
 
   // Mark workspace as working now that the agent is ready
-  const working = upsertWorkspaceStatus(workspaceId, { status: "working" });
+  const working = upsertWorkspaceStatus(task.workspaceId, { status: "working" });
   emitStatusEvent({ kind: "update", status: working });
 
   agent.onUserInputNeeded = async (request) => {
     // Set status to needs_attention while waiting for user input
-    const needsAttention = upsertWorkspaceStatus(workspaceId, { status: "needs_attention" });
+    const needsAttention = upsertWorkspaceStatus(task.workspaceId, { status: "needs_attention" });
     emitStatusEvent({ kind: "update", status: needsAttention });
 
     const answers = await createPendingInput(request.approvalId);
 
     // Restore working status after user responds
-    const restored = upsertWorkspaceStatus(workspaceId, { status: "working" });
+    const restored = upsertWorkspaceStatus(task.workspaceId, { status: "working" });
     emitStatusEvent({ kind: "update", status: restored });
 
     return answers;
   };
 
   // Per-workspace shared directory so concurrent tasks don't collide.
-  const sharedDir = join(bandHome(), "shared", workspaceId);
+  const sharedDir = join(bandHome(), "shared", task.workspaceId);
   mkdirSync(sharedDir, { recursive: true });
 
   let textPartId = "";
@@ -295,7 +339,7 @@ async function runTask(workspaceId: string, task: InternalTask) {
 
   function endText() {
     if (textStarted) {
-      broadcast(workspaceId, { type: "text-end", id: textPartId });
+      broadcast(chatId, { type: "text-end", id: textPartId });
       textStarted = false;
     }
   }
@@ -314,13 +358,13 @@ async function runTask(workspaceId: string, task: InternalTask) {
     const fileSharingHint = `\n\n[File sharing: to send a file to the user, write or copy it to ${sharedDir}/ and it will appear as a downloadable file card in the chat.]`;
     const effectivePrompt = task.sessionId ? task.agentPrompt : task.agentPrompt + fileSharingHint;
     for await (const event of agent.runSession(effectivePrompt, task.sessionId, sessionOptions)) {
-      log.info({ workspaceId, eventType: event.type }, "task event");
+      log.info({ chatId, eventType: event.type }, "task event");
 
       switch (event.type) {
         case "session-start": {
           task.sessionId = event.sessionId;
           persistTask(task);
-          broadcast(workspaceId, {
+          broadcast(chatId, {
             type: "data-session" as UIMessageChunk["type"],
             data: { sessionId: event.sessionId },
           } as UIMessageChunk);
@@ -328,7 +372,7 @@ async function runTask(workspaceId: string, task: InternalTask) {
           // is set and broadcast() stores it in the session buffer.
           // Uses "user-message" (not "data-prompt") so the live stream ignores
           // it — useChat already has the user message in its state.
-          broadcast(workspaceId, {
+          broadcast(chatId, {
             type: "user-message",
             text: task.prompt,
           } as unknown as UIMessageChunk);
@@ -338,10 +382,10 @@ async function runTask(workspaceId: string, task: InternalTask) {
         case "text-delta": {
           if (!textStarted) {
             textPartId = crypto.randomUUID();
-            broadcast(workspaceId, { type: "text-start", id: textPartId });
+            broadcast(chatId, { type: "text-start", id: textPartId });
             textStarted = true;
           }
-          broadcast(workspaceId, {
+          broadcast(chatId, {
             type: "text-delta",
             id: textPartId,
             delta: event.text,
@@ -352,7 +396,7 @@ async function runTask(workspaceId: string, task: InternalTask) {
         case "tool-use": {
           endText();
           announcedToolCalls.add(event.toolCallId);
-          broadcast(workspaceId, {
+          broadcast(chatId, {
             type: "tool-input-available",
             toolCallId: event.toolCallId,
             toolName: event.toolName,
@@ -365,7 +409,7 @@ async function runTask(workspaceId: string, task: InternalTask) {
         case "tool-result": {
           if (!announcedToolCalls.has(event.toolCallId)) {
             endText();
-            broadcast(workspaceId, {
+            broadcast(chatId, {
               type: "tool-input-available",
               toolCallId: event.toolCallId,
               toolName: event.toolName ?? "tool",
@@ -374,7 +418,7 @@ async function runTask(workspaceId: string, task: InternalTask) {
             announcedToolCalls.add(event.toolCallId);
           }
           const truncated = truncateToolOutput(event.output);
-          broadcast(workspaceId, {
+          broadcast(chatId, {
             type: "tool-output-available",
             toolCallId: event.toolCallId,
             output: truncated,
@@ -386,10 +430,10 @@ async function runTask(workspaceId: string, task: InternalTask) {
             for (const filename of listFiles(sharedDir)) {
               if (!emittedSharedFiles.has(filename)) {
                 emittedSharedFiles.add(filename);
-                broadcast(workspaceId, {
+                broadcast(chatId, {
                   type: "file",
                   mediaType: mimeTypeFromFilename(filename),
-                  url: `/api/shared/${encodeURIComponent(workspaceId)}/${encodeURIComponent(filename)}`,
+                  url: `/api/shared/${encodeURIComponent(task.workspaceId)}/${encodeURIComponent(filename)}`,
                   filename,
                 } as UIMessageChunk);
               }
@@ -400,7 +444,7 @@ async function runTask(workspaceId: string, task: InternalTask) {
 
         case "file": {
           endText();
-          broadcast(workspaceId, {
+          broadcast(chatId, {
             type: "file",
             mediaType: event.mediaType,
             url: event.url,
@@ -416,7 +460,7 @@ async function runTask(workspaceId: string, task: InternalTask) {
             task.status = "completed";
             task.completedAt = Date.now();
             persistTask(task);
-            broadcast(workspaceId, {
+            broadcast(chatId, {
               type: "data-result" as UIMessageChunk["type"],
               data: {
                 sessionId: event.sessionId,
@@ -427,25 +471,54 @@ async function runTask(workspaceId: string, task: InternalTask) {
                 }),
               },
             } as UIMessageChunk);
-            broadcast(workspaceId, { type: "finish-step" });
-            broadcast(workspaceId, { type: "finish" });
+            broadcast(chatId, { type: "finish-step" });
+            broadcast(chatId, { type: "finish" });
             finished = true;
           } else {
             task.status = "failed";
             task.completedAt = Date.now();
             persistTask(task);
-            broadcast(workspaceId, {
+            broadcast(chatId, {
               type: "error",
               errorText: `Agent error: ${event.errors.join(", ") || "unknown error"}`,
             });
-            broadcast(workspaceId, { type: "finish" });
+            broadcast(chatId, { type: "finish" });
             finished = true;
           }
           break;
         }
 
+        case "session-id-resolved": {
+          // The agent resolved its real session ID (e.g. OpenCode discovered
+          // its internal ID after the run). Update the task and session buffer
+          // so future operations use the real ID.
+          log.info(
+            { chatId, previous: event.previousSessionId, resolved: event.resolvedSessionId },
+            "session ID resolved",
+          );
+
+          // Migrate the in-memory session buffer to the new key so that
+          // gap-fill replay and sessions.messages can find the events.
+          const oldBuf = sessionBuffers.get(event.previousSessionId);
+          if (oldBuf) {
+            sessionBuffers.set(event.resolvedSessionId, oldBuf);
+            sessionBuffers.delete(event.previousSessionId);
+          }
+
+          if (task.sessionId === event.previousSessionId) {
+            task.sessionId = event.resolvedSessionId;
+            persistTask(task);
+          }
+          // Notify the client so it can update its local session reference
+          broadcast(chatId, {
+            type: "data-session" as UIMessageChunk["type"],
+            data: { sessionId: event.resolvedSessionId },
+          } as UIMessageChunk);
+          break;
+        }
+
         case "error": {
-          broadcast(workspaceId, {
+          broadcast(chatId, {
             type: "error",
             errorText: event.message,
           });
@@ -462,54 +535,55 @@ async function runTask(workspaceId: string, task: InternalTask) {
         task.completedAt = Date.now();
       }
       persistTask(task);
-      broadcast(workspaceId, {
+      broadcast(chatId, {
         type: "error",
         errorText: "Agent session ended without producing a result",
       });
-      broadcast(workspaceId, { type: "finish" });
+      broadcast(chatId, { type: "finish" });
     }
   } catch (err) {
     task.status = "failed";
     task.completedAt = Date.now();
     persistTask(task);
-    broadcast(workspaceId, {
+    broadcast(chatId, {
       type: "error",
       errorText: err instanceof Error ? err.message : "Unknown error",
     });
-    broadcast(workspaceId, { type: "finish" });
+    broadcast(chatId, { type: "finish" });
+    updateChatStatus(chatId, "error");
   }
 
   // Auto-start a new task if there's a queued message and the task succeeded
   let autoStarted = false;
   if (task.status === "completed") {
-    const queued = shiftQueuedMessage(workspaceId);
+    const queued = shiftQueuedMessage(chatId);
     if (queued) {
       try {
         // Emit the queued user prompt so the client can render it as a
         // user message bubble between assistant responses.
-        broadcast(workspaceId, {
+        broadcast(chatId, {
           type: "data-prompt" as UIMessageChunk["type"],
           data: { text: queued },
         } as UIMessageChunk);
-        submitTask({ workspaceId, prompt: queued, sessionId: task.sessionId });
+        submitTask({ workspaceId: task.workspaceId, chatId, prompt: queued, sessionId: task.sessionId });
         autoStarted = true;
       } catch (err) {
-        log.warn({ workspaceId, err }, "failed to auto-start queued task");
+        log.warn({ chatId, err }, "failed to auto-start queued task");
       }
     }
   }
 
-  // Update workspace status — needs_attention on success (user should review),
-  // waiting on failure. Skip if a queued task already auto-started.
+  // Update chat pane and workspace status
   if (!autoStarted) {
+    updateChatStatus(chatId, "idle");
     const endStatus = task.status === "completed" ? "needs_attention" : "waiting";
-    const updated = upsertWorkspaceStatus(workspaceId, { status: endStatus });
+    const updated = upsertWorkspaceStatus(task.workspaceId, { status: endStatus });
     emitStatusEvent({ kind: "update", status: updated });
   }
 }
 
-export function getTask(workspaceId: string): TaskInfo | null {
-  const task = tasks.get(workspaceId);
+export function getTask(chatId: string): TaskInfo | null {
+  const task = tasks.get(chatId);
   if (!task) return null;
   return toTaskInfo(task);
 }
@@ -522,18 +596,18 @@ export function getSessionBuffer(sessionId: string): SessionBuffer | undefined {
   return sessionBuffers.get(sessionId);
 }
 
-export function subscribe(workspaceId: string, listener: Listener): () => void {
-  let subs = listeners.get(workspaceId);
+export function subscribe(chatId: string, listener: Listener): () => void {
+  let subs = listeners.get(chatId);
   if (!subs) {
     subs = new Set();
-    listeners.set(workspaceId, subs);
+    listeners.set(chatId, subs);
   }
   subs.add(listener);
 
   return () => {
     subs.delete(listener);
     if (subs.size === 0) {
-      listeners.delete(workspaceId);
+      listeners.delete(chatId);
     }
   };
 }
@@ -542,6 +616,7 @@ function toTaskInfo(task: InternalTask): TaskInfo {
   return {
     id: task.taskRecordId,
     workspaceId: task.workspaceId,
+    chatId: task.chatId,
     sessionId: task.sessionId,
     status: task.status,
     startedAt: task.startedAt,
@@ -555,8 +630,8 @@ function toTaskInfo(task: InternalTask): TaskInfo {
 }
 
 export class TaskConflictError extends Error {
-  constructor(workspaceId: string) {
-    super(`Task already running for workspace ${workspaceId}`);
+  constructor(chatId: string) {
+    super(`Task already running for chat ${chatId}`);
     this.name = "TaskConflictError";
   }
 }

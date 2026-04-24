@@ -58,6 +58,16 @@ export const tasks = sqliteTable("tasks", {
   mode: text("mode"),
   model: text("model"),
   codingAgentId: text("coding_agent_id"),
+  chatId: text("chat_id"),
+});
+
+export const panelStates = sqliteTable("panel_states", {
+  id: text("id").primaryKey(),
+  workspaceId: text("workspace_id").notNull(),
+  panelType: text("panel_type").notNull(),
+  state: text("state").notNull(), // JSON blob — panel-type-specific
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
 });
 
 export const cronjobs = sqliteTable("cronjobs", {
