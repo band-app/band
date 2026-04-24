@@ -138,9 +138,14 @@ function updateJsonFile(filePath, newVersion, dryRun) {
   const content = readFileSync(fullPath, "utf8");
   const json = JSON.parse(content);
   const oldVersion = json.version;
-  json.version = newVersion;
   if (!dryRun) {
-    writeFileSync(fullPath, JSON.stringify(json, null, 2) + "\n");
+    // Use string replacement to preserve the original formatting (avoids
+    // JSON.stringify reformatting that breaks biome's style expectations).
+    const updated = content.replace(
+      `"version": "${oldVersion}"`,
+      `"version": "${newVersion}"`
+    );
+    writeFileSync(fullPath, updated);
   }
   console.log(`  ${filePath}: ${oldVersion} → ${newVersion}`);
 }
