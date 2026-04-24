@@ -411,7 +411,9 @@ describe("Task stream — Write to shared dir emits file event", () => {
 
     seedSettings(tmpHome, {
       tokenSecret: DEFAULT_TOKEN,
-      codingAgent: { type: "claude-code", command: FAKE_AGENT_PATH },
+      codingAgents: [
+        { id: "claude-code", type: "claude-code", label: "Claude Code", command: FAKE_AGENT_PATH },
+      ],
     });
 
     server = await startServer({ tmpHome, scenarioPath });
@@ -511,7 +513,9 @@ describe("Task stream — Bash cp to shared dir emits file event", () => {
 
     seedSettings(tmpHome, {
       tokenSecret: DEFAULT_TOKEN,
-      codingAgent: { type: "claude-code", command: FAKE_AGENT_PATH },
+      codingAgents: [
+        { id: "claude-code", type: "claude-code", label: "Claude Code", command: FAKE_AGENT_PATH },
+      ],
     });
 
     server = await startServer({ tmpHome, scenarioPath });
@@ -601,7 +605,9 @@ describe("Task stream — Write to workspace does NOT emit file event", () => {
 
     seedSettings(tmpHome, {
       tokenSecret: DEFAULT_TOKEN,
-      codingAgent: { type: "claude-code", command: FAKE_AGENT_PATH },
+      codingAgents: [
+        { id: "claude-code", type: "claude-code", label: "Claude Code", command: FAKE_AGENT_PATH },
+      ],
     });
 
     server = await startServer({ tmpHome, scenarioPath });

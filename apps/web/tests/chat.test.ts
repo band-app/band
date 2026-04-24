@@ -66,10 +66,9 @@ function createDefaultState(tmpHome: string) {
 function defaultSettings() {
   return {
     tokenSecret: DEFAULT_TOKEN,
-    codingAgent: {
-      type: "claude-code",
-      command: FAKE_AGENT_PATH,
-    },
+    codingAgents: [
+      { id: "claude-code", type: "claude-code", label: "Claude Code", command: FAKE_AGENT_PATH },
+    ],
   };
 }
 
@@ -484,7 +483,9 @@ describe("Task submit + stream — streaming", () => {
 
     seedSettings(tmpHome, {
       tokenSecret: DEFAULT_TOKEN,
-      codingAgent: { type: "claude-code", command: FAKE_AGENT_PATH },
+      codingAgents: [
+        { id: "claude-code", type: "claude-code", label: "Claude Code", command: FAKE_AGENT_PATH },
+      ],
     });
 
     server = await startServer({ tmpHome, scenarioPath });
@@ -549,7 +550,9 @@ describe("Task submit + stream — agent failure", () => {
 
     seedSettings(tmpHome, {
       tokenSecret: DEFAULT_TOKEN,
-      codingAgent: { type: "claude-code", command: FAKE_AGENT_PATH },
+      codingAgents: [
+        { id: "claude-code", type: "claude-code", label: "Claude Code", command: FAKE_AGENT_PATH },
+      ],
     });
 
     server = await startServer({ tmpHome, scenarioPath });
@@ -585,7 +588,9 @@ describe("Task submit + stream — agent crash", () => {
 
     seedSettings(tmpHome, {
       tokenSecret: DEFAULT_TOKEN,
-      codingAgent: { type: "claude-code", command: FAKE_AGENT_PATH },
+      codingAgents: [
+        { id: "claude-code", type: "claude-code", label: "Claude Code", command: FAKE_AGENT_PATH },
+      ],
     });
 
     server = await startServer({
@@ -848,7 +853,9 @@ describe("Task submit + stream — AskUserQuestion", () => {
 
     seedSettings(tmpHome, {
       tokenSecret: DEFAULT_TOKEN,
-      codingAgent: { type: "claude-code", command: FAKE_AGENT_PATH },
+      codingAgents: [
+        { id: "claude-code", type: "claude-code", label: "Claude Code", command: FAKE_AGENT_PATH },
+      ],
     });
 
     server = await startServer({ tmpHome, scenarioPath });
@@ -1097,7 +1104,9 @@ describe("tasks.cancel — running task", () => {
 
     seedSettings(tmpHome, {
       tokenSecret: DEFAULT_TOKEN,
-      codingAgent: { type: "claude-code", command: FAKE_AGENT_PATH },
+      codingAgents: [
+        { id: "claude-code", type: "claude-code", label: "Claude Code", command: FAKE_AGENT_PATH },
+      ],
     });
 
     server = await startServer({ tmpHome, scenarioPath });
@@ -1263,7 +1272,9 @@ describe("tasks.rerun", () => {
 
     seedSettings(tmpHome, {
       tokenSecret: DEFAULT_TOKEN,
-      codingAgent: { type: "claude-code", command: FAKE_AGENT_PATH },
+      codingAgents: [
+        { id: "claude-code", type: "claude-code", label: "Claude Code", command: FAKE_AGENT_PATH },
+      ],
     });
 
     server = await startServer({ tmpHome, scenarioPath });
@@ -1395,7 +1406,9 @@ describe("Task submit + stream — tool name with empty text before tool_use", (
 
     seedSettings(tmpHome, {
       tokenSecret: DEFAULT_TOKEN,
-      codingAgent: { type: "claude-code", command: FAKE_AGENT_PATH },
+      codingAgents: [
+        { id: "claude-code", type: "claude-code", label: "Claude Code", command: FAKE_AGENT_PATH },
+      ],
     });
 
     server = await startServer({ tmpHome, scenarioPath });
@@ -1460,7 +1473,9 @@ describe("tasks.stream — data-prompt in live stream", () => {
 
     seedSettings(tmpHome, {
       tokenSecret: DEFAULT_TOKEN,
-      codingAgent: { type: "claude-code", command: FAKE_AGENT_PATH },
+      codingAgents: [
+        { id: "claude-code", type: "claude-code", label: "Claude Code", command: FAKE_AGENT_PATH },
+      ],
     });
 
     server = await startServer({ tmpHome, scenarioPath });
@@ -1545,7 +1560,9 @@ describe("tasks.stream via WebSocket — streaming", () => {
 
     seedSettings(tmpHome, {
       tokenSecret: DEFAULT_TOKEN,
-      codingAgent: { type: "claude-code", command: FAKE_AGENT_PATH },
+      codingAgents: [
+        { id: "claude-code", type: "claude-code", label: "Claude Code", command: FAKE_AGENT_PATH },
+      ],
     });
 
     server = await startServer({ tmpHome, scenarioPath });

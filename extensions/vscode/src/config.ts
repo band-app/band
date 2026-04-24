@@ -181,7 +181,6 @@ export async function loadCodingAgentSettings(): Promise<CodingAgentSettings | n
     const content = await fs.promises.readFile(settingsPath, "utf-8");
     const settings = JSON.parse(content);
 
-    // New format: codingAgents array + defaultCodingAgent
     if (settings?.codingAgents && Array.isArray(settings.codingAgents)) {
       const agents = settings.codingAgents as CodingAgentDefinition[];
       const defaultId = settings.defaultCodingAgent as string | undefined;
@@ -189,11 +188,6 @@ export async function loadCodingAgentSettings(): Promise<CodingAgentSettings | n
       if (agent) {
         return { type: agent.type, command: agent.command };
       }
-    }
-
-    // Legacy format: single codingAgent object
-    if (settings?.codingAgent) {
-      return settings.codingAgent as CodingAgentSettings;
     }
 
     return null;

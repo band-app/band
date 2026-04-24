@@ -271,7 +271,9 @@ describe("sessions.messages — tool name resolution", () => {
     });
     seedSettings(tmpHome, {
       tokenSecret: DEFAULT_TOKEN,
-      codingAgent: { type: "claude-code", command: FAKE_AGENT_PATH },
+      codingAgents: [
+        { id: "claude-code", type: "claude-code", label: "Claude Code", command: FAKE_AGENT_PATH },
+      ],
     });
 
     // Seed the session JSONL in the expected Claude projects directory

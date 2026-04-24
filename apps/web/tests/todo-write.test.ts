@@ -325,7 +325,9 @@ describe("TodoWrite streaming — basic tool call", () => {
 
     seedSettings(tmpHome, {
       tokenSecret: DEFAULT_TOKEN,
-      codingAgent: { type: "claude-code", command: FAKE_AGENT_PATH },
+      codingAgents: [
+        { id: "claude-code", type: "claude-code", label: "Claude Code", command: FAKE_AGENT_PATH },
+      ],
     });
 
     server = await startServer({ tmpHome, scenarioPath });
@@ -491,7 +493,9 @@ describe("TodoWrite streaming — multiple sequential calls", () => {
 
     seedSettings(tmpHome, {
       tokenSecret: DEFAULT_TOKEN,
-      codingAgent: { type: "claude-code", command: FAKE_AGENT_PATH },
+      codingAgents: [
+        { id: "claude-code", type: "claude-code", label: "Claude Code", command: FAKE_AGENT_PATH },
+      ],
     });
 
     server = await startServer({ tmpHome, scenarioPath });
@@ -567,7 +571,9 @@ describe("TodoWrite in session history — tool name resolution", () => {
     });
     seedSettings(tmpHome, {
       tokenSecret: DEFAULT_TOKEN,
-      codingAgent: { type: "claude-code", command: FAKE_AGENT_PATH },
+      codingAgents: [
+        { id: "claude-code", type: "claude-code", label: "Claude Code", command: FAKE_AGENT_PATH },
+      ],
     });
 
     // Build a session JSONL with a TodoWrite tool call
@@ -832,7 +838,9 @@ describe("TodoWrite streaming — mixed with other tool calls", () => {
 
     seedSettings(tmpHome, {
       tokenSecret: DEFAULT_TOKEN,
-      codingAgent: { type: "claude-code", command: FAKE_AGENT_PATH },
+      codingAgents: [
+        { id: "claude-code", type: "claude-code", label: "Claude Code", command: FAKE_AGENT_PATH },
+      ],
     });
 
     server = await startServer({ tmpHome, scenarioPath });
@@ -962,7 +970,9 @@ describe("TodoWrite streaming — edge cases", () => {
 
     seedSettings(tmpHome, {
       tokenSecret: DEFAULT_TOKEN,
-      codingAgent: { type: "claude-code", command: FAKE_AGENT_PATH },
+      codingAgents: [
+        { id: "claude-code", type: "claude-code", label: "Claude Code", command: FAKE_AGENT_PATH },
+      ],
     });
 
     server = await startServer({ tmpHome, scenarioPath });

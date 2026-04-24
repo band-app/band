@@ -69,11 +69,9 @@ function persistToServer(workspaceId: string, layout: unknown): void {
     workspaceId,
     setTimeout(() => {
       saveTimers.delete(workspaceId);
-      trpc.chatLayout.save
-        .mutate({ workspaceId, tree: layout })
-        .catch((err) => {
-          console.error("[DockviewChatContainer] failed to persist layout:", err);
-        });
+      trpc.chatLayout.save.mutate({ workspaceId, tree: layout }).catch((err) => {
+        console.error("[DockviewChatContainer] failed to persist layout:", err);
+      });
     }, 500),
   );
 }
@@ -82,43 +80,7 @@ function persistToServer(workspaceId: string, layout: unknown): void {
 // Legacy layout migration helpers
 // ---------------------------------------------------------------------------
 
-// Old flat tab layout format (v2)
-interface LegacyChatTabLayout {
-  chatIds: string[];
-  activeChatId: string | null;
-}
-
-function isLegacyChatTabLayout(obj: unknown): obj is LegacyChatTabLayout {
-  if (typeof obj !== "object" || obj === null) return false;
-  const o = obj as Record<string, unknown>;
-  return Array.isArray(o.chatIds);
-}
-
-// Old binary split-tree layout format (v1)
-interface TreeNode {
-  type: "split" | "leaf";
-  chatId?: string;
-  children?: [TreeNode, TreeNode];
-}
-
-function isLegacyTreeLayout(obj: unknown): boolean {
-  if (typeof obj !== "object" || obj === null) return false;
-  const o = obj as Record<string, unknown>;
-  return o.type === "split" || o.type === "leaf";
-}
-
-function extractChatIdsFromTree(node: TreeNode): string[] {
-  if (node.type === "leaf" && node.chatId) return [node.chatId];
-  if (node.children) {
-    return [
-      ...extractChatIdsFromTree(node.children[0]),
-      ...extractChatIdsFromTree(node.children[1]),
-    ];
-  }
-  return [];
-}
-
-// Dockview serialized format (v3 — current)
+// Dockview serialized format
 function isDockviewLayout(obj: unknown): boolean {
   if (typeof obj !== "object" || obj === null) return false;
   const o = obj as Record<string, unknown>;
@@ -172,6 +134,7 @@ function ChatTabPanel({ params, api }: IDockviewPanelProps<ChatTabParams>) {
       chatId={currentParams.chatId}
       visible={visible}
       wsActive={wsActive}
+      tabActive={tabActive}
       setTitle={(title: string) => api.setTitle(title)}
     />
   );
@@ -183,12 +146,14 @@ function ChatTabContent({
   chatId,
   visible,
   wsActive,
+  tabActive,
   setTitle,
 }: {
   workspaceId: string;
   chatId: string;
   visible: boolean;
   wsActive: boolean;
+  tabActive: boolean;
   setTitle: (title: string) => void;
 }) {
   const state = useChatPaneState(workspaceId, chatId);
@@ -201,32 +166,24 @@ function ChatTabContent({
     setTitleRef.current(title);
   }, [state.activeSessionSummary, state.agentLabel, state.codingAgentId]);
 
+  // Sync this tab's session history state to the shared ref so the
+  // RightHeaderActions component can render the history toggle button
+  // for whichever tab is currently active.
+  useEffect(() => {
+    if (!tabActive) return;
+    historyToggleRef.current = {
+      supported: state.supportsSessionListing,
+      active: state.showSessionList,
+      toggle: state.toggleSessionList,
+    };
+    return () => {
+      // Clear when this tab deactivates or unmounts
+      historyToggleRef.current = { supported: false, active: false, toggle: () => {} };
+    };
+  }, [tabActive, state.supportsSessionListing, state.showSessionList, state.toggleSessionList]);
+
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">
-      {state.supportsSessionListing && (
-        <div className="flex h-8 shrink-0 items-center justify-end gap-0.5 border-b border-border px-2">
-          <button
-            type="button"
-            onClick={state.toggleSessionList}
-            className={`inline-flex size-7 items-center justify-center rounded-md transition-colors hover:bg-accent ${
-              state.showSessionList
-                ? "bg-accent text-foreground"
-                : "text-muted-foreground"
-            }`}
-            title="Session history"
-          >
-            <Clock className="size-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => state.newSessionRef.current?.()}
-            className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            title="New session"
-          >
-            <Plus className="size-3.5" />
-          </button>
-        </div>
-      )}
       <ChatPane
         workspaceId={workspaceId}
         chatId={chatId}
@@ -278,8 +235,9 @@ function ChatTab(props: IDockviewPanelHeaderProps<ChatTabParams>) {
       if (cancelled) return;
       const raw = (settings as Record<string, unknown> | null)?.codingAgents;
       const codingAgents = Array.isArray(raw) ? (raw as CodingAgentDef[]) : [];
-      const defaultAgentId = (settings as Record<string, unknown> | null)
-        ?.defaultCodingAgent as string | undefined;
+      const defaultAgentId = (settings as Record<string, unknown> | null)?.defaultCodingAgent as
+        | string
+        | undefined;
       const agentId = chatResult.chat?.agent ?? defaultAgentId ?? "";
       const found = codingAgents.find((a) => a.id === agentId);
       if (found) setAgentType(found.type);
@@ -334,6 +292,13 @@ const closeTabRef: { current: ((chatId: string) => void) | null } = {
   current: null,
 };
 
+/** Shared ref for the active tab's session history state — used by RightHeaderActions. */
+const historyToggleRef: {
+  current: { supported: boolean; active: boolean; toggle: () => void };
+} = {
+  current: { supported: false, active: false, toggle: () => {} },
+};
+
 /**
  * Stable component for DockviewReact's rightHeaderActionsComponent.
  * Reads agents and callback from the module-level ref to avoid the
@@ -342,29 +307,53 @@ const closeTabRef: { current: ((chatId: string) => void) | null } = {
 const RightHeaderActions = React.memo(function RightHeaderActions(
   props: IDockviewHeaderActionsProps,
 ) {
-  // Force re-render when agents change via a subscriber pattern
+  // Force re-render when agents or history state change via polling.
   const [, forceUpdate] = useState(0);
   const agentsRef = useRef(addTabRef.current.agents);
+  const historyRef = useRef(historyToggleRef.current);
 
   useEffect(() => {
-    // Poll isn't ideal but agents load once — this ensures the + button
-    // appears after the async settings fetch completes.
     const id = setInterval(() => {
+      let changed = false;
       if (addTabRef.current.agents !== agentsRef.current) {
         agentsRef.current = addTabRef.current.agents;
-        forceUpdate((n) => n + 1);
+        changed = true;
       }
+      const h = historyToggleRef.current;
+      if (
+        h.supported !== historyRef.current.supported ||
+        h.active !== historyRef.current.active ||
+        h.toggle !== historyRef.current.toggle
+      ) {
+        historyRef.current = h;
+        changed = true;
+      }
+      if (changed) forceUpdate((n) => n + 1);
     }, 200);
     return () => clearInterval(id);
   }, []);
 
   const { agents, onAdd } = addTabRef.current;
+  const history = historyToggleRef.current;
   const groupId = props.group.id;
   return (
-    <AddTabButton
-      agents={agents}
-      onAdd={(agentId) => onAdd(agentId, groupId)}
-    />
+    <div className="flex items-center">
+      {history.supported && (
+        <button
+          type="button"
+          onClick={history.toggle}
+          className={`inline-flex size-8 items-center justify-center rounded transition-colors hover:bg-accent ${
+            history.active
+              ? "bg-accent text-foreground"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+          title="Session history"
+        >
+          <Clock className="size-3.5" />
+        </button>
+      )}
+      <AddTabButton agents={agents} onAdd={(agentId) => onAdd(agentId, groupId)} />
+    </div>
   );
 });
 
@@ -433,13 +422,7 @@ export function DockviewChatContainer({
       .then((settings) => {
         const raw = (settings as Record<string, unknown>)?.codingAgents;
         if (Array.isArray(raw)) {
-          const seen = new Set<string>();
-          const unique = (raw as CodingAgentDef[]).filter((a) => {
-            if (seen.has(a.type)) return false;
-            seen.add(a.type);
-            return true;
-          });
-          setAgents(unique);
+          setAgents(raw as CodingAgentDef[]);
         }
       })
       .catch(() => {});
@@ -468,9 +451,7 @@ export function DockviewChatContainer({
         const openChatIds = new Set(api.panels.map((p) => p.id));
         try {
           const { chats } = await trpc.chats.list.query({ workspaceId });
-          const reusable = chats.find(
-            (c) => c.agent === agentId && !openChatIds.has(c.id),
-          );
+          const reusable = chats.find((c) => c.agent === agentId && !openChatIds.has(c.id));
           if (reusable) {
             chatId = reusable.id;
             isFresh = false; // has existing session history
@@ -525,24 +506,21 @@ export function DockviewChatContainer({
     [workspaceId],
   );
 
-  const closeTab = useCallback(
-    (chatId: string) => {
-      const api = apiRef.current;
-      if (!api || api.panels.length <= 1) return; // don't close last tab
+  const closeTab = useCallback((chatId: string) => {
+    const api = apiRef.current;
+    if (!api || api.panels.length <= 1) return; // don't close last tab
 
-      const panel = api.getPanel(chatId);
-      if (panel) {
-        api.removePanel(panel);
-      }
+    const panel = api.getPanel(chatId);
+    if (panel) {
+      api.removePanel(panel);
+    }
 
-      // Don't delete the chat record — it holds sessionIds that allow the
-      // user to see their session history if they reopen a tab for the same
-      // agent later.  The record is lightweight and cleaned up when the
-      // workspace is deleted.
-      // Layout change listeners will auto-persist
-    },
-    [],
-  );
+    // Don't delete the chat record — it holds the active session and
+    // agent config so the user can reopen a tab for the same agent
+    // later.  The record is lightweight and cleaned up when the
+    // workspace is deleted.
+    // Layout change listeners will auto-persist
+  }, []);
 
   // Cmd/Ctrl+W → close the active chat tab
   useEffect(() => {
@@ -593,13 +571,10 @@ export function DockviewChatContainer({
         // Restore full dockview layout (preserves groups, splits, sizes)
         isRestoringRef.current = true;
         try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          // biome-ignore lint/suspicious/noExplicitAny: dockview fromJSON API requires any
           event.api.fromJSON(savedLayout as any);
         } catch (err) {
-          console.error(
-            "[DockviewChatContainer] fromJSON failed, creating default:",
-            err,
-          );
+          console.error("[DockviewChatContainer] fromJSON failed, creating default:", err);
           createDefaultPanel(event.api, workspaceId);
         }
 
@@ -616,34 +591,21 @@ export function DockviewChatContainer({
           isRestoringRef.current = false;
         }, 0);
       } else {
-        // Migrate legacy formats or create default
-        let chatIds: string[] = [];
-        if (savedLayout && isLegacyChatTabLayout(savedLayout)) {
-          chatIds = savedLayout.chatIds;
-        } else if (savedLayout && isLegacyTreeLayout(savedLayout)) {
-          chatIds = extractChatIdsFromTree(savedLayout as TreeNode);
-        }
+        // No saved layout — create a default tab
+        const chatId = newChatId();
+        event.api.addPanel({
+          id: chatId,
+          component: "chatTab",
+          tabComponent: "chatTab",
+          title: "Chat",
+          params: {
+            workspaceId,
+            chatId,
+            visible: visibleRef.current && wsActiveRef.current !== false,
+            wsActive: wsActiveRef.current !== false,
+          },
+        });
 
-        if (chatIds.length === 0) {
-          chatIds = [newChatId()];
-        }
-
-        for (const chatId of chatIds) {
-          event.api.addPanel({
-            id: chatId,
-            component: "chatTab",
-            tabComponent: "chatTab",
-            title: "Chat",
-            params: {
-              workspaceId,
-              chatId,
-              visible: visibleRef.current && wsActiveRef.current !== false,
-              wsActive: wsActiveRef.current !== false,
-            },
-          });
-        }
-
-        // Persist the migrated/new layout in dockview format
         persistToServer(workspaceId, event.api.toJSON());
       }
 
@@ -679,10 +641,7 @@ export function DockviewChatContainer({
   );
 }
 
-function createDefaultPanel(
-  api: DockviewApi,
-  workspaceId: string,
-): void {
+function createDefaultPanel(api: DockviewApi, workspaceId: string): void {
   const chatId = newChatId();
   api.addPanel({
     id: chatId,

@@ -27,10 +27,7 @@ export function insertPanelState(row: PanelStateRow): void {
 }
 
 /** Update a panel state row's state blob and updatedAt. */
-export function updatePanelState(
-  id: string,
-  updates: { state: string; updatedAt: number },
-): void {
+export function updatePanelState(id: string, updates: { state: string; updatedAt: number }): void {
   const db = getDb();
   db.update(panelStates).set(updates).where(eq(panelStates.id, id)).run();
 }
@@ -45,35 +42,21 @@ export function deletePanelState(id: string): void {
  * Delete all panel state rows for a workspace.
  * If `panelType` is provided, only deletes rows of that type.
  */
-export function deletePanelStatesForWorkspace(
-  workspaceId: string,
-  panelType?: string,
-): void {
+export function deletePanelStatesForWorkspace(workspaceId: string, panelType?: string): void {
   const db = getDb();
   if (panelType) {
     db.delete(panelStates)
-      .where(
-        and(
-          eq(panelStates.workspaceId, workspaceId),
-          eq(panelStates.panelType, panelType),
-        ),
-      )
+      .where(and(eq(panelStates.workspaceId, workspaceId), eq(panelStates.panelType, panelType)))
       .run();
   } else {
-    db.delete(panelStates)
-      .where(eq(panelStates.workspaceId, workspaceId))
-      .run();
+    db.delete(panelStates).where(eq(panelStates.workspaceId, workspaceId)).run();
   }
 }
 
 /** List all panel state rows of a given type (across all workspaces). */
 export function listPanelStates(panelType: string): PanelStateRow[] {
   const db = getDb();
-  return db
-    .select()
-    .from(panelStates)
-    .where(eq(panelStates.panelType, panelType))
-    .all();
+  return db.select().from(panelStates).where(eq(panelStates.panelType, panelType)).all();
 }
 
 /** List panel state rows for a specific workspace and type. */
@@ -85,11 +68,6 @@ export function listPanelStatesForWorkspace(
   return db
     .select()
     .from(panelStates)
-    .where(
-      and(
-        eq(panelStates.workspaceId, workspaceId),
-        eq(panelStates.panelType, panelType),
-      ),
-    )
+    .where(and(eq(panelStates.workspaceId, workspaceId), eq(panelStates.panelType, panelType)))
     .all();
 }

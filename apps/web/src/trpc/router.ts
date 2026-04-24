@@ -8,11 +8,8 @@ import { createLogger } from "@band-app/logger";
 import { initTRPC, TRPCError } from "@trpc/server";
 import { Cron } from "croner";
 import { z } from "zod";
-import {
-  createMetadataAgent,
-  getOrCreateAgent,
-  replaceAgent,
-} from "../lib/agent-pool";
+import { createMetadataAgent, getOrCreateAgent, replaceAgent } from "../lib/agent-pool";
+import { deleteChatLayout, getChatLayout, saveChatLayout } from "../lib/chat-layout-manager";
 import {
   createChat,
   getChat,
@@ -24,7 +21,6 @@ import {
   updateChatActiveSession,
   updateChatStatus,
 } from "../lib/chat-manager";
-import { deleteChatLayout, getChatLayout, saveChatLayout } from "../lib/chat-layout-manager";
 import { checkCli, installCli } from "../lib/cli";
 import { convertEventsToUIMessages, convertHistoryToUIMessages } from "../lib/convert-events";
 import { reloadSchedules, stopJobsForKey } from "../lib/cronjob-scheduler";
@@ -1380,7 +1376,12 @@ const tasksRouter = t.router({
           model: input.model,
           codingAgentId: input.codingAgentId,
         });
-        return { id: task.id, workspaceId: task.workspaceId, chatId: task.chatId, sessionId: task.sessionId };
+        return {
+          id: task.id,
+          workspaceId: task.workspaceId,
+          chatId: task.chatId,
+          sessionId: task.sessionId,
+        };
       } catch (err) {
         if (err instanceof TaskConflictError) {
           throw new TRPCError({
@@ -1472,7 +1473,10 @@ const tasksRouter = t.router({
       const { workspaceId, sessionId, afterEventId } = opts.input;
       // Backward compat: resolve chatId from workspaceId if not provided
       const chatId = opts.input.chatId ?? getOrCreateDefaultChat(workspaceId).id;
-      log.info({ chatId, workspaceId, sessionId, afterEventId }, "tasks.stream: subscription opened");
+      log.info(
+        { chatId, workspaceId, sessionId, afterEventId },
+        "tasks.stream: subscription opened",
+      );
 
       // Register the listener FIRST so we capture events from tasks that
       // are already running (avoids race between submit and subscribe).
@@ -1606,11 +1610,7 @@ const sessionsRouter = t.router({
       // Resolve the agent from the chat pane if chatId is provided
       const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
       const chatSession = getChat(chatId);
-      const agent = await getOrCreateAgent(
-        chatId,
-        workspace.worktree.path,
-        chatSession?.agent,
-      );
+      const agent = await getOrCreateAgent(chatId, workspace.worktree.path, chatSession?.agent);
 
       if (!agent.supportedFeatures.sessionListing || !agent.listSessions) {
         return { sessions: [], supported: false };
@@ -1719,11 +1719,7 @@ const sessionsRouter = t.router({
 
       const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
       const chatSession = getChat(chatId);
-      const agent = await getOrCreateAgent(
-        chatId,
-        workspace.worktree.path,
-        chatSession?.agent,
-      );
+      const agent = await getOrCreateAgent(chatId, workspace.worktree.path, chatSession?.agent);
 
       if (!agent.supportedFeatures.sessionListing || !agent.getSessionMessages) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Session listing not supported" });
@@ -2073,11 +2069,7 @@ const skillsRouter = t.router({
 
       const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
       const chatSession = getChat(chatId);
-      const agent = await getOrCreateAgent(
-        chatId,
-        workspace.worktree.path,
-        chatSession?.agent,
-      );
+      const agent = await getOrCreateAgent(chatId, workspace.worktree.path, chatSession?.agent);
       if (agent.listSkills) {
         const skills = await agent.listSkills();
         return { skills };
@@ -2125,11 +2117,9 @@ const modelsRouter = t.router({
 // ---------------------------------------------------------------------------
 
 const chatLayoutRouter = t.router({
-  get: publicProcedure
-    .input(z.object({ workspaceId: z.string() }))
-    .query(({ input }) => {
-      return { tree: getChatLayout(input.workspaceId) };
-    }),
+  get: publicProcedure.input(z.object({ workspaceId: z.string() })).query(({ input }) => {
+    return { tree: getChatLayout(input.workspaceId) };
+  }),
 
   save: publicProcedure
     .input(z.object({ workspaceId: z.string(), tree: z.unknown() }))
@@ -2144,11 +2134,9 @@ const chatLayoutRouter = t.router({
 // ---------------------------------------------------------------------------
 
 const chatsRouter = t.router({
-  list: publicProcedure
-    .input(z.object({ workspaceId: z.string() }))
-    .query(({ input }) => {
-      return { chats: listChats(input.workspaceId) };
-    }),
+  list: publicProcedure.input(z.object({ workspaceId: z.string() })).query(({ input }) => {
+    return { chats: listChats(input.workspaceId) };
+  }),
 
   create: publicProcedure
     .input(
@@ -2328,8 +2316,7 @@ const queueRouter = t.router({
   stream: publicProcedure
     .input(z.object({ workspaceId: z.string(), chatId: z.string().optional() }))
     .subscription(async function* (opts) {
-      const chatId =
-        opts.input.chatId ?? getOrCreateDefaultChat(opts.input.workspaceId).id;
+      const chatId = opts.input.chatId ?? getOrCreateDefaultChat(opts.input.workspaceId).id;
 
       type Update = { messages: string[] };
       const queue: Update[] = [];

@@ -146,8 +146,6 @@ export type AppMode = "side-panel" | "full-editor";
 export interface Settings {
   worktreesDir: string | null;
   defaults?: BandConfig;
-  /** @deprecated Use codingAgents + defaultCodingAgent instead. Kept for migration. */
-  codingAgent?: CodingAgentConfig;
   codingAgents?: CodingAgentDefinition[];
   defaultCodingAgent?: string;
   webServerPort?: number;

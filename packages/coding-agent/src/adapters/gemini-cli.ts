@@ -89,7 +89,6 @@ export class GeminiCliAdapter implements CodingAgent {
     yield { type: "session-start", sessionId };
 
     const rl = createInterface({ input: child.stdout });
-    let gotOutput = false;
 
     try {
       for await (const line of rl) {
@@ -168,7 +167,7 @@ export class GeminiCliAdapter implements CodingAgent {
         const errMsg =
           (spawnError as NodeJS.ErrnoException).code === "ENOENT"
             ? `Gemini CLI executable not found: "${this.executablePath}". Is it installed and on your PATH?`
-            : `Gemini CLI failed to start: ${spawnError.message}`;
+            : `Gemini CLI failed to start: ${(spawnError as Error).message}`;
         yield { type: "error", message: errMsg };
         yield {
           type: "session-result",

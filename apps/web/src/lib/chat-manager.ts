@@ -30,8 +30,6 @@ export interface ChatSession {
   agent: string; // coding agent definition id
   model?: string;
   mode?: string;
-  /** All agent session IDs created in this pane (newest last). */
-  sessionIds: string[];
   /** The session the user last viewed — restored on page load. */
   activeSessionId?: string;
   status: ChatStatus;
@@ -43,10 +41,6 @@ interface ChatPanelState {
   agent: string;
   model?: string | null;
   mode?: string | null;
-  /** Legacy single sessionId — read for backward compat, written as sessionIds. */
-  sessionId?: string | null;
-  /** All session IDs for this pane. */
-  sessionIds?: string[];
   /** The session the user last viewed. */
   activeSessionId?: string | null;
   status: ChatStatus;
@@ -109,7 +103,6 @@ function serializeState(session: ChatSession): string {
     agent: session.agent,
     model: session.model ?? null,
     mode: session.mode ?? null,
-    sessionIds: session.sessionIds,
     activeSessionId: session.activeSessionId ?? null,
     status: session.status,
   };
@@ -133,10 +126,7 @@ export interface CreateChatOptions {
  * Create a new chat pane for a workspace.
  * Persists to panel_states table and adds to in-memory registry.
  */
-export function createChat(
-  workspaceId: string,
-  options?: CreateChatOptions,
-): ChatSession {
+export function createChat(workspaceId: string, options?: CreateChatOptions): ChatSession {
   const settings = loadSettings();
   const defaultAgent = getAgentDefinition(settings);
   const now = Date.now();
@@ -148,7 +138,6 @@ export function createChat(
     agent: options?.agent ?? defaultAgent.id,
     model: options?.model,
     mode: options?.mode,
-    sessionIds: [],
     status: "idle",
   };
 
@@ -232,53 +221,6 @@ export function updateChatStatus(chatId: string, status: ChatStatus): void {
 }
 
 /**
- * Record a new session ID for a chat pane (appended when the agent starts a session).
- */
-export function updateChatSessionId(chatId: string, sessionId: string): void {
-  const session = chatSessions.get(chatId);
-  if (!session) {
-    log.warn({ chatId, sessionId }, "updateChatSessionId: chat session not found in memory — sessionId NOT stored");
-    return;
-  }
-  log.info({ chatId, sessionId, existingSessionIds: session.sessionIds }, "updateChatSessionId: storing sessionId");
-
-  // Avoid duplicates (e.g. resume of the same session)
-  if (!session.sessionIds.includes(sessionId)) {
-    session.sessionIds.push(sessionId);
-  }
-
-  updatePanelState(chatId, {
-    state: serializeState(session),
-    updatedAt: Date.now(),
-  });
-}
-
-/**
- * Replace a placeholder session ID with the real one (e.g. after OpenCode resolves its internal ID).
- * Updates both the sessionIds array and activeSessionId if it matches.
- */
-export function replaceChatSessionId(chatId: string, previousId: string, resolvedId: string): void {
-  const session = chatSessions.get(chatId);
-  if (!session) return;
-
-  const idx = session.sessionIds.indexOf(previousId);
-  if (idx !== -1) {
-    session.sessionIds[idx] = resolvedId;
-  } else if (!session.sessionIds.includes(resolvedId)) {
-    session.sessionIds.push(resolvedId);
-  }
-
-  if (session.activeSessionId === previousId) {
-    session.activeSessionId = resolvedId;
-  }
-
-  updatePanelState(chatId, {
-    state: serializeState(session),
-    updatedAt: Date.now(),
-  });
-}
-
-/**
  * Update which session the user is currently viewing in this pane.
  * Persisted so refreshing the page restores the same session.
  */
@@ -353,14 +295,6 @@ export function loadChatsFromDb(): number {
       updatedAt: now,
     });
 
-    // Backward compat: migrate legacy single sessionId → sessionIds array
-    let sessionIds: string[] = [];
-    if (parsed.sessionIds && parsed.sessionIds.length > 0) {
-      sessionIds = parsed.sessionIds;
-    } else if (parsed.sessionId) {
-      sessionIds = [parsed.sessionId];
-    }
-
     const session: ChatSession = {
       id: row.id,
       workspaceId: row.workspaceId,
@@ -368,7 +302,6 @@ export function loadChatsFromDb(): number {
       agent: parsed.agent,
       model: parsed.model ?? undefined,
       mode: parsed.mode ?? undefined,
-      sessionIds,
       activeSessionId: parsed.activeSessionId ?? undefined,
       status: "idle",
     };

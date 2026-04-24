@@ -69,11 +69,6 @@ export interface CodingAgentDefinition {
 export interface Settings {
   worktreesDir?: string;
   defaults?: unknown;
-  /** @deprecated Use codingAgents + defaultCodingAgent instead. Kept for migration. */
-  codingAgent?: {
-    type: string;
-    command?: string;
-  };
   codingAgents?: CodingAgentDefinition[];
   defaultCodingAgent?: string;
   webServerPort?: number;
@@ -179,15 +174,6 @@ export function getAgentDefinition(settings: Settings, agentId?: string): Coding
     if (found) return found;
   }
   if (agents.length > 0) return agents[0];
-  // Fall back to legacy codingAgent field for backward compatibility
-  if (settings.codingAgent) {
-    return {
-      id: settings.codingAgent.type ?? "claude-code",
-      type: settings.codingAgent.type ?? "claude-code",
-      label: settings.codingAgent.type ?? "Claude Code",
-      command: settings.codingAgent.command,
-    };
-  }
   return { id: "claude-code", type: "claude-code", label: "Claude Code" };
 }
 

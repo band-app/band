@@ -51,7 +51,7 @@ export function useChatPaneState(workspaceId: string, chatId: string): ChatPaneS
   const [activeSessionSummary, setActiveSessionSummary] = useState<string | undefined>(undefined);
   const newSessionRef = useRef<(() => void) | null>(null);
   // Keep a ref to the sessions list for looking up summaries on session switch
-  const sessionsRef = useRef<Array<{ sessionId: string; summary: string }>>([])
+  const sessionsRef = useRef<Array<{ sessionId: string; summary: string }>>([]);
 
   // Load agent config + sessions on mount.
   // Agent config always loads. Session restoration is skipped for fresh panes
@@ -62,9 +62,7 @@ export function useChatPaneState(workspaceId: string, chatId: string): ChatPaneS
     let cancelled = false;
 
     const settingsP = trpc.settings.get.query().catch(() => null);
-    const chatP = trpc.chats.get
-      .query({ chatId })
-      .catch(() => ({ chat: null as null }));
+    const chatP = trpc.chats.get.query({ chatId }).catch(() => ({ chat: null as null }));
     const sessionsP = trpc.sessions.list
       .query({ workspaceId, chatId })
       .catch(() => ({ sessions: [] as never[], supported: false }));
@@ -76,8 +74,9 @@ export function useChatPaneState(workspaceId: string, chatId: string): ChatPaneS
       const codingAgents = Array.isArray(raw) ? (raw as CodingAgentDef[]) : [];
       setAgents(codingAgents);
 
-      const defaultAgentId = (settings as Record<string, unknown> | null)
-        ?.defaultCodingAgent as string | undefined;
+      const defaultAgentId = (settings as Record<string, unknown> | null)?.defaultCodingAgent as
+        | string
+        | undefined;
       const agentId = chatResult.chat?.agent ?? defaultAgentId ?? "";
       setCodingAgentId(agentId);
       const found = codingAgents.find((a) => a.id === agentId);
@@ -96,7 +95,11 @@ export function useChatPaneState(workspaceId: string, chatId: string): ChatPaneS
       }
 
       // Store sessions for summary lookup on session switch
-      const sessions = sessionsResult.sessions as Array<{ sessionId: string; summary: string; lastModified: number }>;
+      const sessions = sessionsResult.sessions as Array<{
+        sessionId: string;
+        summary: string;
+        lastModified: number;
+      }>;
       sessionsRef.current = sessions;
 
       // Fresh panes skip session restoration — start clean.
@@ -112,9 +115,7 @@ export function useChatPaneState(workspaceId: string, chatId: string): ChatPaneS
         const match = sessions.find((s) => s.sessionId === persisted);
         if (match?.summary) setActiveSessionSummary(match.summary);
       } else if (sessionsResult.supported && sessions.length > 0) {
-        const latest = [...sessions].sort(
-          (a, b) => b.lastModified - a.lastModified,
-        )[0];
+        const latest = [...sessions].sort((a, b) => b.lastModified - a.lastModified)[0];
         if (latest) {
           setInitialSessionId(latest.sessionId);
           if (latest.summary) setActiveSessionSummary(latest.summary);

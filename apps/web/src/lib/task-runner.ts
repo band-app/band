@@ -144,10 +144,6 @@ function broadcast(chatId: string, chunk: UIMessageChunk) {
     log.warn({ chatId, chunkType: (chunk as { type?: string }).type }, "broadcast: no listeners");
     return;
   }
-  log.info(
-    { chatId, chunkType: (chunk as { type?: string }).type, listenerCount: subs.size },
-    "broadcast: delivering to listeners",
-  );
   for (const listener of subs) {
     try {
       listener(enrichedChunk);
@@ -158,8 +154,17 @@ function broadcast(chatId: string, chunk: UIMessageChunk) {
 }
 
 export function submitTask(options: SubmitTaskOptions): TaskInfo {
-  const { workspaceId, chatId, prompt, sessionId, agentPrompt, maxTurns, mode, model, codingAgentId } =
-    options;
+  const {
+    workspaceId,
+    chatId,
+    prompt,
+    sessionId,
+    agentPrompt,
+    maxTurns,
+    mode,
+    model,
+    codingAgentId,
+  } = options;
 
   const workspace = resolveWorkspace(workspaceId);
   if (!workspace) {
@@ -565,7 +570,12 @@ async function runTask(chatId: string, task: InternalTask) {
           type: "data-prompt" as UIMessageChunk["type"],
           data: { text: queued },
         } as UIMessageChunk);
-        submitTask({ workspaceId: task.workspaceId, chatId, prompt: queued, sessionId: task.sessionId });
+        submitTask({
+          workspaceId: task.workspaceId,
+          chatId,
+          prompt: queued,
+          sessionId: task.sessionId,
+        });
         autoStarted = true;
       } catch (err) {
         log.warn({ chatId, err }, "failed to auto-start queued task");

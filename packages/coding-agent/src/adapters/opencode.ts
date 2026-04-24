@@ -54,9 +54,7 @@ export class OpenCodeAdapter implements CodingAgent {
     // Only pass models that OpenCode actually supports. Ignore models from
     // other providers (e.g. Claude) to let OpenCode use its own default.
     // Use the cached models list if available; fall back to the hardcoded default list.
-    const knownModelIds = new Set(
-      (this.cachedModels ?? DEFAULT_MODELS).map((m) => m.id),
-    );
+    const knownModelIds = new Set((this.cachedModels ?? DEFAULT_MODELS).map((m) => m.id));
     const effectiveModel =
       requestedModel && knownModelIds.has(requestedModel) ? requestedModel : undefined;
 
@@ -79,6 +77,7 @@ export class OpenCodeAdapter implements CodingAgent {
     let gotOutput = false;
     let lastExitCode = 0;
     let lastStderr = "";
+    let spawnError: Error | null = null;
     let effectiveSessionId: string | undefined = sessionId;
     const maxAttempts = sessionId ? 2 : 1;
 
@@ -102,7 +101,6 @@ export class OpenCodeAdapter implements CodingAgent {
       // Capture spawn errors (e.g. ENOENT when binary is not found).
       // Without this listener an unhandled 'error' event on the child
       // process would crash the server.
-      let spawnError: Error | null = null;
       child.on("error", (err) => {
         spawnError = err;
         log.error({ err, executable: this.executablePath }, "opencode spawn error");
@@ -205,7 +203,7 @@ export class OpenCodeAdapter implements CodingAgent {
       const errMsg =
         (spawnError as NodeJS.ErrnoException).code === "ENOENT"
           ? `OpenCode executable not found: "${this.executablePath}". Is it installed and on your PATH?`
-          : `OpenCode failed to start: ${spawnError.message}`;
+          : `OpenCode failed to start: ${(spawnError as Error).message}`;
       yield { type: "error", message: errMsg };
     } else if (!gotOutput && lastStderr) {
       yield {
@@ -258,7 +256,7 @@ export class OpenCodeAdapter implements CodingAgent {
     const success = lastExitCode === 0 && gotOutput && !spawnError;
     const errors: string[] = [];
     if (spawnError) {
-      errors.push(spawnError.message);
+      errors.push((spawnError as Error).message);
     }
     if (lastExitCode !== 0) {
       errors.push(`OpenCode exited with code ${lastExitCode}`);

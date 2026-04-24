@@ -63,10 +63,9 @@ function createDefaultState(tmpHome: string) {
 function defaultSettings() {
   return {
     tokenSecret: DEFAULT_TOKEN,
-    codingAgent: {
-      type: "claude-code",
-      command: FAKE_AGENT_PATH,
-    },
+    codingAgents: [
+      { id: "claude-code", type: "claude-code", label: "Claude Code", command: FAKE_AGENT_PATH },
+    ],
   };
 }
 

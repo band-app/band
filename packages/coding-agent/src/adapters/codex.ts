@@ -80,7 +80,8 @@ export class CodexAdapter implements CodingAgent {
     // Only pass models that Codex actually supports. Ignore models from
     // other providers (e.g. Claude) to let Codex use its own default.
     const knownModelIds = new Set(CODEX_MODELS.map((m) => m.id));
-    const effectiveModel = requestedModel && knownModelIds.has(requestedModel) ? requestedModel : undefined;
+    const effectiveModel =
+      requestedModel && knownModelIds.has(requestedModel) ? requestedModel : undefined;
     const mode = options?.mode ?? "edit";
 
     log.info(
@@ -150,7 +151,10 @@ export class CodexAdapter implements CodingAgent {
     let result: { events: AsyncIterable<ThreadEvent> };
     try {
       result = await thread.runStreamed(prompt);
-      log.info({ elapsedMs: Date.now() - runStreamedStartMs }, "thread.runStreamed returned successfully");
+      log.info(
+        { elapsedMs: Date.now() - runStreamedStartMs },
+        "thread.runStreamed returned successfully",
+      );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       log.error({ err, cwd: this.workspaceDir, model: effectiveModel }, "codex runStreamed failed");
@@ -177,7 +181,7 @@ export class CodexAdapter implements CodingAgent {
 
     try {
       for await (const event of { [Symbol.asyncIterator]: () => iterator }) {
-        log.info({ eventType: event.type }, "codex event");
+        log.debug({ eventType: event.type }, "codex event");
 
         switch (event.type) {
           // ── Session lifecycle ──────────────────────────────────────────
@@ -255,7 +259,13 @@ export class CodexAdapter implements CodingAgent {
         }
       }
       log.info(
-        { turnCount, totalInputTokens, totalOutputTokens, actualSessionId, elapsedMs: Date.now() - startMs },
+        {
+          turnCount,
+          totalInputTokens,
+          totalOutputTokens,
+          actualSessionId,
+          elapsedMs: Date.now() - startMs,
+        },
         "codex stream done — all events consumed",
       );
     } catch (err) {

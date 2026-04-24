@@ -224,24 +224,39 @@ export function ChatView({
 
   const [modes, setModes] = useState<{ id: string; name: string; description?: string }[]>([]);
   const [selectedMode, setSelectedMode] = useState<string | undefined>();
-  const handleModeSelect = useCallback((mode: string | undefined) => {
-    setSelectedMode(mode);
-  }, []);
+  const handleModeSelect = useCallback(
+    (mode: string | undefined) => {
+      setSelectedMode(mode);
+      trpc.chats.update
+        .mutate({ chatId, mode: mode ?? "" })
+        .catch((err) => console.error("[ChatView] error persisting mode:", err));
+    },
+    [chatId],
+  );
   useEffect(() => {
     trpc.modes.list
       .query({ agentId: codingAgentId || undefined })
       .then((data) => setModes(data.modes as { id: string; name: string; description?: string }[]))
       .catch(() => setModes([]));
-    // Derive mode from active task (e.g. reconnecting to a running plan-mode task)
+    // Hydrate persisted mode from the chat record, or derive from active task
+    trpc.chats.get
+      .query({ chatId })
+      .then((data) => {
+        const persisted = data.chat?.mode;
+        if (typeof persisted === "string" && persisted) {
+          setSelectedMode(persisted);
+        }
+      })
+      .catch(() => {});
     trpc.tasks.get
       .query({ workspaceId, chatId })
       .then((data) => {
         if (data.task?.mode && data.task.status === "running") {
-          handleModeSelect(data.task.mode);
+          setSelectedMode(data.task.mode);
         }
       })
       .catch(() => {});
-  }, [workspaceId, chatId, codingAgentId, handleModeSelect]);
+  }, [workspaceId, chatId, codingAgentId]);
 
   // Listen for Shift+Tab mode toggle dispatched from the workspace layout
   useEffect(() => {
@@ -264,14 +279,37 @@ export function ChatView({
   const selectedModel = userModelOverride ?? agentDefaultModel;
 
   useEffect(() => {
-    trpc.models.list
+    const modelsP = trpc.models.list
       .query({ agentId: codingAgentId || undefined })
       .then((data) => {
         setModels(data.models as { id: string; name: string; description?: string }[]);
         setAgentDefaultModel((data.defaultModel as string) || undefined);
       })
       .catch(() => setModels([]));
-  }, [codingAgentId]);
+
+    // Hydrate persisted model override from the chat record
+    const chatP = trpc.chats.get
+      .query({ chatId })
+      .then((data) => {
+        const persisted = data.chat?.model;
+        if (typeof persisted === "string" && persisted) {
+          setUserModelOverride(persisted);
+        }
+      })
+      .catch(() => {});
+
+    void Promise.all([modelsP, chatP]);
+  }, [codingAgentId, chatId]);
+
+  const handleModelSelect = useCallback(
+    (model: string | undefined) => {
+      setUserModelOverride(model);
+      trpc.chats.update
+        .mutate({ chatId, model: model ?? "" })
+        .catch((err) => console.error("[ChatView] error persisting model:", err));
+    },
+    [chatId],
+  );
 
   const [queuedMessages, setQueuedMessages] = useState<string[]>([]);
 
@@ -283,7 +321,6 @@ export function ChatView({
       { workspaceId, chatId },
       {
         onData(data: { messages: string[] }) {
-          console.log("subscribe", data.messages);
           setQueuedMessages(data.messages);
         },
       },
@@ -558,7 +595,15 @@ export function ChatView({
       onShowSessionListChange(false);
       await loadMessages(sessionId);
     },
-    [loadMessages, setMessages, stop, onShowSessionListChange, onActiveSessionChange, workspaceId, chatId],
+    [
+      loadMessages,
+      setMessages,
+      stop,
+      onShowSessionListChange,
+      onActiveSessionChange,
+      workspaceId,
+      chatId,
+    ],
   );
 
   const handleNewSession = useCallback(() => {
@@ -631,8 +676,6 @@ export function ChatView({
         if (idx === -1) return prev;
         const messages = [...prev.slice(0, idx), ...prev.slice(idx + 1)];
 
-        console.log("cancel", text, messages);
-
         return messages;
       });
       trpc.queue.remove.mutate({ workspaceId, chatId, text }).catch(() => {});
@@ -684,6 +727,7 @@ export function ChatView({
         chatId={chatId}
         activeSessionId={activeSessionId ?? sessionIdRef.current}
         onSelectSession={handleSelectSession}
+        onNewSession={handleNewSession}
       />
     );
   }
@@ -914,7 +958,7 @@ export function ChatView({
                 <ModelMenu
                   models={models}
                   selected={selectedModel}
-                  onSelect={setUserModelOverride}
+                  onSelect={handleModelSelect}
                   agentType={agentType}
                 />
               )}
