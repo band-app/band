@@ -11,5 +11,6 @@ pub mod window_manager;
 #[cfg(not(target_os = "macos"))]
 pub use ide_stub as ide;
 pub mod browser;
+pub mod updater;
 pub mod webserver;
 pub mod window;
