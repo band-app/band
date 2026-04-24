@@ -120,5 +120,49 @@ export function createTrpcMock() {
     query(path, handler);
   }
 
-  return { query, mutation, install };
+  /**
+   * Register baseline mocks for all HTTP tRPC calls that the dockview-based
+   * chat UI makes on load. Without these, any unmocked procedure returns a
+   * 404 error from the mock handler, preventing the chat from rendering.
+   *
+   * Call this after creating the mock and before adding test-specific
+   * overrides (test-specific mocks registered later will take precedence
+   * because they overwrite the handler in the map).
+   */
+  function addDockviewMocks(): void {
+    // DockviewChatContainer: fetches saved layout (null = no saved layout)
+    query("chatLayout.get" as ProcedurePath, (() => ({ tree: null })) as Handler<ProcedurePath>);
+
+    // DockviewChatContainer + ChatPane: agent config
+    query(
+      "settings.get" as ProcedurePath,
+      (() => ({ codingAgents: [], defaultCodingAgent: undefined })) as Handler<ProcedurePath>,
+    );
+
+    // ChatPane: chat record for agent info (null = no record)
+    query("chats.get" as ProcedurePath, (() => ({ chat: null })) as Handler<ProcedurePath>);
+
+    // DockviewChatContainer: agent list for tab dropdown
+    query("chats.list" as ProcedurePath, (() => ({ chats: [] })) as Handler<ProcedurePath>);
+
+    // DockviewChatContainer: persist layout (no-op)
+    mutation("chatLayout.save" as ProcedurePath, (() => ({ ok: true })) as Handler<ProcedurePath>);
+
+    // ChatPane: persist active session (no-op)
+    mutation(
+      "chats.setActiveSession" as ProcedurePath,
+      (() => ({ ok: true })) as Handler<ProcedurePath>,
+    );
+
+    // DashboardShell sidebar: project list
+    query("projects.list" as ProcedurePath, (() => ({ projects: [] })) as Handler<ProcedurePath>);
+
+    // DockviewWorkspaceLayout: diff count badge
+    query(
+      "workspace.getDiffSummary" as ProcedurePath,
+      (() => ({ stats: null })) as Handler<ProcedurePath>,
+    );
+  }
+
+  return { query, mutation, install, addDockviewMocks };
 }

@@ -32,6 +32,7 @@ test.afterAll(async () => {
 
 test("sessions load and display in the session list", async ({ page }) => {
   const mock = createTrpcMock();
+  mock.addDockviewMocks();
   mock.query("sessions.list", {
     sessions: [
       {
@@ -59,9 +60,10 @@ test("sessions load and display in the session list", async ({ page }) => {
   // Click the clock button to open the session list
   await clockButton.click();
 
-  // Verify session summaries are displayed
-  await expect(page.getByText("Fix login bug")).toBeVisible();
-  await expect(page.getByText("Add tests")).toBeVisible();
+  // Verify session summaries are displayed in the session list
+  // Use the session list button locator to avoid matching the dockview tab title
+  await expect(page.getByRole("button", { name: /Fix login bug/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Add tests/ })).toBeVisible();
 
   // Verify git branch badge
   await expect(page.getByText("fix-login")).toBeVisible();
@@ -73,6 +75,7 @@ test("sessions load and display in the session list", async ({ page }) => {
 
 test("empty state shows 'No sessions yet' message", async ({ page }) => {
   const mock = createTrpcMock();
+  mock.addDockviewMocks();
   mock.query("sessions.list", { sessions: [], supported: true });
   await mock.install(page);
 
@@ -88,13 +91,14 @@ test("empty state shows 'No sessions yet' message", async ({ page }) => {
 
 test("session toggle is hidden when not supported", async ({ page }) => {
   const mock = createTrpcMock();
+  mock.addDockviewMocks();
   mock.query("sessions.list", { sessions: [], supported: false });
   await mock.install(page);
 
   await page.goto(`${server.url}/workspace/test-workspace?token=${TOKEN}`);
 
-  // Wait for the page to settle — the header with the workspace name should be visible
-  await expect(page.locator("h1", { hasText: "test-workspace" })).toBeVisible();
+  // Wait for the page to settle — the chat prompt input should be visible
+  await expect(page.getByPlaceholder("Type a message")).toBeVisible();
 
   // The clock button should NOT be present
   const clockButton = page.locator("button").filter({ has: page.locator("svg.lucide-clock") });
@@ -103,6 +107,7 @@ test("session toggle is hidden when not supported", async ({ page }) => {
 
 test("selecting a session loads its messages", async ({ page }) => {
   const mock = createTrpcMock();
+  mock.addDockviewMocks();
   mock.query("sessions.list", {
     sessions: [
       {
@@ -139,8 +144,8 @@ test("selecting a session loads its messages", async ({ page }) => {
   await expect(clockButton).toBeVisible();
   await clockButton.click();
 
-  // Click the session
-  await page.getByText("Fix login bug").click();
+  // Click the session (use role locator to avoid matching the dockview tab title)
+  await page.getByRole("button", { name: /Fix login bug/ }).click();
 
   // Verify historical messages render
   await expect(page.getByText("Please fix the login bug")).toBeVisible();

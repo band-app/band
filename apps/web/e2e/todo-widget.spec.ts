@@ -54,6 +54,7 @@ interface UIMessageFixture {
 }
 
 function installSessionMock(mock: ReturnType<typeof createTrpcMock>, messages: UIMessageFixture[]) {
+  mock.addDockviewMocks();
   mock.query("sessions.list", {
     sessions: [
       {
@@ -76,7 +77,8 @@ async function loadSession(page: import("@playwright/test").Page) {
   const clockButton = page.locator("button").filter({ has: page.locator("svg.lucide-clock") });
   await expect(clockButton).toBeVisible();
   await clockButton.click();
-  await page.getByText("Test session").click();
+  // Use role locator to avoid matching the dockview tab title
+  await page.getByRole("button", { name: /Test session/ }).click();
 }
 
 // ---------------------------------------------------------------------------

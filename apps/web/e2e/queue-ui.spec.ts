@@ -41,12 +41,42 @@ async function trpcMutate(procedure: string, input: unknown): Promise<void> {
   }
 }
 
-async function pushQueue(workspaceId: string, text: string): Promise<void> {
-  await trpcMutate("queue.push", { workspaceId, text });
+async function pushQueue(workspaceId: string, text: string, chatId?: string): Promise<void> {
+  await trpcMutate("queue.push", { workspaceId, text, chatId });
 }
 
-async function clearQueue(workspaceId: string): Promise<void> {
-  await trpcMutate("queue.clear", { workspaceId });
+async function clearQueue(workspaceId: string, chatId?: string): Promise<void> {
+  await trpcMutate("queue.clear", { workspaceId, chatId });
+}
+
+/**
+ * Wait for the dockview ChatPane to load and capture the chatId it uses
+ * from one of its HTTP tRPC calls (e.g. chats.get).
+ */
+async function captureChatId(page: import("@playwright/test").Page): Promise<string> {
+  return new Promise<string>((resolve) => {
+    const handler = (request: import("@playwright/test").Request) => {
+      const url = request.url();
+      if (!url.includes("/trpc/") || !url.includes("chats.get")) return;
+      try {
+        const parsedUrl = new URL(url);
+        const raw = parsedUrl.searchParams.get("input");
+        if (!raw) return;
+        const inputMap = JSON.parse(raw);
+        // Find the chats.get procedure index in the batch
+        const trpcPath = parsedUrl.pathname.replace(/.*\/trpc\//, "");
+        const procedures = trpcPath.split(",");
+        const idx = procedures.indexOf("chats.get");
+        if (idx >= 0 && inputMap[String(idx)]?.chatId) {
+          page.off("request", handler);
+          resolve(inputMap[String(idx)].chatId);
+        }
+      } catch {
+        // ignore parse errors
+      }
+    };
+    page.on("request", handler);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -55,10 +85,15 @@ async function clearQueue(workspaceId: string): Promise<void> {
 
 test("queued messages render with text, Queued badge, and Cancel button", async ({ page }) => {
   const wsId = "test-ws-render";
-  await pushQueue(wsId, "fix the bug");
-  await pushQueue(wsId, "add tests");
 
+  // Start capturing the chatId before navigation so we catch the request
+  const chatIdPromise = captureChatId(page);
   await page.goto(`${server.url}/workspace/${wsId}?token=${TOKEN}`);
+  const chatId = await chatIdPromise;
+
+  // Push messages after we know the chatId so they reach the correct queue
+  await pushQueue(wsId, "fix the bug", chatId);
+  await pushQueue(wsId, "add tests", chatId);
 
   // Both queued message texts should be visible
   await expect(page.getByText("fix the bug")).toBeVisible();
@@ -72,7 +107,7 @@ test("queued messages render with text, Queued badge, and Cancel button", async 
   const cancelButtons = page.getByRole("button", { name: "Cancel" });
   await expect(cancelButtons).toHaveCount(2);
 
-  await clearQueue(wsId);
+  await clearQueue(wsId, chatId);
 });
 
 test("empty queue renders no queued message bubbles", async ({ page }) => {
@@ -89,10 +124,13 @@ test("empty queue renders no queued message bubbles", async ({ page }) => {
 
 test("cancel button calls queue.remove and bubble disappears", async ({ page }) => {
   const wsId = "test-ws-cancel";
-  await pushQueue(wsId, "first message");
-  await pushQueue(wsId, "second message");
 
+  const chatIdPromise = captureChatId(page);
   await page.goto(`${server.url}/workspace/${wsId}?token=${TOKEN}`);
+  const chatId = await chatIdPromise;
+
+  await pushQueue(wsId, "first message", chatId);
+  await pushQueue(wsId, "second message", chatId);
 
   // Both messages should be visible initially
   await expect(page.getByText("first message")).toBeVisible();
@@ -111,16 +149,19 @@ test("cancel button calls queue.remove and bubble disappears", async ({ page }) 
   // Only one "Queued" badge should remain
   await expect(page.getByText("Queued")).toHaveCount(1);
 
-  await clearQueue(wsId);
+  await clearQueue(wsId, chatId);
 });
 
 test("multiple queued messages render in array order", async ({ page }) => {
   const wsId = "test-ws-order";
-  await pushQueue(wsId, "alpha");
-  await pushQueue(wsId, "beta");
-  await pushQueue(wsId, "gamma");
 
+  const chatIdPromise = captureChatId(page);
   await page.goto(`${server.url}/workspace/${wsId}?token=${TOKEN}`);
+  const chatId = await chatIdPromise;
+
+  await pushQueue(wsId, "alpha", chatId);
+  await pushQueue(wsId, "beta", chatId);
+  await pushQueue(wsId, "gamma", chatId);
 
   // All three messages should be visible
   await expect(page.getByText("alpha")).toBeVisible();
@@ -143,5 +184,5 @@ test("multiple queued messages render in array order", async ({ page }) => {
   expect(alphaIdx).toBeLessThan(betaIdx);
   expect(betaIdx).toBeLessThan(gammaIdx);
 
-  await clearQueue(wsId);
+  await clearQueue(wsId, chatId);
 });
