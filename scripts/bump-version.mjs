@@ -166,6 +166,23 @@ function updateCargoLock(dryRun) {
   if (dryRun) return;
   for (const toml of TOML_FILES) {
     const dir = resolve(ROOT, dirname(toml));
+    // Ensure sidecar binary placeholder exists so Tauri's build script doesn't fail
+    // during cargo check. The real binary is built later by the build:cli step.
+    if (toml.includes("dashboard")) {
+      const binDir = resolve(dir, "binaries");
+      const target = execSync("rustc -vV", { encoding: "utf8" })
+        .match(/host: (.+)/)[1]
+        .trim();
+      const placeholder = resolve(binDir, `band-${target}`);
+      execSync(`mkdir -p "${binDir}"`);
+      try {
+        readFileSync(placeholder);
+      } catch {
+        writeFileSync(placeholder, "");
+        execSync(`chmod +x "${placeholder}"`);
+        console.log(`  Created sidecar placeholder: binaries/band-${target}`);
+      }
+    }
     console.log(`  Running cargo check in ${dirname(toml)}...`);
     execSync("cargo check", { cwd: dir, stdio: "inherit" });
   }
