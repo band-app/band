@@ -140,8 +140,8 @@ pub fn run() {
                 .build()?;
 
             // Build the Band application menu with About and Check for Updates.
-            let mut band_menu = SubmenuBuilder::new(app, "Band")
-                .item(&PredefinedMenuItem::about(app, None, None)?);
+            let mut band_menu =
+                SubmenuBuilder::new(app, "Band").item(&PredefinedMenuItem::about(app, None, None)?);
 
             if UPDATER_ENABLED {
                 let check_updates_item =
