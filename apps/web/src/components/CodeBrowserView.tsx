@@ -35,7 +35,7 @@ import {
   Search,
   TextSearch,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Group, Panel, Separator, usePanelRef } from "react-resizable-panels";
 import { Streamdown } from "streamdown";
 import { useFileTabs } from "../hooks/useFileTabs";
@@ -255,6 +255,40 @@ export function CodeBrowserView({
     if (!file) return undefined;
     return parseFileLocation(file).column;
   });
+
+  // -------------------------------------------------------------------------
+  // Container-based layout detection
+  // -------------------------------------------------------------------------
+  // useIsDesktop() checks the viewport width, but CodeBrowserView may live
+  // inside a narrow dockview panel even when the viewport is wide.  We
+  // measure the actual container width so we can switch to the mobile toggle
+  // layout (with back button) when the container is too narrow for the
+  // side-by-side desktop layout.
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState<number | null>(null);
+
+  useLayoutEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    // Synchronous initial measurement to avoid a layout flash
+    setContainerWidth(el.clientWidth);
+  }, []);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setContainerWidth(entry.contentRect.width);
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Use the mobile toggle layout when EITHER the viewport is narrow (real
+  // mobile) OR the container is narrower than 600px (narrow dockview panel).
+  const useMobileLayout = !isDesktop || (containerWidth !== null && containerWidth < 600);
 
   // Markdown view mode (controlled from here, rendered in tab bar actions)
   const [mdViewMode, setMdViewMode] = useState<"preview" | "source">("preview");
@@ -700,210 +734,217 @@ export function CodeBrowserView({
     }
   }, [openFilePath, treeCollapsed, treePanelRef]);
 
-  // Mobile: toggle between browse and view
-  if (!isDesktop) {
-    if (viewFilePath) {
-      return (
-        <FileViewer
-          workspaceId={workspaceId}
-          filePath={viewFilePath}
-          line={viewLine}
-          lineEnd={viewLineEnd}
-          column={viewColumn}
-          onBack={handleBack}
-          onGoBack={handleEditorGoBack}
-          onGoForward={handleEditorGoForward}
-          canGoBack={editorHistory.canGoBack}
-          canGoForward={editorHistory.canGoForward}
-          onCursorLineChange={handleCursorLineChange}
-          renderMarkdown={renderMarkdown}
-          editable
-          lspExtension={lspExtension}
-        />
-      );
-    }
-    return (
-      <FileBrowser
-        workspaceId={workspaceId}
-        onOpenFile={handleSelectFile}
-        selectedFile={viewFilePath}
-      />
-    );
-  }
-
-  // Desktop: side-by-side layout with resizable file tree
+  // -------------------------------------------------------------------------
+  // Render — mobile toggle layout or desktop side-by-side layout
+  // -------------------------------------------------------------------------
+  // Wrapped in a measured container so the ResizeObserver can track width.
   return (
-    <Group
-      orientation="horizontal"
-      defaultLayout={defaultLayout}
-      onLayoutChanged={handleLayoutChanged}
-    >
-      {/* Left panel — file tree */}
-      <Panel
-        id="file-tree"
-        defaultSize="15rem"
-        minSize="10rem"
-        maxSize="50%"
-        collapsible
-        collapsedSize="0%"
-        panelRef={treePanelRef}
-        onResize={(size) => {
-          const collapsed = size.asPercentage === 0;
-          setTreeCollapsed(collapsed);
-          saveFileTreeCollapsed(workspaceId, collapsed);
-        }}
-      >
-        <div className="flex h-full flex-col overflow-hidden border-r border-border">
-          <FileTreeToolbar
-            onQuickOpen={onQuickOpen}
-            onSearchFiles={onSearchFiles}
-            treeCollapsed={treeCollapsed}
-            onToggleTree={toggleTree}
+    <div ref={containerRef} className="h-full">
+      {useMobileLayout ? (
+        // Mobile / narrow container: toggle between file browser and viewer
+        viewFilePath ? (
+          <FileViewer
+            workspaceId={workspaceId}
+            filePath={viewFilePath}
+            line={viewLine}
+            lineEnd={viewLineEnd}
+            column={viewColumn}
+            onBack={handleBack}
+            onGoBack={handleEditorGoBack}
+            onGoForward={handleEditorGoForward}
+            canGoBack={editorHistory.canGoBack}
+            canGoForward={editorHistory.canGoForward}
+            onCursorLineChange={handleCursorLineChange}
+            renderMarkdown={renderMarkdown}
+            editable
+            lspExtension={lspExtension}
           />
-          <div className="min-h-0 flex-1 overflow-hidden">
-            <FileBrowser
-              workspaceId={workspaceId}
-              onOpenFile={handleSelectFile}
-              compact
-              selectedFile={viewFilePath}
-            />
-          </div>
-        </div>
-      </Panel>
-
-      <Separator className="group relative w-[3px] bg-transparent hover:bg-accent-foreground/20 active:bg-accent-foreground/30 transition-colors cursor-col-resize">
-        <button
-          type="button"
-          onClick={toggleTree}
-          className="absolute top-1/2 left-1/2 z-10 flex size-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-accent-foreground/30 bg-background text-muted-foreground opacity-0 shadow-md transition-opacity hover:border-accent-foreground/50 hover:text-foreground group-hover:opacity-100"
+        ) : (
+          <FileBrowser
+            workspaceId={workspaceId}
+            onOpenFile={handleSelectFile}
+            selectedFile={viewFilePath}
+          />
+        )
+      ) : (
+        // Desktop: side-by-side layout with resizable file tree
+        <Group
+          orientation="horizontal"
+          defaultLayout={defaultLayout}
+          onLayoutChanged={handleLayoutChanged}
         >
-          {treeCollapsed ? <ChevronRight className="size-4" /> : <ChevronLeft className="size-4" />}
-        </button>
-      </Separator>
-
-      {/* Right panel — file tabs + content */}
-      <Panel id="file-viewer" minSize="20%">
-        <div className="relative flex h-full flex-col overflow-hidden">
-          {treeCollapsed && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={toggleTree}
-                  className="absolute left-1 top-0 z-10 inline-flex h-9 w-7 items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <PanelLeft className="size-4" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" className="text-xs">
-                Show File Explorer
-              </TooltipContent>
-            </Tooltip>
-          )}
-
-          {/* Tab bar */}
-          <div className={treeCollapsed ? "[&>div]:pl-7" : ""}>
-            <FileTabBar
-              workspaceId={workspaceId}
-              workspacePath={workspacePath}
-              tabs={fileTabs.openTabs}
-              activeTabPath={fileTabs.activeTabPath}
-              onSelectTab={handleTabSelect}
-              onCloseTab={handleTabClose}
-              onGoBack={handleEditorGoBack}
-              onGoForward={handleEditorGoForward}
-              canGoBack={editorHistory.canGoBack}
-              canGoForward={editorHistory.canGoForward}
-              actions={
-                isMarkdown ? (
-                  <div className="flex items-center gap-0.5">
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          type="button"
-                          onClick={() => setMdViewMode("preview")}
-                          className={`inline-flex size-6 items-center justify-center rounded-md transition-colors ${
-                            mdViewMode === "preview"
-                              ? "bg-accent text-accent-foreground"
-                              : "text-muted-foreground hover:bg-accent hover:text-foreground"
-                          }`}
-                        >
-                          <Eye className="size-3.5" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom" className="text-xs">
-                        Preview
-                      </TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          type="button"
-                          onClick={() => setMdViewMode("source")}
-                          className={`inline-flex size-6 items-center justify-center rounded-md transition-colors ${
-                            mdViewMode === "source"
-                              ? "bg-accent text-accent-foreground"
-                              : "text-muted-foreground hover:bg-accent hover:text-foreground"
-                          }`}
-                        >
-                          <Code className="size-3.5" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="bottom" className="text-xs">
-                        Source
-                      </TooltipContent>
-                    </Tooltip>
-                  </div>
-                ) : undefined
-              }
-            />
-          </div>
-
-          {/* File content */}
-          <div className="min-h-0 flex-1">
-            {viewFilePath ? (
-              <FileViewer
-                workspaceId={workspaceId}
-                filePath={viewFilePath}
-                line={viewLine}
-                lineEnd={viewLineEnd}
-                column={viewColumn}
-                onEditorView={handleEditorView}
-                onCursorLineChange={handleCursorLineChange}
-                renderMarkdown={renderMarkdown}
-                editable
-                hideTitleBar
-                lspExtension={lspExtension}
-                viewMode={isMarkdown ? mdViewMode : undefined}
-                onViewModeChange={isMarkdown ? setMdViewMode : undefined}
-                toolbar={
-                  search.searchOpen ? (
-                    <SearchBar
-                      ref={search.searchBarRef}
-                      query={search.searchQuery}
-                      onQueryChange={search.setSearchQuery}
-                      options={search.searchOptions}
-                      onOptionsChange={search.setSearchOptions}
-                      placeholder="Find in file..."
-                      matchInfo={search.matchInfo}
-                      onNext={search.handleNext}
-                      onPrevious={search.handlePrevious}
-                      onClose={search.handleCloseSearch}
-                    />
-                  ) : undefined
-                }
+          {/* Left panel — file tree */}
+          <Panel
+            id="file-tree"
+            defaultSize="15rem"
+            minSize="10rem"
+            maxSize="50%"
+            collapsible
+            collapsedSize="0%"
+            panelRef={treePanelRef}
+            onResize={(size) => {
+              const collapsed = size.asPercentage === 0;
+              setTreeCollapsed(collapsed);
+              saveFileTreeCollapsed(workspaceId, collapsed);
+            }}
+          >
+            <div className="flex h-full flex-col overflow-hidden border-r border-border">
+              <FileTreeToolbar
+                onQuickOpen={onQuickOpen}
+                onSearchFiles={onSearchFiles}
+                treeCollapsed={treeCollapsed}
+                onToggleTree={toggleTree}
               />
-            ) : (
-              <div className="flex h-full items-center justify-center">
-                <div className="flex flex-col items-center gap-3 px-8 text-center">
-                  <File className="size-8 text-muted-foreground/30" />
-                  <p className="text-sm text-muted-foreground">Select a file to view</p>
-                </div>
+              <div className="min-h-0 flex-1 overflow-hidden">
+                <FileBrowser
+                  workspaceId={workspaceId}
+                  onOpenFile={handleSelectFile}
+                  compact
+                  selectedFile={viewFilePath}
+                />
               </div>
-            )}
-          </div>
-        </div>
-      </Panel>
-    </Group>
+            </div>
+          </Panel>
+
+          <Separator className="group relative w-[3px] bg-transparent hover:bg-accent-foreground/20 active:bg-accent-foreground/30 transition-colors cursor-col-resize">
+            <button
+              type="button"
+              onClick={toggleTree}
+              className="absolute top-1/2 left-1/2 z-10 flex size-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-accent-foreground/30 bg-background text-muted-foreground opacity-0 shadow-md transition-opacity hover:border-accent-foreground/50 hover:text-foreground group-hover:opacity-100"
+            >
+              {treeCollapsed ? (
+                <ChevronRight className="size-4" />
+              ) : (
+                <ChevronLeft className="size-4" />
+              )}
+            </button>
+          </Separator>
+
+          {/* Right panel — file tabs + content */}
+          <Panel id="file-viewer" minSize="20%">
+            <div className="relative flex h-full flex-col overflow-hidden">
+              {treeCollapsed && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      onClick={toggleTree}
+                      className="absolute left-1 top-0 z-10 inline-flex h-9 w-7 items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      <PanelLeft className="size-4" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="text-xs">
+                    Show File Explorer
+                  </TooltipContent>
+                </Tooltip>
+              )}
+
+              {/* Tab bar */}
+              <div className={treeCollapsed ? "[&>div]:pl-7" : ""}>
+                <FileTabBar
+                  workspaceId={workspaceId}
+                  workspacePath={workspacePath}
+                  tabs={fileTabs.openTabs}
+                  activeTabPath={fileTabs.activeTabPath}
+                  onSelectTab={handleTabSelect}
+                  onCloseTab={handleTabClose}
+                  onGoBack={handleEditorGoBack}
+                  onGoForward={handleEditorGoForward}
+                  canGoBack={editorHistory.canGoBack}
+                  canGoForward={editorHistory.canGoForward}
+                  actions={
+                    isMarkdown ? (
+                      <div className="flex items-center gap-0.5">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              onClick={() => setMdViewMode("preview")}
+                              className={`inline-flex size-6 items-center justify-center rounded-md transition-colors ${
+                                mdViewMode === "preview"
+                                  ? "bg-accent text-accent-foreground"
+                                  : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                              }`}
+                            >
+                              <Eye className="size-3.5" />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom" className="text-xs">
+                            Preview
+                          </TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              onClick={() => setMdViewMode("source")}
+                              className={`inline-flex size-6 items-center justify-center rounded-md transition-colors ${
+                                mdViewMode === "source"
+                                  ? "bg-accent text-accent-foreground"
+                                  : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                              }`}
+                            >
+                              <Code className="size-3.5" />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom" className="text-xs">
+                            Source
+                          </TooltipContent>
+                        </Tooltip>
+                      </div>
+                    ) : undefined
+                  }
+                />
+              </div>
+
+              {/* File content */}
+              <div className="min-h-0 flex-1">
+                {viewFilePath ? (
+                  <FileViewer
+                    workspaceId={workspaceId}
+                    filePath={viewFilePath}
+                    line={viewLine}
+                    lineEnd={viewLineEnd}
+                    column={viewColumn}
+                    onEditorView={handleEditorView}
+                    onCursorLineChange={handleCursorLineChange}
+                    renderMarkdown={renderMarkdown}
+                    editable
+                    hideTitleBar
+                    lspExtension={lspExtension}
+                    viewMode={isMarkdown ? mdViewMode : undefined}
+                    onViewModeChange={isMarkdown ? setMdViewMode : undefined}
+                    toolbar={
+                      search.searchOpen ? (
+                        <SearchBar
+                          ref={search.searchBarRef}
+                          query={search.searchQuery}
+                          onQueryChange={search.setSearchQuery}
+                          options={search.searchOptions}
+                          onOptionsChange={search.setSearchOptions}
+                          placeholder="Find in file..."
+                          matchInfo={search.matchInfo}
+                          onNext={search.handleNext}
+                          onPrevious={search.handlePrevious}
+                          onClose={search.handleCloseSearch}
+                        />
+                      ) : undefined
+                    }
+                  />
+                ) : (
+                  <div className="flex h-full items-center justify-center">
+                    <div className="flex flex-col items-center gap-3 px-8 text-center">
+                      <File className="size-8 text-muted-foreground/30" />
+                      <p className="text-sm text-muted-foreground">Select a file to view</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </Panel>
+        </Group>
+      )}
+    </div>
   );
 }
