@@ -100,6 +100,8 @@ pub fn run() {
             commands::browser::browser_hide,
             commands::browser::browser_show,
             commands::browser::browser_destroy,
+            commands::browser::browser_hide_all_for_workspace,
+            commands::browser::browser_show_all_for_workspace,
         ])
         .setup(move |app| {
             let window = app.get_webview_window("main").unwrap();

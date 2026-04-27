@@ -15,7 +15,15 @@ import {
   type IDockviewPanelProps,
 } from "dockview";
 import { Clock, Plus, X } from "lucide-react";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { trpc } from "../lib/trpc-client";
 import { ChatPane, type CodingAgentDef, useChatPaneState } from "./ChatPane";
 
@@ -100,30 +108,30 @@ const chatTabTheme: DockviewTheme = {
 // Chat tab panel component (renders inside each dockview tab)
 // ---------------------------------------------------------------------------
 
+// Visibility context — propagated from DockviewChatContainer via React
+// context instead of dockview's updateParameters (which clobbers params).
+const ChatVisibilityContext = createContext({ visible: true, wsActive: true });
+
 interface ChatTabParams {
   workspaceId: string;
   chatId: string;
-  visible: boolean;
-  wsActive: boolean;
 }
 
 function ChatTabPanel({ params, api }: IDockviewPanelProps<ChatTabParams>) {
-  // Track visibility: combine parent visibility param with dockview's own active state.
-  // Read params directly from props — dockview-react's bridge re-renders with merged
-  // params on every updateParameters call. Calling api.getParameters() returns only
-  // the last update payload (not merged), which would drop workspaceId/chatId after
-  // a partial { visible, wsActive } update and blank the panel.
+  // Track visibility: combine parent visibility context with dockview's own active state
   const [tabActive, setTabActive] = useState(api.isActive);
+  const { visible: parentVisible, wsActive } = useContext(ChatVisibilityContext);
 
   useEffect(() => {
     const d = api.onDidActiveChange((e) => setTabActive(e.isActive));
-    return () => d.dispose();
+    return () => {
+      d.dispose();
+    };
   }, [api]);
 
   if (!params.workspaceId || !params.chatId) return null;
 
-  const visible = params.visible && tabActive;
-  const wsActive = params.wsActive;
+  const visible = parentVisible && tabActive;
 
   return (
     <ChatTabContent
@@ -137,7 +145,7 @@ function ChatTabPanel({ params, api }: IDockviewPanelProps<ChatTabParams>) {
   );
 }
 
-/** Separate component so hooks work properly (params change via updateParameters). */
+/** Separate component so hooks work properly. */
 function ChatTabContent({
   workspaceId,
   chatId,
@@ -389,10 +397,6 @@ export function DockviewChatContainer({
 }: DockviewChatContainerProps) {
   const apiRef = useRef<DockviewApi | null>(null);
   const isRestoringRef = useRef(false);
-  const visibleRef = useRef(visible);
-  const wsActiveRef = useRef(wsActive);
-  visibleRef.current = visible;
-  wsActiveRef.current = wsActive;
 
   // Pre-fetch layout from server before mounting dockview
   const [initialData, setInitialData] = useState<{
@@ -486,8 +490,6 @@ export function DockviewChatContainer({
         params: {
           workspaceId,
           chatId,
-          visible: visibleRef.current && wsActiveRef.current !== false,
-          wsActive: wsActiveRef.current !== false,
         },
       };
 
@@ -539,17 +541,8 @@ export function DockviewChatContainer({
     return () => window.removeEventListener("keydown", handler, true);
   }, [visible, closeTab]);
 
-  // Update visibility params when parent visibility changes
-  useEffect(() => {
-    const api = apiRef.current;
-    if (!api) return;
-    for (const panel of api.panels) {
-      panel.api.updateParameters({
-        visible: visible && wsActive !== false,
-        wsActive: wsActive !== false,
-      });
-    }
-  }, [visible, wsActive]);
+  // Visibility is now propagated via ChatVisibilityContext (React context)
+  // instead of updateParameters — see the Provider wrapping DockviewReact.
 
   // Keep module-level refs in sync for stable Dockview components
   addTabRef.current = { agents, onAdd: handleAddTab };
@@ -575,13 +568,7 @@ export function DockviewChatContainer({
           createDefaultPanel(event.api, workspaceId);
         }
 
-        // Update visibility params to current values (may be stale in saved data)
-        for (const panel of event.api.panels) {
-          panel.api.updateParameters({
-            visible: visibleRef.current && wsActiveRef.current !== false,
-            wsActive: wsActiveRef.current !== false,
-          });
-        }
+        // Visibility is propagated via ChatVisibilityContext — no param update needed.
 
         // Allow persistence after restoration settles
         setTimeout(() => {
@@ -589,19 +576,7 @@ export function DockviewChatContainer({
         }, 0);
       } else {
         // No saved layout — create a default tab
-        const chatId = newChatId();
-        event.api.addPanel({
-          id: chatId,
-          component: "chatTab",
-          tabComponent: "chatTab",
-          title: "Chat",
-          params: {
-            workspaceId,
-            chatId,
-            visible: visibleRef.current && wsActiveRef.current !== false,
-            wsActive: wsActiveRef.current !== false,
-          },
-        });
+        createDefaultPanel(event.api, workspaceId);
 
         persistToServer(workspaceId, event.api.toJSON());
       }
@@ -618,6 +593,11 @@ export function DockviewChatContainer({
     [workspaceId, schedulePersist],
   );
 
+  const visibilityValue = useMemo(
+    () => ({ visible: visible && wsActive !== false, wsActive: wsActive !== false }),
+    [visible, wsActive],
+  );
+
   // Don't render dockview until the initial layout is fetched from the server
   if (!initialData.loaded) {
     return <div className="flex h-full w-full items-center justify-center" />;
@@ -625,15 +605,17 @@ export function DockviewChatContainer({
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">
-      <DockviewReact
-        theme={chatTabTheme}
-        className="h-full"
-        components={chatPanelComponents}
-        tabComponents={chatTabComponents}
-        defaultTabComponent={ChatTab}
-        onReady={onReady}
-        rightHeaderActionsComponent={RightHeaderActions}
-      />
+      <ChatVisibilityContext.Provider value={visibilityValue}>
+        <DockviewReact
+          theme={chatTabTheme}
+          className="h-full"
+          components={chatPanelComponents}
+          tabComponents={chatTabComponents}
+          defaultTabComponent={ChatTab}
+          onReady={onReady}
+          rightHeaderActionsComponent={RightHeaderActions}
+        />
+      </ChatVisibilityContext.Provider>
     </div>
   );
 }
@@ -648,8 +630,6 @@ function createDefaultPanel(api: DockviewApi, workspaceId: string): void {
     params: {
       workspaceId,
       chatId,
-      visible: true,
-      wsActive: true,
     },
   });
 }
