@@ -47,6 +47,14 @@ export interface TaskInfo {
   mode?: string;
   model?: string;
   codingAgentId?: string;
+  /**
+   * The eventId of the first event broadcast for this task. Set on the
+   * first call to broadcast() and used by tasks.stream Phase 2b catch-up
+   * replay to scope buffered events to the current task. Without this,
+   * a second message in a session would re-yield every event from the
+   * prior task that shares the same session buffer.
+   */
+  firstEventId?: number;
 }
 
 export interface SubmitTaskOptions {
@@ -136,6 +144,9 @@ function broadcast(chatId: string, chunk: UIMessageChunk) {
     buf.events.push(enrichedChunk);
     if (buf.events.length > MAX_BUFFER_SIZE) {
       buf.events.shift();
+    }
+    if (task.firstEventId === undefined) {
+      task.firstEventId = eventId;
     }
   }
 
@@ -636,6 +647,7 @@ function toTaskInfo(task: InternalTask): TaskInfo {
     mode: task.mode,
     model: task.model,
     codingAgentId: task.codingAgentId,
+    firstEventId: task.firstEventId,
   };
 }
 

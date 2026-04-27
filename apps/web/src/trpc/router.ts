@@ -1527,16 +1527,28 @@ const tasksRouter = t.router({
       // completed) but no events arrived via the live listener yet, replay
       // buffered events from the session.  This closes the race window
       // where broadcast fires *before* the WebSocket subscription opens.
+      //
+      // Scope to the current task only: the session buffer is keyed by
+      // sessionId and accumulates across multiple tasks in the same
+      // session, so replaying everything would re-yield prior tasks'
+      // events (including their `finish`) and confuse the AI SDK.
       let caughtUp = false;
       if (queue.length === 0 && task?.sessionId) {
         const buf = getSessionBuffer(task.sessionId);
         if (buf && buf.events.length > 0) {
+          const taskStartEventId = task.firstEventId ?? Number.POSITIVE_INFINITY;
           log.info(
-            { chatId, sessionId: task.sessionId, bufferedCount: buf.events.length },
+            {
+              chatId,
+              sessionId: task.sessionId,
+              bufferedCount: buf.events.length,
+              taskStartEventId,
+            },
             "tasks.stream: replaying buffered events (catch-up)",
           );
           for (const buffered of buf.events) {
             if (buffered.eventId != null && buffered.eventId <= highWaterMark) continue;
+            if (buffered.eventId != null && buffered.eventId < taskStartEventId) continue;
             yield buffered;
             caughtUp = true;
             if (buffered.eventId != null) {
