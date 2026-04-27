@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { closeSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type {
@@ -90,6 +90,65 @@ function formatToolTitle(toolName: string, input: Record<string, unknown>): stri
 function formatUserAnswer(answers: Record<string, string>): string {
   const lines = Object.entries(answers).map(([question, answer]) => `${question}: ${answer}`);
   return `The user selected:\n${lines.join("\n")}`;
+}
+
+// Mirrors the Claude Code SDK's project-dir encoder: replace any
+// non-alphanumeric byte with `-`. Long paths (>200) get a hash suffix,
+// which we don't replicate — callers fall back to firstPrompt when the
+// computed path doesn't resolve.
+function encodeProjectDir(absDir: string): string {
+  return absDir.replace(/[^a-zA-Z0-9]/g, "-");
+}
+
+const SESSION_TAIL_BYTES = 64 * 1024;
+
+// Read the most recent `last-prompt` record from a session JSONL file by
+// scanning the last 64 KB. The CLI's /resume picker uses this latest
+// prompt as the session title, so we surface the same string here.
+function readSessionLastPrompt(workspaceDir: string, sessionId: string): string | undefined {
+  const configDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
+  const file = join(configDir, "projects", encodeProjectDir(workspaceDir), `${sessionId}.jsonl`);
+
+  let fd: number | undefined;
+  try {
+    const size = statSync(file).size;
+    if (size === 0) return undefined;
+    const readSize = Math.min(size, SESSION_TAIL_BYTES);
+    const buf = Buffer.alloc(readSize);
+    fd = openSync(file, "r");
+    readSync(fd, buf, 0, readSize, size - readSize);
+    let text = buf.toString("utf8");
+    // Drop the partial first line when we tailed the file.
+    if (readSize < size) {
+      const nl = text.indexOf("\n");
+      text = nl === -1 ? "" : text.slice(nl + 1);
+    }
+    const lines = text.split("\n");
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i];
+      if (!line || !line.includes('"last-prompt"')) continue;
+      try {
+        const record = JSON.parse(line);
+        if (record.type === "last-prompt" && typeof record.lastPrompt === "string") {
+          const trimmed = record.lastPrompt.trim();
+          if (trimmed) return trimmed;
+        }
+      } catch {
+        // Malformed line — keep scanning.
+      }
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  } finally {
+    if (fd !== undefined) {
+      try {
+        closeSync(fd);
+      } catch {
+        // ignore
+      }
+    }
+  }
 }
 
 export class ClaudeCodeAdapter implements CodingAgent {
@@ -265,7 +324,9 @@ export class ClaudeCodeAdapter implements CodingAgent {
   async listSessions(dir: string): Promise<SessionListItem[]> {
     log.info({ dir }, "listSessions");
     const sessions = await listSessions({ dir, limit: 50 });
-    return sessions.filter((s) => s.cwd === dir).map(mapSessionInfo);
+    return sessions
+      .filter((s) => s.cwd === dir)
+      .map((s) => mapSessionInfo(s, readSessionLastPrompt(dir, s.sessionId)));
   }
 
   async getSessionMessages(
@@ -340,10 +401,15 @@ function mapModelInfo(info: ModelInfo): AgentModel {
   };
 }
 
-function mapSessionInfo(info: SDKSessionInfo): SessionListItem {
+function mapSessionInfo(info: SDKSessionInfo, lastPrompt?: string): SessionListItem {
+  // Match the Claude Code CLI's /resume picker: prefer the user-set
+  // custom title, then the most recent prompt, then fall back through
+  // the SDK's summary chain (which itself ends in firstPrompt).
+  const summary =
+    info.customTitle ?? lastPrompt ?? info.summary ?? info.firstPrompt ?? "Untitled session";
   return {
     sessionId: info.sessionId,
-    summary: info.customTitle ?? info.summary ?? info.firstPrompt ?? "Untitled session",
+    summary,
     lastModified: info.lastModified,
     firstPrompt: info.firstPrompt,
     gitBranch: info.gitBranch,
