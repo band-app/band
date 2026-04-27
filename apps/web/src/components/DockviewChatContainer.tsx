@@ -108,30 +108,27 @@ interface ChatTabParams {
 }
 
 function ChatTabPanel({ params, api }: IDockviewPanelProps<ChatTabParams>) {
-  // Track visibility: combine parent visibility param with dockview's own active state
+  // Track visibility: combine parent visibility param with dockview's own active state.
+  // Read params directly from props — dockview-react's bridge re-renders with merged
+  // params on every updateParameters call. Calling api.getParameters() returns only
+  // the last update payload (not merged), which would drop workspaceId/chatId after
+  // a partial { visible, wsActive } update and blank the panel.
   const [tabActive, setTabActive] = useState(api.isActive);
-  const [currentParams, setCurrentParams] = useState(params);
 
   useEffect(() => {
-    const d1 = api.onDidActiveChange((e) => setTabActive(e.isActive));
-    const d2 = api.onDidParametersChange(() => {
-      setCurrentParams(api.getParameters<ChatTabParams>());
-    });
-    return () => {
-      d1.dispose();
-      d2.dispose();
-    };
+    const d = api.onDidActiveChange((e) => setTabActive(e.isActive));
+    return () => d.dispose();
   }, [api]);
 
-  if (!currentParams.workspaceId || !currentParams.chatId) return null;
+  if (!params.workspaceId || !params.chatId) return null;
 
-  const visible = currentParams.visible && tabActive;
-  const wsActive = currentParams.wsActive;
+  const visible = params.visible && tabActive;
+  const wsActive = params.wsActive;
 
   return (
     <ChatTabContent
-      workspaceId={currentParams.workspaceId}
-      chatId={currentParams.chatId}
+      workspaceId={params.workspaceId}
+      chatId={params.chatId}
       visible={visible}
       wsActive={wsActive}
       tabActive={tabActive}
