@@ -25,8 +25,6 @@ import type {
 
 const log = createLogger("coding-agent:claude-code");
 
-const ASK_USER_QUESTION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
-
 /**
  * Read the most recently modified plan file.
  *
@@ -230,31 +228,14 @@ export class ClaudeCodeAdapter implements CodingAgent {
         }
       }
 
-      try {
-        const answers = await Promise.race([
-          this.onUserInputNeeded({
-            approvalId,
-            toolCallId: options.toolUseID,
-            toolName,
-            input: enrichedInput,
-          }),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error("User input timeout")), ASK_USER_QUESTION_TIMEOUT_MS),
-          ),
-        ]);
+      const answers = await this.onUserInputNeeded({
+        approvalId,
+        toolCallId: options.toolUseID,
+        toolName,
+        input: enrichedInput,
+      });
 
-        return { behavior: "deny", message: formatUserAnswer(answers) };
-      } catch (err) {
-        log.warn({ err, approvalId }, `${toolName} timed out or errored, auto-allowing`);
-        // If the conversation has already been closed (process exited while
-        // waiting for user input), throw instead of returning a response that
-        // the SDK would try to write to the dead transport — which causes an
-        // unhandled "ProcessTransport is not ready for writing" rejection.
-        if (!this.activeConversation) {
-          throw new Error("Conversation closed while waiting for user input");
-        }
-        return { behavior: "allow", updatedInput: input };
-      }
+      return { behavior: "deny", message: formatUserAnswer(answers) };
     };
 
     const permissionMode = options?.mode === "plan" ? ("plan" as const) : undefined;

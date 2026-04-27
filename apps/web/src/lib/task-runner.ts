@@ -5,7 +5,7 @@ import type { UIMessageChunk } from "ai";
 import { getAgent, getOrCreateAgent, replaceAgent } from "./agent-pool";
 import { getChat, updateChatStatus } from "./chat-manager";
 import { mimeTypeFromFilename } from "./mime-types";
-import { createPendingInput } from "./pending-inputs";
+import { createPendingInput, rejectAllPendingInputs } from "./pending-inputs";
 import { shiftQueuedMessage } from "./queued-message-store";
 import { bandHome, upsertWorkspaceStatus } from "./state";
 import { generateTaskId, markTaskFailed, saveTask } from "./task-store";
@@ -233,6 +233,9 @@ export function abortTask(chatId: string): boolean {
     return false;
   }
 
+  // Reject any pending user-input promises so the agent adapter doesn't hang.
+  rejectAllPendingInputs(new Error("Task aborted by user"));
+
   const agent = getAgent(chatId);
   if (agent?.abort) {
     agent.abort();
@@ -258,6 +261,8 @@ export function cancelTask(taskId: string): { cancelled: boolean; workspaceId?: 
   // Search in-memory tasks for a running task with this record ID
   for (const [chatId, task] of tasks) {
     if (task.taskRecordId === taskId && task.status === "running") {
+      rejectAllPendingInputs(new Error("Task cancelled"));
+
       const agent = getAgent(chatId);
       if (agent?.abort) {
         agent.abort();
@@ -328,23 +333,13 @@ async function runTask(chatId: string, task: InternalTask) {
   const working = upsertWorkspaceStatus(task.workspaceId, { status: "working" });
   emitStatusEvent({ kind: "update", status: working });
 
-  agent.onUserInputNeeded = async (request) => {
-    // Set status to needs_attention while waiting for user input
-    const needsAttention = upsertWorkspaceStatus(task.workspaceId, { status: "needs_attention" });
-    emitStatusEvent({ kind: "update", status: needsAttention });
-
-    const answers = await createPendingInput(request.approvalId);
-
-    // Restore working status after user responds
-    const restored = upsertWorkspaceStatus(task.workspaceId, { status: "working" });
-    emitStatusEvent({ kind: "update", status: restored });
-
-    return answers;
-  };
-
   // Per-workspace shared directory so concurrent tasks don't collide.
   const sharedDir = join(bandHome(), "shared", task.workspaceId);
   mkdirSync(sharedDir, { recursive: true });
+
+  /** Tools that require user interaction — their tool-input-available broadcast
+   * is handled exclusively by onUserInputNeeded (which enriches the input). */
+  const INTERACTIVE_TOOLS = new Set(["AskUserQuestion", "ExitPlanMode"]);
 
   let textPartId = "";
   let textStarted = false;
@@ -359,6 +354,38 @@ async function runTask(chatId: string, task: InternalTask) {
       textStarted = false;
     }
   }
+
+  agent.onUserInputNeeded = async (request) => {
+    // End any in-progress text block so the approval card renders below it.
+    endText();
+
+    // Always broadcast the interactive tool call with the enriched input so
+    // the UI can render the approval component immediately. This is the
+    // authoritative broadcast for interactive tools — the tool-use event
+    // handler deliberately skips broadcasting for these tools to avoid a
+    // race where the tool-use handler broadcasts first with empty input
+    // ({}) and then this callback's enriched input (with plan content etc.)
+    // is skipped because announcedToolCalls already has the ID.
+    announcedToolCalls.add(request.toolCallId);
+    broadcast(chatId, {
+      type: "tool-input-available",
+      toolCallId: request.toolCallId,
+      toolName: request.toolName,
+      input: request.input,
+    });
+
+    // Set status to needs_attention while waiting for user input
+    const needsAttention = upsertWorkspaceStatus(task.workspaceId, { status: "needs_attention" });
+    emitStatusEvent({ kind: "update", status: needsAttention });
+
+    const answers = await createPendingInput(request.approvalId);
+
+    // Restore working status after user responds
+    const restored = upsertWorkspaceStatus(task.workspaceId, { status: "working" });
+    emitStatusEvent({ kind: "update", status: restored });
+
+    return answers;
+  };
 
   try {
     const sessionOptions =
@@ -412,13 +439,19 @@ async function runTask(chatId: string, task: InternalTask) {
         case "tool-use": {
           endText();
           announcedToolCalls.add(event.toolCallId);
-          broadcast(chatId, {
-            type: "tool-input-available",
-            toolCallId: event.toolCallId,
-            toolName: event.toolName,
-            input: event.input,
-            ...(event.displayTitle ? { title: event.displayTitle } : {}),
-          });
+          // Interactive tools (ExitPlanMode, AskUserQuestion) are broadcast
+          // from onUserInputNeeded which has the enriched input. Skip here
+          // to avoid broadcasting with raw/empty input that would either
+          // race with or overwrite the enriched broadcast.
+          if (!INTERACTIVE_TOOLS.has(event.toolName)) {
+            broadcast(chatId, {
+              type: "tool-input-available",
+              toolCallId: event.toolCallId,
+              toolName: event.toolName,
+              input: event.input,
+              ...(event.displayTitle ? { title: event.displayTitle } : {}),
+            });
+          }
           break;
         }
 

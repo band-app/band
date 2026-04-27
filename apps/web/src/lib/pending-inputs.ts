@@ -30,3 +30,10 @@ export function rejectPendingInput(approvalId: string, error: Error): boolean {
   pending.reject(error);
   return true;
 }
+
+export function rejectAllPendingInputs(error: Error): void {
+  for (const [approvalId, pending] of pendingInputs) {
+    pendingInputs.delete(approvalId);
+    pending.reject(error);
+  }
+}
