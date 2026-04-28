@@ -2,6 +2,7 @@ import type { IDockviewPanelProps } from "dockview";
 import { ArrowLeft, ArrowRight, RotateCw, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { isTauri } from "../lib/is-tauri";
+import { trpc } from "../lib/trpc-client";
 
 const DEFAULT_URL = "";
 const BLANK_URL = "about:blank";
@@ -41,15 +42,14 @@ function setFaviconUrl(browserId: string, url: string) {
 
 function subscribeFavicons(cb: () => void) {
   faviconListeners.add(cb);
-  return () => { faviconListeners.delete(cb); };
+  return () => {
+    faviconListeners.delete(cb);
+  };
 }
 
 /** Reactive hook that returns the current favicon URL for a browser tab. */
 export function useFavicon(browserId: string): string | undefined {
-  return useSyncExternalStore(
-    subscribeFavicons,
-    () => faviconMap.get(browserId),
-  );
+  return useSyncExternalStore(subscribeFavicons, () => faviconMap.get(browserId));
 }
 
 // ---------------------------------------------------------------------------
@@ -471,11 +471,14 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
 export function BrowserPaneComponent({
   params,
   api,
-}: { params: BrowserPaneParams; api: IDockviewPanelProps<BrowserPaneParams>["api"] }) {
-  const { workspaceId, browserId, initialUrl } = params;
+}: {
+  params: BrowserPaneParams;
+  api: IDockviewPanelProps<BrowserPaneParams>["api"];
+}) {
+  const { browserId, initialUrl } = params;
 
-  const [currentUrl, setCurrentUrl] = useState(() => loadUrl(browserId) ?? initialUrl ?? DEFAULT_URL);
-  const [inputUrl, setInputUrl] = useState(() => loadUrl(browserId) ?? initialUrl ?? DEFAULT_URL);
+  const [currentUrl, setCurrentUrl] = useState(() => initialUrl ?? DEFAULT_URL);
+  const [inputUrl, setInputUrl] = useState(() => initialUrl ?? DEFAULT_URL);
   const [loading, setLoading] = useState(false);
   const [created, setCreated] = useState(false);
   const createdRef = useRef(false);
@@ -486,16 +489,6 @@ export function BrowserPaneComponent({
   browserIdRef.current = browserId;
   const currentUrlRef = useRef(currentUrl);
   currentUrlRef.current = currentUrl;
-
-  // ------- restore persisted URL when browserId becomes available -------
-  useEffect(() => {
-    if (!browserId) return;
-    const saved = loadUrl(browserId);
-    if (saved) {
-      setCurrentUrl(saved);
-      setInputUrl(saved);
-    }
-  }, [browserId]);
 
   // ------- helpers -------
 
@@ -511,6 +504,39 @@ export function BrowserPaneComponent({
     const { invoke: tauriInvoke } = await import("@tauri-apps/api/core");
     return tauriInvoke(cmd, args);
   }, []);
+
+  // ------- fetch URL from server when no initialUrl param -------
+  // The server browser record is the source of truth for the URL.
+  // When a browser is created via CLI with --url, or on workspace revisit,
+  // the panel is added without an initialUrl param — fetch it from the server.
+  useEffect(() => {
+    if (!browserId || initialUrl) return;
+
+    let cancelled = false;
+    trpc.browsers.get
+      .query({ browserId })
+      .then((result) => {
+        if (cancelled) return;
+        const url = result.browser?.url;
+        if (!url || url === "" || url === BLANK_URL) return;
+        setCurrentUrl(url);
+        setInputUrl(url);
+        if (createdRef.current) {
+          // Webview exists — navigate it directly.
+          invoke("browser_navigate", { browserId, url }).catch(() => {});
+        } else {
+          // Webview not yet created — queue it so tryCreate flushes after
+          // browser_create completes (same mechanism as handleNavigate).
+          pendingNavRef.current = url;
+        }
+      })
+      .catch(() => {
+        // Server fetch failed — the user can still type a URL manually
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [browserId, initialUrl, invoke]);
 
   // ------- create or show webview once placeholder has real dimensions -------
   useEffect(() => {
@@ -531,7 +557,7 @@ export function BrowserPaneComponent({
         await invoke("browser_create", {
           browserId,
           ...bounds,
-          url: loadUrl(browserId) || currentUrlRef.current || BLANK_URL,
+          url: currentUrlRef.current || BLANK_URL,
         });
         createdRef.current = true;
         setCreated(true);
@@ -563,14 +589,18 @@ export function BrowserPaneComponent({
     };
   }, [created, getBounds, invoke, browserId]);
 
-  // ------- listen for URL changes from the Rust side -------
+  // ------- listen for URL / title changes from the Rust side -------
+  // Persist URL to server (debounced) so it survives workspace switches.
+  const urlPersistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
     if (!isTauri) return;
-    let unlisten: (() => void) | undefined;
+    let unlistenUrl: (() => void) | undefined;
+    let unlistenTitle: (() => void) | undefined;
 
     (async () => {
       const { listen } = await import("@tauri-apps/api/event");
-      unlisten = await listen<{ url: string; browser_id: string; loading: boolean }>(
+      unlistenUrl = await listen<{ url: string; browser_id: string; loading: boolean }>(
         "browser-url-changed",
         (event) => {
           if (event.payload.browser_id !== browserIdRef.current) return;
@@ -579,7 +609,12 @@ export function BrowserPaneComponent({
           if (url === BLANK_URL) return;
           setCurrentUrl(url);
           setInputUrl(url);
-          saveUrl(browserIdRef.current, url);
+
+          // Persist to server (debounced to avoid hammering on redirect chains)
+          if (urlPersistTimer.current) clearTimeout(urlPersistTimer.current);
+          urlPersistTimer.current = setTimeout(() => {
+            trpc.browsers.navigate.mutate({ browserId: browserIdRef.current, url }).catch(() => {});
+          }, 500);
 
           // Try to extract favicon from the URL's origin
           try {
@@ -590,12 +625,23 @@ export function BrowserPaneComponent({
           }
         },
       );
+      unlistenTitle = await listen<{ browser_id: string; title: string }>(
+        "browser-title-changed",
+        (event) => {
+          if (event.payload.browser_id !== browserIdRef.current) return;
+          if (event.payload.title) {
+            api.setTitle(event.payload.title);
+          }
+        },
+      );
     })();
 
     return () => {
-      unlisten?.();
+      unlistenUrl?.();
+      unlistenTitle?.();
+      if (urlPersistTimer.current) clearTimeout(urlPersistTimer.current);
     };
-  }, []);
+  }, [api]);
 
   // ------- visibility tracking (hide/show when tab switches) -------
   // In dockview, `isActive` = globally focused (only one panel at a time),
@@ -691,7 +737,6 @@ export function BrowserPaneComponent({
       setCurrentUrl(normalized);
       setInputUrl(normalized);
       setLoading(true);
-      saveUrl(browserId, normalized);
 
       if (createdRef.current) {
         try {

@@ -1,3 +1,5 @@
+import { useAdapter } from "@band-app/dashboard-core";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   type DockviewApi,
   DockviewReact,
@@ -17,7 +19,6 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { useAdapter } from "@band-app/dashboard-core";
 import { isTauri } from "../lib/is-tauri";
 import { trpc } from "../lib/trpc-client";
 import { BrowserPaneComponent, type BrowserPaneParams, useFavicon } from "./BrowserPanel";
@@ -60,12 +61,45 @@ export function newBrowserId(): string {
 }
 
 // ---------------------------------------------------------------------------
-// Debounced server persistence (500ms)
+// React Query cache key
+// ---------------------------------------------------------------------------
+
+function browserLayoutKey(workspaceId: string) {
+  return ["browserLayout", workspaceId] as const;
+}
+
+// ---------------------------------------------------------------------------
+// Debounced server persistence (500ms) — also updates React Query cache
+// so the next mount renders instantly from cached data.
 // ---------------------------------------------------------------------------
 
 const saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-function persistToServer(workspaceId: string, layout: unknown): void {
+interface PersistOptions {
+  queryClient?: ReturnType<typeof useQueryClient>;
+}
+
+function panelIdsFromLayout(layout: unknown): Set<string> {
+  if (typeof layout === "object" && layout !== null) {
+    const panels = (layout as Record<string, unknown>).panels;
+    if (typeof panels === "object" && panels !== null) {
+      return new Set(Object.keys(panels as Record<string, unknown>));
+    }
+  }
+  return new Set();
+}
+
+function persistToServer(workspaceId: string, layout: unknown, opts?: PersistOptions): void {
+  // Update React Query cache immediately so next mount is instant.
+  // Derive browserIds from the layout's panels map so the cache stays
+  // in sync — prevents orphan-pruning on remount after CLI additions.
+  if (opts?.queryClient) {
+    opts.queryClient.setQueryData(browserLayoutKey(workspaceId), {
+      layout,
+      browserIds: panelIdsFromLayout(layout),
+    });
+  }
+
   const existing = saveTimers.get(workspaceId);
   if (existing) clearTimeout(existing);
   saveTimers.set(
@@ -77,6 +111,15 @@ function persistToServer(workspaceId: string, layout: unknown): void {
       });
     }, 500),
   );
+}
+
+// ---------------------------------------------------------------------------
+// Cached data shape
+// ---------------------------------------------------------------------------
+
+interface BrowserLayoutData {
+  layout: unknown | null;
+  browserIds: Set<string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -289,36 +332,37 @@ export function DockviewBrowserContainer({
   wsActive,
 }: DockviewBrowserContainerProps) {
   const adapter = useAdapter();
+  const queryClient = useQueryClient();
   const apiRef = useRef<DockviewApi | null>(null);
   const isRestoringRef = useRef(false);
 
-  // Pre-fetch layout AND browser records from server before mounting dockview.
-  // We need both so we can prune layout panels whose browser records were deleted.
-  const [initialData, setInitialData] = useState<{
-    loaded: boolean;
-    layout: unknown | null;
-    browserIds: Set<string> | null;
-  }>({ loaded: false, layout: null, browserIds: null });
-
-  useEffect(() => {
-    Promise.all([
-      trpc.browserLayout.get.query({ workspaceId }).catch(() => ({ tree: null })),
-      trpc.browsers.list.query({ workspaceId }).catch(() => ({ browsers: [] })),
-    ]).then(([{ tree }, { browsers }]) => {
-      setInitialData({
-        loaded: true,
+  // Fetch layout AND browser records via React Query — cached across mounts
+  // so re-visiting a workspace renders instantly from the cache.
+  const { data: initialData } = useQuery<BrowserLayoutData>({
+    queryKey: browserLayoutKey(workspaceId),
+    queryFn: async () => {
+      const [{ tree }, { browsers }] = await Promise.all([
+        trpc.browserLayout.get.query({ workspaceId }).catch(() => ({ tree: null })),
+        trpc.browsers.list
+          .query({ workspaceId })
+          .catch(() => ({ browsers: [] as { id: string }[] })),
+      ]);
+      return {
         layout: tree,
         browserIds: new Set(browsers.map((b: { id: string }) => b.id)),
-      });
-    });
-  }, [workspaceId]);
+      };
+    },
+    staleTime: Number.POSITIVE_INFINITY, // never auto-refetch — we manage persistence ourselves
+  });
 
-  // Debounced persist: serialize the full dockview layout
+  // Debounced persist: serialize the full dockview layout + update cache
+  const queryClientRef = useRef(queryClient);
+  queryClientRef.current = queryClient;
   const schedulePersist = useCallback(() => {
     if (isRestoringRef.current) return;
     const api = apiRef.current;
     if (!api) return;
-    persistToServer(workspaceId, api.toJSON());
+    persistToServer(workspaceId, api.toJSON(), { queryClient: queryClientRef.current });
   }, [workspaceId]);
 
   const handleAddTab = useCallback(
@@ -460,9 +504,9 @@ export function DockviewBrowserContainer({
 
   // Use refs for the initial data so onReady's closure captures the latest
   const initialLayoutRef = useRef<unknown | null>(null);
-  initialLayoutRef.current = initialData.layout;
+  initialLayoutRef.current = initialData?.layout ?? null;
   const initialBrowserIdsRef = useRef<Set<string> | null>(null);
-  initialBrowserIdsRef.current = initialData.browserIds;
+  initialBrowserIdsRef.current = initialData?.browserIds ?? null;
 
   const onReady = useCallback(
     (event: DockviewReadyEvent) => {
@@ -483,9 +527,7 @@ export function DockviewBrowserContainer({
 
         // Prune panels whose browser records no longer exist on the server.
         if (knownBrowserIds) {
-          const orphans = event.api.panels.filter(
-            (p) => !knownBrowserIds.has(p.id),
-          );
+          const orphans = event.api.panels.filter((p) => !knownBrowserIds.has(p.id));
           for (const orphan of orphans) {
             event.api.removePanel(orphan);
           }
@@ -502,7 +544,7 @@ export function DockviewBrowserContainer({
       } else {
         // No saved layout — create a default tab
         createDefaultPanel(event.api, workspaceId);
-        persistToServer(workspaceId, event.api.toJSON());
+        persistToServer(workspaceId, event.api.toJSON(), { queryClient: queryClientRef.current });
       }
 
       // Listen for any layout changes and auto-persist
@@ -522,8 +564,9 @@ export function DockviewBrowserContainer({
     [visible, wsActive],
   );
 
-  // Don't render dockview until the initial layout is fetched from the server
-  if (!initialData.loaded) {
+  // Don't render dockview until the initial layout is fetched from the server.
+  // On subsequent visits, React Query returns cached data instantly — no loading.
+  if (!initialData) {
     return <div className="flex h-full w-full items-center justify-center" />;
   }
 

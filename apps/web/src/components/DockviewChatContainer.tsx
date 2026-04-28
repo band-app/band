@@ -5,6 +5,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@band-app/ui";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   type DockviewApi,
   DockviewReact,
@@ -65,12 +66,34 @@ export function newChatId(): string {
 }
 
 // ---------------------------------------------------------------------------
-// Debounced server persistence (500ms)
+// React Query cache key
+// ---------------------------------------------------------------------------
+
+function chatLayoutKey(workspaceId: string) {
+  return ["chatLayout", workspaceId] as const;
+}
+
+// ---------------------------------------------------------------------------
+// Debounced server persistence (500ms) — also updates React Query cache
+// so the next mount renders instantly from cached data.
 // ---------------------------------------------------------------------------
 
 const saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-function persistToServer(workspaceId: string, layout: unknown): void {
+interface ChatPersistOptions {
+  queryClient?: ReturnType<typeof useQueryClient>;
+}
+
+interface ChatLayoutData {
+  layout: unknown | null;
+}
+
+function persistToServer(workspaceId: string, layout: unknown, opts?: ChatPersistOptions): void {
+  // Update React Query cache immediately so next mount is instant
+  if (opts?.queryClient) {
+    opts.queryClient.setQueryData(chatLayoutKey(workspaceId), { layout });
+  }
+
   const existing = saveTimers.get(workspaceId);
   if (existing) clearTimeout(existing);
   saveTimers.set(
@@ -395,25 +418,22 @@ export function DockviewChatContainer({
   visible,
   wsActive,
 }: DockviewChatContainerProps) {
+  const queryClient = useQueryClient();
   const apiRef = useRef<DockviewApi | null>(null);
   const isRestoringRef = useRef(false);
 
-  // Pre-fetch layout from server before mounting dockview
-  const [initialData, setInitialData] = useState<{
-    loaded: boolean;
-    layout: unknown | null;
-  }>({ loaded: false, layout: null });
-
-  useEffect(() => {
-    trpc.chatLayout.get
-      .query({ workspaceId })
-      .then(({ tree }) => {
-        setInitialData({ loaded: true, layout: tree });
-      })
-      .catch(() => {
-        setInitialData({ loaded: true, layout: null });
-      });
-  }, [workspaceId]);
+  // Fetch layout via React Query — cached across mounts so re-visiting
+  // a workspace renders instantly from the cache.
+  const { data: initialData } = useQuery<ChatLayoutData>({
+    queryKey: chatLayoutKey(workspaceId),
+    queryFn: async () => {
+      const { tree } = await trpc.chatLayout.get
+        .query({ workspaceId })
+        .catch(() => ({ tree: null }));
+      return { layout: tree };
+    },
+    staleTime: Number.POSITIVE_INFINITY, // never auto-refetch — we manage persistence ourselves
+  });
 
   // Load agents for the "add tab" dropdown
   const [agents, setAgents] = useState<CodingAgentDef[]>([]);
@@ -429,12 +449,14 @@ export function DockviewChatContainer({
       .catch(() => {});
   }, []);
 
-  // Debounced persist: serialize the full dockview layout
+  // Debounced persist: serialize the full dockview layout + update cache
+  const queryClientRef = useRef(queryClient);
+  queryClientRef.current = queryClient;
   const schedulePersist = useCallback(() => {
     if (isRestoringRef.current) return;
     const api = apiRef.current;
     if (!api) return;
-    persistToServer(workspaceId, api.toJSON());
+    persistToServer(workspaceId, api.toJSON(), { queryClient: queryClientRef.current });
   }, [workspaceId]);
 
   const handleAddTab = useCallback(
@@ -550,7 +572,7 @@ export function DockviewChatContainer({
 
   // Use a ref for the initial layout so onReady's closure captures the latest
   const initialLayoutRef = useRef<unknown | null>(null);
-  initialLayoutRef.current = initialData.layout;
+  initialLayoutRef.current = initialData?.layout ?? null;
 
   const onReady = useCallback(
     (event: DockviewReadyEvent) => {
@@ -578,7 +600,7 @@ export function DockviewChatContainer({
         // No saved layout — create a default tab
         createDefaultPanel(event.api, workspaceId);
 
-        persistToServer(workspaceId, event.api.toJSON());
+        persistToServer(workspaceId, event.api.toJSON(), { queryClient: queryClientRef.current });
       }
 
       // Listen for any layout changes and auto-persist
@@ -598,8 +620,9 @@ export function DockviewChatContainer({
     [visible, wsActive],
   );
 
-  // Don't render dockview until the initial layout is fetched from the server
-  if (!initialData.loaded) {
+  // Don't render dockview until the initial layout is fetched from the server.
+  // On subsequent visits, React Query returns cached data instantly — no loading.
+  if (!initialData) {
     return <div className="flex h-full w-full items-center justify-center" />;
   }
 

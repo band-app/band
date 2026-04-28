@@ -22,9 +22,10 @@ import {
   MessageSquare,
   Terminal as TerminalIcon,
 } from "lucide-react";
-import { createContext, lazy, memo, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isTauri } from "../lib/is-tauri";
 import { trpc } from "../lib/trpc-client";
+import { useWsActive } from "../lib/workspace-visibility-store";
 import { CodeBrowserView } from "./CodeBrowserView";
 import { DockviewBrowserContainer } from "./DockviewBrowserContainer";
 import { DockviewChatContainer } from "./DockviewChatContainer";
@@ -67,14 +68,6 @@ const SplitTerminalContainer = lazy(() =>
 
 // Browser panel params (browser container handles its own lazy loading internally)
 
-
-// ---------------------------------------------------------------------------
-// Workspace-active context — propagated via React context instead of
-// dockview's updateParameters (which clobbers the full param object).
-// ---------------------------------------------------------------------------
-
-const WsActiveContext = createContext(true);
-
 // ---------------------------------------------------------------------------
 // Panel params types
 // ---------------------------------------------------------------------------
@@ -115,7 +108,7 @@ function ChatPanelComponent({ params, api }: IDockviewPanelProps<ChatParams>) {
   // (Changes, Files, Terminal) is focused.  `isVisible` is only false when
   // the panel is behind another tab in a tabbed group.
   const [isVisible, setIsVisible] = useState(api.isVisible);
-  const wsActive = useContext(WsActiveContext);
+  const wsActive = useWsActive(params.workspaceId ?? "");
 
   useEffect(() => {
     const d = api.onDidVisibilityChange((e) => setIsVisible(e.isVisible));
@@ -166,7 +159,7 @@ function FilesPanelComponent({ params }: IDockviewPanelProps<FilesParams>) {
 function TerminalPanelComponent({ params, api }: IDockviewPanelProps<TerminalParams>) {
   // Track physical visibility — same approach as ChatPanelComponent.
   const [isVisible, setIsVisible] = useState(api.isVisible);
-  const wsActive = useContext(WsActiveContext);
+  const wsActive = useWsActive(params.workspaceId ?? "");
 
   useEffect(() => {
     const d = api.onDidVisibilityChange((e) => setIsVisible(e.isVisible));
@@ -281,7 +274,7 @@ interface BrowserParams {
 function BrowserPanelComponent({ params, api }: IDockviewPanelProps<BrowserParams>) {
   // Track physical visibility — same approach as ChatPanelComponent.
   const [isVisible, setIsVisible] = useState(api.isVisible);
-  const wsActive = useContext(WsActiveContext);
+  const wsActive = useWsActive(params.workspaceId ?? "");
 
   useEffect(() => {
     const d = api.onDidVisibilityChange((e) => setIsVisible(e.isVisible));
@@ -350,13 +343,7 @@ function useDiffFileCount(workspaceId: string, isActive: boolean): number {
 // ---------------------------------------------------------------------------
 
 /** All panels that must always be present in the layout. */
-const REQUIRED_PANEL_IDS = [
-  "chat",
-  "changes",
-  "files",
-  "terminal",
-  "browser",
-] as const;
+const REQUIRED_PANEL_IDS = ["chat", "changes", "files", "terminal", "browser"] as const;
 
 // ---------------------------------------------------------------------------
 // Layout persistence: shared structure + per-workspace active tabs
@@ -550,7 +537,6 @@ function loadLayout(workspaceId: string): unknown | null {
 
 interface DockviewWorkspaceLayoutProps {
   workspaceId: string;
-  isActive: boolean;
   /** Called when the user makes a STRUCTURAL layout change (panel move,
    *  resize, tab reorder — NOT simple tab activation).  The instance
    *  manager uses this to evict hidden workspaces so they pick up the
@@ -560,9 +546,13 @@ interface DockviewWorkspaceLayoutProps {
 
 export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
   workspaceId,
-  isActive,
   onLayoutChange,
 }: DockviewWorkspaceLayoutProps) {
+  // Subscribe to workspace visibility from the external store.
+  // Only re-renders when this workspace's visibility actually changes —
+  // no Context cascade to panel components.
+  const isActive = useWsActive(workspaceId);
+
   const apiRef = useRef<DockviewApi | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -1028,8 +1018,8 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
     if (api) injectParams(api);
   }, [injectParams]);
 
-  // wsActive is now propagated via WsActiveContext (React context) instead of
-  // updateParameters — see the WsActiveContext.Provider wrapping DockviewReact.
+  // wsActive is propagated via an external store (useWsActive) — panel
+  // components subscribe directly, avoiding React Context cascade re-renders.
 
   // React to hiddenPanels changes: remove newly-hidden panels, add newly-shown ones
   const prevHiddenRef = useRef<string[]>(hiddenPanels);
@@ -1099,16 +1089,14 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
   return (
     <>
       <div ref={containerRef} className="h-full">
-        <WsActiveContext.Provider value={isActive}>
-          <DockviewReact
-            theme={bandTheme}
-            className="h-full"
-            components={components}
-            tabComponents={tabComponents}
-            defaultTabComponent={DefaultTab}
-            onReady={onReady}
-          />
-        </WsActiveContext.Provider>
+        <DockviewReact
+          theme={bandTheme}
+          className="h-full"
+          components={components}
+          tabComponents={tabComponents}
+          defaultTabComponent={DefaultTab}
+          onReady={onReady}
+        />
       </div>
 
       <QuickOpenDialog

@@ -10,8 +10,10 @@ import { Cron } from "croner";
 import { z } from "zod";
 import { createMetadataAgent, getOrCreateAgent, replaceAgent } from "../lib/agent-pool";
 import {
+  addBrowserToLayout,
   deleteBrowserLayout,
   getBrowserLayout,
+  removeBrowserFromLayout,
   saveBrowserLayout,
 } from "../lib/browser-layout-manager";
 import {
@@ -2327,6 +2329,10 @@ const browsersRouter = t.router({
         name: input.name,
         url: input.url,
       });
+      addBrowserToLayout(input.workspaceId, browser.id, {
+        title: input.name,
+        initialUrl: input.url,
+      });
       emit({ kind: "browser-created", workspaceId: input.workspaceId, browserId: browser.id });
       return { browser };
     }),
@@ -2360,7 +2366,14 @@ const browsersRouter = t.router({
   remove: publicProcedure.input(z.object({ browserId: z.string() })).mutation(({ input }) => {
     const browser = getBrowser(input.browserId);
     removeBrowser(input.browserId);
-    emit({ kind: "browser-removed", workspaceId: browser?.workspaceId, browserId: input.browserId });
+    if (browser?.workspaceId) {
+      removeBrowserFromLayout(browser.workspaceId, input.browserId);
+    }
+    emit({
+      kind: "browser-removed",
+      workspaceId: browser?.workspaceId,
+      browserId: input.browserId,
+    });
     return { ok: true };
   }),
 });
