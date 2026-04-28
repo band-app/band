@@ -581,8 +581,20 @@ export function CodeBrowserView({
   // Only reacts to tab state changes — onSelectFile and viewFilePath are
   // intentionally read as latest values to avoid re-triggering on every
   // parent render or file navigation.
+  //
+  // IMPORTANT: skip the initial mount run.  On mount, fileTabs loads the
+  // persisted active tab from localStorage.  If we didn't skip, the
+  // effect would see activeTabPath !== viewFilePath ("" on mount) and
+  // re-open the previously viewed file — defeating mobile back navigation
+  // which clears viewFilePath and then navigates to the code-index route
+  // (causing a remount with an empty viewFilePath).
+  const skipInitialTabSync = useRef(true);
   // biome-ignore lint/correctness/useExhaustiveDependencies: onSelectFile and viewFilePath are intentionally excluded to prevent feedback loops
   useEffect(() => {
+    if (skipInitialTabSync.current) {
+      skipInitialTabSync.current = false;
+      return;
+    }
     if (fileTabs.activeTabPath === null && fileTabs.openTabs.length === 0) {
       // All tabs closed — show empty state
       setViewFilePath("");
