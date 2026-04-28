@@ -474,9 +474,7 @@ fn main() {
                 url,
                 name,
             } => cmd_browser_create(&workspace_id, url.as_deref(), name.as_deref()),
-            BrowserCmd::Navigate { browser_id, url } => {
-                cmd_browser_navigate(&browser_id, &url)
-            }
+            BrowserCmd::Navigate { browser_id, url } => cmd_browser_navigate(&browser_id, &url),
             BrowserCmd::Get { browser_id } => cmd_browser_get(&browser_id),
             BrowserCmd::Remove { browser_id } => cmd_browser_remove(&browser_id),
         },
@@ -1014,10 +1012,7 @@ fn cmd_browser_list(workspace_id: &str) -> Result<CommandResult, String> {
         let id = browser.get("id").and_then(|v| v.as_str()).unwrap_or("");
         let name = browser.get("name").and_then(|v| v.as_str()).unwrap_or("");
         let url = browser.get("url").and_then(|v| v.as_str()).unwrap_or("");
-        let status = browser
-            .get("status")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let status = browser.get("status").and_then(|v| v.as_str()).unwrap_or("");
         rows.push([
             id.to_string(),
             name.to_string(),
@@ -1088,10 +1083,7 @@ fn cmd_browser_get(browser_id: &str) -> Result<CommandResult, String> {
     let id = browser.get("id").and_then(|v| v.as_str()).unwrap_or("");
     let name = browser.get("name").and_then(|v| v.as_str()).unwrap_or("");
     let url = browser.get("url").and_then(|v| v.as_str()).unwrap_or("");
-    let status = browser
-        .get("status")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let status = browser.get("status").and_then(|v| v.as_str()).unwrap_or("");
 
     let text = format!("ID:     {id}\nName:   {name}\nURL:    {url}\nStatus: {status}\n");
 
