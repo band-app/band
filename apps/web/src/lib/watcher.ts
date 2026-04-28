@@ -25,7 +25,9 @@ export interface StatusEvent {
     | "branch-status"
     | "tunnel-url"
     | "tunnel-error"
-    | "setup-status";
+    | "setup-status"
+    | "browser-created"
+    | "browser-removed";
   status?: WorkspaceStatus;
   statuses?: WorkspaceStatus[];
   workspaceId?: string;
@@ -36,6 +38,7 @@ export interface StatusEvent {
   setupState?: "running" | "completed" | "failed";
   setupError?: string;
   runningSetups?: string[];
+  browserId?: string;
 }
 
 type StatusListener = (event: StatusEvent) => void;

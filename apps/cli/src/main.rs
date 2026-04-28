@@ -42,6 +42,11 @@ enum Commands {
         #[command(subcommand)]
         cmd: ChatsCmd,
     },
+    /// Manage browser tabs
+    Browser {
+        #[command(subcommand)]
+        cmd: BrowserCmd,
+    },
     /// Manage scheduled cronjobs
     Cronjobs {
         #[command(subcommand)]
@@ -230,6 +235,43 @@ enum ChatsCmd {
     Remove {
         /// Chat pane ID
         chat_id: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum BrowserCmd {
+    /// List browser tabs for a workspace
+    List {
+        /// Workspace ID
+        workspace_id: String,
+    },
+    /// Create a new browser tab
+    Create {
+        /// Workspace ID
+        workspace_id: String,
+        /// Initial URL to navigate to
+        #[arg(long)]
+        url: Option<String>,
+        /// Display name for the browser tab
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Navigate a browser tab to a URL
+    Navigate {
+        /// Browser tab ID
+        browser_id: String,
+        /// URL to navigate to
+        url: String,
+    },
+    /// Get a browser tab's current state
+    Get {
+        /// Browser tab ID
+        browser_id: String,
+    },
+    /// Remove a browser tab
+    Remove {
+        /// Browser tab ID
+        browser_id: String,
     },
 }
 
@@ -424,6 +466,19 @@ fn main() {
             ChatsCmd::Send { chat_id, message } => cmd_chats_send(&chat_id, &message),
             ChatsCmd::Stop { chat_id } => cmd_chats_stop(&chat_id),
             ChatsCmd::Remove { chat_id } => cmd_chats_remove(&chat_id),
+        },
+        Commands::Browser { cmd } => match cmd {
+            BrowserCmd::List { workspace_id } => cmd_browser_list(&workspace_id),
+            BrowserCmd::Create {
+                workspace_id,
+                url,
+                name,
+            } => cmd_browser_create(&workspace_id, url.as_deref(), name.as_deref()),
+            BrowserCmd::Navigate { browser_id, url } => {
+                cmd_browser_navigate(&browser_id, &url)
+            }
+            BrowserCmd::Get { browser_id } => cmd_browser_get(&browser_id),
+            BrowserCmd::Remove { browser_id } => cmd_browser_remove(&browser_id),
         },
         Commands::Cronjobs { cmd } => match cmd {
             CronjobsCmd::List { project, workspace } => {
@@ -935,6 +990,127 @@ fn cmd_chats_remove(chat_id: &str) -> Result<CommandResult, String> {
     Ok(CommandResult {
         text: format!("Chat {chat_id} removed\n"),
         json: serde_json::json!({"ok": true, "chatId": chat_id}),
+    })
+}
+
+// --- Browser commands ---
+
+fn cmd_browser_list(workspace_id: &str) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let data = client.trpc_query(
+        "browsers.list",
+        &serde_json::json!({"workspaceId": workspace_id}),
+    )?;
+
+    let browsers = data
+        .get("browsers")
+        .and_then(|b| b.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let mut rows: Vec<[String; 4]> = Vec::new();
+    let mut json_browsers = Vec::new();
+    for browser in &browsers {
+        let id = browser.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        let name = browser.get("name").and_then(|v| v.as_str()).unwrap_or("");
+        let url = browser.get("url").and_then(|v| v.as_str()).unwrap_or("");
+        let status = browser
+            .get("status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        rows.push([
+            id.to_string(),
+            name.to_string(),
+            url.to_string(),
+            status.to_string(),
+        ]);
+        json_browsers.push(browser.clone());
+    }
+
+    let text = format_table(&["ID", "NAME", "URL", "STATUS"], &rows);
+
+    Ok(CommandResult {
+        text,
+        json: serde_json::json!({"browsers": json_browsers}),
+    })
+}
+
+fn cmd_browser_create(
+    workspace_id: &str,
+    url: Option<&str>,
+    name: Option<&str>,
+) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let mut input = serde_json::json!({"workspaceId": workspace_id});
+    if let Some(u) = url {
+        input["url"] = serde_json::json!(u);
+    }
+    if let Some(n) = name {
+        input["name"] = serde_json::json!(n);
+    }
+    let data = client.trpc_mutate("browsers.create", &input)?;
+    let browser = data
+        .get("browser")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let id = browser.get("id").and_then(|v| v.as_str()).unwrap_or("");
+
+    Ok(CommandResult {
+        text: format!("{id}\n"),
+        json: serde_json::json!({"browser": browser}),
+    })
+}
+
+fn cmd_browser_navigate(browser_id: &str, url: &str) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    client.trpc_mutate(
+        "browsers.navigate",
+        &serde_json::json!({"browserId": browser_id, "url": url}),
+    )?;
+
+    Ok(CommandResult {
+        text: format!("Navigated {browser_id} to {url}\n"),
+        json: serde_json::json!({"ok": true, "browserId": browser_id, "url": url}),
+    })
+}
+
+fn cmd_browser_get(browser_id: &str) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let data = client.trpc_query(
+        "browsers.get",
+        &serde_json::json!({"browserId": browser_id}),
+    )?;
+
+    let browser = data
+        .get("browser")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let id = browser.get("id").and_then(|v| v.as_str()).unwrap_or("");
+    let name = browser.get("name").and_then(|v| v.as_str()).unwrap_or("");
+    let url = browser.get("url").and_then(|v| v.as_str()).unwrap_or("");
+    let status = browser
+        .get("status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    let text = format!("ID:     {id}\nName:   {name}\nURL:    {url}\nStatus: {status}\n");
+
+    Ok(CommandResult {
+        text,
+        json: serde_json::json!({"browser": browser}),
+    })
+}
+
+fn cmd_browser_remove(browser_id: &str) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    client.trpc_mutate(
+        "browsers.remove",
+        &serde_json::json!({"browserId": browser_id}),
+    )?;
+
+    Ok(CommandResult {
+        text: format!("Browser {browser_id} removed\n"),
+        json: serde_json::json!({"ok": true, "browserId": browser_id}),
     })
 }
 
@@ -1947,6 +2123,49 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "chat_id", "type": "string", "required": true, "positional": true, "description": "Chat pane ID"},
             ],
             "notes": "Removes the chat pane, kills the associated agent process, and cleans up state."
+        }),
+        serde_json::json!({
+            "name": "browser list",
+            "description": "List browser tabs for a workspace",
+            "parameters": [
+                {"name": "workspace_id", "type": "string", "required": true, "positional": true, "description": "Workspace ID"},
+            ],
+            "notes": "Text output: `ID\\tNAME\\tURL\\tSTATUS` (tab-separated table).\nJSON output: `{\"browsers\": [{\"id\": \"...\", \"name\": \"...\", \"url\": \"...\", \"status\": \"...\"}]}`"
+        }),
+        serde_json::json!({
+            "name": "browser create",
+            "description": "Create a new browser tab in a workspace",
+            "parameters": [
+                {"name": "workspace_id", "type": "string", "required": true, "positional": true, "description": "Workspace ID"},
+                {"name": "--url", "type": "string", "required": false, "description": "Initial URL to navigate to"},
+                {"name": "--name", "type": "string", "required": false, "description": "Display name for the browser tab"},
+            ],
+            "notes": "Text output: the new browser tab ID.\nJSON output: `{\"browser\": {\"id\": \"...\", ...}}`"
+        }),
+        serde_json::json!({
+            "name": "browser navigate",
+            "description": "Navigate a browser tab to a URL",
+            "parameters": [
+                {"name": "browser_id", "type": "string", "required": true, "positional": true, "description": "Browser tab ID"},
+                {"name": "url", "type": "string", "required": true, "positional": true, "description": "URL to navigate to"},
+            ],
+            "notes": "Updates the browser tab's URL in the server state."
+        }),
+        serde_json::json!({
+            "name": "browser get",
+            "description": "Get a browser tab's current state",
+            "parameters": [
+                {"name": "browser_id", "type": "string", "required": true, "positional": true, "description": "Browser tab ID"},
+            ],
+            "notes": "Text output: formatted key-value pairs.\nJSON output: `{\"browser\": {\"id\": \"...\", \"name\": \"...\", \"url\": \"...\", \"status\": \"...\"}}`"
+        }),
+        serde_json::json!({
+            "name": "browser remove",
+            "description": "Remove a browser tab",
+            "parameters": [
+                {"name": "browser_id", "type": "string", "required": true, "positional": true, "description": "Browser tab ID"},
+            ],
+            "notes": "Removes the browser tab and cleans up state."
         }),
         serde_json::json!({
             "name": "notify",

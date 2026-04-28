@@ -5,6 +5,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@band-app/ui";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   type DockviewApi,
   DockviewReact,
@@ -15,7 +16,15 @@ import {
   type IDockviewPanelProps,
 } from "dockview";
 import { Clock, Plus, X } from "lucide-react";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { trpc } from "../lib/trpc-client";
 import { ChatPane, type CodingAgentDef, useChatPaneState } from "./ChatPane";
 
@@ -57,12 +66,34 @@ export function newChatId(): string {
 }
 
 // ---------------------------------------------------------------------------
-// Debounced server persistence (500ms)
+// React Query cache key
+// ---------------------------------------------------------------------------
+
+function chatLayoutKey(workspaceId: string) {
+  return ["chatLayout", workspaceId] as const;
+}
+
+// ---------------------------------------------------------------------------
+// Debounced server persistence (500ms) — also updates React Query cache
+// so the next mount renders instantly from cached data.
 // ---------------------------------------------------------------------------
 
 const saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-function persistToServer(workspaceId: string, layout: unknown): void {
+interface ChatPersistOptions {
+  queryClient?: ReturnType<typeof useQueryClient>;
+}
+
+interface ChatLayoutData {
+  layout: unknown | null;
+}
+
+function persistToServer(workspaceId: string, layout: unknown, opts?: ChatPersistOptions): void {
+  // Update React Query cache immediately so next mount is instant
+  if (opts?.queryClient) {
+    opts.queryClient.setQueryData(chatLayoutKey(workspaceId), { layout });
+  }
+
   const existing = saveTimers.get(workspaceId);
   if (existing) clearTimeout(existing);
   saveTimers.set(
@@ -100,30 +131,30 @@ const chatTabTheme: DockviewTheme = {
 // Chat tab panel component (renders inside each dockview tab)
 // ---------------------------------------------------------------------------
 
+// Visibility context — propagated from DockviewChatContainer via React
+// context instead of dockview's updateParameters (which clobbers params).
+const ChatVisibilityContext = createContext({ visible: true, wsActive: true });
+
 interface ChatTabParams {
   workspaceId: string;
   chatId: string;
-  visible: boolean;
-  wsActive: boolean;
 }
 
 function ChatTabPanel({ params, api }: IDockviewPanelProps<ChatTabParams>) {
-  // Track visibility: combine parent visibility param with dockview's own active state.
-  // Read params directly from props — dockview-react's bridge re-renders with merged
-  // params on every updateParameters call. Calling api.getParameters() returns only
-  // the last update payload (not merged), which would drop workspaceId/chatId after
-  // a partial { visible, wsActive } update and blank the panel.
+  // Track visibility: combine parent visibility context with dockview's own active state
   const [tabActive, setTabActive] = useState(api.isActive);
+  const { visible: parentVisible, wsActive } = useContext(ChatVisibilityContext);
 
   useEffect(() => {
     const d = api.onDidActiveChange((e) => setTabActive(e.isActive));
-    return () => d.dispose();
+    return () => {
+      d.dispose();
+    };
   }, [api]);
 
   if (!params.workspaceId || !params.chatId) return null;
 
-  const visible = params.visible && tabActive;
-  const wsActive = params.wsActive;
+  const visible = parentVisible && tabActive;
 
   return (
     <ChatTabContent
@@ -137,7 +168,7 @@ function ChatTabPanel({ params, api }: IDockviewPanelProps<ChatTabParams>) {
   );
 }
 
-/** Separate component so hooks work properly (params change via updateParameters). */
+/** Separate component so hooks work properly. */
 function ChatTabContent({
   workspaceId,
   chatId,
@@ -387,29 +418,22 @@ export function DockviewChatContainer({
   visible,
   wsActive,
 }: DockviewChatContainerProps) {
+  const queryClient = useQueryClient();
   const apiRef = useRef<DockviewApi | null>(null);
   const isRestoringRef = useRef(false);
-  const visibleRef = useRef(visible);
-  const wsActiveRef = useRef(wsActive);
-  visibleRef.current = visible;
-  wsActiveRef.current = wsActive;
 
-  // Pre-fetch layout from server before mounting dockview
-  const [initialData, setInitialData] = useState<{
-    loaded: boolean;
-    layout: unknown | null;
-  }>({ loaded: false, layout: null });
-
-  useEffect(() => {
-    trpc.chatLayout.get
-      .query({ workspaceId })
-      .then(({ tree }) => {
-        setInitialData({ loaded: true, layout: tree });
-      })
-      .catch(() => {
-        setInitialData({ loaded: true, layout: null });
-      });
-  }, [workspaceId]);
+  // Fetch layout via React Query — cached across mounts so re-visiting
+  // a workspace renders instantly from the cache.
+  const { data: initialData } = useQuery<ChatLayoutData>({
+    queryKey: chatLayoutKey(workspaceId),
+    queryFn: async () => {
+      const { tree } = await trpc.chatLayout.get
+        .query({ workspaceId })
+        .catch(() => ({ tree: null }));
+      return { layout: tree };
+    },
+    staleTime: Number.POSITIVE_INFINITY, // never auto-refetch — we manage persistence ourselves
+  });
 
   // Load agents for the "add tab" dropdown
   const [agents, setAgents] = useState<CodingAgentDef[]>([]);
@@ -425,12 +449,14 @@ export function DockviewChatContainer({
       .catch(() => {});
   }, []);
 
-  // Debounced persist: serialize the full dockview layout
+  // Debounced persist: serialize the full dockview layout + update cache
+  const queryClientRef = useRef(queryClient);
+  queryClientRef.current = queryClient;
   const schedulePersist = useCallback(() => {
     if (isRestoringRef.current) return;
     const api = apiRef.current;
     if (!api) return;
-    persistToServer(workspaceId, api.toJSON());
+    persistToServer(workspaceId, api.toJSON(), { queryClient: queryClientRef.current });
   }, [workspaceId]);
 
   const handleAddTab = useCallback(
@@ -486,8 +512,6 @@ export function DockviewChatContainer({
         params: {
           workspaceId,
           chatId,
-          visible: visibleRef.current && wsActiveRef.current !== false,
-          wsActive: wsActiveRef.current !== false,
         },
       };
 
@@ -539,17 +563,8 @@ export function DockviewChatContainer({
     return () => window.removeEventListener("keydown", handler, true);
   }, [visible, closeTab]);
 
-  // Update visibility params when parent visibility changes
-  useEffect(() => {
-    const api = apiRef.current;
-    if (!api) return;
-    for (const panel of api.panels) {
-      panel.api.updateParameters({
-        visible: visible && wsActive !== false,
-        wsActive: wsActive !== false,
-      });
-    }
-  }, [visible, wsActive]);
+  // Visibility is now propagated via ChatVisibilityContext (React context)
+  // instead of updateParameters — see the Provider wrapping DockviewReact.
 
   // Keep module-level refs in sync for stable Dockview components
   addTabRef.current = { agents, onAdd: handleAddTab };
@@ -557,7 +572,7 @@ export function DockviewChatContainer({
 
   // Use a ref for the initial layout so onReady's closure captures the latest
   const initialLayoutRef = useRef<unknown | null>(null);
-  initialLayoutRef.current = initialData.layout;
+  initialLayoutRef.current = initialData?.layout ?? null;
 
   const onReady = useCallback(
     (event: DockviewReadyEvent) => {
@@ -575,13 +590,7 @@ export function DockviewChatContainer({
           createDefaultPanel(event.api, workspaceId);
         }
 
-        // Update visibility params to current values (may be stale in saved data)
-        for (const panel of event.api.panels) {
-          panel.api.updateParameters({
-            visible: visibleRef.current && wsActiveRef.current !== false,
-            wsActive: wsActiveRef.current !== false,
-          });
-        }
+        // Visibility is propagated via ChatVisibilityContext — no param update needed.
 
         // Allow persistence after restoration settles
         setTimeout(() => {
@@ -589,21 +598,9 @@ export function DockviewChatContainer({
         }, 0);
       } else {
         // No saved layout — create a default tab
-        const chatId = newChatId();
-        event.api.addPanel({
-          id: chatId,
-          component: "chatTab",
-          tabComponent: "chatTab",
-          title: "Chat",
-          params: {
-            workspaceId,
-            chatId,
-            visible: visibleRef.current && wsActiveRef.current !== false,
-            wsActive: wsActiveRef.current !== false,
-          },
-        });
+        createDefaultPanel(event.api, workspaceId);
 
-        persistToServer(workspaceId, event.api.toJSON());
+        persistToServer(workspaceId, event.api.toJSON(), { queryClient: queryClientRef.current });
       }
 
       // Listen for any layout changes and auto-persist
@@ -618,22 +615,30 @@ export function DockviewChatContainer({
     [workspaceId, schedulePersist],
   );
 
-  // Don't render dockview until the initial layout is fetched from the server
-  if (!initialData.loaded) {
+  const visibilityValue = useMemo(
+    () => ({ visible: visible && wsActive !== false, wsActive: wsActive !== false }),
+    [visible, wsActive],
+  );
+
+  // Don't render dockview until the initial layout is fetched from the server.
+  // On subsequent visits, React Query returns cached data instantly — no loading.
+  if (!initialData) {
     return <div className="flex h-full w-full items-center justify-center" />;
   }
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">
-      <DockviewReact
-        theme={chatTabTheme}
-        className="h-full"
-        components={chatPanelComponents}
-        tabComponents={chatTabComponents}
-        defaultTabComponent={ChatTab}
-        onReady={onReady}
-        rightHeaderActionsComponent={RightHeaderActions}
-      />
+      <ChatVisibilityContext.Provider value={visibilityValue}>
+        <DockviewReact
+          theme={chatTabTheme}
+          className="h-full"
+          components={chatPanelComponents}
+          tabComponents={chatTabComponents}
+          defaultTabComponent={ChatTab}
+          onReady={onReady}
+          rightHeaderActionsComponent={RightHeaderActions}
+        />
+      </ChatVisibilityContext.Provider>
     </div>
   );
 }
@@ -648,8 +653,6 @@ function createDefaultPanel(api: DockviewApi, workspaceId: string): void {
     params: {
       workspaceId,
       chatId,
-      visible: true,
-      wsActive: true,
     },
   });
 }

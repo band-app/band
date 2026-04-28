@@ -117,3 +117,44 @@
   align-items: center;
   padding-right: 0.25rem;
 }
+
+/* ---------------------------------------------------------------------------
+ * Nested browser tabs — same compact styling as chat tabs for the inner
+ * dockview instance used for multi-browser tabs within the browser panel.
+ * --------------------------------------------------------------------------- */
+
+.dockview-browser-tabs {
+  --dv-tabs-and-actions-container-height: 32px;
+  --dv-tabs-and-actions-container-font-size: 12px;
+}
+
+.dockview-browser-tabs .dv-tab {
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+  max-width: 200px;
+}
+
+/* Hide the sash/resize handle — tabs, not split panes */
+.dockview-browser-tabs .dv-resize-container > .dv-resize-handle-horizontal,
+.dockview-browser-tabs .dv-resize-container > .dv-resize-handle-vertical {
+  display: none;
+}
+
+/* Disable drag-and-drop reordering in nested browser tabs */
+.dockview-browser-tabs .dv-tab {
+  cursor: default;
+}
+
+/* Hide the built-in tab overflow dropdown — its popup gets clipped by
+   ancestor overflow:hidden in the nested dockview. Tabs are already
+   horizontally scrollable so users can still reach all tabs. */
+.dockview-browser-tabs .dv-tabs-overflow-dropdown-root {
+  display: none;
+}
+
+/* Right-side actions area (the + button) */
+.dockview-browser-tabs .dv-right-actions-container {
+  display: flex;
+  align-items: center;
+  padding-right: 0.25rem;
+}

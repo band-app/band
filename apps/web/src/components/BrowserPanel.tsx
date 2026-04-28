@@ -1,7 +1,8 @@
 import type { IDockviewPanelProps } from "dockview";
 import { ArrowLeft, ArrowRight, RotateCw, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { isTauri } from "../lib/is-tauri";
+import { trpc } from "../lib/trpc-client";
 
 const DEFAULT_URL = "";
 const BLANK_URL = "about:blank";
@@ -23,6 +24,43 @@ function loadUrl(workspaceId: string): string | null {
   } catch {
     return null;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Favicon store — tracks per-browser favicon URLs emitted by Tauri.
+// ---------------------------------------------------------------------------
+
+const faviconMap = new Map<string, string>();
+const faviconListeners = new Set<() => void>();
+
+function setFaviconUrl(browserId: string, url: string) {
+  if (faviconMap.get(browserId) !== url) {
+    faviconMap.set(browserId, url);
+    for (const listener of faviconListeners) listener();
+  }
+}
+
+function subscribeFavicons(cb: () => void) {
+  faviconListeners.add(cb);
+  return () => {
+    faviconListeners.delete(cb);
+  };
+}
+
+/** Reactive hook that returns the current favicon URL for a browser tab. */
+export function useFavicon(browserId: string): string | undefined {
+  return useSyncExternalStore(subscribeFavicons, () => faviconMap.get(browserId));
+}
+
+// ---------------------------------------------------------------------------
+// Browser pane params — used by DockviewBrowserContainer for multi-tab support.
+// ---------------------------------------------------------------------------
+
+export interface BrowserPaneParams {
+  workspaceId: string;
+  browserId: string;
+  wsActive?: boolean;
+  initialUrl?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -420,6 +458,416 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
       </div>
 
       {/* Placeholder – the native webview is positioned over this area */}
+      <div ref={placeholderRef} className="min-h-0 flex-1" />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// BrowserPaneComponent — multi-tab variant keyed by browserId.
+// Used by DockviewBrowserContainer to render individual browser tabs.
+// ---------------------------------------------------------------------------
+
+export function BrowserPaneComponent({
+  params,
+  api,
+}: {
+  params: BrowserPaneParams;
+  api: IDockviewPanelProps<BrowserPaneParams>["api"];
+}) {
+  const { browserId, initialUrl } = params;
+
+  const [currentUrl, setCurrentUrl] = useState(() => initialUrl ?? DEFAULT_URL);
+  const [inputUrl, setInputUrl] = useState(() => initialUrl ?? DEFAULT_URL);
+  const [loading, setLoading] = useState(false);
+  const [created, setCreated] = useState(false);
+  const createdRef = useRef(false);
+  const placeholderRef = useRef<HTMLDivElement>(null);
+  const creatingRef = useRef(false);
+  const pendingNavRef = useRef<string | null>(null);
+  const browserIdRef = useRef(browserId);
+  browserIdRef.current = browserId;
+  const currentUrlRef = useRef(currentUrl);
+  currentUrlRef.current = currentUrl;
+
+  // ------- helpers -------
+
+  const getBounds = useCallback(() => {
+    const el = placeholderRef.current;
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    return { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
+  }, []);
+
+  const invoke = useCallback(async (cmd: string, args?: Record<string, unknown>) => {
+    if (!isTauri) return;
+    const { invoke: tauriInvoke } = await import("@tauri-apps/api/core");
+    return tauriInvoke(cmd, args);
+  }, []);
+
+  // ------- fetch URL from server when no initialUrl param -------
+  // The server browser record is the source of truth for the URL.
+  // When a browser is created via CLI with --url, or on workspace revisit,
+  // the panel is added without an initialUrl param — fetch it from the server.
+  useEffect(() => {
+    if (!browserId || initialUrl) return;
+
+    let cancelled = false;
+    trpc.browsers.get
+      .query({ browserId })
+      .then((result) => {
+        if (cancelled) return;
+        const url = result.browser?.url;
+        if (!url || url === "" || url === BLANK_URL) return;
+        setCurrentUrl(url);
+        setInputUrl(url);
+        if (createdRef.current) {
+          // Webview exists — navigate it directly.
+          invoke("browser_navigate", { browserId, url }).catch(() => {});
+        } else {
+          // Webview not yet created — queue it so tryCreate flushes after
+          // browser_create completes (same mechanism as handleNavigate).
+          pendingNavRef.current = url;
+        }
+      })
+      .catch(() => {
+        // Server fetch failed — the user can still type a URL manually
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [browserId, initialUrl, invoke]);
+
+  // ------- create or show webview once placeholder has real dimensions -------
+  useEffect(() => {
+    if (!isTauri || created || creatingRef.current) return;
+    const el = placeholderRef.current;
+    if (!el) return;
+
+    let cancelled = false;
+
+    const tryCreate = async () => {
+      if (cancelled || createdRef.current || creatingRef.current) return;
+      const bounds = getBounds();
+      if (!bounds || bounds.width === 0 || bounds.height === 0) return;
+
+      observer.disconnect();
+      creatingRef.current = true;
+      try {
+        await invoke("browser_create", {
+          browserId,
+          ...bounds,
+          url: currentUrlRef.current || BLANK_URL,
+        });
+        createdRef.current = true;
+        setCreated(true);
+        const pending = pendingNavRef.current;
+        if (pending) {
+          pendingNavRef.current = null;
+          await invoke("browser_navigate", {
+            browserId: browserIdRef.current,
+            url: pending,
+          });
+        }
+      } catch (e) {
+        console.error("Failed to create browser webview:", e);
+      } finally {
+        creatingRef.current = false;
+      }
+    };
+
+    const observer = new ResizeObserver(() => {
+      tryCreate();
+    });
+    observer.observe(el);
+    const timer = setTimeout(tryCreate, 50);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      observer.disconnect();
+    };
+  }, [created, getBounds, invoke, browserId]);
+
+  // ------- listen for URL / title changes from the Rust side -------
+  // Persist URL to server (debounced) so it survives workspace switches.
+  const urlPersistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!isTauri) return;
+    let unlistenUrl: (() => void) | undefined;
+    let unlistenTitle: (() => void) | undefined;
+
+    (async () => {
+      const { listen } = await import("@tauri-apps/api/event");
+      unlistenUrl = await listen<{ url: string; browser_id: string; loading: boolean }>(
+        "browser-url-changed",
+        (event) => {
+          if (event.payload.browser_id !== browserIdRef.current) return;
+          const url = event.payload.url;
+          setLoading(event.payload.loading);
+          if (url === BLANK_URL) return;
+          setCurrentUrl(url);
+          setInputUrl(url);
+
+          // Persist to server (debounced to avoid hammering on redirect chains)
+          if (urlPersistTimer.current) clearTimeout(urlPersistTimer.current);
+          urlPersistTimer.current = setTimeout(() => {
+            trpc.browsers.navigate.mutate({ browserId: browserIdRef.current, url }).catch(() => {});
+          }, 500);
+
+          // Try to extract favicon from the URL's origin
+          try {
+            const origin = new URL(url).origin;
+            setFaviconUrl(browserIdRef.current, `${origin}/favicon.ico`);
+          } catch {
+            // ignore invalid URLs
+          }
+        },
+      );
+      unlistenTitle = await listen<{ browser_id: string; title: string }>(
+        "browser-title-changed",
+        (event) => {
+          if (event.payload.browser_id !== browserIdRef.current) return;
+          if (event.payload.title) {
+            api.setTitle(event.payload.title);
+          }
+        },
+      );
+    })();
+
+    return () => {
+      unlistenUrl?.();
+      unlistenTitle?.();
+      if (urlPersistTimer.current) clearTimeout(urlPersistTimer.current);
+    };
+  }, [api]);
+
+  // ------- visibility tracking (hide/show when tab switches) -------
+  // In dockview, `isActive` = globally focused (only one panel at a time),
+  // while `isVisible` = content area is on screen (multiple in a split).
+  // We show/hide based on *visibility*, not active focus, so split views
+  // keep both native webviews rendered simultaneously.
+  useEffect(() => {
+    if (!isTauri || !created) return;
+
+    const showWebview = async () => {
+      await invoke("browser_show", { browserId });
+      const bounds = getBounds();
+      if (bounds && bounds.width > 0 && bounds.height > 0) {
+        await invoke("browser_set_bounds", { browserId, ...bounds });
+      }
+    };
+
+    const hideWebview = async () => {
+      await invoke("browser_hide", { browserId });
+    };
+
+    const d = api.onDidVisibilityChange((e) => {
+      if (e.isVisible) {
+        showWebview();
+      } else {
+        hideWebview();
+      }
+    });
+
+    return () => {
+      d.dispose();
+    };
+  }, [api, created, getBounds, invoke, browserId]);
+
+  // ------- workspace-level visibility -------
+  useEffect(() => {
+    if (!isTauri || !created) return;
+    const wsActive = params.wsActive !== false;
+
+    if (!wsActive) {
+      invoke("browser_hide", { browserId }).catch(() => {});
+    } else if (api.isVisible) {
+      invoke("browser_show", { browserId }).catch(() => {});
+      const bounds = getBounds();
+      if (bounds && bounds.width > 0 && bounds.height > 0) {
+        invoke("browser_set_bounds", { browserId, ...bounds }).catch(() => {});
+      }
+    }
+  }, [params.wsActive, api, created, getBounds, invoke, browserId]);
+
+  // ------- keep webview bounds in sync on resize -------
+  useEffect(() => {
+    if (!isTauri || !created) return;
+    const el = placeholderRef.current;
+    if (!el) return;
+
+    const observer = new ResizeObserver(() => {
+      const bounds = getBounds();
+      if (!bounds || bounds.width === 0 || bounds.height === 0) return;
+      invoke("browser_set_bounds", { browserId, ...bounds }).catch(() => {});
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [created, getBounds, invoke, browserId]);
+
+  // ------- destroy on unmount -------
+  useEffect(() => {
+    return () => {
+      if (isTauri) {
+        const bId = browserIdRef.current;
+        import("@tauri-apps/api/core").then(({ invoke: tauriInvoke }) => {
+          tauriInvoke("browser_destroy", { browserId: bId }).catch(() => {});
+        });
+      }
+    };
+  }, []);
+
+  // ------- navigation handlers -------
+
+  const handleNavigate = useCallback(
+    async (rawUrl: string) => {
+      let normalized = rawUrl.trim();
+      if (!normalized) return;
+
+      if (!normalized.startsWith("http://") && !normalized.startsWith("https://")) {
+        if (normalized.includes(".") && !normalized.includes(" ")) {
+          normalized = `https://${normalized}`;
+        } else {
+          normalized = `https://www.google.com/search?q=${encodeURIComponent(normalized)}`;
+        }
+      }
+
+      setCurrentUrl(normalized);
+      setInputUrl(normalized);
+      setLoading(true);
+
+      if (createdRef.current) {
+        try {
+          await invoke("browser_navigate", { browserId, url: normalized });
+        } catch (e) {
+          console.error("browser_navigate failed:", e);
+        }
+      } else {
+        pendingNavRef.current = normalized;
+      }
+    },
+    [invoke, browserId],
+  );
+
+  const handleBack = useCallback(async () => {
+    try {
+      await invoke("browser_go_back", { browserId });
+    } catch (e) {
+      console.error("browser_go_back failed:", e);
+    }
+  }, [invoke, browserId]);
+
+  const handleForward = useCallback(async () => {
+    try {
+      await invoke("browser_go_forward", { browserId });
+    } catch (e) {
+      console.error("browser_go_forward failed:", e);
+    }
+  }, [invoke, browserId]);
+
+  const handleReload = useCallback(async () => {
+    try {
+      setLoading(true);
+      await invoke("browser_reload", { browserId });
+    } catch (e) {
+      console.error("browser_reload failed:", e);
+    }
+  }, [invoke, browserId]);
+
+  const handleStop = useCallback(async () => {
+    try {
+      await invoke("browser_eval", { browserId, js: "window.stop()" });
+      setLoading(false);
+    } catch {
+      setLoading(false);
+    }
+  }, [invoke, browserId]);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        handleNavigate(inputUrl);
+      }
+    },
+    [inputUrl, handleNavigate],
+  );
+
+  if (!browserId) return null;
+
+  if (!isTauri) {
+    return (
+      <div className="flex h-full items-center justify-center text-muted-foreground">
+        Browser panel is only available in the desktop app
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-full w-full flex-col">
+      <style>{`@keyframes browser-bar-slide {
+  0% { transform: translateX(-100%); }
+  50% { transform: translateX(200%); }
+  100% { transform: translateX(-100%); }
+}`}</style>
+      <div className="relative flex h-10 shrink-0 items-center gap-1 border-b border-border bg-background px-2">
+        <button
+          type="button"
+          onClick={handleBack}
+          className="flex items-center justify-center rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          title="Back"
+        >
+          <ArrowLeft className="size-4" />
+        </button>
+        <button
+          type="button"
+          onClick={handleForward}
+          className="flex items-center justify-center rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          title="Forward"
+        >
+          <ArrowRight className="size-4" />
+        </button>
+        {loading ? (
+          <button
+            type="button"
+            onClick={handleStop}
+            className="flex items-center justify-center rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            title="Stop"
+          >
+            <X className="size-4" />
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={handleReload}
+            className="flex items-center justify-center rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            title="Reload"
+          >
+            <RotateCw className="size-4" />
+          </button>
+        )}
+        <input
+          type="text"
+          value={inputUrl}
+          onChange={(e) => setInputUrl(e.target.value)}
+          onKeyDown={handleKeyDown}
+          onFocus={(e) => e.target.select()}
+          className="min-w-0 flex-1 rounded border border-transparent bg-muted/50 px-3 py-1.5 text-sm text-foreground outline-none transition-colors focus:border-border"
+          placeholder="Enter URL or search..."
+        />
+        {loading && (
+          <div className="absolute inset-x-0 bottom-0 h-0.5 overflow-hidden bg-blue-500/10">
+            <div
+              className="h-full w-2/5 rounded-full bg-blue-500"
+              style={{
+                animation: "browser-bar-slide 1.4s ease-in-out infinite",
+              }}
+            />
+          </div>
+        )}
+      </div>
       <div ref={placeholderRef} className="min-h-0 flex-1" />
     </div>
   );

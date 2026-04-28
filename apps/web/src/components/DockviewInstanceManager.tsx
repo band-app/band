@@ -1,6 +1,7 @@
 import { useRouterState } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
+import { setWsActive } from "../lib/workspace-visibility-store";
 import { DockviewWorkspaceLayout } from "./DockviewWorkspaceLayout";
 
 // ---------------------------------------------------------------------------
@@ -12,7 +13,7 @@ interface CachedWorkspace {
   lastAccessed: number;
 }
 
-const MAX_CACHED_WORKSPACES = 5;
+const MAX_CACHED_WORKSPACES = 1;
 
 /**
  * Manages multiple DockviewWorkspaceLayout instances with show/hide semantics.
@@ -112,6 +113,13 @@ export function DockviewInstanceManager() {
 
   if (cache.size === 0 || activeWorkspaceId === null) return null;
 
+  // Sync workspace visibility to the external store so leaf components
+  // can subscribe via useWsActive() without Context cascade re-renders.
+  // setWsActive is idempotent — safe to call during render.
+  for (const { workspaceId } of cache.values()) {
+    setWsActive(workspaceId, workspaceId === activeWorkspaceId);
+  }
+
   return (
     <div className="absolute inset-0">
       {Array.from(cache.values()).map(({ workspaceId }) => (
@@ -122,11 +130,7 @@ export function DockviewInstanceManager() {
             workspaceId === activeWorkspaceId ? undefined : { opacity: 0, pointerEvents: "none" }
           }
         >
-          <DockviewWorkspaceLayout
-            workspaceId={workspaceId}
-            isActive={workspaceId === activeWorkspaceId}
-            onLayoutChange={handleLayoutChange}
-          />
+          <DockviewWorkspaceLayout workspaceId={workspaceId} onLayoutChange={handleLayoutChange} />
         </div>
       ))}
     </div>

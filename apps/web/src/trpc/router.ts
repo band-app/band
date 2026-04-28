@@ -9,6 +9,22 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import { Cron } from "croner";
 import { z } from "zod";
 import { createMetadataAgent, getOrCreateAgent, replaceAgent } from "../lib/agent-pool";
+import {
+  addBrowserToLayout,
+  deleteBrowserLayout,
+  getBrowserLayout,
+  removeBrowserFromLayout,
+  saveBrowserLayout,
+} from "../lib/browser-layout-manager";
+import {
+  createBrowser,
+  getBrowser,
+  listBrowsers,
+  removeBrowser,
+  removeWorkspaceBrowsers,
+  updateBrowser,
+  updateBrowserUrl,
+} from "../lib/browser-manager";
 import { deleteChatLayout, getChatLayout, saveChatLayout } from "../lib/chat-layout-manager";
 import {
   createChat,
@@ -394,6 +410,12 @@ const workspacesRouter = t.router({
 
             // Clean up chat layout tree
             deleteChatLayout(workspaceId);
+
+            // Clean up all browser tabs
+            removeWorkspaceBrowsers(workspaceId);
+
+            // Clean up browser layout tree
+            deleteBrowserLayout(workspaceId);
 
             // Kill any running terminal PTY sessions
             killWorkspaceTerminals(workspaceId);
@@ -2267,6 +2289,96 @@ const chatsRouter = t.router({
 });
 
 // ---------------------------------------------------------------------------
+// Browser Layout (split pane tree persistence)
+// ---------------------------------------------------------------------------
+
+const browserLayoutRouter = t.router({
+  get: publicProcedure.input(z.object({ workspaceId: z.string() })).query(({ input }) => {
+    return { tree: getBrowserLayout(input.workspaceId) };
+  }),
+
+  save: publicProcedure
+    .input(z.object({ workspaceId: z.string(), tree: z.unknown() }))
+    .mutation(({ input }) => {
+      saveBrowserLayout(input.workspaceId, input.tree);
+      return { ok: true };
+    }),
+});
+
+// ---------------------------------------------------------------------------
+// Browsers (multi-tab browser management)
+// ---------------------------------------------------------------------------
+
+const browsersRouter = t.router({
+  list: publicProcedure.input(z.object({ workspaceId: z.string() })).query(({ input }) => {
+    return { browsers: listBrowsers(input.workspaceId) };
+  }),
+
+  create: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        id: z.string().optional(),
+        name: z.string().optional(),
+        url: z.string().optional(),
+      }),
+    )
+    .mutation(({ input }) => {
+      const browser = createBrowser(input.workspaceId, {
+        id: input.id,
+        name: input.name,
+        url: input.url,
+      });
+      addBrowserToLayout(input.workspaceId, browser.id, {
+        title: input.name,
+        initialUrl: input.url,
+      });
+      emit({ kind: "browser-created", workspaceId: input.workspaceId, browserId: browser.id });
+      return { browser };
+    }),
+
+  get: publicProcedure.input(z.object({ browserId: z.string() })).query(({ input }) => {
+    const browser = getBrowser(input.browserId);
+    return { browser: browser ?? null };
+  }),
+
+  update: publicProcedure
+    .input(
+      z.object({
+        browserId: z.string(),
+        name: z.string().optional(),
+        url: z.string().optional(),
+      }),
+    )
+    .mutation(({ input }) => {
+      const { browserId, ...updates } = input;
+      const browser = updateBrowser(browserId, updates);
+      return { browser };
+    }),
+
+  navigate: publicProcedure
+    .input(z.object({ browserId: z.string(), url: z.string() }))
+    .mutation(({ input }) => {
+      updateBrowserUrl(input.browserId, input.url);
+      return { ok: true };
+    }),
+
+  remove: publicProcedure.input(z.object({ browserId: z.string() })).mutation(({ input }) => {
+    const browser = getBrowser(input.browserId);
+    removeBrowser(input.browserId);
+    if (browser?.workspaceId) {
+      removeBrowserFromLayout(browser.workspaceId, input.browserId);
+    }
+    emit({
+      kind: "browser-removed",
+      workspaceId: browser?.workspaceId,
+      browserId: input.browserId,
+    });
+    return { ok: true };
+  }),
+});
+
+// ---------------------------------------------------------------------------
 // Queue (persisted queued messages)
 // ---------------------------------------------------------------------------
 
@@ -2387,6 +2499,8 @@ export const appRouter = t.router({
   chat: chatRouter,
   chatLayout: chatLayoutRouter,
   chats: chatsRouter,
+  browserLayout: browserLayoutRouter,
+  browsers: browsersRouter,
   statuses: statusesRouter,
   status: statusRouter,
   cronjobs: cronjobsRouter,
