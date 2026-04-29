@@ -9,6 +9,7 @@ export { AgentIcon, ClaudeIcon, CodexIcon } from "./components/agent-icons";
 export { CIStatusIndicator } from "./components/CIStatusIndicator";
 export { CodeMirrorEditor } from "./components/CodeMirrorEditor";
 export { CodeMirrorViewer } from "./components/CodeMirrorViewer";
+export { CommandPaletteDialog } from "./components/CommandPaletteDialog";
 export { DashboardShell } from "./components/DashboardShell";
 export { type DiffStats, DiffView } from "./components/DiffView";
 export { FileBrowser } from "./components/FileBrowser";
@@ -75,6 +76,8 @@ export {
   scrollToSearchMatch,
   serializeEditorState,
 } from "./lib/codemirror-setup";
+export type { CommandRegistryDeps, PaletteCommand } from "./lib/command-registry";
+export { buildCommands, formatShortcut, isMacPlatform } from "./lib/command-registry";
 export { getFileIcon } from "./lib/file-icon";
 export { type FileLocation, formatFileLocation, parseFileLocation } from "./lib/file-location";
 export { type FilePreviewType, getFilePreviewType } from "./lib/file-type";

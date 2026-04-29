@@ -1,4 +1,6 @@
 import {
+  buildCommands,
+  CommandPaletteDialog,
   type DiffStats,
   DiffView,
   parseFileLocation,
@@ -601,6 +603,7 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
   const [quickOpenOpen, setQuickOpenOpen] = useState(false);
   const [quickOpenQuery, setQuickOpenQuery] = useState<string | undefined>(undefined);
   const [searchFilesOpen, setSearchFilesOpen] = useState(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
 
   // Find-in-file: active panel registers its search callback here
   const findInFileRef = useRef<(() => void) | null>(null);
@@ -634,6 +637,25 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
     setCurrentFile(filePath ?? undefined);
   }, []);
 
+  // Command palette: central command registry for Cmd+Shift+P
+  const paletteCommands = useMemo(
+    () =>
+      buildCommands({
+        getApi: () => apiRef.current,
+        getHiddenPanels: () => hiddenPanelsRef.current,
+        openQuickOpen: () => setQuickOpenOpen(true),
+        openSearchFiles: () => setSearchFilesOpen(true),
+        findInFile: () => {
+          if (findInFileRef.current) {
+            findInFileRef.current();
+          } else {
+            window.dispatchEvent(new CustomEvent("band:find-in-file"));
+          }
+        },
+      }),
+    [],
+  );
+
   // Global keyboard shortcuts (capture phase) — only active for the visible workspace
   useEffect(() => {
     if (!isActive) return;
@@ -653,7 +675,10 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
       const api = apiRef.current;
       const key = e.key.toLowerCase();
 
-      if (key === "p" && !e.shiftKey) {
+      if (key === "p" && e.shiftKey) {
+        e.preventDefault();
+        setCommandPaletteOpen(true);
+      } else if (key === "p" && !e.shiftKey) {
         e.preventDefault();
         setQuickOpenOpen(true);
       } else if (key === "f" && e.shiftKey) {
@@ -1070,7 +1095,7 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
   // With multi-tab browsers, we hide/show ALL webviews for this workspace.
   useEffect(() => {
     if (!isTauri) return;
-    const isDialogOpen = quickOpenOpen || searchFilesOpen;
+    const isDialogOpen = quickOpenOpen || searchFilesOpen || commandPaletteOpen;
 
     (async () => {
       const { invoke } = await import("@tauri-apps/api/core");
@@ -1084,7 +1109,7 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
         }
       }
     })();
-  }, [quickOpenOpen, searchFilesOpen, workspaceId]);
+  }, [quickOpenOpen, searchFilesOpen, commandPaletteOpen, workspaceId]);
 
   return (
     <>
@@ -1116,6 +1141,11 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
         open={searchFilesOpen}
         onOpenChange={setSearchFilesOpen}
         onOpenFile={handleOpenFile}
+      />
+      <CommandPaletteDialog
+        open={commandPaletteOpen}
+        onOpenChange={setCommandPaletteOpen}
+        commands={paletteCommands}
       />
     </>
   );
