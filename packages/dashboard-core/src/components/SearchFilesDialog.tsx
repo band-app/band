@@ -38,6 +38,7 @@ export function SearchFilesDialog({
     regex: false,
   });
   const [results, setResults] = useState<ContentSearchMatch[]>([]);
+  const [selectedValue, setSelectedValue] = useState("");
   const [loading, setLoading] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchBarRef = useRef<SearchBarHandle>(null);
@@ -77,13 +78,13 @@ export function SearchFilesDialog({
     };
   }, [adapter, workspaceId, query, searchOptions, open]);
 
-  // Reset on close, auto-focus on open
+  // Auto-focus and select text on open so typing replaces previous query
   useEffect(() => {
-    if (!open) {
-      setQuery("");
-      setResults([]);
-    } else {
-      requestAnimationFrame(() => searchBarRef.current?.focus());
+    if (open) {
+      requestAnimationFrame(() => {
+        searchBarRef.current?.focus();
+        searchBarRef.current?.select();
+      });
     }
   }, [open]);
 
@@ -97,6 +98,28 @@ export function SearchFilesDialog({
     }
     return Array.from(map.entries());
   }, [results]);
+
+  // Auto-select the first result only when the current selection is no longer valid
+  const selectedValueRef = useRef(selectedValue);
+  selectedValueRef.current = selectedValue;
+
+  useEffect(() => {
+    if (grouped.length > 0) {
+      const current = selectedValueRef.current;
+      const stillValid =
+        current &&
+        grouped.some(([file, matches]) =>
+          matches.some((m) => `${file}:${m.line}:${m.content}` === current),
+        );
+      if (!stillValid) {
+        const [file, matches] = grouped[0];
+        const first = matches[0];
+        setSelectedValue(`${file}:${first.line}:${first.content}`);
+      }
+    } else {
+      setSelectedValue("");
+    }
+  }, [grouped]);
 
   const handleSelect = useCallback(
     (filePath: string, line: number) => {
@@ -115,7 +138,7 @@ export function SearchFilesDialog({
           <DialogTitle>Search in Files</DialogTitle>
           <DialogDescription>Text search across workspace files</DialogDescription>
         </DialogHeader>
-        <Command shouldFilter={false}>
+        <Command shouldFilter={false} value={selectedValue} onValueChange={setSelectedValue}>
           <SearchBar
             ref={searchBarRef}
             query={query}
