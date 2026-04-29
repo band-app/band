@@ -565,6 +565,11 @@ export function CodeBrowserView({
 
   const handleTabClose = useCallback(
     (filePath: string) => {
+      // Tell FileViewer to discard its in-memory edited content ref BEFORE
+      // the tab switch triggers a re-render.  This prevents the cleanup
+      // effect from re-saving the dirty content back to localStorage.
+      window.dispatchEvent(new CustomEvent("band:discard-edits", { detail: { filePath } }));
+
       // Clear the unsaved edits cache so the file reloads fresh from
       // the server when reopened (same key format as FileViewer).
       try {
@@ -572,6 +577,8 @@ export function CodeBrowserView({
       } catch {
         // storage unavailable
       }
+      // Notify listeners (FileTabBar) that dirty state changed
+      window.dispatchEvent(new CustomEvent("band:dirty-change"));
       fileTabs.closeTab(filePath);
     },
     [fileTabs.closeTab, workspaceId],
