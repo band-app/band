@@ -30,21 +30,11 @@ function getBasename(filePath: string): string {
   return filePath.split("/").pop() || filePath;
 }
 
-/** Check if a file has unsaved edits in the FileViewer localStorage cache */
-function hasDirtyEdits(workspaceId: string, filePath: string): boolean {
-  try {
-    return localStorage.getItem(`band-edits:${workspaceId}\0${filePath}`) != null;
-  } catch {
-    return false;
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
 interface FileTabBarProps {
-  workspaceId: string;
   /** Absolute filesystem path of the workspace root (for "Copy Absolute Path") */
   workspacePath?: string;
   tabs: FileTab[];
@@ -57,6 +47,8 @@ interface FileTabBarProps {
   onGoForward?: () => void;
   canGoBack?: boolean;
   canGoForward?: boolean;
+  /** Check if a file has unsaved edits (from tab state) */
+  isDirty?: (filePath: string) => boolean;
   /** Action buttons rendered at the right end of the tab bar (e.g. markdown toggle) */
   actions?: React.ReactNode;
 }
@@ -66,7 +58,6 @@ interface FileTabBarProps {
 // ---------------------------------------------------------------------------
 
 export function FileTabBar({
-  workspaceId,
   workspacePath,
   tabs,
   activeTabPath,
@@ -76,6 +67,7 @@ export function FileTabBar({
   onGoForward,
   canGoBack,
   canGoForward,
+  isDirty: isDirtyFn,
   actions,
 }: FileTabBarProps) {
   const activeRef = useRef<HTMLButtonElement>(null);
@@ -115,13 +107,13 @@ export function FileTabBar({
 
   const handleClose = useCallback(
     (filePath: string) => {
-      if (hasDirtyEdits(workspaceId, filePath)) {
+      if (isDirtyFn?.(filePath)) {
         setConfirmClosePath(filePath);
         return;
       }
       onCloseTab(filePath);
     },
-    [onCloseTab, workspaceId],
+    [onCloseTab, isDirtyFn],
   );
 
   const handleConfirmClose = useCallback(() => {
@@ -203,7 +195,7 @@ export function FileTabBar({
         >
           {tabs.map((tab) => {
             const isActive = tab.filePath === activeTabPath;
-            const isDirty = hasDirtyEdits(workspaceId, tab.filePath);
+            const isDirty = isDirtyFn?.(tab.filePath) ?? false;
             const basename = getBasename(tab.filePath);
             const Icon = getFileIcon(basename);
             const absolutePath = workspacePath
