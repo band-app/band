@@ -106,7 +106,7 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(function Se
         value={query}
         onChange={(e) => onQueryChange(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter") {
+          if (e.key === "Enter" && (onNext || onPrevious)) {
             e.preventDefault();
             if (e.shiftKey) onPrevious?.();
             else onNext?.();
