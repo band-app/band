@@ -33,6 +33,7 @@ struct BrowserUrlChanged {
 }
 
 /// Payload emitted to the frontend with the page's `<title>` after load.
+#[cfg(target_os = "macos")]
 #[derive(Clone, Serialize)]
 struct BrowserTitleChanged {
     browser_id: String,
@@ -136,7 +137,6 @@ pub async fn browser_create(
                     let app_for_title = app_handle.clone();
                     let bid_for_title = b_id.clone();
                     let _ = webview.with_webview(move |wv| {
-                        #[allow(clippy::let_unit_value)]
                         use cocoa::base::{id, nil};
                         use objc::{msg_send, sel, sel_impl};
                         unsafe {
