@@ -5,10 +5,12 @@ import { useIsDark } from "../hooks/use-is-dark";
 import {
   baseEditorExtensions,
   cursorLineTracker,
+  historyField,
   lineHighlightExtension,
   loadLanguage,
   scrollToLine,
   searchHighlightOnly,
+  serializeEditorState,
   setHighlightLines,
 } from "../lib/codemirror-setup";
 import { selectionToChatExtension } from "../lib/selection-to-chat";
@@ -43,6 +45,10 @@ interface CodeMirrorEditorProps {
   onCursorLineChange?: (departureLine: number, arrivalLine: number) => void;
   /** Optional LSP extension to wire into the editor */
   lspExtension?: Extension | null;
+  /** Serialized editor state (from EditorState.toJSON with historyField) to restore on creation */
+  savedEditorState?: unknown;
+  /** Scroll position to restore after editor creation */
+  savedScrollTop?: number;
 }
 
 export function CodeMirrorEditor({
@@ -59,6 +65,8 @@ export function CodeMirrorEditor({
   onSave,
   onCursorLineChange,
   lspExtension,
+  savedEditorState,
+  savedScrollTop,
 }: CodeMirrorEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -90,10 +98,15 @@ export function CodeMirrorEditor({
   const originalContentRef = useRef(originalContent);
   originalContentRef.current = originalContent;
 
-  // On recreation (theme/language change), we save the editor's current
-  // document here so the new instance preserves the user's edits.
+  const savedEditorStateRef = useRef(savedEditorState);
+  savedEditorStateRef.current = savedEditorState;
+  const savedScrollTopRef = useRef(savedScrollTop);
+  savedScrollTopRef.current = savedScrollTop;
+
+  // On recreation (theme/language change), we save the editor's full state
+  // here so the new instance preserves everything (doc, selection, history, scroll).
   // null = first creation (use props instead).
-  const recreationDocRef = useRef<string | null>(null);
+  const recreationStateRef = useRef<{ editorState: unknown; scrollTop: number } | null>(null);
 
   // Create/recreate the editor when language or theme changes.
   // We intentionally do NOT depend on `content` — the editor owns
@@ -140,54 +153,75 @@ export function CodeMirrorEditor({
         extensions.push(langSupport);
       }
 
-      // Determine the initial document:
-      // 1. Recreation (theme/language change) → use the saved document
-      // 2. First creation with cached edits → start with original so cached
-      //    edits become an undoable transaction (Cmd+Z reverts to original)
-      // 3. Normal first creation → use content prop directly
-      const savedDoc = recreationDocRef.current;
-      recreationDocRef.current = null;
+      // Determine how to create the editor state:
+      // 1. Recreation (theme/language change) — restore full state with new extensions
+      // 2. Tab switch — restore from parent-provided saved state
+      // 3. First creation with cached edits — apply as undoable transaction
+      // 4. Normal first creation — use content prop directly
+      const savedRecreation = recreationStateRef.current;
+      recreationStateRef.current = null;
 
-      let initDoc: string;
-      let pendingReplace: string | null = null;
+      let restoreScroll: number | undefined;
 
-      if (savedDoc !== null) {
-        // Recreation — preserve the user's current document
-        initDoc = savedDoc;
-      } else if (
-        originalContentRef.current != null &&
-        originalContentRef.current !== initialContentRef.current
-      ) {
-        // First creation with cached edits — start with original content
-        // and queue the cached edits as an undoable transaction
-        initDoc = originalContentRef.current;
-        pendingReplace = initialContentRef.current;
+      if (savedRecreation) {
+        // Recreation — restore full editor state (doc, selection, undo history)
+        const state = EditorState.fromJSON(
+          savedRecreation.editorState,
+          { extensions },
+          { history: historyField },
+        );
+        viewRef.current = new EditorView({ state, parent: container });
+        restoreScroll = savedRecreation.scrollTop;
+      } else if (savedEditorStateRef.current) {
+        // Tab switch — restore from parent-provided serialized state
+        const state = EditorState.fromJSON(
+          savedEditorStateRef.current,
+          { extensions },
+          { history: historyField },
+        );
+        viewRef.current = new EditorView({ state, parent: container });
+        restoreScroll = savedScrollTopRef.current ?? undefined;
       } else {
-        // Normal creation — no cached edits
-        initDoc = initialContentRef.current;
+        // First creation — use content props
+        let initDoc: string;
+        let pendingReplace: string | null = null;
+
+        if (
+          originalContentRef.current != null &&
+          originalContentRef.current !== initialContentRef.current
+        ) {
+          // Cached edits — start with original content, queue edits as
+          // undoable transaction (Cmd+Z reverts to original)
+          initDoc = originalContentRef.current;
+          pendingReplace = initialContentRef.current;
+        } else {
+          initDoc = initialContentRef.current;
+        }
+
+        const state = EditorState.create({ doc: initDoc, extensions });
+        viewRef.current = new EditorView({ state, parent: container });
+
+        if (pendingReplace !== null) {
+          viewRef.current.dispatch({
+            changes: { from: 0, to: initDoc.length, insert: pendingReplace },
+          });
+        }
+
+        // Scroll to line only on first creation (not restoration)
+        if (lineRef.current) {
+          scrollToLine(viewRef.current, lineRef.current, lineEndRef.current, columnRef.current);
+        }
       }
 
-      const state = EditorState.create({
-        doc: initDoc,
-        extensions,
-      });
-
-      viewRef.current = new EditorView({
-        state,
-        parent: container,
-      });
-
-      // Apply cached edits as a transaction so they appear in undo history.
-      // After this, Cmd+Z will revert back to the original disk content.
-      if (pendingReplace !== null) {
-        viewRef.current.dispatch({
-          changes: { from: 0, to: initDoc.length, insert: pendingReplace },
+      // Restore scroll position and focus (for recreation and tab switch)
+      if (restoreScroll != null) {
+        const scroll = restoreScroll;
+        requestAnimationFrame(() => {
+          if (viewRef.current) {
+            viewRef.current.scrollDOM.scrollTop = scroll;
+            viewRef.current.focus();
+          }
         });
-      }
-
-      // Scroll to line after creation
-      if (lineRef.current) {
-        scrollToLine(viewRef.current, lineRef.current, lineEndRef.current, columnRef.current);
       }
 
       onEditorViewRef.current?.(viewRef.current);
@@ -198,8 +232,9 @@ export function CodeMirrorEditor({
     return () => {
       cancelled = true;
       if (viewRef.current) {
-        // Save current document so recreation preserves user edits
-        recreationDocRef.current = viewRef.current.state.doc.toString();
+        // Save full editor state so recreation preserves everything
+        // (document, cursor/selection, undo history, scroll position)
+        recreationStateRef.current = serializeEditorState(viewRef.current);
         viewRef.current.destroy();
         viewRef.current = null;
         onEditorViewRef.current?.(null);

@@ -657,6 +657,22 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
         return;
       }
 
+      // Ctrl+Tab → next file tab
+      if (e.key === "Tab" && e.ctrlKey && !e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        window.dispatchEvent(new CustomEvent("band:next-file-tab"));
+        return;
+      }
+
+      // Ctrl+Shift+Tab → previous file tab
+      if (e.key === "Tab" && e.ctrlKey && e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        window.dispatchEvent(new CustomEvent("band:prev-file-tab"));
+        return;
+      }
+
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
 
