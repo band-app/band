@@ -58,38 +58,15 @@ interface FileViewerProps {
   onViewModeChange?: (mode: "preview" | "source") => void;
   /** Optional LSP extension to wire into the editor for code intelligence */
   lspExtension?: Extension | null;
+  /** Initial edited content to restore (from tab state). null = no cached edits. */
+  initialEditedContent?: string | null;
+  /** Serialized CodeMirror editor state to restore on creation */
+  savedEditorState?: unknown;
+  /** Scroll position to restore after editor creation */
+  savedScrollTop?: number;
+  /** Called when edited content changes (for persistence to tab state) */
+  onEditedContentChange?: (content: string | null) => void;
 }
-
-// localStorage-backed cache for unsaved edits — survives page reloads
-const EDITS_PREFIX = "band-edits:";
-
-function editsCacheKey(workspaceId: string, filePath: string): string {
-  return `${EDITS_PREFIX}${workspaceId}\0${filePath}`;
-}
-
-const unsavedEditsCache = {
-  get(key: string): string | undefined {
-    try {
-      return localStorage.getItem(key) ?? undefined;
-    } catch {
-      return undefined;
-    }
-  },
-  set(key: string, value: string): void {
-    try {
-      localStorage.setItem(key, value);
-    } catch {
-      // quota exceeded or unavailable — silently ignore
-    }
-  },
-  delete(key: string): void {
-    try {
-      localStorage.removeItem(key);
-    } catch {
-      // unavailable — silently ignore
-    }
-  },
-};
 
 function getFilename(path: string): string {
   return path.split("/").pop() || path;
@@ -130,6 +107,10 @@ export function FileViewer({
   viewMode: controlledViewMode,
   onViewModeChange,
   lspExtension,
+  initialEditedContent,
+  savedEditorState,
+  savedScrollTop,
+  onEditedContentChange,
 }: FileViewerProps) {
   const adapter = useAdapter();
   const [data, setData] = useState<FileContentResult | null>(null);
@@ -156,26 +137,15 @@ export function FileViewer({
 
   const previewType: FilePreviewType = getFilePreviewType(filePath);
 
-  // Persist unsaved edits to cache when leaving a file (navigation or unmount),
-  // and restore them when returning.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: controlledViewMode is intentionally excluded — we only reset internal view mode on file change, not when controlled prop changes
+  // Reset editing state when switching files.
+  // Edited content is initialized from the parent's tab state (via prop).
+  // No cleanup effect needed — the parent saves content on every keystroke
+  // via onEditedContentChange and saves editor state in handleTabSelect.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: controlledViewMode and initialEditedContent are intentionally excluded — we only reset on file change
   useEffect(() => {
-    const key = editsCacheKey(workspaceId, filePath);
-    const cached = unsavedEditsCache.get(key);
-    // Only reset internal view mode when uncontrolled
     if (!controlledViewMode) setInternalViewMode("preview");
-    setEditedContent(cached ?? null);
+    setEditedContent(initialEditedContent ?? null);
     setSaveError(null);
-
-    return () => {
-      // Save current edits to cache when leaving this file
-      const current = editedContentRef.current;
-      if (current !== null) {
-        unsavedEditsCache.set(key, current);
-      } else {
-        unsavedEditsCache.delete(key);
-      }
-    };
   }, [workspaceId, filePath]);
 
   // Listen for discard-edits events from handleTabClose.  When the parent
@@ -258,9 +228,11 @@ export function FileViewer({
   // The content to display — use edited content when available, otherwise server content
   const displayContent = editedContent ?? data?.content;
 
-  // Use a ref to avoid stale closure in the save handler
+  // Use refs to avoid stale closures in handlers
   const editedContentRef = useRef(editedContent);
   editedContentRef.current = editedContent;
+  const onEditedContentChangeRef = useRef(onEditedContentChange);
+  onEditedContentChangeRef.current = onEditedContentChange;
 
   const handleSave = useCallback(async () => {
     if (!adapter.saveWorkspaceFile || editedContentRef.current === null) return;
@@ -271,8 +243,9 @@ export function FileViewer({
       // Update the data state so isDirty resets
       const savedContent = editedContentRef.current;
       setData((prev) => (prev ? { ...prev, content: savedContent } : prev));
-      // Clear cache — saved content is now on disk
-      unsavedEditsCache.delete(editsCacheKey(workspaceId, filePath));
+      // Clear edited content — saved content is now on disk
+      setEditedContent(null);
+      onEditedContentChangeRef.current?.(null);
       window.dispatchEvent(new CustomEvent("band:dirty-change"));
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Failed to save");
@@ -281,26 +254,20 @@ export function FileViewer({
     }
   }, [adapter, workspaceId, filePath]);
 
-  const handleContentChange = useCallback(
-    (newContent: string) => {
-      const key = editsCacheKey(workspaceId, filePath);
-      // When undo brings the content back to the on-disk version, clear
-      // the edited state entirely so the dirty indicators (title bar +
-      // tab dot) disappear and the localStorage cache is cleaned up.
-      if (newContent === dataRef.current?.content) {
-        setEditedContent(null);
-        unsavedEditsCache.delete(key);
-      } else {
-        setEditedContent(newContent);
-        // Write to localStorage immediately so FileTabBar's hasDirtyEdits()
-        // returns the correct value when it re-renders.
-        unsavedEditsCache.set(key, newContent);
-      }
-      // Notify FileTabBar (and any other listener) that dirty state changed
-      window.dispatchEvent(new CustomEvent("band:dirty-change"));
-    },
-    [workspaceId, filePath],
-  );
+  const handleContentChange = useCallback((newContent: string) => {
+    // When undo brings the content back to the on-disk version, clear
+    // the edited state entirely so the dirty indicators (title bar +
+    // tab dot) disappear.
+    if (newContent === dataRef.current?.content) {
+      setEditedContent(null);
+      onEditedContentChangeRef.current?.(null);
+    } else {
+      setEditedContent(newContent);
+      onEditedContentChangeRef.current?.(newContent);
+    }
+    // Notify FileTabBar (and any other listener) that dirty state changed
+    window.dispatchEvent(new CustomEvent("band:dirty-change"));
+  }, []);
 
   // Capture the EditorView locally (for revert) while forwarding to the parent
   const handleEditorView = useCallback(
@@ -315,11 +282,11 @@ export function FileViewer({
     if (isDirty && !window.confirm("You have unsaved changes. Discard?")) {
       return;
     }
-    // Clear cache and ref so the cleanup effect doesn't re-save discarded edits
-    unsavedEditsCache.delete(editsCacheKey(workspaceId, filePath));
-    editedContentRef.current = null;
+    // Clear dirty state
+    setEditedContent(null);
+    onEditedContentChangeRef.current?.(null);
     onBack?.();
-  }, [isDirty, onBack, workspaceId, filePath]);
+  }, [isDirty, onBack]);
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -491,6 +458,8 @@ export function FileViewer({
               onSave={handleSave}
               onCursorLineChange={onCursorLineChange}
               lspExtension={lspExtension}
+              savedEditorState={savedEditorState}
+              savedScrollTop={savedScrollTop}
             />
           ) : (
             <CodeMirrorViewer

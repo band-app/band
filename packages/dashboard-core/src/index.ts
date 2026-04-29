@@ -69,8 +69,11 @@ export {
   collectSearchMatches,
   cursorLineTracker,
   dispatchSearch,
+  historyField,
+  restoreScrollPosition,
   scrollToLine,
   scrollToSearchMatch,
+  serializeEditorState,
 } from "./lib/codemirror-setup";
 export { getFileIcon } from "./lib/file-icon";
 export { type FileLocation, formatFileLocation, parseFileLocation } from "./lib/file-location";

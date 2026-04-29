@@ -11,6 +11,7 @@ import {
   resolveNavigation,
   SearchBar,
   scrollToLine,
+  serializeEditorState,
   toFileUri,
   toLspServerLang,
   toWorkspaceId,
@@ -40,6 +41,7 @@ import { Group, Panel, Separator, usePanelRef } from "react-resizable-panels";
 import { Streamdown } from "streamdown";
 import { useFileTabs } from "../hooks/useFileTabs";
 import { useIsDesktop } from "../hooks/useIsDesktop";
+import { useTabState } from "../hooks/useTabState";
 import { FileTabBar } from "./FileTabBar";
 import { streamdownComponents } from "./streamdown-components";
 
@@ -227,6 +229,7 @@ export function CodeBrowserView({
 }: CodeBrowserViewProps) {
   const isDesktop = useIsDesktop();
   const fileTabs = useFileTabs(workspaceId);
+  const tabState = useTabState(workspaceId);
   const { settings } = useSettingsQuery();
   const { projects } = useProjects();
   const workspacePath = (() => {
@@ -240,8 +243,10 @@ export function CodeBrowserView({
     return undefined;
   })();
   const [viewFilePath, setViewFilePath] = useState(() => {
-    if (!file) return "";
-    return parseFileLocation(file).filePath;
+    if (file) return parseFileLocation(file).filePath;
+    // No file in route — restore the active tab from localStorage so the
+    // editor renders immediately when returning to a workspace.
+    return fileTabs.activeTabPath ?? "";
   });
   const [viewLine, setViewLine] = useState<number | undefined>(() => {
     if (!file) return undefined;
@@ -291,13 +296,22 @@ export function CodeBrowserView({
   const useMobileLayout = !isDesktop || (containerWidth !== null && containerWidth < 600);
 
   // Markdown view mode (controlled from here, rendered in tab bar actions)
-  const [mdViewMode, setMdViewMode] = useState<"preview" | "source">("preview");
+  const [mdViewMode, setMdViewModeState] = useState<"preview" | "source">("preview");
   const isMarkdown = viewFilePath ? getFilePreviewType(viewFilePath) === "markdown" : false;
 
-  // Reset to preview when switching to a different file
+  // Wrap the setter to also persist to tab state
+  const setMdViewMode = useCallback(
+    (mode: "preview" | "source") => {
+      setMdViewModeState(mode);
+      if (viewFilePath) tabState.setViewMode(viewFilePath, mode);
+    },
+    [viewFilePath, tabState.setViewMode],
+  );
+
+  // Restore markdown view mode from tab state (default to preview)
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset on file change only
   useEffect(() => {
-    setMdViewMode("preview");
+    setMdViewModeState(tabState.getViewMode(viewFilePath) ?? "preview");
   }, [viewFilePath]);
 
   // Open initial file as a tab (desktop only)
@@ -394,6 +408,60 @@ export function CodeBrowserView({
   // biome-ignore lint/suspicious/noExplicitAny: EditorView type from @codemirror/view — kept untyped to avoid cross-package dependency
   const editorViewRef = useRef<any>(null);
 
+  // In-memory store for serialized CodeMirror editor state per file.
+  // Primary store for tab switches (faster than localStorage).
+  // Also persisted to localStorage via tabState so undo history survives
+  // workspace switches and page reloads.
+  const savedEditorStatesRef = useRef<Record<string, { editorState: unknown; scrollTop: number }>>(
+    {},
+  );
+
+  // Track viewFilePath in a ref so stable callbacks can read the latest value
+  const viewFilePathRef = useRef(viewFilePath);
+  viewFilePathRef.current = viewFilePath;
+
+  // Save active editor state to localStorage when leaving the workspace.
+  // Uses useLayoutEffect so the cleanup runs synchronously BEFORE
+  // CodeMirrorEditor's useEffect cleanup destroys the editor view.
+  const tabStateUpdateRef = useRef(tabState.update);
+  tabStateUpdateRef.current = tabState.update;
+  useLayoutEffect(() => {
+    return () => {
+      // Save the currently active editor's state
+      const view = editorViewRef.current;
+      const fp = viewFilePathRef.current;
+      if (view && fp) {
+        try {
+          const state = serializeEditorState(view);
+          tabStateUpdateRef.current(fp, {
+            editorState: state.editorState,
+            scrollTop: state.scrollTop,
+          });
+        } catch {
+          // editor not ready
+        }
+      }
+      // Flush all other tabs' in-memory states to localStorage
+      for (const [filePath, state] of Object.entries(savedEditorStatesRef.current)) {
+        tabStateUpdateRef.current(filePath, {
+          editorState: state.editorState,
+          scrollTop: state.scrollTop,
+        });
+      }
+    };
+  }, []);
+
+  // Callback for FileViewer to persist edited content to tab state
+  const handleEditedContentChange = useCallback(
+    (content: string | null) => {
+      const fp = viewFilePathRef.current;
+      if (fp) {
+        tabState.update(fp, { editedContent: content ?? undefined });
+      }
+    },
+    [tabState.update],
+  );
+
   // -------------------------------------------------------------------------
   // Editor navigation history (back/forward)
   // -------------------------------------------------------------------------
@@ -432,6 +500,11 @@ export function CodeBrowserView({
   // The file prop also changes after handleSelectFile navigates the route,
   // but that navigation is already recorded synchronously, so the sentinel
   // inside the hook deduplicates it.
+  //
+  // prevFileRef tracks the previous value so we only clear viewFilePath
+  // when file is *removed* (e.g. mobile back nav), not on the initial
+  // mount where file is absent but fileTabs.activeTabPath was restored.
+  const prevFileRef = useRef(file);
   // biome-ignore lint/correctness/useExhaustiveDependencies: editorHistory.push is stable (ref-based)
   useEffect(() => {
     if (skipFileEffectRef.current) {
@@ -450,14 +523,16 @@ export function CodeBrowserView({
       setViewLine(loc.line);
       setViewLineEnd(loc.lineEnd);
       setViewColumn(loc.column);
-    } else {
+    } else if (prevFileRef.current) {
       // File prop removed (e.g. route changed via back navigation) — clear
       // view state so the mobile layout switches back to FileBrowser.
+      // Only when transitioning from a file to no file, not on initial mount.
       setViewFilePath("");
       setViewLine(undefined);
       setViewLineEnd(undefined);
       setViewColumn(undefined);
     }
+    prevFileRef.current = file;
   }, [file]);
 
   // Handle externally triggered file open (Quick Open, Search, chat links)
@@ -553,35 +628,48 @@ export function CodeBrowserView({
   // -------------------------------------------------------------------------
   const handleTabSelect = useCallback(
     (filePath: string) => {
+      // Save full editor state for the departing file (doc, selection, undo history, scroll)
+      const view = editorViewRef.current;
+      if (view && viewFilePath) {
+        try {
+          const state = serializeEditorState(view);
+          savedEditorStatesRef.current[viewFilePath] = state;
+          // Persist to localStorage so undo history survives workspace switches
+          tabState.update(viewFilePath, {
+            editorState: state.editorState,
+            scrollTop: state.scrollTop,
+          });
+        } catch {
+          // CM view not ready
+        }
+      }
+
+      // Prevent the file prop effect from overwriting state.
+      // The route round-trip (via onSelectFile) only carries the file path.
+      if (filePath !== viewFilePath) skipFileEffectRef.current = true;
+
       fileTabs.setActiveTab(filePath);
       setViewFilePath(filePath);
+      // Don't set viewLine — cursor position is restored from savedEditorState
       setViewLine(undefined);
       setViewLineEnd(undefined);
       setViewColumn(undefined);
       onSelectFile?.(filePath);
     },
-    [fileTabs.setActiveTab, onSelectFile],
+    [fileTabs.setActiveTab, onSelectFile, viewFilePath, tabState.update],
   );
 
   const handleTabClose = useCallback(
     (filePath: string) => {
-      // Tell FileViewer to discard its in-memory edited content ref BEFORE
-      // the tab switch triggers a re-render.  This prevents the cleanup
-      // effect from re-saving the dirty content back to localStorage.
-      window.dispatchEvent(new CustomEvent("band:discard-edits", { detail: { filePath } }));
-
-      // Clear the unsaved edits cache so the file reloads fresh from
-      // the server when reopened (same key format as FileViewer).
-      try {
-        localStorage.removeItem(`band-edits:${workspaceId}\0${filePath}`);
-      } catch {
-        // storage unavailable
-      }
+      // Remove all stored state for this tab (view mode, edited content)
+      tabState.removeFile(filePath);
+      // Remove in-memory editor state (cursor, selection, undo history, scroll)
+      delete savedEditorStatesRef.current[filePath];
       // Notify listeners (FileTabBar) that dirty state changed
       window.dispatchEvent(new CustomEvent("band:dirty-change"));
       fileTabs.closeTab(filePath);
     },
-    [fileTabs.closeTab, workspaceId],
+    [fileTabs.closeTab, tabState.removeFile],
   );
 
   // Sync viewFilePath when active tab changes due to a close.
@@ -611,6 +699,8 @@ export function CodeBrowserView({
       onSelectFile?.(null);
     } else if (fileTabs.activeTabPath && fileTabs.activeTabPath !== viewFilePath) {
       // Active tab changed (e.g. after closing) — sync to new active tab
+      // Cursor/scroll position is restored from savedEditorStatesRef via props
+      skipFileEffectRef.current = true;
       setViewFilePath(fileTabs.activeTabPath);
       setViewLine(undefined);
       setViewLineEnd(undefined);
@@ -625,6 +715,8 @@ export function CodeBrowserView({
       // Prevent the file prop effect from overwriting the line we're about to set.
       // The route round-trip only carries the file path, not the line.
       if (!sameFile) skipFileEffectRef.current = true;
+      // Clear saved editor state so the explicit line takes precedence
+      delete savedEditorStatesRef.current[entry.filePath];
       fileTabs.openTab(entry.filePath);
       setViewFilePath(entry.filePath);
       setViewLine(entry.line);
@@ -777,6 +869,16 @@ export function CodeBrowserView({
             renderMarkdown={renderMarkdown}
             editable
             lspExtension={lspExtension}
+            initialEditedContent={tabState.get(viewFilePath)?.editedContent ?? null}
+            savedEditorState={
+              savedEditorStatesRef.current[viewFilePath]?.editorState ??
+              tabState.get(viewFilePath)?.editorState
+            }
+            savedScrollTop={
+              savedEditorStatesRef.current[viewFilePath]?.scrollTop ??
+              tabState.get(viewFilePath)?.scrollTop
+            }
+            onEditedContentChange={handleEditedContentChange}
           />
         ) : (
           <FileBrowser
@@ -862,7 +964,6 @@ export function CodeBrowserView({
               {/* Tab bar */}
               <div className={treeCollapsed ? "[&>div]:pl-7" : ""}>
                 <FileTabBar
-                  workspaceId={workspaceId}
                   workspacePath={workspacePath}
                   tabs={fileTabs.openTabs}
                   activeTabPath={fileTabs.activeTabPath}
@@ -872,6 +973,7 @@ export function CodeBrowserView({
                   onGoForward={handleEditorGoForward}
                   canGoBack={editorHistory.canGoBack}
                   canGoForward={editorHistory.canGoForward}
+                  isDirty={tabState.isDirty}
                   actions={
                     isMarkdown ? (
                       <div className="flex items-center gap-0.5">
@@ -934,6 +1036,16 @@ export function CodeBrowserView({
                     lspExtension={lspExtension}
                     viewMode={isMarkdown ? mdViewMode : undefined}
                     onViewModeChange={isMarkdown ? setMdViewMode : undefined}
+                    initialEditedContent={tabState.get(viewFilePath)?.editedContent ?? null}
+                    savedEditorState={
+                      savedEditorStatesRef.current[viewFilePath]?.editorState ??
+                      tabState.get(viewFilePath)?.editorState
+                    }
+                    savedScrollTop={
+                      savedEditorStatesRef.current[viewFilePath]?.scrollTop ??
+                      tabState.get(viewFilePath)?.scrollTop
+                    }
+                    onEditedContentChange={handleEditedContentChange}
                     toolbar={
                       search.searchOpen ? (
                         <SearchBar

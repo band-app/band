@@ -2,6 +2,7 @@ import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
 import {
   defaultKeymap,
   history,
+  historyField,
   historyKeymap,
   indentLess,
   indentMore,
@@ -645,4 +646,33 @@ export function cursorLineTracker(
     }
     lastLine = newLine;
   });
+}
+
+// ---------------------------------------------------------------------------
+// Editor state serialization (for tab state persistence)
+// ---------------------------------------------------------------------------
+
+export { historyField };
+
+/**
+ * Serialize the editor state (document, selection, undo history) and scroll
+ * position.  Restore with `EditorState.fromJSON()` passing
+ * `{ history: historyField }` as the field mapping.
+ */
+export function serializeEditorState(view: EditorView): {
+  editorState: unknown;
+  scrollTop: number;
+} {
+  return {
+    editorState: view.state.toJSON({ history: historyField }),
+    scrollTop: view.scrollDOM.scrollTop,
+  };
+}
+
+/**
+ * Restore the scroll position of an editor view.
+ * Call after creating a view from `EditorState.fromJSON()`.
+ */
+export function restoreScrollPosition(view: EditorView, scrollTop: number): void {
+  view.scrollDOM.scrollTop = scrollTop;
 }
