@@ -25,6 +25,7 @@ export { SearchFilesDialog } from "./components/SearchFilesDialog";
 export { SettingsPage } from "./components/SettingsPage";
 export { SetupStatusIndicator } from "./components/SetupStatusIndicator";
 export { WorkspaceCard } from "./components/WorkspaceCard";
+export { WorkspacePickerDialog } from "./components/WorkspacePickerDialog";
 export { type WorkspaceTab, WorkspaceTabNav } from "./components/WorkspaceTabNav";
 // Context
 export { DashboardProvider, useAdapter, useCapabilities } from "./context";
@@ -82,6 +83,7 @@ export { getFileIcon } from "./lib/file-icon";
 export { type FileLocation, formatFileLocation, parseFileLocation } from "./lib/file-location";
 export { type FilePreviewType, getFilePreviewType } from "./lib/file-type";
 export { extensionToLanguage, filenameToLanguage } from "./lib/language-map";
+export { getRecentWorkspaceOrder, recordWorkspaceAccess } from "./lib/recent-workspaces";
 export type { SelectionToChatDetail } from "./lib/selection-to-chat";
 export { isServiceHealthy, type ServiceHealth } from "./lib/service-health";
 // Lib

@@ -1,3 +1,4 @@
+import { recordWorkspaceAccess } from "@band-app/dashboard-core";
 import { useRouterState } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
@@ -74,8 +75,10 @@ export function DockviewInstanceManager() {
 
   // Update lastAccessed timestamp in a non-blocking effect (for LRU ordering).
   // This doesn't affect which workspace is visible — just eviction order.
+  // Also record the access in localStorage for the workspace picker.
   useEffect(() => {
     if (!activeWorkspaceId) return;
+    recordWorkspaceAccess(activeWorkspaceId);
     setCache((prev) => {
       const existing = prev.get(activeWorkspaceId);
       if (!existing) return prev;
