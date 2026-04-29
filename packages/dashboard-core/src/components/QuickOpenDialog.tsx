@@ -28,6 +28,12 @@ interface QuickOpenDialogProps {
   /** When true and only one result is found, auto-open it without showing
    *  the dialog. The dialog is still shown if there are 0 or 2+ results. */
   autoOpen?: boolean;
+  /** Recently accessed files, shown when the search query is empty. */
+  recentFiles?: string[];
+  /** The last search query, restored when the dialog opens (lower priority than initialQuery). */
+  lastQuery?: string;
+  /** Called on close with the current query so the parent can persist it. */
+  onQueryChange?: (query: string) => void;
 }
 
 export function QuickOpenDialog({
@@ -38,6 +44,9 @@ export function QuickOpenDialog({
   currentFile,
   initialQuery,
   autoOpen,
+  recentFiles,
+  lastQuery,
+  onQueryChange,
 }: QuickOpenDialogProps) {
   const adapter = useAdapter();
   const [query, setQuery] = useState("");
@@ -50,22 +59,44 @@ export function QuickOpenDialog({
   // (when `loading` is still its initial `false` value).
   const searchResolved = useRef(false);
 
-  // Seed query from initialQuery when the dialog opens
+  // Seed query from initialQuery (chat links) or lastQuery when the dialog opens
   useEffect(() => {
-    if (open && initialQuery) {
-      setQuery(initialQuery);
+    if (open) {
+      if (initialQuery) {
+        setQuery(initialQuery);
+      } else if (lastQuery) {
+        setQuery(lastQuery);
+        // Select all text so typing immediately replaces it.
+        // Use requestAnimationFrame to ensure the input is rendered and focused.
+        requestAnimationFrame(() => {
+          const input = document.querySelector<HTMLInputElement>('[data-slot="command-input"]');
+          input?.select();
+        });
+      }
     }
-  }, [open, initialQuery]);
+  }, [open, initialQuery, lastQuery]);
 
   // Parse line/column reference from the query (e.g. "src/main.rs:42" -> line 42)
   const parsedQuery = useMemo(() => parseFileLocation(query), [query]);
   const searchQuery = parsedQuery.filePath;
+
+  // Whether to show recent files instead of searching
+  const showRecent =
+    searchQuery === "" && parsedQuery.line == null && recentFiles && recentFiles.length > 0;
 
   useEffect(() => {
     if (!open || !adapter.searchWorkspaceFiles) return;
 
     // Skip file search when the query is a pure go-to-line (":42")
     if (searchQuery === "" && parsedQuery.line != null) {
+      setFiles([]);
+      setLoading(false);
+      searchResolved.current = true;
+      return;
+    }
+
+    // When query is empty and we have recent files, skip the server search
+    if (showRecent) {
       setFiles([]);
       setLoading(false);
       searchResolved.current = true;
@@ -96,7 +127,7 @@ export function QuickOpenDialog({
       cancelled = true;
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [adapter, workspaceId, searchQuery, parsedQuery.line, open]);
+  }, [adapter, workspaceId, searchQuery, parsedQuery.line, open, showRecent]);
 
   // Auto-open: wait for the initial search to resolve, then either open the
   // single result directly or reveal the dialog for the user to pick.
@@ -133,15 +164,23 @@ export function QuickOpenDialog({
     }
   }, [autoOpen, files, open, parsedQuery, onOpenFile, onOpenChange]);
 
-  // Reset on close
+  // Keep a ref to the current query so the close effect can read it without depending on it
+  const queryRef = useRef(query);
+  queryRef.current = query;
+
+  // Reset on close — persist the last query first
   useEffect(() => {
     if (!open) {
+      // Save the current query before clearing so the parent can restore it
+      // on next open. We read from a ref to avoid adding `query` to deps
+      // (which would fire this effect on every keystroke).
+      onQueryChange?.(queryRef.current);
       setQuery("");
       setFiles([]);
       autoOpened.current = false;
       searchResolved.current = false;
     }
-  }, [open]);
+  }, [open, onQueryChange]);
 
   // "Go to line in current file" — when query is just ":N" with no filename
   const isGoToLine = parsedQuery.filePath === "" && parsedQuery.line != null;
@@ -167,6 +206,10 @@ export function QuickOpenDialog({
     },
     [onOpenFile, onOpenChange, parsedQuery],
   );
+
+  // The list of files to render: recent files when query is empty, search results otherwise
+  const displayFiles = showRecent ? recentFiles : files;
+  const groupHeading = showRecent ? "Recent files" : undefined;
 
   return (
     <Dialog open={open && dialogVisible} onOpenChange={onOpenChange}>
@@ -204,8 +247,8 @@ export function QuickOpenDialog({
             ) : (
               <>
                 <CommandEmpty>{loading ? "Searching..." : "No files found."}</CommandEmpty>
-                <CommandGroup>
-                  {files.map((file) => {
+                <CommandGroup heading={groupHeading}>
+                  {displayFiles.map((file) => {
                     const fileName = file.split("/").pop() || file;
                     const Icon = getFileIcon(fileName);
                     return (
