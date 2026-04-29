@@ -785,6 +785,31 @@ export function CodeBrowserView({
     return () => window.removeEventListener("band:lsp-navigate", handleLspNavigate);
   }, [pushDepartureAndArrival, fileTabs.openTab, onSelectFile]);
 
+  // Ctrl+Tab / Ctrl+Shift+Tab to switch between file tabs
+  useEffect(() => {
+    const handleNextTab = () => {
+      const tabs = fileTabs.openTabs;
+      if (tabs.length <= 1) return;
+      const currentIndex = tabs.findIndex((t) => t.filePath === fileTabs.activeTabPath);
+      const nextIndex = (currentIndex + 1) % tabs.length;
+      handleTabSelect(tabs[nextIndex].filePath);
+    };
+    const handlePrevTab = () => {
+      const tabs = fileTabs.openTabs;
+      if (tabs.length <= 1) return;
+      const currentIndex = tabs.findIndex((t) => t.filePath === fileTabs.activeTabPath);
+      const prevIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+      handleTabSelect(tabs[prevIndex].filePath);
+    };
+
+    window.addEventListener("band:next-file-tab", handleNextTab);
+    window.addEventListener("band:prev-file-tab", handlePrevTab);
+    return () => {
+      window.removeEventListener("band:next-file-tab", handleNextTab);
+      window.removeEventListener("band:prev-file-tab", handlePrevTab);
+    };
+  }, [fileTabs.openTabs, fileTabs.activeTabPath, handleTabSelect]);
+
   // Cmd+W / Ctrl+W to close active tab
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
