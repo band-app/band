@@ -26,6 +26,7 @@ import {
   Terminal as TerminalIcon,
 } from "lucide-react";
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRecentFiles } from "../hooks/useRecentFiles";
 import { isTauri } from "../lib/is-tauri";
 import { trpc } from "../lib/trpc-client";
 import { useWsActive } from "../lib/workspace-visibility-store";
@@ -606,6 +607,10 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
   const [searchFilesOpen, setSearchFilesOpen] = useState(false);
   const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [lastQuickOpenQuery, setLastQuickOpenQuery] = useState("");
+
+  // Recent files tracking
+  const { recentFiles, trackFile } = useRecentFiles(workspaceId);
 
   // Find-in-file: active panel registers its search callback here
   const findInFileRef = useRef<(() => void) | null>(null);
@@ -619,25 +624,33 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
   }, []);
 
   // Open file from Changes panel or dialogs → activate Files panel
-  const handleOpenFile = useCallback((filename: string) => {
-    // Store clean path (without line refs) as currentFile so that
-    // go-to-line (:N) in quick open works correctly.
-    const cleanPath = parseFileLocation(filename).filePath;
-    setCurrentFile(cleanPath);
-    setOpenFilePath(filename);
-    const api = apiRef.current;
-    if (api) {
-      api.getPanel("files")?.api.setActive();
-    }
-  }, []);
+  const handleOpenFile = useCallback(
+    (filename: string) => {
+      // Store clean path (without line refs) as currentFile so that
+      // go-to-line (:N) in quick open works correctly.
+      const cleanPath = parseFileLocation(filename).filePath;
+      setCurrentFile(cleanPath);
+      setOpenFilePath(filename);
+      trackFile(cleanPath);
+      const api = apiRef.current;
+      if (api) {
+        api.getPanel("files")?.api.setActive();
+      }
+    },
+    [trackFile],
+  );
 
   const handleFileOpened = useCallback(() => {
     setOpenFilePath(null);
   }, []);
 
-  const handleSelectFile = useCallback((filePath: string | null) => {
-    setCurrentFile(filePath ?? undefined);
-  }, []);
+  const handleSelectFile = useCallback(
+    (filePath: string | null) => {
+      setCurrentFile(filePath ?? undefined);
+      if (filePath) trackFile(filePath);
+    },
+    [trackFile],
+  );
 
   // Command palette: central command registry for Cmd+Shift+P
   const paletteCommands = useMemo(
@@ -1162,6 +1175,9 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
         currentFile={currentFile}
         initialQuery={quickOpenQuery}
         autoOpen={quickOpenQuery != null}
+        recentFiles={recentFiles}
+        lastQuery={lastQuickOpenQuery}
+        onQueryChange={setLastQuickOpenQuery}
       />
       <SearchFilesDialog
         workspaceId={workspaceId}
