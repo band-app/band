@@ -178,6 +178,22 @@ export function FileViewer({
     };
   }, [workspaceId, filePath]);
 
+  // Listen for discard-edits events from handleTabClose.  When the parent
+  // closes a tab with "Close Without Saving", it dispatches this event
+  // BEFORE the tab switch so we can null out the ref synchronously.
+  // The cleanup effect (above) then sees null and skips re-saving.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.filePath === filePath) {
+        editedContentRef.current = null;
+        setEditedContent(null);
+      }
+    };
+    window.addEventListener("band:discard-edits", handler);
+    return () => window.removeEventListener("band:discard-edits", handler);
+  }, [filePath]);
+
   // Warn before tab close when dirty
   useEffect(() => {
     if (!isDirty) return;
