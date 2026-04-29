@@ -1,0 +1,149 @@
+/**
+ * Central command registry for the command palette (Cmd+Shift+P).
+ *
+ * All palette-visible commands are defined here so they can be referenced by
+ * both the CommandPaletteDialog component and the keyboard shortcut handler.
+ */
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export interface PaletteCommand {
+  /** Unique identifier for the command. */
+  id: string;
+  /** Human-readable label shown in the palette. */
+  label: string;
+  /**
+   * Canonical keyboard shortcut string.
+   * Use `Cmd+` for the platform modifier (⌘ on Mac, Ctrl elsewhere).
+   * Examples: `"Cmd+P"`, `"Cmd+Shift+F"`, `"Shift+Tab"`.
+   */
+  shortcut: string;
+  /** Callback executed when the command is selected. */
+  action: () => void;
+}
+
+export interface CommandRegistryDeps {
+  /** Returns the current DockviewApi (reads from a ref at call time). */
+  getApi: () => { getPanel(id: string): { api: { setActive(): void } } | undefined } | null;
+  /** Returns the current list of hidden panel ids (reads from a ref). */
+  getHiddenPanels: () => string[];
+  /** Open the Quick Open dialog. */
+  openQuickOpen: () => void;
+  /** Open the Search Files dialog. */
+  openSearchFiles: () => void;
+  /** Trigger find-in-file for the active editor. */
+  findInFile: () => void;
+}
+
+// ---------------------------------------------------------------------------
+// Platform detection
+// ---------------------------------------------------------------------------
+
+export function isMacPlatform(): boolean {
+  if (typeof navigator === "undefined") return false;
+  // Prefer the modern User-Agent Client Hints API when available
+  const ua = navigator as Navigator & {
+    userAgentData?: { platform?: string };
+  };
+  if (ua.userAgentData?.platform) {
+    return ua.userAgentData.platform === "macOS";
+  }
+  return /Mac|iPhone|iPad|iPod/.test(navigator.platform ?? "");
+}
+
+// ---------------------------------------------------------------------------
+// Shortcut formatting
+// ---------------------------------------------------------------------------
+
+/**
+ * Convert a canonical shortcut string to a platform-appropriate display string.
+ *
+ * On macOS: `Cmd+` → `⌘`, `Shift+` → `⇧`, `Alt+` → `⌥`
+ * On others: `Cmd+` → `Ctrl+`
+ */
+export function formatShortcut(shortcut: string): string {
+  const mac = isMacPlatform();
+  if (mac) {
+    return shortcut
+      .replace(/Cmd\+/g, "⌘")
+      .replace(/Shift\+/g, "⇧")
+      .replace(/Alt\+/g, "⌥");
+  }
+  return shortcut.replace(/Cmd\+/g, "Ctrl+");
+}
+
+// ---------------------------------------------------------------------------
+// Command builder
+// ---------------------------------------------------------------------------
+
+function activatePanel(deps: CommandRegistryDeps, panelId: string): void {
+  if (deps.getHiddenPanels().includes(panelId)) return;
+  deps.getApi()?.getPanel(panelId)?.api.setActive();
+}
+
+export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
+  return [
+    {
+      id: "quick-open",
+      label: "Quick Open",
+      shortcut: "Cmd+P",
+      action: () => deps.openQuickOpen(),
+    },
+    {
+      id: "search-files",
+      label: "Search in Files",
+      shortcut: "Cmd+Shift+F",
+      action: () => deps.openSearchFiles(),
+    },
+    {
+      id: "find-in-file",
+      label: "Find in File",
+      shortcut: "Cmd+F",
+      action: () => deps.findInFile(),
+    },
+    {
+      id: "show-changes",
+      label: "Show Changes",
+      shortcut: "Cmd+E",
+      action: () => activatePanel(deps, "changes"),
+    },
+    {
+      id: "show-terminal",
+      label: "Show Terminal",
+      shortcut: "Cmd+J",
+      action: () => activatePanel(deps, "terminal"),
+    },
+    {
+      id: "show-files",
+      label: "Show Files",
+      shortcut: "Cmd+G",
+      action: () => activatePanel(deps, "files"),
+    },
+    {
+      id: "show-browser",
+      label: "Show Browser",
+      shortcut: "Cmd+B",
+      action: () => activatePanel(deps, "browser"),
+    },
+    {
+      id: "editor-go-back",
+      label: "Go Back",
+      shortcut: "Cmd+-",
+      action: () => window.dispatchEvent(new CustomEvent("band:editor-go-back")),
+    },
+    {
+      id: "editor-go-forward",
+      label: "Go Forward",
+      shortcut: "Cmd+Shift+-",
+      action: () => window.dispatchEvent(new CustomEvent("band:editor-go-forward")),
+    },
+    {
+      id: "toggle-mode",
+      label: "Toggle Edit/Plan Mode",
+      shortcut: "Shift+Tab",
+      action: () => window.dispatchEvent(new CustomEvent("band:toggle-mode")),
+    },
+  ];
+}
