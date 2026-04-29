@@ -5,6 +5,7 @@ import {
   QuickOpenDialog,
   SearchFilesDialog,
   useSettingsQuery,
+  WorkspacePickerDialog,
 } from "@band-app/dashboard-core";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@band-app/ui";
 import {
@@ -601,6 +602,7 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
   const [quickOpenOpen, setQuickOpenOpen] = useState(false);
   const [quickOpenQuery, setQuickOpenQuery] = useState<string | undefined>(undefined);
   const [searchFilesOpen, setSearchFilesOpen] = useState(false);
+  const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false);
 
   // Find-in-file: active panel registers its search callback here
   const findInFileRef = useRef<(() => void) | null>(null);
@@ -644,6 +646,14 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
         e.preventDefault();
         e.stopPropagation();
         window.dispatchEvent(new CustomEvent("band:toggle-mode"));
+        return;
+      }
+
+      // Ctrl+R (not Cmd+R) → workspace picker — on both macOS and Windows
+      if (e.ctrlKey && !e.metaKey && e.key.toLowerCase() === "r" && !e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        setWorkspacePickerOpen(true);
         return;
       }
 
@@ -1070,7 +1080,7 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
   // With multi-tab browsers, we hide/show ALL webviews for this workspace.
   useEffect(() => {
     if (!isTauri) return;
-    const isDialogOpen = quickOpenOpen || searchFilesOpen;
+    const isDialogOpen = quickOpenOpen || searchFilesOpen || workspacePickerOpen;
 
     (async () => {
       const { invoke } = await import("@tauri-apps/api/core");
@@ -1084,7 +1094,7 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
         }
       }
     })();
-  }, [quickOpenOpen, searchFilesOpen, workspaceId]);
+  }, [quickOpenOpen, searchFilesOpen, workspacePickerOpen, workspaceId]);
 
   return (
     <>
@@ -1117,6 +1127,7 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
         onOpenChange={setSearchFilesOpen}
         onOpenFile={handleOpenFile}
       />
+      <WorkspacePickerDialog open={workspacePickerOpen} onOpenChange={setWorkspacePickerOpen} />
     </>
   );
 });
