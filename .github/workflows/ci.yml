@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request_target:
-    types: [labeled, synchronize]
+    types: [opened, reopened, labeled, synchronize]
     branches: [main]
 
 concurrency:
@@ -17,10 +17,11 @@ jobs:
     runs-on: ubuntu-latest
 
     # Always run on push to main.
-    # For PRs, only run when a maintainer adds the 'ci:approved' label.
-    # New commits re-run automatically while the label is present.
+    # For same-repo PRs (collaborators): run automatically.
+    # For fork PRs: only run when a maintainer adds the 'ci:approved' label.
     if: >
       github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name == github.repository ||
       contains(github.event.pull_request.labels.*.name, 'ci:approved')
 
     env:
