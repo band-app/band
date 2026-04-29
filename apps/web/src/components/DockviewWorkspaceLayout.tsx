@@ -676,16 +676,26 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
     if (!isActive) return;
 
     const handler = (e: KeyboardEvent) => {
-      // Shift+Tab → toggle mode (Edit/Plan)
+      // When the terminal (xterm) is focused, let most keyboard shortcuts
+      // pass through so the shell receives them — e.g. Ctrl+R (reverse
+      // search), Ctrl+C (SIGINT), Ctrl+D (EOF), Ctrl+L (clear),
+      // Ctrl+A/E (line navigation), Ctrl+K (kill line), etc.
+      // Only Meta/Cmd-based shortcuts (Cmd+P, Cmd+Shift+P, …) are still
+      // handled at the app level when the terminal has focus.
+      const terminalFocused = document.activeElement?.closest(".xterm") != null;
+
+      // Shift+Tab → toggle mode (Edit/Plan) — skip when terminal focused
       if (e.key === "Tab" && e.shiftKey && !e.ctrlKey && !e.metaKey) {
+        if (terminalFocused) return;
         e.preventDefault();
         e.stopPropagation();
         window.dispatchEvent(new CustomEvent("band:toggle-mode"));
         return;
       }
 
-      // Ctrl+R (not Cmd+R) → workspace picker — on both macOS and Windows
+      // Ctrl+R (not Cmd+R) → workspace picker — skip when terminal focused
       if (e.ctrlKey && !e.metaKey && e.key.toLowerCase() === "r" && !e.shiftKey) {
+        if (terminalFocused) return;
         e.preventDefault();
         e.stopPropagation();
         setWorkspacePickerOpen(true);
@@ -708,8 +718,11 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
         return;
       }
 
+      // When terminal is focused, only handle Meta/Cmd-modified shortcuts.
+      // All plain Ctrl+key combos pass through to the terminal.
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
+      if (terminalFocused && !e.metaKey) return;
 
       const api = apiRef.current;
       const key = e.key.toLowerCase();
