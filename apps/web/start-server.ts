@@ -6,6 +6,7 @@ import { applyWSSHandler } from "@trpc/server/adapters/ws";
 import sirv from "sirv";
 import { WebSocketServer } from "ws";
 import { createAuthMiddleware, parseCookies, tokensEqual } from "./auth.ts";
+import { handleTaskStream } from "./src/api/task-stream.ts";
 import { stopBranchStatusPoller } from "./src/lib/branch-status-poller.ts";
 import { loadChatsFromDb } from "./src/lib/chat-manager.ts";
 import { startCronjobScheduler, stopCronjobScheduler } from "./src/lib/cronjob-scheduler.ts";
@@ -253,6 +254,13 @@ async function main() {
     // Handle MCP (Model Context Protocol) requests
     if (req.url?.startsWith("/mcp")) {
       await handleMcpRequest(req, res);
+      return;
+    }
+
+    // SSE endpoint for task streaming (replaces tRPC WebSocket subscription)
+    const taskStreamMatch = req.url?.match(/^\/api\/tasks\/([^/]+)\/stream/);
+    if (taskStreamMatch) {
+      handleTaskStream(req, res, decodeURIComponent(taskStreamMatch[1]));
       return;
     }
 

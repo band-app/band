@@ -49,7 +49,7 @@ export interface TaskInfo {
   codingAgentId?: string;
   /**
    * The eventId of the first event broadcast for this task. Set on the
-   * first call to broadcast() and used by tasks.stream Phase 2b catch-up
+   * first call to broadcast() and used by the SSE endpoint's catch-up
    * replay to scope buffered events to the current task. Without this,
    * a second message in a session would re-yield every event from the
    * prior task that shares the same session buffer.

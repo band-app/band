@@ -4,7 +4,6 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { WebSocket } from "ws";
 import { seedSettings, seedState } from "./helpers/seed-state";
 
 const PROJECT_ROOT = join(import.meta.dirname, "..");
@@ -155,26 +154,13 @@ async function trpcQuery(
   return fetch(url, { headers: { ...defaultHeaders, ...opts?.headers } });
 }
 
-async function trpcMutate(
-  serverUrl: string,
-  procedure: string,
-  input?: unknown,
-  opts?: { headers?: Record<string, string> },
-) {
-  return fetch(`${serverUrl}/trpc/${procedure}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...defaultHeaders, ...opts?.headers },
-    body: input !== undefined ? JSON.stringify(input) : "{}",
-  });
-}
-
 async function trpcData<T>(res: Response): Promise<T> {
   const body = (await res.json()) as { result: { data: T } };
   return body.result.data;
 }
 
 // ---------------------------------------------------------------------------
-// SSE helpers
+// SSE helpers (AI SDK UIMessageStream format)
 // ---------------------------------------------------------------------------
 
 interface SSEEvent {
@@ -182,7 +168,10 @@ interface SSEEvent {
   data: unknown;
 }
 
-async function parseTrpcSSEStream(response: Response): Promise<SSEEvent[]> {
+/**
+ * Parse an AI SDK SSE stream response into an array of { event, data } objects.
+ */
+async function parseSSEStream(response: Response): Promise<SSEEvent[]> {
   const text = await response.text();
   const events: SSEEvent[] = [];
 
@@ -197,12 +186,6 @@ async function parseTrpcSSEStream(response: Response): Promise<SSEEvent[]> {
       continue;
     }
 
-    const envelope = data as Record<string, unknown>;
-    const result = envelope?.result as Record<string, unknown> | undefined;
-    if (result?.type === "data" && result.data !== undefined) {
-      data = result.data;
-    }
-
     const event =
       typeof data === "object" && data !== null
         ? ((data as Record<string, unknown>).type as string)
@@ -215,85 +198,23 @@ async function parseTrpcSSEStream(response: Response): Promise<SSEEvent[]> {
   return events;
 }
 
-async function trpcSubscription(
+/**
+ * Submit a task via the SSE POST endpoint and wait for the stream to complete.
+ */
+async function submitAndStream(
   serverUrl: string,
-  procedure: string,
-  input: unknown,
-  opts?: { headers?: Record<string, string> },
-): Promise<Response> {
-  const url = `${serverUrl}/trpc/${procedure}?input=${encodeURIComponent(JSON.stringify(input))}`;
-  return fetch(url, {
-    headers: { ...defaultHeaders, ...opts?.headers },
+  workspaceId: string,
+  prompt: string,
+): Promise<{ response: Response; events: SSEEvent[] }> {
+  const chatId = `test-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const response = await fetch(`${serverUrl}/api/tasks/${encodeURIComponent(chatId)}/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...defaultHeaders },
+    body: JSON.stringify({ workspaceId, prompt }),
   });
-}
-
-// ---------------------------------------------------------------------------
-// WebSocket helpers
-// ---------------------------------------------------------------------------
-
-interface WSMessage {
-  id: number;
-  jsonrpc: string;
-  result?: { type: string; data?: unknown };
-  error?: unknown;
-}
-
-function _wsSubscribe(
-  serverUrl: string,
-  procedure: string,
-  input: unknown,
-  opts?: { headers?: Record<string, string>; timeoutMs?: number },
-): Promise<{ messages: WSMessage[]; events: SSEEvent[] }> {
-  const wsUrl = `${serverUrl.replace(/^http/, "ws")}/trpc`;
-  const timeout = opts?.timeoutMs ?? 10_000;
-
-  return new Promise((resolve) => {
-    const ws = new WebSocket(wsUrl, { headers: opts?.headers ?? defaultHeaders });
-    const messages: WSMessage[] = [];
-    const events: SSEEvent[] = [];
-    let timer: ReturnType<typeof setTimeout>;
-
-    function finish() {
-      clearTimeout(timer);
-      ws.close();
-      resolve({ messages, events });
-    }
-
-    ws.on("open", () => {
-      ws.send(
-        JSON.stringify({
-          id: 1,
-          jsonrpc: "2.0",
-          method: "subscription",
-          params: { path: procedure, input },
-        }),
-      );
-    });
-
-    ws.on("message", (raw: Buffer) => {
-      const msg = JSON.parse(raw.toString()) as WSMessage;
-      messages.push(msg);
-
-      if (msg.result?.type === "data" && msg.result.data !== undefined) {
-        const data = msg.result.data;
-        const event =
-          typeof data === "object" && data !== null
-            ? ((data as Record<string, unknown>).type as string)
-            : null;
-        if (event) {
-          events.push({ event, data });
-        }
-      }
-
-      if (msg.result?.type === "stopped") {
-        finish();
-      }
-    });
-
-    ws.on("error", () => finish());
-    ws.on("close", () => finish());
-    timer = setTimeout(finish, timeout);
-  });
+  if (!response.ok) return { response, events: [] };
+  const events = await parseSSEStream(response);
+  return { response, events };
 }
 
 // ---------------------------------------------------------------------------
@@ -352,10 +273,10 @@ function standardScenario() {
 }
 
 // ---------------------------------------------------------------------------
-// Test: Stream events carry eventId
+// Test: SSE stream contains expected event types
 // ---------------------------------------------------------------------------
 
-describe("Stream gap-fill — eventId on stream events", () => {
+describe("Stream gap-fill — SSE stream events", () => {
   let server: ServerHandle;
   let tmpHome: string;
 
@@ -372,41 +293,43 @@ describe("Stream gap-fill — eventId on stream events", () => {
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  it("every stream event carries a numeric eventId that is monotonically increasing", async () => {
-    // Submit a task
-    const submitRes = await trpcMutate(server.url, "tasks.submit", {
-      workspaceId: "testproject-main",
-      prompt: "hello gapfill",
-    });
-    expect(submitRes.status).toBe(200);
-
-    // Stream via SSE
-    const streamRes = await trpcSubscription(server.url, "tasks.stream", {
-      workspaceId: "testproject-main",
-    });
-    const events = await parseTrpcSSEStream(streamRes);
-
+  it("streams events including data-session, text-delta, and finish", async () => {
+    const { response, events } = await submitAndStream(
+      server.url,
+      "testproject-main",
+      "hello gapfill",
+    );
+    expect(response.status).toBe(200);
     expect(events.length).toBeGreaterThan(0);
 
-    // All events after session-start should have eventId (session-start
-    // sets the sessionId, so the first few events before it may not have one).
-    // But data-session is persisted once sessionId is set, so everything
-    // from data-session onward should have eventId.
-    const sessionIdx = events.findIndex((e) => e.event === "data-session");
-    expect(sessionIdx).toBeGreaterThanOrEqual(0);
+    const eventTypes = events.map((e) => e.event);
+    expect(eventTypes).toContain("data-session");
+    expect(eventTypes).toContain("text-delta");
+    expect(eventTypes).toContain("finish");
+  });
 
-    const eventsAfterSession = events.slice(sessionIdx);
-    const eventIds = eventsAfterSession
-      .map((e) => (e.data as Record<string, unknown>).eventId)
-      .filter((id) => typeof id === "number") as number[];
+  it("persists events with monotonically increasing eventIds in session store", async () => {
+    // Submit and stream to completion
+    const { response } = await submitAndStream(server.url, "testproject-main", "eventid test");
+    expect(response.status).toBe(200);
 
-    // Should have eventIds on most events
-    expect(eventIds.length).toBeGreaterThan(0);
+    // Verify via sessions.messages that eventIds are sequential
+    const messagesRes = await trpcQuery(server.url, "sessions.messages", {
+      workspaceId: "testproject-main",
+      sessionId: "gapfill-session-1",
+    });
+    expect(messagesRes.status).toBe(200);
 
-    // eventIds should be monotonically increasing
-    for (let i = 1; i < eventIds.length; i++) {
-      expect(eventIds[i]).toBeGreaterThan(eventIds[i - 1]);
-    }
+    const data = await trpcData<{
+      messages: unknown[];
+      firstEventId: number | null;
+      lastEventId: number | null;
+      hasMore: boolean;
+    }>(messagesRes);
+
+    expect(typeof data.firstEventId).toBe("number");
+    expect(typeof data.lastEventId).toBe("number");
+    expect(data.lastEventId!).toBeGreaterThan(data.firstEventId!);
   });
 });
 
@@ -432,18 +355,13 @@ describe("Stream gap-fill — sessions.messages", () => {
   });
 
   it("returns UIMessages with pagination metadata after task completes", async () => {
-    // Submit and stream to completion
-    const submitRes = await trpcMutate(server.url, "tasks.submit", {
-      workspaceId: "testproject-main",
-      prompt: "test messages endpoint",
-    });
-    expect(submitRes.status).toBe(200);
-
-    // Wait for the stream to complete
-    const streamRes = await trpcSubscription(server.url, "tasks.stream", {
-      workspaceId: "testproject-main",
-    });
-    const events = await parseTrpcSSEStream(streamRes);
+    // Submit and stream to completion via SSE
+    const { response, events } = await submitAndStream(
+      server.url,
+      "testproject-main",
+      "test messages endpoint",
+    );
+    expect(response.status).toBe(200);
     expect(events.some((e) => e.event === "finish")).toBe(true);
 
     // Now query the messages endpoint
@@ -519,10 +437,10 @@ describe("Stream gap-fill — sessions.messages", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Test: Gap-fill replays missed events
+// Test: Gap-fill — sessions.messages supports pagination for replay
 // ---------------------------------------------------------------------------
 
-describe("Stream gap-fill — replay missed events", () => {
+describe("Stream gap-fill — pagination for history replay", () => {
   let server: ServerHandle;
   let tmpHome: string;
 
@@ -539,52 +457,60 @@ describe("Stream gap-fill — replay missed events", () => {
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  it("replays missed events when subscribing with afterEventId", async () => {
-    // Submit a task and stream to completion, collecting eventIds
-    const submitRes = await trpcMutate(server.url, "tasks.submit", {
-      workspaceId: "testproject-main",
-      prompt: "first task for gapfill",
-    });
-    expect(submitRes.status).toBe(200);
+  it("returns paginated subsets of events via beforeEventId", async () => {
+    // Submit and stream to completion
+    const { response } = await submitAndStream(
+      server.url,
+      "testproject-main",
+      "first task for gapfill",
+    );
+    expect(response.status).toBe(200);
 
-    const streamRes = await trpcSubscription(server.url, "tasks.stream", {
-      workspaceId: "testproject-main",
-    });
-    const events = await parseTrpcSSEStream(streamRes);
-    expect(events.some((e) => e.event === "finish")).toBe(true);
-
-    // Collect all eventIds
-    const allEventIds = events
-      .map((e) => (e.data as Record<string, unknown>).eventId)
-      .filter((id) => typeof id === "number") as number[];
-
-    expect(allEventIds.length).toBeGreaterThan(2);
-
-    // Pick an afterEventId from the middle
-    const midIndex = Math.floor(allEventIds.length / 2);
-    const afterEventId = allEventIds[midIndex];
-
-    // Subscribe with afterEventId — should replay events after that point
-    // Since the task already completed and no new task is running, the
-    // subscription will replay DB events and then end (no live task).
-    const replayRes = await trpcSubscription(server.url, "tasks.stream", {
+    // Get all messages
+    const allRes = await trpcQuery(server.url, "sessions.messages", {
       workspaceId: "testproject-main",
       sessionId: "gapfill-session-1",
-      afterEventId,
     });
-    const replayEvents = await parseTrpcSSEStream(replayRes);
+    const allData = await trpcData<{
+      messages: unknown[];
+      firstEventId: number | null;
+      lastEventId: number | null;
+      hasMore: boolean;
+    }>(allRes);
 
-    // Replayed events should all have eventId > afterEventId
-    const replayedIds = replayEvents
-      .map((e) => (e.data as Record<string, unknown>).eventId)
-      .filter((id) => typeof id === "number") as number[];
+    expect(allData.messages.length).toBeGreaterThan(0);
+    expect(typeof allData.firstEventId).toBe("number");
+    expect(typeof allData.lastEventId).toBe("number");
 
-    for (const id of replayedIds) {
-      expect(id).toBeGreaterThan(afterEventId);
+    // Fetch a page before the last event
+    const midEventId = Math.floor((allData.firstEventId! + allData.lastEventId!) / 2);
+    const pageRes = await trpcQuery(server.url, "sessions.messages", {
+      workspaceId: "testproject-main",
+      sessionId: "gapfill-session-1",
+      beforeEventId: midEventId + 1,
+      limit: 100,
+    });
+    const pageData = await trpcData<{
+      messages: unknown[];
+      firstEventId: number | null;
+      lastEventId: number | null;
+      hasMore: boolean;
+    }>(pageRes);
+
+    // Page should only contain events up to midEventId
+    if (pageData.lastEventId != null) {
+      expect(pageData.lastEventId).toBeLessThanOrEqual(midEventId);
     }
+  });
 
-    // Should have replayed the events that were after our midpoint
-    const expectedIds = allEventIds.filter((id) => id > afterEventId);
-    expect(replayedIds).toEqual(expectedIds);
+  it("GET SSE endpoint returns 204 when no task is running", async () => {
+    // After the task from the previous test completed, reconnecting
+    // should return 204 since no task is active.
+    const chatId = `test-completed-${Date.now()}`;
+    const res = await fetch(`${server.url}/api/tasks/${encodeURIComponent(chatId)}/stream`, {
+      method: "GET",
+      headers: defaultHeaders,
+    });
+    expect(res.status).toBe(204);
   });
 });

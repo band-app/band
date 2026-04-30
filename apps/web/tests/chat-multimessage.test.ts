@@ -7,10 +7,9 @@
  * yield every event from the first message before any new events,
  * confusing the AI SDK's useChat hook.
  *
- * These tests submit two tasks back-to-back via tasks.submit, stream
- * each through tasks.stream over WebSocket (matching how the production
- * client connects), and assert that the second stream is scoped to the
- * second task only.
+ * These tests submit two tasks back-to-back via the SSE POST endpoint,
+ * stream each to completion, and assert that the second stream is scoped
+ * to the second task only.
  */
 
 import { spawn } from "node:child_process";
@@ -19,7 +18,6 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { WebSocket } from "ws";
 import { seedSettings, seedState } from "./helpers/seed-state";
 
 const PROJECT_ROOT = join(import.meta.dirname, "..");
@@ -149,79 +147,41 @@ async function startServer(opts: { tmpHome: string; scenarioPath: string }): Pro
 
 const defaultHeaders = { Cookie: `band_token=${DEFAULT_TOKEN}` };
 
-async function trpcMutate(url: string, procedure: string, input: unknown) {
-  return fetch(`${url}/trpc/${procedure}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...defaultHeaders },
-    body: JSON.stringify(input),
-  });
-}
-
 interface StreamEvent {
   type: string;
-  eventId?: number;
   data?: unknown;
   delta?: string;
   text?: string;
 }
 
 /**
- * Open a tasks.stream WebSocket subscription and collect events until the
- * subscription completes (or the timeout fires).
+ * Parse an AI SDK SSE stream response into an array of StreamEvent objects.
  */
-function wsStream(
-  serverUrl: string,
-  input: unknown,
-  opts?: { timeoutMs?: number },
-): Promise<StreamEvent[]> {
-  const wsUrl = `${serverUrl.replace(/^http/, "ws")}/trpc`;
-  const timeoutMs = opts?.timeoutMs ?? 10_000;
+async function parseSSEStream(response: Response): Promise<StreamEvent[]> {
+  const text = await response.text();
+  const events: StreamEvent[] = [];
 
-  return new Promise((resolve) => {
-    const ws = new WebSocket(wsUrl, { headers: defaultHeaders });
-    const events: StreamEvent[] = [];
-    let timer: ReturnType<typeof setTimeout>;
-
-    function finish() {
-      clearTimeout(timer);
-      try {
-        ws.close();
-      } catch {
-        // already closed
-      }
-      resolve(events);
+  for (const line of text.split("\n")) {
+    if (!line.startsWith("data:")) continue;
+    const raw = line.slice(5).trim();
+    if (!raw || raw === "[DONE]") continue;
+    let data: unknown;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      continue;
     }
+    if (typeof data === "object" && data !== null && "type" in (data as Record<string, unknown>)) {
+      events.push(data as StreamEvent);
+    }
+  }
 
-    ws.on("open", () => {
-      ws.send(
-        JSON.stringify({
-          id: 1,
-          jsonrpc: "2.0",
-          method: "subscription",
-          params: { path: "tasks.stream", input },
-        }),
-      );
-    });
-
-    ws.on("message", (raw: Buffer) => {
-      const msg = JSON.parse(raw.toString()) as {
-        result?: { type: string; data?: unknown };
-      };
-      if (msg.result?.type === "data" && msg.result.data && typeof msg.result.data === "object") {
-        events.push(msg.result.data as StreamEvent);
-      }
-      if (msg.result?.type === "stopped") finish();
-    });
-
-    ws.on("error", finish);
-    ws.on("close", finish);
-    timer = setTimeout(finish, timeoutMs);
-  });
+  return events;
 }
 
 /**
- * Submit a task and concurrently open a stream subscription so we don't miss
- * early events. Returns the events collected from the stream.
+ * Submit a task via the SSE POST endpoint and collect all events.
+ * POST /api/tasks/:chatId/stream combines submit + stream in one request.
  */
 async function submitAndStream(
   serverUrl: string,
@@ -232,21 +192,25 @@ async function submitAndStream(
     sessionId?: string;
   },
 ): Promise<{ submitOk: boolean; events: StreamEvent[] }> {
-  const streamPromise = wsStream(serverUrl, {
-    workspaceId: input.workspaceId,
-    chatId: input.chatId,
-    ...(input.sessionId && { sessionId: input.sessionId }),
-  });
+  const response = await fetch(
+    `${serverUrl}/api/tasks/${encodeURIComponent(input.chatId)}/stream`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...defaultHeaders },
+      body: JSON.stringify({
+        workspaceId: input.workspaceId,
+        prompt: input.prompt,
+        ...(input.sessionId && { sessionId: input.sessionId }),
+      }),
+    },
+  );
 
-  // Tiny delay so the WS subscription is registered before we submit.
-  // This matches the production client (which awaits submit before
-  // opening the stream); the tighter race is exactly what Phase 2b
-  // catch-up was meant to fix.
-  await new Promise((r) => setTimeout(r, 50));
+  if (!response.ok) {
+    return { submitOk: false, events: [] };
+  }
 
-  const submitRes = await trpcMutate(serverUrl, "tasks.submit", input);
-  const events = await streamPromise;
-  return { submitOk: submitRes.ok, events };
+  const events = await parseSSEStream(response);
+  return { submitOk: true, events };
 }
 
 // ---------------------------------------------------------------------------
@@ -317,12 +281,6 @@ describe("chat — sending two messages in a single chat pane", () => {
     )?.sessionId;
     expect(firstSessionId).toBeTruthy();
 
-    const firstFinishIds = first.events
-      .filter((e) => e.type === "finish")
-      .map((e) => e.eventId)
-      .filter((id): id is number => typeof id === "number");
-    const lastEventIdOfFirst = Math.max(...firstFinishIds, 0);
-
     // --- Message 2 -------------------------------------------------------
     const second = await submitAndStream(server.url, {
       workspaceId,
@@ -339,16 +297,8 @@ describe("chat — sending two messages in a single chat pane", () => {
 
     // The bug: Phase 2b replay yields every prior session event before
     // any task-2 event. With the fix, the second stream must contain
-    // exactly one finish event and its events must all be newer than the
-    // last event of the first task.
+    // exactly one finish event — not replayed events from the first task.
     const finishCount = secondTypes.filter((t) => t === "finish").length;
     expect(finishCount).toBe(1);
-
-    const secondEventIds = second.events
-      .map((e) => e.eventId)
-      .filter((id): id is number => typeof id === "number");
-    expect(secondEventIds.length).toBeGreaterThan(0);
-    const minSecondEventId = Math.min(...secondEventIds);
-    expect(minSecondEventId).toBeGreaterThan(lastEventIdOfFirst);
   });
 });

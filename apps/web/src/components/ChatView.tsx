@@ -339,6 +339,14 @@ export function ChatView({
     [workspaceId, chatId],
   );
 
+  // Close the SSE connection when the transport is replaced (chat/workspace
+  // change) or the component unmounts. This releases the HTTP connection back
+  // to the browser pool — critical because browsers limit HTTP/1.1 connections
+  // to ~6 per origin, and each SSE stream holds one open.
+  useEffect(() => {
+    return () => transport.close();
+  }, [transport]);
+
   useEffect(() => {
     transport.mode = selectedMode;
   }, [transport, selectedMode]);
@@ -358,12 +366,6 @@ export function ChatView({
     // and lastEventIdRef are populated first (from loadMessages).
     resume: false,
     onData: (dataPart) => {
-      // Track eventId from every chunk for gap-fill on reconnect
-      const eventId = (dataPart as Record<string, unknown>).eventId;
-      if (typeof eventId === "number") {
-        lastEventIdRef.current = eventId;
-      }
-
       if (
         dataPart.type === "data-session" &&
         dataPart.data != null &&
@@ -376,42 +378,6 @@ export function ChatView({
       }
     },
   });
-
-  // Reconnect to the stream when the tab regains focus, but only if we're
-  // not already streaming (avoids creating a duplicate concurrent stream).
-  const statusRef = useRef(status);
-  statusRef.current = status;
-  useEffect(() => {
-    const handleVisibility = () => {
-      if (document.visibilityState !== "visible") return;
-      const s = statusRef.current;
-      if (s === "streaming" || s === "submitted") return;
-      resumeStream();
-    };
-    document.addEventListener("visibilitychange", handleVisibility);
-    return () => document.removeEventListener("visibilitychange", handleVisibility);
-  }, [resumeStream]);
-
-  // Auto-reconnect when the stream drops with an error (e.g. network issue).
-  // Gap-fill from lastEventIdRef picks up where we left off.
-  // Uses exponential backoff and a max retry limit to avoid infinite loops.
-  const reconnectAttemptsRef = useRef(0);
-  useEffect(() => {
-    if (status === "streaming" || status === "submitted") {
-      // Reset retry counter on successful connection
-      reconnectAttemptsRef.current = 0;
-      return;
-    }
-    if (status !== "error") return;
-    const attempt = reconnectAttemptsRef.current;
-    if (attempt >= 5) return; // Give up after 5 attempts
-    reconnectAttemptsRef.current = attempt + 1;
-    const delay = Math.min(1000 * 2 ** attempt, 30000);
-    const timer = setTimeout(() => {
-      resumeStream();
-    }, delay);
-    return () => clearTimeout(timer);
-  }, [status, resumeStream]);
 
   const abortingRef = useRef(false);
 

@@ -131,14 +131,6 @@ async function startServer(
 
 const defaultHeaders = { Cookie: `band_token=${DEFAULT_TOKEN}` };
 
-async function trpcMutate(serverUrl: string, procedure: string, input?: unknown) {
-  return fetch(`${serverUrl}/trpc/${procedure}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...defaultHeaders },
-    body: input !== undefined ? JSON.stringify(input) : "{}",
-  });
-}
-
 // ---------------------------------------------------------------------------
 // SSE helpers
 // ---------------------------------------------------------------------------
@@ -148,7 +140,10 @@ interface SSEEvent {
   data: unknown;
 }
 
-async function parseTrpcSSEStream(response: Response): Promise<SSEEvent[]> {
+/**
+ * Parse an AI SDK SSE stream response into an array of { event, data } objects.
+ */
+async function parseSSEStream(response: Response): Promise<SSEEvent[]> {
   const text = await response.text();
   const events: SSEEvent[] = [];
 
@@ -163,12 +158,6 @@ async function parseTrpcSSEStream(response: Response): Promise<SSEEvent[]> {
       continue;
     }
 
-    const envelope = data as Record<string, unknown>;
-    const result = envelope?.result as Record<string, unknown> | undefined;
-    if (result?.type === "data" && result.data !== undefined) {
-      data = result.data;
-    }
-
     const event =
       typeof data === "object" && data !== null
         ? ((data as Record<string, unknown>).type as string)
@@ -181,26 +170,22 @@ async function parseTrpcSSEStream(response: Response): Promise<SSEEvent[]> {
   return events;
 }
 
-async function trpcSubscription(
-  serverUrl: string,
-  procedure: string,
-  input: unknown,
-): Promise<Response> {
-  const url = `${serverUrl}/trpc/${procedure}?input=${encodeURIComponent(JSON.stringify(input))}`;
-  return fetch(url, { headers: defaultHeaders });
-}
-
+/**
+ * Submit a task via the SSE POST endpoint and stream to completion.
+ */
 async function submitAndStream(
   serverUrl: string,
   workspaceId: string,
   prompt: string,
 ): Promise<{ submitRes: Response; events: SSEEvent[] }> {
-  const submitRes = await trpcMutate(serverUrl, "tasks.submit", { workspaceId, prompt });
-  if (!submitRes.ok) {
-    return { submitRes, events: [] };
-  }
-  const streamRes = await trpcSubscription(serverUrl, "tasks.stream", { workspaceId });
-  const events = await parseTrpcSSEStream(streamRes);
+  const chatId = `test-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const submitRes = await fetch(`${serverUrl}/api/tasks/${encodeURIComponent(chatId)}/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...defaultHeaders },
+    body: JSON.stringify({ workspaceId, prompt }),
+  });
+  if (!submitRes.ok) return { submitRes, events: [] };
+  const events = await parseSSEStream(submitRes);
   return { submitRes, events };
 }
 

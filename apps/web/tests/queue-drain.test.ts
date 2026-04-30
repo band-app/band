@@ -4,7 +4,6 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { WebSocket } from "ws";
 import { seedSettings, seedState } from "./helpers/seed-state";
 
 const PROJECT_ROOT = join(import.meta.dirname, "..");
@@ -163,83 +162,9 @@ async function trpcData<T>(res: Response): Promise<T> {
   return body.result.data;
 }
 
-// ---------------------------------------------------------------------------
-// WebSocket helpers (tRPC JSON-RPC over WebSocket)
-// ---------------------------------------------------------------------------
-
-interface WSMessage {
-  id: number;
-  jsonrpc: string;
-  result?: { type: string; data?: unknown };
-  error?: unknown;
-}
-
 interface SSEEvent {
   event: string | null;
   data: unknown;
-}
-
-/**
- * Subscribe to a tRPC procedure over WebSocket and collect data messages.
- * Returns collected data events once the subscription completes or times out.
- */
-function wsSubscribe(
-  serverUrl: string,
-  procedure: string,
-  input: unknown,
-  opts?: { headers?: Record<string, string>; timeoutMs?: number },
-): Promise<{ messages: WSMessage[]; events: SSEEvent[] }> {
-  const wsUrl = `${serverUrl.replace(/^http/, "ws")}/trpc`;
-  const timeout = opts?.timeoutMs ?? 10_000;
-
-  return new Promise((resolve) => {
-    const ws = new WebSocket(wsUrl, { headers: opts?.headers ?? defaultHeaders });
-    const messages: WSMessage[] = [];
-    const events: SSEEvent[] = [];
-    let timer: ReturnType<typeof setTimeout>;
-
-    function finish() {
-      clearTimeout(timer);
-      ws.close();
-      resolve({ messages, events });
-    }
-
-    ws.on("open", () => {
-      ws.send(
-        JSON.stringify({
-          id: 1,
-          jsonrpc: "2.0",
-          method: "subscription",
-          params: { path: procedure, input },
-        }),
-      );
-    });
-
-    ws.on("message", (raw: Buffer) => {
-      const msg = JSON.parse(raw.toString()) as WSMessage;
-      messages.push(msg);
-
-      if (msg.result?.type === "data" && msg.result.data !== undefined) {
-        const data = msg.result.data;
-        const event =
-          typeof data === "object" && data !== null
-            ? ((data as Record<string, unknown>).type as string)
-            : null;
-        if (event) {
-          events.push({ event, data });
-        }
-      }
-
-      // "stopped" means the subscription completed server-side
-      if (msg.result?.type === "stopped") {
-        finish();
-      }
-    });
-
-    ws.on("error", () => finish());
-    ws.on("close", () => finish());
-    timer = setTimeout(finish, timeout);
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -492,10 +417,44 @@ describe("queue auto-drain — failed task does not drain queue", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Stream subscription stays alive across auto-drained tasks (WebSocket)
+// SSE helpers (AI SDK UIMessageStream format)
 // ---------------------------------------------------------------------------
 
-describe("stream stays alive across auto-drained tasks (WebSocket)", () => {
+/**
+ * Parse an AI SDK SSE stream response into an array of { event, data } objects.
+ */
+async function parseSSEStream(response: Response): Promise<SSEEvent[]> {
+  const text = await response.text();
+  const events: SSEEvent[] = [];
+
+  for (const line of text.split("\n")) {
+    if (!line.startsWith("data:")) continue;
+    const raw = line.slice(5).trim();
+    if (!raw || raw === "[DONE]") continue;
+    let data: unknown;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      continue;
+    }
+
+    const event =
+      typeof data === "object" && data !== null
+        ? ((data as Record<string, unknown>).type as string)
+        : null;
+    if (event) {
+      events.push({ event, data });
+    }
+  }
+
+  return events;
+}
+
+// ---------------------------------------------------------------------------
+// Stream stays alive across auto-drained tasks (SSE)
+// ---------------------------------------------------------------------------
+
+describe("stream stays alive across auto-drained tasks (SSE)", () => {
   let server: ServerHandle;
   let tmpHome: string;
 
@@ -516,39 +475,34 @@ describe("stream stays alive across auto-drained tasks (WebSocket)", () => {
 
   it("auto-started task streams events including data-prompt to connected client", async () => {
     const workspaceId = "testproject-main";
+    const chatId = `test-queue-drain-${Date.now()}`;
 
     // 1. Pre-load the queue BEFORE submitting the first task
-    await trpcMutate(server.url, "queue.push", { workspaceId, text: "task B" });
+    await trpcMutate(server.url, "queue.push", { workspaceId, chatId, text: "task B" });
 
-    // 2. Submit the first task
-    const submitRes = await trpcMutate(server.url, "tasks.submit", {
-      workspaceId,
-      prompt: "task A",
+    // 2. Submit via SSE POST — opens stream that stays alive through both tasks
+    const response = await fetch(`${server.url}/api/tasks/${encodeURIComponent(chatId)}/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...defaultHeaders },
+      body: JSON.stringify({ workspaceId, prompt: "task A" }),
     });
-    expect(submitRes.status).toBe(200);
+    expect(response.status).toBe(200);
+    const events = await parseSSEStream(response);
 
-    // 3. Subscribe via WebSocket — stays connected through both tasks
-    const { events } = await wsSubscribe(
-      server.url,
-      "tasks.stream",
-      { workspaceId },
-      { timeoutMs: 15_000 },
-    );
-
-    // 4. Should have finish and result events
+    // 3. Should have finish and result events
     const finishEvents = events.filter((e) => e.event === "finish");
     expect(finishEvents.length).toBeGreaterThanOrEqual(1);
 
     const resultEvents = events.filter((e) => e.event === "data-result");
     expect(resultEvents.length).toBeGreaterThanOrEqual(1);
 
-    // 5. Should have a data-prompt event for the queued message so the
+    // 4. Should have a data-prompt event for the queued message so the
     //    client can render the user message bubble between responses
     const promptEvents = events.filter((e) => e.event === "data-prompt");
     expect(promptEvents.length).toBe(1);
     expect((promptEvents[0].data as { data: { text: string } }).data.text).toBe("task B");
 
-    // 6. Queue should be empty
+    // 5. Queue should be empty
     const queueRes = await trpcQuery(server.url, "queue.get", { workspaceId });
     const queueData = await trpcData<{ messages: string[] }>(queueRes);
     expect(queueData.messages).toEqual([]);
@@ -578,26 +532,22 @@ describe("stream closes after last task when queue is empty", () => {
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  it("closes the subscription after task finishes with empty queue", async () => {
+  it("closes the SSE stream after task finishes with empty queue", async () => {
     const workspaceId = "testproject-main";
+    const chatId = `test-queue-close-${Date.now()}`;
 
-    // Submit a task with no queue
-    const submitRes = await trpcMutate(server.url, "tasks.submit", {
-      workspaceId,
-      prompt: "only task",
-    });
-    expect(submitRes.status).toBe(200);
-
+    // Submit via SSE POST endpoint
     const startTime = Date.now();
-    const { events } = await wsSubscribe(
-      server.url,
-      "tasks.stream",
-      { workspaceId },
-      { timeoutMs: 10_000 },
-    );
+    const response = await fetch(`${server.url}/api/tasks/${encodeURIComponent(chatId)}/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...defaultHeaders },
+      body: JSON.stringify({ workspaceId, prompt: "only task" }),
+    });
+    expect(response.status).toBe(200);
+    const events = await parseSSEStream(response);
     const elapsed = Date.now() - startTime;
 
-    // Should have completed (not timed out at 10s)
+    // Should have completed (not timed out)
     expect(elapsed).toBeLessThan(9_000);
 
     // Should have exactly one finish event

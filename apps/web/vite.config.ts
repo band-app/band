@@ -156,6 +156,18 @@ function trpcDevPlugin(): Plugin {
         }
       });
 
+      // SSE endpoint for task streaming (replaces tRPC WebSocket subscription)
+      server.middlewares.use(async (req, res, next) => {
+        const match = req.url?.match(/^\/api\/tasks\/([^/]+)\/stream/);
+        if (!match) {
+          next();
+          return;
+        }
+        const chatId = decodeURIComponent(match[1]);
+        const { handleTaskStream } = await server.ssrLoadModule("./src/api/task-stream");
+        handleTaskStream(req, res, chatId);
+      });
+
       server.middlewares.use("/trpc", async (req, res) => {
         // Use ssrLoadModule so Vite handles TS resolution at dev time
         const [{ nodeHTTPRequestHandler }, { createContext }, { appRouter }] = (await Promise.all([

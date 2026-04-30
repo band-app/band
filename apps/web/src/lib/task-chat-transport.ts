@@ -1,79 +1,36 @@
 import type { ChatTransport, UIMessage, UIMessageChunk } from "ai";
+import { parseJsonEventStream, uiMessageChunkSchema } from "ai";
 import { trpc } from "./trpc-client";
 
-function subscriptionToStream(
-  workspaceId: string,
-  chatId: string,
-  opts?: {
-    sessionId?: string;
-    afterEventId?: number;
-    abortSignal?: AbortSignal;
-  },
-): ReadableStream<UIMessageChunk> {
-  let subscription: { unsubscribe: () => void } | null = null;
-  let closed = false;
-
-  return new ReadableStream<UIMessageChunk>({
-    start(controller) {
-      subscription = trpc.tasks.stream.subscribe(
-        {
-          workspaceId,
-          chatId,
-          ...(opts?.sessionId && { sessionId: opts.sessionId }),
-          ...(opts?.afterEventId != null && { afterEventId: opts.afterEventId }),
-        },
-        {
-          onData(chunk: UIMessageChunk) {
-            if (!closed) {
-              try {
-                controller.enqueue(chunk);
-              } catch {
-                closed = true;
-              }
-            }
-          },
-          onComplete() {
-            console.log("[stream] subscription completed");
-            if (!closed) {
-              closed = true;
-              try {
-                controller.close();
-              } catch {
-                // already closed by consumer or abort
-              }
-            }
-          },
-          onError(err: unknown) {
-            console.error("[stream] subscription error:", err);
-            if (!closed) {
-              closed = true;
-              try {
-                controller.error(err);
-              } catch {
-                // already closed/errored
-              }
-            }
-          },
-        },
-      );
-
-      opts?.abortSignal?.addEventListener("abort", () => {
-        if (!closed) {
-          closed = true;
-          try {
-            controller.close();
-          } catch {
-            // already closed
-          }
+/**
+ * Parse a raw SSE byte stream into a stream of UIMessageChunk objects.
+ *
+ * Unlike the AI SDK's DefaultChatTransport (which throws on parse failures),
+ * we silently skip chunks that don't match `uiMessageChunkSchema`. The task
+ * runner broadcasts application-level chunks (e.g. "user-message") that are
+ * not part of the standard UIMessageChunk union — these must not crash the
+ * stream.
+ */
+function parseSSEStream(stream: ReadableStream<Uint8Array>): ReadableStream<UIMessageChunk> {
+  return parseJsonEventStream({
+    stream,
+    schema: uiMessageChunkSchema,
+  }).pipeThrough(
+    new TransformStream<
+      { success: boolean; value?: UIMessageChunk; error?: unknown },
+      UIMessageChunk
+    >({
+      transform(chunk, controller) {
+        if (!chunk.success) {
+          // Skip non-standard chunks (e.g. "user-message") that fail schema
+          // validation — these are internal application events, not UI stream
+          // protocol chunks.
+          return;
         }
-        subscription?.unsubscribe();
-      });
-    },
-    cancel() {
-      closed = true;
-      subscription?.unsubscribe();
-    },
-  });
+        controller.enqueue(chunk.value!);
+      },
+    }),
+  );
 }
 
 export class TaskChatTransport implements ChatTransport<UIMessage> {
@@ -84,6 +41,13 @@ export class TaskChatTransport implements ChatTransport<UIMessage> {
   mode: string | undefined;
   model: string | undefined;
   codingAgentId: string | undefined;
+
+  /**
+   * Internal AbortController for the current SSE fetch connection.
+   * Used to close connections that the AI SDK can't abort (reconnectToStream
+   * has no abortSignal in the ChatTransport interface).
+   */
+  private connectionController: AbortController | null = null;
 
   constructor(
     workspaceId: string,
@@ -97,7 +61,28 @@ export class TaskChatTransport implements ChatTransport<UIMessage> {
     this.getLastEventId = getLastEventId;
   }
 
+  /**
+   * Abort any in-flight SSE connection. Called before opening a new one
+   * to ensure at most one connection per transport instance.
+   */
+  private abortConnection(): void {
+    if (this.connectionController) {
+      this.connectionController.abort();
+      this.connectionController = null;
+    }
+  }
+
+  /**
+   * Close the current SSE connection without aborting the server-side task.
+   * Call this from component cleanup (unmount, tab deactivation) to release
+   * the HTTP connection back to the browser's pool.
+   */
+  close(): void {
+    this.abortConnection();
+  }
+
   abort(): Promise<void> {
+    this.abortConnection();
     return trpc.tasks.abort.mutate({ workspaceId: this.workspaceId, chatId: this.chatId }).then(
       () => {},
       () => {},
@@ -110,6 +95,9 @@ export class TaskChatTransport implements ChatTransport<UIMessage> {
   }: Parameters<ChatTransport<UIMessage>["sendMessages"]>[0]): Promise<
     ReadableStream<UIMessageChunk>
   > {
+    // Close any existing reconnect/stream connection
+    this.abortConnection();
+
     // Extract user text and files from the last message
     const lastMessage = messages[messages.length - 1];
     let userText = "";
@@ -134,64 +122,98 @@ export class TaskChatTransport implements ChatTransport<UIMessage> {
       }
     }
 
-    // Submit the task
-    try {
-      await trpc.tasks.submit.mutate({
+    // Create a combined abort controller — aborts when either the SDK's
+    // signal fires (stop()) or our internal close() is called.
+    this.connectionController = new AbortController();
+    const controller = this.connectionController;
+    if (abortSignal) {
+      abortSignal.addEventListener("abort", () => controller.abort(), { once: true });
+    }
+
+    // POST to the SSE endpoint — submits the task and opens a stream in one request
+    const response = await fetch(`/api/tasks/${encodeURIComponent(this.chatId)}/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
         workspaceId: this.workspaceId,
-        chatId: this.chatId,
         prompt: userText,
         sessionId: this.getSessionId(),
         ...(files.length > 0 && { files }),
         ...(this.mode && { mode: this.mode }),
         ...(this.model && { model: this.model }),
         ...(this.codingAgentId && { codingAgentId: this.codingAgentId }),
+      }),
+      signal: controller.signal,
+    });
+
+    // Handle conflict — task is already running, queue the message instead
+    if (response.status === 409) {
+      await trpc.queue.push.mutate({
+        workspaceId: this.workspaceId,
+        chatId: this.chatId,
+        text: userText,
       });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Submit failed";
-      // If a task is already running (race condition — the pre-check in
-      // handleSubmit passed but a task started before submit), queue the
-      // message instead of failing.
-      if (msg.includes("already running") || msg.includes("CONFLICT")) {
-        await trpc.queue.push.mutate({
-          workspaceId: this.workspaceId,
-          chatId: this.chatId,
-          text: userText,
-        });
-        return new ReadableStream<UIMessageChunk>({
-          start(controller) {
-            controller.close();
-          },
-        });
-      }
-      throw new Error(msg);
+      return new ReadableStream<UIMessageChunk>({
+        start(controller) {
+          controller.close();
+        },
+      });
     }
 
-    return subscriptionToStream(this.workspaceId, this.chatId, {
-      sessionId: this.getSessionId(),
-      abortSignal,
-    });
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ error: "Stream request failed" }));
+      throw new Error((err as { error?: string }).error || `HTTP ${response.status}`);
+    }
+
+    if (!response.body) {
+      throw new Error("The response body is empty.");
+    }
+
+    return parseSSEStream(response.body);
   }
 
   async reconnectToStream(
     _options: Parameters<ChatTransport<UIMessage>["reconnectToStream"]>[0],
   ): Promise<ReadableStream<UIMessageChunk> | null> {
-    const task = await trpc.tasks.get.query({
-      workspaceId: this.workspaceId,
-      chatId: this.chatId,
-    });
-    if (!task.task || task.task.status !== "running") return null;
+    // Close any existing connection before reconnecting
+    this.abortConnection();
 
     const sessionId = this.getSessionId();
-    const afterEventId = this.getLastEventId();
-    console.log("[reconnect] opening stream", {
-      sessionId,
-      afterEventId,
-      taskSessionId: task.task.sessionId,
-    });
-    console.trace("[reconnect] call stack");
-    return subscriptionToStream(this.workspaceId, this.chatId, {
-      sessionId,
-      afterEventId,
-    });
+    const lastEventId = this.getLastEventId();
+
+    const params = new URLSearchParams();
+    if (sessionId) params.set("sessionId", sessionId);
+
+    this.connectionController = new AbortController();
+
+    const headers: Record<string, string> = {};
+    if (lastEventId != null) {
+      headers["Last-Event-ID"] = String(lastEventId);
+    }
+
+    let response: Response;
+    try {
+      response = await fetch(
+        `/api/tasks/${encodeURIComponent(this.chatId)}/stream?${params.toString()}`,
+        { method: "GET", headers, signal: this.connectionController.signal },
+      );
+    } catch (err) {
+      // AbortError from close() — not a real failure
+      if (err instanceof DOMException && err.name === "AbortError") return null;
+      throw err;
+    }
+
+    // 204 = no active stream to reconnect to
+    if (response.status === 204) return null;
+
+    if (!response.ok) {
+      throw new Error(`Reconnect failed: HTTP ${response.status}`);
+    }
+
+    if (!response.body) {
+      throw new Error("The response body is empty.");
+    }
+
+    return parseSSEStream(response.body);
   }
 }

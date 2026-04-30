@@ -1,7 +1,7 @@
 import { execFile, execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, unlinkSync } from "node:fs";
-import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { basename, extname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { toWorkspaceId } from "@band-app/dashboard-core";
@@ -65,11 +65,7 @@ import {
   shiftQueuedMessage,
   subscribeQueue,
 } from "../lib/queued-message-store";
-import {
-  getSessionEventsAfter,
-  getSessionEventsBefore,
-  getSessionEventsTail,
-} from "../lib/session-store";
+import { getSessionEventsBefore, getSessionEventsTail } from "../lib/session-store";
 import { runSetup } from "../lib/setup-runner";
 import {
   bandHome,
@@ -85,16 +81,7 @@ import {
   upsertWorkspaceStatus,
   worktreesDir,
 } from "../lib/state";
-import {
-  abortTask,
-  cancelTask,
-  getSessionBuffer,
-  getTask,
-  type StreamChunk,
-  submitTask,
-  subscribe as subscribeTask,
-  TaskConflictError,
-} from "../lib/task-runner";
+import { abortTask, cancelTask, getTask, submitTask, TaskConflictError } from "../lib/task-runner";
 import { listTasks, loadTask } from "../lib/task-store";
 import { loadWorkspaceTerminalConfig } from "../lib/terminal-config";
 import {
@@ -115,6 +102,7 @@ import {
   writeToTerminal,
 } from "../lib/terminal-manager";
 import { getTunnelStatus, startTunnel, stopTunnel } from "../lib/tunnel";
+import { saveUploadedFiles } from "../lib/upload-utils";
 import { emit, subscribe as subscribeStatus } from "../lib/watcher";
 import { resolveWorkspace } from "../lib/workspace";
 import type { Context } from "./context";
@@ -1296,35 +1284,6 @@ const prereqsRouter = t.router({
 // Tasks
 // ---------------------------------------------------------------------------
 
-interface FilePart {
-  mediaType: string;
-  url: string;
-  filename?: string;
-}
-
-async function saveUploadedFiles(fileParts: FilePart[]): Promise<string[]> {
-  const uploadDir = join(bandHome(), "uploads");
-  await mkdir(uploadDir, { recursive: true });
-
-  const savedPaths: string[] = [];
-
-  for (const part of fileParts) {
-    const dataUrlMatch = part.url.match(/^data:[^;]+;base64,(.+)$/);
-    if (!dataUrlMatch) continue;
-
-    const buffer = Buffer.from(dataUrlMatch[1], "base64");
-    const timestamp = Date.now();
-    const filename = part.filename || `file-${timestamp}`;
-    const safeName = `${timestamp}-${filename.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
-    const filePath = join(uploadDir, safeName);
-
-    await writeFile(filePath, buffer);
-    savedPaths.push(filePath);
-  }
-
-  return savedPaths;
-}
-
 const tasksRouter = t.router({
   list: publicProcedure
     .input(
@@ -1501,151 +1460,6 @@ const tasksRouter = t.router({
       throw err;
     }
   }),
-
-  stream: publicProcedure
-    .input(
-      z.object({
-        workspaceId: z.string(),
-        chatId: z.string().optional(),
-        sessionId: z.string().optional(),
-        afterEventId: z.number().optional(),
-      }),
-    )
-    .subscription(async function* (opts) {
-      const { workspaceId, sessionId, afterEventId } = opts.input;
-      // Backward compat: resolve chatId from workspaceId if not provided
-      const chatId = opts.input.chatId ?? getOrCreateDefaultChat(workspaceId).id;
-      log.info(
-        { chatId, workspaceId, sessionId, afterEventId },
-        "tasks.stream: subscription opened",
-      );
-
-      // Register the listener FIRST so we capture events from tasks that
-      // are already running (avoids race between submit and subscribe).
-      const queue: StreamChunk[] = [];
-      let resolve: (() => void) | null = null;
-      let highWaterMark = afterEventId ?? 0;
-
-      const unsubscribe = subscribeTask(chatId, (chunk: StreamChunk) => {
-        // Dedup: skip events we already replayed from the buffer
-        if (chunk.eventId != null && chunk.eventId <= highWaterMark) return;
-        queue.push(chunk);
-        resolve?.();
-      });
-
-      opts.signal?.addEventListener("abort", () => {
-        unsubscribe();
-        resolve?.();
-      });
-
-      // Phase 1: Replay missed events from in-memory buffer (gap-fill)
-      if (sessionId && afterEventId != null) {
-        const missed = getSessionEventsAfter(sessionId, afterEventId);
-        for (const row of missed) {
-          let chunk: Record<string, unknown>;
-          try {
-            chunk = JSON.parse(row.chunkJson);
-          } catch {
-            continue;
-          }
-          yield { ...chunk, eventId: row.id };
-          highWaterMark = Math.max(highWaterMark, row.id);
-        }
-      }
-
-      // Phase 2: Live events — check if a task is running or wait briefly
-      let task = getTask(chatId);
-      if (!task || task.status !== "running") {
-        for (let i = 0; i < 10 && !opts.signal?.aborted; i++) {
-          await new Promise((r) => setTimeout(r, 50));
-          // If events arrived while waiting, a task started and we caught it
-          if (queue.length > 0) break;
-          task = getTask(chatId);
-          if (task?.status === "running") break;
-        }
-      }
-
-      // Phase 2b: Catch-up replay — if a task is running (or just
-      // completed) but no events arrived via the live listener yet, replay
-      // buffered events from the session.  This closes the race window
-      // where broadcast fires *before* the WebSocket subscription opens.
-      //
-      // Scope to the current task only: the session buffer is keyed by
-      // sessionId and accumulates across multiple tasks in the same
-      // session, so replaying everything would re-yield prior tasks'
-      // events (including their `finish`) and confuse the AI SDK.
-      let caughtUp = false;
-      if (queue.length === 0 && task?.sessionId) {
-        const buf = getSessionBuffer(task.sessionId);
-        if (buf && buf.events.length > 0) {
-          const taskStartEventId = task.firstEventId ?? Number.POSITIVE_INFINITY;
-          log.info(
-            {
-              chatId,
-              sessionId: task.sessionId,
-              bufferedCount: buf.events.length,
-              taskStartEventId,
-            },
-            "tasks.stream: replaying buffered events (catch-up)",
-          );
-          for (const buffered of buf.events) {
-            if (buffered.eventId != null && buffered.eventId <= highWaterMark) continue;
-            if (buffered.eventId != null && buffered.eventId < taskStartEventId) continue;
-            yield buffered;
-            caughtUp = true;
-            if (buffered.eventId != null) {
-              highWaterMark = Math.max(highWaterMark, buffered.eventId);
-            }
-          }
-        }
-      }
-
-      // If still no running task and no events captured, check if the task
-      // already failed/completed.  If the task failed before the subscription
-      // was opened, broadcast events were lost (no listener registered yet).
-      // Replay the failure to the client so it sees the error.
-      // Skip if we already replayed buffered events above (they include the
-      // error/finish already).
-      if (queue.length === 0 && !caughtUp && (!task || task.status !== "running")) {
-        log.warn(
-          { chatId, taskStatus: task?.status, queueLen: queue.length },
-          "tasks.stream: no running task and no events — closing subscription early",
-        );
-        if (task?.status === "failed") {
-          yield { type: "error", errorText: "Task failed" } as unknown as StreamChunk;
-          yield { type: "finish" } as unknown as StreamChunk;
-        }
-        unsubscribe();
-        return;
-      }
-
-      try {
-        while (!opts.signal?.aborted) {
-          while (queue.length > 0) {
-            const chunk = queue.shift()!;
-            yield chunk;
-            // When a task finishes, end the subscription only if no
-            // follow-up work remains. Keep it alive when queued messages
-            // exist OR when an auto-started task is already running
-            // (shiftQueuedMessage may have emptied the queue before we
-            // get here, but submitTask already created a new running task).
-            if (chunk.type === "finish") {
-              const hasQueued = getQueuedMessages(chatId).length > 0;
-              const taskRunning = getTask(chatId)?.status === "running";
-              if (!hasQueued && !taskRunning) {
-                return;
-              }
-            }
-          }
-          await new Promise<void>((r) => {
-            resolve = r;
-          });
-          resolve = null;
-        }
-      } finally {
-        unsubscribe();
-      }
-    }),
 });
 
 // ---------------------------------------------------------------------------
