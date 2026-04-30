@@ -1222,10 +1222,7 @@ fn cmd_terminal_list(workspace_id: &str) -> Result<CommandResult, String> {
             .get("terminalId")
             .and_then(|v| v.as_str())
             .unwrap_or("");
-        let title = term
-            .get("title")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let title = term.get("title").and_then(|v| v.as_str()).unwrap_or("");
         let pid = term
             .get("pid")
             .and_then(|v| v.as_u64())
@@ -1295,10 +1292,7 @@ fn cmd_terminal_output(terminal_id: &str, lines: Option<u32>) -> Result<CommandR
         input["lines"] = serde_json::json!(n);
     }
     let data = client.trpc_query("terminal.output", &input)?;
-    let output = data
-        .get("output")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let output = data.get("output").and_then(|v| v.as_str()).unwrap_or("");
 
     Ok(CommandResult {
         text: output.to_string(),
@@ -1511,8 +1505,7 @@ fn cmd_terminal_attach(terminal_id: &str, json_output: bool) -> Result<(), Strin
             if line.is_empty() {
                 if !data_buf.is_empty() {
                     if let Ok(chunk) = serde_json::from_str::<serde_json::Value>(&data_buf) {
-                        let chunk_type =
-                            chunk.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                        let chunk_type = chunk.get("type").and_then(|t| t.as_str()).unwrap_or("");
                         if chunk_type == "output" {
                             if let Some(output) = chunk.get("data").and_then(|d| d.as_str()) {
                                 print!("{output}");
