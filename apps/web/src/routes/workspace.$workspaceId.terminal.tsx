@@ -16,10 +16,7 @@ function WorkspaceTerminal() {
   const { workspaceId } = Route.useParams();
   return (
     <Suspense fallback={null}>
-      <DockviewTerminalContainer
-        workspaceId={decodeURIComponent(workspaceId)}
-        visible={true}
-      />
+      <DockviewTerminalContainer workspaceId={decodeURIComponent(workspaceId)} visible={true} />
     </Suspense>
   );
 }

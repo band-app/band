@@ -56,7 +56,8 @@
 .dockview-theme-band .dv-groupview.dv-active-group
   > .dv-tabs-and-actions-container
   .dv-tab.dv-active-tab,
-.dockview-theme-band .dv-groupview.dv-inactive-group
+.dockview-theme-band
+  .dv-groupview.dv-inactive-group
   > .dv-tabs-and-actions-container
   .dv-tab.dv-active-tab {
   box-shadow: none;
@@ -119,7 +120,8 @@
 .dockview-chat-tabs .dv-groupview.dv-active-group
   > .dv-tabs-and-actions-container
   .dv-tab.dv-active-tab,
-.dockview-chat-tabs .dv-groupview.dv-inactive-group
+.dockview-chat-tabs
+  .dv-groupview.dv-inactive-group
   > .dv-tabs-and-actions-container
   .dv-tab.dv-active-tab {
   box-shadow: none;
@@ -171,7 +173,8 @@
 .dockview-browser-tabs .dv-groupview.dv-active-group
   > .dv-tabs-and-actions-container
   .dv-tab.dv-active-tab,
-.dockview-browser-tabs .dv-groupview.dv-inactive-group
+.dockview-browser-tabs
+  .dv-groupview.dv-inactive-group
   > .dv-tabs-and-actions-container
   .dv-tab.dv-active-tab {
   box-shadow: none;
@@ -223,7 +226,8 @@
 .dockview-terminal-tabs .dv-groupview.dv-active-group
   > .dv-tabs-and-actions-container
   .dv-tab.dv-active-tab,
-.dockview-terminal-tabs .dv-groupview.dv-inactive-group
+.dockview-terminal-tabs
+  .dv-groupview.dv-inactive-group
   > .dv-tabs-and-actions-container
   .dv-tab.dv-active-tab {
   box-shadow: none;

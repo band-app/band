@@ -2522,11 +2522,9 @@ const terminalLayoutRouter = t.router({
 // ---------------------------------------------------------------------------
 
 const terminalRouter = t.router({
-  list: publicProcedure
-    .input(z.object({ workspaceId: z.string() }))
-    .query(({ input }) => {
-      return { terminals: listTerminals(input.workspaceId) };
-    }),
+  list: publicProcedure.input(z.object({ workspaceId: z.string() })).query(({ input }) => {
+    return { terminals: listTerminals(input.workspaceId) };
+  }),
 
   create: publicProcedure
     .input(
@@ -2580,18 +2578,16 @@ const terminalRouter = t.router({
       return { output };
     }),
 
-  kill: publicProcedure
-    .input(z.object({ terminalId: z.string() }))
-    .mutation(({ input }) => {
-      const session = getTerminalSession(input.terminalId);
-      const workspaceId = session?.workspaceId;
-      killTerminal(input.terminalId);
-      if (workspaceId) {
-        removeTerminalFromLayout(workspaceId, input.terminalId);
-        emit({ kind: "terminal-killed", workspaceId, terminalId: input.terminalId });
-      }
-      return { ok: true };
-    }),
+  kill: publicProcedure.input(z.object({ terminalId: z.string() })).mutation(({ input }) => {
+    const session = getTerminalSession(input.terminalId);
+    const workspaceId = session?.workspaceId;
+    killTerminal(input.terminalId);
+    if (workspaceId) {
+      removeTerminalFromLayout(workspaceId, input.terminalId);
+      emit({ kind: "terminal-killed", workspaceId, terminalId: input.terminalId });
+    }
+    return { ok: true };
+  }),
 
   stream: publicProcedure
     .input(

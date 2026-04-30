@@ -188,10 +188,22 @@ export function resizeTerminal(terminalId: string, cols: number, rows: number): 
  */
 export function listTerminals(
   workspaceId: string,
-): Array<{ terminalId: string; workspaceId: string; pid: number; scrollbackLength: number; title: string }> {
+): Array<{
+  terminalId: string;
+  workspaceId: string;
+  pid: number;
+  scrollbackLength: number;
+  title: string;
+}> {
   const ids = workspaceTerminals.get(workspaceId);
   if (!ids) return [];
-  const result: Array<{ terminalId: string; workspaceId: string; pid: number; scrollbackLength: number; title: string }> = [];
+  const result: Array<{
+    terminalId: string;
+    workspaceId: string;
+    pid: number;
+    scrollbackLength: number;
+    title: string;
+  }> = [];
   for (const terminalId of ids) {
     const session = terminals.get(terminalId);
     if (session) {

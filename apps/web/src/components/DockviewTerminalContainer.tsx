@@ -439,7 +439,7 @@ export function DockviewTerminalContainer({
         console.error("[DockviewTerminalContainer] failed to kill terminal:", err);
       });
     },
-    [workspaceId],
+    [],
   );
 
   // Keyboard shortcuts:
@@ -633,7 +633,7 @@ async function seedFromConfigOrDefault(
 ): Promise<void> {
   try {
     const { config } = await trpc.workspace.getTerminalConfig.query({ workspaceId });
-    if (config && config.layout) {
+    if (config?.layout) {
       // Flatten the config tree into pane nodes and create terminals for each
       const panes = flattenConfigPanes(config.layout);
       if (panes.length > 0) {
