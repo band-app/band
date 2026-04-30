@@ -1,10 +1,4 @@
 import { AgentIcon } from "@band-app/dashboard-core";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@band-app/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   type DockviewApi,
@@ -15,7 +9,7 @@ import {
   type IDockviewPanelHeaderProps,
   type IDockviewPanelProps,
 } from "dockview";
-import { Clock, Columns2, Plus, Rows2, X } from "lucide-react";
+import { Columns2, Plus, Rows2, X } from "lucide-react";
 import React, {
   createContext,
   useCallback,
@@ -162,7 +156,6 @@ function ChatTabPanel({ params, api }: IDockviewPanelProps<ChatTabParams>) {
       chatId={params.chatId}
       visible={visible}
       wsActive={wsActive}
-      tabActive={tabActive}
       setTitle={(title: string) => api.setTitle(title)}
     />
   );
@@ -174,14 +167,12 @@ function ChatTabContent({
   chatId,
   visible,
   wsActive,
-  tabActive,
   setTitle,
 }: {
   workspaceId: string;
   chatId: string;
   visible: boolean;
   wsActive: boolean;
-  tabActive: boolean;
   setTitle: (title: string) => void;
 }) {
   const state = useChatPaneState(workspaceId, chatId);
@@ -193,22 +184,6 @@ function ChatTabContent({
     const title = state.activeSessionSummary || state.agentLabel || state.codingAgentId || "Chat";
     setTitleRef.current(title);
   }, [state.activeSessionSummary, state.agentLabel, state.codingAgentId]);
-
-  // Sync this tab's session history state to the shared ref so the
-  // RightHeaderActions component can render the history toggle button
-  // for whichever tab is currently active.
-  useEffect(() => {
-    if (!tabActive) return;
-    historyToggleRef.current = {
-      supported: state.supportsSessionListing,
-      active: state.showSessionList,
-      toggle: state.toggleSessionList,
-    };
-    return () => {
-      // Clear when this tab deactivates or unmounts
-      historyToggleRef.current = { supported: false, active: false, toggle: () => {} };
-    };
-  }, [tabActive, state.supportsSessionListing, state.showSessionList, state.toggleSessionList]);
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">
@@ -311,12 +286,11 @@ function ChatTab(props: IDockviewPanelHeaderProps<ChatTabParams>) {
 
 const addTabRef: {
   current: {
-    agents: CodingAgentDef[];
     onAdd: (agentId?: string, groupId?: string) => void;
     onSplit: (groupId: string, direction: "right" | "below") => void;
   };
 } = {
-  current: { agents: [], onAdd: () => {}, onSplit: () => {} },
+  current: { onAdd: () => {}, onSplit: () => {} },
 };
 
 /** Shared ref for the close-tab action — used by ChatTab's close button. */
@@ -324,66 +298,18 @@ const closeTabRef: { current: ((chatId: string) => void) | null } = {
   current: null,
 };
 
-/** Shared ref for the active tab's session history state — used by RightHeaderActions. */
-const historyToggleRef: {
-  current: { supported: boolean; active: boolean; toggle: () => void };
-} = {
-  current: { supported: false, active: false, toggle: () => {} },
-};
-
 /**
  * Stable component for DockviewReact's rightHeaderActionsComponent.
- * Reads agents and callback from the module-level ref to avoid the
+ * Reads callback from the module-level ref to avoid the
  * "only React.memo/forwardRef/function components accepted" error.
  */
 const RightHeaderActions = React.memo(function RightHeaderActions(
   props: IDockviewHeaderActionsProps,
 ) {
-  // Force re-render when agents or history state change via polling.
-  const [, forceUpdate] = useState(0);
-  const agentsRef = useRef(addTabRef.current.agents);
-  const historyRef = useRef(historyToggleRef.current);
-
-  useEffect(() => {
-    const id = setInterval(() => {
-      let changed = false;
-      if (addTabRef.current.agents !== agentsRef.current) {
-        agentsRef.current = addTabRef.current.agents;
-        changed = true;
-      }
-      const h = historyToggleRef.current;
-      if (
-        h.supported !== historyRef.current.supported ||
-        h.active !== historyRef.current.active ||
-        h.toggle !== historyRef.current.toggle
-      ) {
-        historyRef.current = h;
-        changed = true;
-      }
-      if (changed) forceUpdate((n) => n + 1);
-    }, 200);
-    return () => clearInterval(id);
-  }, []);
-
-  const { agents, onAdd, onSplit } = addTabRef.current;
-  const history = historyToggleRef.current;
+  const { onAdd, onSplit } = addTabRef.current;
   const groupId = props.group.id;
   return (
     <div className="flex items-center">
-      {history.supported && (
-        <button
-          type="button"
-          onClick={history.toggle}
-          className={`inline-flex size-8 items-center justify-center rounded transition-colors hover:bg-accent ${
-            history.active
-              ? "bg-accent text-foreground"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-          title="Session history"
-        >
-          <Clock className="size-3.5" />
-        </button>
-      )}
       <button
         type="button"
         className="inline-flex size-8 items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent rounded transition-colors"
@@ -400,7 +326,14 @@ const RightHeaderActions = React.memo(function RightHeaderActions(
       >
         <Rows2 className="size-3.5" />
       </button>
-      <AddTabButton agents={agents} onAdd={(agentId) => onAdd(agentId, groupId)} />
+      <button
+        type="button"
+        className="inline-flex size-8 items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent rounded transition-colors"
+        onClick={() => onAdd(undefined, groupId)}
+        title="New chat tab"
+      >
+        <Plus className="size-4" />
+      </button>
     </div>
   );
 });
@@ -455,20 +388,6 @@ export function DockviewChatContainer({
     },
     staleTime: Number.POSITIVE_INFINITY, // never auto-refetch — we manage persistence ourselves
   });
-
-  // Load agents for the "add tab" dropdown
-  const [agents, setAgents] = useState<CodingAgentDef[]>([]);
-  useEffect(() => {
-    trpc.settings.get
-      .query()
-      .then((settings) => {
-        const raw = (settings as Record<string, unknown>)?.codingAgents;
-        if (Array.isArray(raw)) {
-          setAgents(raw as CodingAgentDef[]);
-        }
-      })
-      .catch(() => {});
-  }, []);
 
   // Debounced persist: serialize the full dockview layout + update cache
   const queryClientRef = useRef(queryClient);
@@ -656,7 +575,7 @@ export function DockviewChatContainer({
   // instead of updateParameters — see the Provider wrapping DockviewReact.
 
   // Keep module-level refs in sync for stable Dockview components
-  addTabRef.current = { agents, onAdd: handleAddTab, onSplit: handleSplit };
+  addTabRef.current = { onAdd: handleAddTab, onSplit: handleSplit };
   closeTabRef.current = closeTab;
 
   // Use a ref for the initial layout so onReady's closure captures the latest
@@ -744,53 +663,4 @@ function createDefaultPanel(api: DockviewApi, workspaceId: string): void {
       chatId,
     },
   });
-}
-
-// ---------------------------------------------------------------------------
-// Add tab button (with agent picker dropdown)
-// ---------------------------------------------------------------------------
-
-function AddTabButton({
-  agents,
-  onAdd,
-}: {
-  agents: CodingAgentDef[];
-  onAdd: (agentId?: string) => void;
-}) {
-  const hasMultipleAgents = agents.length > 1;
-
-  if (!hasMultipleAgents) {
-    return (
-      <button
-        type="button"
-        className="inline-flex size-8 items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent rounded transition-colors"
-        onClick={() => onAdd()}
-        title="New chat tab"
-      >
-        <Plus className="size-4" />
-      </button>
-    );
-  }
-
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          className="inline-flex size-8 items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent rounded transition-colors"
-          title="New chat tab"
-        >
-          <Plus className="size-4" />
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-[180px]">
-        {agents.map((agent) => (
-          <DropdownMenuItem key={agent.id} onClick={() => onAdd(agent.id)}>
-            <AgentIcon type={agent.type} className="size-3.5 shrink-0" />
-            <span className="truncate">{agent.label}</span>
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
 }

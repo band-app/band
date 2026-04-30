@@ -1978,6 +1978,39 @@ const modelsRouter = t.router({
       const agentDef = getAgentDefinition(settings, input.agentId);
       return { models, defaultModel: agentDef.model };
     }),
+
+  /** List all agents with their models — used by the combined agent/model selector. */
+  listAll: publicProcedure.query(async () => {
+    const settings = loadSettings();
+    const codingAgents = settings.codingAgents ?? [];
+    const defaultAgentId = settings.defaultCodingAgent ?? codingAgents[0]?.id ?? "";
+
+    const agents = await Promise.all(
+      codingAgents.map(async (def) => {
+        try {
+          const agent = await createMetadataAgent(def.id);
+          const models = agent.listModels ? await agent.listModels() : [];
+          return {
+            agentId: def.id,
+            agentType: def.type,
+            agentLabel: def.label,
+            models,
+            defaultModel: def.model,
+          };
+        } catch {
+          return {
+            agentId: def.id,
+            agentType: def.type,
+            agentLabel: def.label,
+            models: [],
+            defaultModel: def.model,
+          };
+        }
+      }),
+    );
+
+    return { agents, defaultAgentId };
+  }),
 });
 
 // ---------------------------------------------------------------------------

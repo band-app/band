@@ -35,7 +35,8 @@ function MobileChatContent({ workspaceId }: { workspaceId: string }) {
   const [initialSessionId, setInitialSessionId] = useState<string | undefined>(undefined);
   const [sessionQueryDone, setSessionQueryDone] = useState(false);
   const { showSessionList, setShowSessionList } = useSessionListContext();
-  const { chatKey, setTaskRunning, agentType, newSessionRef } = useAgentSwitcherContext();
+  const { chatKey, setTaskRunning, agentType, codingAgentId, switchAgent, newSessionRef } =
+    useAgentSwitcherContext();
 
   // Resolve default chat for mobile view
   useEffect(() => {
@@ -100,6 +101,8 @@ function MobileChatContent({ workspaceId }: { workspaceId: string }) {
         onStreamingChange={setTaskRunning}
         onNewSessionRef={newSessionRef}
         agentType={agentType}
+        codingAgentId={codingAgentId}
+        onSwitchAgent={switchAgent}
       />
     </div>
   );

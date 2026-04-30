@@ -27,6 +27,10 @@ export interface ChatPaneState {
   onActiveSessionChange: (sessionId: string | undefined) => void;
   /** Summary of the active session (if any). Used for tab titles. */
   activeSessionSummary: string | undefined;
+  /** Switch to a different coding agent — triggers chat reload. */
+  onSwitchAgent: (agentId: string) => void;
+  /** Key that increments on agent switch to force ChatView remount. */
+  paneKey: number;
 }
 
 /**
@@ -49,6 +53,7 @@ export function useChatPaneState(workspaceId: string, chatId: string): ChatPaneS
   const [agentLabel, setAgentLabel] = useState<string>("");
   const [agents, setAgents] = useState<CodingAgentDef[]>([]);
   const [activeSessionSummary, setActiveSessionSummary] = useState<string | undefined>(undefined);
+  const [paneKey, setPaneKey] = useState(0);
   const newSessionRef = useRef<(() => void) | null>(null);
   // Keep a ref to the sessions list for looking up summaries on session switch
   const sessionsRef = useRef<Array<{ sessionId: string; summary: string }>>([]);
@@ -154,6 +159,28 @@ export function useChatPaneState(workspaceId: string, chatId: string): ChatPaneS
     [workspaceId, chatId],
   );
 
+  // Switch to a different coding agent — calls server, updates local state, increments paneKey.
+  const onSwitchAgent = useCallback(
+    (agentId: string) => {
+      if (agentId === codingAgentId) return;
+      trpc.workspace.switchAgent
+        .mutate({ workspaceId, agentId, chatId })
+        .then(() => {
+          setCodingAgentId(agentId);
+          const found = agents.find((a) => a.id === agentId);
+          if (found) {
+            setAgentType(found.type);
+            setAgentLabel(found.label);
+          }
+          setPaneKey((k) => k + 1);
+        })
+        .catch((err) => {
+          console.error("[ChatPane] error switching agent:", err);
+        });
+    },
+    [workspaceId, chatId, codingAgentId, agents],
+  );
+
   return {
     supportsSessionListing,
     initialSessionId,
@@ -168,6 +195,8 @@ export function useChatPaneState(workspaceId: string, chatId: string): ChatPaneS
     newSessionRef,
     onActiveSessionChange,
     activeSessionSummary,
+    onSwitchAgent,
+    paneKey,
   };
 }
 
@@ -189,6 +218,7 @@ export function ChatPane({ workspaceId, chatId, visible, wsActive, state }: Chat
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <ChatView
+        key={state.paneKey}
         workspaceId={workspaceId}
         chatId={chatId}
         workspaceName={workspaceId}
@@ -201,6 +231,7 @@ export function ChatPane({ workspaceId, chatId, visible, wsActive, state }: Chat
         onActiveSessionChange={state.onActiveSessionChange}
         agentType={state.agentType}
         codingAgentId={state.codingAgentId}
+        onSwitchAgent={state.onSwitchAgent}
         visible={visible}
         wsActive={wsActive}
       />

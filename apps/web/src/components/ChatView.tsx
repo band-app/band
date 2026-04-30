@@ -5,7 +5,10 @@ import {
   cn,
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
   Tooltip,
   TooltipContent,
@@ -13,7 +16,17 @@ import {
 } from "@band-app/ui";
 import type { UIMessage } from "ai";
 import { getToolName, isToolUIPart } from "ai";
-import { Bot, ChevronDown, Clock, CodeXml, Loader2, ScrollText, X } from "lucide-react";
+import {
+  Bot,
+  ChevronDown,
+  Clock,
+  CodeXml,
+  GitBranch,
+  Loader2,
+  Plus,
+  ScrollText,
+  X,
+} from "lucide-react";
 import {
   Fragment,
   useCallback,
@@ -49,7 +62,6 @@ import { applyTaskToolCall, isTaskTool, type TaskMap } from "./ai-elements/task-
 import type { ToolPart } from "./ai-elements/tool";
 import type { ToolCallItem } from "./ai-elements/tool-call";
 import { ToolCall } from "./ai-elements/tool-call";
-import { SessionList } from "./SessionList";
 
 const IN_PROGRESS_STATES = new Set<ToolPart["state"]>([
   "input-available",
@@ -132,6 +144,14 @@ function splitMessageAtQueueBoundaries(parts: UIMessageParts): QueueSegment[] {
   return segments;
 }
 
+interface AgentGroup {
+  agentId: string;
+  agentType: string;
+  agentLabel: string;
+  models: { id: string; name: string; description?: string }[];
+  defaultModel?: string;
+}
+
 interface ChatViewProps {
   workspaceId: string;
   chatId: string;
@@ -149,6 +169,8 @@ interface ChatViewProps {
   chatKey?: number;
   agentType?: string;
   codingAgentId?: string;
+  /** Called when the user picks a model under a different coding agent. */
+  onSwitchAgent?: (agentId: string) => void;
   visible?: boolean;
   /** Workspace is active (even if the chat tab isn't the focused tab). */
   wsActive?: boolean;
@@ -161,7 +183,7 @@ export function ChatView({
   supportsSessionListing,
   initialSessionId,
   sessionQueryDone = false,
-  showSessionList,
+  showSessionList: _showSessionList,
   onShowSessionListChange,
   onStreamingChange,
   onNewSessionRef,
@@ -169,6 +191,7 @@ export function ChatView({
   chatKey = 0,
   agentType,
   codingAgentId,
+  onSwitchAgent,
   visible,
   wsActive,
 }: ChatViewProps) {
@@ -271,6 +294,7 @@ export function ChatView({
   }, [modes, selectedMode, handleModeSelect]);
 
   const [models, setModels] = useState<{ id: string; name: string; description?: string }[]>([]);
+  const [agentGroups, setAgentGroups] = useState<AgentGroup[]>([]);
   // Default model from agent settings (per agent type)
   const [agentDefaultModel, setAgentDefaultModel] = useState<string | undefined>();
   // Explicit user override from the model dropdown
@@ -279,13 +303,22 @@ export function ChatView({
   const selectedModel = userModelOverride ?? agentDefaultModel;
 
   useEffect(() => {
-    const modelsP = trpc.models.list
-      .query({ agentId: codingAgentId || undefined })
+    const modelsP = trpc.models.listAll
+      .query()
       .then((data) => {
-        setModels(data.models as { id: string; name: string; description?: string }[]);
-        setAgentDefaultModel((data.defaultModel as string) || undefined);
+        setAgentGroups(data.agents as AgentGroup[]);
+        // Derive current agent's models from the groups
+        const currentGroup = (data.agents as AgentGroup[]).find((g) => g.agentId === codingAgentId);
+        if (currentGroup) {
+          setModels(currentGroup.models);
+          setAgentDefaultModel(currentGroup.defaultModel || undefined);
+        } else if ((data.agents as AgentGroup[]).length > 0) {
+          const first = (data.agents as AgentGroup[])[0];
+          setModels(first.models);
+          setAgentDefaultModel(first.defaultModel || undefined);
+        }
       })
-      .catch(() => setModels([]));
+      .catch(() => setAgentGroups([]));
 
     // Hydrate persisted model override from the chat record
     const chatP = trpc.chats.get
@@ -686,18 +719,6 @@ export function ChatView({
 
   const isEmpty = messages.length === 0;
 
-  if (supportsSessionListing && showSessionList) {
-    return (
-      <SessionList
-        workspaceId={workspaceId}
-        chatId={chatId}
-        activeSessionId={activeSessionId ?? sessionIdRef.current}
-        onSelectSession={handleSelectSession}
-        onNewSession={handleNewSession}
-      />
-    );
-  }
-
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <Conversation className="min-h-0 flex-1" contextRef={stickyContextRef}>
@@ -920,16 +941,28 @@ export function ChatView({
           <PromptInputActions>
             <div className="flex items-center gap-0.5">
               <PromptInputAttach />
-              {models.length > 0 && (
-                <ModelMenu
-                  models={models}
-                  selected={selectedModel}
-                  onSelect={handleModelSelect}
-                  agentType={agentType}
+              {(agentGroups.length > 0 || models.length > 0) && (
+                <AgentModelMenu
+                  agentGroups={agentGroups}
+                  currentAgentId={codingAgentId}
+                  currentAgentType={agentType}
+                  selectedModel={selectedModel}
+                  onSelectModel={handleModelSelect}
+                  onSwitchAgent={onSwitchAgent}
+                  disabled={status !== "ready" && status !== "error"}
                 />
               )}
               {modes.length > 0 && (
                 <ModeMenu modes={modes} selected={selectedMode} onSelect={handleModeSelect} />
+              )}
+              {supportsSessionListing && (
+                <SessionHistoryMenu
+                  workspaceId={workspaceId}
+                  chatId={chatId}
+                  activeSessionId={activeSessionId ?? sessionIdRef.current}
+                  onSelectSession={handleSelectSession}
+                  onNewSession={handleNewSession}
+                />
               )}
             </div>
             <PromptInputSubmit
@@ -1005,50 +1038,224 @@ function ModeMenu({
   );
 }
 
-function ModelMenu({
-  models,
-  selected,
-  onSelect,
-  agentType,
+function AgentModelMenu({
+  agentGroups,
+  currentAgentId,
+  currentAgentType,
+  selectedModel,
+  onSelectModel,
+  onSwitchAgent,
+  disabled,
 }: {
-  models: { id: string; name: string; description?: string }[];
-  selected: string | undefined;
-  onSelect: (model: string | undefined) => void;
-  agentType?: string;
+  agentGroups: AgentGroup[];
+  currentAgentId?: string;
+  currentAgentType?: string;
+  selectedModel: string | undefined;
+  onSelectModel: (model: string | undefined) => void;
+  onSwitchAgent?: (agentId: string) => void;
+  disabled?: boolean;
 }) {
-  const current = models.find((m) => m.id === selected) ?? models[0];
+  const currentGroup = agentGroups.find((g) => g.agentId === currentAgentId) ?? agentGroups[0];
+  const currentModels = currentGroup?.models ?? [];
+  const current = currentModels.find((m) => m.id === selectedModel) ?? currentModels[0];
   const displayName = current?.name ?? "Model";
+  const showGroups = agentGroups.length > 1;
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          disabled={disabled}
+          className={cn(
+            "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+            disabled && "opacity-50 cursor-not-allowed",
+          )}
         >
-          {agentType ? (
-            <AgentIcon type={agentType} className="size-3" />
+          {currentAgentType ? (
+            <AgentIcon type={currentAgentType} className="size-3" />
           ) : (
             <ChevronDown className="size-3" />
           )}
           {displayName}
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-[140px]">
-        {models.map((model) => (
-          <DropdownMenuItem
-            key={model.id}
-            onClick={() => onSelect(model.id)}
-            className={cn(
-              "flex flex-col items-start gap-0.5",
-              model.id === selected ? "bg-accent" : "",
-            )}
-          >
-            <span className="text-sm font-medium">{model.name}</span>
-            {model.description && (
-              <span className="text-xs text-muted-foreground">{model.description}</span>
-            )}
-          </DropdownMenuItem>
-        ))}
+      <DropdownMenuContent align="start" className="min-w-[200px] max-h-[400px] overflow-y-auto">
+        {showGroups
+          ? agentGroups.map((group, groupIndex) => {
+              const isCurrentAgent = group.agentId === currentAgentId;
+              return (
+                <Fragment key={group.agentId}>
+                  {groupIndex > 0 && <DropdownMenuSeparator />}
+                  <DropdownMenuLabel className="flex items-center gap-1.5">
+                    <AgentIcon type={group.agentType} className="size-3.5" />
+                    {group.agentLabel}
+                  </DropdownMenuLabel>
+                  <DropdownMenuGroup>
+                    {group.models.length > 0 ? (
+                      group.models.map((model) => (
+                        <DropdownMenuItem
+                          key={`${group.agentId}:${model.id}`}
+                          onClick={() => {
+                            if (isCurrentAgent) {
+                              onSelectModel(model.id);
+                            } else {
+                              onSwitchAgent?.(group.agentId);
+                            }
+                          }}
+                          className={cn(
+                            "flex flex-col items-start gap-0.5 pl-6",
+                            isCurrentAgent && model.id === selectedModel ? "bg-accent" : "",
+                          )}
+                        >
+                          <span className="text-sm font-medium">{model.name}</span>
+                          {model.description && (
+                            <span className="text-xs text-muted-foreground">
+                              {model.description}
+                            </span>
+                          )}
+                        </DropdownMenuItem>
+                      ))
+                    ) : (
+                      <DropdownMenuItem
+                        onClick={() => {
+                          if (!isCurrentAgent) {
+                            onSwitchAgent?.(group.agentId);
+                          }
+                        }}
+                        className="pl-6 text-muted-foreground"
+                      >
+                        <span className="text-sm italic">
+                          {isCurrentAgent ? "Default model" : "Switch to this agent"}
+                        </span>
+                      </DropdownMenuItem>
+                    )}
+                  </DropdownMenuGroup>
+                </Fragment>
+              );
+            })
+          : currentModels.map((model) => (
+              <DropdownMenuItem
+                key={model.id}
+                onClick={() => onSelectModel(model.id)}
+                className={cn(
+                  "flex flex-col items-start gap-0.5",
+                  model.id === selectedModel ? "bg-accent" : "",
+                )}
+              >
+                <span className="text-sm font-medium">{model.name}</span>
+                {model.description && (
+                  <span className="text-xs text-muted-foreground">{model.description}</span>
+                )}
+              </DropdownMenuItem>
+            ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function relativeTime(ms: number): string {
+  const seconds = Math.floor((Date.now() - ms) / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  return `${months}mo ago`;
+}
+
+interface SessionHistoryItem {
+  sessionId: string;
+  summary: string;
+  lastModified: number;
+  gitBranch?: string;
+}
+
+function SessionHistoryMenu({
+  workspaceId,
+  chatId,
+  activeSessionId,
+  onSelectSession,
+  onNewSession,
+}: {
+  workspaceId: string;
+  chatId: string;
+  activeSessionId?: string;
+  onSelectSession: (sessionId: string) => void;
+  onNewSession: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [sessions, setSessions] = useState<SessionHistoryItem[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    trpc.sessions.list
+      .query({ workspaceId, chatId })
+      .then((data) => setSessions(data.sessions as SessionHistoryItem[]))
+      .catch(() => setSessions([]))
+      .finally(() => setLoading(false));
+  }, [open, workspaceId, chatId]);
+
+  return (
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="inline-flex items-center justify-center rounded-md px-2 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <Clock className="size-3" />
+            </button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent>Session history</TooltipContent>
+      </Tooltip>
+      <DropdownMenuContent align="start" className="w-72">
+        {loading ? (
+          <div className="flex items-center justify-center py-6">
+            <Loader2 className="size-4 animate-spin text-muted-foreground" />
+          </div>
+        ) : sessions.length === 0 ? (
+          <div className="px-3 py-4 text-center text-sm text-muted-foreground">No sessions yet</div>
+        ) : (
+          <div className="max-h-64 overflow-y-auto">
+            {sessions.map((session) => {
+              const isActive = session.sessionId === activeSessionId;
+              return (
+                <DropdownMenuItem
+                  key={session.sessionId}
+                  onClick={() => onSelectSession(session.sessionId)}
+                  className={cn("flex flex-col items-start gap-0.5", isActive && "bg-accent")}
+                >
+                  <span className="line-clamp-1 text-sm font-medium">{session.summary}</span>
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <span>{relativeTime(session.lastModified)}</span>
+                    {session.gitBranch && (
+                      <>
+                        <span className="text-border">·</span>
+                        <span className="inline-flex items-center gap-1">
+                          <GitBranch className="size-2.5" />
+                          {session.gitBranch}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </DropdownMenuItem>
+              );
+            })}
+          </div>
+        )}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => onNewSession()}>
+          <Plus className="size-3.5" />
+          New session
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );

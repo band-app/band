@@ -5,6 +5,8 @@ export interface AgentSwitcherContextValue {
   chatKey: number;
   setTaskRunning: (running: boolean) => void;
   agentType?: string;
+  codingAgentId?: string;
+  switchAgent?: (agentId: string) => Promise<void>;
   newSessionRef?: React.MutableRefObject<(() => void) | null>;
 }
 

@@ -1,5 +1,4 @@
 import {
-  AgentIcon,
   type DiffStats,
   QuickOpenDialog,
   useDashboardStore,
@@ -8,7 +7,7 @@ import {
   WorkspaceTabNav,
 } from "@band-app/dashboard-core";
 import { createFileRoute, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
-import { ArrowLeft, ChevronDown, Clock, Plus } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import {
   createContext,
   useCallback,
@@ -216,14 +215,12 @@ function MobileWorkspaceLayout({
   const navigate = useNavigate();
   const { height: appHeight, offsetTop: appOffsetTop } = useAppHeight();
   const isTasksWindow = useRef<boolean | null>(null);
-  const [supportsSessionListing, setSupportsSessionListing] = useState(false);
   const [showSessionList, setShowSessionList] = useState(false);
 
   // Agent switcher state
   const [agents, setAgents] = useState<CodingAgentDef[]>([]);
   const [currentAgentId, setCurrentAgentId] = useState<string>("");
-  const [showAgentMenu, setShowAgentMenu] = useState(false);
-  const [taskRunning, setTaskRunning] = useState(false);
+  const [, setTaskRunning] = useState(false);
   const [chatKey, setChatKey] = useState(0);
   const newSessionRef = useRef<(() => void) | null>(null);
 
@@ -236,20 +233,6 @@ function MobileWorkspaceLayout({
       isTasksWindow.current = getCurrentWebviewWindow().label === "tasks";
     });
   }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    trpc.sessions.list
-      .query({ workspaceId })
-      .then((data) => {
-        if (cancelled) return;
-        if (data.supported) setSupportsSessionListing(true);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceId]);
 
   // Load available agents from settings and current workspace agent
   // biome-ignore lint/correctness/useExhaustiveDependencies: chatKey intentionally triggers reload after agent switch; currentAgentId excluded to avoid infinite loop
@@ -323,7 +306,6 @@ function MobileWorkspaceLayout({
 
   const handleSwitchAgent = useCallback(
     async (agentId: string) => {
-      setShowAgentMenu(false);
       if (agentId === currentAgentId) return;
       try {
         await trpc.workspace.switchAgent.mutate({ workspaceId, agentId });
@@ -340,16 +322,11 @@ function MobileWorkspaceLayout({
     navigate({ to: isTasksWindow.current ? "/tasks" : "/" });
   }, [navigate]);
 
-  const handleToggleSessionList = useCallback(() => {
-    setShowSessionList((prev) => !prev);
-  }, []);
-
   const handleSetShowSessionList = useCallback((show: boolean) => {
     setShowSessionList(show);
   }, []);
 
   const currentAgent = agents.find((a) => a.id === currentAgentId);
-  const switchDisabled = taskRunning;
 
   const tabHrefs = {
     chat: `/workspace/${encodedId}`,
@@ -362,7 +339,14 @@ function MobileWorkspaceLayout({
       value={{ showSessionList, setShowSessionList: handleSetShowSessionList }}
     >
       <AgentSwitcherContext.Provider
-        value={{ chatKey, setTaskRunning, agentType: currentAgent?.type, newSessionRef }}
+        value={{
+          chatKey,
+          setTaskRunning,
+          agentType: currentAgent?.type,
+          codingAgentId: currentAgentId,
+          switchAgent: handleSwitchAgent,
+          newSessionRef,
+        }}
       >
         <div
           className="flex flex-col overflow-hidden"
@@ -383,72 +367,6 @@ function MobileWorkspaceLayout({
             <div className="min-w-0 flex-1">
               <h1 className="truncate text-sm font-semibold">{workspaceId}</h1>
             </div>
-            {agents.length > 1 && activeTab === "chat" && (
-              <div className="relative">
-                <button
-                  type="button"
-                  disabled={switchDisabled}
-                  onClick={() => setShowAgentMenu((prev) => !prev)}
-                  className={`inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs transition-colors ${
-                    switchDisabled
-                      ? "opacity-50 cursor-not-allowed text-muted-foreground"
-                      : "text-muted-foreground hover:bg-accent hover:text-foreground"
-                  }`}
-                >
-                  {currentAgent && (
-                    <AgentIcon type={currentAgent.type} className="size-3.5 shrink-0" />
-                  )}
-                  <span className="max-w-[120px] truncate">{currentAgent?.label ?? "Default"}</span>
-                  <ChevronDown className="size-3 opacity-50" />
-                </button>
-                {showAgentMenu && !switchDisabled && (
-                  <>
-                    <div
-                      className="fixed inset-0 z-40"
-                      onClick={() => setShowAgentMenu(false)}
-                      onKeyDown={() => {}}
-                      role="presentation"
-                    />
-                    <div className="absolute right-0 top-full z-50 mt-1 min-w-[160px] rounded-md border border-border bg-popover p-1 shadow-md">
-                      {agents.map((agent) => (
-                        <button
-                          key={agent.id}
-                          type="button"
-                          className={`flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs transition-colors hover:bg-accent ${
-                            agent.id === currentAgentId
-                              ? "bg-accent text-foreground"
-                              : "text-muted-foreground"
-                          }`}
-                          onClick={() => handleSwitchAgent(agent.id)}
-                        >
-                          <AgentIcon type={agent.type} className="size-3.5 shrink-0" />
-                          {agent.label}
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-            {supportsSessionListing && activeTab === "chat" && (
-              <div className="flex items-center gap-0.5">
-                <button
-                  type="button"
-                  onClick={handleToggleSessionList}
-                  className={`inline-flex size-8 items-center justify-center rounded-md transition-colors hover:bg-accent ${showSessionList ? "bg-accent text-foreground" : "text-muted-foreground"}`}
-                >
-                  <Clock className="size-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => newSessionRef.current?.()}
-                  className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                  title="New session"
-                >
-                  <Plus className="size-4" />
-                </button>
-              </div>
-            )}
           </header>
           <WorkspaceTabNav
             activeTab={activeTab}
