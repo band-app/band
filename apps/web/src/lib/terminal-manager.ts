@@ -186,9 +186,7 @@ export function resizeTerminal(terminalId: string, cols: number, rows: number): 
 /**
  * List all terminal sessions for a workspace.
  */
-export function listTerminals(
-  workspaceId: string,
-): Array<{
+export function listTerminals(workspaceId: string): Array<{
   terminalId: string;
   workspaceId: string;
   pid: number;

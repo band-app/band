@@ -424,23 +424,20 @@ export function DockviewTerminalContainer({
     [workspaceId],
   );
 
-  const closeTab = useCallback(
-    (terminalId: string) => {
-      const api = apiRef.current;
-      if (!api || api.panels.length <= 1) return; // don't close last tab
+  const closeTab = useCallback((terminalId: string) => {
+    const api = apiRef.current;
+    if (!api || api.panels.length <= 1) return; // don't close last tab
 
-      const panel = api.getPanel(terminalId);
-      if (panel) {
-        api.removePanel(panel);
-      }
+    const panel = api.getPanel(terminalId);
+    if (panel) {
+      api.removePanel(panel);
+    }
 
-      // Kill the terminal on the server (kills PTY + removes from layout + emits event)
-      trpc.terminal.kill.mutate({ terminalId }).catch((err) => {
-        console.error("[DockviewTerminalContainer] failed to kill terminal:", err);
-      });
-    },
-    [],
-  );
+    // Kill the terminal on the server (kills PTY + removes from layout + emits event)
+    trpc.terminal.kill.mutate({ terminalId }).catch((err) => {
+      console.error("[DockviewTerminalContainer] failed to kill terminal:", err);
+    });
+  }, []);
 
   // Keyboard shortcuts:
   // - Cmd/Ctrl+W → close the active terminal tab
