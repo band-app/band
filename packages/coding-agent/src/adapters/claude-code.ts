@@ -315,7 +315,12 @@ export class ClaudeCodeAdapter implements CodingAgent {
       limit: options?.limit,
       offset: options?.offset,
     });
-    return messages.map(mapSessionMessage);
+    return messages
+      .filter(
+        (m): m is SessionMessage & { type: "user" | "assistant" } =>
+          m.type === "user" || m.type === "assistant",
+      )
+      .map(mapSessionMessage);
   }
 
   async listSkills(): Promise<SkillInfo[]> {
@@ -350,14 +355,14 @@ export class ClaudeCodeAdapter implements CodingAgent {
         description: "Sonnet 4.6 for long sessions · $6/$22.50 per Mtok",
       },
       {
-        id: "claude-opus-4-6",
+        id: "claude-opus-4-7",
         name: "Opus",
-        description: "Opus 4.6 · Most capable for complex work · $5/$25 per Mtok",
+        description: "Opus 4.7 · Most capable for complex work · $5/$25 per Mtok",
       },
       {
-        id: "claude-opus-4-6[1m]",
+        id: "claude-opus-4-7[1m]",
         name: "Opus (1M context)",
-        description: "Opus 4.6 for long sessions · $10/$37.50 per Mtok",
+        description: "Opus 4.7 for long sessions · $10/$37.50 per Mtok",
       },
       {
         id: "claude-haiku-4-5-20251001",
@@ -391,7 +396,9 @@ function mapSessionInfo(info: SDKSessionInfo, lastPrompt?: string): SessionListI
   };
 }
 
-function mapSessionMessage(msg: SessionMessage): SessionMessageItem {
+function mapSessionMessage(
+  msg: SessionMessage & { type: "user" | "assistant" },
+): SessionMessageItem {
   const content: SessionMessageItem["content"] = [];
   const raw = msg.message as {
     content?:
