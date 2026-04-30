@@ -26,18 +26,12 @@ import type {
 const log = createLogger("coding-agent:claude-code");
 
 /**
- * Read the most recently modified plan file.
+ * Read the most recently modified plan file from the workspace.
  *
- * Claude Code stores plans under `<CLAUDE_CONFIG_DIR>/plans/` which
- * defaults to `~/.claude/plans/` but can be overridden via the
- * `CLAUDE_CONFIG_DIR` env var. We check both the configured/default
- * location and `~/.band/plans/` (legacy) and return whichever has
- * the newest file.
+ * Claude Code writes plans into `<workspaceDir>/.claude/plans/`.
  */
-function readLatestPlanFile(): string | undefined {
-  const home = homedir();
-  const configDir = process.env.CLAUDE_CONFIG_DIR || join(home, ".claude");
-  const plansDirs = [join(configDir, "plans"), join(home, ".band", "plans")];
+function readLatestPlanFile(workspaceDir: string): string | undefined {
+  const plansDirs = [join(workspaceDir, ".claude", "plans")];
 
   let newest: { path: string; mtime: number } | undefined;
   for (const dir of plansDirs) {
@@ -222,7 +216,7 @@ export class ClaudeCodeAdapter implements CodingAgent {
       // the UI can render a plan preview.
       let enrichedInput = input as Record<string, unknown>;
       if (toolName === "ExitPlanMode") {
-        const planContent = readLatestPlanFile();
+        const planContent = readLatestPlanFile(this.workspaceDir);
         if (planContent) {
           enrichedInput = { ...enrichedInput, plan: planContent };
         }
