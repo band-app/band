@@ -43,8 +43,22 @@ describe("build output", () => {
     ).toBe(true);
   });
 
-  it.skipIf(skipSdkChecks)("contains Claude Code SDK cli.js", () => {
-    expect(existsSync(join(dist, "cli.js"))).toBe(true);
+  it.skipIf(skipSdkChecks)("contains Claude Code SDK native binary", () => {
+    // SDK 0.2.x ships a native `claude` binary per platform under
+    // @anthropic-ai/claude-agent-sdk-<platform>-<arch>. Build copies the
+    // matching package into dist/node_modules. Linux has both glibc and
+    // musl variants — accept either.
+    const platform = process.platform;
+    const arch = process.arch;
+    const candidates =
+      platform === "linux"
+        ? [
+            `@anthropic-ai/claude-agent-sdk-linux-${arch}`,
+            `@anthropic-ai/claude-agent-sdk-linux-${arch}-musl`,
+          ]
+        : [`@anthropic-ai/claude-agent-sdk-${platform}-${arch}`];
+    const found = candidates.some((pkg) => existsSync(join(dist, "node_modules", pkg, "claude")));
+    expect(found).toBe(true);
   });
 
   it.skipIf(skipSdkChecks)("contains Codex SDK package", () => {

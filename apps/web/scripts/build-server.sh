@@ -122,14 +122,39 @@ SHIM
   # so they only exist in the root node_modules/.pnpm store.
   MONO_ROOT="$(cd ../.. && pwd)"
 
-  # Copy claude-agent-sdk CLI script.
-  # The SDK resolves cli.js via join(dirname(import.meta.url), "..", "cli.js").
-  # After esbuild bundling import.meta.url points to dist/start-server.mjs,
-  # so the SDK looks for dist/cli.js.
-  CLAUDE_SDK_CLI="$(find "$MONO_ROOT/node_modules/.pnpm" -path "*/@anthropic-ai/claude-agent-sdk/cli.js" -type f 2>/dev/null | head -1)"
-  if [ -n "$CLAUDE_SDK_CLI" ]; then
-    cp "$CLAUDE_SDK_CLI" dist/cli.js
-  fi
+  # Copy claude-agent-sdk platform-specific native binary.
+  # SDK 0.2.x ships a native `claude` binary per platform via optional
+  # dependency packages named @anthropic-ai/claude-agent-sdk-<platform>-<arch>
+  # (and -musl on Linux). At runtime the SDK resolves
+  #   require.resolve("@anthropic-ai/claude-agent-sdk-<platform>-<arch>/claude")
+  # so the platform package directory needs to be present under
+  # dist/node_modules/. Copy whichever variants exist for the current
+  # platform.
+  CLAUDE_SDK_PLATFORM_PKGS=""
+  case "$(uname -s)" in
+    Darwin)
+      case "$(uname -m)" in
+        arm64) CLAUDE_SDK_PLATFORM_PKGS="@anthropic-ai/claude-agent-sdk-darwin-arm64" ;;
+        x86_64) CLAUDE_SDK_PLATFORM_PKGS="@anthropic-ai/claude-agent-sdk-darwin-x64" ;;
+      esac
+      ;;
+    Linux)
+      case "$(uname -m)" in
+        aarch64|arm64) CLAUDE_SDK_PLATFORM_PKGS="@anthropic-ai/claude-agent-sdk-linux-arm64 @anthropic-ai/claude-agent-sdk-linux-arm64-musl" ;;
+        x86_64) CLAUDE_SDK_PLATFORM_PKGS="@anthropic-ai/claude-agent-sdk-linux-x64 @anthropic-ai/claude-agent-sdk-linux-x64-musl" ;;
+      esac
+      ;;
+  esac
+
+  for PKG in $CLAUDE_SDK_PLATFORM_PKGS; do
+    PKG_SRC="$(find "$MONO_ROOT/node_modules/.pnpm" -maxdepth 4 -path "*/$PKG" -type d 2>/dev/null | head -1)"
+    if [ -n "$PKG_SRC" ] && [ -f "$PKG_SRC/claude" ]; then
+      mkdir -p "dist/node_modules/$PKG"
+      cp "$PKG_SRC/package.json" "dist/node_modules/$PKG/"
+      cp "$PKG_SRC/claude" "dist/node_modules/$PKG/"
+      chmod +x "dist/node_modules/$PKG/claude"
+    fi
+  done
 
   # Copy Codex SDK package.json so createRequire(import.meta.url).resolve("@openai/codex/package.json")
   # works from dist/. The actual codex CLI binary is expected to be installed on the user's system.
