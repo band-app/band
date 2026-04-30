@@ -337,7 +337,8 @@ function resolveCodexBinary(): string | undefined {
 // ─── Models ─────────────────────────────────────────────────────────────────
 
 const CODEX_MODELS: AgentModel[] = [
-  { id: "gpt-5.4", name: "GPT-5.4", description: "Flagship frontier model" },
+  { id: "gpt-5.5", name: "GPT-5.5", description: "Flagship frontier model" },
+  { id: "gpt-5.4", name: "GPT-5.4", description: "Previous flagship model" },
   { id: "gpt-5.4-mini", name: "GPT-5.4 Mini", description: "Fast, efficient mini model" },
   { id: "gpt-5.3-codex", name: "GPT-5.3 Codex", description: "Coding-optimized model" },
   { id: "gpt-5.2-codex", name: "GPT-5.2 Codex", description: "Previous coding-optimized model" },
