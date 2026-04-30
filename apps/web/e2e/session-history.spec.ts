@@ -60,10 +60,9 @@ test("sessions load and display in the session list", async ({ page }) => {
   // Click the clock button to open the session list
   await clockButton.click();
 
-  // Verify session summaries are displayed in the session list
-  // Use the session list button locator to avoid matching the dockview tab title
-  await expect(page.getByRole("button", { name: /Fix login bug/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: /Add tests/ })).toBeVisible();
+  // Verify session summaries are displayed in the dropdown menu
+  await expect(page.getByRole("menuitem", { name: /Fix login bug/ })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: /Add tests/ })).toBeVisible();
 
   // Verify git branch badge
   await expect(page.getByText("fix-login")).toBeVisible();
@@ -144,8 +143,8 @@ test("selecting a session loads its messages", async ({ page }) => {
   await expect(clockButton).toBeVisible();
   await clockButton.click();
 
-  // Click the session (use role locator to avoid matching the dockview tab title)
-  await page.getByRole("button", { name: /Fix login bug/ }).click();
+  // Click the session (use menuitem role for DropdownMenuItem)
+  await page.getByRole("menuitem", { name: /Fix login bug/ }).click();
 
   // Verify historical messages render
   await expect(page.getByText("Please fix the login bug")).toBeVisible();

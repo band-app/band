@@ -77,8 +77,8 @@ async function loadSession(page: import("@playwright/test").Page) {
   const clockButton = page.locator("button").filter({ has: page.locator("svg.lucide-clock") });
   await expect(clockButton).toBeVisible();
   await clockButton.click();
-  // Use role locator to avoid matching the dockview tab title
-  await page.getByRole("button", { name: /Test session/ }).click();
+  // Use menuitem role to match DropdownMenuItem (avoids matching the dockview tab title)
+  await page.getByRole("menuitem", { name: /Test session/ }).click();
 }
 
 // ---------------------------------------------------------------------------
