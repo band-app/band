@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronRight, Folder, FolderOpen } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { buildFileTree, type FileTreeNode } from "../lib/build-file-tree";
 import { getFileIcon } from "../lib/file-icon";
 import type { FileStatus } from "../types";
@@ -8,6 +8,7 @@ import { FileStatusBadge } from "./FileStatusBadge";
 interface ChangesFileTreeProps {
   fileStatuses: Record<string, FileStatus>;
   onSelectFile: (filePath: string) => void;
+  activeFile?: string | null;
 }
 
 interface ChangesTreeNodeProps {
@@ -16,6 +17,7 @@ interface ChangesTreeNodeProps {
   expandedPaths: Set<string>;
   onToggle: (path: string) => void;
   onSelectFile: (filePath: string) => void;
+  activeFile?: string | null;
 }
 
 function ChangesTreeNode({
@@ -24,9 +26,19 @@ function ChangesTreeNode({
   expandedPaths,
   onToggle,
   onSelectFile,
+  activeFile,
 }: ChangesTreeNodeProps) {
   const isDir = node.children !== undefined;
   const isExpanded = isDir && expandedPaths.has(node.path);
+  const isActive = !isDir && activeFile === node.path;
+  const btnRef = useRef<HTMLButtonElement>(null);
+
+  // Auto-scroll the active file into view within the sidebar
+  useEffect(() => {
+    if (isActive && btnRef.current) {
+      btnRef.current.scrollIntoView({ block: "nearest" });
+    }
+  }, [isActive]);
 
   const handleClick = () => {
     if (isDir) {
@@ -39,9 +51,12 @@ function ChangesTreeNode({
   return (
     <>
       <button
+        ref={isActive ? btnRef : undefined}
         type="button"
         onClick={handleClick}
-        className="flex h-[26px] w-full items-center gap-1 pr-3 text-left text-xs hover:bg-accent/50"
+        className={`flex h-[26px] w-full items-center gap-1 pr-3 text-left text-xs ${
+          isActive ? "bg-accent text-accent-foreground" : "hover:bg-accent/50"
+        }`}
         style={{ paddingLeft: `${depth * 12 + 4}px` }}
       >
         {/* Chevron / spacer */}
@@ -88,6 +103,7 @@ function ChangesTreeNode({
             expandedPaths={expandedPaths}
             onToggle={onToggle}
             onSelectFile={onSelectFile}
+            activeFile={activeFile}
           />
         ))}
     </>
@@ -108,7 +124,7 @@ function collectDirPaths(nodes: FileTreeNode[]): string[] {
   return paths;
 }
 
-export function ChangesFileTree({ fileStatuses, onSelectFile }: ChangesFileTreeProps) {
+export function ChangesFileTree({ fileStatuses, onSelectFile, activeFile }: ChangesFileTreeProps) {
   const tree = useMemo(() => buildFileTree(fileStatuses), [fileStatuses]);
 
   // All directories expanded by default (changed-file sets are typically small)
@@ -151,6 +167,7 @@ export function ChangesFileTree({ fileStatuses, onSelectFile }: ChangesFileTreeP
           expandedPaths={expandedPaths}
           onToggle={handleToggle}
           onSelectFile={onSelectFile}
+          activeFile={activeFile}
         />
       ))}
     </>

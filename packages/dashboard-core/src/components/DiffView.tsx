@@ -530,6 +530,8 @@ interface LazyFileRowProps {
   viewMode: ViewMode;
   expandAll: boolean;
   focusedFile: { path: string; seq: number } | null;
+  isActive?: boolean;
+  scrollContainerRef?: React.RefObject<HTMLDivElement | null>;
   onToggleFile: (filename: string, isOpen: boolean) => void;
   onLoadMoreContext: (filename: string) => void;
   onShowFullFile: (filename: string) => void;
@@ -545,6 +547,8 @@ function LazyFileRow({
   viewMode,
   expandAll,
   focusedFile,
+  isActive,
+  scrollContainerRef,
   onToggleFile,
   onLoadMoreContext,
   onShowFullFile,
@@ -588,16 +592,23 @@ function LazyFileRow({
   useEffect(() => {
     if (focusedFile && focusedFile.path === filename) {
       setIsOpen(true);
-      // Defer scroll to allow the DOM to update after opening
+      // Double rAF: first lets React commit, second lets layout complete
       requestAnimationFrame(() => {
-        const elementId = `diff-file-${encodeURIComponent(filename)}`;
-        const element = document.getElementById(elementId);
-        if (element) {
-          element.scrollIntoView({ behavior: "smooth", block: "start" });
-        }
+        requestAnimationFrame(() => {
+          const el = document.getElementById(`diff-file-${encodeURIComponent(filename)}`);
+          const container = scrollContainerRef?.current;
+          if (el && container) {
+            const elTop = el.getBoundingClientRect().top;
+            const containerTop = container.getBoundingClientRect().top;
+            container.scrollTo({
+              top: container.scrollTop + (elTop - containerTop),
+              behavior: "instant",
+            });
+          }
+        });
       });
     }
-  }, [focusedFile, filename]);
+  }, [focusedFile, filename, scrollContainerRef]);
 
   const diff = cacheEntry?.diff ?? null;
   const diffError = cacheEntry?.diffError ?? null;
@@ -609,12 +620,12 @@ function LazyFileRow({
   return (
     <div
       id={`diff-file-${encodeURIComponent(filename)}`}
-      className="overflow-hidden rounded-lg border-2 border-border"
+      className={`overflow-clip rounded-lg border-2 ${isActive ? "border-blue-500/60" : "border-border"}`}
     >
       <button
         type="button"
         onClick={toggle}
-        className="sticky top-0 z-10 flex w-full items-center gap-2 bg-muted/20 px-4 py-2.5 text-left text-sm hover:bg-accent/50"
+        className="sticky top-0 z-10 flex w-full items-center gap-2 bg-muted px-4 py-2.5 text-left text-sm hover:bg-accent"
       >
         <span
           className={`shrink-0 text-muted-foreground transition-transform ${isOpen ? "rotate-90" : ""}`}
@@ -857,6 +868,11 @@ export function DiffView({
   );
 
   // -------------------------------------------------------------------------
+  // Scroll container ref — used for scroll-to-file and tree sync
+  // -------------------------------------------------------------------------
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  // -------------------------------------------------------------------------
   // Find-in-diff state
   // -------------------------------------------------------------------------
   const editorViewsRef = useRef<Map<string, EditorView[]>>(new Map());
@@ -882,6 +898,64 @@ export function DiffView({
     focusSeqRef.current += 1;
     setFocusedFile({ path: filePath, seq: focusSeqRef.current });
   }, []);
+
+  // Track which file diff is currently in view for tree sidebar highlighting
+  const [activeFile, setActiveFile] = useState<string | null>(null);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-attach when summary changes so the listener is set up after the scroll container mounts
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    let ticking = false;
+    const onScroll = () => {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(() => {
+        ticking = false;
+        const names = filenamesRef.current;
+        if (names.length === 0) return;
+        const rect = container.getBoundingClientRect();
+        const EDGE_BUFFER = 40;
+
+        // If scrolled near the top, always select the first file
+        if (container.scrollTop <= EDGE_BUFFER) {
+          setActiveFile((prev) => (prev === names[0] ? prev : names[0]));
+          return;
+        }
+        // If scrolled near the bottom, always select the last file
+        if (container.scrollHeight - container.scrollTop - container.clientHeight <= EDGE_BUFFER) {
+          const last = names[names.length - 1];
+          setActiveFile((prev) => (prev === last ? prev : last));
+          return;
+        }
+
+        const center = rect.top + rect.height / 2;
+        let closest: string | null = null;
+        let closestDist = Infinity;
+        for (const name of names) {
+          const el = document.getElementById(`diff-file-${encodeURIComponent(name)}`);
+          if (!el) continue;
+          const elRect = el.getBoundingClientRect();
+          // If the element spans the center, it's the active file
+          if (elRect.top <= center && elRect.bottom >= center) {
+            closest = name;
+            break;
+          }
+          // Otherwise, pick the one whose edge is closest to center
+          const dist = Math.min(Math.abs(elRect.top - center), Math.abs(elRect.bottom - center));
+          if (dist < closestDist) {
+            closestDist = dist;
+            closest = name;
+          }
+        }
+        setActiveFile((prev) => (prev === closest ? prev : closest));
+      });
+    };
+    container.addEventListener("scroll", onScroll, { passive: true });
+    // Set initial active file on mount
+    onScroll();
+    return () => container.removeEventListener("scroll", onScroll);
+  }, [summary]);
 
   // Editor views registry — also dispatches active search to newly registered views
   const handleEditorViews = useCallback(
@@ -1195,7 +1269,11 @@ export function DiffView({
             </button>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto py-1">
-            <ChangesFileTree fileStatuses={fileStatuses} onSelectFile={handleScrollToFile} />
+            <ChangesFileTree
+              fileStatuses={fileStatuses}
+              onSelectFile={handleScrollToFile}
+              activeFile={activeFile}
+            />
           </div>
         </div>
       )}
@@ -1327,7 +1405,7 @@ export function DiffView({
             onClose={search.handleCloseSearch}
           />
         )}
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div ref={scrollContainerRef} className="min-h-0 flex-1 overflow-y-auto">
           <div className="flex flex-col gap-3 p-3">
             {filenames.map((filename) => (
               <LazyFileRow
@@ -1338,6 +1416,8 @@ export function DiffView({
                 viewMode={viewMode}
                 expandAll={expandAll}
                 focusedFile={focusedFile}
+                isActive={activeFile === filename}
+                scrollContainerRef={scrollContainerRef}
                 onToggleFile={handleToggleFile}
                 onLoadMoreContext={handleLoadMoreContext}
                 onShowFullFile={handleShowFullFile}
