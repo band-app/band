@@ -385,11 +385,7 @@ describe("Task submit + stream — streaming", () => {
   });
 
   it("returns 200 on submit and streams UIMessageChunk events", async () => {
-    const { submitRes, events } = await submitAndStream(
-      server.url,
-      "testproject-main",
-      "hello",
-    );
+    const { submitRes, events } = await submitAndStream(server.url, "testproject-main", "hello");
     expect(submitRes.status).toBe(200);
 
     const contentType = submitRes.headers.get("content-type")!;
