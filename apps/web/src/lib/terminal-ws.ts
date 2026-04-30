@@ -94,6 +94,8 @@ interface TerminalSession {
     onData: (cb: (data: string) => void) => { dispose: () => void };
     onExit: (cb: (e: { exitCode: number }) => void) => { dispose: () => void };
     write: (data: string) => void;
+    /** Name of the foreground process running in the PTY. */
+    readonly process: string;
   };
   scrollback: string;
   workspaceId: string;
@@ -114,19 +116,38 @@ function attachSession(
   );
 
   // Replay buffered scrollback so the client sees previous output.
+  // Send as binary frame so the client can distinguish from JSON control messages.
   if (session.scrollback.length > 0) {
-    ws.send(stripTerminalQueries(session.scrollback));
+    ws.send(Buffer.from(stripTerminalQueries(session.scrollback)));
   }
 
-  // PTY output -> WebSocket
+  // PTY output -> WebSocket (binary frames)
   const dataDisposable = session.pty.onData((data: string) => {
     if (ws.readyState === ws.OPEN) {
-      ws.send(data);
+      ws.send(Buffer.from(data));
     }
   });
 
+  // Poll the PTY foreground process name and send title updates (text/JSON frames).
+  // This mimics how iTerm detects the running command without relying on OSC sequences.
+  let lastProcess = "";
+  const processInterval = setInterval(() => {
+    try {
+      const currentProcess = session.pty.process;
+      if (currentProcess && currentProcess !== lastProcess) {
+        lastProcess = currentProcess;
+        if (ws.readyState === ws.OPEN) {
+          ws.send(JSON.stringify({ type: "title", title: currentProcess }));
+        }
+      }
+    } catch {
+      // pty.process can throw if the process has exited
+    }
+  }, 1000);
+
   // PTY exit -> close WebSocket
   const exitDisposable = session.pty.onExit(({ exitCode }) => {
+    clearInterval(processInterval);
     log.debug("PTY exited with code %d for terminal %s", exitCode, terminalId);
     if (ws.readyState === ws.OPEN) {
       ws.close(1000, "Terminal exited");
@@ -140,6 +161,7 @@ function attachSession(
 
   // WebSocket close -> detach listeners but keep PTY alive
   ws.on("close", () => {
+    clearInterval(processInterval);
     dataDisposable.dispose();
     exitDisposable.dispose();
     log.debug("Terminal disconnected: %s (PTY kept alive)", terminalId);

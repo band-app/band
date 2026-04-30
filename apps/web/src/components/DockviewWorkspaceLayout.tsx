@@ -63,11 +63,13 @@ const PANEL_SHORTCUTS: Record<string, string> = {
 };
 
 // ---------------------------------------------------------------------------
-// Lazy-loaded split terminal container (avoid importing @xterm CJS during SSR)
+// Lazy-loaded dockview terminal container (avoid importing @xterm CJS during SSR)
 // ---------------------------------------------------------------------------
 
-const SplitTerminalContainer = lazy(() =>
-  import("./SplitTerminalContainer").then((m) => ({ default: m.SplitTerminalContainer })),
+const DockviewTerminalContainer = lazy(() =>
+  import("./DockviewTerminalContainer").then((m) => ({
+    default: m.DockviewTerminalContainer,
+  })),
 );
 
 // Browser panel params (browser container handles its own lazy loading internally)
@@ -176,7 +178,11 @@ function TerminalPanelComponent({ params, api }: IDockviewPanelProps<TerminalPar
 
   return (
     <Suspense fallback={null}>
-      <SplitTerminalContainer workspaceId={params.workspaceId} visible={visible} />
+      <DockviewTerminalContainer
+        workspaceId={params.workspaceId}
+        visible={visible}
+        wsActive={wsActive}
+      />
     </Suspense>
   );
 }

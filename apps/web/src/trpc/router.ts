@@ -1,4 +1,5 @@
 import { execFile, execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { basename, extname, join, resolve } from "node:path";
@@ -96,7 +97,23 @@ import {
 } from "../lib/task-runner";
 import { listTasks, loadTask } from "../lib/task-store";
 import { loadWorkspaceTerminalConfig } from "../lib/terminal-config";
-import { killWorkspaceTerminals } from "../lib/terminal-manager";
+import {
+  addTerminalToLayout,
+  deleteTerminalLayout,
+  getTerminalLayout,
+  removeTerminalFromLayout,
+  saveTerminalLayout,
+} from "../lib/terminal-layout-manager";
+import {
+  getScrollback,
+  getTerminalSession,
+  killTerminal,
+  killWorkspaceTerminals,
+  listTerminals,
+  spawnTerminal,
+  subscribeTerminalOutput,
+  writeToTerminal,
+} from "../lib/terminal-manager";
 import { getTunnelStatus, startTunnel, stopTunnel } from "../lib/tunnel";
 import { emit, subscribe as subscribeStatus } from "../lib/watcher";
 import { resolveWorkspace } from "../lib/workspace";
@@ -419,6 +436,9 @@ const workspacesRouter = t.router({
 
             // Kill any running terminal PTY sessions
             killWorkspaceTerminals(workspaceId);
+
+            // Clean up terminal layout tree
+            deleteTerminalLayout(workspaceId);
 
             // Kill any running language server processes
             killWorkspaceServers(workspaceId);
@@ -2481,6 +2501,154 @@ const queueRouter = t.router({
 });
 
 // ---------------------------------------------------------------------------
+// Terminal Layout (split pane tree persistence)
+// ---------------------------------------------------------------------------
+
+const terminalLayoutRouter = t.router({
+  get: publicProcedure.input(z.object({ workspaceId: z.string() })).query(({ input }) => {
+    return { tree: getTerminalLayout(input.workspaceId) };
+  }),
+
+  save: publicProcedure
+    .input(z.object({ workspaceId: z.string(), tree: z.unknown() }))
+    .mutation(({ input }) => {
+      saveTerminalLayout(input.workspaceId, input.tree);
+      return { ok: true };
+    }),
+});
+
+// ---------------------------------------------------------------------------
+// Terminal
+// ---------------------------------------------------------------------------
+
+const terminalRouter = t.router({
+  list: publicProcedure.input(z.object({ workspaceId: z.string() })).query(({ input }) => {
+    return { terminals: listTerminals(input.workspaceId) };
+  }),
+
+  create: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        id: z.string().optional(),
+        command: z.string().optional(),
+        cwd: z.string().optional(),
+        env: z.record(z.string()).optional(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const terminalId = input.id ?? randomUUID();
+      const session = await spawnTerminal(input.workspaceId, terminalId, {
+        command: input.command,
+        cwd: input.cwd,
+        env: input.env,
+      });
+      addTerminalToLayout(input.workspaceId, terminalId, {
+        command: input.command,
+        cwd: input.cwd,
+        env: input.env,
+      });
+      emit({ kind: "terminal-created", workspaceId: input.workspaceId, terminalId });
+      return { terminalId, workspaceId: input.workspaceId, pid: session.pty.pid };
+    }),
+
+  send: publicProcedure
+    .input(z.object({ terminalId: z.string(), data: z.string() }))
+    .mutation(({ input }) => {
+      const ok = writeToTerminal(input.terminalId, input.data);
+      if (!ok) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `Terminal not found: ${input.terminalId}`,
+        });
+      }
+      return { ok: true };
+    }),
+
+  output: publicProcedure
+    .input(z.object({ terminalId: z.string(), lines: z.number().int().positive().optional() }))
+    .query(({ input }) => {
+      const output = getScrollback(input.terminalId, input.lines ?? undefined);
+      if (output == null) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `Terminal not found: ${input.terminalId}`,
+        });
+      }
+      return { output };
+    }),
+
+  kill: publicProcedure.input(z.object({ terminalId: z.string() })).mutation(({ input }) => {
+    const session = getTerminalSession(input.terminalId);
+    const workspaceId = session?.workspaceId;
+    killTerminal(input.terminalId);
+    if (workspaceId) {
+      removeTerminalFromLayout(workspaceId, input.terminalId);
+      emit({ kind: "terminal-killed", workspaceId, terminalId: input.terminalId });
+    }
+    return { ok: true };
+  }),
+
+  stream: publicProcedure
+    .input(
+      z.object({
+        terminalId: z.string(),
+        replay: z.boolean().optional().default(true),
+      }),
+    )
+    .subscription(async function* (opts) {
+      const { terminalId, replay } = opts.input;
+
+      // Check if terminal exists
+      const session = getTerminalSession(terminalId);
+      if (!session) {
+        yield { type: "error" as const, data: `Terminal not found: ${terminalId}` };
+        return;
+      }
+
+      // Replay buffered scrollback first
+      if (replay && session.scrollback.length > 0) {
+        yield { type: "output" as const, data: session.scrollback };
+      }
+
+      // Stream live output
+      const queue: string[] = [];
+      let resolve: (() => void) | null = null;
+
+      const unsubscribe = subscribeTerminalOutput(terminalId, (data: string) => {
+        queue.push(data);
+        resolve?.();
+      });
+
+      opts.signal?.addEventListener("abort", () => {
+        unsubscribe();
+        resolve?.();
+      });
+
+      try {
+        while (!opts.signal?.aborted) {
+          while (queue.length > 0) {
+            yield { type: "output" as const, data: queue.shift()! };
+          }
+
+          // Check if terminal is still alive
+          if (!getTerminalSession(terminalId)) {
+            yield { type: "exit" as const };
+            return;
+          }
+
+          await new Promise<void>((r) => {
+            resolve = r;
+          });
+          resolve = null;
+        }
+      } finally {
+        unsubscribe();
+      }
+    }),
+});
+
+// ---------------------------------------------------------------------------
 // App Router
 // ---------------------------------------------------------------------------
 
@@ -2508,6 +2676,8 @@ export const appRouter = t.router({
   modes: modesRouter,
   models: modelsRouter,
   queue: queueRouter,
+  terminal: terminalRouter,
+  terminalLayout: terminalLayoutRouter,
 });
 
 export type AppRouter = typeof appRouter;
