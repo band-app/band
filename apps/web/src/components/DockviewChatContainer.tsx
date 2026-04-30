@@ -15,7 +15,7 @@ import {
   type IDockviewPanelHeaderProps,
   type IDockviewPanelProps,
 } from "dockview";
-import { Clock, Plus, X } from "lucide-react";
+import { Clock, Columns2, Plus, Rows2, X } from "lucide-react";
 import React, {
   createContext,
   useCallback,
@@ -310,9 +310,13 @@ function ChatTab(props: IDockviewPanelHeaderProps<ChatTabParams>) {
 // ---------------------------------------------------------------------------
 
 const addTabRef: {
-  current: { agents: CodingAgentDef[]; onAdd: (agentId?: string, groupId?: string) => void };
+  current: {
+    agents: CodingAgentDef[];
+    onAdd: (agentId?: string, groupId?: string) => void;
+    onSplit: (groupId: string, direction: "right" | "below") => void;
+  };
 } = {
-  current: { agents: [], onAdd: () => {} },
+  current: { agents: [], onAdd: () => {}, onSplit: () => {} },
 };
 
 /** Shared ref for the close-tab action — used by ChatTab's close button. */
@@ -361,7 +365,7 @@ const RightHeaderActions = React.memo(function RightHeaderActions(
     return () => clearInterval(id);
   }, []);
 
-  const { agents, onAdd } = addTabRef.current;
+  const { agents, onAdd, onSplit } = addTabRef.current;
   const history = historyToggleRef.current;
   const groupId = props.group.id;
   return (
@@ -380,6 +384,22 @@ const RightHeaderActions = React.memo(function RightHeaderActions(
           <Clock className="size-3.5" />
         </button>
       )}
+      <button
+        type="button"
+        className="inline-flex size-8 items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent rounded transition-colors"
+        onClick={() => onSplit(groupId, "right")}
+        title="Split right"
+      >
+        <Columns2 className="size-3.5" />
+      </button>
+      <button
+        type="button"
+        className="inline-flex size-8 items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent rounded transition-colors"
+        onClick={() => onSplit(groupId, "below")}
+        title="Split down"
+      >
+        <Rows2 className="size-3.5" />
+      </button>
       <AddTabButton agents={agents} onAdd={(agentId) => onAdd(agentId, groupId)} />
     </div>
   );
@@ -421,6 +441,7 @@ export function DockviewChatContainer({
   const queryClient = useQueryClient();
   const apiRef = useRef<DockviewApi | null>(null);
   const isRestoringRef = useRef(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // Fetch layout via React Query — cached across mounts so re-visiting
   // a workspace renders instantly from the cache.
@@ -527,6 +548,32 @@ export function DockviewChatContainer({
     [workspaceId],
   );
 
+  const handleSplit = useCallback(
+    async (groupId: string, direction: "right" | "below") => {
+      const api = apiRef.current;
+      if (!api) return;
+
+      const chatId = newChatId();
+      markChatFresh(chatId);
+
+      api.addPanel({
+        id: chatId,
+        component: "chatTab",
+        tabComponent: "chatTab",
+        title: "Chat",
+        params: {
+          workspaceId,
+          chatId,
+        },
+        position: {
+          referenceGroup: groupId,
+          direction,
+        },
+      } as Parameters<typeof api.addPanel>[0]);
+    },
+    [workspaceId],
+  );
+
   const closeTab = useCallback((chatId: string) => {
     const api = apiRef.current;
     if (!api || api.panels.length <= 1) return; // don't close last tab
@@ -543,12 +590,45 @@ export function DockviewChatContainer({
     // Layout change listeners will auto-persist
   }, []);
 
-  // Cmd/Ctrl+W → close the active chat tab
+  // Keyboard shortcuts:
+  // - Cmd/Ctrl+T → open a new chat tab (default coding agent)
+  // - Cmd/Ctrl+W → close the active chat tab
+  // - Cmd/Ctrl+D → split right (vertical split)
+  // - Cmd/Ctrl+Shift+D → split down (horizontal split)
+  // - Ctrl+(Shift)+Tab → cycle through tabs in the active group
   useEffect(() => {
     if (!visible) return;
     const handler = (e: KeyboardEvent) => {
+      // Only handle shortcut if this container (or a descendant) has focus
+      if (!containerRef.current?.contains(document.activeElement)) return;
+
+      const key = e.key.toLowerCase();
+
+      // Ctrl+(Shift)+Tab → cycle tabs within the active group
+      if (e.ctrlKey && !e.metaKey && key === "tab") {
+        e.preventDefault();
+        e.stopPropagation();
+        const group = apiRef.current?.activeGroup;
+        if (!group) return;
+        if (e.shiftKey) {
+          group.model.moveToPrevious();
+        } else {
+          group.model.moveToNext();
+        }
+        // Re-focus the panel content so the container retains focus
+        // for subsequent keyboard shortcuts.
+        group.model.focusContent();
+        return;
+      }
+
       const mod = e.metaKey || e.ctrlKey;
-      if (mod && e.key.toLowerCase() === "w" && !e.shiftKey) {
+      if (!mod) return;
+
+      if (key === "t" && !e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        handleAddTab();
+      } else if (key === "w" && !e.shiftKey) {
         const api = apiRef.current;
         if (!api || api.panels.length <= 1) return;
         e.preventDefault();
@@ -557,17 +637,26 @@ export function DockviewChatContainer({
         if (active) {
           closeTab(active.id);
         }
+      } else if (key === "d") {
+        e.preventDefault();
+        e.stopPropagation();
+        const api = apiRef.current;
+        if (!api) return;
+        const activeGroup = api.activeGroup;
+        if (!activeGroup) return;
+        const direction = e.shiftKey ? "below" : "right";
+        handleSplit(activeGroup.id, direction);
       }
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [visible, closeTab]);
+  }, [visible, closeTab, handleSplit, handleAddTab]);
 
   // Visibility is now propagated via ChatVisibilityContext (React context)
   // instead of updateParameters — see the Provider wrapping DockviewReact.
 
   // Keep module-level refs in sync for stable Dockview components
-  addTabRef.current = { agents, onAdd: handleAddTab };
+  addTabRef.current = { agents, onAdd: handleAddTab, onSplit: handleSplit };
   closeTabRef.current = closeTab;
 
   // Use a ref for the initial layout so onReady's closure captures the latest
@@ -627,7 +716,7 @@ export function DockviewChatContainer({
   }
 
   return (
-    <div className="flex h-full w-full flex-col overflow-hidden">
+    <div ref={containerRef} className="flex h-full w-full flex-col overflow-hidden">
       <ChatVisibilityContext.Provider value={visibilityValue}>
         <DockviewReact
           theme={chatTabTheme}

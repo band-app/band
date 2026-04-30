@@ -139,6 +139,7 @@ interface TerminalTabParams {
   command?: string;
   cwd?: string;
   env?: Record<string, string>;
+  autoFocus?: boolean;
 }
 
 function TerminalTabPanel({ params, api }: IDockviewPanelProps<TerminalTabParams>) {
@@ -172,6 +173,7 @@ function TerminalTabPanel({ params, api }: IDockviewPanelProps<TerminalTabParams
           terminalId={params.terminalId}
           visible={visible}
           paneMetadata={paneMetadata}
+          autoFocus={params.autoFocus}
           onTitleChange={onTitleChange}
         />
       </Suspense>
@@ -325,6 +327,7 @@ export function DockviewTerminalContainer({
   const queryClient = useQueryClient();
   const apiRef = useRef<DockviewApi | null>(null);
   const isRestoringRef = useRef(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // Fetch layout AND terminal records via React Query — cached across mounts
   const { data: initialData } = useQuery<TerminalLayoutData>({
@@ -371,6 +374,7 @@ export function DockviewTerminalContainer({
         params: {
           workspaceId,
           terminalId,
+          autoFocus: true,
         },
       };
 
@@ -408,6 +412,7 @@ export function DockviewTerminalContainer({
         params: {
           workspaceId,
           terminalId,
+          autoFocus: true,
         },
         position: {
           referenceGroup: groupId,
@@ -433,6 +438,16 @@ export function DockviewTerminalContainer({
       api.removePanel(panel);
     }
 
+    // After closing, focus the xterm textarea in the newly active panel
+    // so the terminal receives keyboard input immediately.
+    requestAnimationFrame(() => {
+      const activePanel = api.activePanel;
+      if (!activePanel) return;
+      activePanel.view.content.element
+        .querySelector<HTMLTextAreaElement>(".xterm-helper-textarea")
+        ?.focus();
+    });
+
     // Kill the terminal on the server (kills PTY + removes from layout + emits event)
     trpc.terminal.kill.mutate({ terminalId }).catch((err) => {
       console.error("[DockviewTerminalContainer] failed to kill terminal:", err);
@@ -440,18 +455,53 @@ export function DockviewTerminalContainer({
   }, []);
 
   // Keyboard shortcuts:
+  // - Cmd/Ctrl+T → open a new terminal tab
   // - Cmd/Ctrl+W → close the active terminal tab
   // - Cmd/Ctrl+D → split right (vertical split)
   // - Cmd/Ctrl+Shift+D → split down (horizontal split)
+  // - Ctrl+(Shift)+Tab → cycle through tabs in the active group
   useEffect(() => {
     if (!visible) return;
     const handler = (e: KeyboardEvent) => {
-      const mod = e.metaKey || e.ctrlKey;
-      if (!mod) return;
+      // Only handle shortcut if this container (or a descendant) has focus
+      if (!containerRef.current?.contains(document.activeElement)) return;
 
       const key = e.key.toLowerCase();
 
-      if (key === "w" && !e.shiftKey) {
+      // Ctrl+(Shift)+Tab → cycle tabs within the active group
+      if (e.ctrlKey && !e.metaKey && key === "tab") {
+        e.preventDefault();
+        e.stopPropagation();
+        const api = apiRef.current;
+        const group = api?.activeGroup;
+        if (!group) return;
+        if (e.shiftKey) {
+          group.model.moveToPrevious();
+        } else {
+          group.model.moveToNext();
+        }
+        // Focus the xterm helper textarea inside the newly active panel
+        // so the terminal actually receives keyboard input.
+        // focusContent() only focuses the dockview wrapper which makes the
+        // cursor blink but doesn't route keypresses to xterm.
+        requestAnimationFrame(() => {
+          const panel = api.activePanel;
+          if (!panel) return;
+          panel.view.content.element
+            .querySelector<HTMLTextAreaElement>(".xterm-helper-textarea")
+            ?.focus();
+        });
+        return;
+      }
+
+      const mod = e.metaKey || e.ctrlKey;
+      if (!mod) return;
+
+      if (key === "t" && !e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        handleAddTab();
+      } else if (key === "w" && !e.shiftKey) {
         const api = apiRef.current;
         if (!api || api.panels.length <= 1) return;
         e.preventDefault();
@@ -473,7 +523,7 @@ export function DockviewTerminalContainer({
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [visible, closeTab, handleSplit]);
+  }, [visible, closeTab, handleSplit, handleAddTab]);
 
   // Sync dockview panels when terminals are created/killed externally (e.g. CLI).
   useEffect(() => {
@@ -577,7 +627,7 @@ export function DockviewTerminalContainer({
   }
 
   return (
-    <div className="flex h-full w-full flex-col overflow-hidden">
+    <div ref={containerRef} className="flex h-full w-full flex-col overflow-hidden">
       <TerminalVisibilityContext.Provider value={visibilityValue}>
         <DockviewReact
           theme={terminalTabTheme}

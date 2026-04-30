@@ -9,7 +9,7 @@ import {
   type IDockviewPanelHeaderProps,
   type IDockviewPanelProps,
 } from "dockview";
-import { Globe, Plus, X } from "lucide-react";
+import { Columns2, Globe, Plus, Rows2, X } from "lucide-react";
 import React, {
   createContext,
   useCallback,
@@ -265,9 +265,12 @@ function BrowserTab(props: IDockviewPanelHeaderProps<BrowserTabParams>) {
 // ---------------------------------------------------------------------------
 
 const addTabRef: {
-  current: { onAdd: (groupId?: string) => void };
+  current: {
+    onAdd: (groupId?: string) => void;
+    onSplit: (groupId: string, direction: "right" | "below") => void;
+  };
 } = {
-  current: { onAdd: () => {} },
+  current: { onAdd: () => {}, onSplit: () => {} },
 };
 
 /** Shared ref for the close-tab action — used by BrowserTab's close button. */
@@ -286,6 +289,22 @@ const RightHeaderActions = React.memo(function RightHeaderActions(
   const groupId = props.group.id;
   return (
     <div className="flex items-center">
+      <button
+        type="button"
+        className="inline-flex size-8 items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent rounded transition-colors"
+        onClick={() => addTabRef.current.onSplit(groupId, "right")}
+        title="Split right"
+      >
+        <Columns2 className="size-3.5" />
+      </button>
+      <button
+        type="button"
+        className="inline-flex size-8 items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent rounded transition-colors"
+        onClick={() => addTabRef.current.onSplit(groupId, "below")}
+        title="Split down"
+      >
+        <Rows2 className="size-3.5" />
+      </button>
       <button
         type="button"
         className="inline-flex size-8 items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent rounded transition-colors"
@@ -335,6 +354,7 @@ export function DockviewBrowserContainer({
   const queryClient = useQueryClient();
   const apiRef = useRef<DockviewApi | null>(null);
   const isRestoringRef = useRef(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // Fetch layout AND browser records via React Query — cached across mounts
   // so re-visiting a workspace renders instantly from the cache.
@@ -404,6 +424,39 @@ export function DockviewBrowserContainer({
     [workspaceId],
   );
 
+  const handleSplit = useCallback(
+    async (groupId: string, direction: "right" | "below") => {
+      const api = apiRef.current;
+      if (!api) return;
+
+      const browserId = newBrowserId();
+      markBrowserFresh(browserId);
+
+      // Create the server-side browser record BEFORE adding the panel
+      try {
+        await trpc.browsers.create.mutate({ workspaceId, id: browserId });
+      } catch (err) {
+        console.error("[DockviewBrowserContainer] error creating split browser:", err);
+      }
+
+      api.addPanel({
+        id: browserId,
+        component: "browserTab",
+        tabComponent: "browserTab",
+        title: "New Tab",
+        params: {
+          workspaceId,
+          browserId,
+        },
+        position: {
+          referenceGroup: groupId,
+          direction,
+        },
+      } as Parameters<typeof api.addPanel>[0]);
+    },
+    [workspaceId],
+  );
+
   const closeTab = useCallback((browserId: string) => {
     const api = apiRef.current;
     if (!api || api.panels.length <= 1) return; // don't close last tab
@@ -420,12 +473,59 @@ export function DockviewBrowserContainer({
     // Layout change listeners will auto-persist
   }, []);
 
-  // Cmd/Ctrl+W → close the active browser tab
+  // Keyboard shortcuts:
+  // - Cmd/Ctrl+T → open a new browser tab
+  // - Cmd/Ctrl+W → close the active browser tab
+  // - Cmd/Ctrl+D → split right (vertical split)
+  // - Cmd/Ctrl+Shift+D → split down (horizontal split)
+  // - Cmd/Ctrl+R → reload the active browser tab (Tauri only)
+  // - Ctrl+(Shift)+Tab → cycle through tabs in the active group
   useEffect(() => {
     if (!visible) return;
     const handler = (e: KeyboardEvent) => {
+      // Only handle shortcut if this container (or a descendant) has focus
+      if (!containerRef.current?.contains(document.activeElement)) return;
+
+      const key = e.key.toLowerCase();
+
+      // Ctrl+(Shift)+Tab → cycle tabs within the active group
+      if (e.ctrlKey && !e.metaKey && key === "tab") {
+        e.preventDefault();
+        e.stopPropagation();
+        const api = apiRef.current;
+        const group = api?.activeGroup;
+        if (!group) return;
+        if (e.shiftKey) {
+          group.model.moveToPrevious();
+        } else {
+          group.model.moveToNext();
+        }
+        // Focus the address bar in the newly active panel.
+        requestAnimationFrame(() => {
+          const panel = api.activePanel;
+          if (!panel) return;
+          panel.view.content.element.querySelector<HTMLInputElement>("input[type='text']")?.focus();
+        });
+        return;
+      }
+
       const mod = e.metaKey || e.ctrlKey;
-      if (mod && e.key.toLowerCase() === "w" && !e.shiftKey) {
+      if (!mod) return;
+
+      if (key === "t" && !e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        handleAddTab().then(() => {
+          // Focus the address bar in the newly created panel.
+          requestAnimationFrame(() => {
+            const panel = apiRef.current?.activePanel;
+            if (!panel) return;
+            panel.view.content.element
+              .querySelector<HTMLInputElement>("input[type='text']")
+              ?.focus();
+          });
+        });
+      } else if (key === "w" && !e.shiftKey) {
         const api = apiRef.current;
         if (!api || api.panels.length <= 1) return;
         e.preventDefault();
@@ -434,18 +534,16 @@ export function DockviewBrowserContainer({
         if (active) {
           closeTab(active.id);
         }
-      }
-    };
-    window.addEventListener("keydown", handler, true);
-    return () => window.removeEventListener("keydown", handler, true);
-  }, [visible, closeTab]);
-
-  // Cmd/Ctrl+R → reload the active browser tab
-  useEffect(() => {
-    if (!visible || !isTauri) return;
-    const handler = async (e: KeyboardEvent) => {
-      const mod = e.metaKey || e.ctrlKey;
-      if (mod && e.key.toLowerCase() === "r" && !e.shiftKey) {
+      } else if (key === "d") {
+        e.preventDefault();
+        e.stopPropagation();
+        const api = apiRef.current;
+        if (!api) return;
+        const activeGroup = api.activeGroup;
+        if (!activeGroup) return;
+        const direction = e.shiftKey ? "below" : "right";
+        handleSplit(activeGroup.id, direction);
+      } else if (key === "r" && !e.shiftKey && isTauri) {
         const api = apiRef.current;
         if (!api) return;
         const active = api.activePanel;
@@ -453,17 +551,16 @@ export function DockviewBrowserContainer({
         if (!browserId) return;
         e.preventDefault();
         e.stopPropagation();
-        try {
-          const { invoke } = await import("@tauri-apps/api/core");
-          await invoke("browser_reload", { browserId });
-        } catch (err) {
-          console.error("[DockviewBrowserContainer] browser_reload failed:", err);
-        }
+        import("@tauri-apps/api/core")
+          .then(({ invoke }) => invoke("browser_reload", { browserId }))
+          .catch((err) => {
+            console.error("[DockviewBrowserContainer] browser_reload failed:", err);
+          });
       }
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [visible]);
+  }, [visible, closeTab, handleSplit, handleAddTab]);
 
   // Sync dockview panels when browsers are created/removed externally (e.g. CLI).
   useEffect(() => {
@@ -499,7 +596,7 @@ export function DockviewBrowserContainer({
   // instead of updateParameters — see the Provider wrapping DockviewReact.
 
   // Keep module-level refs in sync for stable Dockview components
-  addTabRef.current = { onAdd: handleAddTab };
+  addTabRef.current = { onAdd: handleAddTab, onSplit: handleSplit };
   closeTabRef.current = closeTab;
 
   // Use refs for the initial data so onReady's closure captures the latest
@@ -571,7 +668,7 @@ export function DockviewBrowserContainer({
   }
 
   return (
-    <div className="flex h-full w-full flex-col overflow-hidden">
+    <div ref={containerRef} className="flex h-full w-full flex-col overflow-hidden">
       <BrowserVisibilityContext.Provider value={visibilityValue}>
         <DockviewReact
           theme={browserTabTheme}

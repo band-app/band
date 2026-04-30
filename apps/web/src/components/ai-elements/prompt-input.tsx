@@ -105,6 +105,18 @@ export const PromptInput = ({
     }
   }, [draftStorageKey]);
 
+  // Focus the textarea when the component first mounts and is visible.
+  // This ensures new chat tabs opened via keyboard shortcut (Cmd+T) get
+  // focus in the input field automatically.
+  const mountFocusedRef = useRef(false);
+  useEffect(() => {
+    if (mountFocusedRef.current || !visible) return;
+    mountFocusedRef.current = true;
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+    });
+  }, [visible]);
+
   // Ref for gating global event handlers — hidden workspaces must not
   // process events that would modify their textarea.
   const visibleRef = useRef(visible);
