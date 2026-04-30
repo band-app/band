@@ -9,6 +9,8 @@ use std::collections::HashMap;
 use std::fmt::Write;
 use std::io::BufRead;
 use std::process;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 #[derive(Parser)]
 #[command(name = "band", about = "Band CLI — programmatic workspace management")]
@@ -568,9 +570,8 @@ fn main() {
                 lines,
                 follow: false,
             } => cmd_terminal_output(&terminal_id, lines),
-            TerminalCmd::Output { .. } => unreachable!(), // follow=true handled above
+            TerminalCmd::Output { .. } | TerminalCmd::Attach { .. } => unreachable!(),
             TerminalCmd::Kill { terminal_id } => cmd_terminal_kill(&terminal_id),
-            TerminalCmd::Attach { .. } => unreachable!(), // handled above
         },
         Commands::Cronjobs { cmd } => match cmd {
             CronjobsCmd::List { project, workspace } => {
@@ -1225,12 +1226,12 @@ fn cmd_terminal_list(workspace_id: &str) -> Result<CommandResult, String> {
         let title = term.get("title").and_then(|v| v.as_str()).unwrap_or("");
         let pid = term
             .get("pid")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .map(|v| v.to_string())
             .unwrap_or_default();
         let scrollback = term
             .get("scrollbackLength")
-            .and_then(|v| v.as_u64())
+            .and_then(serde_json::Value::as_u64)
             .map(|v| v.to_string())
             .unwrap_or_default();
         rows.push([id.to_string(), title.to_string(), pid, scrollback]);
@@ -1449,87 +1450,87 @@ fn handle_terminal_attach(terminal_id: &str, json_output: bool) -> i32 {
     }
 }
 
-fn cmd_terminal_attach(terminal_id: &str, json_output: bool) -> Result<(), String> {
+/// Background thread: stream SSE output from the terminal and print to stdout.
+fn stream_terminal_output(tid: &str, done: &AtomicBool) {
     use std::io::Write;
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::Arc;
 
+    let bg_client = match api::ApiClient::from_settings() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return;
+        }
+    };
+    let input = serde_json::json!({"terminalId": tid, "replay": true});
+    let response = match bg_client.trpc_subscribe("terminal.stream", &input) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return;
+        }
+    };
+    if response.status().as_u16() >= 400 {
+        eprintln!("error: server returned HTTP {}", response.status().as_u16());
+        return;
+    }
+    let mut body = response.into_body();
+    let mut reader = std::io::BufReader::new(body.as_reader());
+    let mut line_buf = String::new();
+    let mut data_buf = String::new();
+
+    loop {
+        if done.load(Ordering::Relaxed) {
+            break;
+        }
+        line_buf.clear();
+        match reader.read_line(&mut line_buf) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {}
+        }
+        let line = line_buf.trim_end();
+        if line.is_empty() {
+            if !data_buf.is_empty() {
+                if let Ok(chunk) = serde_json::from_str::<serde_json::Value>(&data_buf) {
+                    let chunk_type = chunk.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                    if chunk_type == "output" {
+                        if let Some(output) = chunk.get("data").and_then(|d| d.as_str()) {
+                            print!("{output}");
+                            let _ = std::io::stdout().flush();
+                        }
+                    } else if chunk_type == "exit" {
+                        if !done.load(Ordering::Relaxed) {
+                            eprintln!("\n[terminal exited]");
+                        }
+                        done.store(true, Ordering::Relaxed);
+                        break;
+                    }
+                }
+                data_buf.clear();
+            }
+            continue;
+        }
+        if let Some(data) = line.strip_prefix("data: ") {
+            if !data_buf.is_empty() {
+                data_buf.push('\n');
+            }
+            data_buf.push_str(data);
+        }
+    }
+}
+
+fn cmd_terminal_attach(terminal_id: &str, json_output: bool) -> Result<(), String> {
     let client = api::ApiClient::from_settings()?;
 
     if !json_output {
         eprintln!("[attached to terminal {terminal_id} — type input, press Ctrl+C to detach]");
     }
 
-    // Start SSE output stream in background thread
     let tid = terminal_id.to_string();
     let done = Arc::new(AtomicBool::new(false));
     let done_clone = done.clone();
 
     let output_handle = std::thread::spawn(move || {
-        let bg_client = match api::ApiClient::from_settings() {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("error: {e}");
-                return;
-            }
-        };
-        let input = serde_json::json!({"terminalId": tid, "replay": true});
-        let response = match bg_client.trpc_subscribe("terminal.stream", &input) {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("error: {e}");
-                return;
-            }
-        };
-        if response.status().as_u16() >= 400 {
-            eprintln!("error: server returned HTTP {}", response.status().as_u16());
-            return;
-        }
-        let mut body = response.into_body();
-        let reader = std::io::BufReader::new(body.as_reader());
-        let mut line_buf = String::new();
-        let mut data_buf = String::new();
-        let mut reader = reader;
-
-        loop {
-            if done_clone.load(Ordering::Relaxed) {
-                break;
-            }
-            line_buf.clear();
-            match reader.read_line(&mut line_buf) {
-                Ok(0) => break,
-                Ok(_) => {}
-                Err(_) => break,
-            }
-            let line = line_buf.trim_end();
-            if line.is_empty() {
-                if !data_buf.is_empty() {
-                    if let Ok(chunk) = serde_json::from_str::<serde_json::Value>(&data_buf) {
-                        let chunk_type = chunk.get("type").and_then(|t| t.as_str()).unwrap_or("");
-                        if chunk_type == "output" {
-                            if let Some(output) = chunk.get("data").and_then(|d| d.as_str()) {
-                                print!("{output}");
-                                let _ = std::io::stdout().flush();
-                            }
-                        } else if chunk_type == "exit" {
-                            if !done_clone.load(Ordering::Relaxed) {
-                                eprintln!("\n[terminal exited]");
-                            }
-                            done_clone.store(true, Ordering::Relaxed);
-                            break;
-                        }
-                    }
-                    data_buf.clear();
-                }
-                continue;
-            }
-            if let Some(data) = line.strip_prefix("data: ") {
-                if !data_buf.is_empty() {
-                    data_buf.push('\n');
-                }
-                data_buf.push_str(data);
-            }
-        }
+        stream_terminal_output(&tid, &done_clone);
     });
 
     // Main thread: read stdin line-by-line and send to terminal
