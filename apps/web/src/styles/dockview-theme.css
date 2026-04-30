@@ -52,18 +52,15 @@
   --dv-tab-margin: 0px;
 }
 
-/* Underline on the selected tab in an active group */
+/* No underline on selected tab — just brighter text + bold */
 .dockview-theme-band .dv-groupview.dv-active-group
   > .dv-tabs-and-actions-container
-  .dv-tab.dv-active-tab {
-  box-shadow: inset 0 -2px 0 0 var(--foreground);
-}
-
-/* Subtle underline on the selected tab in an inactive group */
+  .dv-tab.dv-active-tab,
 .dockview-theme-band .dv-groupview.dv-inactive-group
   > .dv-tabs-and-actions-container
   .dv-tab.dv-active-tab {
-  box-shadow: inset 0 -2px 0 0 var(--muted-foreground);
+  box-shadow: none;
+  font-weight: 600;
 }
 
 /* Border below the tabs container */
@@ -118,6 +115,17 @@
   padding-right: 0.25rem;
 }
 
+/* No underline on selected chat tab — just brighter text + bold */
+.dockview-chat-tabs .dv-groupview.dv-active-group
+  > .dv-tabs-and-actions-container
+  .dv-tab.dv-active-tab,
+.dockview-chat-tabs .dv-groupview.dv-inactive-group
+  > .dv-tabs-and-actions-container
+  .dv-tab.dv-active-tab {
+  box-shadow: none;
+  font-weight: 600;
+}
+
 /* ---------------------------------------------------------------------------
  * Nested browser tabs — same compact styling as chat tabs for the inner
  * dockview instance used for multi-browser tabs within the browser panel.
@@ -157,4 +165,67 @@
   display: flex;
   align-items: center;
   padding-right: 0.25rem;
+}
+
+/* No underline on selected browser tab — just brighter text + bold */
+.dockview-browser-tabs .dv-groupview.dv-active-group
+  > .dv-tabs-and-actions-container
+  .dv-tab.dv-active-tab,
+.dockview-browser-tabs .dv-groupview.dv-inactive-group
+  > .dv-tabs-and-actions-container
+  .dv-tab.dv-active-tab {
+  box-shadow: none;
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------------------
+ * Nested terminal tabs — compact styling for the inner dockview instance
+ * used for multi-terminal tabs within the terminal panel.
+ * --------------------------------------------------------------------------- */
+
+.dockview-terminal-tabs {
+  --dv-tabs-and-actions-container-height: 32px;
+  --dv-tabs-and-actions-container-font-size: 12px;
+}
+
+.dockview-terminal-tabs .dv-tab {
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+  max-width: 200px;
+}
+
+/* Hide the sash/resize handle — tabs, not split panes */
+.dockview-terminal-tabs .dv-resize-container > .dv-resize-handle-horizontal,
+.dockview-terminal-tabs .dv-resize-container > .dv-resize-handle-vertical {
+  display: none;
+}
+
+/* Disable drag-and-drop reordering in nested terminal tabs */
+.dockview-terminal-tabs .dv-tab {
+  cursor: default;
+}
+
+/* Hide the built-in tab overflow dropdown — its popup gets clipped by
+   ancestor overflow:hidden in the nested dockview. Tabs are already
+   horizontally scrollable so users can still reach all tabs. */
+.dockview-terminal-tabs .dv-tabs-overflow-dropdown-root {
+  display: none;
+}
+
+/* Right-side actions area (the + button) */
+.dockview-terminal-tabs .dv-right-actions-container {
+  display: flex;
+  align-items: center;
+  padding-right: 0.25rem;
+}
+
+/* No underline on selected terminal tab — just brighter text */
+.dockview-terminal-tabs .dv-groupview.dv-active-group
+  > .dv-tabs-and-actions-container
+  .dv-tab.dv-active-tab,
+.dockview-terminal-tabs .dv-groupview.dv-inactive-group
+  > .dv-tabs-and-actions-container
+  .dv-tab.dv-active-tab {
+  box-shadow: none;
+  font-weight: 600;
 }

@@ -2,7 +2,14 @@ import type { FitAddon } from "@xterm/addon-fit";
 import type { Terminal } from "@xterm/xterm";
 import { useEffect, useRef } from "react";
 import { openExternalUrl } from "../lib/open-external-url";
-import type { PaneMetadata } from "../lib/terminal-config-utils";
+
+export interface PaneMetadata {
+  name?: string;
+  command?: string;
+  cwd?: string;
+  env?: Record<string, string>;
+  focus?: boolean;
+}
 
 interface TerminalPanelProps {
   workspaceId: string;
@@ -12,6 +19,8 @@ interface TerminalPanelProps {
   paneMetadata?: PaneMetadata;
   /** When true, auto-focus this terminal after it opens. */
   autoFocus?: boolean;
+  /** Called when the terminal emits a title change (e.g. shell sets window title via escape sequence). */
+  onTitleChange?: (title: string) => void;
 }
 
 export function TerminalPanel({
@@ -20,11 +29,14 @@ export function TerminalPanel({
   visible,
   paneMetadata,
   autoFocus,
+  onTitleChange,
 }: TerminalPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const onTitleChangeRef = useRef(onTitleChange);
+  onTitleChangeRef.current = onTitleChange;
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -96,6 +108,9 @@ export function TerminalPanel({
       );
       wsRef.current = ws;
 
+      // Binary frames = PTY data, text frames = JSON control messages (e.g. title updates)
+      ws.binaryType = "arraybuffer";
+
       ws.onopen = () => {
         // Send init message with pane metadata (command, cwd, env) if available.
         // The server uses this to configure the PTY on first spawn.
@@ -123,7 +138,21 @@ export function TerminalPanel({
       };
 
       ws.onmessage = (event) => {
-        terminal.write(event.data);
+        if (event.data instanceof ArrayBuffer) {
+          // Binary frame = raw PTY output
+          terminal.write(new Uint8Array(event.data));
+        } else {
+          // Text frame = JSON control message
+          try {
+            const msg = JSON.parse(event.data as string);
+            if (msg.type === "title" && typeof msg.title === "string") {
+              onTitleChangeRef.current?.(msg.title);
+            }
+          } catch {
+            // Not valid JSON — write as-is (shouldn't happen)
+            terminal.write(event.data);
+          }
+        }
       };
 
       ws.onclose = () => {
@@ -134,6 +163,11 @@ export function TerminalPanel({
         if (ws.readyState === WebSocket.OPEN) {
           ws.send(data);
         }
+      });
+
+      // Propagate shell title changes (e.g. running command, cwd) to the tab
+      terminal.onTitleChange((title) => {
+        onTitleChangeRef.current?.(title);
       });
 
       // Auto-fit on container resize (skip zero-size to avoid killing server PTY)

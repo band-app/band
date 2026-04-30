@@ -34,4 +34,4 @@ The web server (`apps/web`) handles **data, state, and background processes** on
 
 ## Band CLI Skill
 
-The Band CLI skill is maintained at `apps/cli/SKILL.md`. When updating the skill, edit that file and copy it to `~/.claude/skills/band/SKILL.md`.
+The Band CLI skill is generated from the template at `apps/cli/skills/band-cli.md` and the CLI schema. Run `band generate-skills --output-dir apps/cli/skills` to regenerate, then copy the output to `~/.claude/skills/band/SKILL.md`.

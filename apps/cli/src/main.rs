@@ -47,6 +47,11 @@ enum Commands {
         #[command(subcommand)]
         cmd: BrowserCmd,
     },
+    /// Manage terminal sessions
+    Terminal {
+        #[command(subcommand)]
+        cmd: TerminalCmd,
+    },
     /// Manage scheduled cronjobs
     Cronjobs {
         #[command(subcommand)]
@@ -276,6 +281,55 @@ enum BrowserCmd {
 }
 
 #[derive(Subcommand)]
+enum TerminalCmd {
+    /// List terminal sessions for a workspace
+    List {
+        /// Workspace ID
+        workspace_id: String,
+    },
+    /// Create a new terminal session
+    Create {
+        /// Workspace ID
+        workspace_id: String,
+        /// Shell command to auto-run after spawn
+        #[arg(long)]
+        command: Option<String>,
+        /// Working directory (relative to workspace root)
+        #[arg(long)]
+        cwd: Option<String>,
+    },
+    /// Send input to a terminal session
+    Send {
+        /// Terminal ID
+        terminal_id: String,
+        /// Text to send (supports \\n for newline, \\t for tab)
+        #[arg(long)]
+        data: String,
+    },
+    /// Get terminal output (scrollback buffer)
+    Output {
+        /// Terminal ID
+        terminal_id: String,
+        /// Number of lines to show (from end of buffer)
+        #[arg(long, short = 'n')]
+        lines: Option<u32>,
+        /// Stream live output
+        #[arg(long, short = 'f')]
+        follow: bool,
+    },
+    /// Kill a terminal session
+    Kill {
+        /// Terminal ID
+        terminal_id: String,
+    },
+    /// Attach to a terminal (stream output + send input interactively)
+    Attach {
+        /// Terminal ID
+        terminal_id: String,
+    },
+}
+
+#[derive(Subcommand)]
 enum CronjobsCmd {
     /// List cronjobs
     List {
@@ -396,6 +450,29 @@ fn main() {
         process::exit(exit_code);
     }
 
+    // terminal output --follow streams output directly
+    if let Commands::Terminal {
+        cmd:
+            TerminalCmd::Output {
+                ref terminal_id,
+                lines,
+                follow: true,
+            },
+    } = cli.command
+    {
+        let exit_code = handle_terminal_follow(terminal_id, lines, json_output);
+        process::exit(exit_code);
+    }
+
+    // terminal attach is interactive streaming
+    if let Commands::Terminal {
+        cmd: TerminalCmd::Attach { ref terminal_id },
+    } = cli.command
+    {
+        let exit_code = handle_terminal_attach(terminal_id, json_output);
+        process::exit(exit_code);
+    }
+
     let result = match cli.command {
         Commands::Projects { cmd } => match cmd {
             ProjectsCmd::List => cmd_projects_list(),
@@ -477,6 +554,23 @@ fn main() {
             BrowserCmd::Navigate { browser_id, url } => cmd_browser_navigate(&browser_id, &url),
             BrowserCmd::Get { browser_id } => cmd_browser_get(&browser_id),
             BrowserCmd::Remove { browser_id } => cmd_browser_remove(&browser_id),
+        },
+        Commands::Terminal { cmd } => match cmd {
+            TerminalCmd::List { workspace_id } => cmd_terminal_list(&workspace_id),
+            TerminalCmd::Create {
+                workspace_id,
+                command,
+                cwd,
+            } => cmd_terminal_create(&workspace_id, command.as_deref(), cwd.as_deref()),
+            TerminalCmd::Send { terminal_id, data } => cmd_terminal_send(&terminal_id, &data),
+            TerminalCmd::Output {
+                terminal_id,
+                lines,
+                follow: false,
+            } => cmd_terminal_output(&terminal_id, lines),
+            TerminalCmd::Output { .. } => unreachable!(), // follow=true handled above
+            TerminalCmd::Kill { terminal_id } => cmd_terminal_kill(&terminal_id),
+            TerminalCmd::Attach { .. } => unreachable!(), // handled above
         },
         Commands::Cronjobs { cmd } => match cmd {
             CronjobsCmd::List { project, workspace } => {
@@ -1104,6 +1198,379 @@ fn cmd_browser_remove(browser_id: &str) -> Result<CommandResult, String> {
         text: format!("Browser {browser_id} removed\n"),
         json: serde_json::json!({"ok": true, "browserId": browser_id}),
     })
+}
+
+// --- Terminal commands ---
+
+fn cmd_terminal_list(workspace_id: &str) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let data = client.trpc_query(
+        "terminal.list",
+        &serde_json::json!({"workspaceId": workspace_id}),
+    )?;
+
+    let terminals = data
+        .get("terminals")
+        .and_then(|t| t.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let mut rows: Vec<[String; 4]> = Vec::new();
+    let mut json_terminals = Vec::new();
+    for term in &terminals {
+        let id = term
+            .get("terminalId")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let title = term
+            .get("title")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let pid = term
+            .get("pid")
+            .and_then(|v| v.as_u64())
+            .map(|v| v.to_string())
+            .unwrap_or_default();
+        let scrollback = term
+            .get("scrollbackLength")
+            .and_then(|v| v.as_u64())
+            .map(|v| v.to_string())
+            .unwrap_or_default();
+        rows.push([id.to_string(), title.to_string(), pid, scrollback]);
+        json_terminals.push(term.clone());
+    }
+
+    let text = format_table(&["TERMINAL ID", "TITLE", "PID", "SCROLLBACK"], &rows);
+
+    Ok(CommandResult {
+        text,
+        json: serde_json::json!({"terminals": json_terminals}),
+    })
+}
+
+fn cmd_terminal_create(
+    workspace_id: &str,
+    command: Option<&str>,
+    cwd: Option<&str>,
+) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let mut input = serde_json::json!({"workspaceId": workspace_id});
+    if let Some(cmd) = command {
+        input["command"] = serde_json::json!(cmd);
+    }
+    if let Some(c) = cwd {
+        input["cwd"] = serde_json::json!(c);
+    }
+    let data = client.trpc_mutate("terminal.create", &input)?;
+    let terminal_id = data
+        .get("terminalId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    Ok(CommandResult {
+        text: format!("{terminal_id}\n"),
+        json: data,
+    })
+}
+
+fn cmd_terminal_send(terminal_id: &str, data: &str) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    // Unescape common escape sequences
+    let unescaped = data.replace("\\n", "\n").replace("\\t", "\t");
+    client.trpc_mutate(
+        "terminal.send",
+        &serde_json::json!({"terminalId": terminal_id, "data": unescaped}),
+    )?;
+
+    Ok(CommandResult {
+        text: format!("Sent to terminal {terminal_id}\n"),
+        json: serde_json::json!({"ok": true, "terminalId": terminal_id}),
+    })
+}
+
+fn cmd_terminal_output(terminal_id: &str, lines: Option<u32>) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let mut input = serde_json::json!({"terminalId": terminal_id});
+    if let Some(n) = lines {
+        input["lines"] = serde_json::json!(n);
+    }
+    let data = client.trpc_query("terminal.output", &input)?;
+    let output = data
+        .get("output")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    Ok(CommandResult {
+        text: output.to_string(),
+        json: data,
+    })
+}
+
+fn cmd_terminal_kill(terminal_id: &str) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    client.trpc_mutate(
+        "terminal.kill",
+        &serde_json::json!({"terminalId": terminal_id}),
+    )?;
+
+    Ok(CommandResult {
+        text: format!("Terminal {terminal_id} killed\n"),
+        json: serde_json::json!({"ok": true, "terminalId": terminal_id}),
+    })
+}
+
+fn handle_terminal_follow(terminal_id: &str, lines: Option<u32>, json_output: bool) -> i32 {
+    match cmd_terminal_follow(terminal_id, lines, json_output) {
+        Ok(()) => 0,
+        Err(e) => {
+            if json_output {
+                eprintln!("{}", serde_json::json!({"error": e}));
+            } else {
+                eprintln!("error: {e}");
+            }
+            1
+        }
+    }
+}
+
+fn cmd_terminal_follow(
+    terminal_id: &str,
+    lines: Option<u32>,
+    json_output: bool,
+) -> Result<(), String> {
+    use std::io::Write;
+
+    let client = api::ApiClient::from_settings()?;
+
+    // If --lines was provided without --follow, that's handled elsewhere.
+    // Here we stream live output, optionally replaying scrollback first.
+    let mut input = serde_json::json!({"terminalId": terminal_id, "replay": true});
+    if let Some(n) = lines {
+        // When --lines is combined with --follow, first fetch the last N lines,
+        // then switch to streaming without replay to avoid duplicates.
+        let snap = client.trpc_query(
+            "terminal.output",
+            &serde_json::json!({"terminalId": terminal_id, "lines": n}),
+        )?;
+        let output = snap.get("output").and_then(|v| v.as_str()).unwrap_or("");
+        if !output.is_empty() {
+            print!("{output}");
+            let _ = std::io::stdout().flush();
+        }
+        input["replay"] = serde_json::json!(false);
+    }
+
+    let mut response = client.trpc_subscribe("terminal.stream", &input)?;
+    let status = response.status().as_u16();
+
+    if status == 401 {
+        return Err("Authentication failed. Check tokenSecret in settings".to_string());
+    }
+    if status >= 400 {
+        let body: serde_json::Value = response
+            .body_mut()
+            .read_json()
+            .unwrap_or(serde_json::Value::Null);
+        let msg = body
+            .get("error")
+            .and_then(|e| e.get("message"))
+            .and_then(|m| m.as_str())
+            .unwrap_or("Unknown server error");
+        return Err(msg.to_string());
+    }
+
+    let mut body = response.into_body();
+    let reader = std::io::BufReader::new(body.as_reader());
+    stream_terminal_sse(reader, json_output)
+}
+
+fn stream_terminal_sse(reader: impl BufRead, json_output: bool) -> Result<(), String> {
+    use std::io::Write;
+
+    let mut line_buf = String::new();
+    let mut data_buf = String::new();
+    let mut reader = reader;
+
+    loop {
+        line_buf.clear();
+        match reader.read_line(&mut line_buf) {
+            Ok(0) => break, // EOF
+            Ok(_) => {}
+            Err(e) => return Err(format!("Connection error: {e}")),
+        }
+
+        let line = line_buf.trim_end();
+
+        if line.is_empty() {
+            if !data_buf.is_empty() {
+                let chunk: serde_json::Value = serde_json::from_str(&data_buf)
+                    .map_err(|e| format!("Invalid JSON in SSE: {e}"))?;
+                data_buf.clear();
+
+                let chunk_type = chunk.get("type").and_then(|t| t.as_str()).unwrap_or("");
+
+                if json_output {
+                    println!("{}", serde_json::to_string(&chunk).unwrap_or_default());
+                } else if chunk_type == "output" {
+                    if let Some(output) = chunk.get("data").and_then(|d| d.as_str()) {
+                        print!("{output}");
+                        let _ = std::io::stdout().flush();
+                    }
+                } else if chunk_type == "error" {
+                    if let Some(msg) = chunk.get("data").and_then(|d| d.as_str()) {
+                        eprintln!("error: {msg}");
+                    }
+                }
+
+                if chunk_type == "exit" || chunk_type == "error" {
+                    return Ok(());
+                }
+            }
+            continue;
+        }
+
+        if let Some(data) = line.strip_prefix("data: ") {
+            if !data_buf.is_empty() {
+                data_buf.push('\n');
+            }
+            data_buf.push_str(data);
+        }
+        // Ignore id:, event:, and comment lines
+    }
+
+    Ok(())
+}
+
+fn handle_terminal_attach(terminal_id: &str, json_output: bool) -> i32 {
+    match cmd_terminal_attach(terminal_id, json_output) {
+        Ok(()) => 0,
+        Err(e) => {
+            if json_output {
+                eprintln!("{}", serde_json::json!({"error": e}));
+            } else {
+                eprintln!("error: {e}");
+            }
+            1
+        }
+    }
+}
+
+fn cmd_terminal_attach(terminal_id: &str, json_output: bool) -> Result<(), String> {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    let client = api::ApiClient::from_settings()?;
+
+    if !json_output {
+        eprintln!("[attached to terminal {terminal_id} — type input, press Ctrl+C to detach]");
+    }
+
+    // Start SSE output stream in background thread
+    let tid = terminal_id.to_string();
+    let done = Arc::new(AtomicBool::new(false));
+    let done_clone = done.clone();
+
+    let output_handle = std::thread::spawn(move || {
+        let bg_client = match api::ApiClient::from_settings() {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("error: {e}");
+                return;
+            }
+        };
+        let input = serde_json::json!({"terminalId": tid, "replay": true});
+        let response = match bg_client.trpc_subscribe("terminal.stream", &input) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("error: {e}");
+                return;
+            }
+        };
+        if response.status().as_u16() >= 400 {
+            eprintln!("error: server returned HTTP {}", response.status().as_u16());
+            return;
+        }
+        let mut body = response.into_body();
+        let reader = std::io::BufReader::new(body.as_reader());
+        let mut line_buf = String::new();
+        let mut data_buf = String::new();
+        let mut reader = reader;
+
+        loop {
+            if done_clone.load(Ordering::Relaxed) {
+                break;
+            }
+            line_buf.clear();
+            match reader.read_line(&mut line_buf) {
+                Ok(0) => break,
+                Ok(_) => {}
+                Err(_) => break,
+            }
+            let line = line_buf.trim_end();
+            if line.is_empty() {
+                if !data_buf.is_empty() {
+                    if let Ok(chunk) = serde_json::from_str::<serde_json::Value>(&data_buf) {
+                        let chunk_type =
+                            chunk.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                        if chunk_type == "output" {
+                            if let Some(output) = chunk.get("data").and_then(|d| d.as_str()) {
+                                print!("{output}");
+                                let _ = std::io::stdout().flush();
+                            }
+                        } else if chunk_type == "exit" {
+                            if !done_clone.load(Ordering::Relaxed) {
+                                eprintln!("\n[terminal exited]");
+                            }
+                            done_clone.store(true, Ordering::Relaxed);
+                            break;
+                        }
+                    }
+                    data_buf.clear();
+                }
+                continue;
+            }
+            if let Some(data) = line.strip_prefix("data: ") {
+                if !data_buf.is_empty() {
+                    data_buf.push('\n');
+                }
+                data_buf.push_str(data);
+            }
+        }
+    });
+
+    // Main thread: read stdin line-by-line and send to terminal
+    let stdin = std::io::stdin();
+    loop {
+        if done.load(Ordering::Relaxed) {
+            break;
+        }
+        let mut line = String::new();
+        match stdin.read_line(&mut line) {
+            Ok(0) => break, // EOF
+            Ok(_) => {
+                if done.load(Ordering::Relaxed) {
+                    break;
+                }
+                if let Err(e) = client.trpc_mutate(
+                    "terminal.send",
+                    &serde_json::json!({"terminalId": terminal_id, "data": line}),
+                ) {
+                    eprintln!("error sending input: {e}");
+                    break;
+                }
+            }
+            Err(e) => {
+                eprintln!("stdin error: {e}");
+                break;
+            }
+        }
+    }
+
+    done.store(true, Ordering::Relaxed);
+    let _ = output_handle.join();
+
+    Ok(())
 }
 
 // --- Cronjobs commands ---
@@ -2158,6 +2625,59 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "browser_id", "type": "string", "required": true, "positional": true, "description": "Browser tab ID"},
             ],
             "notes": "Removes the browser tab and cleans up state."
+        }),
+        serde_json::json!({
+            "name": "terminal list",
+            "description": "List terminal sessions for a workspace",
+            "parameters": [
+                {"name": "workspace_id", "type": "string", "required": true, "positional": true, "description": "Workspace ID"},
+            ],
+            "notes": "Text output: `TERMINAL ID\\tTITLE\\tPID\\tSCROLLBACK` (tab-separated table).\nJSON output: `{\"terminals\": [{\"terminalId\": \"...\", \"workspaceId\": \"...\", \"pid\": N, \"scrollbackLength\": N, \"title\": \"...\"}]}`"
+        }),
+        serde_json::json!({
+            "name": "terminal create",
+            "description": "Create a new terminal session in a workspace",
+            "parameters": [
+                {"name": "workspace_id", "type": "string", "required": true, "positional": true, "description": "Workspace ID"},
+                {"name": "--command", "type": "string", "required": false, "description": "Shell command to auto-run after spawn"},
+                {"name": "--cwd", "type": "string", "required": false, "description": "Working directory (relative to workspace root)"},
+            ],
+            "notes": "Creates a new terminal session with its own PTY process. Returns the terminal ID.\nJSON output: `{\"terminalId\": \"...\", \"workspaceId\": \"...\", \"pid\": N}`"
+        }),
+        serde_json::json!({
+            "name": "terminal send",
+            "description": "Send input to a terminal session",
+            "parameters": [
+                {"name": "terminal_id", "type": "string", "required": true, "positional": true, "description": "Terminal ID"},
+                {"name": "--data", "type": "string", "required": true, "description": "Text to send (supports \\n for newline, \\t for tab)"},
+            ],
+            "notes": "Writes text to the terminal's PTY stdin. Use \\n to send a newline (execute command).\nExample: band terminal send <id> --data \"ls -la\\n\""
+        }),
+        serde_json::json!({
+            "name": "terminal output",
+            "description": "Get terminal output (scrollback buffer)",
+            "parameters": [
+                {"name": "terminal_id", "type": "string", "required": true, "positional": true, "description": "Terminal ID"},
+                {"name": "--lines", "type": "integer", "required": false, "description": "Number of lines to show (from end of buffer)"},
+                {"name": "--follow", "type": "boolean", "required": false, "description": "Stream live output (like tail -f)"},
+            ],
+            "notes": "Without --follow: fetches the current scrollback buffer (up to 100KB).\nWith --follow: streams live terminal output via SSE. Press Ctrl+C to stop."
+        }),
+        serde_json::json!({
+            "name": "terminal kill",
+            "description": "Kill a terminal session",
+            "parameters": [
+                {"name": "terminal_id", "type": "string", "required": true, "positional": true, "description": "Terminal ID"},
+            ],
+            "notes": "Kills the terminal's PTY process and cleans up the session."
+        }),
+        serde_json::json!({
+            "name": "terminal attach",
+            "description": "Attach to a terminal (stream output + send input interactively)",
+            "parameters": [
+                {"name": "terminal_id", "type": "string", "required": true, "positional": true, "description": "Terminal ID"},
+            ],
+            "notes": "Streams terminal output to stdout while reading stdin line-by-line and sending it to the terminal.\nPress Ctrl+C to detach. Best for running commands, not full TUI interaction (use web UI for that)."
         }),
         serde_json::json!({
             "name": "notify",

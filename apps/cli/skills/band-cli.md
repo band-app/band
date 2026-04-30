@@ -1,7 +1,7 @@
 ---
 name: band-cli
 version: 0.1.0
-description: Programmatic workspace management for Band. Use when the user wants to create, list, or remove Band workspaces or projects, manage tasks, manage tunnels, or check settings via the Band CLI.
+description: Programmatic workspace management for Band. Use when the user wants to create, list, or remove Band workspaces or projects, manage tasks, manage tunnels, manage terminal sessions, or check settings via the Band CLI.
 allowed-tools: Bash
 argument-hint: [command] [args...]
 ---
@@ -77,6 +77,28 @@ band tasks cancel tsk_1234567890
 
 # Re-run a failed task
 band tasks rerun tsk_1234567890
+```
+
+### Terminal management
+
+```sh
+# Create a terminal running a dev server
+tid=$(band terminal create my-app-feat-auth --command "npm run dev" --output json | jq -r .terminalId)
+
+# Check the output
+band terminal output "$tid" --lines 20
+
+# Stream live output
+band terminal output "$tid" --follow
+
+# Send a command to the terminal
+band terminal send "$tid" --data "echo hello\n"
+
+# Attach interactively
+band terminal attach "$tid"
+
+# Kill the terminal when done
+band terminal kill "$tid"
 ```
 
 ### Project management

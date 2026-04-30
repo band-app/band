@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { createLogger } from "@band-app/logger";
 import type { IPty } from "node-pty";
 import { shellPath } from "./process-utils";
@@ -17,7 +18,7 @@ export interface SpawnOptions {
   env?: Record<string, string>;
 }
 
-interface TerminalSession {
+export interface TerminalSession {
   pty: IPty;
   scrollback: string;
   workspaceId: string;
@@ -28,6 +29,9 @@ const terminals = new Map<string, TerminalSession>();
 
 /** workspaceId -> Set<terminalId> (reverse index for workspace-level cleanup) */
 const workspaceTerminals = new Map<string, Set<string>>();
+
+/** terminalId -> Set<listener> for live output streaming */
+const outputListeners = new Map<string, Set<(data: string) => void>>();
 
 /**
  * Spawns a new terminal session for the given workspace and terminalId.
@@ -131,17 +135,28 @@ export async function spawnTerminal(
   }
   ids.add(terminalId);
 
-  // Buffer all PTY output for replay on reconnect
+  // Buffer all PTY output for replay on reconnect + notify listeners
   ptyProcess.onData((data: string) => {
     session.scrollback += data;
     if (session.scrollback.length > MAX_SCROLLBACK_SIZE) {
       session.scrollback = session.scrollback.slice(-MAX_SCROLLBACK_SIZE);
+    }
+    const listeners = outputListeners.get(terminalId);
+    if (listeners) {
+      for (const cb of listeners) {
+        try {
+          cb(data);
+        } catch {
+          // listener errors must not crash the PTY data handler
+        }
+      }
     }
   });
 
   ptyProcess.onExit(() => {
     log.debug("Terminal exited: %s (workspace %s)", terminalId, workspaceId);
     terminals.delete(terminalId);
+    outputListeners.delete(terminalId);
     const set = workspaceTerminals.get(workspaceId);
     if (set) {
       set.delete(terminalId);
@@ -166,6 +181,81 @@ export function resizeTerminal(terminalId: string, cols: number, rows: number): 
   if (session) {
     session.pty.resize(cols, rows);
   }
+}
+
+/**
+ * List all terminal sessions for a workspace.
+ */
+export function listTerminals(
+  workspaceId: string,
+): Array<{ terminalId: string; workspaceId: string; pid: number; scrollbackLength: number; title: string }> {
+  const ids = workspaceTerminals.get(workspaceId);
+  if (!ids) return [];
+  const result: Array<{ terminalId: string; workspaceId: string; pid: number; scrollbackLength: number; title: string }> = [];
+  for (const terminalId of ids) {
+    const session = terminals.get(terminalId);
+    if (session) {
+      let title = "";
+      try {
+        title = session.pty.process;
+      } catch {
+        // pty.process can throw if the process has exited
+      }
+      result.push({
+        terminalId,
+        workspaceId,
+        pid: session.pty.pid,
+        scrollbackLength: session.scrollback.length,
+        title,
+      });
+    }
+  }
+  return result;
+}
+
+/**
+ * Returns the scrollback buffer for a terminal, optionally limited to the last N lines.
+ * Returns null if the terminal is not found.
+ */
+export function getScrollback(terminalId: string, lines?: number): string | null {
+  const session = terminals.get(terminalId);
+  if (!session) return null;
+  if (lines == null) return session.scrollback;
+  const allLines = session.scrollback.split("\n");
+  return allLines.slice(-lines).join("\n");
+}
+
+/**
+ * Writes data to a terminal's PTY stdin.
+ * Returns false if the terminal is not found.
+ */
+export function writeToTerminal(terminalId: string, data: string): boolean {
+  const session = terminals.get(terminalId);
+  if (!session) return false;
+  session.pty.write(data);
+  return true;
+}
+
+/**
+ * Subscribe to live output from a terminal's PTY.
+ * Returns an unsubscribe function.
+ */
+export function subscribeTerminalOutput(
+  terminalId: string,
+  callback: (data: string) => void,
+): () => void {
+  let listeners = outputListeners.get(terminalId);
+  if (!listeners) {
+    listeners = new Set();
+    outputListeners.set(terminalId, listeners);
+  }
+  listeners.add(callback);
+  return () => {
+    listeners.delete(callback);
+    if (listeners.size === 0) {
+      outputListeners.delete(terminalId);
+    }
+  };
 }
 
 /**
