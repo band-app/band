@@ -2,13 +2,12 @@
   "$schema": "https://unpkg.com/knip@latest/schema.json",
   "ignoreWorkspaces": ["apps/cli"],
   "exclude": ["exports", "types", "unresolved"],
-  "ignoreBinaries": ["rustc"],
+  "ignoreBinaries": ["rustc", "wrangler"],
   "workspaces": {
     ".": {
       "entry": ["scripts/*.mjs"],
       "ignoreDependencies": [
         "@band-app/cli",
-        "@tanstack/react-query",
         "@trpc/client",
         "@trpc/server"
       ]
@@ -54,7 +53,7 @@
     "packages/dashboard-core": {
       "entry": ["src/index.ts", "src/adapters/web.ts", "src/adapters/hybrid.ts"],
       "project": ["src/**/*.{ts,tsx}"],
-      "ignoreDependencies": ["@babel/runtime", "@codemirror/autocomplete", "@codemirror/lint"]
+      "ignoreDependencies": ["@babel/runtime", "@codemirror/lint"]
     },
     "packages/coding-agent": {
       "entry": ["src/index.ts", "tests/mocks/*.mjs"],
@@ -71,7 +70,7 @@
     },
     "extensions/vscode": {
       "project": ["src/**/*.ts"],
-      "ignoreBinaries": ["vsce"]
+      "ignoreBinaries": []
     }
   }
 }
