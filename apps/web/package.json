@@ -87,6 +87,7 @@
     "radix-ui": "^1.4.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "remark-breaks": "^4.0.0",
     "sirv": "^3.0.0",
     "streamdown": "^2.3.0",
     "tailwind-merge": "^3.5.0",
