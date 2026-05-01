@@ -1,4 +1,11 @@
-import { accessSync, constants, lstatSync, realpathSync, symlinkSync, unlinkSync } from "node:fs";
+import {
+  accessSync,
+  constants,
+  lstatSync,
+  realpathSync,
+  symlinkSync,
+  unlinkSync,
+} from "node:fs";
 import { platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -13,7 +20,8 @@ export const SYMLINK_PATH = "/usr/local/bin/band";
 
 /** Find the CLI binary by trying multiple resolution strategies. */
 export function findCliBinary(): string | null {
-  const strategies = [
+  // --- Strategy A: cargo build output (dev & source builds) ---
+  const appsStrategies = [
     // cwd = apps/web/ (Vite dev and production server)
     resolve(process.cwd(), ".."),
     // cwd = project root (fallback)
@@ -22,7 +30,7 @@ export function findCliBinary(): string | null {
     resolve(import.meta.dirname, "..", "..", ".."),
   ];
 
-  for (const appsDir of strategies) {
+  for (const appsDir of appsStrategies) {
     for (const profile of ["release", "debug"]) {
       const p = join(appsDir, "cli", "target", profile, "band");
       try {
@@ -33,6 +41,28 @@ export function findCliBinary(): string | null {
       }
     }
   }
+
+  // --- Strategy B: Tauri sidecar binary in macOS .app bundle ---
+  // When running inside Band.app, the CLI sidecar lives next to the main
+  // executable at .app/Contents/MacOS/band.  The web server's cwd is
+  // .app/Contents/Resources/web/, so walk up to Contents/MacOS.
+  if (platform() === "darwin") {
+    const macOsCandidates = [
+      // From cwd (Resources/web/) → Contents/MacOS/band
+      resolve(process.cwd(), "..", "..", "MacOS", "band"),
+      // From bundled dist file (Resources/web/dist/) → Contents/MacOS/band
+      resolve(import.meta.dirname, "..", "..", "..", "MacOS", "band"),
+    ];
+    for (const p of macOsCandidates) {
+      try {
+        lstatSync(p);
+        return p;
+      } catch {
+        // Continue
+      }
+    }
+  }
+
   return null;
 }
 
@@ -42,9 +72,22 @@ export async function checkCli(): Promise<CliStatus> {
     if (!stat.isSymbolicLink()) {
       return "ConflictingBinary";
     }
-    // Check if the symlink points to our CLI binary
-    const target = realpathSync(SYMLINK_PATH);
-    if (!target.includes(join("apps", "cli", "target"))) {
+
+    // Resolve the symlink target — may throw if the target no longer exists
+    // (e.g. the symlink pointed to a deleted worktree).
+    let target: string;
+    try {
+      target = realpathSync(SYMLINK_PATH);
+    } catch {
+      // Dangling symlink — treat as not installed so installCli() can
+      // replace it with a valid path.
+      return "NotInstalled";
+    }
+
+    // Accept our own cargo build output OR the Tauri sidecar binary
+    const isCargoBuild = target.includes(join("apps", "cli", "target"));
+    const isSidecar = target.includes(join("Contents", "MacOS", "band"));
+    if (!isCargoBuild && !isSidecar) {
       return "ConflictingBinary";
     }
     return "Installed";
