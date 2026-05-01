@@ -14,7 +14,10 @@ interface CachedWorkspace {
   lastAccessed: number;
 }
 
-const MAX_CACHED_WORKSPACES = 1;
+// Keep recently visited workspaces' dockview instances alive in memory so
+// switching between them is instantaneous (no init cost, no layout shift).
+// Bumped from 1 → 5 to eliminate flicker on the common A→B→A switch pattern.
+const MAX_CACHED_WORKSPACES = 5;
 
 /**
  * Manages multiple DockviewWorkspaceLayout instances with show/hide semantics.
@@ -125,17 +128,24 @@ export function DockviewInstanceManager() {
 
   return (
     <div className="absolute inset-0">
-      {Array.from(cache.values()).map(({ workspaceId }) => (
-        <div
-          key={workspaceId}
-          className="absolute inset-0"
-          style={
-            workspaceId === activeWorkspaceId ? undefined : { opacity: 0, pointerEvents: "none" }
-          }
-        >
-          <DockviewWorkspaceLayout workspaceId={workspaceId} onLayoutChange={handleLayoutChange} />
-        </div>
-      ))}
+      {Array.from(cache.values()).map(({ workspaceId }) => {
+        const isActive = workspaceId === activeWorkspaceId;
+        return (
+          <div
+            key={workspaceId}
+            className="absolute inset-0 transition-opacity duration-150 ease-out"
+            style={{
+              opacity: isActive ? 1 : 0,
+              pointerEvents: isActive ? undefined : "none",
+            }}
+          >
+            <DockviewWorkspaceLayout
+              workspaceId={workspaceId}
+              onLayoutChange={handleLayoutChange}
+            />
+          </div>
+        );
+      })}
     </div>
   );
 }

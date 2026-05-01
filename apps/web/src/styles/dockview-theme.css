@@ -52,8 +52,15 @@
   --dv-tab-margin: 0px;
 }
 
-/* No underline on selected tab — just brighter text + bold */
-.dockview-theme-band .dv-groupview.dv-active-group
+/* All tabs share the same font-weight so switching active tab does NOT
+   change glyph metrics → no reflow / layout shift in tab labels.
+   Active state is signaled via color (foreground vs muted-foreground)
+   set on the dockview CSS variables above, not via font-weight. */
+.dockview-theme-band .dv-tab {
+  font-weight: 600;
+}
+.dockview-theme-band
+  .dv-groupview.dv-active-group
   > .dv-tabs-and-actions-container
   .dv-tab.dv-active-tab,
 .dockview-theme-band
@@ -61,7 +68,6 @@
   > .dv-tabs-and-actions-container
   .dv-tab.dv-active-tab {
   box-shadow: none;
-  font-weight: 600;
 }
 
 /* Border below the tabs container */
@@ -116,8 +122,12 @@
   padding-right: 0.25rem;
 }
 
-/* No underline on selected chat tab — just brighter text + bold */
-.dockview-chat-tabs .dv-groupview.dv-active-group
+/* Uniform font-weight across all chat tabs → no reflow on active toggle. */
+.dockview-chat-tabs .dv-tab {
+  font-weight: 600;
+}
+.dockview-chat-tabs
+  .dv-groupview.dv-active-group
   > .dv-tabs-and-actions-container
   .dv-tab.dv-active-tab,
 .dockview-chat-tabs
@@ -125,7 +135,6 @@
   > .dv-tabs-and-actions-container
   .dv-tab.dv-active-tab {
   box-shadow: none;
-  font-weight: 600;
 }
 
 /* ---------------------------------------------------------------------------
@@ -169,8 +178,12 @@
   padding-right: 0.25rem;
 }
 
-/* No underline on selected browser tab — just brighter text + bold */
-.dockview-browser-tabs .dv-groupview.dv-active-group
+/* Uniform font-weight across all browser tabs → no reflow on active toggle. */
+.dockview-browser-tabs .dv-tab {
+  font-weight: 600;
+}
+.dockview-browser-tabs
+  .dv-groupview.dv-active-group
   > .dv-tabs-and-actions-container
   .dv-tab.dv-active-tab,
 .dockview-browser-tabs
@@ -178,7 +191,6 @@
   > .dv-tabs-and-actions-container
   .dv-tab.dv-active-tab {
   box-shadow: none;
-  font-weight: 600;
 }
 
 /* ---------------------------------------------------------------------------
@@ -222,8 +234,12 @@
   padding-right: 0.25rem;
 }
 
-/* No underline on selected terminal tab — just brighter text */
-.dockview-terminal-tabs .dv-groupview.dv-active-group
+/* Uniform font-weight across all terminal tabs → no reflow on active toggle. */
+.dockview-terminal-tabs .dv-tab {
+  font-weight: 600;
+}
+.dockview-terminal-tabs
+  .dv-groupview.dv-active-group
   > .dv-tabs-and-actions-container
   .dv-tab.dv-active-tab,
 .dockview-terminal-tabs
@@ -231,5 +247,4 @@
   > .dv-tabs-and-actions-container
   .dv-tab.dv-active-tab {
   box-shadow: none;
-  font-weight: 600;
 }
