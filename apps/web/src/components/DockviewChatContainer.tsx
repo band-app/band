@@ -177,13 +177,17 @@ function ChatTabContent({
 }) {
   const state = useChatPaneState(workspaceId, chatId);
 
-  // Update the dockview tab title based on session summary or agent label
+  // Update the dockview tab title based on session summary or agent label.
+  // Wait for sessionQueryDone before pushing a title so we don't flicker
+  // through agentLabel → sessionSummary on cold mount. Once the session
+  // query has resolved (with or without a summary), pick the best value.
   const setTitleRef = useRef(setTitle);
   setTitleRef.current = setTitle;
   useEffect(() => {
+    if (!state.sessionQueryDone) return;
     const title = state.activeSessionSummary || state.agentLabel || state.codingAgentId || "Chat";
     setTitleRef.current(title);
-  }, [state.activeSessionSummary, state.agentLabel, state.codingAgentId]);
+  }, [state.sessionQueryDone, state.activeSessionSummary, state.agentLabel, state.codingAgentId]);
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">
@@ -202,15 +206,43 @@ function ChatTabContent({
 // Custom tab header: agent icon + name + close button
 // ---------------------------------------------------------------------------
 
+// Persist last-known tab title + agent type per chatId so a remount of the tab
+// header (workspace switch, dockview re-init) starts with the previous values
+// instead of the bare "Chat" placeholder + missing icon — eliminates the
+// fade-in flicker users saw when title/icon resolved asynchronously.
+function readCachedTabMeta(chatId: string): { title?: string; agentType?: string } {
+  if (!chatId) return {};
+  try {
+    const raw = sessionStorage.getItem(`band:chat-tab-meta:${chatId}`);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeCachedTabMeta(chatId: string, patch: { title?: string; agentType?: string }) {
+  if (!chatId) return;
+  try {
+    const prev = readCachedTabMeta(chatId);
+    sessionStorage.setItem(`band:chat-tab-meta:${chatId}`, JSON.stringify({ ...prev, ...patch }));
+  } catch {}
+}
+
 function ChatTab(props: IDockviewPanelHeaderProps<ChatTabParams>) {
-  const [title, setTitle] = useState(props.api.title ?? "Chat");
-  const [agentType, setAgentType] = useState<string | undefined>(undefined);
+  const initialChatId = props.params.chatId;
+  const initialCache = readCachedTabMeta(initialChatId);
+  const [title, setTitle] = useState(initialCache.title ?? props.api.title ?? "Chat");
+  const [agentType, setAgentType] = useState<string | undefined>(initialCache.agentType);
   const [panelCount, setPanelCount] = useState(props.containerApi.panels.length);
 
   useEffect(() => {
-    const d = props.api.onDidTitleChange(() => setTitle(props.api.title ?? "Chat"));
+    const d = props.api.onDidTitleChange(() => {
+      const next = props.api.title ?? "Chat";
+      setTitle(next);
+      writeCachedTabMeta(initialChatId, { title: next });
+    });
     return () => d.dispose();
-  }, [props.api]);
+  }, [props.api, initialChatId]);
 
   // Track panel count reactively for close button visibility
   useEffect(() => {
@@ -243,7 +275,10 @@ function ChatTab(props: IDockviewPanelHeaderProps<ChatTabParams>) {
         | undefined;
       const agentId = chatResult.chat?.agent ?? defaultAgentId ?? "";
       const found = codingAgents.find((a) => a.id === agentId);
-      if (found) setAgentType(found.type);
+      if (found) {
+        setAgentType(found.type);
+        writeCachedTabMeta(chatId, { agentType: found.type });
+      }
     });
     return () => {
       cancelled = true;
@@ -263,19 +298,34 @@ function ChatTab(props: IDockviewPanelHeaderProps<ChatTabParams>) {
   return (
     <div className="dv-default-tab">
       <div className="flex items-center gap-1.5 min-w-0">
-        {agentType && <AgentIcon type={agentType} className="size-3.5 shrink-0" />}
-        <span className="truncate">{title}</span>
-      </div>
-      {showClose && (
-        <button
-          type="button"
-          className="ml-1 inline-flex size-4 items-center justify-center rounded-sm opacity-60 hover:opacity-100 hover:bg-accent transition-colors"
-          onClick={handleClose}
-          title="Close tab"
+        {/* Reserve icon slot — opacity fades in once agentType resolves so
+            the icon does not pop in. Width is reserved either way. */}
+        <span
+          className="inline-flex size-3.5 shrink-0 items-center justify-center transition-opacity duration-150"
+          style={{ opacity: agentType ? 1 : 0 }}
         >
-          <X className="size-3" />
-        </button>
-      )}
+          {agentType && <AgentIcon type={agentType} className="size-3.5" />}
+        </span>
+        {/* Bounded width so chat tab does not reflow as title loads/changes. */}
+        <span className="truncate min-w-[6rem] max-w-[14rem]">{title}</span>
+      </div>
+      {/* Always render the close button slot — toggle visibility via opacity
+          instead of mounting/unmounting so panelCount swings (1 ↔ 2) do not
+          shift the tab width. */}
+      <button
+        type="button"
+        aria-hidden={!showClose}
+        tabIndex={showClose ? 0 : -1}
+        className="ml-1 inline-flex size-4 items-center justify-center rounded-sm opacity-60 hover:opacity-100 hover:bg-accent transition-opacity"
+        style={{
+          opacity: showClose ? undefined : 0,
+          pointerEvents: showClose ? undefined : "none",
+        }}
+        onClick={handleClose}
+        title="Close tab"
+      >
+        <X className="size-3" />
+      </button>
     </div>
   );
 }

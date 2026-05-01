@@ -9,6 +9,7 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuShortcut,
   DropdownMenuTrigger,
   Tooltip,
   TooltipContent,
@@ -653,6 +654,15 @@ export function ChatView({
       }
     };
   }, [onNewSessionRef, handleNewSession]);
+
+  // Global keyboard shortcut: Cmd/Ctrl+Shift+N → start new session.
+  // Only the visible chat pane in the active workspace responds.
+  useEffect(() => {
+    if (!visible || !wsActive) return;
+    const onNewChat = () => handleNewSession();
+    window.addEventListener("band:new-chat-session", onNewChat);
+    return () => window.removeEventListener("band:new-chat-session", onNewChat);
+  }, [visible, wsActive, handleNewSession]);
 
   const queueMessage = useCallback(
     (text: string) => {
@@ -1367,6 +1377,7 @@ function SessionHistoryMenu({
         <DropdownMenuItem onClick={() => onNewSession()}>
           <Plus className="size-3.5" />
           New session
+          <DropdownMenuShortcut>⌘⇧N</DropdownMenuShortcut>
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
