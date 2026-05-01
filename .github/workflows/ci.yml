@@ -102,7 +102,7 @@ jobs:
       - name: Lint (cargo clippy — Dashboard)
         run: |
           mkdir -p apps/web/dist apps/dashboard/src-tauri/binaries extensions/vscode/dist
-          touch apps/web/dist/start-server.mjs extensions/vscode/dist/extension.js extensions/vscode/band-vscode-0.1.0.vsix
+          touch apps/web/dist/start-server.mjs extensions/vscode/dist/extension.js
           cp apps/cli/target/release/band "apps/dashboard/src-tauri/binaries/band-$(rustc -vV | sed -n 's/host: //p')"
           cargo clippy --manifest-path apps/dashboard/src-tauri/Cargo.toml -- -D warnings
 
