@@ -256,11 +256,15 @@ pub fn run() {
                 }
             }
 
-            // Read app mode from settings (defaults to "side-panel")
+            // Ensure first-run defaults (e.g. appMode = "full-editor") are
+            // written to settings.json before we read them.
+            state::ensure_first_run_defaults();
+
+            // Read app mode from settings (defaults to "full-editor")
             let app_mode = state::load_settings()
                 .ok()
                 .and_then(|s| s.app_mode)
-                .unwrap_or_else(|| "side-panel".to_string());
+                .unwrap_or_else(|| "full-editor".to_string());
 
             // Position and size the window based on app mode
             if let Ok(Some(monitor)) = window.current_monitor() {

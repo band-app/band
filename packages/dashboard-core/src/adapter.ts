@@ -65,7 +65,7 @@ export interface DashboardAdapter {
 
   // CLI
   checkCli(): Promise<CliStatus>;
-  installCli(): Promise<void>;
+  installCli(opts?: { allowPrompt?: boolean }): Promise<void>;
 
   // Agent status (optional)
   clearNeedsAttention?(workspaceId: string): Promise<void>;

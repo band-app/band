@@ -139,6 +139,9 @@ jobs:
           cargo test --manifest-path apps/dashboard/src-tauri/Cargo.toml
           rm -rf apps/web/dist
 
+      - name: Build VS Code extension (produces .vsix bundled into Band.app)
+        run: pnpm build:extension
+
       - name: Build frontend
         run: |
           pnpm build:web

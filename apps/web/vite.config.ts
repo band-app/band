@@ -18,6 +18,20 @@ function trpcDevPlugin(): Plugin {
   return {
     name: "trpc-dev-server",
     configureServer(server) {
+      // Ensure a tokenSecret exists in settings.json so the Tauri app can
+      // authenticate to the dev server (same behavior as start-server.ts).
+      server.ssrLoadModule("./src/lib/state").then(({ getOrCreateToken }) => {
+        getOrCreateToken();
+      });
+
+      // Run the same first-time/idempotent setup as start-server.ts:
+      // populate defaults.apps, notifications, and Claude Code hooks.
+      server.ssrLoadModule("./src/lib/setup").then(({ runFirstTimeSetup }) => {
+        runFirstTimeSetup().catch((err: Error) => {
+          log.warn("First-time setup failed: %s", err.message);
+        });
+      });
+
       // Invalidate cached spec when router or related files change
       server.watcher.on("change", (file) => {
         if (file.includes("/trpc/") || file.endsWith("router.ts")) {

@@ -610,14 +610,16 @@ const cliRouter = t.router({
     return { status };
   }),
 
-  install: publicProcedure.mutation(async () => {
-    try {
-      await installCli();
-      return { ok: true };
-    } catch (err) {
-      throw new Error(err instanceof Error ? err.message : String(err));
-    }
-  }),
+  install: publicProcedure
+    .input(z.object({ allowPrompt: z.boolean().optional() }).optional())
+    .mutation(async ({ input }) => {
+      try {
+        await installCli({ allowPrompt: input?.allowPrompt });
+        return { ok: true };
+      } catch (err) {
+        throw new Error(err instanceof Error ? err.message : String(err));
+      }
+    }),
 });
 
 // ---------------------------------------------------------------------------

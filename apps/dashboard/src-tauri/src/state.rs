@@ -94,6 +94,48 @@ pub fn load_settings() -> Result<Settings, String> {
     serde_json::from_str(&data).map_err(|e| format!("Failed to parse settings: {e}"))
 }
 
+/// Ensure first-run defaults exist in settings.json.
+/// If `appMode` is not set, writes `"full-editor"` as the default.
+/// Called before reading settings on Tauri startup so the window opens
+/// in the correct mode on first launch.
+pub fn ensure_first_run_defaults() {
+    let path = settings_file();
+
+    // Load existing settings (or start with an empty JSON object)
+    let mut value: serde_json::Value = if path.exists() {
+        fs::read_to_string(&path)
+            .ok()
+            .and_then(|data| serde_json::from_str(&data).ok())
+            .unwrap_or_else(|| serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+
+    // Ensure the top-level value is an object
+    if !value.is_object() {
+        value = serde_json::json!({});
+    }
+
+    let obj = value.as_object_mut().expect("value is an object");
+
+    // Only set appMode if it's not already present
+    if obj.contains_key("appMode") {
+        return;
+    }
+
+    obj.insert(
+        "appMode".to_string(),
+        serde_json::Value::String("full-editor".to_string()),
+    );
+
+    // Write back
+    if let Ok(data) = serde_json::to_string_pretty(&value) {
+        let dir = band_home();
+        let _ = fs::create_dir_all(&dir);
+        let _ = fs::write(&path, format!("{data}\n"));
+    }
+}
+
 // --- Window state persistence ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

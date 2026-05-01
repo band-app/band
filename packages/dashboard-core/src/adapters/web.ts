@@ -225,8 +225,8 @@ export class WebDashboardAdapter implements DashboardAdapter {
     return data.status as CliStatus;
   }
 
-  async installCli(): Promise<void> {
-    await this.trpc.cli.install.mutate();
+  async installCli(opts?: { allowPrompt?: boolean }): Promise<void> {
+    await this.trpc.cli.install.mutate(opts);
   }
 
   async getWorkspaceDiff(

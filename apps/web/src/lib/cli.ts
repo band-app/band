@@ -1,5 +1,10 @@
+import { execFile } from "node:child_process";
 import { accessSync, constants, lstatSync, realpathSync, symlinkSync, unlinkSync } from "node:fs";
+import { platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { promisify } from "node:util";
+
+const execFileP = promisify(execFile);
 
 export type CliStatus =
   | "Installed"
@@ -75,7 +80,18 @@ function isDirWritable(dir: string): boolean {
   }
 }
 
-export async function installCli(): Promise<void> {
+export interface InstallCliOptions {
+  /**
+   * If true and the symlink directory isn't writable on macOS, prompt for
+   * admin credentials via osascript and run the install with elevated
+   * privileges. Should only be true when triggered by an explicit user
+   * action (e.g. clicking an Install button), never on background auto-
+   * install paths.
+   */
+  allowPrompt?: boolean;
+}
+
+export async function installCli(opts: InstallCliOptions = {}): Promise<void> {
   const binaryPath = findCliBinary();
   if (!binaryPath) {
     throw new Error(
@@ -86,7 +102,6 @@ export async function installCli(): Promise<void> {
   const dir = dirname(SYMLINK_PATH);
 
   if (isDirWritable(dir)) {
-    // Directory is writable — do it directly
     try {
       lstatSync(SYMLINK_PATH);
       unlinkSync(SYMLINK_PATH);
@@ -95,7 +110,47 @@ export async function installCli(): Promise<void> {
       if (code !== "ENOENT") throw err;
     }
     symlinkSync(binaryPath, SYMLINK_PATH);
-  } else {
-    throw new Error(`Run: sudo ln -sf "${binaryPath}" "${SYMLINK_PATH}"`);
+    return;
+  }
+
+  if (platform() === "darwin") {
+    if (opts.allowPrompt) {
+      await installViaOsascript(binaryPath, SYMLINK_PATH);
+      return;
+    }
+    // On macOS the user can elevate by clicking the Install button —
+    // surface a friendly message rather than telling them to run sudo.
+    throw new Error("admin password required");
+  }
+
+  throw new Error(`Run: sudo ln -sf "${binaryPath}" "${SYMLINK_PATH}"`);
+}
+
+/** Quote a string for use as a single shell argument inside single quotes. */
+function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, "'\\''")}'`;
+}
+
+/** Quote a string as an AppleScript string literal. */
+function appleScriptString(s: string): string {
+  return `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+/**
+ * On macOS, run `ln -sf` with admin privileges via osascript so the OS
+ * displays a single password prompt instead of asking the user to run sudo
+ * in a terminal.
+ */
+async function installViaOsascript(binaryPath: string, symlinkPath: string): Promise<void> {
+  const cmd = `ln -sf ${shellQuote(binaryPath)} ${shellQuote(symlinkPath)}`;
+  const script = `do shell script ${appleScriptString(cmd)} with administrator privileges`;
+  try {
+    await execFileP("osascript", ["-e", script]);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes("User canceled") || message.includes("-128")) {
+      throw new Error("Admin password prompt cancelled");
+    }
+    throw new Error(`Failed to install band CLI: ${message}`);
   }
 }
