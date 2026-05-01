@@ -43,6 +43,17 @@ export class OpenAICodexAdapter implements CodingAgent {
   ): AsyncGenerator<AgentEvent> {
     const effectiveMaxTurns = options?.maxTurns ?? this.maxTurns;
     const effectiveModel = options?.model ?? this.model;
+    // Map Band permissionMode → Codex sandbox.
+    //   plan / read-only intent       → read-only
+    //   bypassPermissions             → danger-full-access
+    //   default / acceptEdits / null  → configured sandbox (workspace-write fallback)
+    const effectiveSandbox =
+      options?.permissionMode === "plan"
+        ? "read-only"
+        : options?.permissionMode === "bypassPermissions"
+          ? "danger-full-access"
+          : this.sandboxMode;
+    const effort = options?.effort;
 
     log.info(
       {
@@ -51,6 +62,8 @@ export class OpenAICodexAdapter implements CodingAgent {
         model: effectiveModel,
         cwd: this.workspaceDir,
         maxTurns: effectiveMaxTurns,
+        sandbox: effectiveSandbox,
+        effort,
       },
       "runSession starting",
     );
@@ -75,7 +88,8 @@ export class OpenAICodexAdapter implements CodingAgent {
     const stream = thread.runStreamed(prompt, {
       cwd: this.workspaceDir,
       maxTurns: effectiveMaxTurns,
-      sandbox: this.sandboxMode,
+      sandbox: effectiveSandbox,
+      ...(effort && { reasoningEffort: effort }),
     });
 
     const iterator = stream[Symbol.asyncIterator]();
@@ -185,6 +199,7 @@ interface CodexThread {
       cwd?: string;
       maxTurns?: number;
       sandbox?: string;
+      reasoningEffort?: string;
     },
   ): AsyncIterable<Record<string, unknown>>;
 }

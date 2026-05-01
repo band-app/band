@@ -51,6 +51,8 @@ export class GeminiCliAdapter implements CodingAgent {
     const knownGeminiModels = new Set(this.listModels().map((m) => m.id));
     const effectiveModel =
       requestedModel && knownGeminiModels.has(requestedModel) ? requestedModel : undefined;
+    const permissionMode = options?.permissionMode;
+    const effort = options?.effort;
 
     log.info(
       {
@@ -58,6 +60,8 @@ export class GeminiCliAdapter implements CodingAgent {
         model: effectiveModel,
         cwd: this.workspaceDir,
         maxTurns: effectiveMaxTurns,
+        permissionMode,
+        effort,
       },
       "runSession starting",
     );
@@ -65,6 +69,11 @@ export class GeminiCliAdapter implements CodingAgent {
     const args = ["--output-format", "stream-json"];
     if (effectiveModel) {
       args.push("--model", effectiveModel);
+    }
+    // Gemini CLI: `--yolo` skips approval prompts. Map bypassPermissions /
+    // acceptEdits → --yolo. Plan/default leave approvals on.
+    if (permissionMode === "bypassPermissions" || permissionMode === "acceptEdits") {
+      args.push("--yolo");
     }
     args.push("--", prompt);
 

@@ -32,6 +32,8 @@ export interface ChatSession {
   agent: string; // coding agent definition id
   model?: string;
   mode?: string;
+  permissionMode?: string;
+  effort?: string;
   /** The session the user last viewed — restored on page load. */
   activeSessionId?: string;
   /**
@@ -55,6 +57,8 @@ interface ChatPanelState {
   agent: string;
   model?: string | null;
   mode?: string | null;
+  permissionMode?: string | null;
+  effort?: string | null;
   /** The session the user last viewed. */
   activeSessionId?: string | null;
   /** Cached display title for activeSessionId. */
@@ -121,6 +125,8 @@ function serializeState(session: ChatSession): string {
     agent: session.agent,
     model: session.model ?? null,
     mode: session.mode ?? null,
+    permissionMode: session.permissionMode ?? null,
+    effort: session.effort ?? null,
     activeSessionId: session.activeSessionId ?? null,
     activeSessionSummary: session.activeSessionSummary ?? null,
     activeSessionLastModified: session.activeSessionLastModified ?? null,
@@ -140,6 +146,8 @@ export interface CreateChatOptions {
   agent?: string;
   model?: string;
   mode?: string;
+  permissionMode?: string;
+  effort?: string;
 }
 
 /**
@@ -158,6 +166,8 @@ export function createChat(workspaceId: string, options?: CreateChatOptions): Ch
     agent: options?.agent ?? defaultAgent.id,
     model: options?.model,
     mode: options?.mode,
+    permissionMode: options?.permissionMode,
+    effort: options?.effort,
     status: "idle",
   };
 
@@ -203,6 +213,8 @@ export interface UpdateChatOptions {
   agent?: string;
   model?: string | null;
   mode?: string | null;
+  permissionMode?: string | null;
+  effort?: string | null;
 }
 
 /**
@@ -216,6 +228,9 @@ export function updateChat(chatId: string, updates: UpdateChatOptions): ChatSess
   if (updates.agent !== undefined) session.agent = updates.agent;
   if (updates.model !== undefined) session.model = updates.model ?? undefined;
   if (updates.mode !== undefined) session.mode = updates.mode ?? undefined;
+  if (updates.permissionMode !== undefined)
+    session.permissionMode = updates.permissionMode ?? undefined;
+  if (updates.effort !== undefined) session.effort = updates.effort ?? undefined;
 
   updatePanelState(chatId, {
     state: serializeState(session),
@@ -383,6 +398,8 @@ export function loadChatsFromDb(): number {
       agent: parsed.agent,
       model: parsed.model ?? undefined,
       mode: parsed.mode ?? undefined,
+      permissionMode: parsed.permissionMode ?? undefined,
+      effort: parsed.effort ?? undefined,
       activeSessionId: parsed.activeSessionId ?? undefined,
       activeSessionSummary: parsed.activeSessionSummary ?? undefined,
       activeSessionLastModified: parsed.activeSessionLastModified ?? undefined,

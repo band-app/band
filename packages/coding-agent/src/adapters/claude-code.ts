@@ -247,7 +247,9 @@ export class ClaudeCodeAdapter implements CodingAgent {
       return { behavior: "deny", message: formatUserAnswer(answers) };
     };
 
-    const permissionMode = options?.mode === "plan" ? ("plan" as const) : undefined;
+    const permissionMode =
+      options?.permissionMode ?? (options?.mode === "plan" ? ("plan" as const) : undefined);
+    const effort = options?.effort;
 
     const conversation = query({
       prompt,
@@ -262,6 +264,7 @@ export class ClaudeCodeAdapter implements CodingAgent {
         pathToClaudeCodeExecutable: this.executablePath,
         settingSources: ["user", "project"],
         permissionMode,
+        ...(effort && { effort }),
         stderr: (data) => log.warn({ data }, "claude-code stderr"),
       },
     });

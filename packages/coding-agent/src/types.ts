@@ -74,10 +74,16 @@ export interface AgentModel {
   description?: string;
 }
 
+export type PermissionMode = "default" | "acceptEdits" | "bypassPermissions" | "plan";
+
+export type EffortLevel = "low" | "medium" | "high" | "xhigh";
+
 export interface RunSessionOptions {
   maxTurns?: number;
   mode?: string;
   model?: string;
+  permissionMode?: PermissionMode;
+  effort?: EffortLevel;
 }
 
 export interface CodingAgent {

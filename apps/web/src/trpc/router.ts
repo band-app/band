@@ -2130,6 +2130,8 @@ const chatsRouter = t.router({
         agent: z.string().optional(),
         model: z.string().optional(),
         mode: z.string().optional(),
+        permissionMode: z.string().optional(),
+        effort: z.string().optional(),
       }),
     )
     .mutation(({ input }) => {
@@ -2139,6 +2141,8 @@ const chatsRouter = t.router({
         agent: input.agent,
         model: input.model,
         mode: input.mode,
+        permissionMode: input.permissionMode,
+        effort: input.effort,
       });
       return { chat };
     }),
@@ -2179,6 +2183,8 @@ const chatsRouter = t.router({
         agent: z.string().optional(),
         model: z.string().optional(),
         mode: z.string().optional(),
+        permissionMode: z.string().optional(),
+        effort: z.string().optional(),
       }),
     )
     .mutation(({ input }) => {

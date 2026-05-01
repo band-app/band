@@ -46,6 +46,8 @@ interface SubmitBody {
   maxTurns?: number;
   mode?: string;
   model?: string;
+  permissionMode?: string;
+  effort?: string;
   codingAgentId?: string;
   files?: { mediaType: string; url: string; filename?: string }[];
 }
@@ -218,7 +220,18 @@ async function handlePost(
     return;
   }
 
-  const { workspaceId, prompt, sessionId, maxTurns, mode, model, codingAgentId, files } = body;
+  const {
+    workspaceId,
+    prompt,
+    sessionId,
+    maxTurns,
+    mode,
+    model,
+    permissionMode,
+    effort,
+    codingAgentId,
+    files,
+  } = body;
 
   if (!workspaceId || !prompt) {
     res.writeHead(400, { "Content-Type": "application/json" });
@@ -253,6 +266,8 @@ async function handlePost(
       maxTurns,
       mode,
       model,
+      permissionMode,
+      effort,
       codingAgentId,
     });
   } catch (err) {

@@ -59,12 +59,16 @@ export class OpenCodeAdapter implements CodingAgent {
     const effectiveModel =
       requestedModel && knownModelIds.has(requestedModel) ? requestedModel : undefined;
 
+    // OpenCode CLI does not expose permissionMode or reasoning-effort flags.
+    // Accept them for API parity and ignore.
     log.info(
       {
         prompt: prompt.slice(0, 100),
         model: effectiveModel,
         cwd: this.workspaceDir,
         sessionId,
+        permissionMode: options?.permissionMode,
+        effort: options?.effort,
       },
       "runSession starting",
     );

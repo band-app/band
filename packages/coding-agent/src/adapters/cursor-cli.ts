@@ -79,12 +79,16 @@ export class CursorCliAdapter implements CodingAgent {
   ): AsyncGenerator<AgentEvent> {
     const effectiveModel = options?.model ?? this.model;
 
+    // Cursor SDK does not expose permissionMode or reasoning-effort options.
+    // Accept them for API parity and ignore.
     log.info(
       {
         prompt: prompt.slice(0, 100),
         sessionId,
         model: effectiveModel,
         maxTurns: this.maxTurns,
+        permissionMode: options?.permissionMode,
+        effort: options?.effort,
       },
       "runSession starting",
     );

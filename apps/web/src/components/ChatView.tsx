@@ -26,7 +26,9 @@ import {
   Loader2,
   Plus,
   ScrollText,
+  Shield,
   X,
+  Zap,
 } from "lucide-react";
 import {
   Fragment,
@@ -345,18 +347,49 @@ export function ChatView({
     },
     [chatId],
   );
+  const [selectedPermissionMode, setSelectedPermissionMode] = useState<string | undefined>();
+  const handlePermissionModeSelect = useCallback(
+    (value: string | undefined) => {
+      setSelectedPermissionMode(value);
+      trpc.chats.update
+        .mutate({ chatId, permissionMode: value ?? "" })
+        .catch((err) => console.error("[ChatView] error persisting permissionMode:", err));
+    },
+    [chatId],
+  );
+
+  const [selectedEffort, setSelectedEffort] = useState<string | undefined>();
+  const handleEffortSelect = useCallback(
+    (value: string | undefined) => {
+      setSelectedEffort(value);
+      trpc.chats.update
+        .mutate({ chatId, effort: value ?? "" })
+        .catch((err) => console.error("[ChatView] error persisting effort:", err));
+    },
+    [chatId],
+  );
+
   useEffect(() => {
     trpc.modes.list
       .query({ agentId: codingAgentId || undefined })
       .then((data) => setModes(data.modes as { id: string; name: string; description?: string }[]))
       .catch(() => setModes([]));
-    // Hydrate persisted mode from the chat record, or derive from active task
+    // Hydrate persisted mode/permissionMode/effort from the chat record,
+    // or derive from active task.
     trpc.chats.get
       .query({ chatId })
       .then((data) => {
-        const persisted = data.chat?.mode;
-        if (typeof persisted === "string" && persisted) {
-          setSelectedMode(persisted);
+        const persistedMode = data.chat?.mode;
+        if (typeof persistedMode === "string" && persistedMode) {
+          setSelectedMode(persistedMode);
+        }
+        const persistedPerm = data.chat?.permissionMode;
+        if (typeof persistedPerm === "string" && persistedPerm) {
+          setSelectedPermissionMode(persistedPerm);
+        }
+        const persistedEffort = data.chat?.effort;
+        if (typeof persistedEffort === "string" && persistedEffort) {
+          setSelectedEffort(persistedEffort);
         }
       })
       .catch(() => {});
@@ -476,6 +509,14 @@ export function ChatView({
   useEffect(() => {
     transport.model = userModelOverride ?? agentDefaultModel;
   }, [transport, userModelOverride, agentDefaultModel]);
+
+  useEffect(() => {
+    transport.permissionMode = selectedPermissionMode;
+  }, [transport, selectedPermissionMode]);
+
+  useEffect(() => {
+    transport.effort = selectedEffort;
+  }, [transport, selectedEffort]);
 
   useEffect(() => {
     transport.codingAgentId = codingAgentId;
@@ -1248,6 +1289,11 @@ export function ChatView({
               {modes.length > 0 && (
                 <ModeMenu modes={modes} selected={selectedMode} onSelect={handleModeSelect} />
               )}
+              <PermissionMenu
+                selected={selectedPermissionMode}
+                onSelect={handlePermissionModeSelect}
+              />
+              <EffortMenu selected={selectedEffort} onSelect={handleEffortSelect} />
               {supportsSessionListing && (
                 <SessionHistoryMenu
                   workspaceId={workspaceId}
@@ -1323,6 +1369,112 @@ function ModeMenu({
               {mode.description && (
                 <span className="text-xs text-muted-foreground">{mode.description}</span>
               )}
+            </div>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+const PERMISSION_OPTIONS: { id: string; name: string; description: string }[] = [
+  { id: "default", name: "Default", description: "Prompt before risky tools" },
+  { id: "acceptEdits", name: "Accept edits", description: "Auto-approve file edits" },
+  { id: "bypassPermissions", name: "Bypass", description: "Skip all permission prompts" },
+  { id: "plan", name: "Plan", description: "Read-only planning, no edits" },
+];
+
+function PermissionMenu({
+  selected,
+  onSelect,
+}: {
+  selected: string | undefined;
+  onSelect: (value: string | undefined) => void;
+}) {
+  const current = PERMISSION_OPTIONS.find((p) => p.id === selected);
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <Shield className="size-3" />
+          {current?.name ?? "Permission"}
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="min-w-[200px]">
+        <DropdownMenuItem
+          onClick={() => onSelect(undefined)}
+          className={cn("flex items-start gap-2", !selected ? "bg-accent" : "")}
+        >
+          <div className="flex flex-col gap-0.5">
+            <span className="text-sm font-medium">Auto</span>
+            <span className="text-xs text-muted-foreground">Use agent default</span>
+          </div>
+        </DropdownMenuItem>
+        {PERMISSION_OPTIONS.map((opt) => (
+          <DropdownMenuItem
+            key={opt.id}
+            onClick={() => onSelect(opt.id)}
+            className={cn("flex items-start gap-2", opt.id === selected ? "bg-accent" : "")}
+          >
+            <div className="flex flex-col gap-0.5">
+              <span className="text-sm font-medium">{opt.name}</span>
+              <span className="text-xs text-muted-foreground">{opt.description}</span>
+            </div>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+const EFFORT_OPTIONS: { id: string; name: string; description: string }[] = [
+  { id: "low", name: "Low", description: "Fast, minimal reasoning" },
+  { id: "medium", name: "Medium", description: "Balanced reasoning" },
+  { id: "high", name: "High", description: "Deep reasoning (default)" },
+  { id: "xhigh", name: "X-High", description: "Maximum reasoning" },
+];
+
+function EffortMenu({
+  selected,
+  onSelect,
+}: {
+  selected: string | undefined;
+  onSelect: (value: string | undefined) => void;
+}) {
+  const current = EFFORT_OPTIONS.find((e) => e.id === selected);
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <Zap className="size-3" />
+          {current?.name ?? "Effort"}
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="min-w-[180px]">
+        <DropdownMenuItem
+          onClick={() => onSelect(undefined)}
+          className={cn("flex items-start gap-2", !selected ? "bg-accent" : "")}
+        >
+          <div className="flex flex-col gap-0.5">
+            <span className="text-sm font-medium">Auto</span>
+            <span className="text-xs text-muted-foreground">Use agent default</span>
+          </div>
+        </DropdownMenuItem>
+        {EFFORT_OPTIONS.map((opt) => (
+          <DropdownMenuItem
+            key={opt.id}
+            onClick={() => onSelect(opt.id)}
+            className={cn("flex items-start gap-2", opt.id === selected ? "bg-accent" : "")}
+          >
+            <div className="flex flex-col gap-0.5">
+              <span className="text-sm font-medium">{opt.name}</span>
+              <span className="text-xs text-muted-foreground">{opt.description}</span>
             </div>
           </DropdownMenuItem>
         ))}

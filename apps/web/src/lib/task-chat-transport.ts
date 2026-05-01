@@ -40,6 +40,8 @@ export class TaskChatTransport implements ChatTransport<UIMessage> {
   private getLastEventId: () => number | undefined;
   mode: string | undefined;
   model: string | undefined;
+  permissionMode: string | undefined;
+  effort: string | undefined;
   codingAgentId: string | undefined;
 
   /**
@@ -141,6 +143,8 @@ export class TaskChatTransport implements ChatTransport<UIMessage> {
         ...(files.length > 0 && { files }),
         ...(this.mode && { mode: this.mode }),
         ...(this.model && { model: this.model }),
+        ...(this.permissionMode && { permissionMode: this.permissionMode }),
+        ...(this.effort && { effort: this.effort }),
         ...(this.codingAgentId && { codingAgentId: this.codingAgentId }),
       }),
       signal: controller.signal,

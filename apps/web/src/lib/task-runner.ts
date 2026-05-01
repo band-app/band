@@ -46,6 +46,8 @@ export interface TaskInfo {
   maxTurns?: number;
   mode?: string;
   model?: string;
+  permissionMode?: string;
+  effort?: string;
   codingAgentId?: string;
   /**
    * The eventId of the first event broadcast for this task. Set on the
@@ -66,6 +68,8 @@ export interface SubmitTaskOptions {
   maxTurns?: number;
   mode?: string;
   model?: string;
+  permissionMode?: string;
+  effort?: string;
   codingAgentId?: string;
 }
 
@@ -174,6 +178,8 @@ export function submitTask(options: SubmitTaskOptions): TaskInfo {
     maxTurns,
     mode,
     model,
+    permissionMode,
+    effort,
     codingAgentId,
   } = options;
 
@@ -201,6 +207,8 @@ export function submitTask(options: SubmitTaskOptions): TaskInfo {
     maxTurns,
     mode,
     model,
+    permissionMode,
+    effort,
     codingAgentId,
   };
   tasks.set(chatId, task);
@@ -389,11 +397,21 @@ async function runTask(chatId: string, task: InternalTask) {
 
   try {
     const sessionOptions =
-      task.maxTurns || task.mode || task.model
+      task.maxTurns || task.mode || task.model || task.permissionMode || task.effort
         ? {
             ...(task.maxTurns && { maxTurns: task.maxTurns }),
             ...(task.mode && { mode: task.mode }),
             ...(task.model && { model: task.model }),
+            ...(task.permissionMode && {
+              permissionMode: task.permissionMode as
+                | "default"
+                | "acceptEdits"
+                | "bypassPermissions"
+                | "plan",
+            }),
+            ...(task.effort && {
+              effort: task.effort as "low" | "medium" | "high" | "xhigh",
+            }),
           }
         : undefined;
     // Append file-sharing hint so the agent knows it can send files to the user.
@@ -693,6 +711,8 @@ function toTaskInfo(task: InternalTask): TaskInfo {
     maxTurns: task.maxTurns,
     mode: task.mode,
     model: task.model,
+    permissionMode: task.permissionMode,
+    effort: task.effort,
     codingAgentId: task.codingAgentId,
     firstEventId: task.firstEventId,
   };
