@@ -516,6 +516,23 @@ async function runTask(chatId: string, task: InternalTask) {
           break;
         }
 
+        case "usage": {
+          broadcast(chatId, {
+            type: "data-usage" as UIMessageChunk["type"],
+            data: {
+              inputTokens: event.inputTokens,
+              outputTokens: event.outputTokens,
+              ...(event.cacheReadTokens !== undefined && {
+                cacheReadTokens: event.cacheReadTokens,
+              }),
+              ...(event.cacheCreationTokens !== undefined && {
+                cacheCreationTokens: event.cacheCreationTokens,
+              }),
+            },
+          } as UIMessageChunk);
+          break;
+        }
+
         case "session-result": {
           endText();
 
