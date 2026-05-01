@@ -29,7 +29,7 @@ fn resolve_web_dir() -> Result<std::path::PathBuf, String> {
 
     // 2. Production: relative to current executable
     if let Ok(exe) = std::env::current_exe() {
-        // macOS bundle: .app/Contents/MacOS/band-dashboard → .app/Contents/Resources/web
+        // macOS bundle: .app/Contents/MacOS/Band → .app/Contents/Resources/web
         if let Some(macos_dir) = exe.parent() {
             let resources = macos_dir.join("../Resources/web");
             if resources.join("dist/server/server.js").exists() {
