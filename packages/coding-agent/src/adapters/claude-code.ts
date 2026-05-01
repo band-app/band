@@ -582,6 +582,24 @@ function* mapClaudeCodeEvent(
       const numTurns = (message.num_turns as number) ?? 0;
       const costUsd = (message.total_cost_usd as number) ?? 0;
 
+      const usage = message.usage as
+        | {
+            input_tokens?: number;
+            output_tokens?: number;
+            cache_read_input_tokens?: number;
+            cache_creation_input_tokens?: number;
+          }
+        | undefined;
+      if (usage) {
+        yield {
+          type: "usage",
+          inputTokens: usage.input_tokens ?? 0,
+          outputTokens: usage.output_tokens ?? 0,
+          cacheReadTokens: usage.cache_read_input_tokens ?? 0,
+          cacheCreationTokens: usage.cache_creation_input_tokens ?? 0,
+        };
+      }
+
       // Fallback: if the final assistant text was never streamed via
       // intermediate `assistant` events (e.g. the SDK jumped straight
       // from an empty-text placeholder to the `result` event), emit

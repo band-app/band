@@ -152,6 +152,7 @@ export function convertEventsToUIMessages(events: SessionEventRecord[]): UIMessa
 
       case "data-session":
       case "data-result":
+      case "data-usage":
       case "finish-step":
       case "finish":
       case "start-step":

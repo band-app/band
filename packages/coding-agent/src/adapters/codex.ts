@@ -224,6 +224,11 @@ export class CodexAdapter implements CodingAgent {
             totalInputTokens += event.usage.input_tokens;
             totalOutputTokens += event.usage.output_tokens;
             yield {
+              type: "usage",
+              inputTokens: event.usage.input_tokens,
+              outputTokens: event.usage.output_tokens,
+            };
+            yield {
               type: "session-result",
               success: true,
               sessionId: actualSessionId,
