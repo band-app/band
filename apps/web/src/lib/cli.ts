@@ -1,11 +1,4 @@
-import {
-  accessSync,
-  constants,
-  lstatSync,
-  realpathSync,
-  symlinkSync,
-  unlinkSync,
-} from "node:fs";
+import { accessSync, constants, lstatSync, realpathSync, symlinkSync, unlinkSync } from "node:fs";
 import { platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
