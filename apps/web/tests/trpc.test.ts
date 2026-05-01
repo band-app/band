@@ -877,8 +877,9 @@ describe("tRPC — system checks", () => {
     const data = await trpcData<{ installed: boolean; other_hooks_exist: boolean }>(res);
     expect(typeof data.installed).toBe("boolean");
     expect(typeof data.other_hooks_exist).toBe("boolean");
-    // No claude settings in temp HOME, so hooks should not be installed
-    expect(data.installed).toBe(false);
+    // setup.ts auto-installs Claude hooks during server boot, so they
+    // should be present in the temp HOME by the time we query.
+    expect(data.installed).toBe(true);
   });
 });
 
