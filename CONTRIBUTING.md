@@ -111,6 +111,22 @@ This project uses **integration tests** as the primary testing approach. Do not 
 - **Node.js built-in test runner.** Use `node:test` with `node:assert/strict`.
 - **Never modify production code to make a test pass.**
 
+## Building Locally vs. Signed Releases
+
+Local builds (`pnpm build:dashboard` or `pnpm tauri build`) produce **unsigned** `.dmg` artifacts. macOS Gatekeeper will warn that the app is "damaged" or "from an unidentified developer" on first launch — this is expected for fork builds.
+
+Signed + notarized releases are produced **only** by the official `release.yml` and `nightly.yml` GitHub Actions workflows running on `band-app/band`. Apple Developer certificates and App Store Connect API keys live in a protected `production` GitHub Environment with required reviewers and `main`-branch restrictions, so:
+
+- Forks cannot trigger signed builds (secrets are not exposed to fork PRs).
+- Pull requests cannot exfiltrate signing credentials — release workflows only run via `workflow_dispatch` from maintainers.
+
+If you need to test a fork build on your own Mac, either:
+
+1. Right-click the `.app` → **Open** → confirm once, **or**
+2. `xattr -dr com.apple.quarantine /path/to/Band.app` to clear the quarantine flag.
+
+Do not request signing access for a fork — sign your build with your own Developer ID if you need notarization.
+
 ## Code of Conduct
 
 Be respectful and constructive. We're all here to build something useful.

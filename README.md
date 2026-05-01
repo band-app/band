@@ -25,6 +25,32 @@ IDE-agnostic agent orchestrator. A desktop app for managing AI coding agents acr
    AI Agent (claude, cursor, etc.)
 ```
 
+## Install
+
+### Stable
+
+Download the latest signed `.dmg` from [GitHub Releases](https://github.com/band-app/band/releases/latest), open it, and drag **Band** to `/Applications`. First launch should open without Gatekeeper warnings — releases are signed and notarized with an Apple Developer ID.
+
+Auto-update is built in: the app checks daily and prompts before installing.
+
+### Nightly
+
+Bleeding-edge builds from the `develop` branch are published to a single rolling [`nightly` release](https://github.com/band-app/band/releases/tag/nightly) every day at 04:00 UTC. Nightly builds:
+
+- Use a `<version>-nightly.<date>.<sha>` version label so you can see what you're running in **Settings → About**.
+- Are **not** wired to the stable updater channel — you must download new nightlies manually.
+- May be unstable. Use for testing pre-release features only.
+
+### Build from source (unsigned)
+
+```bash
+pnpm install
+pnpm build:dashboard
+open apps/dashboard/src-tauri/target/release/bundle/dmg/*.dmg
+```
+
+Local builds are unsigned — see [CONTRIBUTING.md](CONTRIBUTING.md#building-locally-vs-signed-releases) for how macOS handles them.
+
 ## Project Structure
 
 ```

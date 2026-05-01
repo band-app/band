@@ -1,0 +1,190 @@
+name: Nightly Build
+
+on:
+  schedule:
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch or commit SHA to build (default: develop)'
+        required: false
+        type: string
+        default: develop
+
+permissions:
+  contents: write
+
+jobs:
+  nightly:
+    name: Nightly
+    runs-on: macos-latest
+    environment: production
+    env:
+      NODE_OPTIONS: '--max-old-space-size=4096'
+      HAS_APPLE_CERT: ${{ secrets.APPLE_CERTIFICATE != '' && '1' || '' }}
+      HAS_APPLE_API_KEY: ${{ secrets.APPLE_API_KEY != '' && '1' || '' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || 'develop' }}
+          fetch-depth: 0
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ~/.pnpm-store
+          key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-registry-${{ runner.os }}-
+
+      - name: Cache Dashboard target
+        uses: actions/cache@v4
+        with:
+          path: apps/dashboard/src-tauri/target
+          key: cargo-dashboard-${{ runner.os }}-${{ hashFiles('apps/dashboard/src-tauri/Cargo.lock') }}
+          restore-keys: cargo-dashboard-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Compute nightly version
+        id: version
+        env:
+          GH_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          BASE_VERSION=$(node -p "require('./package.json').version")
+          DATE=$(date -u +%Y%m%d)
+          SHORT_SHA=$(echo "$GH_SHA" | cut -c1-7)
+          NIGHTLY_VERSION="${BASE_VERSION}-nightly.${DATE}.${SHORT_SHA}"
+          {
+            echo "nightly_version=$NIGHTLY_VERSION"
+            echo "short_sha=$SHORT_SHA"
+            echo "date=$DATE"
+          } >> "$GITHUB_OUTPUT"
+          echo "Nightly version: $NIGHTLY_VERSION"
+
+      - name: Build CLI
+        run: pnpm build:cli
+
+      - name: Build frontend
+        env:
+          BAND_BUILD_SHA: ${{ github.sha }}
+          BAND_BUILD_CHANNEL: nightly
+        run: |
+          pnpm build:web
+          pnpm --filter @band-app/dashboard build
+
+      - name: Import Apple certificate
+        if: ${{ env.HAS_APPLE_CERT == '1' }}
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          CERT_PATH="$RUNNER_TEMP/cert.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+
+          echo -n "$APPLE_CERTIFICATE" | base64 --decode -o "$CERT_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          security import "$CERT_PATH" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+
+          security list-keychain -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          rm "$CERT_PATH"
+
+      - name: Write App Store Connect API key
+        if: ${{ env.HAS_APPLE_API_KEY == '1' }}
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+        run: |
+          mkdir -p "$RUNNER_TEMP"
+          echo -n "$APPLE_API_KEY" | base64 --decode -o "$RUNNER_TEMP/api-key.p8"
+          chmod 600 "$RUNNER_TEMP/api-key.p8"
+
+      - name: Build DMG (nightly version override)
+        env:
+          NIGHTLY_VERSION: ${{ steps.version.outputs.nightly_version }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_PATH: ${{ runner.temp }}/api-key.p8
+        run: |
+          set -euo pipefail
+          VERSION_OVERRIDE=$(jq -n --arg v "$NIGHTLY_VERSION" '{version: $v}')
+          pnpm --filter @band-app/dashboard tauri build --ci \
+            --config '{"build":{"beforeBuildCommand":""}}' \
+            --config src-tauri/tauri.prod.conf.json \
+            --config "$VERSION_OVERRIDE"
+
+      - name: Cleanup keychain and key
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/build.keychain-db" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/api-key.p8"
+
+      - name: Collect artifacts
+        id: artifacts
+        env:
+          NIGHTLY_VERSION: ${{ steps.version.outputs.nightly_version }}
+        run: |
+          set -euo pipefail
+          BUNDLE_DIR="apps/dashboard/src-tauri/target/release/bundle"
+          STAGING="$RUNNER_TEMP/nightly-artifacts"
+          mkdir -p "$STAGING"
+          for f in "$BUNDLE_DIR"/dmg/*.dmg; do
+            cp "$f" "$STAGING/Band-${NIGHTLY_VERSION}.dmg"
+          done
+          echo "staging=$STAGING" >> "$GITHUB_OUTPUT"
+          ls -la "$STAGING"
+
+      - name: Publish rolling "nightly" GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NIGHTLY_VERSION: ${{ steps.version.outputs.nightly_version }}
+          STAGING: ${{ steps.artifacts.outputs.staging }}
+          GH_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          TAG="nightly"
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$TAG" \
+            --target "$GH_SHA" \
+            --title "Nightly build ($NIGHTLY_VERSION)" \
+            --notes "Latest unstable build from develop. Version: $NIGHTLY_VERSION. Commit: $GH_SHA. Not published to stable updater channel." \
+            --prerelease \
+            "$STAGING"/*
