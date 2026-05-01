@@ -83,6 +83,7 @@ pub fn run() {
             commands::ide::reveal_in_finder,
             commands::ide::check_app_exists,
             commands::ide::open_with_app,
+            commands::ide::install_cli,
             commands::webserver::webserver_start,
             commands::webserver::webserver_stop,
             commands::window::open_tasks_window,

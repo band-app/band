@@ -38,7 +38,7 @@ import {
   updateChatActiveSession,
   updateChatStatus,
 } from "../lib/chat-manager";
-import { checkCli, installCli } from "../lib/cli";
+import { checkCli, installCli, resolveCliPaths } from "../lib/cli";
 import { convertEventsToUIMessages, convertHistoryToUIMessages } from "../lib/convert-events";
 import { reloadSchedules, stopJobsForKey } from "../lib/cronjob-scheduler";
 import {
@@ -608,6 +608,10 @@ const cliRouter = t.router({
   check: publicProcedure.query(async () => {
     const status = await checkCli();
     return { status };
+  }),
+
+  resolve: publicProcedure.query(() => {
+    return resolveCliPaths();
   }),
 
   install: publicProcedure

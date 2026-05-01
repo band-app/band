@@ -58,6 +58,33 @@ export class HybridDashboardAdapter extends WebDashboardAdapter {
     return super.openWorkspace(workspaceId);
   }
 
+  async installCli(opts?: { allowPrompt?: boolean }): Promise<void> {
+    try {
+      // Try the web server path first (works when /usr/local/bin is writable)
+      await super.installCli();
+      return;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // If elevation is needed, the user explicitly clicked Install, and we're
+      // in Tauri, delegate to the desktop app which can show the macOS admin
+      // password dialog (it's the foreground GUI process).
+      if (opts?.allowPrompt && isTauri() && message.includes("elevation-required")) {
+        const paths = await this.trpc.cli.resolve.query();
+        if (!paths) {
+          throw new Error(
+            "Could not find band CLI binary. Build it first with: cargo build --release -p band-cli",
+          );
+        }
+        await tauriInvoke("install_cli", {
+          binaryPath: paths.binaryPath,
+          symlinkPath: paths.symlinkPath,
+        });
+        return;
+      }
+      throw err;
+    }
+  }
+
   subscribeActiveWorkspace(onChange: (workspaceId: string | null) => void): Unsubscribe {
     if (!isTauri() || this._appMode === "full-editor") {
       return super.subscribeActiveWorkspace(onChange);

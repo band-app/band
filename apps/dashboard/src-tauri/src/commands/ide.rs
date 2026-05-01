@@ -735,6 +735,38 @@ pub fn check_app_exists(app_name: String) -> bool {
         .is_ok_and(|output| output.status.success())
 }
 
+/// Install the CLI by creating a symlink with administrator privileges.
+/// Runs `osascript` to show a macOS admin password dialog — this works
+/// because the Tauri app is the foreground GUI process (unlike the web
+/// server, which can't reliably show GUI dialogs).
+#[tauri::command]
+pub fn install_cli(binary_path: String, symlink_path: String) -> Result<(), String> {
+    let cmd = format!(
+        "ln -sf '{}' '{}'",
+        binary_path.replace('\'', "'\\''"),
+        symlink_path.replace('\'', "'\\''")
+    );
+    let script = format!(
+        "do shell script \"{}\" with administrator privileges",
+        cmd.replace('\\', "\\\\").replace('"', "\\\"")
+    );
+    let output = std::process::Command::new("osascript")
+        .args(["-e", &script])
+        .output()
+        .map_err(|e| format!("Failed to run osascript: {e}"))?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("User canceled") || stderr.contains("-128") {
+            Err("Admin password prompt cancelled".to_string())
+        } else {
+            Err(format!("Failed to install CLI: {stderr}"))
+        }
+    }
+}
+
 /// Opens a path with a specific macOS application.
 #[tauri::command]
 pub fn open_with_app(path: String, app_name: String) -> Result<(), String> {

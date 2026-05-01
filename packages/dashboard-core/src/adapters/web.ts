@@ -29,7 +29,7 @@ export class WebDashboardAdapter implements DashboardAdapter {
   // The AppRouter type lives in apps/web which cannot be imported here
   // (circular dep). Type safety comes from the DashboardAdapter interface.
   // biome-ignore lint/suspicious/noExplicitAny: tRPC client without router type
-  private trpc: any = createTRPCClient({
+  protected trpc: any = createTRPCClient({
     links: [
       splitLink({
         condition: (op) => op.type === "subscription",

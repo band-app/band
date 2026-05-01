@@ -1,10 +1,6 @@
-import { execFile } from "node:child_process";
 import { accessSync, constants, lstatSync, realpathSync, symlinkSync, unlinkSync } from "node:fs";
 import { platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { promisify } from "node:util";
-
-const execFileP = promisify(execFile);
 
 export type CliStatus =
   | "Installed"
@@ -13,10 +9,10 @@ export type CliStatus =
   | "DirNotFound"
   | "NotWritable";
 
-const SYMLINK_PATH = "/usr/local/bin/band";
+export const SYMLINK_PATH = "/usr/local/bin/band";
 
 /** Find the CLI binary by trying multiple resolution strategies. */
-function findCliBinary(): string | null {
+export function findCliBinary(): string | null {
   const strategies = [
     // cwd = apps/web/ (Vite dev and production server)
     resolve(process.cwd(), ".."),
@@ -91,7 +87,7 @@ export interface InstallCliOptions {
   allowPrompt?: boolean;
 }
 
-export async function installCli(opts: InstallCliOptions = {}): Promise<void> {
+export async function installCli(_opts: InstallCliOptions = {}): Promise<void> {
   const binaryPath = findCliBinary();
   if (!binaryPath) {
     throw new Error(
@@ -114,43 +110,18 @@ export async function installCli(opts: InstallCliOptions = {}): Promise<void> {
   }
 
   if (platform() === "darwin") {
-    if (opts.allowPrompt) {
-      await installViaOsascript(binaryPath, SYMLINK_PATH);
-      return;
-    }
-    // On macOS the user can elevate by clicking the Install button —
-    // surface a friendly message rather than telling them to run sudo.
-    throw new Error("admin password required");
+    // Elevation must happen in the Tauri desktop app (foreground GUI process).
+    // Throw a recognizable error so the hybrid adapter can catch it and
+    // delegate to the Tauri `install_cli` command.
+    throw new Error("elevation-required");
   }
 
   throw new Error(`Run: sudo ln -sf "${binaryPath}" "${SYMLINK_PATH}"`);
 }
 
-/** Quote a string for use as a single shell argument inside single quotes. */
-function shellQuote(s: string): string {
-  return `'${s.replace(/'/g, "'\\''")}'`;
-}
-
-/** Quote a string as an AppleScript string literal. */
-function appleScriptString(s: string): string {
-  return `"${s.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
-}
-
-/**
- * On macOS, run `ln -sf` with admin privileges via osascript so the OS
- * displays a single password prompt instead of asking the user to run sudo
- * in a terminal.
- */
-async function installViaOsascript(binaryPath: string, symlinkPath: string): Promise<void> {
-  const cmd = `ln -sf ${shellQuote(binaryPath)} ${shellQuote(symlinkPath)}`;
-  const script = `do shell script ${appleScriptString(cmd)} with administrator privileges`;
-  try {
-    await execFileP("osascript", ["-e", script]);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (message.includes("User canceled") || message.includes("-128")) {
-      throw new Error("Admin password prompt cancelled");
-    }
-    throw new Error(`Failed to install band CLI: ${message}`);
-  }
+/** Resolve the CLI binary path and symlink path for the frontend. */
+export function resolveCliPaths(): { binaryPath: string; symlinkPath: string } | null {
+  const binaryPath = findCliBinary();
+  if (!binaryPath) return null;
+  return { binaryPath, symlinkPath: SYMLINK_PATH };
 }
