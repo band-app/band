@@ -82,13 +82,13 @@ describe("CodexAdapter", () => {
 
   it("passes model via startThread, not constructor config", async () => {
     _test.setEvents([{ type: "thread.started", thread_id: "t1" }]);
-    const adapter = new CodexAdapter(makeConfig({ model: "gpt-5-codex" }));
+    const adapter = new CodexAdapter(makeConfig({ model: "gpt-5.5" }));
     await collectEvents(adapter.runSession("hello"));
     assert.equal(_test.constructorCalls.length, 1);
     // Model is no longer passed via constructor config (avoids double-passing)
     assert.equal(_test.constructorCalls[0].config, undefined);
     // Model is passed via startThread options instead
-    assert.equal(_test.startThreadCalls[0].opts?.model, "gpt-5-codex");
+    assert.equal(_test.startThreadCalls[0].opts?.model, "gpt-5.5");
   });
 
   it("passes executablePath as codexPathOverride", async () => {
@@ -464,11 +464,28 @@ describe("CodexAdapter", () => {
       { type: "turn.started" },
       {
         type: "turn.completed",
-        usage: { input_tokens: 1000, cached_input_tokens: 200, output_tokens: 500 },
+        usage: {
+          input_tokens: 1000,
+          cached_input_tokens: 200,
+          output_tokens: 500,
+          reasoning_output_tokens: 50,
+        },
       },
     ]);
     const adapter = new CodexAdapter(makeConfig());
     const events = await collectEvents(adapter.runSession("plan"));
+
+    const usage = events.find((e) => e.type === "usage") as
+      | {
+          contextTokens: number;
+          totalProcessedTokens?: number;
+          reasoningOutputTokens?: number;
+        }
+      | undefined;
+    assert.ok(usage);
+    assert.equal(usage.contextTokens, 1550);
+    assert.equal(usage.totalProcessedTokens, 1550);
+    assert.equal(usage.reasoningOutputTokens, 50);
 
     const result = events.find((e) => e.type === "session-result") as {
       success: boolean;
@@ -666,6 +683,7 @@ describe("CodexAdapter", () => {
       "tool-result",
       "text-delta",
       // item.completed for agent_message emits no delta (already fully streamed)
+      "usage",
       "session-result",
     ]);
 
@@ -680,8 +698,18 @@ describe("CodexAdapter", () => {
     const toolResult = events[3] as { output: string };
     assert.equal(toolResult.output, "# My Project\nHello world");
 
+    // Verify usage carries context size
+    const usageEvent = events[5] as {
+      inputTokens: number;
+      contextTokens?: number;
+      totalProcessedTokens?: number;
+    };
+    assert.equal(usageEvent.inputTokens, 500);
+    assert.equal(usageEvent.contextTokens, 700);
+    assert.equal(usageEvent.totalProcessedTokens, 700);
+
     // Verify session-result
-    const sessionResult = events[5] as {
+    const sessionResult = events[6] as {
       success: boolean;
       numTurns: number;
     };

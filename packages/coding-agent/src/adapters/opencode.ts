@@ -112,6 +112,13 @@ export class OpenCodeAdapter implements CodingAgent {
         stderrChunks.push(chunk.toString());
       });
 
+      // Register the close listener *before* iterating stdout so a fast-exit
+      // (process closes before the readline loop starts/finishes draining)
+      // can't fire 'close' without a subscriber and leave us with exit code 0.
+      const exitCodePromise = new Promise<number>((resolve) => {
+        child.on("close", (code) => resolve(code ?? 0));
+      });
+
       const rl = createInterface({ input: child.stdout });
 
       try {
@@ -179,9 +186,7 @@ export class OpenCodeAdapter implements CodingAgent {
           }
         }
 
-        lastExitCode = await new Promise<number>((resolve) => {
-          child.on("close", (code) => resolve(code ?? 0));
-        });
+        lastExitCode = await exitCodePromise;
         lastStderr = stderrChunks.join("");
 
         if (!gotOutput && effectiveSessionId && attempt < maxAttempts) {

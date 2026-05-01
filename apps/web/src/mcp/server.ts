@@ -22,7 +22,7 @@ interface ProcedureInfo {
 function discoverProcedures(): ProcedureInfo[] {
   const procedures: ProcedureInfo[] = [];
   // appRouter._def.procedures is a flat Record<"namespace.method", AnyProcedure>
-  const procRecord = (appRouter._def as Record<string, unknown>).procedures as Record<
+  const procRecord = (appRouter._def as unknown as Record<string, unknown>).procedures as Record<
     string,
     // biome-ignore lint/suspicious/noExplicitAny: tRPC internal structure
     any

@@ -47,21 +47,71 @@ export interface ErrorEvent {
   message: string;
 }
 
+/** Identifies which provider produced a UsageEvent so consumers can apply
+ * provider-aware semantics without sniffing optional fields. */
+export type UsageProvider = "claude" | "codex" | "gemini" | "opencode" | "cursor";
+
 /**
  * Token usage for the most recent turn. Adapters emit this when usage info
  * is available so the UI can show context-window pressure.
  *
- * For Claude-family agents, `inputTokens` is the prompt size for the latest
- * turn (which approximates current context size, since the full conversation
- * is resent each turn). `cacheReadTokens` and `cacheCreationTokens` count
- * cached prompt content. For Codex/Gemini, only input/output are populated.
+ * Provider semantics differ:
+ *   • Claude — on `result` events `inputTokens` is the *uncached* prompt
+ *     portion of the latest API round-trip; cached portions appear in
+ *     `cacheReadTokens` / `cacheCreationTokens`, and total context ≈ sum of
+ *     all three. Mid-turn (per-assistant) emissions freeze input/output/cache
+ *     at the *previous* turn's cumulative totals so tooltip values stay
+ *     coherent while `contextTokens` ticks live from the SDK.
+ *   • Codex / OpenAI Responses API — `inputTokens` is the *full* prompt size
+ *     for the turn (already inclusive of cached content). `cacheReadTokens`
+ *     reports the cached subset for tooltip display only; do not sum. Codex
+ *     also populates `reasoningOutputTokens`, `contextTokens`, and
+ *     `totalProcessedTokens`.
+ *
+ * Adapters MUST set `contextTokens` to the computed context size for their
+ * provider so the UI can render the meter without knowing per-provider
+ * arithmetic. UIs should prefer `contextTokens` and only fall back to the
+ * legacy summation (driven by `provider`) for snapshots that predate that
+ * field.
  */
 export interface UsageEvent {
   type: "usage";
+  /**
+   * Provider that produced this snapshot. Drives provider-aware UI logic
+   * (legacy context summation, tooltip rendering). Optional for backward
+   * compatibility with snapshots persisted before this field existed; new
+   * adapters MUST set it.
+   */
+  provider?: UsageProvider;
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens?: number;
+  /**
+   * Claude-only: tokens written into the prompt cache on this round-trip.
+   * Non-Claude adapters MUST leave this `undefined`.
+   */
   cacheCreationTokens?: number;
+  reasoningOutputTokens?: number;
+  /** Total tokens currently in the model's context window (provider-aware). */
+  contextTokens?: number;
+  /**
+   * Cumulative tokens processed by this session/thread when available.
+   * Monotonic across `runSession` boundaries within a single process —
+   * adapters persist running totals keyed by session id so a continuing
+   * conversation never resets to zero. Not durable across server restarts.
+   *
+   * For Codex/OpenAI this approximates billed prompt+output tokens (each
+   * turn's full prompt is counted, so prior history is recounted across
+   * turns by design); for Claude it is the API-reported cumulative.
+   */
+  totalProcessedTokens?: number;
+  /**
+   * Effective max context window the agent is operating against. When set,
+   * the UI should prefer this over a hard-coded model→window map (e.g.
+   * Claude SDK's `getContextUsage().maxTokens` reflects the auto-compact
+   * threshold).
+   */
+  maxContextTokens?: number;
 }
 
 /**
