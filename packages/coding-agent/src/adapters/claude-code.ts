@@ -580,8 +580,26 @@ function* mapClaudeCodeEvent(
               name?: string;
               input?: Record<string, unknown>;
             }>;
+            usage?: {
+              input_tokens?: number;
+              output_tokens?: number;
+              cache_read_input_tokens?: number;
+              cache_creation_input_tokens?: number;
+            };
           }
         | undefined;
+      // Emit a usage snapshot for the latest assistant message so the UI
+      // context meter ticks after every LLM round-trip — not just at the
+      // final `result` event.
+      if (msg?.usage) {
+        yield {
+          type: "usage",
+          inputTokens: msg.usage.input_tokens ?? 0,
+          outputTokens: msg.usage.output_tokens ?? 0,
+          cacheReadTokens: msg.usage.cache_read_input_tokens ?? 0,
+          cacheCreationTokens: msg.usage.cache_creation_input_tokens ?? 0,
+        };
+      }
       const content = msg?.content;
       if (Array.isArray(content)) {
         // Pre-populate toolNames for all visible tool_use blocks so that
