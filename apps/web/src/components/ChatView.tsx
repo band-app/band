@@ -1,5 +1,5 @@
 import { useChat } from "@ai-sdk/react";
-import { AgentIcon } from "@band-app/dashboard-core";
+import { AgentIcon, useExperimentalContextMeter } from "@band-app/dashboard-core";
 import {
   Badge,
   cn,
@@ -286,6 +286,7 @@ export function ChatView({
   const [loadingHistory, setLoadingHistory] = useState(!!initialSessionId);
   const [hasMore, setHasMore] = useState(false);
   const [usage, setUsage] = useState<UsageData | undefined>(undefined);
+  const [contextMeterEnabled] = useExperimentalContextMeter();
   const [loadingOlder, setLoadingOlder] = useState(false);
   const scrollHeightBeforePrependRef = useRef<number | null>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -395,6 +396,21 @@ export function ChatView({
   const [userModelOverride, setUserModelOverride] = useState<string | undefined>();
   // Effective model: user override takes precedence, then agent default
   const selectedModel = userModelOverride ?? agentDefaultModel;
+
+  // Drop the SDK-reported `maxContextTokens` when the model changes — that
+  // value was for the prior model and would otherwise stick until the next
+  // turn refreshes it (e.g. switching Sonnet 1M → Haiku 200k would still
+  // show the 1M denominator). Falling back to undefined lets ContextMeter
+  // use the static MODEL_CONTEXT_WINDOWS entry for the new model in the
+  // meantime.
+  useEffect(() => {
+    if (!selectedModel) return;
+    setUsage((prev) => {
+      if (!prev || prev.maxContextTokens === undefined) return prev;
+      const { maxContextTokens: _drop, ...rest } = prev;
+      return rest;
+    });
+  }, [selectedModel]);
 
   useEffect(() => {
     const modelsP = trpc.models.listAll
@@ -1229,7 +1245,7 @@ export function ChatView({
 
       <div className="mx-auto w-full max-w-3xl shrink-0 px-3 lg:px-4 pt-2 pb-4 standalone:pb-[env(safe-area-inset-bottom)]">
         <TaskListWidget tasks={taskMap} workspaceId={workspaceId} />
-        <ContextMeter usage={usage} model={selectedModel} />
+        {contextMeterEnabled && <ContextMeter usage={usage} model={selectedModel} />}
         <PromptInput
           onSubmit={handleSubmit}
           draftKey={workspaceId}
@@ -1472,20 +1488,25 @@ function relativeTime(ms: number): string {
   return `${months}mo ago`;
 }
 
-// Approximate context window per model. Used for the chat context meter.
-// Falls back to 200k for unknown models — meter still shows raw counts.
+// Approximate context window per model. Fallback for the chat context meter
+// when an adapter doesn't report `maxContextTokens` live. Claude Code adapter
+// always passes the SDK's `getContextUsage().maxTokens`, so this map is
+// fallback-only for Claude; Codex/Gemini/Cursor SDKs don't expose a context
+// window field, so they rely on this map directly.
 const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
-  // Claude family
+  // Claude — Opus 4.7, Opus 4.6, and Sonnet 4.6 default to 1M GA at standard
+  // pricing. Haiku 4.5 stays at 200k.
   "claude-opus-4-7": 1_000_000,
-  "claude-opus-4-6": 200_000,
-  "claude-sonnet-4-6": 200_000,
+  "claude-opus-4-6": 1_000_000,
+  "claude-sonnet-4-6": 1_000_000,
   "claude-haiku-4-5": 200_000,
-  // OpenAI
+  // OpenAI — GPT-5 family runs at 400k inside Codex CLI (the Responses API
+  // tier is 1M but Band shells out to the codex binary which caps at 400k).
   "gpt-5": 400_000,
   "gpt-4.1": 1_000_000,
   "gpt-4o": 128_000,
-  // Gemini
-  "gemini-2.5-pro": 2_000_000,
+  // Gemini 2.5 Pro and Flash are both 1M (~1,048,576).
+  "gemini-2.5-pro": 1_000_000,
   "gemini-2.5-flash": 1_000_000,
 };
 

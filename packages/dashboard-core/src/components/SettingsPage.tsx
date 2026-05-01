@@ -26,6 +26,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useAdapter, useCapabilities } from "../context";
 import { useUpdateSettings } from "../hooks/use-settings-mutations";
 import { useSettingsQuery } from "../hooks/use-settings-query";
+import { useExperimentalContextMeter } from "../lib/experimental-flags";
 import { playSound, SOUNDS, type SoundId } from "../lib/sounds";
 import type { CodingAgentDefinition, CodingAgentType, LabelDefinition, Theme } from "../types";
 import { AgentIcon } from "./agent-icons";
@@ -76,6 +77,9 @@ export function SettingsPage({ open, onOpenChange }: Props) {
   const [agentModels, setAgentModels] = useState<
     Record<string, { id: string; name: string; description?: string }[]>
   >({});
+  // Experimental flags live in localStorage (per-device) rather than the
+  // settings store, so they don't participate in `isDirty` / Save.
+  const [contextMeterEnabled, setContextMeterEnabled] = useExperimentalContextMeter();
 
   const adapter = useAdapter();
 
@@ -569,6 +573,24 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                   id="auto-start-tunnel"
                   checked={autoStartTunnel}
                   onCheckedChange={setAutoStartTunnel}
+                />
+              </SettingsRow>
+            </SettingsSection>
+
+            {/* ── Experimental ───────────────────────────────── */}
+            <SettingsSection
+              title="Experimental"
+              description="Unstable features that may change or break between releases. Stored per device — not synced across the workspace."
+            >
+              <SettingsRow
+                htmlFor="exp-context-meter"
+                label="Context window meter"
+                description="Show a context-usage donut next to the session-history button. Token counting accuracy varies by provider — disable if numbers look wrong."
+              >
+                <Switch
+                  id="exp-context-meter"
+                  checked={contextMeterEnabled}
+                  onCheckedChange={setContextMeterEnabled}
                 />
               </SettingsRow>
             </SettingsSection>

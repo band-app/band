@@ -295,11 +295,22 @@ export class CodexAdapter implements CodingAgent {
           }
 
           case "turn.completed": {
-            const reasoningOutputTokens = event.usage.reasoning_output_tokens ?? 0;
-            const contextTokens =
-              event.usage.input_tokens + event.usage.output_tokens + reasoningOutputTokens;
-            totalInputTokens += event.usage.input_tokens;
-            totalOutputTokens += event.usage.output_tokens;
+            // Codex CLI versions vary: some omit individual usage fields. Coerce
+            // each to 0 so a missing field doesn't NaN the broadcast (ChatView
+            // silently drops data-usage chunks without numeric inputTokens).
+            const usage = event.usage ?? {
+              input_tokens: 0,
+              output_tokens: 0,
+              cached_input_tokens: 0,
+              reasoning_output_tokens: 0,
+            };
+            const inputTokens = usage.input_tokens ?? 0;
+            const outputTokens = usage.output_tokens ?? 0;
+            const cachedInputTokens = usage.cached_input_tokens ?? 0;
+            const reasoningOutputTokens = usage.reasoning_output_tokens ?? 0;
+            const contextTokens = inputTokens + outputTokens + reasoningOutputTokens;
+            totalInputTokens += inputTokens;
+            totalOutputTokens += outputTokens;
             totalReasoningOutputTokens += reasoningOutputTokens;
             persistCumulative();
             // OpenAI Responses API: `input_tokens` is the full prompt sent to
@@ -307,12 +318,23 @@ export class CodexAdapter implements CodingAgent {
             // `cached_input_tokens` is a subset for visibility only. Match the
             // t3code-style split: current window usage is the latest turn's
             // total, while totalProcessedTokens is cumulative session work.
+            log.debug(
+              {
+                inputTokens,
+                outputTokens,
+                cachedInputTokens,
+                reasoningOutputTokens,
+                contextTokens,
+                totalProcessed: totalInputTokens + totalOutputTokens + totalReasoningOutputTokens,
+              },
+              "codex usage emitted",
+            );
             yield {
               type: "usage",
               provider: "codex",
-              inputTokens: event.usage.input_tokens,
-              outputTokens: event.usage.output_tokens,
-              cacheReadTokens: event.usage.cached_input_tokens,
+              inputTokens,
+              outputTokens,
+              cacheReadTokens: cachedInputTokens,
               reasoningOutputTokens,
               contextTokens,
               totalProcessedTokens:
