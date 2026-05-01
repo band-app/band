@@ -453,12 +453,42 @@ function resolveCodexBinary(): string | undefined {
 
 // ─── Models ─────────────────────────────────────────────────────────────────
 
+// All GPT-5 family models cap at 400k tokens inside the Codex CLI tier
+// (Plus / Pro / Business / Enterprise / Edu / Go). The Responses API tier
+// goes higher (1M for 5.5) but Band shells out to the codex binary.
+const CODEX_CTX = 400_000;
+
 const CODEX_MODELS: AgentModel[] = [
-  { id: "gpt-5.5", name: "GPT-5.5", description: "Flagship frontier model" },
-  { id: "gpt-5.4", name: "GPT-5.4", description: "Previous flagship model" },
-  { id: "gpt-5.4-mini", name: "GPT-5.4 Mini", description: "Fast, efficient mini model" },
-  { id: "gpt-5.3-codex", name: "GPT-5.3 Codex", description: "Coding-optimized model" },
-  { id: "gpt-5.2-codex", name: "GPT-5.2 Codex", description: "Previous coding-optimized model" },
+  {
+    id: "gpt-5.5",
+    name: "GPT-5.5",
+    description: "Flagship frontier model",
+    contextWindow: CODEX_CTX,
+  },
+  {
+    id: "gpt-5.4",
+    name: "GPT-5.4",
+    description: "Previous flagship model",
+    contextWindow: CODEX_CTX,
+  },
+  {
+    id: "gpt-5.4-mini",
+    name: "GPT-5.4 Mini",
+    description: "Fast, efficient mini model",
+    contextWindow: CODEX_CTX,
+  },
+  {
+    id: "gpt-5.3-codex",
+    name: "GPT-5.3 Codex",
+    description: "Coding-optimized model",
+    contextWindow: CODEX_CTX,
+  },
+  {
+    id: "gpt-5.2-codex",
+    name: "GPT-5.2 Codex",
+    description: "Previous coding-optimized model",
+    contextWindow: CODEX_CTX,
+  },
 ];
 
 // ─── Skills ─────────────────────────────────────────────────────────────────

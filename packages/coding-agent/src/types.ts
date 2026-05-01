@@ -72,6 +72,8 @@ export interface AgentModel {
   id: string;
   name: string;
   description?: string;
+  /** Approximate max input context window in tokens (e.g. 200000, 1_000_000). */
+  contextWindow?: number;
 }
 
 export interface RunSessionOptions {

@@ -53,6 +53,16 @@ interface Props {
   onOpenChange: (open: boolean) => void;
 }
 
+/** Compact context-window label, e.g. 200000 → "200k", 1_000_000 → "1M". */
+function formatCtxWindow(n: number): string {
+  if (n >= 1_000_000) {
+    const m = n / 1_000_000;
+    return `${Number.isInteger(m) ? m.toFixed(0) : m.toFixed(1)}M`;
+  }
+  if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
+  return String(n);
+}
+
 export function SettingsPage({ open, onOpenChange }: Props) {
   const { settings } = useSettingsQuery();
   const updateSettingsMutation = useUpdateSettings();
@@ -75,7 +85,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
   const [enableLSP, setEnableLSP] = useState(settings.enableLSP ?? false);
   const [selectedTheme, setSelectedTheme] = useState<Theme>(settings.theme ?? "system");
   const [agentModels, setAgentModels] = useState<
-    Record<string, { id: string; name: string; description?: string }[]>
+    Record<string, { id: string; name: string; description?: string; contextWindow?: number }[]>
   >({});
   // Experimental flags live in localStorage (per-device) rather than the
   // settings store, so they don't participate in `isDirty` / Save.
@@ -483,7 +493,14 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                                 <SelectItem value={MODEL_DEFAULT_SENTINEL}>Default</SelectItem>
                                 {models.map((m) => (
                                   <SelectItem key={m.id} value={m.id}>
-                                    {m.name}
+                                    <span className="flex w-full items-baseline justify-between gap-2">
+                                      <span>{m.name}</span>
+                                      {m.contextWindow !== undefined && (
+                                        <span className="text-[10px] uppercase tabular-nums text-muted-foreground">
+                                          {formatCtxWindow(m.contextWindow)} ctx
+                                        </span>
+                                      )}
+                                    </span>
                                   </SelectItem>
                                 ))}
                               </SelectContent>
