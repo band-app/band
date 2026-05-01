@@ -213,6 +213,13 @@ interface AgentGroup {
   defaultModel?: string;
 }
 
+interface UsageData {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens?: number;
+  cacheCreationTokens?: number;
+}
+
 interface ChatViewProps {
   workspaceId: string;
   chatId: string;
@@ -281,6 +288,7 @@ export function ChatView({
   const currentSessionId =
     activeSessionId ?? (initialSessionCleared ? undefined : initialSessionId);
   const [hasMore, setHasMore] = useState(false);
+  const [usage, setUsage] = useState<UsageData | undefined>(undefined);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const scrollHeightBeforePrependRef = useRef<number | null>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -497,6 +505,20 @@ export function ChatView({
         const sid = (dataPart.data as { sessionId: string }).sessionId;
         sessionIdRef.current = sid;
         onActiveSessionChange?.(sid);
+      } else if (
+        dataPart.type === "data-usage" &&
+        dataPart.data != null &&
+        typeof dataPart.data === "object"
+      ) {
+        const data = dataPart.data as Partial<UsageData>;
+        if (typeof data.inputTokens === "number" && typeof data.outputTokens === "number") {
+          setUsage({
+            inputTokens: data.inputTokens,
+            outputTokens: data.outputTokens,
+            cacheReadTokens: data.cacheReadTokens,
+            cacheCreationTokens: data.cacheCreationTokens,
+          });
+        }
       }
     },
   });
@@ -851,6 +873,7 @@ export function ChatView({
       onActiveSessionChange?.(sessionId);
       setMessages([]);
       setQueuedMessages([]);
+      setUsage(undefined);
       trpc.queue.clear.mutate({ workspaceId, chatId }).catch(() => {});
       onShowSessionListChange(false);
       await loadMessages(sessionId);
@@ -880,6 +903,7 @@ export function ChatView({
     onActiveSessionChange?.(undefined);
     setMessages([]);
     setQueuedMessages([]);
+    setUsage(undefined);
     trpc.queue.clear.mutate({ workspaceId, chatId }).catch(() => {});
     onShowSessionListChange(false);
   }, [
@@ -1218,6 +1242,7 @@ export function ChatView({
 
       <div className="mx-auto w-full max-w-3xl shrink-0 px-3 lg:px-4 pt-2 pb-4 standalone:pb-[env(safe-area-inset-bottom)]">
         <TaskListWidget tasks={taskMap} workspaceId={workspaceId} />
+        <ContextMeter usage={usage} model={selectedModel} />
         <PromptInput
           onSubmit={handleSubmit}
           draftKey={workspaceId}
@@ -1458,6 +1483,93 @@ function relativeTime(ms: number): string {
   if (days < 30) return `${days}d ago`;
   const months = Math.floor(days / 30);
   return `${months}mo ago`;
+}
+
+// Approximate context window per model. Used for the chat context meter.
+// Falls back to 200k for unknown models — meter still shows raw counts.
+const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
+  // Claude family
+  "claude-opus-4-7": 1_000_000,
+  "claude-opus-4-6": 200_000,
+  "claude-sonnet-4-6": 200_000,
+  "claude-haiku-4-5": 200_000,
+  // OpenAI
+  "gpt-5": 400_000,
+  "gpt-4.1": 1_000_000,
+  "gpt-4o": 128_000,
+  // Gemini
+  "gemini-2.5-pro": 2_000_000,
+  "gemini-2.5-flash": 1_000_000,
+};
+
+function getContextWindow(model: string | undefined): number {
+  if (!model) return 200_000;
+  // Try exact match, then prefix match (e.g. "claude-sonnet-4-6-20250101").
+  if (MODEL_CONTEXT_WINDOWS[model]) return MODEL_CONTEXT_WINDOWS[model];
+  for (const [key, value] of Object.entries(MODEL_CONTEXT_WINDOWS)) {
+    if (model.startsWith(key)) return value;
+  }
+  return 200_000;
+}
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}k`;
+  return String(n);
+}
+
+function ContextMeter({
+  usage,
+  model,
+}: {
+  usage: UsageData | undefined;
+  model: string | undefined;
+}) {
+  const contextSize = usage
+    ? usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheCreationTokens ?? 0)
+    : 0;
+  const window = getContextWindow(model);
+  const pct = Math.min(100, (contextSize / window) * 100);
+  const danger = pct >= 85;
+  const warn = !danger && pct >= 65;
+  const barColor = danger ? "bg-destructive" : warn ? "bg-amber-500" : "bg-primary/60";
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div className="mb-1 flex items-center gap-2 px-1 text-[11px] text-muted-foreground">
+          <span className="tabular-nums">
+            {formatTokens(contextSize)} / {formatTokens(window)}
+          </span>
+          <div className="h-1 flex-1 overflow-hidden rounded-full bg-border">
+            <div className={cn("h-full transition-all", barColor)} style={{ width: `${pct}%` }} />
+          </div>
+          <span className="tabular-nums">{Math.round(pct)}%</span>
+        </div>
+      </TooltipTrigger>
+      <TooltipContent>
+        <div className="space-y-0.5 text-xs">
+          {usage ? (
+            <>
+              <div>Input: {usage.inputTokens.toLocaleString()}</div>
+              <div>Output: {usage.outputTokens.toLocaleString()}</div>
+              {usage.cacheReadTokens !== undefined && (
+                <div>Cache read: {usage.cacheReadTokens.toLocaleString()}</div>
+              )}
+              {usage.cacheCreationTokens !== undefined && (
+                <div>Cache write: {usage.cacheCreationTokens.toLocaleString()}</div>
+              )}
+              <div className="mt-1 border-t pt-1">
+                Context: {contextSize.toLocaleString()} / {window.toLocaleString()}
+              </div>
+            </>
+          ) : (
+            <div>Context window: {window.toLocaleString()} tokens</div>
+          )}
+        </div>
+      </TooltipContent>
+    </Tooltip>
+  );
 }
 
 interface SessionHistoryItem {

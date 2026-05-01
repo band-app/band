@@ -48,6 +48,23 @@ export interface ErrorEvent {
 }
 
 /**
+ * Token usage for the most recent turn. Adapters emit this when usage info
+ * is available so the UI can show context-window pressure.
+ *
+ * For Claude-family agents, `inputTokens` is the prompt size for the latest
+ * turn (which approximates current context size, since the full conversation
+ * is resent each turn). `cacheReadTokens` and `cacheCreationTokens` count
+ * cached prompt content. For Codex/Gemini, only input/output are populated.
+ */
+export interface UsageEvent {
+  type: "usage";
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens?: number;
+  cacheCreationTokens?: number;
+}
+
+/**
  * Emitted when the agent resolves the real session ID after a run.
  * Some agents (e.g. OpenCode) create their own session IDs internally.
  * The adapter emits session-start with a temporary ID early (so the UI
@@ -69,4 +86,5 @@ export type AgentEvent =
   | FileEvent
   | SessionResultEvent
   | SessionIdResolvedEvent
+  | UsageEvent
   | ErrorEvent;
