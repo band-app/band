@@ -214,10 +214,19 @@ interface AgentGroup {
 }
 
 interface UsageData {
+  /** Provider that produced this snapshot. Drives legacy context-size math. */
+  provider?: "claude" | "codex" | "gemini" | "opencode" | "cursor";
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens?: number;
   cacheCreationTokens?: number;
+  reasoningOutputTokens?: number;
+  /** Provider-aware total context tokens (preferred over summing fields). */
+  contextTokens?: number;
+  /** Cumulative processed tokens for the session/thread when available. */
+  totalProcessedTokens?: number;
+  /** Authoritative model context window from the agent SDK. */
+  maxContextTokens?: number;
 }
 
 interface ChatViewProps {
@@ -512,11 +521,26 @@ export function ChatView({
       ) {
         const data = dataPart.data as Partial<UsageData>;
         if (typeof data.inputTokens === "number" && typeof data.outputTokens === "number") {
-          setUsage({
+          const next: UsageData = {
+            provider: data.provider,
             inputTokens: data.inputTokens,
             outputTokens: data.outputTokens,
             cacheReadTokens: data.cacheReadTokens,
             cacheCreationTokens: data.cacheCreationTokens,
+            reasoningOutputTokens: data.reasoningOutputTokens,
+            contextTokens: data.contextTokens,
+            totalProcessedTokens: data.totalProcessedTokens,
+            maxContextTokens: data.maxContextTokens,
+          };
+          // SSE gap-fill can replay older usage chunks on reconnect. Prefer
+          // monotonic totalProcessedTokens when present so context may shrink
+          // after compaction; older providers fall back to context size.
+          setUsage((prev) => {
+            const shouldUseNext =
+              prev?.totalProcessedTokens !== undefined && next.totalProcessedTokens !== undefined
+                ? next.totalProcessedTokens >= prev.totalProcessedTokens
+                : usageContextSize(next) >= usageContextSize(prev);
+            return shouldUseNext ? next : prev;
           });
         }
       }
@@ -670,12 +694,27 @@ export function ChatView({
           chatId,
           sessionId,
         });
-        setMessages(data.messages as UIMessage[]);
+        setMessages(data.messages as unknown as UIMessage[]);
         lastEventIdRef.current = data.lastEventId ?? undefined;
         firstEventIdRef.current = data.firstEventId ?? undefined;
         firstMessageIndexRef.current =
           (data as { firstMessageIndex?: number | null }).firstMessageIndex ?? undefined;
         setHasMore(data.hasMore);
+        // Re-hydrate the context meter from the persisted snapshot so it
+        // survives task completion and page refreshes.
+        if (data.lastUsage) {
+          setUsage({
+            provider: data.lastUsage.provider,
+            inputTokens: data.lastUsage.inputTokens,
+            outputTokens: data.lastUsage.outputTokens,
+            cacheReadTokens: data.lastUsage.cacheReadTokens,
+            cacheCreationTokens: data.lastUsage.cacheCreationTokens,
+            reasoningOutputTokens: data.lastUsage.reasoningOutputTokens,
+            contextTokens: data.lastUsage.contextTokens,
+            totalProcessedTokens: data.lastUsage.totalProcessedTokens,
+            maxContextTokens: data.lastUsage.maxContextTokens,
+          });
+        }
       } finally {
         setLoadingHistory(false);
       }
@@ -717,7 +756,7 @@ export function ChatView({
           scrollHeightBeforePrependRef.current = scrollEl.scrollHeight;
         }
 
-        setMessages((prev) => [...(data.messages as UIMessage[]), ...prev]);
+        setMessages((prev) => [...(data.messages as unknown as UIMessage[]), ...prev]);
         firstEventIdRef.current = data.firstEventId ?? undefined;
         firstMessageIndexRef.current =
           (data as { firstMessageIndex?: number | null }).firstMessageIndex ?? undefined;
@@ -1525,10 +1564,19 @@ function ContextMeter({
   usage: UsageData | undefined;
   model: string | undefined;
 }) {
-  const contextSize = usage
-    ? usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheCreationTokens ?? 0)
-    : 0;
-  const window = getContextWindow(model);
+  // Adapters compute context size with provider-aware semantics and pass it
+  // through `contextTokens`. Only fall back to summation for legacy snapshots
+  // that predate that field. Provider semantics differ:
+  //   • Claude: `inputTokens` is the *uncached* portion → must add cache.
+  //   • Codex/OpenAI: `inputTokens` is the full prompt (already includes
+  //     cached) → adding `cacheReadTokens` would double-count.
+  // `legacyContextSize` uses the `provider` discriminator (with a
+  // cacheCreationTokens-presence fallback for old snapshots).
+  const contextSize = usage ? (usage.contextTokens ?? legacyContextSize(usage)) : 0;
+  // Prefer the SDK-reported max (e.g. Claude's auto-compact-aware limit).
+  // Fall back to the static model→window map for providers that don't
+  // report it (Codex, Gemini, etc.).
+  const window = usage?.maxContextTokens ?? getContextWindow(model);
   const pct = Math.min(100, (contextSize / window) * 100);
   const danger = pct >= 85;
   const warn = !danger && pct >= 65;
@@ -1559,6 +1607,13 @@ function ContextMeter({
               {usage.cacheCreationTokens !== undefined && (
                 <div>Cache write: {usage.cacheCreationTokens.toLocaleString()}</div>
               )}
+              {usage.reasoningOutputTokens !== undefined && (
+                <div>Reasoning output: {usage.reasoningOutputTokens.toLocaleString()}</div>
+              )}
+              {usage.totalProcessedTokens !== undefined &&
+                usage.totalProcessedTokens > contextSize && (
+                  <div>Total processed: {usage.totalProcessedTokens.toLocaleString()}</div>
+                )}
               <div className="mt-1 border-t pt-1">
                 Context: {contextSize.toLocaleString()} / {window.toLocaleString()}
               </div>
@@ -1570,6 +1625,31 @@ function ContextMeter({
       </TooltipContent>
     </Tooltip>
   );
+}
+
+function usageContextSize(usage: UsageData | undefined): number {
+  if (!usage) return 0;
+  return usage.contextTokens ?? legacyContextSize(usage);
+}
+
+/**
+ * Backward-compat fallback for usage snapshots that lack `contextTokens`.
+ * Uses `provider` when set; falls back to `cacheCreationTokens` presence as
+ * a Claude detector for snapshots persisted before the provider field
+ * existed. Claude `inputTokens` excludes cached content (must add cache
+ * fields); other providers report the full prompt.
+ */
+function legacyContextSize(usage: UsageData): number {
+  const isClaude = usage.provider === "claude" || usage.cacheCreationTokens !== undefined;
+  if (isClaude) {
+    return (
+      usage.inputTokens +
+      (usage.cacheReadTokens ?? 0) +
+      (usage.cacheCreationTokens ?? 0) +
+      (usage.reasoningOutputTokens ?? 0)
+    );
+  }
+  return usage.inputTokens + (usage.reasoningOutputTokens ?? 0);
 }
 
 interface SessionHistoryItem {

@@ -102,6 +102,38 @@ function encodeProjectDir(absDir: string): string {
 
 const SESSION_TAIL_BYTES = 64 * 1024;
 
+interface CumulativeUsage {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheCreation: number;
+}
+
+/**
+ * Per-session cumulative usage counters, persisted across `runSession`
+ * invocations so `totalProcessedTokens` is monotonic across a continuing
+ * conversation. Module-scoped (lives for the lifetime of the process); not
+ * durable across server restarts.
+ *
+ * Bounded by `MAX_CUMULATIVE_SESSIONS` via simple insertion-order LRU eviction
+ * to prevent unbounded growth in long-running servers.
+ */
+const cumulativeUsageBySession = new Map<string, CumulativeUsage>();
+const MAX_CUMULATIVE_SESSIONS = 500;
+
+/** Set into a bounded LRU map. JS Map preserves insertion order, so deleting
+ * the first key drops the oldest. Re-inserting an existing key bumps it to
+ * MRU. */
+function lruSet<K, V>(map: Map<K, V>, key: K, value: V, cap: number): void {
+  if (map.has(key)) map.delete(key);
+  map.set(key, value);
+  while (map.size > cap) {
+    const oldest = map.keys().next().value;
+    if (oldest === undefined) break;
+    map.delete(oldest);
+  }
+}
+
 // Read the most recent `last-prompt` record from a session JSONL file by
 // scanning the last 64 KB. The CLI's /resume picker uses this latest
 // prompt as the session title, so we surface the same string here.
@@ -288,6 +320,57 @@ export class ClaudeCodeAdapter implements CodingAgent {
       hasEmittedTextSinceLastUser: false,
     };
 
+    // Cumulative session totals — persisted in `cumulativeUsageBySession`
+    // keyed by sessionId so they survive `runSession` boundaries. New sessions
+    // start at zero; resumed sessions pick up where the prior run left off.
+    // This makes `totalProcessedTokens` truly monotonic across the whole
+    // session and lets the task-runner monotonic guard rehydrate correctly.
+    let currentSessionId = sessionId ?? "";
+    const initialCumulative = currentSessionId
+      ? cumulativeUsageBySession.get(currentSessionId)
+      : undefined;
+    let cumulativeInput = initialCumulative?.input ?? 0;
+    let cumulativeOutput = initialCumulative?.output ?? 0;
+    let cumulativeCacheRead = initialCumulative?.cacheRead ?? 0;
+    let cumulativeCacheCreation = initialCumulative?.cacheCreation ?? 0;
+
+    const persistCumulative = () => {
+      if (!currentSessionId) return;
+      lruSet(
+        cumulativeUsageBySession,
+        currentSessionId,
+        {
+          input: cumulativeInput,
+          output: cumulativeOutput,
+          cacheRead: cumulativeCacheRead,
+          cacheCreation: cumulativeCacheCreation,
+        },
+        MAX_CUMULATIVE_SESSIONS,
+      );
+    };
+
+    // Migrate stored cumulative under a newly-resolved sessionId. Called when
+    // the SDK reports a session_id different from the one we initialised
+    // with — typically the first `system.init` for a brand-new session.
+    const adoptSessionId = (newSid: string) => {
+      if (!newSid || newSid === currentSessionId) return;
+      const prevStored = currentSessionId
+        ? cumulativeUsageBySession.get(currentSessionId)
+        : undefined;
+      if (prevStored) {
+        lruSet(cumulativeUsageBySession, newSid, prevStored, MAX_CUMULATIVE_SESSIONS);
+        cumulativeUsageBySession.delete(currentSessionId);
+      }
+      currentSessionId = newSid;
+      persistCumulative();
+    };
+
+    // Most recent canonical context snapshot from `getContextUsage()`.
+    // Reused on the terminal `result` event so the final usage payload
+    // reports the same window size the UI just rendered, instead of the
+    // accumulated-across-API-calls number SDK puts on `result.usage`.
+    let lastKnownContext: { contextTokens: number; maxContextTokens?: number } | undefined;
+
     try {
       for await (const message of conversation) {
         log.debug(
@@ -298,7 +381,118 @@ export class ClaudeCodeAdapter implements CodingAgent {
           "sdk message",
         );
 
+        // Adopt SDK-reported sessionId as soon as it's known so cumulatives
+        // get persisted under the right key. Applies to brand-new sessions
+        // (no `sessionId` param) and to any rare ID changes.
+        const rawSid = (message as { session_id?: string | number | null }).session_id;
+        if (rawSid != null) {
+          adoptSessionId(String(rawSid));
+        }
+
+        // Handle the terminal `result` event's usage *before* delegating to
+        // the mapper so the usage event lands ahead of any text-delta /
+        // session-result the mapper emits for the same message. SDK's
+        // `result.usage` is the accumulated total for this turn — drive
+        // `totalProcessedTokens` from it; carry context-size from the most
+        // recent `getContextUsage()` call so the meter doesn't briefly
+        // jump to the inflated accumulated number.
+        if (message.type === "result") {
+          const resultUsage = (
+            message as {
+              usage?: {
+                input_tokens?: number;
+                output_tokens?: number;
+                cache_read_input_tokens?: number;
+                cache_creation_input_tokens?: number;
+              };
+            }
+          ).usage;
+          if (resultUsage) {
+            const inputTokens = resultUsage.input_tokens ?? 0;
+            const outputTokens = resultUsage.output_tokens ?? 0;
+            const cacheReadTokens = resultUsage.cache_read_input_tokens ?? 0;
+            const cacheCreationTokens = resultUsage.cache_creation_input_tokens ?? 0;
+            cumulativeInput += inputTokens;
+            cumulativeOutput += outputTokens;
+            cumulativeCacheRead += cacheReadTokens;
+            cumulativeCacheCreation += cacheCreationTokens;
+            persistCumulative();
+
+            // If no prior main-thread assistant message ran getContextUsage()
+            // (e.g. tool-only turn or early termination), fetch a snapshot now
+            // so the terminal usage event still carries an accurate context
+            // size instead of forcing the UI onto the per-call summation
+            // fallback (which under-counts: it omits system prompt, MCP
+            // tools, and memory-file overhead).
+            if (!lastKnownContext) {
+              try {
+                const ctx = await conversation.getContextUsage();
+                lastKnownContext = {
+                  contextTokens: ctx.totalTokens,
+                  maxContextTokens: ctx.maxTokens,
+                };
+              } catch (err) {
+                log.warn({ err }, "getContextUsage failed on result; emitting without snapshot");
+              }
+            }
+
+            yield {
+              type: "usage",
+              provider: "claude",
+              inputTokens,
+              outputTokens,
+              cacheReadTokens,
+              cacheCreationTokens,
+              contextTokens: lastKnownContext?.contextTokens,
+              maxContextTokens: lastKnownContext?.maxContextTokens,
+              totalProcessedTokens:
+                cumulativeInput + cumulativeOutput + cumulativeCacheRead + cumulativeCacheCreation,
+            };
+          }
+        }
+
         yield* mapClaudeCodeEvent(message, state);
+
+        // After each main-thread assistant message, ask the SDK for the
+        // canonical context-window breakdown (same number Claude Code's
+        // `/context` HUD displays). It includes system prompt, MCP tools,
+        // memory files, and message history overhead — far more accurate
+        // than summing per-call API usage. Skip subagent messages and
+        // non-assistant messages. On failure, log and skip — falling back
+        // to per-message summation drifts upward across multi-tool turns
+        // and is worse than no update.
+        if (
+          message.type === "assistant" &&
+          (message as { parent_tool_use_id?: string | null }).parent_tool_use_id == null
+        ) {
+          try {
+            const ctx = await conversation.getContextUsage();
+            lastKnownContext = {
+              contextTokens: ctx.totalTokens,
+              maxContextTokens: ctx.maxTokens,
+            };
+            // Mid-turn emission ticks the context meter without inflating the
+            // tooltip's per-field counters: input/output/cache reflect the
+            // last *completed* turn's cumulative totals (frozen between
+            // result events), while contextTokens is a live SDK snapshot.
+            // Surfacing `ctx.apiUsage` here would show single-API-call
+            // values that look nonsensical next to a 50k-token context.
+            yield {
+              type: "usage",
+              provider: "claude",
+              inputTokens: cumulativeInput,
+              outputTokens: cumulativeOutput,
+              cacheReadTokens: cumulativeCacheRead,
+              cacheCreationTokens: cumulativeCacheCreation,
+              contextTokens: ctx.totalTokens,
+              maxContextTokens: ctx.maxTokens,
+              totalProcessedTokens:
+                cumulativeInput + cumulativeOutput + cumulativeCacheRead + cumulativeCacheCreation,
+            };
+          } catch (err) {
+            log.warn({ err }, "getContextUsage failed; skipping usage emission");
+          }
+        }
       }
       log.info("conversation generator done");
     } catch (err) {
@@ -588,18 +782,10 @@ function* mapClaudeCodeEvent(
             };
           }
         | undefined;
-      // Emit a usage snapshot for the latest assistant message so the UI
-      // context meter ticks after every LLM round-trip — not just at the
-      // final `result` event.
-      if (msg?.usage) {
-        yield {
-          type: "usage",
-          inputTokens: msg.usage.input_tokens ?? 0,
-          outputTokens: msg.usage.output_tokens ?? 0,
-          cacheReadTokens: msg.usage.cache_read_input_tokens ?? 0,
-          cacheCreationTokens: msg.usage.cache_creation_input_tokens ?? 0,
-        };
-      }
+      // Note: per-assistant usage is emitted by the caller via
+      // `getContextUsage()` so the meter reflects the SDK's full context
+      // accounting (system prompt, MCP tools, memory files). Emitting
+      // here too would double-broadcast on every assistant message.
       const content = msg?.content;
       if (Array.isArray(content)) {
         // Pre-populate toolNames for all visible tool_use blocks so that
@@ -693,23 +879,12 @@ function* mapClaudeCodeEvent(
       const numTurns = (message.num_turns as number) ?? 0;
       const costUsd = (message.total_cost_usd as number) ?? 0;
 
-      const usage = message.usage as
-        | {
-            input_tokens?: number;
-            output_tokens?: number;
-            cache_read_input_tokens?: number;
-            cache_creation_input_tokens?: number;
-          }
-        | undefined;
-      if (usage) {
-        yield {
-          type: "usage",
-          inputTokens: usage.input_tokens ?? 0,
-          outputTokens: usage.output_tokens ?? 0,
-          cacheReadTokens: usage.cache_read_input_tokens ?? 0,
-          cacheCreationTokens: usage.cache_creation_input_tokens ?? 0,
-        };
-      }
+      // Note: usage for the terminal `result` event is emitted by the
+      // caller (runSession's outer loop) before delegating to this mapper,
+      // so it can carry the cached `lastKnownContext` snapshot and the
+      // running cumulative `totalProcessedTokens`. Emitting here would
+      // double-broadcast and report the inflated accumulated number as
+      // current context size.
 
       // Fallback: if the final assistant text was never streamed via
       // intermediate `assistant` events (e.g. the SDK jumped straight

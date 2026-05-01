@@ -23,6 +23,36 @@ import type {
 
 const log = createLogger("coding-agent:codex");
 
+interface CumulativeUsage {
+  input: number;
+  output: number;
+  reasoningOutput: number;
+}
+
+/**
+ * Per-thread cumulative usage counters, persisted across `runSession`
+ * invocations so `totalProcessedTokens` is monotonic across a continuing
+ * Codex thread. Module-scoped (lifetime-of-process); not durable across
+ * server restarts.
+ *
+ * Bounded by `MAX_CUMULATIVE_SESSIONS` via insertion-order LRU eviction
+ * to prevent unbounded growth in long-running servers.
+ */
+const cumulativeUsageBySession = new Map<string, CumulativeUsage>();
+const MAX_CUMULATIVE_SESSIONS = 500;
+
+/** Bounded-LRU set. JS Map preserves insertion order, so deleting the first
+ * key drops the oldest. Re-inserting an existing key bumps it to MRU. */
+function lruSet<K, V>(map: Map<K, V>, key: K, value: V, cap: number): void {
+  if (map.has(key)) map.delete(key);
+  map.set(key, value);
+  while (map.size > cap) {
+    const oldest = map.keys().next().value;
+    if (oldest === undefined) break;
+    map.delete(oldest);
+  }
+}
+
 /**
  * Codex adapter — uses the `@openai/codex-sdk` TypeScript SDK which wraps the
  * Codex CLI binary and exchanges JSONL events over stdin/stdout.
@@ -141,11 +171,49 @@ export class CodexAdapter implements CodingAgent {
 
     const startMs = Date.now();
     let turnCount = 0;
-    let totalInputTokens = 0;
-    let totalOutputTokens = 0;
     // Track the actual thread ID from the SDK — sessionId param may be
     // undefined for new sessions.
     let actualSessionId = sessionId ?? "";
+
+    // Cumulative thread totals — persisted in `cumulativeUsageBySession`
+    // keyed by thread id so they survive `runSession` boundaries. New threads
+    // start at zero; resumed threads pick up where the prior run left off.
+    const initialCumulative = actualSessionId
+      ? cumulativeUsageBySession.get(actualSessionId)
+      : undefined;
+    let totalInputTokens = initialCumulative?.input ?? 0;
+    let totalOutputTokens = initialCumulative?.output ?? 0;
+    let totalReasoningOutputTokens = initialCumulative?.reasoningOutput ?? 0;
+
+    const persistCumulative = () => {
+      if (!actualSessionId) return;
+      lruSet(
+        cumulativeUsageBySession,
+        actualSessionId,
+        {
+          input: totalInputTokens,
+          output: totalOutputTokens,
+          reasoningOutput: totalReasoningOutputTokens,
+        },
+        MAX_CUMULATIVE_SESSIONS,
+      );
+    };
+
+    // Migrate stored cumulative under a newly-resolved thread id. Called when
+    // `thread.started` reports a thread_id different from the one we
+    // initialised with — typically for brand-new threads.
+    const adoptSessionId = (newSid: string) => {
+      if (!newSid || newSid === actualSessionId) return;
+      const prevStored = actualSessionId
+        ? cumulativeUsageBySession.get(actualSessionId)
+        : undefined;
+      if (prevStored) {
+        lruSet(cumulativeUsageBySession, newSid, prevStored, MAX_CUMULATIVE_SESSIONS);
+        cumulativeUsageBySession.delete(actualSessionId);
+      }
+      actualSessionId = newSid;
+      persistCumulative();
+    };
 
     const runStreamedStartMs = Date.now();
     log.info("calling thread.runStreamed");
@@ -179,6 +247,10 @@ export class CodexAdapter implements CodingAgent {
     const toolNames = new Map<string, string>();
     // Track emitted text length per item to compute deltas on item.updated
     const emittedTextLengths = new Map<string, number>();
+    // Buffer terminal turn state — emit a single session-result *after* the
+    // iterator exhausts so multi-turn sessions don't yield duplicate finishes.
+    let lastTurnOutcome: "completed" | "failed" | null = null;
+    let lastTurnError: string | null = null;
 
     try {
       for await (const event of { [Symbol.asyncIterator]: () => iterator }) {
@@ -187,7 +259,8 @@ export class CodexAdapter implements CodingAgent {
         switch (event.type) {
           // ── Session lifecycle ──────────────────────────────────────────
           case "thread.started": {
-            actualSessionId = event.thread_id ?? sessionId ?? "";
+            const resolvedSid = event.thread_id ?? sessionId ?? "";
+            adoptSessionId(resolvedSid);
             log.info(
               { threadId: event.thread_id, sessionIdParam: sessionId, actualSessionId },
               "codex thread.started",
@@ -222,35 +295,37 @@ export class CodexAdapter implements CodingAgent {
           }
 
           case "turn.completed": {
+            const reasoningOutputTokens = event.usage.reasoning_output_tokens ?? 0;
+            const contextTokens =
+              event.usage.input_tokens + event.usage.output_tokens + reasoningOutputTokens;
             totalInputTokens += event.usage.input_tokens;
             totalOutputTokens += event.usage.output_tokens;
+            totalReasoningOutputTokens += reasoningOutputTokens;
+            persistCumulative();
+            // OpenAI Responses API: `input_tokens` is the full prompt sent to
+            // the model for this turn (already inclusive of cached content).
+            // `cached_input_tokens` is a subset for visibility only. Match the
+            // t3code-style split: current window usage is the latest turn's
+            // total, while totalProcessedTokens is cumulative session work.
             yield {
               type: "usage",
+              provider: "codex",
               inputTokens: event.usage.input_tokens,
               outputTokens: event.usage.output_tokens,
+              cacheReadTokens: event.usage.cached_input_tokens,
+              reasoningOutputTokens,
+              contextTokens,
+              totalProcessedTokens:
+                totalInputTokens + totalOutputTokens + totalReasoningOutputTokens,
             };
-            yield {
-              type: "session-result",
-              success: true,
-              sessionId: actualSessionId,
-              durationMs: Date.now() - startMs,
-              numTurns: turnCount,
-              costUsd: 0,
-              errors: [],
-            };
+            lastTurnOutcome = "completed";
+            lastTurnError = null;
             break;
           }
 
           case "turn.failed": {
-            yield {
-              type: "session-result",
-              success: false,
-              sessionId: actualSessionId,
-              durationMs: Date.now() - startMs,
-              numTurns: turnCount,
-              costUsd: 0,
-              errors: [event.error.message],
-            };
+            lastTurnOutcome = "failed";
+            lastTurnError = event.error.message;
             break;
           }
 
@@ -269,11 +344,25 @@ export class CodexAdapter implements CodingAgent {
           turnCount,
           totalInputTokens,
           totalOutputTokens,
+          totalReasoningOutputTokens,
           actualSessionId,
           elapsedMs: Date.now() - startMs,
         },
         "codex stream done — all events consumed",
       );
+
+      // Emit a single terminal session-result reflecting the last turn outcome.
+      if (lastTurnOutcome !== null) {
+        yield {
+          type: "session-result",
+          success: lastTurnOutcome === "completed",
+          sessionId: actualSessionId,
+          durationMs: Date.now() - startMs,
+          numTurns: turnCount,
+          costUsd: 0,
+          errors: lastTurnError ? [lastTurnError] : [],
+        };
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       log.error({ err, cwd: this.workspaceDir }, "codex stream error");

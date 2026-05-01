@@ -86,7 +86,14 @@ import {
   upsertWorkspaceStatus,
   worktreesDir,
 } from "../lib/state";
-import { abortTask, cancelTask, getTask, submitTask, TaskConflictError } from "../lib/task-runner";
+import {
+  abortTask,
+  cancelTask,
+  getSessionUsage,
+  getTask,
+  submitTask,
+  TaskConflictError,
+} from "../lib/task-runner";
 import { listTasks, loadTask } from "../lib/task-store";
 import { loadWorkspaceTerminalConfig } from "../lib/terminal-config";
 import {
@@ -1533,6 +1540,9 @@ const sessionsRouter = t.router({
     )
     .query(async ({ input }) => {
       const pageSize = input.limit ?? 100;
+      // Latest usage snapshot — included on the initial page only so the
+      // chat UI can re-hydrate the context meter without a separate query.
+      const lastUsage = input.beforeEventId ? null : (getSessionUsage(input.sessionId) ?? null);
 
       // Try in-memory session buffer first (only for non-JSONL pagination).
       // When the client is paginating via beforeMessageIndex we're explicitly
@@ -1560,6 +1570,7 @@ const sessionsRouter = t.router({
               lastEventId,
               firstMessageIndex: null,
               hasMore: hasMoreInBuffer,
+              lastUsage,
             };
           }
 
@@ -1591,6 +1602,7 @@ const sessionsRouter = t.router({
                   lastEventId,
                   firstMessageIndex: jsonl.firstMessageIndex,
                   hasMore: jsonl.hasMore,
+                  lastUsage,
                 };
               }
             }
@@ -1604,6 +1616,7 @@ const sessionsRouter = t.router({
             lastEventId,
             firstMessageIndex: null,
             hasMore: false,
+            lastUsage,
           };
         }
       }
@@ -1632,6 +1645,7 @@ const sessionsRouter = t.router({
         lastEventId: null,
         firstMessageIndex: jsonl.firstMessageIndex,
         hasMore: jsonl.hasMore,
+        lastUsage,
       };
     }),
 });
