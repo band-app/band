@@ -46,7 +46,8 @@
     "resources": {
       "../../web/dist/": "web/dist/",
       "../../../extensions/vscode/dist/extension.js": "extensions/band/dist/extension.js",
-      "../../../extensions/vscode/package.json": "extensions/band/package.json"
+      "../../../extensions/vscode/package.json": "extensions/band/package.json",
+      "../../../extensions/vscode/band-vscode-0.1.0.vsix": "extensions/band/band-vscode-0.1.0.vsix"
     }
   },
   "plugins": {}

@@ -84,24 +84,22 @@ async function installExtension(editorType: "vscode" | "cursor"): Promise<{
   installed: boolean;
   error?: string;
 }> {
-  // Resolve path to the bundled .vsix file.
-  // This source file lives at apps/web/src/lib/setup.ts, so go up to the
-  // project root and then into extensions/vscode/.
-  const extensionSrcDir = resolve(
-    import.meta.dirname,
-    "..",
-    "..",
-    "..",
-    "..",
-    "extensions",
-    "vscode",
-  );
-  const vsixPath = join(extensionSrcDir, "band-vscode-0.1.0.vsix");
+  // The vsix lives in two places depending on how the server is running:
+  //  - Dev: apps/web/src/lib/setup.ts → up to repo root → extensions/vscode/<vsix>
+  //  - Prod: bundled web server at <Resources>/web/dist/start-server.mjs;
+  //    Tauri bundles the vsix at <Resources>/extensions/band/<vsix>
+  //    (see tauri.conf.json `bundle.resources`)
+  const vsixName = "band-vscode-0.1.0.vsix";
+  const candidatePaths = [
+    resolve(import.meta.dirname, "..", "..", "extensions", "band", vsixName),
+    resolve(import.meta.dirname, "..", "..", "..", "..", "extensions", "vscode", vsixName),
+  ];
+  const vsixPath = candidatePaths.find((p) => existsSync(p));
 
-  if (!existsSync(vsixPath)) {
+  if (!vsixPath) {
     return {
       installed: false,
-      error: `VSIX not found at ${vsixPath} — run \`vsce package\` in extensions/vscode/`,
+      error: `VSIX not found (looked in: ${candidatePaths.join(", ")})`,
     };
   }
 

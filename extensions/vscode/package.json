@@ -24,14 +24,14 @@
     ]
   },
   "scripts": {
-    "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node && npm run deploy",
+    "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node && npm run package",
     "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch",
-    "deploy": "cp dist/extension.js ~/.vscode/extensions/band.band-vscode-0.1.0/dist/extension.js && cp package.json ~/.vscode/extensions/band.band-vscode-0.1.0/package.json && mkdir -p ~/.cursor/extensions/band.band-vscode-0.1.0/dist && cp dist/extension.js ~/.cursor/extensions/band.band-vscode-0.1.0/dist/extension.js && cp package.json ~/.cursor/extensions/band.band-vscode-0.1.0/package.json",
-    "package": "vsce package"
+    "package": "vsce package --no-dependencies --out band-vscode-0.1.0.vsix"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.2.1",
     "esbuild": "^0.24.0",
     "typescript": "^5.7.0"
   }
