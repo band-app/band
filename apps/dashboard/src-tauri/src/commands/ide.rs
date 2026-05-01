@@ -282,19 +282,23 @@ fn detect_frontmost_workspace(app_state: &state::AppState) -> Option<String> {
 }
 
 /// Fetch fresh project state from the web server and update the cache.
-fn refresh_project_cache(cache: &ProjectCache) -> Option<state::AppState> {
-    let client = ApiClient::from_settings().ok()?;
-    let data = client
-        .trpc_query("projects.list", &serde_json::json!({}))
-        .ok()?;
-    let projects_arr = data.get("projects").and_then(|p| p.as_array())?;
+/// Returns the actual error so callers can surface it instead of a generic
+/// "not available yet" message.
+fn refresh_project_cache(cache: &ProjectCache) -> Result<state::AppState, String> {
+    let client = ApiClient::from_settings()
+        .map_err(|e| format!("Failed to connect to Band web server: {e}"))?;
+    let data = client.trpc_query("projects.list", &serde_json::json!({}))?;
+    let projects_arr = data
+        .get("projects")
+        .and_then(|p| p.as_array())
+        .ok_or_else(|| "projects.list response missing 'projects' array".to_string())?;
     let projects: Vec<state::ProjectState> = projects_arr
         .iter()
         .filter_map(|p| serde_json::from_value(p.clone()).ok())
         .collect();
     let app_state = state::AppState { projects };
     cache.set(app_state.clone());
-    Some(app_state)
+    Ok(app_state)
 }
 
 /// Look up a workspace in the app state by ID.
@@ -444,7 +448,9 @@ pub fn start_focus_polling(app_handle: tauri::AppHandle, enabled: Arc<AtomicBool
             // Refresh project cache from web server every 5 seconds
             if last_cache_refresh.elapsed() >= Duration::from_secs(5) {
                 last_cache_refresh = std::time::Instant::now();
-                refresh_project_cache(&project_cache);
+                if let Err(e) = refresh_project_cache(&project_cache) {
+                    log_debug(&format!("focus polling: refresh_project_cache failed: {e}"));
+                }
 
                 if api.is_none() {
                     api = ApiClient::from_settings().ok();
@@ -538,17 +544,18 @@ pub fn workspace_focus(
     drop(last);
 
     // Try cache first, then refresh from API on miss
-    let app_state = project_cache
-        .get()
-        .or_else(|| refresh_project_cache(&project_cache))
-        .ok_or("Project state not available yet")?;
+    let app_state = match project_cache.get() {
+        Some(s) => s,
+        None => refresh_project_cache(&project_cache)
+            .map_err(|e| format!("Could not load project state: {e}"))?,
+    };
 
     let (wt_path, proj_path, ws_id) =
         if let Some((proj, wt)) = find_workspace(&workspace_id, &app_state) {
             (wt.path.clone(), proj.path.clone(), workspace_id.clone())
         } else {
             let fresh = refresh_project_cache(&project_cache)
-                .ok_or(format!("Workspace '{workspace_id}' not found"))?;
+                .map_err(|e| format!("Could not refresh project state: {e}"))?;
             if let Some((proj, wt)) = find_workspace(&workspace_id, &fresh) {
                 (wt.path.clone(), proj.path.clone(), workspace_id.clone())
             } else {

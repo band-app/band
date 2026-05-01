@@ -241,7 +241,7 @@ export function DashboardShell({ toolbarExtra, hideTitleBar }: DashboardShellPro
           <span className="text-blue-700 dark:text-blue-200">
             {cliState.status === "conflict"
               ? "A different `band` binary exists — replace it to use the bundled CLI"
-              : `Install \`band\` CLI to /usr/local/bin (${cliState.reason})`}
+              : "Install band CLI"}
           </span>
           <Button variant="outline" size="sm" className="shrink-0 text-xs" onClick={installCli}>
             Install

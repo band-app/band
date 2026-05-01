@@ -48,10 +48,6 @@ const DEFAULT_DEFAULTS = {
   apps: [
     {
       type: "vscode" as const,
-      terminals: [
-        { name: "claude", command: "band tasks watch && claude --continue" },
-        { name: "shell", command: "", split: "vertical" as const },
-      ],
     },
   ],
 };

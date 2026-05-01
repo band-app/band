@@ -62,7 +62,8 @@ export function useCliSetup() {
 
   const install = async () => {
     try {
-      await adapter.installCli();
+      // Explicit user action — allow OS-level admin prompt when needed
+      await adapter.installCli({ allowPrompt: true });
       // Re-check to confirm it actually worked
       const result = await adapter.checkCli();
       if (result === "Installed") {

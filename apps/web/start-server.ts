@@ -16,6 +16,7 @@ import { killAllServers } from "./src/lib/lsp-manager.ts";
 import { handleLspConnection } from "./src/lib/lsp-proxy.ts";
 import { mimeTypeFromFilename } from "./src/lib/mime-types.ts";
 import { checkPrereqs } from "./src/lib/process-utils.ts";
+import { runFirstTimeSetup } from "./src/lib/setup.ts";
 import { bandHome, getOrCreateToken, loadSettings, resetAgentStatuses } from "./src/lib/state.ts";
 import { cleanupStaleTasks } from "./src/lib/task-store.ts";
 import { killAllTerminals } from "./src/lib/terminal-manager.ts";
@@ -174,6 +175,10 @@ async function main() {
   if (resetCount > 0) {
     console.log(`Reset ${resetCount} stale agent status(es) on startup`);
   }
+
+  // First-time setup: detect editor, write default config, install
+  // extension and CLI. Idempotent — skips if defaults already exist.
+  await runFirstTimeSetup();
 
   // Start cronjob scheduler — reads definitions and watches for changes
   startCronjobScheduler();
