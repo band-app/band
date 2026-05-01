@@ -61,3 +61,8 @@ pub fn check_app_exists(_app_name: String) -> bool {
 pub fn open_with_app(_path: String, _app_name: String) -> Result<(), String> {
     Err("Not supported on this platform".to_string())
 }
+
+#[tauri::command]
+pub fn install_cli(_binary_path: String, _symlink_path: String) -> Result<(), String> {
+    Err("Not supported on this platform".to_string())
+}
