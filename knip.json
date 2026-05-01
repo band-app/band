@@ -6,11 +6,7 @@
   "workspaces": {
     ".": {
       "entry": ["scripts/*.mjs"],
-      "ignoreDependencies": [
-        "@band-app/cli",
-        "@trpc/client",
-        "@trpc/server"
-      ]
+      "ignoreDependencies": ["@band-app/cli", "@trpc/client", "@trpc/server"]
     },
     "apps/web": {
       "entry": [
