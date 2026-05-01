@@ -40,7 +40,9 @@ export interface DashboardAdapter {
   updateSettings(settings: Settings): Promise<void>;
 
   // Models (for agent configuration)
-  listModels?(agentId?: string): Promise<{ id: string; name: string; description?: string }[]>;
+  listModels?(
+    agentId?: string,
+  ): Promise<{ id: string; name: string; description?: string; contextWindow?: number }[]>;
 
   // Event subscriptions (return unsubscribe fn)
   subscribeAgentStatus(

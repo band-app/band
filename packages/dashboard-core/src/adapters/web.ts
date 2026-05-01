@@ -115,9 +115,14 @@ export class WebDashboardAdapter implements DashboardAdapter {
 
   async listModels(
     agentId?: string,
-  ): Promise<{ id: string; name: string; description?: string }[]> {
+  ): Promise<{ id: string; name: string; description?: string; contextWindow?: number }[]> {
     const data = await this.trpc.models.list.query({ agentId });
-    return data.models as { id: string; name: string; description?: string }[];
+    return data.models as {
+      id: string;
+      name: string;
+      description?: string;
+      contextWindow?: number;
+    }[];
   }
 
   private statusHandlers = new Set<(data: SSEEvent) => void>();

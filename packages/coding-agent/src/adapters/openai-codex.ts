@@ -186,8 +186,13 @@ export class OpenAICodexAdapter implements CodingAgent {
 
   listModels(): AgentModel[] {
     return [
-      { id: "codex-mini", name: "Codex Mini", description: "Fast and efficient" },
-      { id: "o4-mini", name: "o4-mini" },
+      {
+        id: "codex-mini",
+        name: "Codex Mini",
+        description: "Fast and efficient",
+        contextWindow: 200_000,
+      },
+      { id: "o4-mini", name: "o4-mini", contextWindow: 200_000 },
     ];
   }
 }

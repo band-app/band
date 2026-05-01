@@ -85,6 +85,16 @@ interface Props {
   hideTitle?: boolean;
 }
 
+/** Compact context-window label, e.g. 200000 → "200k", 1_000_000 → "1M". */
+function formatCtxWindow(n: number): string {
+  if (n >= 1_000_000) {
+    const m = n / 1_000_000;
+    return `${Number.isInteger(m) ? m.toFixed(0) : m.toFixed(1)}M`;
+  }
+  if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
+  return String(n);
+}
+
 function SettingsRow({
   label,
   value,
@@ -141,7 +151,7 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
   const [selectedTheme, setSelectedTheme] = useState<Theme>(settings.theme ?? "system");
   const [appMode, setAppMode] = useState<AppMode>(settings.appMode ?? "side-panel");
   const [agentModels, setAgentModels] = useState<
-    Record<string, { id: string; name: string; description?: string }[]>
+    Record<string, { id: string; name: string; description?: string; contextWindow?: number }[]>
   >({});
   const [contextMeterEnabled, setContextMeterEnabled] = useExperimentalContextMeter();
 
@@ -605,7 +615,14 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
                               <DropdownMenuRadioItem value="">Default</DropdownMenuRadioItem>
                               {agentModels[known.type]?.map((m) => (
                                 <DropdownMenuRadioItem key={m.id} value={m.id}>
-                                  {m.name}
+                                  <span className="flex w-full items-baseline justify-between gap-2">
+                                    <span>{m.name}</span>
+                                    {m.contextWindow !== undefined && (
+                                      <span className="text-[10px] uppercase tabular-nums text-muted-foreground">
+                                        {formatCtxWindow(m.contextWindow)} ctx
+                                      </span>
+                                    )}
+                                  </span>
                                 </DropdownMenuRadioItem>
                               ))}
                             </DropdownMenuRadioGroup>

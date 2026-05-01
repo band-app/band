@@ -543,31 +543,54 @@ export class ClaudeCodeAdapter implements CodingAgent {
     return [
       {
         id: "claude-sonnet-4-6",
-        name: "Default (recommended)",
-        description: "Use the default model (currently Sonnet 4.6) · $3/$15 per Mtok",
+        name: "Sonnet 4.6",
+        description: "Balanced default for everyday work",
+        contextWindow: claudeContextForId("claude-sonnet-4-6"),
       },
       {
         id: "claude-sonnet-4-6[1m]",
-        name: "Sonnet (1M context)",
-        description: "Sonnet 4.6 for long sessions · $6/$22.50 per Mtok",
+        name: "Sonnet 4.6 (1M)",
+        description: "Long-context tier for large sessions",
+        contextWindow: 1_000_000,
       },
       {
         id: "claude-opus-4-7",
-        name: "Opus",
-        description: "Opus 4.7 · Most capable for complex work · $5/$25 per Mtok",
+        name: "Opus 4.7",
+        description: "Most capable for complex work",
+        contextWindow: claudeContextForId("claude-opus-4-7"),
       },
       {
         id: "claude-opus-4-7[1m]",
-        name: "Opus (1M context)",
-        description: "Opus 4.7 for long sessions · $10/$37.50 per Mtok",
+        name: "Opus 4.7 (1M)",
+        description: "Most capable, long-context tier",
+        contextWindow: 1_000_000,
       },
       {
         id: "claude-haiku-4-5-20251001",
-        name: "Haiku",
-        description: "Haiku 4.5 · Fastest for quick answers · $1/$5 per Mtok",
+        name: "Haiku 4.5",
+        description: "Fastest for quick answers",
+        contextWindow: claudeContextForId("claude-haiku-4-5-20251001"),
       },
     ];
   }
+}
+
+/**
+ * Approximate context window per Claude model id. Mirrors the static map in
+ * the web meter so SDK-discovered models also surface a window estimate.
+ * The runtime `getContextUsage()` value still wins when present.
+ *
+ *   • [1m] suffix    → 1M long-context tier
+ *   • Sonnet 4.x     → 1M (GA at standard pricing, no premium)
+ *   • Opus 4.x       → 200k default; the 1M tier requires the [1m] id
+ *   • Haiku 4.x      → 200k
+ */
+function claudeContextForId(id: string): number | undefined {
+  if (id.includes("[1m]")) return 1_000_000;
+  if (id.startsWith("claude-haiku")) return 200_000;
+  if (id.startsWith("claude-opus")) return 200_000;
+  if (id.startsWith("claude-sonnet")) return 1_000_000;
+  return undefined;
 }
 
 function mapModelInfo(info: ModelInfo): AgentModel {
@@ -575,6 +598,7 @@ function mapModelInfo(info: ModelInfo): AgentModel {
     id: info.value,
     name: info.displayName,
     description: info.description,
+    contextWindow: claudeContextForId(info.value),
   };
 }
 

@@ -147,11 +147,19 @@ function splitMessageAtQueueBoundaries(parts: UIMessageParts): QueueSegment[] {
   return segments;
 }
 
+interface ModelInfo {
+  id: string;
+  name: string;
+  description?: string;
+  /** Approximate max input context window in tokens, when known. */
+  contextWindow?: number;
+}
+
 interface AgentGroup {
   agentId: string;
   agentType: string;
   agentLabel: string;
-  models: { id: string; name: string; description?: string }[];
+  models: ModelInfo[];
   defaultModel?: string;
 }
 
@@ -345,7 +353,7 @@ export function ChatView({
     return () => window.removeEventListener("band:toggle-mode", handler);
   }, [modes, selectedMode, handleModeSelect]);
 
-  const [models, setModels] = useState<{ id: string; name: string; description?: string }[]>([]);
+  const [models, setModels] = useState<ModelInfo[]>([]);
   const [agentGroups, setAgentGroups] = useState<AgentGroup[]>([]);
   // Default model from agent settings (per agent type)
   const [agentDefaultModel, setAgentDefaultModel] = useState<string | undefined>();
@@ -353,6 +361,12 @@ export function ChatView({
   const [userModelOverride, setUserModelOverride] = useState<string | undefined>();
   // Effective model: user override takes precedence, then agent default
   const selectedModel = userModelOverride ?? agentDefaultModel;
+  // Resolved ModelInfo for the active selection — flows the SDK-reported
+  // contextWindow into the meter so it doesn't have to guess from the id.
+  const selectedModelInfo = useMemo(
+    () => models.find((m) => m.id === selectedModel),
+    [models, selectedModel],
+  );
 
   // Drop the SDK-reported `maxContextTokens` when the model changes — that
   // value was for the prior model and would otherwise stick until the next
@@ -1055,7 +1069,9 @@ export function ChatView({
 
       <div className="mx-auto w-full max-w-3xl shrink-0 px-3 lg:px-4 pt-2 pb-4 standalone:pb-[env(safe-area-inset-bottom)]">
         <TaskListWidget tasks={taskMap} workspaceId={workspaceId} />
-        {contextMeterEnabled && <ContextMeter usage={usage} model={selectedModel} />}
+        {contextMeterEnabled && (
+          <ContextMeter usage={usage} model={selectedModel} modelInfo={selectedModelInfo} />
+        )}
         <PromptInput
           onSubmit={handleSubmit}
           draftKey={workspaceId}
@@ -1350,7 +1366,7 @@ function AgentModelMenu({
                             isCurrentAgent && model.id === selectedModel ? "bg-accent" : "",
                           )}
                         >
-                          <span className="text-sm font-medium">{model.name}</span>
+                          <ModelLine model={model} />
                           {model.description && (
                             <span className="text-xs text-muted-foreground">
                               {model.description}
@@ -1385,7 +1401,7 @@ function AgentModelMenu({
                   model.id === selectedModel ? "bg-accent" : "",
                 )}
               >
-                <span className="text-sm font-medium">{model.name}</span>
+                <ModelLine model={model} />
                 {model.description && (
                   <span className="text-xs text-muted-foreground">{model.description}</span>
                 )}
@@ -1410,15 +1426,23 @@ function relativeTime(ms: number): string {
 }
 
 // Approximate context window per model. Fallback for the chat context meter
-// when an adapter doesn't report `maxContextTokens` live. Claude Code adapter
+// when an adapter doesn't report `maxContextTokens` live and the picker
+// doesn't supply a `contextWindow` on the ModelInfo. Claude Code adapter
 // always passes the SDK's `getContextUsage().maxTokens`, so this map is
 // fallback-only for Claude; Codex/Gemini/Cursor SDKs don't expose a context
 // window field, so they rely on this map directly.
+//
+// Order matters: `getContextWindow` walks entries with the longest key first
+// so "claude-opus-4-7[1m]" matches before "claude-opus-4-7".
 const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
-  // Claude — Opus 4.7, Opus 4.6, and Sonnet 4.6 default to 1M GA at standard
-  // pricing. Haiku 4.5 stays at 200k.
-  "claude-opus-4-7": 1_000_000,
-  "claude-opus-4-6": 1_000_000,
+  // Claude — Opus 4.x ships a 200k default and a separate [1m] long-context
+  // tier. Sonnet 4.6 is 1M GA at standard pricing (the [1m] suffix is a
+  // legacy alias). Haiku 4.5 stays at 200k.
+  "claude-opus-4-7[1m]": 1_000_000,
+  "claude-opus-4-6[1m]": 1_000_000,
+  "claude-opus-4-7": 200_000,
+  "claude-opus-4-6": 200_000,
+  "claude-sonnet-4-6[1m]": 1_000_000,
   "claude-sonnet-4-6": 1_000_000,
   "claude-haiku-4-5": 200_000,
   // OpenAI — GPT-5 family runs at 400k inside Codex CLI (the Responses API
@@ -1433,9 +1457,11 @@ const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
 
 function getContextWindow(model: string | undefined): number {
   if (!model) return 200_000;
-  // Try exact match, then prefix match (e.g. "claude-sonnet-4-6-20250101").
   if (MODEL_CONTEXT_WINDOWS[model]) return MODEL_CONTEXT_WINDOWS[model];
-  for (const [key, value] of Object.entries(MODEL_CONTEXT_WINDOWS)) {
+  // Prefix match — sort by descending key length so longer/more specific
+  // keys win (e.g. "claude-opus-4-7[1m]" before "claude-opus-4-7").
+  const entries = Object.entries(MODEL_CONTEXT_WINDOWS).sort(([a], [b]) => b.length - a.length);
+  for (const [key, value] of entries) {
     if (model.startsWith(key)) return value;
   }
   return 200_000;
@@ -1447,12 +1473,37 @@ function formatTokens(n: number): string {
   return String(n);
 }
 
+/** Compact context-window label, e.g. 200000 → "200k", 1_000_000 → "1M". */
+function formatCtxWindow(n: number): string {
+  if (n >= 1_000_000) {
+    const m = n / 1_000_000;
+    return `${Number.isInteger(m) ? m.toFixed(0) : m.toFixed(1)}M`;
+  }
+  if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
+  return String(n);
+}
+
+function ModelLine({ model }: { model: ModelInfo }) {
+  return (
+    <span className="flex w-full items-baseline justify-between gap-2">
+      <span className="text-sm font-medium">{model.name}</span>
+      {model.contextWindow !== undefined && (
+        <span className="text-[10px] uppercase tabular-nums text-muted-foreground">
+          {formatCtxWindow(model.contextWindow)} ctx
+        </span>
+      )}
+    </span>
+  );
+}
+
 function ContextMeter({
   usage,
   model,
+  modelInfo,
 }: {
   usage: UsageData | undefined;
   model: string | undefined;
+  modelInfo?: ModelInfo;
 }) {
   // Adapters compute context size with provider-aware semantics and pass it
   // through `contextTokens`. Only fall back to summation for legacy snapshots
@@ -1463,10 +1514,11 @@ function ContextMeter({
   // `legacyContextSize` uses the `provider` discriminator (with a
   // cacheCreationTokens-presence fallback for old snapshots).
   const contextSize = usage ? (usage.contextTokens ?? legacyContextSize(usage)) : 0;
-  // Prefer the SDK-reported max (e.g. Claude's auto-compact-aware limit).
-  // Fall back to the static model→window map for providers that don't
-  // report it (Codex, Gemini, etc.).
-  const window = usage?.maxContextTokens ?? getContextWindow(model);
+  // Window denominator priority:
+  //   1. SDK-reported `maxContextTokens` (Claude only, auto-compact-aware)
+  //   2. `modelInfo.contextWindow` from the adapter's listModels()
+  //   3. Static MODEL_CONTEXT_WINDOWS map keyed by id prefix
+  const window = usage?.maxContextTokens ?? modelInfo?.contextWindow ?? getContextWindow(model);
   const pct = Math.min(100, (contextSize / window) * 100);
   const danger = pct >= 85;
   const warn = !danger && pct >= 65;

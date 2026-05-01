@@ -165,6 +165,9 @@ export class CursorCliAdapter implements CodingAgent {
   }
 
   listModels(): AgentModel[] {
+    // Cursor "auto" routes among multiple backends — context window varies by
+    // chosen model. No SDK-side reporting; leave undefined so the meter
+    // falls back to the static MODEL_CONTEXT_WINDOWS default (200k).
     return [{ id: "auto", name: "Auto", description: "Cursor chooses the best model" }];
   }
 }
