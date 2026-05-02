@@ -22,7 +22,7 @@
   "scripts": {
     "dev": "vite dev --port 3456 --host 0.0.0.0",
     "build": "vite build && ./scripts/build-server.sh",
-    "start": "node dist/start-server.mjs",
+    "start": "bun dist/start-server.mjs",
     "build:test-server": "esbuild test-server.ts --bundle --platform=node --format=esm --outfile=dist/test-server.mjs --banner:js=\"import{createRequire as __cr}from'module';import{fileURLToPath as __fu}from'url';import{dirname as __dn}from'path';const require=__cr(import.meta.url);const __filename=__fu(import.meta.url);const __dirname=__dn(__filename);\"",
     "pretest": "pnpm build",
     "test": "vitest run",
@@ -31,13 +31,14 @@
     "postinstall": "chmod +x node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true"
   },
   "dependencies": {
-    "better-sqlite3": "^12.8.0",
     "node-pty": "^1.1.0",
     "react-resizable-panels": "^4.9.0",
     "typescript-language-server": "^5.1.3",
     "vscode-jsonrpc": "8.2.0"
   },
   "devDependencies": {
+    "@types/bun": "^1.3.0",
+    "better-sqlite3": "^12.8.0",
     "@ai-sdk/react": "^3.0.0",
     "@band-app/coding-agent": "workspace:^",
     "@band-app/dashboard-core": "workspace:^",

@@ -37,11 +37,9 @@ describe("build output", () => {
     expect(readdirSync(prebuildsDir).length).toBeGreaterThan(0);
   });
 
-  it("contains better-sqlite3 native binary", () => {
-    expect(
-      existsSync(join(dist, "node_modules/better-sqlite3/build/Release/better_sqlite3.node")),
-    ).toBe(true);
-  });
+  // SQLite is now provided by `bun:sqlite` (built into the Bun runtime
+  // bundled at Contents/MacOS/bun), so no SQLite native module ships under
+  // dist/node_modules/.
 
   it.skipIf(skipSdkChecks)("contains Claude Code SDK native binary", () => {
     // SDK 0.2.x ships a native `claude` binary per platform under

@@ -4,11 +4,21 @@
   "description": "IDE extension for Band agent orchestration",
   "version": "0.1.0",
   "publisher": "band",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/band-app/band.git",
+    "directory": "extensions/vscode"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
   "categories": [
     "Other"
+  ],
+  "files": [
+    "dist",
+    "LICENSE"
   ],
   "activationEvents": [
     "workspaceContains:**/.band/config.json",
