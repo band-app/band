@@ -43,11 +43,11 @@ describe("build output", () => {
     ).toBe(true);
   });
 
-  it.skipIf(skipSdkChecks)("contains Claude Code SDK native binary", () => {
-    // SDK 0.2.x ships a native `claude` binary per platform under
-    // @anthropic-ai/claude-agent-sdk-<platform>-<arch>. Build copies the
-    // matching package into dist/node_modules. Linux has both glibc and
-    // musl variants — accept either.
+  it.skipIf(skipSdkChecks)("does NOT bundle Claude Code SDK native binary", () => {
+    // We deliberately do NOT bundle the ~206MB platform binary shipped by
+    // @anthropic-ai/claude-agent-sdk-<platform>-<arch>. Band users have
+    // `claude` installed already, and the SDK resolves it from PATH at
+    // runtime. Keeping it out shrinks the Tauri DMG by ~200MB.
     const platform = process.platform;
     const arch = process.arch;
     const candidates =
@@ -58,7 +58,7 @@ describe("build output", () => {
           ]
         : [`@anthropic-ai/claude-agent-sdk-${platform}-${arch}`];
     const found = candidates.some((pkg) => existsSync(join(dist, "node_modules", pkg, "claude")));
-    expect(found).toBe(true);
+    expect(found).toBe(false);
   });
 
   it.skipIf(skipSdkChecks)("contains Codex SDK package", () => {

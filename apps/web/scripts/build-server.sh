@@ -122,39 +122,11 @@ SHIM
   # so they only exist in the root node_modules/.pnpm store.
   MONO_ROOT="$(cd ../.. && pwd)"
 
-  # Copy claude-agent-sdk platform-specific native binary.
-  # SDK 0.2.x ships a native `claude` binary per platform via optional
-  # dependency packages named @anthropic-ai/claude-agent-sdk-<platform>-<arch>
-  # (and -musl on Linux). At runtime the SDK resolves
-  #   require.resolve("@anthropic-ai/claude-agent-sdk-<platform>-<arch>/claude")
-  # so the platform package directory needs to be present under
-  # dist/node_modules/. Copy whichever variants exist for the current
-  # platform.
-  CLAUDE_SDK_PLATFORM_PKGS=""
-  case "$(uname -s)" in
-    Darwin)
-      case "$(uname -m)" in
-        arm64) CLAUDE_SDK_PLATFORM_PKGS="@anthropic-ai/claude-agent-sdk-darwin-arm64" ;;
-        x86_64) CLAUDE_SDK_PLATFORM_PKGS="@anthropic-ai/claude-agent-sdk-darwin-x64" ;;
-      esac
-      ;;
-    Linux)
-      case "$(uname -m)" in
-        aarch64|arm64) CLAUDE_SDK_PLATFORM_PKGS="@anthropic-ai/claude-agent-sdk-linux-arm64 @anthropic-ai/claude-agent-sdk-linux-arm64-musl" ;;
-        x86_64) CLAUDE_SDK_PLATFORM_PKGS="@anthropic-ai/claude-agent-sdk-linux-x64 @anthropic-ai/claude-agent-sdk-linux-x64-musl" ;;
-      esac
-      ;;
-  esac
-
-  for PKG in $CLAUDE_SDK_PLATFORM_PKGS; do
-    PKG_SRC="$(find "$MONO_ROOT/node_modules/.pnpm" -maxdepth 4 -path "*/$PKG" -type d 2>/dev/null | head -1)"
-    if [ -n "$PKG_SRC" ] && [ -f "$PKG_SRC/claude" ]; then
-      mkdir -p "dist/node_modules/$PKG"
-      cp "$PKG_SRC/package.json" "dist/node_modules/$PKG/"
-      cp "$PKG_SRC/claude" "dist/node_modules/$PKG/"
-      chmod +x "dist/node_modules/$PKG/claude"
-    fi
-  done
+  # NOTE: We deliberately do NOT bundle the @anthropic-ai/claude-agent-sdk
+  # platform-specific native binary (~206MB on macOS arm64). Bundling it
+  # makes the Tauri app balloon to ~300MB. Band users are developers using
+  # AI coding agents, so they already have `claude` installed on PATH —
+  # the SDK resolves it from there at runtime.
 
   # Copy Codex SDK package.json so createRequire(import.meta.url).resolve("@openai/codex/package.json")
   # works from dist/. The actual codex CLI binary is expected to be installed on the user's system.
