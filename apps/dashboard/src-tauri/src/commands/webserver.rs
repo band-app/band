@@ -48,6 +48,38 @@ pub(crate) fn get_configured_port() -> u16 {
         .unwrap_or(DEFAULT_WEB_SERVER_PORT)
 }
 
+/// Resolve the JS runtime path. Production: bundled `bun` sidecar next to the
+/// main executable. Dev: `binaries/bun-<triple>` from the cargo manifest dir.
+/// Last resort: `bun` on PATH.
+fn resolve_runtime() -> std::path::PathBuf {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(macos_dir) = exe.parent() {
+            let bundled = macos_dir.join("bun");
+            if bundled.exists() {
+                return bundled;
+            }
+        }
+    }
+    #[cfg(debug_assertions)]
+    {
+        if let Some(manifest) = option_env!("CARGO_MANIFEST_DIR") {
+            let triple = match std::env::consts::ARCH {
+                "aarch64" => "aarch64-apple-darwin",
+                "x86_64" => "x86_64-apple-darwin",
+                _ => "",
+            };
+            if !triple.is_empty() {
+                let dev_path =
+                    std::path::Path::new(manifest).join(format!("binaries/bun-{triple}"));
+                if dev_path.exists() {
+                    return dev_path;
+                }
+            }
+        }
+    }
+    std::path::PathBuf::from("bun")
+}
+
 /// Resolve the user's full shell PATH once (includes nvm/npm paths).
 pub(crate) fn shell_path() -> &'static str {
     static PATH: OnceLock<String> = OnceLock::new();
@@ -261,7 +293,8 @@ pub(crate) fn ensure_webserver_running() -> Result<(u16, String), String> {
 
     let (log_out, log_err) = server_log_stdio().unwrap_or_else(|_| (Stdio::null(), Stdio::null()));
 
-    let mut cmd = Command::new("node");
+    let runtime = resolve_runtime();
+    let mut cmd = Command::new(&runtime);
     cmd.arg(&start_script)
         .current_dir(&web_dir)
         .env("PATH", shell_path())
@@ -272,7 +305,10 @@ pub(crate) fn ensure_webserver_running() -> Result<(u16, String), String> {
 
     let _child = cmd.spawn().map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
-            "Node.js is required but not installed. Install it from https://nodejs.org".to_string()
+            format!(
+                "Bundled runtime not found at {} — reinstall Band",
+                runtime.display()
+            )
         } else {
             format!("Failed to start web server: {e}")
         }
@@ -318,7 +354,8 @@ pub async fn webserver_start(state: State<'_, WebServerState>) -> Result<(), Str
 
     let (log_out, log_err) = server_log_stdio().unwrap_or_else(|_| (Stdio::null(), Stdio::null()));
 
-    let mut cmd = Command::new("node");
+    let runtime = resolve_runtime();
+    let mut cmd = Command::new(&runtime);
     cmd.arg(&start_script)
         .current_dir(&web_dir)
         .env("PATH", shell_path())
@@ -329,7 +366,10 @@ pub async fn webserver_start(state: State<'_, WebServerState>) -> Result<(), Str
 
     let child = cmd.spawn().map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
-            "Node.js is required but not installed. Install it from https://nodejs.org".to_string()
+            format!(
+                "Bundled runtime not found at {} — reinstall Band",
+                runtime.display()
+            )
         } else {
             format!("Failed to start web server: {e}")
         }

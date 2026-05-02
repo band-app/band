@@ -123,6 +123,9 @@ jobs:
       - name: Build CLI
         run: pnpm build:cli
 
+      - name: Download Bun runtime
+        run: pnpm download:bun
+
       - name: Lint (cargo clippy — Dashboard)
         run: |
           mkdir -p apps/web/dist
