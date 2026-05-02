@@ -92,31 +92,62 @@ export function useChatPaneState(workspaceId: string, chatId: string): ChatPaneS
     });
 
     // --- Session state ---
-    Promise.all([chatP, sessionsP]).then(([chatResult, sessionsResult]) => {
+    //
+    // Two-phase resolution so chat rendering doesn't wait on the slow
+    // sessions.list call:
+    //
+    //   Phase A (fast): chats.get resolves. If a persisted activeSessionId
+    //     exists, surface it and flip sessionQueryDone immediately so
+    //     ChatView can start loading messages. This is the common case
+    //     for any workspace the user has visited before.
+    //
+    //   Phase B (slow): sessions.list resolves. Used to populate the
+    //     session sidebar/dropdown, the active-session summary for the
+    //     tab title, and to fall back to the most recently modified
+    //     session when no activeSessionId was persisted.
+    //
+    // For panes with no persisted active session we still wait for both
+    // (otherwise ChatView would resumeStream() against `undefined` and we
+    // would never auto-load the latest session).
+    chatP.then((chatResult) => {
       if (cancelled) return;
+      // Fresh panes skip session restoration — start clean.
+      if (isFresh) {
+        setSessionQueryDone(true);
+        return;
+      }
+      const persisted = chatResult.chat?.activeSessionId;
+      if (typeof persisted === "string" && persisted) {
+        setInitialSessionId(persisted);
+        setSessionQueryDone(true);
+      }
+    });
 
+    sessionsP.then((sessionsResult) => {
+      if (cancelled) return;
       if (sessionsResult.supported) {
         setSupportsSessionListing(true);
       }
-
-      // Store sessions for summary lookup on session switch
       const sessions = sessionsResult.sessions as Array<{
         sessionId: string;
         summary: string;
         lastModified: number;
       }>;
       sessionsRef.current = sessions;
+    });
 
-      // Fresh panes skip session restoration — start clean.
-      if (isFresh) {
-        setSessionQueryDone(true);
-        return;
-      }
-
-      // Persisted active session takes priority
+    // Once both have resolved, fill in the active-session summary for the
+    // tab title and (if no persisted session existed) pick a fallback +
+    // flip sessionQueryDone so ChatView unblocks.
+    Promise.all([chatP, sessionsP]).then(([chatResult, sessionsResult]) => {
+      if (cancelled || isFresh) return;
+      const sessions = sessionsResult.sessions as Array<{
+        sessionId: string;
+        summary: string;
+        lastModified: number;
+      }>;
       const persisted = chatResult.chat?.activeSessionId;
       if (typeof persisted === "string" && persisted) {
-        setInitialSessionId(persisted);
         const match = sessions.find((s) => s.sessionId === persisted);
         if (match?.summary) setActiveSessionSummary(match.summary);
       } else if (sessionsResult.supported && sessions.length > 0) {
@@ -126,7 +157,6 @@ export function useChatPaneState(workspaceId: string, chatId: string): ChatPaneS
           if (latest.summary) setActiveSessionSummary(latest.summary);
         }
       }
-
       setSessionQueryDone(true);
     });
 

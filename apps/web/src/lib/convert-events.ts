@@ -44,12 +44,10 @@ export function convertEventsToUIMessages(events: SessionEventRecord[]): UIMessa
   }
 
   for (const event of events) {
-    let chunk: Record<string, unknown>;
-    try {
-      chunk = JSON.parse(event.chunkJson);
-    } catch {
-      continue;
-    }
+    // event.chunk is already-parsed — see SessionEventRecord. Avoiding the
+    // JSON.parse round-trip here is the whole point of the change to the
+    // buffer storage shape.
+    const chunk = event.chunk as unknown as Record<string, unknown>;
 
     switch (chunk.type) {
       case "text-start": {

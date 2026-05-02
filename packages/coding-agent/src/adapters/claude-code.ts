@@ -1,4 +1,5 @@
-import { closeSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { open, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type {
@@ -97,18 +98,25 @@ const SESSION_TAIL_BYTES = 64 * 1024;
 // Read the most recent `last-prompt` record from a session JSONL file by
 // scanning the last 64 KB. The CLI's /resume picker uses this latest
 // prompt as the session title, so we surface the same string here.
-function readSessionLastPrompt(workspaceDir: string, sessionId: string): string | undefined {
+//
+// Async: synchronous fs calls would block the event loop; with N sessions
+// the cumulative latency is multiplied. Callers (see `listSessions`) run
+// these in parallel via `Promise.all`.
+async function readSessionLastPrompt(
+  workspaceDir: string,
+  sessionId: string,
+): Promise<string | undefined> {
   const configDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
   const file = join(configDir, "projects", encodeProjectDir(workspaceDir), `${sessionId}.jsonl`);
 
-  let fd: number | undefined;
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
-    const size = statSync(file).size;
+    const { size } = await stat(file);
     if (size === 0) return undefined;
     const readSize = Math.min(size, SESSION_TAIL_BYTES);
     const buf = Buffer.alloc(readSize);
-    fd = openSync(file, "r");
-    readSync(fd, buf, 0, readSize, size - readSize);
+    handle = await open(file, "r");
+    await handle.read(buf, 0, readSize, size - readSize);
     let text = buf.toString("utf8");
     // Drop the partial first line when we tailed the file.
     if (readSize < size) {
@@ -133,9 +141,9 @@ function readSessionLastPrompt(workspaceDir: string, sessionId: string): string 
   } catch {
     return undefined;
   } finally {
-    if (fd !== undefined) {
+    if (handle !== undefined) {
       try {
-        closeSync(fd);
+        await handle.close();
       } catch {
         // ignore
       }
@@ -299,9 +307,13 @@ export class ClaudeCodeAdapter implements CodingAgent {
   async listSessions(dir: string): Promise<SessionListItem[]> {
     log.info({ dir }, "listSessions");
     const sessions = await listSessions({ dir });
-    return sessions
-      .filter((s) => s.cwd === dir)
-      .map((s) => mapSessionInfo(s, readSessionLastPrompt(dir, s.sessionId)));
+    const filtered = sessions.filter((s) => s.cwd === dir);
+    // Fan out the per-session JSONL tail reads. Sequential fs calls
+    // dominate workspace-switch latency when there are many sessions.
+    const lastPrompts = await Promise.all(
+      filtered.map((s) => readSessionLastPrompt(dir, s.sessionId)),
+    );
+    return filtered.map((s, i) => mapSessionInfo(s, lastPrompts[i]));
   }
 
   async getSessionMessages(

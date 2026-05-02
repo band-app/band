@@ -1,10 +1,19 @@
 import { getSessionBuffer, type StreamChunk } from "./task-runner";
 
+/**
+ * A buffered session event.
+ *
+ * Buffered chunks are kept as already-parsed objects so that callers don't
+ * pay a JSON.stringify/parse cost on every read. With ring buffers up to
+ * MAX_BUFFER_SIZE (2000) entries this loop dominated workspace-switch
+ * latency for active sessions.
+ */
 export interface SessionEventRecord {
   id: number;
   sessionId: string;
   chunkType: string;
-  chunkJson: string;
+  /** The parsed stream chunk. Treat as read-only. */
+  chunk: StreamChunk;
   createdAt: number;
 }
 
@@ -13,7 +22,7 @@ function chunkToRecord(sessionId: string, chunk: StreamChunk): SessionEventRecor
     id: chunk.eventId ?? 0,
     sessionId,
     chunkType: chunk.type,
-    chunkJson: JSON.stringify(chunk),
+    chunk,
     createdAt: Date.now(),
   };
 }

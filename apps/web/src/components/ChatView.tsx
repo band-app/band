@@ -198,6 +198,11 @@ export function ChatView({
   const sessionIdRef = useRef<string | undefined>(undefined);
   const lastEventIdRef = useRef<number | undefined>(undefined);
   const firstEventIdRef = useRef<number | undefined>(undefined);
+  // Index of the first JSONL message currently in `messages`. Used as the
+  // exclusive upper bound for the next "older messages" pagination request.
+  // Set when the server returns history sourced from JSONL (firstEventId is
+  // null). When pagination is buffer-based, this stays undefined.
+  const firstMessageIndexRef = useRef<number | undefined>(undefined);
   const [activeSessionId, setActiveSessionId] = useState<string | undefined>(undefined);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [hasMore, setHasMore] = useState(false);
@@ -467,6 +472,8 @@ export function ChatView({
         setMessages(data.messages as UIMessage[]);
         lastEventIdRef.current = data.lastEventId ?? undefined;
         firstEventIdRef.current = data.firstEventId ?? undefined;
+        firstMessageIndexRef.current =
+          (data as { firstMessageIndex?: number | null }).firstMessageIndex ?? undefined;
         setHasMore(data.hasMore);
       } finally {
         setLoadingHistory(false);
@@ -479,10 +486,14 @@ export function ChatView({
   );
 
   // Load older messages when the user scrolls to the top of the chat.
+  // Uses the buffer cursor (firstEventId) when available, otherwise the
+  // JSONL cursor (firstMessageIndex). Exactly one of the two is set.
   const loadOlderMessages = useCallback(async () => {
     const sessionId = sessionIdRef.current;
     const beforeEventId = firstEventIdRef.current;
-    if (!sessionId || !beforeEventId || !hasMore || loadingOlder || loadingHistory) {
+    const beforeMessageIndex = firstMessageIndexRef.current;
+    const haveCursor = beforeEventId !== undefined || beforeMessageIndex !== undefined;
+    if (!sessionId || !haveCursor || !hasMore || loadingOlder || loadingHistory) {
       return;
     }
 
@@ -493,6 +504,7 @@ export function ChatView({
         chatId,
         sessionId,
         beforeEventId,
+        beforeMessageIndex,
         limit: 100,
       });
 
@@ -505,6 +517,8 @@ export function ChatView({
 
         setMessages((prev) => [...(data.messages as UIMessage[]), ...prev]);
         firstEventIdRef.current = data.firstEventId ?? undefined;
+        firstMessageIndexRef.current =
+          (data as { firstMessageIndex?: number | null }).firstMessageIndex ?? undefined;
         setHasMore(data.hasMore);
       } else {
         setHasMore(false);
@@ -585,6 +599,7 @@ export function ChatView({
       sessionIdRef.current = sessionId;
       lastEventIdRef.current = undefined;
       firstEventIdRef.current = undefined;
+      firstMessageIndexRef.current = undefined;
       setHasMore(false);
       setActiveSessionId(sessionId);
       onActiveSessionChange?.(sessionId);
@@ -610,6 +625,7 @@ export function ChatView({
     sessionIdRef.current = undefined;
     lastEventIdRef.current = undefined;
     firstEventIdRef.current = undefined;
+    firstMessageIndexRef.current = undefined;
     setHasMore(false);
     setActiveSessionId(undefined);
     onActiveSessionChange?.(undefined);

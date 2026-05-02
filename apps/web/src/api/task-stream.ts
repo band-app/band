@@ -105,13 +105,8 @@ function streamTask(
         if (sessionId && afterEventId != null) {
           const missed = getSessionEventsAfter(sessionId, afterEventId);
           for (const row of missed) {
-            let chunk: Record<string, unknown>;
-            try {
-              chunk = JSON.parse(row.chunkJson);
-            } catch {
-              continue;
-            }
-            const uiChunk = toUIChunk({ ...chunk, eventId: row.id } as StreamChunk);
+            // row.chunk is the already-parsed StreamChunk (SessionEventRecord).
+            const uiChunk = toUIChunk({ ...row.chunk, eventId: row.id } as StreamChunk);
             if (uiChunk) writer.write(uiChunk);
             highWaterMark = Math.max(highWaterMark, row.id);
           }

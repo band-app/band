@@ -17,11 +17,20 @@ interface PoolEntry {
   agentDefId: string;
 }
 
+/** In-flight creation entry — concurrent callers join the same promise. */
+interface PendingEntry {
+  promise: Promise<CodingAgent>;
+  agentDefId: string;
+}
+
 // Use globalThis to ensure a single shared state across multiple bundles
 const POOL_KEY = Symbol.for("band.agent-pool.v2");
+const PENDING_KEY = Symbol.for("band.agent-pool.pending");
 const g = globalThis as unknown as Record<symbol, unknown>;
 if (!g[POOL_KEY]) g[POOL_KEY] = new Map<string, PoolEntry>();
+if (!g[PENDING_KEY]) g[PENDING_KEY] = new Map<string, PendingEntry>();
 const pool = g[POOL_KEY] as Map<string, PoolEntry>;
+const pending = g[PENDING_KEY] as Map<string, PendingEntry>;
 
 /**
  * Read the 'model' field from ~/.claude/settings.json as a fallback
@@ -86,6 +95,11 @@ export function removeAgent(chatId: string): boolean {
  * If the cached agent was created with a different agentId, it is
  * replaced so that a chatId reused for a different agent type gets
  * the correct process.
+ *
+ * Concurrent callers with the same chatId share a single in-flight
+ * createCodingAgent() promise so we don't pay the dynamic-import cost
+ * twice when sessions.list and sessions.messages race on workspace
+ * switch.
  */
 export async function getOrCreateAgent(
   chatId: string,
@@ -107,11 +121,33 @@ export async function getOrCreateAgent(
   }
 
   const defId = resolveAgentDefId(agentId);
+
+  // Join an in-flight creation if one matches the requested definition.
+  const inFlight = pending.get(chatId);
+  if (inFlight && inFlight.agentDefId === defId) {
+    return inFlight.promise;
+  }
+
   const config = getAgentConfig(worktreePath, agentId);
   log.info({ chatId, type: config.type, defId, cwd: worktreePath }, "creating agent");
-  const agent = await createCodingAgent(config);
-  pool.set(chatId, { agent, agentDefId: defId });
-  return agent;
+
+  const promise: Promise<CodingAgent> = createCodingAgent(config).then(
+    (agent) => {
+      pool.set(chatId, { agent, agentDefId: defId });
+      // Only clear the pending entry if it's still ours — if another
+      // request swapped in a different definition, leave that one alone.
+      const current = pending.get(chatId);
+      if (current?.promise === promise) pending.delete(chatId);
+      return agent;
+    },
+    (err) => {
+      const current = pending.get(chatId);
+      if (current?.promise === promise) pending.delete(chatId);
+      throw err;
+    },
+  );
+  pending.set(chatId, { promise, agentDefId: defId });
+  return promise;
 }
 
 /**

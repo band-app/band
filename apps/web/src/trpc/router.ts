@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import { toWorkspaceId } from "@band-app/dashboard-core";
 import { createLogger } from "@band-app/logger";
 import { initTRPC, TRPCError } from "@trpc/server";
+import type { UIMessage } from "ai";
 import { Cron } from "croner";
 import { z } from "zod";
 import { createMetadataAgent, getOrCreateAgent, replaceAgent } from "../lib/agent-pool";
@@ -1503,122 +1504,173 @@ const sessionsRouter = t.router({
         workspaceId: z.string(),
         chatId: z.string().optional(),
         sessionId: z.string(),
+        // Buffer cursor: pagination through the in-memory ring buffer.
         beforeEventId: z.number().optional(),
+        // JSONL cursor: pagination through the on-disk session history.
+        // Index is in the full message list; the server returns messages
+        // [max(0, beforeMessageIndex - limit), beforeMessageIndex).
+        beforeMessageIndex: z.number().int().nonnegative().optional(),
         limit: z.number().min(1).max(200).default(100).optional(),
       }),
     )
     .query(async ({ input }) => {
       const pageSize = input.limit ?? 100;
 
-      // Try in-memory session buffer first
-      const events = input.beforeEventId
-        ? getSessionEventsBefore(input.sessionId, input.beforeEventId, pageSize)
-        : getSessionEventsTail(input.sessionId, pageSize);
+      // Try in-memory session buffer first (only for non-JSONL pagination).
+      // When the client is paginating via beforeMessageIndex we're explicitly
+      // requesting an older JSONL page and must skip the buffer.
+      if (input.beforeMessageIndex === undefined) {
+        const events = input.beforeEventId
+          ? getSessionEventsBefore(input.sessionId, input.beforeEventId, pageSize)
+          : getSessionEventsTail(input.sessionId, pageSize);
 
-      if (events.length > 0) {
-        const bufferMessages = convertEventsToUIMessages(events);
-        const firstEventId = events[0].id;
-        const lastEventId = events[events.length - 1].id;
+        if (events.length > 0) {
+          const bufferMessages = convertEventsToUIMessages(events);
+          const firstEventId = events[0].id;
+          const lastEventId = events[events.length - 1].id;
 
-        // Check if there are more events before the first one we returned
-        const older = getSessionEventsBefore(input.sessionId, firstEventId, 1);
-        const hasMoreInBuffer = older.length > 0;
+          // Check if there are more events before the first one we returned
+          const older = getSessionEventsBefore(input.sessionId, firstEventId, 1);
+          const hasMoreInBuffer = older.length > 0;
 
-        if (hasMoreInBuffer || input.beforeEventId) {
-          // More buffer pages available, or this is already a pagination request —
-          // return buffer page only.
-          return { messages: bufferMessages, firstEventId, lastEventId, hasMore: hasMoreInBuffer };
-        }
+          if (hasMoreInBuffer || input.beforeEventId) {
+            // More buffer pages available, or this is already a pagination
+            // request — return buffer page only.
+            return {
+              messages: bufferMessages,
+              firstEventId,
+              lastEventId,
+              firstMessageIndex: null,
+              hasMore: hasMoreInBuffer,
+            };
+          }
 
-        // We're at the start of the buffer with no older buffer pages.
-        // Check if JSONL history exists (e.g. from before a server restart).
-        // If it does, use JSONL as the sole history source — it contains the
-        // complete conversation including any tasks whose events are also in
-        // the buffer. Merging them would cause duplicates.
-        // The buffer's lastEventId is still returned so that resumeStream()
-        // can gap-fill from the correct point for any in-flight task.
-        try {
-          const workspace = resolveWorkspace(input.workspaceId);
-          if (workspace) {
-            const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
-            const chatSession = getChat(chatId);
-            const agent = await getOrCreateAgent(
-              chatId,
-              workspace.worktree.path,
-              chatSession?.agent,
-            );
-            if (agent.supportedFeatures.sessionListing && agent.getSessionMessages) {
-              const rawMessages = await agent.getSessionMessages(
-                input.sessionId,
-                workspace.worktree.path,
-              );
-              if (rawMessages && rawMessages.length > 0) {
-                const historyMessages = convertHistoryToUIMessages(
-                  rawMessages as {
-                    role: "user" | "assistant";
-                    id: string;
-                    content: {
-                      type: "text" | "tool_use" | "tool_result";
-                      text?: string;
-                      toolCallId?: string;
-                      toolName?: string;
-                      displayTitle?: string;
-                      input?: unknown;
-                      output?: string;
-                      isError?: boolean;
-                    }[];
-                  }[],
-                );
+          // We're at the start of the buffer with no older buffer pages.
+          // Check if JSONL history exists (e.g. from before a server restart).
+          // If it does, use JSONL as the sole history source — it contains the
+          // complete conversation including any tasks whose events are also in
+          // the buffer. Merging them would cause duplicates.
+          // The buffer's lastEventId is still returned so that resumeStream()
+          // can gap-fill from the correct point for any in-flight task.
+          try {
+            const workspace = resolveWorkspace(input.workspaceId);
+            if (workspace) {
+              const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
+              const jsonl = await loadJsonlPage({
+                chatId,
+                workspacePath: workspace.worktree.path,
+                sessionId: input.sessionId,
+                pageSize,
+                beforeMessageIndex: undefined,
+              });
+              // Only switch to the JSONL response when JSONL actually has
+              // messages — otherwise the buffer is the authoritative source
+              // (e.g. agents that don't persist sessions to disk).
+              if (jsonl && jsonl.messages.length > 0) {
                 return {
-                  messages: historyMessages,
+                  messages: jsonl.messages,
                   firstEventId: null,
                   lastEventId,
-                  hasMore: false,
+                  firstMessageIndex: jsonl.firstMessageIndex,
+                  hasMore: jsonl.hasMore,
                 };
               }
             }
+          } catch {
+            // JSONL lookup failed — return buffer-only results
           }
-        } catch {
-          // JSONL lookup failed — return buffer-only results
-        }
 
-        return { messages: bufferMessages, firstEventId, lastEventId, hasMore: false };
+          return {
+            messages: bufferMessages,
+            firstEventId,
+            lastEventId,
+            firstMessageIndex: null,
+            hasMore: false,
+          };
+        }
       }
 
-      // Fallback: no buffer at all — convert agent's JSONL-based history server-side
+      // Fallback: no buffer at all (cold path) or explicit JSONL pagination
+      // — convert agent's JSONL-based history server-side, sliced to the
+      // most recent `pageSize` messages.
       const workspace = resolveWorkspace(input.workspaceId);
       if (!workspace) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Workspace not found" });
       }
-
       const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
-      const chatSession = getChat(chatId);
-      const agent = await getOrCreateAgent(chatId, workspace.worktree.path, chatSession?.agent);
-
-      if (!agent.supportedFeatures.sessionListing || !agent.getSessionMessages) {
+      const jsonl = await loadJsonlPage({
+        chatId,
+        workspacePath: workspace.worktree.path,
+        sessionId: input.sessionId,
+        pageSize,
+        beforeMessageIndex: input.beforeMessageIndex,
+      });
+      if (!jsonl) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Session listing not supported" });
       }
-
-      const rawMessages = await agent.getSessionMessages(input.sessionId, workspace.worktree.path);
-      const messages = convertHistoryToUIMessages(
-        rawMessages as {
-          role: "user" | "assistant";
-          id: string;
-          content: {
-            type: "text" | "tool_use" | "tool_result";
-            text?: string;
-            toolCallId?: string;
-            toolName?: string;
-            displayTitle?: string;
-            input?: unknown;
-            output?: string;
-            isError?: boolean;
-          }[];
-        }[],
-      );
-      return { messages, firstEventId: null, lastEventId: null, hasMore: false };
+      return {
+        messages: jsonl.messages,
+        firstEventId: null,
+        lastEventId: null,
+        firstMessageIndex: jsonl.firstMessageIndex,
+        hasMore: jsonl.hasMore,
+      };
     }),
 });
+
+/**
+ * Load a page of session history from the agent's JSONL transcript.
+ *
+ * Uses the agent's full message list and slices server-side to bound the
+ * payload at `pageSize` messages. The first call (no `beforeMessageIndex`)
+ * returns the most recent `pageSize` messages; older pages are addressed by
+ * the index of their last message + 1 (i.e. the cursor returned as
+ * `firstMessageIndex` in the previous response).
+ *
+ * Returns `null` when the agent does not support session listing.
+ */
+async function loadJsonlPage(opts: {
+  chatId: string;
+  workspacePath: string;
+  sessionId: string;
+  pageSize: number;
+  beforeMessageIndex: number | undefined;
+}): Promise<{ messages: UIMessage[]; firstMessageIndex: number; hasMore: boolean } | null> {
+  const chatSession = getChat(opts.chatId);
+  const agent = await getOrCreateAgent(opts.chatId, opts.workspacePath, chatSession?.agent);
+  if (!agent.supportedFeatures.sessionListing || !agent.getSessionMessages) {
+    return null;
+  }
+
+  const all = await agent.getSessionMessages(opts.sessionId, opts.workspacePath);
+  if (!all || all.length === 0) {
+    return { messages: [], firstMessageIndex: 0, hasMore: false };
+  }
+
+  const total = all.length;
+  const endIndex =
+    opts.beforeMessageIndex !== undefined ? Math.min(opts.beforeMessageIndex, total) : total;
+  const startIndex = Math.max(0, endIndex - opts.pageSize);
+  const slice = all.slice(startIndex, endIndex);
+
+  const messages = convertHistoryToUIMessages(
+    slice as {
+      role: "user" | "assistant";
+      id: string;
+      content: {
+        type: "text" | "tool_use" | "tool_result";
+        text?: string;
+        toolCallId?: string;
+        toolName?: string;
+        displayTitle?: string;
+        input?: unknown;
+        output?: string;
+        isError?: boolean;
+      }[];
+    }[],
+  );
+  return { messages, firstMessageIndex: startIndex, hasMore: startIndex > 0 };
+}
 
 // ---------------------------------------------------------------------------
 // Services
