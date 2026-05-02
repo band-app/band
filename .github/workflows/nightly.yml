@@ -145,11 +145,11 @@ jobs:
           APPLE_API_KEY_PATH: ${{ runner.temp }}/api-key.p8
         run: |
           set -euo pipefail
-          VERSION_OVERRIDE=$(jq -n --arg v "$NIGHTLY_VERSION" '{version: $v}')
+          NIGHTLY_OVERRIDE=$(jq -n --arg v "$NIGHTLY_VERSION" '{version: $v, productName: "Band Nightly", identifier: "app.getband.night-agent"}')
           pnpm --filter @band-app/dashboard tauri build --ci \
             --config '{"build":{"beforeBuildCommand":""}}' \
             --config src-tauri/tauri.prod.conf.json \
-            --config "$VERSION_OVERRIDE"
+            --config "$NIGHTLY_OVERRIDE"
 
       - name: Cleanup keychain and key
         if: always()
