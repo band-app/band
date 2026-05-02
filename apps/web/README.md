@@ -44,12 +44,12 @@ Environment:
 
 ```bash
 pnpm install          # at repo root
-pnpm dev:web          # vite dev (Node-based, in-process)
+pnpm dev:web          # vite dev (Bun runtime, in-process)
 pnpm --filter @band-app/server build
 pnpm --filter @band-app/server test    # vitest under Node
 ```
 
-Dev runs vite under Node for HMR. Tests run vitest under Node and use `better-sqlite3` directly (kept as a devDependency). The production bundle (`dist/start-server.mjs`) uses `bun:sqlite` and runs under Bun.
+Dev runs vite under Bun (`bun --bun vite dev`) so SSR module evaluation can resolve `bun:sqlite`. Tests run vitest under Node and use `better-sqlite3` directly (kept as a devDependency). The production bundle (`dist/start-server.mjs`) uses `bun:sqlite` and runs under Bun.
 
 `tests/sync-state.test.ts` is excluded from vitest because it imports `src/lib/db/connection.ts` which statically imports `bun:sqlite`. Re-enable when the suite migrates to `bun test`.
 

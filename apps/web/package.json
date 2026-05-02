@@ -20,7 +20,7 @@
     "linux"
   ],
   "scripts": {
-    "dev": "vite dev --port 3456 --host 0.0.0.0",
+    "dev": "bun --bun vite dev --port 3456 --host 0.0.0.0",
     "build": "vite build && ./scripts/build-server.sh",
     "start": "bun dist/start-server.mjs",
     "build:test-server": "esbuild test-server.ts --bundle --platform=node --format=esm --outfile=dist/test-server.mjs --banner:js=\"import{createRequire as __cr}from'module';import{fileURLToPath as __fu}from'url';import{dirname as __dn}from'path';const require=__cr(import.meta.url);const __filename=__fu(import.meta.url);const __dirname=__dn(__filename);\"",
