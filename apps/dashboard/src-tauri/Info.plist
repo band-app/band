@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>Band controls terminal apps (iTerm2, Ghostty, Warp) and System Events to set up workspaces and route commands.</string>
+  <key>NSSystemAdministrationUsageDescription</key>
+  <string>Band positions IDE and terminal windows alongside the dashboard.</string>
+  <key>NSDesktopFolderUsageDescription</key>
+  <string>Band opens git repositories you select on the desktop.</string>
+  <key>NSDocumentsFolderUsageDescription</key>
+  <string>Band opens git repositories you select from Documents.</string>
+  <key>NSDownloadsFolderUsageDescription</key>
+  <string>Band opens git repositories you select from Downloads.</string>
+  <key>LSUIElement</key>
+  <false/>
+  <key>NSHighResolutionCapable</key>
+  <true/>
+  <key>NSSupportsAutomaticGraphicsSwitching</key>
+  <true/>
+</dict>
+</plist>
