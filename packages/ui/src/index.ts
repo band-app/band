@@ -16,6 +16,7 @@ export * from "./components/input-group";
 export * from "./components/label";
 export * from "./components/popover";
 export * from "./components/scroll-area";
+export * from "./components/segmented-control";
 export * from "./components/select";
 export * from "./components/separator";
 export * from "./components/spinner";

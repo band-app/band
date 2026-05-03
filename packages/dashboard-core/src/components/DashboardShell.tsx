@@ -322,16 +322,7 @@ export function DashboardShell({ toolbarExtra, hideTitleBar }: DashboardShellPro
         defaultLabel={labelFilter}
       />
 
-      <Dialog open={showSettingsDialog} onOpenChange={setShowSettingsDialog}>
-        <DialogContent className="sm:max-w-6xl h-[80vh] overflow-hidden p-0 flex flex-col gap-0">
-          <DialogHeader className="px-6 pt-6 pb-4 shrink-0">
-            <DialogTitle>Settings</DialogTitle>
-          </DialogHeader>
-          <div className="flex-1 min-h-0 overflow-hidden">
-            <SettingsPage hideTitle />
-          </div>
-        </DialogContent>
-      </Dialog>
+      <SettingsPage open={showSettingsDialog} onOpenChange={setShowSettingsDialog} />
     </div>
   );
 }

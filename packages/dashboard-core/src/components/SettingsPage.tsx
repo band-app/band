@@ -1,28 +1,27 @@
 import {
+  Accordion,
+  AccordionContent,
+  AccordionHeader,
+  AccordionItem,
+  AccordionTriggerInline,
   Button,
   ColorPicker,
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
+  cn,
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
   Input,
   Label,
-  Separator,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
   Switch,
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
 } from "@band-app/ui";
-import {
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  FolderOpen,
-  Plus,
-  Save,
-  Trash2,
-} from "lucide-react";
+import { ChevronDown, FolderOpen, Plus, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useAdapter, useCapabilities } from "../context";
 import { useUpdateSettings } from "../hooks/use-settings-mutations";
@@ -30,6 +29,8 @@ import { useSettingsQuery } from "../hooks/use-settings-query";
 import { playSound, SOUNDS, type SoundId } from "../lib/sounds";
 import type { CodingAgentDefinition, CodingAgentType, LabelDefinition, Theme } from "../types";
 import { AgentIcon } from "./agent-icons";
+import { SettingsRow } from "./settings/SettingsRow";
+import { SettingsSection } from "./settings/SettingsSection";
 
 const KNOWN_AGENTS: { id: string; type: CodingAgentType; label: string; defaultCommand: string }[] =
   [
@@ -38,65 +39,24 @@ const KNOWN_AGENTS: { id: string; type: CodingAgentType; label: string; defaultC
     { id: "opencode", type: "opencode", label: "OpenCode", defaultCommand: "opencode" },
   ];
 
-type Section =
-  | "menu"
-  | "appearance"
-  | "general"
-  | "coding-agent"
-  | "notifications"
-  | "web-server"
-  | "labels";
-
-const SECTION_TITLES: Record<Exclude<Section, "menu">, string> = {
-  appearance: "Appearance",
-  general: "General",
-  labels: "Labels",
-  "coding-agent": "Coding Agents",
-  notifications: "Notifications",
-  "web-server": "Web Server",
-};
+// Sentinel used by the per-agent "Default model" Select. Radix forbids
+// empty-string SelectItem values (it reserves them for "no selection"), so
+// we use this opaque token in the UI and translate to/from `undefined`
+// when reading or writing the persisted agent definition.
+const MODEL_DEFAULT_SENTINEL = "__band_default__";
 
 interface Props {
-  onClose?: () => void;
-  hideTitle?: boolean;
+  /** Whether the dialog is visible. */
+  open: boolean;
+  /** Called when the dialog wants to open or close (Esc, backdrop click, Done button). */
+  onOpenChange: (open: boolean) => void;
 }
 
-function SettingsRow({
-  label,
-  value,
-  active,
-  onClick,
-}: {
-  label: string;
-  value?: string;
-  active?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      className={`flex w-full items-center justify-between px-3 py-2.5 text-sm hover:bg-accent/50 rounded-md transition-colors text-left ${active ? "bg-accent/50" : ""}`}
-      onClick={onClick}
-    >
-      <span>{label}</span>
-      <span className="flex items-center gap-1 text-muted-foreground">
-        {value && <span className="text-xs truncate max-w-[140px]">{value}</span>}
-        <ChevronRight className="size-4 shrink-0 lg:hidden" />
-      </span>
-    </button>
-  );
-}
-
-export function SettingsPage({ onClose, hideTitle }: Props) {
+export function SettingsPage({ open, onOpenChange }: Props) {
   const { settings } = useSettingsQuery();
   const updateSettingsMutation = useUpdateSettings();
   const capabilities = useCapabilities();
-  const [section, setSection] = useState<Section>(() => {
-    if (typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches) {
-      return "appearance";
-    }
-    return "menu";
-  });
+
   const [worktreesDir, setWorktreesDir] = useState(settings.worktreesDir ?? "");
   const [codingAgents, setCodingAgents] = useState<CodingAgentDefinition[]>(
     Array.isArray(settings.codingAgents) ? settings.codingAgents : [],
@@ -219,468 +179,413 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
     });
   };
 
-  const worktreesDirPreview = worktreesDir || "Default";
-  const agentPreview =
-    codingAgents.length > 0
-      ? `${codingAgents.length} agent${codingAgents.length === 1 ? "" : "s"}`
-      : "None";
-  const portPreview = webServerPort || "3456";
-  const labelsPreview =
-    labels.length > 0 ? `${labels.length} label${labels.length === 1 ? "" : "s"}` : "None";
-  const themePreview =
-    selectedTheme === "system" ? "System" : selectedTheme === "dark" ? "Dark" : "Light";
-  const notificationsPreview = soundOnNeedsAttention
-    ? (SOUNDS.find((s) => s.id === selectedSound)?.label ?? "On")
-    : "Off";
+  const handleSaveAndClose = async () => {
+    await handleSave();
+    onOpenChange(false);
+  };
 
-  const activeSection = section === "menu" ? null : section;
+  /* ── Layout ─────────────────────────────────────────────── */
 
-  /* ── Shared section content ─────────────────────────────── */
-
-  const sectionContent = activeSection && (
-    <>
-      {activeSection === "appearance" && (
-        <div className="space-y-4 px-1">
-          <div className="space-y-2">
-            <Label>Theme</Label>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full justify-between font-normal h-7 text-xs px-2"
-                >
-                  {selectedTheme === "system"
-                    ? "System"
-                    : selectedTheme === "dark"
-                      ? "Dark"
-                      : "Light"}
-                  <ChevronDown className="size-3 opacity-50" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                align="start"
-                className="w-[--radix-dropdown-menu-trigger-width]"
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        className={
+          // Mobile: take the full viewport — no margin, no rounded corners,
+          // top-anchored so the address-bar doesn't clip the footer.
+          // Desktop (sm+): float as a centered, capped-width card.
+          [
+            "inset-0 left-0 top-0 h-dvh w-full max-w-none translate-x-0 translate-y-0 rounded-none",
+            "sm:inset-auto sm:top-[50%] sm:left-[50%] sm:h-[80vh] sm:w-full sm:max-w-2xl sm:translate-x-[-50%] sm:translate-y-[-50%] sm:rounded-lg",
+            "overflow-hidden p-0 flex flex-col gap-0",
+          ].join(" ")
+        }
+      >
+        <DialogHeader className="px-6 pt-6 pb-4 shrink-0">
+          <DialogTitle>Settings</DialogTitle>
+        </DialogHeader>
+        {/* Body — every section stacked in a single scrolling column. */}
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <div className="flex flex-col gap-6 px-6 pb-6">
+            {/* ── Appearance ─────────────────────────────────── */}
+            <SettingsSection title="Appearance">
+              <SettingsRow
+                variant="responsive"
+                label="Theme"
+                description="Choose between system default, light, and dark mode."
               >
-                <DropdownMenuRadioGroup
+                <Select
                   value={selectedTheme}
                   onValueChange={(v: string) => setSelectedTheme(v as Theme)}
                 >
-                  <DropdownMenuRadioItem value="system">System</DropdownMenuRadioItem>
-                  <DropdownMenuRadioItem value="light">Light</DropdownMenuRadioItem>
-                  <DropdownMenuRadioItem value="dark">Dark</DropdownMenuRadioItem>
-                </DropdownMenuRadioGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <p className="text-xs text-muted-foreground">
-              Choose between system default, light, and dark mode. System follows your OS
-              preference. You can also cycle through themes using the toolbar button.
-            </p>
-          </div>
-        </div>
-      )}
+                  <SelectTrigger className="h-8 w-full text-sm sm:w-32" aria-label="Theme">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="system">System</SelectItem>
+                    <SelectItem value="light">Light</SelectItem>
+                    <SelectItem value="dark">Dark</SelectItem>
+                  </SelectContent>
+                </Select>
+              </SettingsRow>
+            </SettingsSection>
 
-      {activeSection === "general" && (
-        <div className="space-y-4 px-1">
-          <div className="space-y-2">
-            <Label htmlFor="worktrees-dir">Worktrees folder</Label>
-            <div className="flex gap-2">
-              <Input
-                id="worktrees-dir"
-                placeholder="~/.band/worktrees (default)"
-                value={worktreesDir}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                  setWorktreesDir(e.target.value)
-                }
-              />
-              {capabilities.pickFolder && (
-                <Button type="button" variant="ghost" size="icon" onClick={handleBrowse}>
-                  <FolderOpen />
-                </Button>
-              )}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Directory where new worktrees are created. Leave empty for the default location.
-            </p>
-          </div>
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label htmlFor="enable-lsp">Code intelligence (LSP)</Label>
-              <Switch id="enable-lsp" checked={enableLSP} onCheckedChange={setEnableLSP} />
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Enable hover type info and go-to-definition in the code browser. Currently supports
-              TypeScript and JavaScript. Uses additional memory per workspace.
-            </p>
-          </div>
-        </div>
-      )}
-
-      {activeSection === "labels" && (
-        <div className="space-y-3 px-1">
-          {labels.map((lbl) => (
-            <div key={lbl.id} className="flex items-center gap-2">
-              <ColorPicker
-                value={lbl.color}
-                onChange={(color) =>
-                  setLabels((prev) => prev.map((l) => (l.id === lbl.id ? { ...l, color } : l)))
-                }
-                showHex={false}
-                className="w-auto h-7 px-1.5 shrink-0"
-              />
-              <Input
-                value={lbl.name}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                  setLabels((prev) =>
-                    prev.map((l) => (l.id === lbl.id ? { ...l, name: e.target.value } : l)),
-                  )
-                }
-                className="flex-1 h-7 text-xs"
-              />
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                className="text-destructive hover:text-destructive shrink-0"
-                onClick={() => setLabels((prev) => prev.filter((l) => l.id !== lbl.id))}
+            {/* ── General ────────────────────────────────────── */}
+            <SettingsSection title="General">
+              <SettingsRow
+                variant="responsive"
+                htmlFor="worktrees-dir"
+                label="Worktrees folder"
+                description="Directory where new worktrees are created. Leave empty for the default location."
               >
-                <Trash2 className="size-3" />
-              </Button>
-            </div>
-          ))}
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full text-xs"
-            onClick={() => {
-              const id = `lbl_${Date.now()}`;
-              setLabels((prev) => [...prev, { id, name: "New label", color: "#3b82f6" }]);
-            }}
-          >
-            <Plus className="size-3 mr-1" />
-            Add label
-          </Button>
-        </div>
-      )}
-
-      {activeSection === "coding-agent" && (
-        <div className="space-y-3 px-1">
-          {KNOWN_AGENTS.map((known) => {
-            const agent = codingAgents.find((a) => a.type === known.type);
-            const enabled = !!agent;
-            return (
-              <div
-                key={known.id}
-                className={`space-y-2 rounded-md border border-border p-3 transition-opacity ${!enabled ? "opacity-50" : ""}`}
-              >
-                <div className="flex items-center gap-2">
-                  <span
-                    className={`size-2 rounded-full shrink-0 ${enabled ? "bg-green-500" : "bg-muted-foreground/30"}`}
+                <div className="flex w-full gap-2 sm:w-[22rem]">
+                  <Input
+                    id="worktrees-dir"
+                    placeholder="~/.band/worktrees (default)"
+                    value={worktreesDir}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                      setWorktreesDir(e.target.value)
+                    }
+                    className="h-8 text-sm"
                   />
-                  <AgentIcon type={known.type} className="size-4 shrink-0" />
-                  <span className="flex-1 text-sm font-medium">{known.label}</span>
-                  <Switch
-                    checked={enabled}
-                    onCheckedChange={(checked: boolean) => {
-                      if (checked) {
-                        setCodingAgents((prev) => [
-                          ...prev,
-                          { id: known.id, type: known.type, label: known.label },
-                        ]);
-                        if (!defaultAgentId) setDefaultAgentId(known.id);
-                      } else {
-                        setCodingAgents((prev) => prev.filter((a) => a.type !== known.type));
-                        if (defaultAgentId === known.id || defaultAgentId === agent?.id) {
-                          const remaining = codingAgents.filter((a) => a.type !== known.type);
-                          setDefaultAgentId(remaining.length > 0 ? remaining[0].id : "");
-                        }
-                      }
-                    }}
-                  />
-                </div>
-                {enabled && (
-                  <div className="space-y-2">
-                    <button
+                  {capabilities.pickFolder && (
+                    <Button
                       type="button"
-                      onClick={() => setDefaultAgentId(agent?.id ?? known.id)}
-                      className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium transition-colors ${
-                        defaultAgentId === (agent?.id ?? known.id)
-                          ? "bg-primary/15 text-primary"
-                          : "text-muted-foreground hover:text-foreground hover:bg-muted"
-                      }`}
+                      variant="outline"
+                      size="icon-sm"
+                      onClick={handleBrowse}
+                      aria-label="Browse for folder"
                     >
-                      {defaultAgentId === (agent?.id ?? known.id) ? "Default" : "Set as default"}
-                    </button>
-                    <div className="space-y-1">
-                      <Label className="text-xs text-muted-foreground">Command</Label>
-                      <Input
-                        placeholder={known.defaultCommand}
-                        value={agent?.command ?? ""}
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                          setCodingAgents((prev) =>
-                            prev.map((a) =>
-                              a.type === known.type
-                                ? { ...a, command: e.target.value || undefined }
-                                : a,
-                            ),
+                      <FolderOpen />
+                    </Button>
+                  )}
+                </div>
+              </SettingsRow>
+              <SettingsRow
+                htmlFor="enable-lsp"
+                label="Code intelligence (LSP)"
+                description="Enable hover type info and go-to-definition in the code browser. Currently supports TypeScript and JavaScript. Uses additional memory per workspace."
+              >
+                <Switch id="enable-lsp" checked={enableLSP} onCheckedChange={setEnableLSP} />
+              </SettingsRow>
+            </SettingsSection>
+
+            {/* ── Labels ─────────────────────────────────────── */}
+            <SettingsSection
+              title="Labels"
+              description="Tag projects to filter and group them in the sidebar."
+            >
+              {labels.length === 0 ? (
+                <SettingsRow
+                  label="No labels yet"
+                  description="Add a label to start tagging projects."
+                >
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const id = `lbl_${Date.now()}`;
+                      setLabels((prev) => [...prev, { id, name: "New label", color: "#3b82f6" }]);
+                    }}
+                  >
+                    <Plus className="size-3" />
+                    Add label
+                  </Button>
+                </SettingsRow>
+              ) : (
+                <>
+                  {labels.map((lbl) => (
+                    <div
+                      key={lbl.id}
+                      data-slot="settings-row"
+                      className="flex items-center gap-2 px-4 py-2.5"
+                    >
+                      <ColorPicker
+                        value={lbl.color}
+                        onChange={(color) =>
+                          setLabels((prev) =>
+                            prev.map((l) => (l.id === lbl.id ? { ...l, color } : l)),
                           )
                         }
-                        className="h-7 text-xs"
+                        showHex={false}
+                        className="w-auto h-7 px-1.5 shrink-0"
                       />
+                      <Input
+                        value={lbl.name}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                          setLabels((prev) =>
+                            prev.map((l) => (l.id === lbl.id ? { ...l, name: e.target.value } : l)),
+                          )
+                        }
+                        className="flex-1 h-8 text-sm"
+                      />
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        aria-label="Remove label"
+                        className="shrink-0 text-foreground hover:text-foreground"
+                        onClick={() => setLabels((prev) => prev.filter((l) => l.id !== lbl.id))}
+                      >
+                        <X className="size-3.5" />
+                      </Button>
                     </div>
-                    {(agentModels[known.type]?.length ?? 0) > 0 && (
-                      <div className="space-y-1">
-                        <Label className="text-xs text-muted-foreground">Default model</Label>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="w-full justify-between font-normal h-7 text-xs px-2"
-                            >
-                              {agentModels[known.type]?.find((m) => m.id === agent?.model)?.name ??
-                                "Default"}
-                              <ChevronDown className="size-3 opacity-50" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent
-                            align="start"
-                            className="w-[--radix-dropdown-menu-trigger-width]"
-                          >
-                            <DropdownMenuRadioGroup
-                              value={agent?.model ?? ""}
+                  ))}
+                  <div data-slot="settings-row" className="flex items-center px-4 py-2.5">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        const id = `lbl_${Date.now()}`;
+                        setLabels((prev) => [...prev, { id, name: "New label", color: "#3b82f6" }]);
+                      }}
+                    >
+                      <Plus className="size-3" />
+                      Add label
+                    </Button>
+                  </div>
+                </>
+              )}
+            </SettingsSection>
+
+            {/* ── Coding Agents ──────────────────────────────── */}
+            <SettingsSection
+              title="Coding Agents"
+              description="Enable the agents you have installed."
+            >
+              {codingAgents.length > 0 && (
+                <SettingsRow
+                  variant="responsive"
+                  label="Default agent"
+                  description="Used for new workspaces. You can switch agents per workspace from the workspace chat header."
+                >
+                  <Select
+                    value={defaultAgentId || codingAgents[0].id}
+                    onValueChange={(v: string) => setDefaultAgentId(v)}
+                  >
+                    <SelectTrigger
+                      className="h-8 w-full text-sm sm:w-48"
+                      aria-label="Default coding agent"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {codingAgents.map((a) => (
+                        <SelectItem key={a.id} value={a.id}>
+                          <AgentIcon type={a.type} className="size-3.5" />
+                          {a.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </SettingsRow>
+              )}
+              <Accordion type="multiple" className="w-full">
+                {KNOWN_AGENTS.map((known) => {
+                  const agent = codingAgents.find((a) => a.type === known.type);
+                  const enabled = !!agent;
+                  const models = agentModels[known.type] ?? [];
+                  return (
+                    <AccordionItem
+                      key={known.id}
+                      value={known.id}
+                      data-slot="settings-row"
+                      className={cn("border-b-0 transition-opacity", !enabled && "opacity-60")}
+                    >
+                      <AccordionHeader className="flex items-center gap-3 px-4 py-3">
+                        <span
+                          className={cn(
+                            "size-2 shrink-0 rounded-full",
+                            enabled ? "bg-green-500" : "bg-muted-foreground/30",
+                          )}
+                        />
+                        <AgentIcon type={known.type} className="size-4 shrink-0" />
+                        <AccordionTriggerInline
+                          aria-label={`Toggle advanced settings for ${known.label}`}
+                          className="flex-1 rounded-md text-left text-sm font-medium"
+                        >
+                          {known.label}
+                        </AccordionTriggerInline>
+                        <Switch
+                          aria-label={`Enable ${known.label}`}
+                          checked={enabled}
+                          onCheckedChange={(checked: boolean) => {
+                            if (checked) {
+                              setCodingAgents((prev) => [
+                                ...prev,
+                                { id: known.id, type: known.type, label: known.label },
+                              ]);
+                              if (!defaultAgentId) setDefaultAgentId(known.id);
+                            } else {
+                              setCodingAgents((prev) => prev.filter((a) => a.type !== known.type));
+                              if (defaultAgentId === known.id || defaultAgentId === agent?.id) {
+                                const remaining = codingAgents.filter((a) => a.type !== known.type);
+                                setDefaultAgentId(remaining.length > 0 ? remaining[0].id : "");
+                              }
+                            }
+                          }}
+                        />
+                        <AccordionTriggerInline
+                          aria-label={`Toggle advanced settings for ${known.label}`}
+                          className="-mr-1 inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground [&[data-state=open]>svg]:rotate-180"
+                        >
+                          <ChevronDown className="size-4 shrink-0 transition-transform duration-200" />
+                        </AccordionTriggerInline>
+                      </AccordionHeader>
+                      <AccordionContent className="space-y-2.5 px-4 pb-3 pl-11">
+                        <div className="space-y-1">
+                          <Label className="text-xs text-muted-foreground">Command</Label>
+                          <Input
+                            placeholder={known.defaultCommand}
+                            disabled={!enabled}
+                            value={agent?.command ?? ""}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                              setCodingAgents((prev) =>
+                                prev.map((a) =>
+                                  a.type === known.type
+                                    ? { ...a, command: e.target.value || undefined }
+                                    : a,
+                                ),
+                              )
+                            }
+                            className="h-8 text-xs"
+                          />
+                        </div>
+                        {models.length > 0 && (
+                          <div className="space-y-1">
+                            <Label className="text-xs text-muted-foreground">Default model</Label>
+                            <Select
+                              // Radix Select reserves the empty string for the
+                              // "no selection / show placeholder" state, so we
+                              // round-trip through a sentinel for "use the agent's
+                              // built-in default model".
+                              value={agent?.model ?? MODEL_DEFAULT_SENTINEL}
+                              disabled={!enabled}
                               onValueChange={(v: string) =>
                                 setCodingAgents((prev) =>
                                   prev.map((a) =>
-                                    a.type === known.type ? { ...a, model: v || undefined } : a,
+                                    a.type === known.type
+                                      ? {
+                                          ...a,
+                                          model: v === MODEL_DEFAULT_SENTINEL ? undefined : v,
+                                        }
+                                      : a,
                                   ),
                                 )
                               }
                             >
-                              <DropdownMenuRadioItem value="">Default</DropdownMenuRadioItem>
-                              {agentModels[known.type]?.map((m) => (
-                                <DropdownMenuRadioItem key={m.id} value={m.id}>
-                                  {m.name}
-                                </DropdownMenuRadioItem>
-                              ))}
-                            </DropdownMenuRadioGroup>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-          <p className="text-xs text-muted-foreground">
-            Enable agents and set a default. The default agent is used for new workspaces. You can
-            switch agents per workspace from the workspace chat header.
-          </p>
-        </div>
-      )}
+                              <SelectTrigger className="h-8 text-xs">
+                                <SelectValue placeholder="Default" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value={MODEL_DEFAULT_SENTINEL}>Default</SelectItem>
+                                {models.map((m) => (
+                                  <SelectItem key={m.id} value={m.id}>
+                                    {m.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        )}
+                      </AccordionContent>
+                    </AccordionItem>
+                  );
+                })}
+              </Accordion>
+            </SettingsSection>
 
-      {activeSection === "notifications" && (
-        <div className="space-y-4 px-1">
-          <div className="space-y-2">
-            <Label>Notification sound</Label>
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-muted-foreground">Play when agent needs attention</span>
-              <Switch
-                id="sound-needs-attention"
-                checked={soundOnNeedsAttention}
-                onCheckedChange={(checked: boolean) => {
-                  setSoundOnNeedsAttention(checked);
-                  if (checked) {
-                    playSound(selectedSound);
-                  }
-                }}
-              />
-            </div>
-          </div>
-          {soundOnNeedsAttention && (
-            <div className="space-y-2">
-              <Label>Sound</Label>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full justify-between font-normal h-7 text-xs px-2"
-                  >
-                    {SOUNDS.find((s) => s.id === selectedSound)?.label ?? "Chime"}
-                    <ChevronDown className="size-3 opacity-50" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent
-                  align="start"
-                  className="w-[--radix-dropdown-menu-trigger-width]"
+            {/* ── Notifications ──────────────────────────────── */}
+            <SettingsSection title="Notifications">
+              <SettingsRow
+                htmlFor="sound-needs-attention"
+                label="Play sound on needs attention"
+                description="Play a sound when an agent transitions from working to needs attention."
+              >
+                <Switch
+                  id="sound-needs-attention"
+                  checked={soundOnNeedsAttention}
+                  onCheckedChange={(checked: boolean) => {
+                    setSoundOnNeedsAttention(checked);
+                    if (checked) {
+                      playSound(selectedSound);
+                    }
+                  }}
+                />
+              </SettingsRow>
+              {soundOnNeedsAttention && (
+                <SettingsRow
+                  variant="responsive"
+                  label="Sound"
+                  description="Choose which sound plays. Selecting one previews it."
                 >
-                  <DropdownMenuRadioGroup
+                  <Select
                     value={selectedSound}
                     onValueChange={(v: string) => {
                       setSelectedSound(v as SoundId);
                       playSound(v as SoundId);
                     }}
                   >
-                    {SOUNDS.map((s) => (
-                      <DropdownMenuRadioItem key={s.id} value={s.id}>
-                        {s.label}
-                      </DropdownMenuRadioItem>
-                    ))}
-                  </DropdownMenuRadioGroup>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <p className="text-xs text-muted-foreground">
-                Choose a sound to play when an agent transitions from working to needs attention.
-              </p>
-            </div>
-          )}
-        </div>
-      )}
-
-      {activeSection === "web-server" && (
-        <div className="space-y-4 px-1">
-          <div className="space-y-2">
-            <Label htmlFor="web-server-port">Port</Label>
-            <Input
-              id="web-server-port"
-              type="number"
-              placeholder="3456 (default)"
-              value={webServerPort}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                setWebServerPort(e.target.value)
-              }
-              min={1}
-              max={65535}
-            />
-            <p className="text-xs text-muted-foreground">
-              Port the web server listens on for mobile access. Leave empty for the default (3456).
-              Requires restart.
-            </p>
-          </div>
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label htmlFor="auto-start-tunnel">Auto-start tunnel</Label>
-              <Switch
-                id="auto-start-tunnel"
-                checked={autoStartTunnel}
-                onCheckedChange={setAutoStartTunnel}
-              />
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Automatically start the web server and tunnel when the app launches.
-            </p>
-          </div>
-        </div>
-      )}
-    </>
-  );
-
-  /* ── Menu items ─────────────────────────────────────────── */
-
-  const menuItems = (
-    <div className="flex flex-col gap-px">
-      <SettingsRow
-        label="Appearance"
-        value={themePreview}
-        active={activeSection === "appearance"}
-        onClick={() => setSection("appearance")}
-      />
-      <Separator />
-      <SettingsRow
-        label="General"
-        value={worktreesDirPreview}
-        active={activeSection === "general"}
-        onClick={() => setSection("general")}
-      />
-      <Separator />
-      <SettingsRow
-        label="Labels"
-        value={labelsPreview}
-        active={activeSection === "labels"}
-        onClick={() => setSection("labels")}
-      />
-      <Separator />
-      <SettingsRow
-        label="Coding Agents"
-        value={agentPreview}
-        active={activeSection === "coding-agent"}
-        onClick={() => setSection("coding-agent")}
-      />
-      <Separator />
-      <SettingsRow
-        label="Notifications"
-        value={notificationsPreview}
-        active={activeSection === "notifications"}
-        onClick={() => setSection("notifications")}
-      />
-      <Separator />
-      <SettingsRow
-        label="Web Server"
-        value={portPreview}
-        active={activeSection === "web-server"}
-        onClick={() => setSection("web-server")}
-      />
-    </div>
-  );
-
-  /* ── Layout ─────────────────────────────────────────────── */
-
-  return (
-    <div className="flex flex-col lg:flex-row h-full">
-      {/* ── Left: menu panel ──────────────────────────────── */}
-      <div
-        className={`lg:w-72 lg:shrink-0 lg:border-r lg:border-border lg:block overflow-y-auto ${section !== "menu" ? "hidden" : ""}`}
-      >
-        {!hideTitle && (
-          <>
-            <div className="flex items-center gap-1 mb-2 px-1">
-              {onClose && (
-                <Button variant="ghost" size="icon-sm" onClick={onClose} className="lg:hidden">
-                  <ChevronLeft className="size-5" />
-                </Button>
+                    <SelectTrigger className="h-8 w-full text-xs sm:min-w-[10rem]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {SOUNDS.map((s) => (
+                        <SelectItem key={s.id} value={s.id}>
+                          {s.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </SettingsRow>
               )}
-              <h2 className="text-base font-semibold">Settings</h2>
-            </div>
-            <Separator />
-          </>
-        )}
-        {menuItems}
-      </div>
+            </SettingsSection>
 
-      {/* ── Right: detail panel ───────────────────────────── */}
-      <div
-        className={`flex-1 min-w-0 overflow-y-auto lg:block ${section === "menu" ? "hidden" : ""}`}
-      >
-        {activeSection && (
-          <div className="lg:px-4 lg:py-2">
-            <div className="flex items-center gap-1 mb-3 px-1">
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => setSection("menu")}
-                className="lg:hidden"
+            {/* ── Web Server ─────────────────────────────────── */}
+            <SettingsSection title="Web Server">
+              <SettingsRow
+                variant="responsive"
+                htmlFor="web-server-port"
+                label="Port"
+                description="Port the web server listens on for mobile access. Leave empty for the default (3456). Requires restart."
               >
-                <ChevronLeft className="size-5" />
-              </Button>
-              <h2 className="text-base font-semibold flex-1">{SECTION_TITLES[activeSection]}</h2>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon-sm" onClick={handleSave} className="relative">
-                    <Save className="size-5" />
-                    {isDirty && (
-                      <span className="absolute top-0.5 right-0.5 size-2 rounded-full bg-blue-500" />
-                    )}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Save</TooltipContent>
-              </Tooltip>
-            </div>
-            <Separator className="mb-3" />
-            {sectionContent}
+                <Input
+                  id="web-server-port"
+                  type="number"
+                  placeholder="3456 (default)"
+                  value={webServerPort}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    setWebServerPort(e.target.value)
+                  }
+                  min={1}
+                  max={65535}
+                  className="h-8 w-full text-sm sm:w-32"
+                />
+              </SettingsRow>
+              <SettingsRow
+                htmlFor="auto-start-tunnel"
+                label="Auto-start tunnel"
+                description="Automatically start the web server and tunnel when the app launches."
+              >
+                <Switch
+                  id="auto-start-tunnel"
+                  checked={autoStartTunnel}
+                  onCheckedChange={setAutoStartTunnel}
+                />
+              </SettingsRow>
+            </SettingsSection>
           </div>
-        )}
-      </div>
-    </div>
+        </div>
+        <DialogFooter className="border-t border-border px-6 py-3 sm:justify-end">
+          <Button
+            type="button"
+            size="sm"
+            onClick={handleSaveAndClose}
+            disabled={!isDirty}
+            aria-label="Save"
+          >
+            Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
