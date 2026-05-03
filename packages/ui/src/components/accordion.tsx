@@ -8,6 +8,49 @@ function Accordion({ ...props }: React.ComponentProps<typeof AccordionPrimitive.
   return <AccordionPrimitive.Root data-slot="accordion" {...props} />;
 }
 
+/**
+ * Wrapper for Radix's `Accordion.Header` so callers can place additional
+ * controls (e.g. a Switch) as siblings of an `AccordionTrigger` inside the
+ * same row without nesting buttons. The default `AccordionTrigger` already
+ * embeds a Header internally, so use this only when you need a custom row
+ * layout — pair it with `AccordionTriggerInline` (no Header wrapper).
+ */
+function AccordionHeader({
+  className,
+  ...props
+}: React.ComponentProps<typeof AccordionPrimitive.Header>) {
+  return (
+    <AccordionPrimitive.Header
+      data-slot="accordion-header"
+      className={cn("flex", className)}
+      {...props}
+    />
+  );
+}
+
+/**
+ * The bare trigger button — no Header wrapper, no chevron. Intended for
+ * use inside a custom `AccordionHeader` row that has additional siblings.
+ */
+function AccordionTriggerInline({
+  className,
+  children,
+  ...props
+}: React.ComponentProps<typeof AccordionPrimitive.Trigger>) {
+  return (
+    <AccordionPrimitive.Trigger
+      data-slot="accordion-trigger"
+      className={cn(
+        "outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50",
+        className,
+      )}
+      {...props}
+    >
+      {children}
+    </AccordionPrimitive.Trigger>
+  );
+}
+
 function AccordionItem({
   className,
   ...props
@@ -59,4 +102,11 @@ function AccordionContent({
   );
 }
 
-export { Accordion, AccordionItem, AccordionTrigger, AccordionContent };
+export {
+  Accordion,
+  AccordionContent,
+  AccordionHeader,
+  AccordionItem,
+  AccordionTrigger,
+  AccordionTriggerInline,
+};

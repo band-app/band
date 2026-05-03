@@ -1,6 +1,12 @@
 import {
+  Accordion,
+  AccordionContent,
+  AccordionHeader,
+  AccordionItem,
+  AccordionTriggerInline,
   Button,
   ColorPicker,
+  cn,
   Dialog,
   DialogContent,
   DialogFooter,
@@ -15,7 +21,7 @@ import {
   SelectValue,
   Switch,
 } from "@band-app/ui";
-import { FolderOpen, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, FolderOpen, Plus, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useAdapter, useCapabilities } from "../context";
 import { useUpdateSettings } from "../hooks/use-settings-mutations";
@@ -372,48 +378,59 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                   </Select>
                 </SettingsRow>
               )}
-              {KNOWN_AGENTS.map((known) => {
-                const agent = codingAgents.find((a) => a.type === known.type);
-                const enabled = !!agent;
-                const models = agentModels[known.type] ?? [];
-                return (
-                  <div
-                    key={known.id}
-                    data-slot="settings-row"
-                    className={`px-4 py-3 transition-opacity ${!enabled ? "opacity-60" : ""}`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <span
-                        className={`size-2 rounded-full shrink-0 ${enabled ? "bg-green-500" : "bg-muted-foreground/30"}`}
-                      />
-                      <AgentIcon type={known.type} className="size-4 shrink-0" />
-                      <span className="flex-1 text-sm font-medium">{known.label}</span>
-                      <Switch
-                        aria-label={`Enable ${known.label}`}
-                        checked={enabled}
-                        onCheckedChange={(checked: boolean) => {
-                          if (checked) {
-                            setCodingAgents((prev) => [
-                              ...prev,
-                              { id: known.id, type: known.type, label: known.label },
-                            ]);
-                            if (!defaultAgentId) setDefaultAgentId(known.id);
-                          } else {
-                            setCodingAgents((prev) => prev.filter((a) => a.type !== known.type));
-                            if (defaultAgentId === known.id || defaultAgentId === agent?.id) {
-                              const remaining = codingAgents.filter((a) => a.type !== known.type);
-                              setDefaultAgentId(remaining.length > 0 ? remaining[0].id : "");
+              <Accordion type="multiple" className="w-full">
+                {KNOWN_AGENTS.map((known) => {
+                  const agent = codingAgents.find((a) => a.type === known.type);
+                  const enabled = !!agent;
+                  const models = agentModels[known.type] ?? [];
+                  return (
+                    <AccordionItem
+                      key={known.id}
+                      value={known.id}
+                      data-slot="settings-row"
+                      className={cn("border-b-0 transition-opacity", !enabled && "opacity-60")}
+                    >
+                      <AccordionHeader className="flex items-center gap-3 px-4 py-3">
+                        <span
+                          className={cn(
+                            "size-2 shrink-0 rounded-full",
+                            enabled ? "bg-green-500" : "bg-muted-foreground/30",
+                          )}
+                        />
+                        <AgentIcon type={known.type} className="size-4 shrink-0" />
+                        <AccordionTriggerInline
+                          aria-label={`Toggle advanced settings for ${known.label}`}
+                          className="flex flex-1 items-center justify-between gap-2 rounded-md text-left text-sm font-medium [&[data-state=open]>svg]:rotate-180"
+                        >
+                          <span>{known.label}</span>
+                          <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform duration-200" />
+                        </AccordionTriggerInline>
+                        <Switch
+                          aria-label={`Enable ${known.label}`}
+                          checked={enabled}
+                          onCheckedChange={(checked: boolean) => {
+                            if (checked) {
+                              setCodingAgents((prev) => [
+                                ...prev,
+                                { id: known.id, type: known.type, label: known.label },
+                              ]);
+                              if (!defaultAgentId) setDefaultAgentId(known.id);
+                            } else {
+                              setCodingAgents((prev) => prev.filter((a) => a.type !== known.type));
+                              if (defaultAgentId === known.id || defaultAgentId === agent?.id) {
+                                const remaining = codingAgents.filter((a) => a.type !== known.type);
+                                setDefaultAgentId(remaining.length > 0 ? remaining[0].id : "");
+                              }
                             }
-                          }
-                        }}
-                      />
-                    </div>
-                    {enabled && (
-                      <div className="mt-3 space-y-2.5 pl-7">
+                          }}
+                        />
+                      </AccordionHeader>
+                      <AccordionContent className="space-y-2.5 px-4 pb-3 pl-11">
                         <div className="space-y-1">
                           <Label className="text-xs text-muted-foreground">Command</Label>
                           <Input
                             placeholder={known.defaultCommand}
+                            disabled={!enabled}
                             value={agent?.command ?? ""}
                             onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                               setCodingAgents((prev) =>
@@ -436,6 +453,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                               // round-trip through a sentinel for "use the agent's
                               // built-in default model".
                               value={agent?.model ?? MODEL_DEFAULT_SENTINEL}
+                              disabled={!enabled}
                               onValueChange={(v: string) =>
                                 setCodingAgents((prev) =>
                                   prev.map((a) =>
@@ -463,11 +481,11 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                             </Select>
                           </div>
                         )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+                      </AccordionContent>
+                    </AccordionItem>
+                  );
+                })}
+              </Accordion>
             </SettingsSection>
 
             {/* ── Notifications ──────────────────────────────── */}
