@@ -17,7 +17,19 @@ let tmpHome: string;
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
   seedState(tmpHome, { projects: [] });
-  seedSettings(tmpHome, { tokenSecret: TOKEN, theme: "dark" });
+  // Seed codingAgents explicitly so the Default-agent dropdown renders
+  // deterministically — without this, runFirstTimeSetup() relies on the
+  // host having `claude`/`codex`/`opencode` on PATH, which is true on
+  // dev machines but not on CI runners.
+  seedSettings(tmpHome, {
+    tokenSecret: TOKEN,
+    theme: "dark",
+    codingAgents: [
+      { id: "claude-code", type: "claude-code", label: "Claude Code" },
+      { id: "codex", type: "codex", label: "Codex" },
+    ],
+    defaultCodingAgent: "claude-code",
+  });
   server = await startServer({ tmpHome });
 });
 
