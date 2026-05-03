@@ -8,7 +8,6 @@ import {
   DialogTitle,
   Input,
   Label,
-  SegmentedControl,
   Select,
   SelectContent,
   SelectItem,
@@ -196,16 +195,19 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                 label="Theme"
                 description="Choose between system default, light, and dark mode. System follows your OS preference. You can also cycle through themes using the toolbar button."
               >
-                <SegmentedControl<Theme>
-                  ariaLabel="Theme"
-                  options={[
-                    { value: "system", label: "System" },
-                    { value: "light", label: "Light" },
-                    { value: "dark", label: "Dark" },
-                  ]}
+                <Select
                   value={selectedTheme}
-                  onChange={(v) => setSelectedTheme(v)}
-                />
+                  onValueChange={(v: string) => setSelectedTheme(v as Theme)}
+                >
+                  <SelectTrigger className="h-8 w-32 text-sm" aria-label="Theme">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="system">System</SelectItem>
+                    <SelectItem value="light">Light</SelectItem>
+                    <SelectItem value="dark">Dark</SelectItem>
+                  </SelectContent>
+                </Select>
               </SettingsRow>
             </SettingsSection>
 

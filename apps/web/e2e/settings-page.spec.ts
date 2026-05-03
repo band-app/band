@@ -63,9 +63,9 @@ test("settings dialog renders every section in a single scrolling list", async (
   // every section's first row to be visible (after scrolling, if needed).
   await expect(dialog.locator('[data-slot="settings-section-card"]')).toHaveCount(6);
 
-  // Appearance — segmented control rendered by SettingsRow.
+  // Appearance — Theme dropdown rendered by SettingsRow.
   await expect(dialog.getByText("Theme", { exact: true })).toBeVisible();
-  await expect(dialog.getByRole("radiogroup", { name: "Theme" })).toBeVisible();
+  await expect(dialog.getByRole("combobox", { name: "Theme" })).toBeVisible();
 
   // Subsequent sections live in the same scrolling column. Use scrollIntoView
   // before asserting visibility because the dialog viewport is fixed-height.
@@ -147,20 +147,16 @@ test("coding agents section renders and toggling an agent doesn't crash", async 
   expect(errors).toEqual([]);
 });
 
-test("changing theme via segmented control persists the new theme", async ({ page }) => {
+test("changing theme via the dropdown persists the new theme", async ({ page }) => {
   await page.goto(`${server.url}/?token=${TOKEN}`);
   const dialog = await openSettingsDialog(page);
 
-  // Appearance is the default section on lg+ screens.
-  const radiogroup = dialog.getByRole("radiogroup", { name: "Theme" });
-  await expect(radiogroup).toBeVisible();
-
-  // Click the "Light" segment.
-  await radiogroup.getByRole("radio", { name: "Light" }).click();
-  await expect(radiogroup.getByRole("radio", { name: "Light" })).toHaveAttribute(
-    "aria-checked",
-    "true",
-  );
+  // Open the Theme dropdown and pick Light.
+  const trigger = dialog.getByRole("combobox", { name: "Theme" });
+  await expect(trigger).toBeVisible();
+  await trigger.click();
+  await page.getByRole("option", { name: "Light" }).click();
+  await expect(trigger).toContainText("Light");
 
   // Save and verify persistence.
   await dialog.getByRole("button", { name: "Save" }).click();
