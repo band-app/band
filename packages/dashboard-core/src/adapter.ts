@@ -30,7 +30,6 @@ export interface DashboardAdapter {
   // Workspaces
   createWorkspace(project: string, branch: string, base?: string, prompt?: string): Promise<void>;
   removeWorkspace(project: string, branch: string): Promise<void>;
-  openWorkspace(workspaceId: string): Promise<void>;
   runScript(path: string, scriptType: string): Promise<void>;
   gitPull(project: string, branch: string): Promise<void>;
   gitPush(project: string, branch: string): Promise<void>;
@@ -48,8 +47,6 @@ export interface DashboardAdapter {
     onUpdate: (status: WorkspaceStatus) => void,
     onRemove: (workspaceId: string) => void,
   ): Unsubscribe;
-
-  subscribeActiveWorkspace(onChange: (workspaceId: string | null) => void): Unsubscribe;
 
   subscribeBranchStatus(
     onGit: (workspaceId: string, git: GitStatus) => void,
@@ -69,9 +66,6 @@ export interface DashboardAdapter {
 
   // Agent status (optional)
   clearNeedsAttention?(workspaceId: string): Promise<void>;
-
-  // Window management
-  closeWorkspaceWindows(workspaceId: string): Promise<void>;
 
   // Code browsing (optional)
   getWorkspaceDiff?(

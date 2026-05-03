@@ -6,9 +6,9 @@ import {
   useUpdateSettings,
 } from "@band-app/dashboard-core";
 import {
-  HybridDashboardAdapter,
   NativeShellCapabilities,
-} from "@band-app/dashboard-core/adapters/hybrid";
+  TauriDashboardAdapter,
+} from "@band-app/dashboard-core/adapters/tauri";
 import { WebCapabilities, WebDashboardAdapter } from "@band-app/dashboard-core/adapters/web";
 import { TooltipProvider } from "@band-app/ui";
 import {
@@ -46,7 +46,7 @@ import {
 import { applyZoomLevel, loadZoomLevel, zoomIn, zoomOut, zoomReset } from "../lib/zoom";
 import "../styles/globals.css";
 
-const adapter = isTauri ? new HybridDashboardAdapter() : new WebDashboardAdapter();
+const adapter = isTauri ? new TauriDashboardAdapter() : new WebDashboardAdapter();
 const capabilities = isTauri ? new NativeShellCapabilities() : new WebCapabilities();
 
 export { adapter, capabilities };
@@ -185,30 +185,9 @@ function ZoomSync() {
   return null;
 }
 
-const STANDALONE_ROUTES = ["/tasks", "/cronjobs", "/settings"];
-
-/**
- * Syncs the appMode setting into the HybridDashboardAdapter and
- * NativeShellCapabilities so they behave correctly for the active mode.
- */
-function ModeSync() {
-  const { settings } = useSettingsQuery();
-  const appMode = settings.appMode ?? "side-panel";
-
-  useEffect(() => {
-    if (isTauri) {
-      (adapter as HybridDashboardAdapter).setAppMode(appMode);
-      (capabilities as NativeShellCapabilities).setAppMode(appMode);
-    }
-  }, [appMode]);
-
-  return null;
-}
-
 function AppShell() {
   const { settings } = useSettingsQuery();
   const updateSettings = useUpdateSettings();
-  const appMode = settings.appMode ?? "side-panel";
   const hiddenPanels = useMemo(
     () =>
       ((settings as unknown as Record<string, unknown>).hiddenPanels as string[] | undefined) ?? [],
@@ -216,12 +195,11 @@ function AppShell() {
   );
   // Show desktop split layout when:
   // - In a regular browser on a wide screen, OR
-  // - In Tauri with "full-editor" mode
+  // - In Tauri (always full-editor since side-panel mode was extracted)
   const isWideScreen = useIsDesktop();
-  const isDesktop = (isWideScreen && !isTauri) || (isTauri && appMode === "full-editor");
+  const isDesktop = isWideScreen || isTauri;
   const router = useRouter();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const isStandalone = STANDALONE_ROUTES.includes(pathname);
 
   // Wire up client-side navigation for WebCapabilities
   useEffect(() => {
@@ -321,15 +299,13 @@ function AppShell() {
     [settings, updateSettings],
   );
 
-  if (!isDesktop || isStandalone) {
+  if (!isDesktop) {
     return <Outlet />;
   }
 
-  const isTauriFullEditor = isTauri && appMode === "full-editor";
-
   return (
     <div className="flex flex-col h-dvh w-full overflow-hidden bg-background text-foreground">
-      {isTauriFullEditor && (
+      {isTauri && (
         <TauriTitleBar
           onToggleSidebar={toggleSidebar}
           sidebarCollapsed={sidebarCollapsed}
@@ -361,7 +337,7 @@ function AppShell() {
             }}
           >
             <div className="h-full border-r border-border overflow-hidden">
-              <DashboardShell toolbarExtra={<ToolbarButtons />} hideTitleBar={isTauriFullEditor} />
+              <DashboardShell toolbarExtra={<ToolbarButtons />} hideTitleBar={isTauri} />
             </div>
           </Panel>
           <Separator className="w-[3px] bg-transparent hover:bg-accent-foreground/20 active:bg-accent-foreground/30 transition-colors cursor-col-resize" />
@@ -391,7 +367,6 @@ function RootLayout() {
         <DashboardProvider adapter={adapter} capabilities={capabilities}>
           <ThemeSync />
           <ZoomSync />
-          <ModeSync />
           <TooltipProvider>
             <AppShell />
           </TooltipProvider>

@@ -85,6 +85,13 @@
       "when": 1775200000000,
       "tag": "0011_chat_panes",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1777812693755,
+      "tag": "0012_drop_workspace_status_ide",
+      "breakpoints": true
     }
   ]
 }

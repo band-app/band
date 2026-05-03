@@ -1,4 +1,3 @@
-import { useSettingsQuery } from "@band-app/dashboard-core";
 import { createFileRoute } from "@tanstack/react-router";
 import { MessageSquare } from "lucide-react";
 import { DashboardView } from "../components/DashboardView";
@@ -10,11 +9,9 @@ export const Route = createFileRoute("/")({
 });
 
 function DashboardPage() {
-  const { settings } = useSettingsQuery();
-  const appMode = settings.appMode ?? "side-panel";
   const isWideScreen = useIsDesktop();
-  // Desktop split layout is active in browser on wide screens, or in Tauri full-editor mode
-  const isDesktop = (isWideScreen && !isTauri) || (isTauri && appMode === "full-editor");
+  // Desktop split layout is active in Tauri or in a wide browser window.
+  const isDesktop = isWideScreen || isTauri;
 
   // Desktop: sidebar is rendered by root layout, just show empty state
   if (isDesktop) {
@@ -28,7 +25,7 @@ function DashboardPage() {
     );
   }
 
-  // Mobile / Tauri side-panel: full-screen dashboard shell
+  // Mobile / narrow browser: full-screen dashboard shell
   return (
     <div className="h-dvh pb-4 standalone:pb-[env(safe-area-inset-bottom)]">
       <DashboardView />

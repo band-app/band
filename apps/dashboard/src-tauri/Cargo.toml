@@ -27,7 +27,6 @@ libc = "0.2"
 tokio = { version = "1", features = ["process", "time", "net"] }
 url = "2"
 wry = "0.54.3"
-ureq = { version = "3", features = ["json"] }
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 

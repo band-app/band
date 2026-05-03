@@ -1,5 +1,3 @@
-#[cfg(target_os = "macos")]
-mod api;
 mod commands;
 mod git;
 mod state;
@@ -12,7 +10,6 @@ use std::sync::Arc;
 use commands::browser::BrowserState;
 use commands::updater::UPDATER_ENABLED;
 use commands::webserver::{self as webserver, ManagedProcess, WebServerState};
-use state::{ActiveWorkspaceState, FocusManagementState, ProjectCache};
 use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
 use tauri::Manager;
 
@@ -70,27 +67,16 @@ pub fn run() {
 
     let app = builder
         .manage(WebServerState(ManagedProcess::new()))
-        .manage(ActiveWorkspaceState::new())
-        .manage(ProjectCache::new())
         .manage(BrowserState::new())
-        .manage(FocusManagementState::new(true))
         .invoke_handler(tauri::generate_handler![
-            commands::ide::workspace_focus,
-            commands::ide::workspace_close,
-            commands::ide::get_active_workspace,
-            commands::ide::detect_active_workspace,
-            commands::ide::pick_folder,
-            commands::ide::reveal_in_finder,
-            commands::ide::check_app_exists,
-            commands::ide::open_with_app,
-            commands::ide::install_cli,
+            commands::macos_shell::pick_folder,
+            commands::macos_shell::reveal_in_finder,
+            commands::macos_shell::check_app_exists,
+            commands::macos_shell::open_with_app,
+            commands::macos_shell::install_cli,
             commands::webserver::webserver_start,
             commands::webserver::webserver_stop,
-            commands::window::open_tasks_window,
-            commands::window::open_cronjobs_window,
-            commands::window::open_settings_window,
             commands::window::get_app_title,
-            commands::window::set_app_mode,
             commands::browser::browser_create,
             commands::browser::browser_navigate,
             commands::browser::browser_go_back,
@@ -211,10 +197,14 @@ pub fn run() {
                         ));
                     }
                 } else if event.id() == "settings" {
-                    let handle = app_handle.clone();
-                    tauri::async_runtime::spawn(async move {
-                        let _ = commands::window::open_settings_window(handle).await;
-                    });
+                    // The Settings dialog lives in the React tree (DashboardShell);
+                    // it registers `window.__bandOpenSettings` so the native menu
+                    // can pop it without spawning a separate window. Same pattern
+                    // as the zoom handler above.
+                    if let Some(win) = app_handle.get_webview_window("main") {
+                        let _ =
+                            win.eval("if(window.__bandOpenSettings)window.__bandOpenSettings()");
+                    }
                 } else if event.id() == "check_for_updates" {
                     let handle = app_handle.clone();
                     tauri::async_runtime::spawn(async move {
@@ -257,17 +247,9 @@ pub fn run() {
                 }
             }
 
-            // Ensure first-run defaults (e.g. appMode = "full-editor") are
-            // written to settings.json before we read them.
-            state::ensure_first_run_defaults();
-
-            // Read app mode from settings (defaults to "full-editor")
-            let app_mode = state::load_settings()
-                .ok()
-                .and_then(|s| s.app_mode)
-                .unwrap_or_else(|| "full-editor".to_string());
-
-            // Position and size the window based on app mode
+            // Size the main window to fill the primary monitor on launch.
+            // The user can resize/move it after; this is just a sane default
+            // for the full-editor layout.
             if let Ok(Some(monitor)) = window.current_monitor() {
                 let screen_size = monitor.size();
                 let scale_factor = monitor.scale_factor();
@@ -277,34 +259,10 @@ pub fn run() {
                 let _ = window.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(
                     0.0, 0.0,
                 )));
-
-                if app_mode == "full-editor" {
-                    // Full editor: use entire screen
-                    let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(
-                        screen_width,
-                        screen_height,
-                    )));
-                } else {
-                    // Side panel: use saved width, or default to 400
-                    let saved_width = state::load_window_state()
-                        .sidebar_width
-                        .unwrap_or(400.0)
-                        .max(240.0); // enforce minimum
-
-                    let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(
-                        saved_width,
-                        screen_height,
-                    )));
-                }
-            }
-
-            // Update the focus-management flag based on the persisted app mode.
-            // Default is `true` (enabled); disable it in full-editor mode.
-            let focus_state = app.state::<FocusManagementState>();
-            if app_mode == "full-editor" {
-                focus_state
-                    .0
-                    .store(false, std::sync::atomic::Ordering::SeqCst);
+                let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(
+                    screen_width,
+                    screen_height,
+                )));
             }
 
             // Check for updates silently after a short delay so the app
@@ -317,38 +275,13 @@ pub fn run() {
                 });
             }
 
-            // Poll the frontmost VS Code window to track active workspace.
-            // Only needed in side-panel mode where we manage external IDE windows.
-            if app_mode != "full-editor" {
-                let focus_flag = focus_state.inner().0.clone();
-                commands::ide::start_focus_polling(app.handle().clone(), focus_flag);
-            }
-
             // Kill web server and close secondary windows on app exit.
             // Uses a `cleaned_up` flag to avoid double cleanup when both
             // CloseRequested (close button) and ExitRequested (Cmd+Q) fire.
             let web_proc = app.state::<WebServerState>().inner().0.clone();
             let app_handle_for_close = app.handle().clone();
             let cleaned_up_close = cleaned_up;
-            let resize_focus_flag = app.state::<FocusManagementState>().inner().0.clone();
-            let resize_window = app.get_webview_window("main").unwrap();
             window.on_window_event(move |event| {
-                // Persist sidebar width when the window is resized in side-panel mode.
-                if let tauri::WindowEvent::Resized(_) = event {
-                    if resize_focus_flag.load(Ordering::SeqCst) {
-                        if let Ok(size) = resize_window.outer_size() {
-                            let scale = resize_window
-                                .current_monitor()
-                                .ok()
-                                .flatten()
-                                .map_or(1.0, |m| m.scale_factor());
-                            let width = f64::from(size.width) / scale;
-                            let mut ws = state::load_window_state();
-                            ws.sidebar_width = Some(width);
-                            state::save_window_state(&ws);
-                        }
-                    }
-                }
                 if let tauri::WindowEvent::CloseRequested { .. } = event {
                     if cleaned_up_close
                         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -362,16 +295,6 @@ pub fn run() {
                             let _ = wv.close();
                         }
                     }
-                    if let Some(tasks_win) = app_handle_for_close.get_webview_window("tasks") {
-                        let _ = tasks_win.destroy();
-                    }
-                    if let Some(cron_win) = app_handle_for_close.get_webview_window("cronjobs") {
-                        let _ = cron_win.destroy();
-                    }
-                    if let Some(settings_win) = app_handle_for_close.get_webview_window("settings")
-                    {
-                        let _ = settings_win.destroy();
-                    }
                     web_proc.kill();
                     // Only kill by port in release builds where we spawned the
                     // server ourselves. In dev mode the orchestrating script
@@ -382,34 +305,6 @@ pub fn run() {
                     }
                 }
             });
-
-            // Raise the active workspace's app windows when the dashboard gains focus.
-            // The handler is always registered but checks the focus-management flag
-            // at runtime so it becomes a no-op in full-editor mode (and respects
-            // runtime mode switches via `set_app_mode`).
-            {
-                let focus_flag = app.state::<FocusManagementState>().inner().0.clone();
-                let active_ws_state: std::sync::Arc<std::sync::Mutex<Option<String>>> =
-                    app.state::<ActiveWorkspaceState>().inner().0.clone();
-                let raise_cache = app.state::<ProjectCache>().inner().clone();
-                let window_ref = app.get_webview_window("main").unwrap();
-                window_ref.on_window_event(move |event| {
-                    if let tauri::WindowEvent::Focused(true) = event {
-                        // Skip window raising when focus management is disabled
-                        // (full-editor mode).
-                        if !focus_flag.load(std::sync::atomic::Ordering::SeqCst) {
-                            return;
-                        }
-
-                        let workspace_id: Option<String> =
-                            active_ws_state.lock().ok().and_then(|guard| guard.clone());
-
-                        if let Some(ws_id) = workspace_id {
-                            commands::ide::raise_workspace_windows(&ws_id, &raise_cache);
-                        }
-                    }
-                });
-            }
 
             Ok(())
         })
@@ -430,15 +325,6 @@ pub fn run() {
                 if label.starts_with("browser-") {
                     let _ = wv.close();
                 }
-            }
-            if let Some(tasks_win) = app_handle.get_webview_window("tasks") {
-                let _ = tasks_win.destroy();
-            }
-            if let Some(cron_win) = app_handle.get_webview_window("cronjobs") {
-                let _ = cron_win.destroy();
-            }
-            if let Some(settings_win) = app_handle.get_webview_window("settings") {
-                let _ = settings_win.destroy();
             }
             web_proc.kill();
             if cfg!(not(debug_assertions)) {

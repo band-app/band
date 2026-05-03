@@ -1,6 +1,6 @@
 # Band
 
-IDE-agnostic agent orchestrator — dashboard + VS Code extension. A desktop app for managing AI coding agents across multiple workspaces and projects, with a built-in code editor, terminal, chat, LSP support, and a CLI for programmatic control.
+IDE-agnostic agent orchestrator. A desktop app for managing AI coding agents across multiple workspaces and projects, with a built-in code editor, terminal, chat, LSP support, and a CLI for programmatic control.
 
 ```
 ┌──────────────────────────────────────────┐
@@ -9,20 +9,19 @@ IDE-agnostic agent orchestrator — dashboard + VS Code extension. A desktop app
 │  - Code editor (CodeMirror 6 + LSP)      │
 │  - Integrated terminal & chat            │
 │  - Agent status overview                 │
-│  - Window management (focus, positioning)│
 └──────────────┬───────────────────────────┘
                │
        Web Server (Node.js)
    (data, state, git, LSP, agents)
         http://localhost:3456
                │
-       ┌───────┴───────┐
-       ▼               ▼
-  ┌─────────┐    ┌─────────┐
-  │ VS Code │    │  Band   │
-  │  Ext.   │    │   CLI   │
-  └────┬────┘    └─────────┘
-       ▼
+               ▼
+         ┌─────────┐
+         │  Band   │
+         │   CLI   │
+         └─────────┘
+               │
+               ▼
    AI Agent (claude, cursor, etc.)
 ```
 
@@ -34,8 +33,6 @@ apps/
   web/                Node.js web server (tRPC, git ops, LSP, coding agents)
   cli/                Band CLI (Rust) — programmatic workspace management
   website/            Marketing website (Astro)
-extensions/
-  vscode/             VS Code extension
 packages/
   dashboard-core/     Shared dashboard UI (CodeMirror, components)
   coding-agent/       Coding agent integration
@@ -48,7 +45,7 @@ packages/
 - [Node.js](https://nodejs.org) v22+
 - [pnpm](https://pnpm.io) v10+
 - [Rust](https://rustup.rs) (for Tauri dashboard and CLI)
-- macOS (dashboard uses native window management)
+- macOS
 
 ### Install Rust (if not already installed)
 
@@ -122,39 +119,6 @@ band settings                   # View settings
 
 All state and operations happen server-side. The CLI connects to the running Band server.
 
-## VS Code Extension
-
-### Build
-
-```bash
-pnpm build:extension
-
-# Or from the extension directory:
-cd extensions/vscode
-pnpm build
-```
-
-### Install in VS Code
-
-1. Build the extension
-2. Open VS Code
-3. Run `Extensions: Install from VSIX...` from the command palette (if packaged) **or** for development:
-
-```bash
-cd extensions/vscode
-code --extensionDevelopmentPath="$(pwd)"
-```
-
-### How the Extension Works
-
-The extension activates when it detects a `.band/config.yaml` in the workspace. It then:
-
-1. Sets up the editor layout (splits) based on config
-2. Creates terminals and runs configured commands (dev server, AI agent)
-3. Opens Simple Browser for preview URLs
-4. Monitors terminal output for agent status changes
-5. Writes status to `~/.band/status/{workspaceId}.json`
-
 ## Development
 
 ### Lint & Format
@@ -187,30 +151,3 @@ pnpm tauri dev
 # Check Rust compilation:
 cd src-tauri && cargo check
 ```
-
-### VS Code Extension
-
-```bash
-cd extensions/vscode
-
-# Build once:
-pnpm build
-
-# Watch mode (rebuilds on file change):
-pnpm watch
-
-# Test in VS Code:
-code --extensionDevelopmentPath="$(pwd)"
-```
-
-### Adding a New IDE Extension
-
-To add support for another IDE (IntelliJ, Xcode, etc.):
-
-1. Create a new directory under `extensions/`
-2. On workspace open, read `.band/config.yaml`
-3. Monitor agent terminal output using the patterns from config
-4. Write status JSON to `~/.band/status/{workspaceId}.json`
-5. Clean up the status file when the workspace closes
-
-The dashboard will automatically pick up status from any IDE that writes to `~/.band/status/`.

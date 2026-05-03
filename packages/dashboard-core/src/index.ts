@@ -50,7 +50,6 @@ export { useUpdateSettings } from "./hooks/use-settings-mutations";
 export { useSettingsQuery } from "./hooks/use-settings-query";
 // Hooks
 export {
-  useActiveWorkspaceWatcher,
   useBranchStatusWatcher,
   useSetupStatusWatcher,
   useStatusWatcher,
@@ -102,8 +101,6 @@ export {
 export type {
   AgentInfo,
   AgentStatusType,
-  AppMode,
-  BandConfig,
   CIState,
   CIStatus,
   CodingAgentConfig,

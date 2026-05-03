@@ -5,16 +5,15 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <h1>Project Configuration</h1>
 
   <p>
-    Each Band project can include a <code>.band/config.json</code> file at the repository root. This
-    file defines how workspaces should be set up, which applications to open, and what scripts to
-    run during workspace lifecycle events.
+    Each Band project can include a <code>.band/config.json</code> file at the repository root.
+    This file defines shell scripts that run during workspace lifecycle events. Commit it to the
+    repository so that all team members share the same workspace setup.
   </p>
 
   <h2>File Location</h2>
 
   <p>
-    The configuration file lives at <code>&lt;project-root&gt;/.band/config.json</code>. It is
-    committed to the repository so that all team members share the same workspace setup.
+    The configuration file lives at <code>&lt;project-root&gt;/.band/config.json</code>.
   </p>
 
   <h2>Schema</h2>
@@ -23,35 +22,15 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
 
   <pre><code set:html={`{'{'}
   "setup": ["npm install", "npm run db:migrate"],
-  "teardown": ["npm run db:reset"],
-  "apps": [
-    {'{'}
-      "preset": "cursor",
-      "position": "left-half"
-    {'}'},
-    {'{'}
-      "preset": "terminal",
-      "position": "right-half",
-      "commands": [
-        {'{'}
-          "command": "npm run dev",
-          "name": "dev-server"
-        {'}'},
-        {'{'}
-          "command": "npm run test:watch",
-          "name": "tests",
-          "split": true
-        {'}'}
-      ]
-    {'}'}
-  ]
+  "teardown": ["npm run db:reset"]
 {'}'}`}></code></pre>
 
   <h2>Setup Scripts</h2>
 
   <p>
-    The <code>setup</code> array contains shell commands that run when a workspace is created or
-    first focused. These commands execute sequentially in the workspace directory.
+    The <code>setup</code> array contains shell commands that run after a workspace is created
+    via <code>band workspaces create</code>. Commands execute sequentially in the new worktree
+    directory.
   </p>
 
   <pre><code>"setup": [
@@ -61,67 +40,23 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
 ]</code></pre>
 
   <p>
-    Use setup scripts for dependency installation, database migrations, environment file creation, or
-    any other initialization your project needs.
+    Use setup scripts for dependency installation, database migrations, environment file
+    creation, or any other initialization your project needs. Setup failures are non-fatal —
+    the workspace is still created.
   </p>
 
   <h2>Teardown Scripts</h2>
 
   <p>
-    The <code>teardown</code> array contains shell commands that run when a workspace is removed.
-    Use these for cleanup tasks like stopping background services or resetting databases.
+    The <code>teardown</code> array contains shell commands that run before a workspace is
+    removed via <code>band workspaces remove</code>. Use these for cleanup tasks like stopping
+    background services or resetting databases.
   </p>
 
   <pre><code>"teardown": [
   "docker compose down",
   "npm run db:reset"
 ]</code></pre>
-
-  <h2>Apps Array</h2>
-
-  <p>
-    The <code>apps</code> array defines which applications to open and how to position them when a
-    workspace is focused. Each entry specifies a preset and optional positioning.
-  </p>
-
-  <p>See <a href="/docs/app-presets">App Presets</a> for the full list of supported presets.</p>
-
-  <h3>Position Values</h3>
-
-  <ul>
-    <li><code>left-half</code> — Left half of the screen.</li>
-    <li><code>right-half</code> — Right half of the screen.</li>
-    <li><code>fullscreen</code> — Full screen.</li>
-    <li><code>top-half</code> — Top half of the screen.</li>
-    <li><code>bottom-half</code> — Bottom half of the screen.</li>
-  </ul>
-
-  <h3>Terminal Presets</h3>
-
-  <p>
-    Terminal presets support a <code>commands</code> array that defines terminal tabs and splits.
-  </p>
-
-  <pre><code set:html={`{'{'}
-  "preset": "terminal",
-  "commands": [
-    {'{'}
-      "command": "npm run dev",
-      "name": "dev-server"
-    {'}'},
-    {'{'}
-      "command": "npm run test:watch",
-      "name": "tests",
-      "split": true
-    {'}'}
-  ]
-{'}'}`}></code></pre>
-
-  <ul>
-    <li><code>command</code> — The shell command to run in the terminal.</li>
-    <li><code>name</code> — A label for the terminal tab.</li>
-    <li><code>split</code> — If <code>true</code>, opens as a split pane instead of a new tab.</li>
-  </ul>
 
   <h2>Full Example</h2>
 
@@ -133,20 +68,6 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   ],
   "teardown": [
     "docker compose down -v"
-  ],
-  "apps": [
-    {'{'}
-      "preset": "cursor",
-      "position": "left-half"
-    {'}'},
-    {'{'}
-      "preset": "terminal",
-      "position": "right-half",
-      "commands": [
-        {"{"} "command": "npm run dev", "name": "dev" {'}'},
-        {"{"} "command": "npm run test:watch", "name": "test", "split": true {'}'}
-      ]
-    {'}'}
   ]
 {'}'}`}></code></pre>
 </DocsLayout>

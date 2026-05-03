@@ -1,6 +1,6 @@
 import { rmSync } from "node:fs";
 import { join } from "node:path";
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
@@ -53,6 +53,30 @@ function seedTask(
       task.completedAt ?? null,
     );
   sqlite.close();
+}
+
+/**
+ * Open the Tasks dialog from the dashboard's "Run agent" toolbar dropdown.
+ * Returns the dialog locator for further interaction. Use after `page.goto`
+ * has loaded the dashboard.
+ */
+async function openTasksDialog(page: Page) {
+  // The dashboard React app fetches projects via tRPC on mount, so the
+  // toolbar's React click handlers may not be bound by the time `load`
+  // fires. Wait for the network to settle before driving the dropdown.
+  await page.waitForLoadState("networkidle");
+  const trigger = page.locator('button[aria-label="Run agent"]');
+  // Retry the open until the menu actually appears — covers any remaining
+  // hydration race between the click reaching the DOM and React binding
+  // the dropdown's onClick.
+  await expect(async () => {
+    await trigger.click();
+    await expect(page.getByRole("menu")).toBeVisible({ timeout: 1_000 });
+  }).toPass({ timeout: 15_000 });
+  await page.getByRole("menuitem", { name: "Tasks" }).click();
+  const dialog = page.getByRole("dialog", { name: "Tasks" });
+  await expect(dialog).toBeVisible();
+  return dialog;
 }
 
 test.beforeAll(async () => {
@@ -123,102 +147,106 @@ test.afterAll(async () => {
   rmSync(tmpHome, { recursive: true, force: true });
 });
 
+test.beforeEach(async ({ page }) => {
+  await page.goto(`${server.url}/?token=${TOKEN}`);
+});
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-test("tasks page renders and shows seeded tasks", async ({ page }) => {
-  await page.goto(`${server.url}/tasks?token=${TOKEN}`);
+test("tasks dialog renders and shows seeded tasks", async ({ page }) => {
+  const dialog = await openTasksDialog(page);
 
-  await expect(page.getByText("Add authentication to the API")).toBeVisible();
-  await expect(page.getByText("Fix login validation bug")).toBeVisible();
-  await expect(page.getByText("Optimize database queries")).toBeVisible();
+  await expect(dialog.getByText("Add authentication to the API")).toBeVisible();
+  await expect(dialog.getByText("Fix login validation bug")).toBeVisible();
+  await expect(dialog.getByText("Optimize database queries")).toBeVisible();
 });
 
-test("tasks page shows status badges", async ({ page }) => {
-  await page.goto(`${server.url}/tasks?token=${TOKEN}`);
+test("tasks dialog shows status badges", async ({ page }) => {
+  const dialog = await openTasksDialog(page);
 
   // Scope badge checks to task cards to avoid matching select dropdown options
-  const cards = page.locator(".rounded-lg.border");
+  const cards = dialog.locator(".rounded-lg.border");
   await expect(cards.getByText("Completed")).toBeVisible();
   await expect(cards.getByText("Failed")).toBeVisible();
   await expect(cards.getByText("Running")).toBeVisible();
 });
 
 test("filtering by status works", async ({ page }) => {
-  await page.goto(`${server.url}/tasks?token=${TOKEN}`);
+  const dialog = await openTasksDialog(page);
 
   // Wait for tasks to load
-  await expect(page.getByText("Add authentication to the API")).toBeVisible();
+  await expect(dialog.getByText("Add authentication to the API")).toBeVisible();
 
   // Open status filter dropdown (second select trigger) and pick "completed"
-  await page.locator('[data-slot="select-trigger"]').nth(1).click();
+  await dialog.locator('[data-slot="select-trigger"]').nth(1).click();
   await page.getByRole("option", { name: "completed" }).click();
 
   // Only the completed task should be visible
-  await expect(page.getByText("Add authentication to the API")).toBeVisible();
-  await expect(page.getByText("Fix login validation bug")).not.toBeVisible();
-  await expect(page.getByText("Optimize database queries")).not.toBeVisible();
+  await expect(dialog.getByText("Add authentication to the API")).toBeVisible();
+  await expect(dialog.getByText("Fix login validation bug")).not.toBeVisible();
+  await expect(dialog.getByText("Optimize database queries")).not.toBeVisible();
 });
 
 test("filtering by project works", async ({ page }) => {
-  await page.goto(`${server.url}/tasks?token=${TOKEN}`);
+  const dialog = await openTasksDialog(page);
 
   // Wait for tasks to load
-  await expect(page.getByText("Add authentication to the API")).toBeVisible();
+  await expect(dialog.getByText("Add authentication to the API")).toBeVisible();
 
   // Select "backend" project from dropdown
-  await page.locator('[data-slot="select-trigger"]').first().click();
+  await dialog.locator('[data-slot="select-trigger"]').first().click();
   await page.getByRole("option", { name: "backend" }).click();
 
   // Only the backend task should be visible
-  await expect(page.getByText("Optimize database queries")).toBeVisible();
-  await expect(page.getByText("Add authentication to the API")).not.toBeVisible();
-  await expect(page.getByText("Fix login validation bug")).not.toBeVisible();
+  await expect(dialog.getByText("Optimize database queries")).toBeVisible();
+  await expect(dialog.getByText("Add authentication to the API")).not.toBeVisible();
+  await expect(dialog.getByText("Fix login validation bug")).not.toBeVisible();
 });
 
 test("empty state shows when no tasks match filters", async ({ page }) => {
-  await page.goto(`${server.url}/tasks?token=${TOKEN}`);
+  const dialog = await openTasksDialog(page);
 
   // Wait for tasks to load
-  await expect(page.getByText("Add authentication to the API")).toBeVisible();
+  await expect(dialog.getByText("Add authentication to the API")).toBeVisible();
 
   // Select "backend" project + "completed" status — no tasks match
-  await page.locator('[data-slot="select-trigger"]').first().click();
+  await dialog.locator('[data-slot="select-trigger"]').first().click();
   await page.getByRole("option", { name: "backend" }).click();
-  await page.locator('[data-slot="select-trigger"]').nth(1).click();
+  await dialog.locator('[data-slot="select-trigger"]').nth(1).click();
   await page.getByRole("option", { name: "completed" }).click();
 
-  await expect(page.getByText("No tasks found")).toBeVisible();
-  await expect(page.getByText("Try adjusting your filters")).toBeVisible();
+  await expect(dialog.getByText("No tasks found")).toBeVisible();
+  await expect(dialog.getByText("Try adjusting your filters")).toBeVisible();
 });
 
 test("completed task shows session link", async ({ page }) => {
-  await page.goto(`${server.url}/tasks?token=${TOKEN}`);
+  const dialog = await openTasksDialog(page);
 
   // The completed task with a sessionId should have a "Session" link
-  await expect(page.getByText("Add authentication to the API")).toBeVisible();
-  const sessionLink = page.getByRole("link", { name: "Session" });
+  await expect(dialog.getByText("Add authentication to the API")).toBeVisible();
+  const sessionLink = dialog.getByRole("link", { name: "Session" });
   await expect(sessionLink.first()).toBeVisible();
 });
 
 test("new task dialog opens and shows project/workspace selectors", async ({ page }) => {
-  await page.goto(`${server.url}/tasks?token=${TOKEN}`);
+  const dialog = await openTasksDialog(page);
 
-  // Wait for page to load
-  await expect(page.getByText("Add authentication to the API")).toBeVisible();
+  // Wait for the tasks dialog to load
+  await expect(dialog.getByText("Add authentication to the API")).toBeVisible();
 
-  // Click "New Task" button
-  await page.getByRole("button", { name: "New Task" }).click();
+  // Click "New Task" button (inside the Tasks dialog)
+  await dialog.getByRole("button", { name: "New Task" }).click();
 
-  // Dialog should open with form elements
+  // Nested "New Task" dialog should open with form elements
   await expect(page.getByText("Dispatch a new task to a coding agent")).toBeVisible();
   await expect(page.getByText("Project", { exact: true })).toBeVisible();
   await expect(page.getByText("Workspace", { exact: true })).toBeVisible();
   await expect(page.getByText("Prompt", { exact: true })).toBeVisible();
 });
 
-test("tasks page renders filter controls", async ({ page }) => {
-  await page.goto(`${server.url}/tasks?token=${TOKEN}`);
-  await expect(page.getByText("All Projects")).toBeVisible();
+test("tasks dialog renders filter controls", async ({ page }) => {
+  const dialog = await openTasksDialog(page);
+  await expect(dialog.getByText("All Projects")).toBeVisible();
 });

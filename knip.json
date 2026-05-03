@@ -47,7 +47,7 @@
       "project": ["src/**/*.{ts,tsx}"]
     },
     "packages/dashboard-core": {
-      "entry": ["src/index.ts", "src/adapters/web.ts", "src/adapters/hybrid.ts"],
+      "entry": ["src/index.ts", "src/adapters/web.ts", "src/adapters/tauri.ts"],
       "project": ["src/**/*.{ts,tsx}"],
       "ignoreDependencies": ["@babel/runtime", "@codemirror/lint"]
     },
@@ -63,10 +63,6 @@
     "packages/logger": {
       "entry": ["src/index.ts"],
       "project": ["src/**/*.ts"]
-    },
-    "extensions/vscode": {
-      "project": ["src/**/*.ts"],
-      "ignoreBinaries": []
     }
   }
 }

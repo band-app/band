@@ -81,16 +81,8 @@ export class WebDashboardAdapter implements DashboardAdapter {
     await this.trpc.workspaces.remove.mutate({ project, branch });
   }
 
-  async openWorkspace(_workspaceId: string): Promise<void> {
-    // No-op: window management is handled by the desktop app
-  }
-
   async clearNeedsAttention(workspaceId: string): Promise<void> {
     await this.trpc.statuses.clearNeedsAttention.mutate({ workspaceId });
-  }
-
-  async closeWorkspaceWindows(_workspaceId: string): Promise<void> {
-    // No-op: window management is handled by the desktop app
   }
 
   async runScript(path: string, scriptType: string): Promise<void> {
@@ -193,11 +185,6 @@ export class WebDashboardAdapter implements DashboardAdapter {
         onRemove(data.workspaceId);
       }
     });
-  }
-
-  subscribeActiveWorkspace(_onChange: (workspaceId: string | null) => void): Unsubscribe {
-    // Web app doesn't have active workspace tracking
-    return () => {};
   }
 
   subscribeBranchStatus(

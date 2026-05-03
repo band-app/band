@@ -70,7 +70,6 @@ export interface WorkspaceStatusData {
   project: string;
   branch: string;
   worktreePath: string;
-  ide?: string;
   agentName?: string;
   agentStatus?: string;
   agentLastActivity?: string;
@@ -98,7 +97,6 @@ export function seedWorkspaceStatuses(tmpHome: string, statuses: WorkspaceStatus
           project: s.project,
           branch: s.branch,
           worktreePath: s.worktreePath,
-          ide: s.ide ?? "vscode",
           agentName: s.agentName ?? "claude-code",
           agentStatus: s.agentStatus ?? "waiting",
           agentLastActivity: s.agentLastActivity ?? "",

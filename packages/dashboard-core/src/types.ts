@@ -12,7 +12,6 @@ export interface WorkspaceStatus {
   project: string;
   branch: string;
   worktreePath: string;
-  ide: string;
   agent?: AgentInfo;
 }
 
@@ -68,27 +67,6 @@ export interface SetupStatus {
   error?: string;
 }
 
-export interface AppConfig {
-  type: string;
-  size?: number;
-  split?: "horizontal" | "vertical";
-  terminals?: {
-    name: string;
-    command: string;
-    split?: "horizontal" | "vertical";
-  }[];
-  commands?: {
-    name?: string;
-    command: string;
-    split?: "horizontal" | "vertical";
-  }[];
-  url?: string;
-}
-
-export interface BandConfig {
-  apps?: AppConfig[];
-}
-
 // ---------------------------------------------------------------------------
 // Workspace terminal configuration (recursive split-tree layout)
 // ---------------------------------------------------------------------------
@@ -141,11 +119,8 @@ export interface LabelDefinition {
 
 export type Theme = "system" | "light" | "dark";
 
-export type AppMode = "side-panel" | "full-editor";
-
 export interface Settings {
   worktreesDir: string | null;
-  defaults?: BandConfig;
   codingAgents?: CodingAgentDefinition[];
   defaultCodingAgent?: string;
   webServerPort?: number;
@@ -155,7 +130,6 @@ export interface Settings {
   autoStartTunnel?: boolean;
   enableLSP?: boolean;
   theme?: Theme;
-  appMode?: AppMode;
 }
 
 export interface HooksStatus {

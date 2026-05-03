@@ -14,7 +14,6 @@ import {
 } from "@band-app/ui";
 import { ListTodo, Timer, Zap } from "lucide-react";
 import { useCallback, useState } from "react";
-import { isTauri } from "../lib/is-tauri";
 import { CronjobsPageContent } from "./CronjobsPageContent";
 import { TasksPageContent } from "./TasksPageContent";
 import { TunnelToolbarButton } from "./TunnelToolbarButton";
@@ -23,23 +22,8 @@ export function ToolbarButtons() {
   const [showTasksDialog, setShowTasksDialog] = useState(false);
   const [showCronjobsDialog, setShowCronjobsDialog] = useState(false);
 
-  const handleTasksClick = useCallback(async () => {
-    if (isTauri) {
-      const { invoke } = await import("@tauri-apps/api/core");
-      await invoke("open_tasks_window");
-    } else {
-      setShowTasksDialog(true);
-    }
-  }, []);
-
-  const handleCronjobsClick = useCallback(async () => {
-    if (isTauri) {
-      const { invoke } = await import("@tauri-apps/api/core");
-      await invoke("open_cronjobs_window");
-    } else {
-      setShowCronjobsDialog(true);
-    }
-  }, []);
+  const handleTasksClick = useCallback(() => setShowTasksDialog(true), []);
+  const handleCronjobsClick = useCallback(() => setShowCronjobsDialog(true), []);
 
   return (
     <>
@@ -47,7 +31,7 @@ export function ToolbarButtons() {
         <Tooltip>
           <TooltipTrigger asChild>
             <DropdownMenuTrigger asChild>
-              <Button size="icon-sm" variant="ghost">
+              <Button size="icon-sm" variant="ghost" aria-label="Run agent">
                 <Zap className="size-5" />
               </Button>
             </DropdownMenuTrigger>
