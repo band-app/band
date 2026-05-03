@@ -21,7 +21,7 @@ import {
   SelectValue,
   Switch,
 } from "@band-app/ui";
-import { ChevronDown, FolderOpen, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, FolderOpen, Plus, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useAdapter, useCapabilities } from "../context";
 import { useUpdateSettings } from "../hooks/use-settings-mutations";
@@ -322,10 +322,10 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                         variant="ghost"
                         size="icon-xs"
                         aria-label="Remove label"
-                        className="text-destructive hover:text-destructive shrink-0"
+                        className="shrink-0 text-foreground hover:text-foreground"
                         onClick={() => setLabels((prev) => prev.filter((l) => l.id !== lbl.id))}
                       >
-                        <Trash2 className="size-3" />
+                        <X className="size-3.5" />
                       </Button>
                     </div>
                   ))}
@@ -400,10 +400,9 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                         <AgentIcon type={known.type} className="size-4 shrink-0" />
                         <AccordionTriggerInline
                           aria-label={`Toggle advanced settings for ${known.label}`}
-                          className="flex flex-1 items-center justify-between gap-2 rounded-md text-left text-sm font-medium [&[data-state=open]>svg]:rotate-180"
+                          className="flex-1 rounded-md text-left text-sm font-medium"
                         >
-                          <span>{known.label}</span>
-                          <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform duration-200" />
+                          {known.label}
                         </AccordionTriggerInline>
                         <Switch
                           aria-label={`Enable ${known.label}`}
@@ -424,6 +423,12 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                             }
                           }}
                         />
+                        <AccordionTriggerInline
+                          aria-label={`Toggle advanced settings for ${known.label}`}
+                          className="-mr-1 inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground [&[data-state=open]>svg]:rotate-180"
+                        >
+                          <ChevronDown className="size-4 shrink-0 transition-transform duration-200" />
+                        </AccordionTriggerInline>
                       </AccordionHeader>
                       <AccordionContent className="space-y-2.5 px-4 pb-3 pl-11">
                         <div className="space-y-1">
