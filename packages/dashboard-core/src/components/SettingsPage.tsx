@@ -192,6 +192,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
             {/* ── Appearance ─────────────────────────────────── */}
             <SettingsSection title="Appearance">
               <SettingsRow
+                variant="responsive"
                 label="Theme"
                 description="Choose between system default, light, and dark mode."
               >
@@ -199,7 +200,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                   value={selectedTheme}
                   onValueChange={(v: string) => setSelectedTheme(v as Theme)}
                 >
-                  <SelectTrigger className="h-8 w-32 text-sm" aria-label="Theme">
+                  <SelectTrigger className="h-8 w-full text-sm sm:w-32" aria-label="Theme">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -214,11 +215,12 @@ export function SettingsPage({ open, onOpenChange }: Props) {
             {/* ── General ────────────────────────────────────── */}
             <SettingsSection title="General">
               <SettingsRow
+                variant="responsive"
                 htmlFor="worktrees-dir"
                 label="Worktrees folder"
                 description="Directory where new worktrees are created. Leave empty for the default location."
               >
-                <div className="flex w-[22rem] max-w-full gap-2">
+                <div className="flex w-full gap-2 sm:w-[22rem]">
                   <Input
                     id="worktrees-dir"
                     placeholder="~/.band/worktrees (default)"
@@ -462,6 +464,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
               </SettingsRow>
               {soundOnNeedsAttention && (
                 <SettingsRow
+                  variant="responsive"
                   label="Sound"
                   description="Choose which sound plays. Selecting one previews it."
                 >
@@ -472,7 +475,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                       playSound(v as SoundId);
                     }}
                   >
-                    <SelectTrigger className="h-8 min-w-[10rem] text-xs">
+                    <SelectTrigger className="h-8 w-full text-xs sm:min-w-[10rem]">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -490,6 +493,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
             {/* ── Web Server ─────────────────────────────────── */}
             <SettingsSection title="Web Server">
               <SettingsRow
+                variant="responsive"
                 htmlFor="web-server-port"
                 label="Port"
                 description="Port the web server listens on for mobile access. Leave empty for the default (3456). Requires restart."
@@ -504,7 +508,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                   }
                   min={1}
                   max={65535}
-                  className="h-8 w-32 text-sm"
+                  className="h-8 w-full text-sm sm:w-32"
                 />
               </SettingsRow>
               <SettingsRow
