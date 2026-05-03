@@ -263,12 +263,11 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
       {activeSection === "general" && (
         <SettingsSection title="General">
           <SettingsRow
-            variant="stacked"
             htmlFor="worktrees-dir"
             label="Worktrees folder"
             description="Directory where new worktrees are created. Leave empty for the default location."
           >
-            <div className="flex gap-2">
+            <div className="flex w-[22rem] max-w-full gap-2">
               <Input
                 id="worktrees-dir"
                 placeholder="~/.band/worktrees (default)"
@@ -276,9 +275,16 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                   setWorktreesDir(e.target.value)
                 }
+                className="h-8 text-sm"
               />
               {capabilities.pickFolder && (
-                <Button type="button" variant="outline" size="icon" onClick={handleBrowse}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon-sm"
+                  onClick={handleBrowse}
+                  aria-label="Browse for folder"
+                >
                   <FolderOpen />
                 </Button>
               )}
@@ -532,7 +538,6 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
       {activeSection === "web-server" && (
         <SettingsSection title="Web Server">
           <SettingsRow
-            variant="stacked"
             htmlFor="web-server-port"
             label="Port"
             description="Port the web server listens on for mobile access. Leave empty for the default (3456). Requires restart."
@@ -547,6 +552,7 @@ export function SettingsPage({ onClose, hideTitle }: Props) {
               }
               min={1}
               max={65535}
+              className="h-8 w-32 text-sm"
             />
           </SettingsRow>
           <SettingsRow
