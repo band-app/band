@@ -24,6 +24,7 @@ export { SearchBar, type SearchBarHandle, type SearchOptions } from "./component
 export { SearchFilesDialog } from "./components/SearchFilesDialog";
 export { SettingsPage } from "./components/SettingsPage";
 export { SetupStatusIndicator } from "./components/SetupStatusIndicator";
+export { SettingsRow, SettingsSection } from "./components/settings";
 export { WorkspaceCard } from "./components/WorkspaceCard";
 export { WorkspacePickerDialog } from "./components/WorkspacePickerDialog";
 export { type WorkspaceTab, WorkspaceTabNav } from "./components/WorkspaceTabNav";
