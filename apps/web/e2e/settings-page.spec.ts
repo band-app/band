@@ -54,59 +54,53 @@ function readSettings(): Record<string, unknown> {
 // Tests
 // ---------------------------------------------------------------------------
 
-test("settings dialog renders the section list with the new card primitives", async ({ page }) => {
+test("settings dialog renders every section in a single scrolling list", async ({ page }) => {
   await page.goto(`${server.url}/?token=${TOKEN}`);
   const dialog = await openSettingsDialog(page);
 
-  // Default open section on lg+ screens is Appearance — the segmented control
-  // should be rendered by the new SettingsRow primitive.
+  // Every section is now rendered at once — there is no master/detail
+  // navigation. We expect six SettingsSection cards to be present and
+  // every section's first row to be visible (after scrolling, if needed).
+  await expect(dialog.locator('[data-slot="settings-section-card"]')).toHaveCount(6);
+
+  // Appearance — segmented control rendered by SettingsRow.
   await expect(dialog.getByText("Theme", { exact: true })).toBeVisible();
   await expect(dialog.getByRole("radiogroup", { name: "Theme" })).toBeVisible();
 
-  // The card wrapper introduced by SettingsSection.
-  await expect(dialog.locator('[data-slot="settings-section-card"]')).toHaveCount(1);
-
-  // Switch to General. Both rows should render.
-  await dialog.getByRole("button", { name: /General/ }).click();
-  await expect(dialog.getByText("Worktrees folder", { exact: true })).toBeVisible();
-  await expect(dialog.getByText("Code intelligence (LSP)", { exact: true })).toBeVisible();
-  await expect(dialog.locator('[data-slot="settings-row"]').first()).toBeVisible();
-
-  // Switch to Web Server. Both rows should render.
-  await dialog.getByRole("button", { name: /Web Server/ }).click();
-  await expect(dialog.getByText("Port", { exact: true })).toBeVisible();
-  await expect(dialog.getByText("Auto-start tunnel", { exact: true })).toBeVisible();
-
-  // Switch to Notifications. The toggle row should render.
-  await dialog.getByRole("button", { name: /Notifications/ }).click();
-  await expect(dialog.getByText("Play sound on needs attention", { exact: true })).toBeVisible();
-
-  // Switch to Coding Agents. All known agents should render.
-  await dialog.getByRole("button", { name: /Coding Agents/ }).click();
-  await expect(dialog.getByText("Claude Code", { exact: true })).toBeVisible();
-  await expect(dialog.getByText("Codex", { exact: true })).toBeVisible();
-  await expect(dialog.getByText("OpenCode", { exact: true })).toBeVisible();
-
-  // Switch to Labels. Empty state row should render.
-  await dialog.getByRole("button", { name: /Labels/ }).click();
-  await expect(dialog.getByText("No labels yet", { exact: true })).toBeVisible();
+  // Subsequent sections live in the same scrolling column. Use scrollIntoView
+  // before asserting visibility because the dialog viewport is fixed-height.
+  for (const label of [
+    "Worktrees folder",
+    "Code intelligence (LSP)",
+    "No labels yet",
+    "Claude Code",
+    "Codex",
+    "OpenCode",
+    "Play sound on needs attention",
+    "Port",
+    "Auto-start tunnel",
+  ]) {
+    const row = dialog.getByText(label, { exact: true });
+    await row.scrollIntoViewIfNeeded();
+    await expect(row).toBeVisible();
+  }
 });
 
 test("toggling LSP and saving persists to settings.json", async ({ page }) => {
   await page.goto(`${server.url}/?token=${TOKEN}`);
   const dialog = await openSettingsDialog(page);
 
-  await dialog.getByRole("button", { name: /General/ }).click();
-
-  // Switch is exposed by Radix as a button with role=switch.
+  // No sidebar — the LSP switch is in the General section, somewhere down
+  // the scrolling column. Scroll to it before clicking.
   const lspSwitch = dialog.locator("#enable-lsp");
+  await lspSwitch.scrollIntoViewIfNeeded();
   await expect(lspSwitch).toBeVisible();
   await expect(lspSwitch).toHaveAttribute("data-state", "unchecked");
 
   await lspSwitch.click();
   await expect(lspSwitch).toHaveAttribute("data-state", "checked");
 
-  // Save (the icon button in the section header).
+  // Save (the icon button in the page header).
   await dialog.getByRole("button", { name: "Save" }).click();
 
   // Wait for the mutation to complete by polling the persisted JSON.
@@ -131,8 +125,11 @@ test("coding agents section renders and toggling an agent doesn't crash", async 
   await page.goto(`${server.url}/?token=${TOKEN}`);
   const dialog = await openSettingsDialog(page);
 
-  await dialog.getByRole("button", { name: /Coding Agents/ }).click();
-  await expect(dialog.getByText("Claude Code", { exact: true })).toBeVisible();
+  // The Coding Agents section is part of the single scrolling list. Scroll
+  // to its first agent row before interacting.
+  const claudeRow = dialog.getByText("Claude Code", { exact: true });
+  await claudeRow.scrollIntoViewIfNeeded();
+  await expect(claudeRow).toBeVisible();
 
   // Enable Claude Code so listModels() is called and the model Select
   // potentially mounts. Even without models the toggle path must not throw.
