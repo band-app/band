@@ -96,11 +96,11 @@ function toolPartToItem(part: ToolPart): ToolCallItem {
   };
 }
 
-function ThinkingIndicator({ label = "Thinking..." }: { label?: string }) {
+function ThinkingIndicator() {
   return (
     <div className="mt-2 flex items-center gap-2 text-muted-foreground">
       <Loader2 className="size-4 lg:size-3.5 animate-spin" />
-      <span className="text-base lg:text-sm">{label}</span>
+      <span className="text-base lg:text-sm">Thinking...</span>
     </div>
   );
 }
@@ -264,7 +264,10 @@ export function ChatView({
   // null). When pagination is buffer-based, this stays undefined.
   const firstMessageIndexRef = useRef<number | undefined>(undefined);
   const [activeSessionId, setActiveSessionId] = useState<string | undefined>(undefined);
-  const [loadingHistory, setLoadingHistory] = useState(false);
+  // If we have an initialSessionId we're going to call loadMessages() in the
+  // mount effect below — initialize loadingHistory to true so the skeleton
+  // shows on the first render rather than briefly flashing the empty state.
+  const [loadingHistory, setLoadingHistory] = useState(!!initialSessionId);
   const [hasMore, setHasMore] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const scrollHeightBeforePrependRef = useRef<number | null>(null);
@@ -280,9 +283,6 @@ export function ChatView({
   // Holds the AbortController for the in-flight reconnect attempt so a new
   // attempt (or unmount) can cancel the old one cleanly.
   const connectAbortRef = useRef<AbortController | null>(null);
-  // True while we're actively trying (including between retries) to attach
-  // to a running stream. Drives the "Connecting…" indicator.
-  const [isConnecting, setIsConnecting] = useState(false);
   const prevVisibleRef = useRef(visible);
 
   // Scroll to bottom when the panel becomes visible (e.g. switching tabs in dockview).
@@ -552,7 +552,6 @@ export function ChatView({
     // cover task registration lag without blocking the UI for too long.
     const delays = [0, 250, 500, 1000, 2000];
 
-    setIsConnecting(true);
     try {
       for (let i = 0; i < delays.length; i++) {
         if (signal.aborted) return;
@@ -593,7 +592,6 @@ export function ChatView({
       if (connectAbortRef.current === controller) {
         connectAbortRef.current = null;
       }
-      setIsConnecting(false);
     }
   }, [workspaceId, chatId, resumeStream, cancelConnectAttempt]);
 
@@ -974,7 +972,14 @@ export function ChatView({
             </output>
           )}
 
-          {isEmpty && !loadingHistory && (
+          {/*
+            Empty state: only when we know there's no session to load.
+            Skeleton: when sessions are still being fetched, when we have a
+            session but the message-load effect hasn't kicked in yet, or while
+            the load is in flight. This prevents the empty state from
+            flashing on first workspace load before chats.get resolves.
+          */}
+          {isEmpty && sessionQueryDone && !initialSessionId && !loadingHistory && (
             <ConversationEmptyState
               icon={
                 agentType ? (
@@ -988,7 +993,9 @@ export function ChatView({
             />
           )}
 
-          {loadingHistory && messages.length === 0 && <ConversationSkeleton />}
+          {messages.length === 0 && (loadingHistory || !sessionQueryDone || !!initialSessionId) && (
+            <ConversationSkeleton />
+          )}
 
           {(() => {
             return messages.map((message, messageIndex) => {
@@ -1003,12 +1010,6 @@ export function ChatView({
                     (getToolName(p) === "AskUserQuestion" || getToolName(p) === "ExitPlanMode"),
                 );
               const showThinking = isLastAssistant && isStreaming && !hasPendingInteractiveTool;
-              // Show "Connecting…" on the last assistant bubble when we're
-              // in the retry loop but the SSE stream hasn't attached yet.
-              // Suppressed once `isStreaming` flips on so we don't show two
-              // indicators at once.
-              const showConnecting =
-                isLastAssistant && isConnecting && !isStreaming && !hasPendingInteractiveTool;
 
               if (message.role !== "assistant") {
                 // User messages render normally
@@ -1053,7 +1054,7 @@ export function ChatView({
                   (p) =>
                     (p.type === "text" && p.text.trim()) || p.type === "file" || isToolUIPart(p),
                 );
-                if (visibleParts.length === 0 && !showThinking && !showConnecting) return null;
+                if (visibleParts.length === 0 && !showThinking) return null;
                 return (
                   <Message key={message.id} from="assistant">
                     <MessageContent>
@@ -1084,7 +1085,6 @@ export function ChatView({
                         );
                       })}
                       {showThinking && <ThinkingIndicator />}
-                      {showConnecting && <ThinkingIndicator label="Connecting…" />}
                     </MessageContent>
                   </Message>
                 );
@@ -1107,8 +1107,7 @@ export function ChatView({
                         </MessageContent>
                       </Message>
                     )}
-                    {(visibleParts.length > 0 ||
-                      (isLastSegment && (showThinking || showConnecting))) && (
+                    {(visibleParts.length > 0 || (isLastSegment && showThinking)) && (
                       <Message from="assistant">
                         <MessageContent>
                           {visibleParts.map((seg) => {
@@ -1143,9 +1142,6 @@ export function ChatView({
                             );
                           })}
                           {isLastSegment && showThinking && <ThinkingIndicator />}
-                          {isLastSegment && showConnecting && (
-                            <ThinkingIndicator label="Connecting…" />
-                          )}
                         </MessageContent>
                       </Message>
                     )}
@@ -1161,16 +1157,6 @@ export function ChatView({
               </MessageContent>
             </Message>
           )}
-          {!isStreaming &&
-            isConnecting &&
-            (!messages.length || messages[messages.length - 1].role === "user") && (
-              <Message from="assistant">
-                <MessageContent>
-                  <ThinkingIndicator label="Connecting…" />
-                </MessageContent>
-              </Message>
-            )}
-
           {queuedMessages.map((text) => (
             <QueuedMessageBubble key={text} text={text} onCancel={() => handleCancelQueued(text)} />
           ))}
