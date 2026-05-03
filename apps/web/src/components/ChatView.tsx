@@ -269,6 +269,17 @@ export function ChatView({
   // mount effect below — initialize loadingHistory to true so the skeleton
   // shows on the first render rather than briefly flashing the empty state.
   const [loadingHistory, setLoadingHistory] = useState(!!initialSessionId);
+  // True once the user explicitly clears the session via "New session". The
+  // `initialSessionId` prop reflects the parent's persisted activeSessionId
+  // and may stay stale for a tick (or longer) after handleNewSession fires,
+  // so we ignore it for skeleton/empty-state decisions once cleared.
+  const [initialSessionCleared, setInitialSessionCleared] = useState(false);
+  // The session this view is currently on, considering local navigation:
+  //   - activeSessionId once the mount effect / handleSelectSession sets it
+  //   - else the initialSessionId prop, unless the user explicitly cleared
+  // This is what render conditions should consult, not initialSessionId.
+  const currentSessionId =
+    activeSessionId ?? (initialSessionCleared ? undefined : initialSessionId);
   const [hasMore, setHasMore] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const scrollHeightBeforePrependRef = useRef<number | null>(null);
@@ -789,6 +800,36 @@ export function ChatView({
     };
   }, [connectToRunningStream]);
 
+  // Release the SSE connection while the workspace is hidden so cached
+  // (but inactive) workspaces don't pin HTTP/1.1 connection slots —
+  // browsers cap at ~6 per origin and the dockview LRU keeps several
+  // workspaces alive at once. The server-side task keeps running
+  // independently; on reactivation we re-fetch the persisted session
+  // history (so messages that landed while we were hidden show up) and
+  // then resume any still-running stream via Last-Event-ID.
+  const prevWsActiveRef = useRef(wsActive);
+  useEffect(() => {
+    const prev = prevWsActiveRef.current;
+    prevWsActiveRef.current = wsActive;
+
+    if (prev && !wsActive) {
+      // Workspace just deactivated — abort any in-flight reconnect retry
+      // and close the active SSE fetch. transport.close() is a no-op when
+      // there's no open connection (idle chat).
+      cancelConnectAttempt();
+      transport.close();
+    } else if (!prev && wsActive && sessionIdRef.current) {
+      // Workspace just reactivated and we know about a session — refresh
+      // from the persisted JSONL state. loadMessages also calls
+      // connectToRunningStream at the end, so an in-flight task is
+      // resumed from Last-Event-ID. If the task completed while we were
+      // hidden, this is the only path that surfaces the final message
+      // (the resume endpoint returns 204 once the in-memory task is
+      // gone, so resumeStream alone wouldn't pick it up).
+      void loadMessages(sessionIdRef.current);
+    }
+  }, [wsActive, transport, cancelConnectAttempt, loadMessages]);
+
   // Cancel any in-flight reconnect on unmount or when the underlying
   // chat/key changes (transport gets recreated).
   // biome-ignore lint/correctness/useExhaustiveDependencies: chatKey/chatId trigger cleanup
@@ -835,6 +876,7 @@ export function ChatView({
     firstMessageIndexRef.current = undefined;
     setHasMore(false);
     setActiveSessionId(undefined);
+    setInitialSessionCleared(true);
     onActiveSessionChange?.(undefined);
     setMessages([]);
     setQueuedMessages([]);
@@ -989,7 +1031,7 @@ export function ChatView({
             the load is in flight. This prevents the empty state from
             flashing on first workspace load before chats.get resolves.
           */}
-          {isEmpty && sessionQueryDone && !initialSessionId && !loadingHistory && (
+          {isEmpty && sessionQueryDone && !currentSessionId && !loadingHistory && (
             <ConversationEmptyState
               icon={
                 agentType ? (
@@ -1003,7 +1045,7 @@ export function ChatView({
             />
           )}
 
-          {messages.length === 0 && (loadingHistory || !sessionQueryDone || !!initialSessionId) && (
+          {messages.length === 0 && (loadingHistory || !sessionQueryDone || !!currentSessionId) && (
             <ConversationSkeleton />
           )}
 
