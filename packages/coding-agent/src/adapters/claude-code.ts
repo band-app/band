@@ -8,7 +8,12 @@ import type {
   SDKSessionInfo,
   SessionMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import { getSessionMessages, listSessions, query } from "@anthropic-ai/claude-agent-sdk";
+import {
+  getSessionMessages,
+  listSessions,
+  query,
+  getSessionInfo as sdkGetSessionInfo,
+} from "@anthropic-ai/claude-agent-sdk";
 import { createLogger } from "@band-app/logger";
 import type { ClaudeCodeConfig } from "../config.js";
 import type { AgentEvent } from "../events.js";
@@ -17,7 +22,9 @@ import type {
   AgentMode,
   AgentModel,
   CodingAgent,
+  GetSessionMessagesOptions,
   RunSessionOptions,
+  SessionInfo,
   SessionListItem,
   SessionMessageItem,
   SkillInfo,
@@ -316,23 +323,97 @@ export class ClaudeCodeAdapter implements CodingAgent {
     return filtered.map((s, i) => mapSessionInfo(s, lastPrompts[i]));
   }
 
+  async getSessionInfo(sessionId: string, dir: string): Promise<SessionInfo | undefined> {
+    // SDK's getSessionInfo reads only the single session file — much
+    // cheaper than listSessions which walks the entire project dir.
+    const info = await sdkGetSessionInfo(sessionId, { dir });
+    if (!info) return undefined;
+    const lastPrompt = await readSessionLastPrompt(dir, sessionId);
+    const summary =
+      info.customTitle ?? lastPrompt ?? info.summary ?? info.firstPrompt ?? "Untitled session";
+    return {
+      sessionId: info.sessionId,
+      summary,
+      lastModified: info.lastModified,
+    };
+  }
+
+  async getLatestSession(dir: string): Promise<SessionInfo | undefined> {
+    // mtime-sorted readdir of the project directory + a single
+    // getSessionInfo on the newest file. Matches the fallback used by
+    // the chat pane when no activeSessionId is persisted yet.
+    const configDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
+    const projectDir = join(configDir, "projects", encodeProjectDir(dir));
+    let entries: string[];
+    try {
+      entries = readdirSync(projectDir);
+    } catch {
+      return undefined;
+    }
+    let newest: { sessionId: string; mtime: number } | undefined;
+    for (const name of entries) {
+      if (!name.endsWith(".jsonl")) continue;
+      try {
+        const mtime = statSync(join(projectDir, name)).mtimeMs;
+        if (!newest || mtime > newest.mtime) {
+          newest = { sessionId: name.slice(0, -".jsonl".length), mtime };
+        }
+      } catch {
+        // unreadable entry — skip
+      }
+    }
+    if (!newest) return undefined;
+    return this.getSessionInfo(newest.sessionId, dir);
+  }
+
   async getSessionMessages(
     sessionId: string,
     dir: string,
-    options?: { limit?: number; offset?: number },
-  ): Promise<SessionMessageItem[]> {
+    options?: GetSessionMessagesOptions,
+  ): Promise<{ messages: SessionMessageItem[]; hasMore: boolean; firstOffset: number }> {
     log.info({ sessionId, dir, ...options }, "getSessionMessages");
-    const messages = await getSessionMessages(sessionId, {
-      dir,
-      limit: options?.limit,
-      offset: options?.offset,
-    });
-    return messages
-      .filter(
+
+    if (options?.tail !== undefined) {
+      // Tail mode: SDK reads the whole file regardless (parent-chain
+      // reconstruction requires it). We slice the last `tail + 1` from
+      // the SDK's filtered list and use the +1 to set hasMore.
+      const raw = await getSessionMessages(sessionId, { dir });
+      const filtered = raw.filter(
         (m): m is SessionMessage & { type: "user" | "assistant" } =>
           m.type === "user" || m.type === "assistant",
-      )
-      .map(mapSessionMessage);
+      );
+      const tail = Math.max(0, options.tail);
+      const probedStart = Math.max(0, filtered.length - tail - 1);
+      const probed = filtered.slice(probedStart);
+      const hasMore = probed.length > tail;
+      const slice = hasMore ? probed.slice(1) : probed;
+      const firstOffset = probedStart + (hasMore ? 1 : 0);
+      return {
+        messages: slice.map(mapSessionMessage),
+        hasMore,
+        firstOffset,
+      };
+    }
+
+    // Offset/limit mode: ask the SDK for one extra so an extra-row in
+    // the response signals hasMore without a separate count. The SDK
+    // still parses the whole file, but the returned array is bounded
+    // and the per-message conversion cost stays in the slice.
+    const offset = Math.max(0, options?.offset ?? 0);
+    const limit = options?.limit;
+    const sdkLimit = limit !== undefined ? Math.max(0, limit) + 1 : undefined;
+    const raw = await getSessionMessages(sessionId, { dir, offset, limit: sdkLimit });
+    const filtered = raw.filter(
+      (m): m is SessionMessage & { type: "user" | "assistant" } =>
+        m.type === "user" || m.type === "assistant",
+    );
+    const hasMore = limit !== undefined && filtered.length > limit;
+    const slice = hasMore ? filtered.slice(0, limit) : filtered;
+    return {
+      messages: slice.map(mapSessionMessage),
+      hasMore,
+      firstOffset: offset,
+    };
   }
 
   async listSkills(): Promise<SkillInfo[]> {

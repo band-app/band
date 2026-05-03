@@ -55,6 +55,10 @@ interface UIMessageFixture {
 
 function installSessionMock(mock: ReturnType<typeof createTrpcMock>, messages: UIMessageFixture[]) {
   mock.addDockviewMocks();
+  // The chat pane now derives `supportsSessionListing` from the agent
+  // definition rather than `sessions.list`. Without this override the
+  // clock affordance never renders.
+  mock.addSupportedAgentMocks();
   mock.query("sessions.list", {
     sessions: [
       {

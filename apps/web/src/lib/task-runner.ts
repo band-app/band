@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { createLogger } from "@band-app/logger";
 import type { UIMessageChunk } from "ai";
 import { getAgent, getOrCreateAgent, replaceAgent } from "./agent-pool";
-import { getChat, updateChatStatus } from "./chat-manager";
+import { getChat, updateChatActiveSession, updateChatStatus } from "./chat-manager";
 import { mimeTypeFromFilename } from "./mime-types";
 import { createPendingInput, rejectAllPendingInputs } from "./pending-inputs";
 import { shiftQueuedMessage } from "./queued-message-store";
@@ -407,6 +407,20 @@ async function runTask(chatId: string, task: InternalTask) {
         case "session-start": {
           task.sessionId = event.sessionId;
           persistTask(task);
+
+          // Persist the active session + a best-effort initial summary on
+          // the chat row so a page refresh between session creation and
+          // the client's setActiveSession call still renders the right
+          // tab title. The user's prompt is the natural summary for a
+          // brand-new session — it's what the CLI's /resume picker shows
+          // and what listSessions would return once the JSONL contains a
+          // last-prompt record.
+          updateChatActiveSession(chatId, {
+            activeSessionId: event.sessionId,
+            summary: task.prompt,
+            lastModified: Date.now(),
+          });
+
           broadcast(chatId, {
             type: "data-session" as UIMessageChunk["type"],
             data: { sessionId: event.sessionId },

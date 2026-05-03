@@ -14,6 +14,7 @@ import type {
   AgentMode,
   AgentModel,
   CodingAgent,
+  GetSessionMessagesOptions,
   RunSessionOptions,
   SessionListItem,
   SessionMessageItem,
@@ -310,8 +311,8 @@ export class CodexAdapter implements CodingAgent {
   async getSessionMessages(
     sessionId: string,
     dir: string,
-    options?: { limit?: number; offset?: number },
-  ): Promise<SessionMessageItem[]> {
+    options?: GetSessionMessagesOptions,
+  ): Promise<{ messages: SessionMessageItem[]; hasMore: boolean; firstOffset: number }> {
     log.info({ sessionId, dir, ...options }, "getSessionMessages");
     return readCodexSessionMessages(sessionId, options);
   }
@@ -696,13 +697,23 @@ async function readCodexSessions(): Promise<CodexSessionEntry[]> {
 /** Read messages from a specific session file. */
 async function readCodexSessionMessages(
   sessionId: string,
-  options?: { limit?: number; offset?: number },
-): Promise<SessionMessageItem[]> {
+  options?: GetSessionMessagesOptions,
+): Promise<{ messages: SessionMessageItem[]; hasMore: boolean; firstOffset: number }> {
   const files = await findSessionFiles();
   const targetFile = files.find((f) => f.includes(sessionId));
-  if (!targetFile) return [];
+  if (!targetFile) return { messages: [], hasMore: false, firstOffset: 0 };
 
-  const messages: SessionMessageItem[] = [];
+  const tail = options?.tail;
+  const offset = options?.offset ?? 0;
+  const limit = options?.limit;
+  // "+1 trick": over-fetch by one to detect hasMore without a separate
+  // total count. For `tail`, the ring buffer holds at most `tail + 1`
+  // entries; for offset/limit, we stop after `offset + limit + 1`.
+  const ringCap = tail !== undefined ? Math.max(0, tail) + 1 : 0;
+  const stopAt = limit !== undefined ? offset + Math.max(0, limit) + 1 : Number.POSITIVE_INFINITY;
+  const ring: SessionMessageItem[] = [];
+  const collected: SessionMessageItem[] = [];
+
   const rl = createInterface({
     input: createReadStream(targetFile),
     crlfDelay: Number.POSITIVE_INFINITY,
@@ -768,20 +779,42 @@ async function readCodexSessionMessages(
 
     if (content.length === 0) continue;
 
-    const offset = options?.offset ?? 0;
-    const limit = options?.limit ?? Number.POSITIVE_INFINITY;
+    const item: SessionMessageItem = {
+      role,
+      id: `codex-${sessionId}-${msgIndex}`,
+      content,
+    };
 
-    if (msgIndex >= offset && msgIndex < offset + limit) {
-      messages.push({
-        role,
-        id: `codex-${sessionId}-${msgIndex}`,
-        content,
-      });
+    if (tail !== undefined) {
+      ring.push(item);
+      if (ring.length > ringCap) ring.shift();
+    } else if (msgIndex >= offset && (limit === undefined || msgIndex < offset + limit + 1)) {
+      collected.push(item);
     }
     msgIndex++;
 
-    if (msgIndex >= offset + limit) break;
+    // Early-exit for offset/limit once we've collected one beyond the
+    // window. We've answered both "what's the slice" and "is there more"
+    // — no need to walk the rest of the file.
+    if (limit !== undefined && msgIndex >= stopAt) break;
   }
 
-  return messages;
+  if (tail !== undefined) {
+    const tailSize = Math.max(0, tail);
+    const hasMore = ring.length > tailSize;
+    const slice = hasMore ? ring.slice(1) : ring;
+    // The ring's first element sits at index `msgIndex - ring.length` in
+    // the full filtered list.
+    const ringStart = msgIndex - ring.length;
+    return {
+      messages: slice,
+      hasMore,
+      firstOffset: ringStart + (hasMore ? 1 : 0),
+    };
+  }
+
+  const requested = limit ?? Number.POSITIVE_INFINITY;
+  const hasMore = limit !== undefined && collected.length > requested;
+  const slice = hasMore ? collected.slice(0, requested) : collected;
+  return { messages: slice, hasMore, firstOffset: offset };
 }

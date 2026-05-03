@@ -39,6 +39,10 @@ import {
   updateChatActiveSession,
   updateChatStatus,
 } from "../lib/chat-manager";
+import {
+  ensureActiveSessionSummary,
+  scheduleActiveSessionRefresh,
+} from "../lib/chat-session-summary";
 import { checkCli, installCli, resolveCliPaths } from "../lib/cli";
 import { convertEventsToUIMessages, convertHistoryToUIMessages } from "../lib/convert-events";
 import { reloadSchedules, stopJobsForKey } from "../lib/cronjob-scheduler";
@@ -1621,11 +1625,11 @@ const sessionsRouter = t.router({
 /**
  * Load a page of session history from the agent's JSONL transcript.
  *
- * Uses the agent's full message list and slices server-side to bound the
- * payload at `pageSize` messages. The first call (no `beforeMessageIndex`)
- * returns the most recent `pageSize` messages; older pages are addressed by
- * the index of their last message + 1 (i.e. the cursor returned as
- * `firstMessageIndex` in the previous response).
+ * The first call (no `beforeMessageIndex`) requests the last `pageSize`
+ * messages via `{ tail: pageSize }`. Older pages use `{ offset, limit }`
+ * derived from the previous response's `firstMessageIndex`. Adapters
+ * over-fetch by one message (the "+1 trick") so the response carries an
+ * accurate `hasMore` without requiring a separate `total` count.
  *
  * Returns `null` when the agent does not support session listing.
  */
@@ -1642,16 +1646,22 @@ async function loadJsonlPage(opts: {
     return null;
   }
 
-  const all = await agent.getSessionMessages(opts.sessionId, opts.workspacePath);
-  if (!all || all.length === 0) {
-    return { messages: [], firstMessageIndex: 0, hasMore: false };
-  }
+  // Translate the cursor model used by the tRPC endpoint into the agent's
+  // tail/offset/limit options. `beforeMessageIndex` is the index *after*
+  // the slice, so the slice is `[max(0, before - pageSize), before)`.
+  const queryOpts =
+    opts.beforeMessageIndex !== undefined
+      ? {
+          offset: Math.max(0, opts.beforeMessageIndex - opts.pageSize),
+          limit: opts.beforeMessageIndex - Math.max(0, opts.beforeMessageIndex - opts.pageSize),
+        }
+      : { tail: opts.pageSize };
 
-  const total = all.length;
-  const endIndex =
-    opts.beforeMessageIndex !== undefined ? Math.min(opts.beforeMessageIndex, total) : total;
-  const startIndex = Math.max(0, endIndex - opts.pageSize);
-  const slice = all.slice(startIndex, endIndex);
+  const {
+    messages: slice,
+    hasMore,
+    firstOffset,
+  } = await agent.getSessionMessages(opts.sessionId, opts.workspacePath, queryOpts);
 
   const messages = convertHistoryToUIMessages(
     slice as {
@@ -1669,7 +1679,7 @@ async function loadJsonlPage(opts: {
       }[];
     }[],
   );
-  return { messages, firstMessageIndex: startIndex, hasMore: startIndex > 0 };
+  return { messages, firstMessageIndex: firstOffset, hasMore };
 }
 
 // ---------------------------------------------------------------------------
@@ -2119,9 +2129,32 @@ const chatsRouter = t.router({
       return { chat };
     }),
 
-  get: publicProcedure.input(z.object({ chatId: z.string() })).query(({ input }) => {
+  get: publicProcedure.input(z.object({ chatId: z.string() })).query(async ({ input }) => {
     const chat = getChat(input.chatId);
-    return { chat: chat ?? null };
+    if (!chat) return { chat: null };
+
+    const workspace = resolveWorkspace(chat.workspaceId);
+
+    // Lazy-resolve case: row has no cached summary yet (post-migration, or
+    // a fresh chat with no activeSessionId). Block once on the first read
+    // so the client can render a meaningful tab title without waiting for
+    // a separate sessions.list. Subsequent reads are pure SQLite.
+    if (workspace && (!chat.activeSessionId || chat.activeSessionSummary === undefined)) {
+      const resolved = await ensureActiveSessionSummary(input.chatId, workspace.worktree.path);
+      if (resolved) {
+        return { chat: resolved };
+      }
+    }
+
+    // Hot path: cached values returned immediately. Kick off a
+    // background refresh so the next read picks up any drift (e.g. the
+    // user renamed the session via /rename). Errors are swallowed; the
+    // refresh will be retried on the next request.
+    if (workspace) {
+      scheduleActiveSessionRefresh(input.chatId, workspace.worktree.path);
+    }
+
+    return { chat };
   }),
 
   update: publicProcedure
@@ -2153,7 +2186,7 @@ const chatsRouter = t.router({
         sessionId: z.string().optional(),
       }),
     )
-    .mutation(({ input }) => {
+    .mutation(async ({ input }) => {
       // Lazily ensure the server-side chat record exists. The client
       // generates chatIds locally, so setActiveSession may be called
       // before the first message is sent (which normally creates the record).
@@ -2161,7 +2194,39 @@ const chatsRouter = t.router({
       if (!chat) {
         chat = createChat(input.workspaceId, { id: input.chatId, name: "Chat" });
       }
-      updateChatActiveSession(input.chatId, input.sessionId);
+
+      if (!input.sessionId) {
+        updateChatActiveSession(input.chatId, undefined);
+        return { ok: true };
+      }
+
+      // Resolve the summary inline so the persisted row carries a usable
+      // tab title from the moment the client switches sessions. If
+      // getSessionInfo fails or returns undefined (the JSONL doesn't exist
+      // yet for a freshly-created session), persist NULL — the next
+      // chats.get's background refresh will catch up.
+      const workspace = resolveWorkspace(input.workspaceId);
+      let summary: string | undefined;
+      let lastModified: number | undefined;
+      if (workspace) {
+        try {
+          const agent = await getOrCreateAgent(input.chatId, workspace.worktree.path, chat.agent);
+          const info = await agent.getSessionInfo?.(input.sessionId, workspace.worktree.path);
+          summary = info?.summary;
+          lastModified = info?.lastModified;
+        } catch (err) {
+          log.warn(
+            { chatId: input.chatId, sessionId: input.sessionId, err },
+            "setActiveSession: getSessionInfo failed",
+          );
+        }
+      }
+
+      updateChatActiveSession(input.chatId, {
+        activeSessionId: input.sessionId,
+        summary,
+        lastModified,
+      });
       return { ok: true };
     }),
 

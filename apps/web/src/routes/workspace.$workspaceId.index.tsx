@@ -1,6 +1,7 @@
 import { useSettingsQuery } from "@band-app/dashboard-core";
 import { createFileRoute, Navigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { agentTypeSupportsSessionListing } from "../components/ChatPane";
 import { ChatView } from "../components/ChatView";
 import { useAgentSwitcherContext } from "../hooks/useAgentSwitcherContext";
 import { useIsDesktop } from "../hooks/useIsDesktop";
@@ -30,6 +31,7 @@ function WorkspaceIndex() {
 }
 
 function MobileChatContent({ workspaceId }: { workspaceId: string }) {
+  const { settings } = useSettingsQuery();
   const [chatId, setChatId] = useState<string | undefined>(undefined);
   const [supportsSessionListing, setSupportsSessionListing] = useState(false);
   const [initialSessionId, setInitialSessionId] = useState<string | undefined>(undefined);
@@ -59,29 +61,38 @@ function MobileChatContent({ workspaceId }: { workspaceId: string }) {
     };
   }, [workspaceId]);
 
+  // Resolve initial session + session-listing support from the persisted
+  // chat row. This mirrors `useChatPaneState` (ChatPane.tsx): the server
+  // persists `activeSessionId` (and the cached summary) on the chat row
+  // so the hot path is a pure SQLite read with no filesystem walk over
+  // `~/.claude/projects/<workspace>/`. Falls back to the latest session
+  // (mtime-sorted) inside `chats.get` when no activeSessionId is
+  // persisted yet. `sessions.list` is only invoked lazily when the user
+  // opens the history dropdown (see `SessionHistoryMenu` in ChatView).
   // biome-ignore lint/correctness/useExhaustiveDependencies: chatKey intentionally triggers reload after agent switch
   useEffect(() => {
     if (!chatId) return;
     let cancelled = false;
-    trpc.sessions.list
-      .query({ workspaceId, chatId })
+    trpc.chats.get
+      .query({ chatId })
       .then((data) => {
         if (cancelled) return;
-        if (data.supported) {
-          setSupportsSessionListing(true);
-          const latest = [...data.sessions].sort((a, b) => b.lastModified - a.lastModified)[0];
-          if (latest) setInitialSessionId(latest.sessionId);
+        const chat = data?.chat;
+        if (chat) {
+          const found = settings.codingAgents?.find((a) => a.id === chat.agent);
+          setSupportsSessionListing(agentTypeSupportsSessionListing(found?.type));
+          if (chat.activeSessionId) setInitialSessionId(chat.activeSessionId);
         }
         setSessionQueryDone(true);
       })
       .catch((err) => {
         if (!cancelled) setSessionQueryDone(true);
-        console.error("[sessions] error:", err);
+        console.error("[chats.get] error:", err);
       });
     return () => {
       cancelled = true;
     };
-  }, [workspaceId, chatId, chatKey]);
+  }, [workspaceId, chatId, chatKey, settings]);
 
   if (!chatId) return null;
 

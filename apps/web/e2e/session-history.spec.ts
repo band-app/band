@@ -33,6 +33,7 @@ test.afterAll(async () => {
 test("sessions load and display in the session list", async ({ page }) => {
   const mock = createTrpcMock();
   mock.addDockviewMocks();
+  mock.addSupportedAgentMocks();
   mock.query("sessions.list", {
     sessions: [
       {
@@ -75,6 +76,7 @@ test("sessions load and display in the session list", async ({ page }) => {
 test("empty state shows 'No sessions yet' message", async ({ page }) => {
   const mock = createTrpcMock();
   mock.addDockviewMocks();
+  mock.addSupportedAgentMocks();
   mock.query("sessions.list", { sessions: [], supported: true });
   await mock.install(page);
 
@@ -107,6 +109,7 @@ test("session toggle is hidden when not supported", async ({ page }) => {
 test("selecting a session loads its messages", async ({ page }) => {
   const mock = createTrpcMock();
   mock.addDockviewMocks();
+  mock.addSupportedAgentMocks();
   mock.query("sessions.list", {
     sessions: [
       {

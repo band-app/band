@@ -32,6 +32,18 @@ export interface ChatSession {
   mode?: string;
   /** The session the user last viewed — restored on page load. */
   activeSessionId?: string;
+  /**
+   * Cached display title for `activeSessionId` so the chat pane can render
+   * its tab title without a filesystem walk on the hot path. Refreshed in
+   * the background by `chats.get`.
+   */
+  activeSessionSummary?: string;
+  /**
+   * Cached lastModified (ms epoch) for `activeSessionId`. Used by the
+   * background refresh to skip the read when the JSONL file hasn't
+   * changed since the cached value was written.
+   */
+  activeSessionLastModified?: number;
   status: ChatStatus;
 }
 
@@ -43,6 +55,10 @@ interface ChatPanelState {
   mode?: string | null;
   /** The session the user last viewed. */
   activeSessionId?: string | null;
+  /** Cached display title for activeSessionId. */
+  activeSessionSummary?: string | null;
+  /** Cached lastModified (ms epoch) for activeSessionId. */
+  activeSessionLastModified?: number | null;
   status: ChatStatus;
 }
 
@@ -104,6 +120,8 @@ function serializeState(session: ChatSession): string {
     model: session.model ?? null,
     mode: session.mode ?? null,
     activeSessionId: session.activeSessionId ?? null,
+    activeSessionSummary: session.activeSessionSummary ?? null,
+    activeSessionLastModified: session.activeSessionLastModified ?? null,
     status: session.status,
   };
   return JSON.stringify(blob);
@@ -220,19 +238,80 @@ export function updateChatStatus(chatId: string, status: ChatStatus): void {
   });
 }
 
+export interface ActiveSessionUpdate {
+  activeSessionId: string | undefined;
+  /**
+   * Cached display title for `activeSessionId`. Pass `undefined` to clear
+   * (e.g. when the user resets to a new session without a summary yet).
+   */
+  summary?: string;
+  lastModified?: number;
+}
+
 /**
  * Update which session the user is currently viewing in this pane.
- * Persisted so refreshing the page restores the same session.
+ * Persisted so refreshing the page restores the same session — and (when
+ * provided) the cached title/mtime so first paint avoids a filesystem walk.
  */
-export function updateChatActiveSession(chatId: string, activeSessionId: string | undefined): void {
+export function updateChatActiveSession(
+  chatId: string,
+  update: string | undefined | ActiveSessionUpdate,
+): void {
   const session = chatSessions.get(chatId);
   if (!session) return;
-  session.activeSessionId = activeSessionId;
+
+  if (typeof update === "string" || update === undefined) {
+    session.activeSessionId = update;
+    // Clear cached summary/lastModified when the session changes without
+    // us having pre-resolved metadata. The next chats.get will lazily
+    // resolve and persist.
+    session.activeSessionSummary = undefined;
+    session.activeSessionLastModified = undefined;
+  } else {
+    session.activeSessionId = update.activeSessionId;
+    session.activeSessionSummary = update.summary;
+    session.activeSessionLastModified = update.lastModified;
+  }
 
   updatePanelState(chatId, {
     state: serializeState(session),
     updatedAt: Date.now(),
   });
+}
+
+/**
+ * Refresh just the cached summary/lastModified for the chat's active session.
+ * Used by the background refresh after `chats.get` to keep the persisted
+ * title in sync with the on-disk JSONL when it drifts (e.g. after `/rename`).
+ *
+ * Returns true if the row was actually updated.
+ */
+export function updateChatSessionSummary(
+  chatId: string,
+  sessionId: string,
+  summary: string | undefined,
+  lastModified: number | undefined,
+): boolean {
+  const session = chatSessions.get(chatId);
+  if (!session) return false;
+  // Stale write guard: only apply if the cached row still references the
+  // same activeSessionId. Otherwise the user moved on between the read
+  // and the refresh and we'd clobber the new state with old data.
+  if (session.activeSessionId !== sessionId) return false;
+  if (
+    session.activeSessionSummary === summary &&
+    session.activeSessionLastModified === lastModified
+  ) {
+    return false;
+  }
+  session.activeSessionSummary = summary;
+  session.activeSessionLastModified = lastModified;
+
+  updatePanelState(chatId, {
+    state: serializeState(session),
+    updatedAt: Date.now(),
+  });
+  return true;
 }
 
 /**
@@ -303,6 +382,8 @@ export function loadChatsFromDb(): number {
       model: parsed.model ?? undefined,
       mode: parsed.mode ?? undefined,
       activeSessionId: parsed.activeSessionId ?? undefined,
+      activeSessionSummary: parsed.activeSessionSummary ?? undefined,
+      activeSessionLastModified: parsed.activeSessionLastModified ?? undefined,
       status: "idle",
     };
     addToIndex(session);
