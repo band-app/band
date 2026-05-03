@@ -73,9 +73,6 @@ test("settings dialog renders every section in a single scrolling list", async (
     "Worktrees folder",
     "Code intelligence (LSP)",
     "No labels yet",
-    "Claude Code",
-    "Codex",
-    "OpenCode",
     "Play sound on needs attention",
     "Port",
     "Auto-start tunnel",
@@ -84,6 +81,22 @@ test("settings dialog renders every section in a single scrolling list", async (
     await row.scrollIntoViewIfNeeded();
     await expect(row).toBeVisible();
   }
+
+  // Coding Agents — the agent labels appear in two places (the per-agent
+  // row and, when enabled, the default-agent dropdown's selected value),
+  // so target the agent's enable switch which is uniquely keyed.
+  for (const agent of ["Claude Code", "Codex", "OpenCode"]) {
+    const sw = dialog.getByRole("switch", { name: `Enable ${agent}` });
+    await sw.scrollIntoViewIfNeeded();
+    await expect(sw).toBeVisible();
+  }
+
+  // The "Default coding agent" dropdown only renders when at least one
+  // agent is enabled. The first-time-setup hook auto-detects installed
+  // CLIs in the test environment, so we expect it to be visible.
+  const defaultAgentTrigger = dialog.getByRole("combobox", { name: "Default coding agent" });
+  await defaultAgentTrigger.scrollIntoViewIfNeeded();
+  await expect(defaultAgentTrigger).toBeVisible();
 });
 
 test("toggling LSP and saving persists to settings.json", async ({ page }) => {
@@ -126,16 +139,16 @@ test("coding agents section renders and toggling an agent doesn't crash", async 
   const dialog = await openSettingsDialog(page);
 
   // The Coding Agents section is part of the single scrolling list. Scroll
-  // to its first agent row before interacting.
-  const claudeRow = dialog.getByText("Claude Code", { exact: true });
-  await claudeRow.scrollIntoViewIfNeeded();
-  await expect(claudeRow).toBeVisible();
+  // to Claude Code's enable switch (the per-agent row label and the
+  // default-agent dropdown both contain the text "Claude Code", so use
+  // the uniquely-named switch instead).
+  const claudeSwitch = dialog.getByRole("switch", { name: "Enable Claude Code" });
+  await claudeSwitch.scrollIntoViewIfNeeded();
+  await expect(claudeSwitch).toBeVisible();
 
-  // Enable Claude Code so listModels() is called and the model Select
+  // Toggle Claude Code so listModels() is called and the model Select
   // potentially mounts. The toggle alone is enough to exercise the
   // listModels effect — saving would close the dialog.
-  const claudeSwitch = dialog.getByRole("switch", { name: "Enable Claude Code" });
-  await expect(claudeSwitch).toBeVisible();
   await claudeSwitch.click({ force: true });
 
   // Allow listModels() + any subsequent renders to settle.
@@ -143,7 +156,7 @@ test("coding agents section renders and toggling an agent doesn't crash", async 
 
   // The dialog must still be visible — if Radix had thrown, the React tree
   // would have unmounted into an error boundary.
-  await expect(dialog.getByText("Claude Code", { exact: true })).toBeVisible();
+  await expect(claudeSwitch).toBeVisible();
   expect(errors).toEqual([]);
 });
 

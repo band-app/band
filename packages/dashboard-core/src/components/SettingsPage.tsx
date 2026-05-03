@@ -332,12 +332,38 @@ export function SettingsPage({ open, onOpenChange }: Props) {
             {/* ── Coding Agents ──────────────────────────────── */}
             <SettingsSection
               title="Coding Agents"
-              description="Enable agents and set a default. The default agent is used for new workspaces. You can switch agents per workspace from the workspace chat header."
+              description="Enable the agents you have installed."
             >
+              {codingAgents.length > 0 && (
+                <SettingsRow
+                  variant="responsive"
+                  label="Default agent"
+                  description="Used for new workspaces. You can switch agents per workspace from the workspace chat header."
+                >
+                  <Select
+                    value={defaultAgentId || codingAgents[0].id}
+                    onValueChange={(v: string) => setDefaultAgentId(v)}
+                  >
+                    <SelectTrigger
+                      className="h-8 w-full text-sm sm:w-48"
+                      aria-label="Default coding agent"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {codingAgents.map((a) => (
+                        <SelectItem key={a.id} value={a.id}>
+                          <AgentIcon type={a.type} className="size-3.5" />
+                          {a.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </SettingsRow>
+              )}
               {KNOWN_AGENTS.map((known) => {
                 const agent = codingAgents.find((a) => a.type === known.type);
                 const enabled = !!agent;
-                const isDefault = enabled && defaultAgentId === (agent?.id ?? known.id);
                 const models = agentModels[known.type] ?? [];
                 return (
                   <div
@@ -373,17 +399,6 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                     </div>
                     {enabled && (
                       <div className="mt-3 space-y-2.5 pl-7">
-                        <button
-                          type="button"
-                          onClick={() => setDefaultAgentId(agent?.id ?? known.id)}
-                          className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium transition-colors ${
-                            isDefault
-                              ? "bg-primary/15 text-primary"
-                              : "text-muted-foreground hover:text-foreground hover:bg-muted"
-                          }`}
-                        >
-                          {isDefault ? "Default" : "Set as default"}
-                        </button>
                         <div className="space-y-1">
                           <Label className="text-xs text-muted-foreground">Command</Label>
                           <Input
