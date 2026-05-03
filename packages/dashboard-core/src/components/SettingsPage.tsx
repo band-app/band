@@ -570,9 +570,6 @@ export function SettingsPage({ open, onOpenChange }: Props) {
           </div>
         </div>
         <DialogFooter className="border-t border-border px-6 py-3 sm:justify-end">
-          <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
           <Button
             type="button"
             size="sm"
