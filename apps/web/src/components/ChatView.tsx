@@ -105,6 +105,66 @@ function ThinkingIndicator({ label = "Thinking..." }: { label?: string }) {
   );
 }
 
+/**
+ * Skeleton placeholder shown while a session's history is being fetched.
+ * Mimics the alternating user→assistant bubble shape so the layout doesn't
+ * jump once messages arrive — much less jarring than a centered spinner.
+ */
+function SkeletonBar({ widthClass, className }: { widthClass: string; className?: string }) {
+  return <div className={cn("h-3 rounded bg-muted/70", widthClass, className)} />;
+}
+
+function ConversationSkeleton() {
+  return (
+    <output
+      className="flex animate-pulse flex-col gap-6"
+      aria-busy="true"
+      aria-label="Loading messages"
+    >
+      {/* User bubble — right-aligned, narrower */}
+      <Message from="user">
+        <MessageContent>
+          <div className="flex flex-col gap-2 py-1">
+            <SkeletonBar widthClass="w-48" className="bg-foreground/10" />
+            <SkeletonBar widthClass="w-32" className="bg-foreground/10" />
+          </div>
+        </MessageContent>
+      </Message>
+
+      {/* Assistant bubble — full width, several lines */}
+      <Message from="assistant">
+        <MessageContent>
+          <div className="flex flex-col gap-2 pt-1">
+            <SkeletonBar widthClass="w-3/4" />
+            <SkeletonBar widthClass="w-full" />
+            <SkeletonBar widthClass="w-5/6" />
+            <SkeletonBar widthClass="w-2/3" />
+          </div>
+        </MessageContent>
+      </Message>
+
+      {/* A second user/assistant pair for longer-feeling conversations */}
+      <Message from="user">
+        <MessageContent>
+          <div className="flex flex-col gap-2 py-1">
+            <SkeletonBar widthClass="w-40" className="bg-foreground/10" />
+          </div>
+        </MessageContent>
+      </Message>
+
+      <Message from="assistant">
+        <MessageContent>
+          <div className="flex flex-col gap-2 pt-1">
+            <SkeletonBar widthClass="w-2/3" />
+            <SkeletonBar widthClass="w-4/5" />
+            <SkeletonBar widthClass="w-1/2" />
+          </div>
+        </MessageContent>
+      </Message>
+    </output>
+  );
+}
+
 type UIMessageParts = ReturnType<
   typeof import("@ai-sdk/react").useChat
 >["messages"][number]["parts"];
@@ -900,14 +960,21 @@ export function ChatView({
             <div ref={sentinelRef} className="h-px w-full shrink-0" aria-hidden="true" />
           )}
 
-          {/* Loading indicator for older messages */}
+          {/* Loading indicator for older messages — skeleton row matching
+              the bubble layout so the prepended history doesn't pop. */}
           {loadingOlder && (
-            <div className="flex items-center justify-center py-4">
-              <Loader2 className="size-4 animate-spin text-muted-foreground" />
-            </div>
+            <output
+              className="flex animate-pulse flex-col gap-2 py-3"
+              aria-busy="true"
+              aria-label="Loading older messages"
+            >
+              <SkeletonBar widthClass="w-2/3" />
+              <SkeletonBar widthClass="w-3/4" />
+              <SkeletonBar widthClass="w-1/2" />
+            </output>
           )}
 
-          {isEmpty && (
+          {isEmpty && !loadingHistory && (
             <ConversationEmptyState
               icon={
                 agentType ? (
@@ -921,11 +988,7 @@ export function ChatView({
             />
           )}
 
-          {loadingHistory && messages.length === 0 && (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="size-5 animate-spin text-muted-foreground" />
-            </div>
-          )}
+          {loadingHistory && messages.length === 0 && <ConversationSkeleton />}
 
           {(() => {
             return messages.map((message, messageIndex) => {
