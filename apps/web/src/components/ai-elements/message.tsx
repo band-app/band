@@ -7,6 +7,7 @@ import type { UIMessage } from "ai";
 import { Download, Expand, FileIcon } from "lucide-react";
 import type { ComponentProps, HTMLAttributes } from "react";
 import { memo, useCallback, useState } from "react";
+import remarkBreaks from "remark-breaks";
 import { defaultRehypePlugins, defaultRemarkPlugins, Streamdown } from "streamdown";
 
 import {
@@ -63,7 +64,11 @@ export const MessageResponse = memo(
       )}
       plugins={streamdownPlugins}
       components={fileLinkComponents}
-      remarkPlugins={[...Object.values(defaultRemarkPlugins), ...fileLinkRemarkPlugins]}
+      remarkPlugins={[
+        ...Object.values(defaultRemarkPlugins),
+        remarkBreaks,
+        ...fileLinkRemarkPlugins,
+      ]}
       rehypePlugins={[...Object.values(defaultRehypePlugins), ...fileLinkRehypePlugins]}
       urlTransform={fileLinkUrlTransform}
       {...props}

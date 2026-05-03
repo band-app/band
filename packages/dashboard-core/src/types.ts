@@ -130,6 +130,13 @@ export interface Settings {
   autoStartTunnel?: boolean;
   enableLSP?: boolean;
   theme?: Theme;
+  /**
+   * Maximum number of workspace dockview instances kept alive in memory at
+   * once for instant switching. Higher values use more memory but make
+   * switching back to recent workspaces faster.
+   * @default 3
+   */
+  maxCachedWorkspaces?: number;
 }
 
 export interface HooksStatus {

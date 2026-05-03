@@ -74,6 +74,12 @@ export interface Settings {
   labels?: LabelDefinition[];
   tokenSecret?: string;
   autoStartTunnel?: boolean;
+  /**
+   * Maximum number of workspace dockview instances kept alive in memory at
+   * once. Higher values speed up switching back to recent workspaces at the
+   * cost of memory and background work. Defaults to 3 in the client.
+   */
+  maxCachedWorkspaces?: number;
   /** Extra fields not explicitly modeled. Preserved across read/write. */
   [key: string]: unknown;
 }

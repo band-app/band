@@ -133,12 +133,17 @@ function WorkspaceLayout() {
     setHydrated(true);
   }, []);
 
-  // Sync zustand active workspace from URL
+  // Sync zustand active workspace from URL.
+  // Two effects: one updates on param change, the other clears only on unmount.
+  // Combining them caused a brief null-then-set toggle on every workspace
+  // switch, which made sidebar cards flash inactive for one frame.
   const setActiveWorkspace = useDashboardStore((s) => s.setActiveWorkspace);
   useEffect(() => {
     setActiveWorkspace(decoded);
-    return () => setActiveWorkspace(null);
   }, [decoded, setActiveWorkspace]);
+  useEffect(() => {
+    return () => setActiveWorkspace(null);
+  }, [setActiveWorkspace]);
 
   // Clear needs_attention status when viewing this workspace
   const clearNeedsAttention = useDashboardStore((s) => s.clearNeedsAttention);

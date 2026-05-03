@@ -9,7 +9,7 @@ import {
   useSettingsQuery,
   WorkspacePickerDialog,
 } from "@band-app/dashboard-core";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@band-app/ui";
+import { cn, Tooltip, TooltipContent, TooltipTrigger } from "@band-app/ui";
 import {
   type DockviewApi,
   DockviewReact,
@@ -207,8 +207,12 @@ function DefaultTab(props: IDockviewPanelHeaderProps) {
         className="dv-default-tab-content"
         style={{ display: "flex", alignItems: "center", gap: 6 }}
       >
-        {Icon && <Icon className="size-4 shrink-0" />}
-        <span>{title}</span>
+        {Icon ? (
+          <Icon className="size-4 shrink-0" />
+        ) : (
+          <span className="inline-block size-4 shrink-0" aria-hidden />
+        )}
+        <span className="truncate">{title}</span>
       </div>
     </div>
   );
@@ -243,19 +247,31 @@ function BadgeTab(props: IDockviewPanelHeaderProps) {
     return () => d.dispose();
   }, [props.api]);
 
+  const hasBadge = badge != null && badge > 0;
+
   const tab = (
     <div className="dv-default-tab">
       <div
         className="dv-default-tab-content"
         style={{ display: "flex", alignItems: "center", gap: 6 }}
       >
-        {Icon && <Icon className="size-4 shrink-0" />}
-        <span>{title}</span>
-        {badge != null && badge > 0 && (
-          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-500/20 px-1.5 text-xs font-medium text-blue-600 dark:text-blue-400">
-            {badge}
-          </span>
+        {Icon ? (
+          <Icon className="size-4 shrink-0" />
+        ) : (
+          <span className="inline-block size-4 shrink-0" aria-hidden />
         )}
+        <span className="truncate">{title}</span>
+        {/* Reserve badge slot — invisible when count is 0 so width stays
+            stable when diff stats load asynchronously after a workspace switch. */}
+        <span
+          aria-hidden={!hasBadge}
+          className={cn(
+            "inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-500/20 px-1.5 text-xs font-medium text-blue-600 dark:text-blue-400 transition-opacity",
+            hasBadge ? "opacity-100" : "opacity-0",
+          )}
+        >
+          {hasBadge ? badge : 0}
+        </span>
       </div>
     </div>
   );
@@ -733,7 +749,10 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
       const api = apiRef.current;
       const key = e.key.toLowerCase();
 
-      if (key === "p" && e.shiftKey) {
+      if (key === "n" && e.shiftKey) {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent("band:new-chat-session"));
+      } else if (key === "p" && e.shiftKey) {
         e.preventDefault();
         setCommandPaletteOpen(true);
       } else if (key === "p" && !e.shiftKey) {
