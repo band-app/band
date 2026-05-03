@@ -1625,11 +1625,11 @@ const sessionsRouter = t.router({
 /**
  * Load a page of session history from the agent's JSONL transcript.
  *
- * Uses the agent's full message list and slices server-side to bound the
- * payload at `pageSize` messages. The first call (no `beforeMessageIndex`)
- * returns the most recent `pageSize` messages; older pages are addressed by
- * the index of their last message + 1 (i.e. the cursor returned as
- * `firstMessageIndex` in the previous response).
+ * The first call (no `beforeMessageIndex`) requests the last `pageSize`
+ * messages via `{ tail: pageSize }`. Older pages use `{ offset, limit }`
+ * derived from the previous response's `firstMessageIndex`. Adapters
+ * over-fetch by one message (the "+1 trick") so the response carries an
+ * accurate `hasMore` without requiring a separate `total` count.
  *
  * Returns `null` when the agent does not support session listing.
  */
@@ -1646,16 +1646,22 @@ async function loadJsonlPage(opts: {
     return null;
   }
 
-  const all = await agent.getSessionMessages(opts.sessionId, opts.workspacePath);
-  if (!all || all.length === 0) {
-    return { messages: [], firstMessageIndex: 0, hasMore: false };
-  }
+  // Translate the cursor model used by the tRPC endpoint into the agent's
+  // tail/offset/limit options. `beforeMessageIndex` is the index *after*
+  // the slice, so the slice is `[max(0, before - pageSize), before)`.
+  const queryOpts =
+    opts.beforeMessageIndex !== undefined
+      ? {
+          offset: Math.max(0, opts.beforeMessageIndex - opts.pageSize),
+          limit: opts.beforeMessageIndex - Math.max(0, opts.beforeMessageIndex - opts.pageSize),
+        }
+      : { tail: opts.pageSize };
 
-  const total = all.length;
-  const endIndex =
-    opts.beforeMessageIndex !== undefined ? Math.min(opts.beforeMessageIndex, total) : total;
-  const startIndex = Math.max(0, endIndex - opts.pageSize);
-  const slice = all.slice(startIndex, endIndex);
+  const {
+    messages: slice,
+    hasMore,
+    firstOffset,
+  } = await agent.getSessionMessages(opts.sessionId, opts.workspacePath, queryOpts);
 
   const messages = convertHistoryToUIMessages(
     slice as {
@@ -1673,7 +1679,7 @@ async function loadJsonlPage(opts: {
       }[];
     }[],
   );
-  return { messages, firstMessageIndex: startIndex, hasMore: startIndex > 0 };
+  return { messages, firstMessageIndex: firstOffset, hasMore };
 }
 
 // ---------------------------------------------------------------------------

@@ -10,6 +10,7 @@ import { readSkillsFromDir } from "../skills.js";
 import type {
   AgentModel,
   CodingAgent,
+  GetSessionMessagesOptions,
   RunSessionOptions,
   SessionListItem,
   SessionMessageItem,
@@ -318,8 +319,8 @@ export class OpenCodeAdapter implements CodingAgent {
   async getSessionMessages(
     sessionId: string,
     _dir: string,
-    options?: { limit?: number; offset?: number },
-  ): Promise<SessionMessageItem[]> {
+    options?: GetSessionMessagesOptions,
+  ): Promise<{ messages: SessionMessageItem[]; hasMore: boolean; firstOffset: number }> {
     log.info({ sessionId, ...options }, "getSessionMessages");
     return fetchOpenCodeSessionMessages(this.executablePath, sessionId, options);
   }
@@ -460,8 +461,8 @@ type OpenCodeExportedPart =
 async function fetchOpenCodeSessionMessages(
   executablePath: string,
   sessionId: string,
-  options?: { limit?: number; offset?: number },
-): Promise<SessionMessageItem[]> {
+  options?: GetSessionMessagesOptions,
+): Promise<{ messages: SessionMessageItem[]; hasMore: boolean; firstOffset: number }> {
   const raw = await new Promise<string>((resolve, reject) => {
     execFile(
       executablePath,
@@ -479,19 +480,24 @@ async function fetchOpenCodeSessionMessages(
 
   // `opencode export` prefixes output with "Exporting session: ..." line
   const jsonStart = raw.indexOf("{");
-  if (jsonStart === -1) return [];
+  if (jsonStart === -1) return { messages: [], hasMore: false, firstOffset: 0 };
 
   let session: OpenCodeExportedSession;
   try {
     session = JSON.parse(raw.slice(jsonStart)) as OpenCodeExportedSession;
   } catch {
     log.warn({ sessionId }, "failed to parse exported session");
-    return [];
+    return { messages: [], hasMore: false, firstOffset: 0 };
   }
 
+  const tail = options?.tail;
   const offset = options?.offset ?? 0;
-  const limit = options?.limit ?? Number.POSITIVE_INFINITY;
-  const messages: SessionMessageItem[] = [];
+  const limit = options?.limit;
+  // "+1 trick" — see codex adapter for rationale.
+  const ringCap = tail !== undefined ? Math.max(0, tail) + 1 : 0;
+  const stopAt = limit !== undefined ? offset + Math.max(0, limit) + 1 : Number.POSITIVE_INFINITY;
+  const ring: SessionMessageItem[] = [];
+  const collected: SessionMessageItem[] = [];
   let msgIndex = 0;
 
   for (const msg of session.messages) {
@@ -533,19 +539,34 @@ async function fetchOpenCodeSessionMessages(
 
     if (content.length === 0) continue;
 
-    if (msgIndex >= offset && msgIndex < offset + limit) {
-      messages.push({
-        role,
-        id: msg.info.id,
-        content,
-      });
+    const item: SessionMessageItem = {
+      role,
+      id: msg.info.id,
+      content,
+    };
+
+    if (tail !== undefined) {
+      ring.push(item);
+      if (ring.length > ringCap) ring.shift();
+    } else if (msgIndex >= offset && (limit === undefined || msgIndex < offset + limit + 1)) {
+      collected.push(item);
     }
     msgIndex++;
-
-    if (msgIndex >= offset + limit) break;
+    if (limit !== undefined && msgIndex >= stopAt) break;
   }
 
-  return messages;
+  if (tail !== undefined) {
+    const tailSize = Math.max(0, tail);
+    const hasMore = ring.length > tailSize;
+    const slice = hasMore ? ring.slice(1) : ring;
+    const ringStart = msgIndex - ring.length;
+    return { messages: slice, hasMore, firstOffset: ringStart + (hasMore ? 1 : 0) };
+  }
+
+  const requested = limit ?? Number.POSITIVE_INFINITY;
+  const hasMore = limit !== undefined && collected.length > requested;
+  const slice = hasMore ? collected.slice(0, requested) : collected;
+  return { messages: slice, hasMore, firstOffset: offset };
 }
 
 /**

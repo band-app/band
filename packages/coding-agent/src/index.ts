@@ -24,6 +24,7 @@ export type {
   AgentModel,
   CodingAgent,
   CodingAgentFeatures,
+  GetSessionMessagesOptions,
   RunSessionOptions,
   SessionInfo,
   SessionListItem,
