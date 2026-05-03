@@ -96,11 +96,11 @@ function toolPartToItem(part: ToolPart): ToolCallItem {
   };
 }
 
-function ThinkingIndicator() {
+function ThinkingIndicator({ label = "Thinking..." }: { label?: string }) {
   return (
     <div className="mt-2 flex items-center gap-2 text-muted-foreground">
       <Loader2 className="size-4 lg:size-3.5 animate-spin" />
-      <span className="text-base lg:text-sm">Thinking...</span>
+      <span className="text-base lg:text-sm">{label}</span>
     </div>
   );
 }
@@ -210,7 +210,19 @@ export function ChatView({
   const scrollHeightBeforePrependRef = useRef<number | null>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const stickyContextRef = useRef<StickToBottomContext>(null);
-  const initialSessionLoadedRef = useRef(false);
+  // Gate that ensures we run the initial history-load exactly once for a
+  // given (chatKey, initialSessionId) tuple. Distinct from the connect
+  // retry loop, which is allowed to fire multiple times.
+  const initialHistoryLoadedRef = useRef(false);
+  // Mirrors `useChat`'s status so the retry loop can read it without
+  // forcing a re-render of the closure.
+  const statusRef = useRef<"submitted" | "streaming" | "ready" | "error">("ready");
+  // Holds the AbortController for the in-flight reconnect attempt so a new
+  // attempt (or unmount) can cancel the old one cleanly.
+  const connectAbortRef = useRef<AbortController | null>(null);
+  // True while we're actively trying (including between retries) to attach
+  // to a running stream. Drives the "Connecting…" indicator.
+  const [isConnecting, setIsConnecting] = useState(false);
   const prevVisibleRef = useRef(visible);
 
   // Scroll to bottom when the panel becomes visible (e.g. switching tabs in dockview).
@@ -419,6 +431,13 @@ export function ChatView({
 
   const abortingRef = useRef(false);
 
+  // Keep statusRef in sync with the live `status` so the connect-retry loop
+  // (which can outlive a single render) can observe transitions to
+  // "submitted"/"streaming" and stop retrying.
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
+
   const handleStop = useCallback(() => {
     abortingRef.current = true;
     transport.abort().finally(() => {
@@ -428,6 +447,95 @@ export function ChatView({
   }, [transport, stop]);
 
   const isStreaming = status === "submitted" || status === "streaming";
+
+  // Cancel any in-flight reconnect retry. Called before opening a new one
+  // and on unmount/dependency change.
+  const cancelConnectAttempt = useCallback(() => {
+    if (connectAbortRef.current) {
+      connectAbortRef.current.abort();
+      connectAbortRef.current = null;
+    }
+  }, []);
+
+  /**
+   * Try to reconnect to a running task's SSE stream, retrying with backoff
+   * until one of:
+   *   - `useChat.status` flips to "submitted"/"streaming" (success)
+   *   - the server confirms no task is running (clean give-up)
+   *   - we exhaust the retry budget
+   *   - the attempt is cancelled (unmount / new attempt)
+   *
+   * Why retry? `GET /api/tasks/:chatId/stream` returns 204 if the in-memory
+   * task hasn't been registered yet (registration lag, server boot, brief
+   * race during workspace switch). The Vercel AI SDK treats 204 as "nothing
+   * to resume" and silently leaves status at "ready" — no thinking indicator,
+   * no error, no log. The retry loop turns that silent failure into either
+   * a real connection or a clean give-up.
+   */
+  const connectToRunningStream = useCallback(async () => {
+    cancelConnectAttempt();
+    const controller = new AbortController();
+    connectAbortRef.current = controller;
+    const signal = controller.signal;
+
+    // Read the latest status off the ref. Wrapping the read in a function
+    // keeps TypeScript from narrowing the ref's union type across awaits —
+    // `statusRef.current` is mutable, so a check earlier in the function
+    // shouldn't shrink its type later.
+    const isAttached = (): boolean => {
+      const s = statusRef.current;
+      return s === "submitted" || s === "streaming";
+    };
+
+    // Backoff schedule (ms): first attempt is immediate, then 250 → 500 →
+    // 1000 → 2000. Total wait ~3.75s before giving up — long enough to
+    // cover task registration lag without blocking the UI for too long.
+    const delays = [0, 250, 500, 1000, 2000];
+
+    setIsConnecting(true);
+    try {
+      for (let i = 0; i < delays.length; i++) {
+        if (signal.aborted) return;
+
+        if (delays[i] > 0) {
+          await new Promise<void>((r) => setTimeout(r, delays[i]));
+          if (signal.aborted) return;
+        }
+
+        // If `useChat` is already streaming (e.g. a sendMessage just took
+        // over while we were waiting), we're done.
+        if (isAttached()) return;
+
+        // Attempt the resume. The transport aborts any prior in-flight
+        // connection internally, so calling this repeatedly is safe.
+        resumeStream();
+
+        // Give the AI SDK a tick to update `status`. If the GET succeeds
+        // and the server has events to send, status flips to "streaming"
+        // shortly after the first chunk arrives.
+        await new Promise<void>((r) => setTimeout(r, 350));
+        if (signal.aborted) return;
+
+        if (isAttached()) return;
+
+        // Status didn't change → resumeStream resolved to null (204) or
+        // hasn't seen events yet. Ask the server: is anything actually
+        // running? If not, give up cleanly. If yes, keep retrying.
+        try {
+          const { running } = await trpc.tasks.isRunning.query({ workspaceId, chatId });
+          if (signal.aborted) return;
+          if (!running) return;
+        } catch {
+          // Network blip — keep retrying with the same backoff.
+        }
+      }
+    } finally {
+      if (connectAbortRef.current === controller) {
+        connectAbortRef.current = null;
+      }
+      setIsConnecting(false);
+    }
+  }, [workspaceId, chatId, resumeStream, cancelConnectAttempt]);
 
   useEffect(() => {
     onStreamingChange?.(isStreaming);
@@ -462,6 +570,7 @@ export function ChatView({
       // Kill any stale stream before loading + resuming to prevent
       // two concurrent streams writing to the same messages array.
       stop();
+      cancelConnectAttempt();
       setLoadingHistory(true);
       try {
         const data = await trpc.sessions.messages.query({
@@ -478,11 +587,12 @@ export function ChatView({
       } finally {
         setLoadingHistory(false);
       }
-      // Now that refs are populated, try to reconnect to a running stream.
-      // If no task is running, reconnectToStream returns null and this is a no-op.
-      resumeStream();
+      // Now that refs are populated, try to reconnect to a running stream
+      // with retries. If no task is running on the server, the loop gives
+      // up cleanly after one round-trip to tasks.isRunning.
+      void connectToRunningStream();
     },
-    [workspaceId, chatId, setMessages, resumeStream, stop],
+    [workspaceId, chatId, setMessages, connectToRunningStream, stop, cancelConnectAttempt],
   );
 
   // Load older messages when the user scrolls to the top of the chat.
@@ -576,26 +686,62 @@ export function ChatView({
   // This avoids the race where an eager resumeStream() opens stream A,
   // then initialSessionId arrives → loadMessages opens stream B, and
   // both pump chunks into the same messages array (causing duplicates).
+  //
+  // The history-load itself is one-shot per (chatKey, initialSessionId):
+  // we don't want to refetch all messages on every render. The reconnect
+  // attempt embedded in loadMessages (via connectToRunningStream) IS
+  // retryable, and is also re-triggered on tab focus / network online
+  // events below.
   useEffect(() => {
-    if (initialSessionId && !initialSessionLoadedRef.current) {
-      // Session query resolved with a session — load its history.
-      // loadMessages will call resumeStream() after setting refs.
-      initialSessionLoadedRef.current = true;
+    if (initialHistoryLoadedRef.current) return;
+    if (initialSessionId) {
+      initialHistoryLoadedRef.current = true;
       sessionIdRef.current = initialSessionId;
       setActiveSessionId(initialSessionId);
       loadMessages(initialSessionId);
-    } else if (sessionQueryDone && !initialSessionId && !initialSessionLoadedRef.current) {
-      // Session query resolved with NO sessions — just try resuming
-      // a running task (e.g. started from CLI).
-      initialSessionLoadedRef.current = true;
-      resumeStream();
+    } else if (sessionQueryDone && !initialSessionId) {
+      // No sessions — just try resuming a running task (e.g. started from
+      // CLI). Use the retrying connect helper instead of a single
+      // resumeStream() call so we cover the registration-lag window.
+      initialHistoryLoadedRef.current = true;
+      void connectToRunningStream();
     }
-  }, [initialSessionId, sessionQueryDone, loadMessages, resumeStream]);
+  }, [initialSessionId, sessionQueryDone, loadMessages, connectToRunningStream]);
+
+  // Re-attempt reconnect when the tab regains focus or the network comes
+  // back online. We skip if we're already streaming or already attempting,
+  // and we ask the server first to avoid a retry storm when nothing's
+  // actually running.
+  useEffect(() => {
+    const maybeReconnect = () => {
+      if (statusRef.current === "submitted" || statusRef.current === "streaming") return;
+      if (connectAbortRef.current) return;
+      // Fire-and-forget: connectToRunningStream itself handles the
+      // is-running short-circuit.
+      void connectToRunningStream();
+    };
+    const onFocus = () => maybeReconnect();
+    const onOnline = () => maybeReconnect();
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("online", onOnline);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("online", onOnline);
+    };
+  }, [connectToRunningStream]);
+
+  // Cancel any in-flight reconnect on unmount or when the underlying
+  // chat/key changes (transport gets recreated).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: chatKey/chatId trigger cleanup
+  useEffect(() => {
+    return () => cancelConnectAttempt();
+  }, [chatKey, chatId, cancelConnectAttempt]);
 
   const handleSelectSession = useCallback(
     async (sessionId: string) => {
       // Stop any active stream before switching sessions
       stop();
+      cancelConnectAttempt();
       sessionIdRef.current = sessionId;
       lastEventIdRef.current = undefined;
       firstEventIdRef.current = undefined;
@@ -613,6 +759,7 @@ export function ChatView({
       loadMessages,
       setMessages,
       stop,
+      cancelConnectAttempt,
       onShowSessionListChange,
       onActiveSessionChange,
       workspaceId,
@@ -622,6 +769,7 @@ export function ChatView({
 
   const handleNewSession = useCallback(() => {
     stop();
+    cancelConnectAttempt();
     sessionIdRef.current = undefined;
     lastEventIdRef.current = undefined;
     firstEventIdRef.current = undefined;
@@ -633,7 +781,15 @@ export function ChatView({
     setQueuedMessages([]);
     trpc.queue.clear.mutate({ workspaceId, chatId }).catch(() => {});
     onShowSessionListChange(false);
-  }, [setMessages, stop, onShowSessionListChange, onActiveSessionChange, workspaceId, chatId]);
+  }, [
+    setMessages,
+    stop,
+    cancelConnectAttempt,
+    onShowSessionListChange,
+    onActiveSessionChange,
+    workspaceId,
+    chatId,
+  ]);
 
   useEffect(() => {
     if (onNewSessionRef) {
@@ -784,6 +940,12 @@ export function ChatView({
                     (getToolName(p) === "AskUserQuestion" || getToolName(p) === "ExitPlanMode"),
                 );
               const showThinking = isLastAssistant && isStreaming && !hasPendingInteractiveTool;
+              // Show "Connecting…" on the last assistant bubble when we're
+              // in the retry loop but the SSE stream hasn't attached yet.
+              // Suppressed once `isStreaming` flips on so we don't show two
+              // indicators at once.
+              const showConnecting =
+                isLastAssistant && isConnecting && !isStreaming && !hasPendingInteractiveTool;
 
               if (message.role !== "assistant") {
                 // User messages render normally
@@ -828,7 +990,7 @@ export function ChatView({
                   (p) =>
                     (p.type === "text" && p.text.trim()) || p.type === "file" || isToolUIPart(p),
                 );
-                if (visibleParts.length === 0 && !showThinking) return null;
+                if (visibleParts.length === 0 && !showThinking && !showConnecting) return null;
                 return (
                   <Message key={message.id} from="assistant">
                     <MessageContent>
@@ -859,6 +1021,7 @@ export function ChatView({
                         );
                       })}
                       {showThinking && <ThinkingIndicator />}
+                      {showConnecting && <ThinkingIndicator label="Connecting…" />}
                     </MessageContent>
                   </Message>
                 );
@@ -881,7 +1044,8 @@ export function ChatView({
                         </MessageContent>
                       </Message>
                     )}
-                    {(visibleParts.length > 0 || (isLastSegment && showThinking)) && (
+                    {(visibleParts.length > 0 ||
+                      (isLastSegment && (showThinking || showConnecting))) && (
                       <Message from="assistant">
                         <MessageContent>
                           {visibleParts.map((seg) => {
@@ -916,6 +1080,9 @@ export function ChatView({
                             );
                           })}
                           {isLastSegment && showThinking && <ThinkingIndicator />}
+                          {isLastSegment && showConnecting && (
+                            <ThinkingIndicator label="Connecting…" />
+                          )}
                         </MessageContent>
                       </Message>
                     )}
@@ -931,6 +1098,15 @@ export function ChatView({
               </MessageContent>
             </Message>
           )}
+          {!isStreaming &&
+            isConnecting &&
+            (!messages.length || messages[messages.length - 1].role === "user") && (
+              <Message from="assistant">
+                <MessageContent>
+                  <ThinkingIndicator label="Connecting…" />
+                </MessageContent>
+              </Message>
+            )}
 
           {queuedMessages.map((text) => (
             <QueuedMessageBubble key={text} text={text} onCancel={() => handleCancelQueued(text)} />

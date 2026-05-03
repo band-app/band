@@ -1419,6 +1419,20 @@ const tasksRouter = t.router({
       return { task };
     }),
 
+  /**
+   * Lightweight existence check — used by the client during reconnect retries
+   * to distinguish "server says nothing's running, give up" from "server says
+   * a task IS running, keep retrying". This avoids a noisy `task` payload
+   * round-trip on every retry tick.
+   */
+  isRunning: publicProcedure
+    .input(z.object({ workspaceId: z.string(), chatId: z.string().optional() }))
+    .query(({ input }) => {
+      const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
+      const task = getTask(chatId);
+      return { running: task?.status === "running" };
+    }),
+
   abort: publicProcedure
     .input(z.object({ workspaceId: z.string(), chatId: z.string().optional() }))
     .mutation(({ input }) => {
