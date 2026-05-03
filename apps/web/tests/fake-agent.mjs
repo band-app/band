@@ -94,6 +94,13 @@ process.stdin.on("data", (chunk) => {
 			});
 			continue;
 		}
+		// Pause for `_sleep_ms` before the next message — used by tests to
+		// simulate long-running tasks so they can probe reconnect endpoints
+		// while the task is in the "running" state.
+		if (typeof msg._sleep_ms === "number") {
+			await new Promise((resolve) => setTimeout(resolve, msg._sleep_ms));
+			continue;
+		}
 		// Create a file on disk (simulates what a real tool would do)
 		if (msg._write_file) {
 			mkdirSync(dirname(msg._write_file.path), { recursive: true });
