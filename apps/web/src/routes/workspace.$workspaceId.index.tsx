@@ -1,6 +1,7 @@
 import { useSettingsQuery } from "@band-app/dashboard-core";
 import { createFileRoute, Navigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { agentTypeSupportsSessionListing } from "../components/ChatPane";
 import { ChatView } from "../components/ChatView";
 import { useAgentSwitcherContext } from "../hooks/useAgentSwitcherContext";
 import { useIsDesktop } from "../hooks/useIsDesktop";
@@ -78,11 +79,8 @@ function MobileChatContent({ workspaceId }: { workspaceId: string }) {
         if (cancelled) return;
         const chat = data?.chat;
         if (chat) {
-          // Only claude-code currently supports session listing — keep
-          // this in sync with CodingAgentFeatures.sessionListing on the
-          // adapters and the same derivation in ChatPane.tsx.
           const found = settings.codingAgents?.find((a) => a.id === chat.agent);
-          setSupportsSessionListing(found?.type === "claude-code");
+          setSupportsSessionListing(agentTypeSupportsSessionListing(found?.type));
           if (chat.activeSessionId) setInitialSessionId(chat.activeSessionId);
         }
         setSessionQueryDone(true);

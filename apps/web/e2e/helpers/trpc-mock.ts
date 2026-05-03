@@ -164,5 +164,39 @@ export function createTrpcMock() {
     );
   }
 
-  return { query, mutation, install, addDockviewMocks };
+  /**
+   * Override `settings.get` and `chats.get` so the chat pane derives
+   * `supportsSessionListing: true` from the agent definition. The chat
+   * pane no longer reads `sessions.list` to decide whether to render
+   * the history affordance — the capability is computed from the
+   * configured agent type. Tests that exercise the session-history UI
+   * must call this after `addDockviewMocks` (or override the same two
+   * procedures themselves).
+   */
+  function addSupportedAgentMocks(): void {
+    query(
+      "settings.get" as ProcedurePath,
+      (() => ({
+        codingAgents: [{ id: "claude-code", type: "claude-code", label: "Claude Code" }],
+        defaultCodingAgent: "claude-code",
+      })) as Handler<ProcedurePath>,
+    );
+    query(
+      "chats.get" as ProcedurePath,
+      (() => ({
+        chat: {
+          id: "default-chat",
+          workspaceId: "test-workspace",
+          name: "Chat",
+          agent: "claude-code",
+          status: "idle",
+          activeSessionId: undefined,
+          activeSessionSummary: undefined,
+          activeSessionLastModified: undefined,
+        },
+      })) as Handler<ProcedurePath>,
+    );
+  }
+
+  return { query, mutation, install, addDockviewMocks, addSupportedAgentMocks };
 }

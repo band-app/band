@@ -10,6 +10,17 @@ import { consumeChatFresh } from "./DockviewChatContainer";
 const settingsKey = () => ["settings.get"] as const;
 const chatKey = (chatId: string) => ["chats.get", chatId] as const;
 
+/**
+ * Agent types whose adapters report `supportedFeatures.sessionListing: true`.
+ * Keep in sync with `CodingAgentFeatures.sessionListing` on each adapter in
+ * `packages/coding-agent/src/adapters/`.
+ */
+const SESSION_LISTING_AGENT_TYPES = new Set(["claude-code", "codex", "opencode"]);
+
+export function agentTypeSupportsSessionListing(type: string | undefined): boolean {
+  return type !== undefined && SESSION_LISTING_AGENT_TYPES.has(type);
+}
+
 export interface CodingAgentDef {
   id: string;
   type: string;
@@ -112,9 +123,7 @@ export function useChatPaneState(workspaceId: string, chatId: string): ChatPaneS
     const raw = settings.codingAgents;
     const codingAgents = Array.isArray(raw) ? (raw as Array<{ id: string; type: string }>) : [];
     const found = codingAgents.find((a) => a.id === chat.agent);
-    // Only claude-code currently supports session listing — keep this in
-    // sync with CodingAgentFeatures.sessionListing on the adapters.
-    return found?.type === "claude-code";
+    return found ? agentTypeSupportsSessionListing(found.type) : false;
   })();
 
   // --- Agent config: derived from settings + chat record ---
