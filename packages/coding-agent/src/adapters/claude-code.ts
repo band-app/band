@@ -8,7 +8,12 @@ import type {
   SDKSessionInfo,
   SessionMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import { getSessionMessages, listSessions, query } from "@anthropic-ai/claude-agent-sdk";
+import {
+  getSessionMessages,
+  listSessions,
+  query,
+  getSessionInfo as sdkGetSessionInfo,
+} from "@anthropic-ai/claude-agent-sdk";
 import { createLogger } from "@band-app/logger";
 import type { ClaudeCodeConfig } from "../config.js";
 import type { AgentEvent } from "../events.js";
@@ -18,6 +23,7 @@ import type {
   AgentModel,
   CodingAgent,
   RunSessionOptions,
+  SessionInfo,
   SessionListItem,
   SessionMessageItem,
   SkillInfo,
@@ -314,6 +320,49 @@ export class ClaudeCodeAdapter implements CodingAgent {
       filtered.map((s) => readSessionLastPrompt(dir, s.sessionId)),
     );
     return filtered.map((s, i) => mapSessionInfo(s, lastPrompts[i]));
+  }
+
+  async getSessionInfo(sessionId: string, dir: string): Promise<SessionInfo | undefined> {
+    // SDK's getSessionInfo reads only the single session file — much
+    // cheaper than listSessions which walks the entire project dir.
+    const info = await sdkGetSessionInfo(sessionId, { dir });
+    if (!info) return undefined;
+    const lastPrompt = await readSessionLastPrompt(dir, sessionId);
+    const summary =
+      info.customTitle ?? lastPrompt ?? info.summary ?? info.firstPrompt ?? "Untitled session";
+    return {
+      sessionId: info.sessionId,
+      summary,
+      lastModified: info.lastModified,
+    };
+  }
+
+  async getLatestSession(dir: string): Promise<SessionInfo | undefined> {
+    // mtime-sorted readdir of the project directory + a single
+    // getSessionInfo on the newest file. Matches the fallback used by
+    // the chat pane when no activeSessionId is persisted yet.
+    const configDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
+    const projectDir = join(configDir, "projects", encodeProjectDir(dir));
+    let entries: string[];
+    try {
+      entries = readdirSync(projectDir);
+    } catch {
+      return undefined;
+    }
+    let newest: { sessionId: string; mtime: number } | undefined;
+    for (const name of entries) {
+      if (!name.endsWith(".jsonl")) continue;
+      try {
+        const mtime = statSync(join(projectDir, name)).mtimeMs;
+        if (!newest || mtime > newest.mtime) {
+          newest = { sessionId: name.slice(0, -".jsonl".length), mtime };
+        }
+      } catch {
+        // unreadable entry — skip
+      }
+    }
+    if (!newest) return undefined;
+    return this.getSessionInfo(newest.sessionId, dir);
   }
 
   async getSessionMessages(

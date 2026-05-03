@@ -20,6 +20,12 @@ export interface SessionListItem {
   gitBranch?: string;
 }
 
+export interface SessionInfo {
+  sessionId: string;
+  summary: string;
+  lastModified: number;
+}
+
 export interface SessionMessageItem {
   role: "user" | "assistant";
   id: string;
@@ -71,6 +77,21 @@ export interface CodingAgent {
   ): AsyncGenerator<AgentEvent>;
   abort?(): void;
   listSessions?(dir: string): Promise<SessionListItem[]>;
+  /**
+   * Read metadata for a single session by ID. Optimised path that avoids
+   * walking the entire project directory — used to populate persisted
+   * tab titles without a full `listSessions` call. Returns undefined if
+   * the session file isn't found or has no extractable summary.
+   */
+  getSessionInfo?(sessionId: string, dir: string): Promise<SessionInfo | undefined>;
+  /**
+   * Find the most-recently-modified session in a project directory.
+   * Used as a fallback when no activeSessionId is persisted yet (e.g.
+   * a freshly-mounted workspace). Implementations should do an
+   * mtime-sorted directory scan + a single `getSessionInfo` rather than
+   * loading every session's metadata.
+   */
+  getLatestSession?(dir: string): Promise<SessionInfo | undefined>;
   getSessionMessages?(
     sessionId: string,
     dir: string,

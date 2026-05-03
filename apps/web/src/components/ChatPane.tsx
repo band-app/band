@@ -9,8 +9,6 @@ import { consumeChatFresh } from "./DockviewChatContainer";
 // shared placeholderData policy.
 const settingsKey = () => ["settings.get"] as const;
 const chatKey = (chatId: string) => ["chats.get", chatId] as const;
-const sessionsKey = (workspaceId: string, chatId: string) =>
-  ["sessions.list", workspaceId, chatId] as const;
 
 export interface CodingAgentDef {
   id: string;
@@ -46,10 +44,12 @@ export interface ChatPaneState {
  * Hook that loads agent config and session state for a chat pane.
  * Used by both the pane titlebar (for controls) and ChatView (for rendering).
  *
- * Caching strategy: chats.get and sessions.list go through React Query with
- * `placeholderData: keepPreviousData` so revisiting a workspace renders from
- * cache instantly while the latest values revalidate in the background. The
- * cache key includes workspaceId + chatId so concurrent panes are isolated.
+ * Caching strategy: `chats.get` is the only query on the first-paint hot
+ * path. The server persists `activeSessionId` AND the cached
+ * `activeSessionSummary` on the chat row, so a workspace switch is a pure
+ * SQLite read with zero filesystem access. `sessions.list` is no longer
+ * eagerly called here — it fires only when the user opens the history
+ * dropdown (see `SessionHistoryMenu` in ChatView).
  */
 export function useChatPaneState(workspaceId: string, chatId: string): ChatPaneState {
   // Check once at mount whether this is a freshly-split pane.
@@ -60,7 +60,6 @@ export function useChatPaneState(workspaceId: string, chatId: string): ChatPaneS
   const sessionInitRef = useRef(isFreshRef.current);
   const agentInitRef = useRef(false);
 
-  const [supportsSessionListing, setSupportsSessionListing] = useState(false);
   const [initialSessionId, setInitialSessionId] = useState<string | undefined>(undefined);
   // Fresh panes can render immediately — no session to restore.
   const [sessionQueryDone, setSessionQueryDone] = useState(isFreshRef.current);
@@ -72,8 +71,6 @@ export function useChatPaneState(workspaceId: string, chatId: string): ChatPaneS
   const [activeSessionSummary, setActiveSessionSummary] = useState<string | undefined>(undefined);
   const [paneKey, setPaneKey] = useState(0);
   const newSessionRef = useRef<(() => void) | null>(null);
-  // Keep a ref to the sessions list for looking up summaries on session switch
-  const sessionsRef = useRef<Array<{ sessionId: string; summary: string }>>([]);
 
   // Settings: shared across all panes. Long staleTime — settings rarely change.
   const settingsQuery = useQuery<Record<string, unknown> | null>({
@@ -90,7 +87,8 @@ export function useChatPaneState(workspaceId: string, chatId: string): ChatPaneS
 
   // Chat record: keyed per chatId. Refetched in the background when stale,
   // but the placeholder keeps the previous data on screen so re-mounts feel
-  // instant.
+  // instant. The server resolves any missing summary lazily on this call,
+  // and kicks off a background refresh so subsequent reads stay fresh.
   type ChatGetResult = Awaited<ReturnType<typeof trpc.chats.get.query>>;
   const chatQuery = useQuery<ChatGetResult>({
     queryKey: chatKey(chatId),
@@ -105,22 +103,19 @@ export function useChatPaneState(workspaceId: string, chatId: string): ChatPaneS
     staleTime: 30_000,
   });
 
-  // Sessions list: keyed per (workspaceId, chatId). The big win of caching:
-  // returning to a recently-visited workspace gets the (potentially stale)
-  // list immediately from cache while a fresh fetch runs in background.
-  type SessionsListResult = Awaited<ReturnType<typeof trpc.sessions.list.query>>;
-  const sessionsQuery = useQuery<SessionsListResult>({
-    queryKey: sessionsKey(workspaceId, chatId),
-    queryFn: async () => {
-      try {
-        return await trpc.sessions.list.query({ workspaceId, chatId });
-      } catch {
-        return { sessions: [], supported: false } as SessionsListResult;
-      }
-    },
-    placeholderData: keepPreviousData,
-    staleTime: 30_000,
-  });
+  // Whether the configured agent supports session listing — derived from
+  // the agent definition, no filesystem access required.
+  const supportsSessionListing = (() => {
+    const settings = settingsQuery.data as Record<string, unknown> | null | undefined;
+    const chat = chatQuery.data?.chat;
+    if (!settings || !chat) return false;
+    const raw = settings.codingAgents;
+    const codingAgents = Array.isArray(raw) ? (raw as Array<{ id: string; type: string }>) : [];
+    const found = codingAgents.find((a) => a.id === chat.agent);
+    // Only claude-code currently supports session listing — keep this in
+    // sync with CodingAgentFeatures.sessionListing on the adapters.
+    return found?.type === "claude-code";
+  })();
 
   // --- Agent config: derived from settings + chat record ---
   // Runs on first arrival and on chatId change. Subsequent background
@@ -149,37 +144,13 @@ export function useChatPaneState(workspaceId: string, chatId: string): ChatPaneS
     agentInitRef.current = true;
   }, [settingsQuery.data, chatQuery.data]);
 
-  // --- Session list ref + supportsSessionListing ---
-  // Always reflects the latest sessions data (even on background refetch)
-  // so onActiveSessionChange's summary lookups stay current.
-  useEffect(() => {
-    const data = sessionsQuery.data;
-    if (!data) return;
-    if (data.supported) setSupportsSessionListing(true);
-    sessionsRef.current = data.sessions as Array<{
-      sessionId: string;
-      summary: string;
-      lastModified: number;
-    }>;
-  }, [sessionsQuery.data]);
-
   // --- Session state initialisation ---
   //
-  // Two-phase resolution so chat rendering doesn't wait on the slow
-  // sessions.list call:
-  //
-  //   Phase A (fast): chats.get resolves. If a persisted activeSessionId
-  //     exists, surface it and flip sessionQueryDone immediately so
-  //     ChatView can start loading messages.
-  //
-  //   Phase B (slow): sessions.list resolves. Used to populate the
-  //     session sidebar/dropdown, the active-session summary for the
-  //     tab title, and to fall back to the most recently modified
-  //     session when no activeSessionId was persisted.
-  //
-  // For panes with no persisted active session we still wait for both
-  // (otherwise ChatView would resumeStream() against `undefined` and we
-  // would never auto-load the latest session).
+  // Single-phase: `chats.get` returns both the persisted activeSessionId
+  // and the cached summary. The server-side fallback (no activeSessionId)
+  // resolves the latest session via mtime-sorted readdir + a single
+  // getSessionInfo and persists the result, so the row we see here is
+  // always self-contained.
   useEffect(() => {
     if (sessionInitRef.current) return;
     const chatResult = chatQuery.data;
@@ -187,75 +158,50 @@ export function useChatPaneState(workspaceId: string, chatId: string): ChatPaneS
     const persisted = chatResult.chat?.activeSessionId;
     if (typeof persisted === "string" && persisted) {
       setInitialSessionId(persisted);
-      setSessionQueryDone(true);
-      sessionInitRef.current = true;
-    }
-  }, [chatQuery.data]);
-
-  useEffect(() => {
-    if (sessionInitRef.current) return;
-    const chatResult = chatQuery.data;
-    const sessionsResult = sessionsQuery.data;
-    if (!chatResult || !sessionsResult) return;
-
-    const sessions = sessionsResult.sessions as Array<{
-      sessionId: string;
-      summary: string;
-      lastModified: number;
-    }>;
-    if (sessionsResult.supported && sessions.length > 0) {
-      const latest = [...sessions].sort((a, b) => b.lastModified - a.lastModified)[0];
-      if (latest) {
-        setInitialSessionId(latest.sessionId);
-        if (latest.summary) setActiveSessionSummary(latest.summary);
-      }
+      const summary = chatResult.chat?.activeSessionSummary;
+      if (typeof summary === "string" && summary) setActiveSessionSummary(summary);
     }
     setSessionQueryDone(true);
     sessionInitRef.current = true;
-  }, [chatQuery.data, sessionsQuery.data]);
+  }, [chatQuery.data]);
 
-  // Whenever both queries are resolved, populate the active-session summary
-  // for the tab title. Re-runs on background refetches so the title stays
-  // in sync with the persisted activeSessionId.
+  // Keep the tab title in sync with background refetches — the server
+  // refreshes the cached summary after each chats.get and the next read
+  // (≤30 s later) reflects any drift (e.g. /rename).
   useEffect(() => {
     const chatResult = chatQuery.data;
-    const sessionsResult = sessionsQuery.data;
-    if (!chatResult || !sessionsResult) return;
+    if (!chatResult) return;
     const persisted = chatResult.chat?.activeSessionId;
     if (typeof persisted !== "string" || !persisted) return;
-    const sessions = sessionsResult.sessions as Array<{
-      sessionId: string;
-      summary: string;
-    }>;
-    const match = sessions.find((s) => s.sessionId === persisted);
-    if (match?.summary) setActiveSessionSummary(match.summary);
-  }, [chatQuery.data, sessionsQuery.data]);
+    const summary = chatResult.chat?.activeSessionSummary;
+    if (typeof summary === "string" && summary) setActiveSessionSummary(summary);
+  }, [chatQuery.data]);
+
+  const queryClient = useQueryClient();
 
   const toggleSessionList = useCallback(() => {
     setShowSessionList((prev) => !prev);
   }, []);
 
-  // Persist active session to the server and update the summary for the tab title.
+  // Persist active session to the server. The server resolves the new
+  // session's summary inline, so the next chats.get carries the updated
+  // tab title. We also clear the local summary immediately so the title
+  // doesn't show the previous session's prompt while the mutation is in
+  // flight — the next chatQuery refetch will repopulate it.
   const onActiveSessionChange = useCallback(
     (sessionId: string | undefined) => {
       trpc.chats.setActiveSession
         .mutate({ workspaceId, chatId, sessionId: sessionId ?? undefined })
+        .then(() => {
+          queryClient.invalidateQueries({ queryKey: chatKey(chatId) });
+        })
         .catch((err) => {
           console.error("[ChatPane] error persisting active session:", err);
         });
-
-      // Update session summary from cached sessions list
-      if (sessionId) {
-        const match = sessionsRef.current.find((s) => s.sessionId === sessionId);
-        setActiveSessionSummary(match?.summary || undefined);
-      } else {
-        setActiveSessionSummary(undefined);
-      }
+      setActiveSessionSummary(undefined);
     },
-    [workspaceId, chatId],
+    [workspaceId, chatId, queryClient],
   );
-
-  const queryClient = useQueryClient();
 
   // Switch to a different coding agent — calls server, updates local state, increments paneKey.
   const onSwitchAgent = useCallback(
