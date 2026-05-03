@@ -25,7 +25,8 @@ function trpcDevPlugin(): Plugin {
       });
 
       // Run the same first-time/idempotent setup as start-server.ts:
-      // populate defaults.apps, notifications, and Claude Code hooks.
+      // install the CLI/extension on first run, detect coding agents,
+      // initialise notification defaults, and install Claude Code hooks.
       server.ssrLoadModule("./src/lib/setup").then(({ runFirstTimeSetup }) => {
         runFirstTimeSetup().catch((err: Error) => {
           log.warn("First-time setup failed: %s", err.message);

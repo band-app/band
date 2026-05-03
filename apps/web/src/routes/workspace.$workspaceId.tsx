@@ -2,7 +2,6 @@ import {
   type DiffStats,
   QuickOpenDialog,
   useDashboardStore,
-  useSettingsQuery,
   type WorkspaceTab,
   WorkspaceTabNav,
 } from "@band-app/dashboard-core";
@@ -123,10 +122,8 @@ function useDiffFileCount(workspaceId: string): number {
 function WorkspaceLayout() {
   const { workspaceId } = Route.useParams();
   const decoded = decodeURIComponent(workspaceId);
-  const { settings } = useSettingsQuery();
-  const appMode = settings.appMode ?? "side-panel";
   const isWideScreen = useIsDesktop();
-  const isDesktop = (isWideScreen && !isTauri) || (isTauri && appMode === "full-editor");
+  const isDesktop = isWideScreen || isTauri;
   const [hydrated, setHydrated] = useState(false);
   const [diffStats, setDiffStats] = useState<DiffStats | null>(null);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
@@ -214,7 +211,6 @@ function MobileWorkspaceLayout({
   const diffFileCount = useDiffFileCount(workspaceId);
   const navigate = useNavigate();
   const { height: appHeight, offsetTop: appOffsetTop } = useAppHeight();
-  const isTasksWindow = useRef<boolean | null>(null);
   const [showSessionList, setShowSessionList] = useState(false);
 
   // Agent switcher state
@@ -223,16 +219,6 @@ function MobileWorkspaceLayout({
   const [, setTaskRunning] = useState(false);
   const [chatKey, setChatKey] = useState(0);
   const newSessionRef = useRef<(() => void) | null>(null);
-
-  useEffect(() => {
-    if (!isTauri) {
-      isTasksWindow.current = false;
-      return;
-    }
-    import("@tauri-apps/api/webviewWindow").then(({ getCurrentWebviewWindow }) => {
-      isTasksWindow.current = getCurrentWebviewWindow().label === "tasks";
-    });
-  }, []);
 
   // Load available agents from settings and current workspace agent
   // biome-ignore lint/correctness/useExhaustiveDependencies: chatKey intentionally triggers reload after agent switch; currentAgentId excluded to avoid infinite loop
@@ -319,7 +305,7 @@ function MobileWorkspaceLayout({
   );
 
   const handleBack = useCallback(() => {
-    navigate({ to: isTasksWindow.current ? "/tasks" : "/" });
+    navigate({ to: "/" });
   }, [navigate]);
 
   const handleSetShowSessionList = useCallback((show: boolean) => {

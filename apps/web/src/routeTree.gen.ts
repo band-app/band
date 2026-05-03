@@ -9,9 +9,6 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as TasksRouteImport } from './routes/tasks'
-import { Route as SettingsRouteImport } from './routes/settings'
-import { Route as CronjobsRouteImport } from './routes/cronjobs'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as WorkspaceWorkspaceIdRouteImport } from './routes/workspace.$workspaceId'
 import { Route as WorkspaceWorkspaceIdIndexRouteImport } from './routes/workspace.$workspaceId.index'
@@ -21,21 +18,6 @@ import { Route as WorkspaceWorkspaceIdChangesRouteImport } from './routes/worksp
 import { Route as WorkspaceWorkspaceIdCodeIndexRouteImport } from './routes/workspace.$workspaceId.code.index'
 import { Route as WorkspaceWorkspaceIdCodeSplatRouteImport } from './routes/workspace.$workspaceId.code.$'
 
-const TasksRoute = TasksRouteImport.update({
-  id: '/tasks',
-  path: '/tasks',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const SettingsRoute = SettingsRouteImport.update({
-  id: '/settings',
-  path: '/settings',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CronjobsRoute = CronjobsRouteImport.update({
-  id: '/cronjobs',
-  path: '/cronjobs',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -85,9 +67,6 @@ const WorkspaceWorkspaceIdCodeSplatRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/cronjobs': typeof CronjobsRoute
-  '/settings': typeof SettingsRoute
-  '/tasks': typeof TasksRoute
   '/workspace/$workspaceId': typeof WorkspaceWorkspaceIdRouteWithChildren
   '/workspace/$workspaceId/changes': typeof WorkspaceWorkspaceIdChangesRoute
   '/workspace/$workspaceId/code': typeof WorkspaceWorkspaceIdCodeRouteWithChildren
@@ -98,9 +77,6 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/cronjobs': typeof CronjobsRoute
-  '/settings': typeof SettingsRoute
-  '/tasks': typeof TasksRoute
   '/workspace/$workspaceId/changes': typeof WorkspaceWorkspaceIdChangesRoute
   '/workspace/$workspaceId/terminal': typeof WorkspaceWorkspaceIdTerminalRoute
   '/workspace/$workspaceId': typeof WorkspaceWorkspaceIdIndexRoute
@@ -110,9 +86,6 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/cronjobs': typeof CronjobsRoute
-  '/settings': typeof SettingsRoute
-  '/tasks': typeof TasksRoute
   '/workspace/$workspaceId': typeof WorkspaceWorkspaceIdRouteWithChildren
   '/workspace/$workspaceId/changes': typeof WorkspaceWorkspaceIdChangesRoute
   '/workspace/$workspaceId/code': typeof WorkspaceWorkspaceIdCodeRouteWithChildren
@@ -125,9 +98,6 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/cronjobs'
-    | '/settings'
-    | '/tasks'
     | '/workspace/$workspaceId'
     | '/workspace/$workspaceId/changes'
     | '/workspace/$workspaceId/code'
@@ -138,9 +108,6 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/cronjobs'
-    | '/settings'
-    | '/tasks'
     | '/workspace/$workspaceId/changes'
     | '/workspace/$workspaceId/terminal'
     | '/workspace/$workspaceId'
@@ -149,9 +116,6 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
-    | '/cronjobs'
-    | '/settings'
-    | '/tasks'
     | '/workspace/$workspaceId'
     | '/workspace/$workspaceId/changes'
     | '/workspace/$workspaceId/code'
@@ -163,35 +127,11 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  CronjobsRoute: typeof CronjobsRoute
-  SettingsRoute: typeof SettingsRoute
-  TasksRoute: typeof TasksRoute
   WorkspaceWorkspaceIdRoute: typeof WorkspaceWorkspaceIdRouteWithChildren
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/tasks': {
-      id: '/tasks'
-      path: '/tasks'
-      fullPath: '/tasks'
-      preLoaderRoute: typeof TasksRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/settings': {
-      id: '/settings'
-      path: '/settings'
-      fullPath: '/settings'
-      preLoaderRoute: typeof SettingsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/cronjobs': {
-      id: '/cronjobs'
-      path: '/cronjobs'
-      fullPath: '/cronjobs'
-      preLoaderRoute: typeof CronjobsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/': {
       id: '/'
       path: '/'
@@ -286,9 +226,6 @@ const WorkspaceWorkspaceIdRouteWithChildren =
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  CronjobsRoute: CronjobsRoute,
-  SettingsRoute: SettingsRoute,
-  TasksRoute: TasksRoute,
   WorkspaceWorkspaceIdRoute: WorkspaceWorkspaceIdRouteWithChildren,
 }
 export const routeTree = rootRouteImport

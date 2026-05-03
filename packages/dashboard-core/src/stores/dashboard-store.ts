@@ -14,7 +14,6 @@ export interface DashboardState {
   error: string | null;
   branchStatuses: Map<string, WorkspaceBranchStatus>;
   setupStatuses: Map<string, SetupStatus>;
-  _openingWorkspace: boolean;
 
   openWorkspace: (workspaceId: string) => void;
   clearNeedsAttention: (workspaceId: string) => void;
@@ -43,34 +42,10 @@ export function createDashboardStore(adapter: DashboardAdapter): DashboardStore 
     setupStatuses: new Map(),
     activeWorkspaceId: null,
     error: null,
-    _openingWorkspace: false,
 
     openWorkspace: (workspaceId: string) => {
-      // Block duplicate clicks on the same workspace while it's opening,
-      // but allow switching to a different workspace.
-      if (get()._openingWorkspace && get().activeWorkspaceId === workspaceId) return;
-      set({ activeWorkspaceId: workspaceId, _openingWorkspace: true });
-
+      set({ activeWorkspaceId: workspaceId });
       get().clearNeedsAttention(workspaceId);
-
-      adapter
-        .openWorkspace(workspaceId)
-        .catch((e) => {
-          set({ error: String(e) });
-        })
-        .finally(() => {
-          // Delay clearing the flag so focus-polling events that arrive
-          // before the new windows are fully raised get ignored.  The
-          // Rust side also suppresses detection, but this provides
-          // defense in depth on the JS side.
-          setTimeout(() => {
-            // Only clear if this workspace is still the one being opened
-            // (a newer openWorkspace call may have overridden it).
-            if (get().activeWorkspaceId === workspaceId) {
-              set({ _openingWorkspace: false });
-            }
-          }, 2000);
-        });
     },
 
     clearNeedsAttention: (workspaceId: string) => {
@@ -103,16 +78,10 @@ export function createDashboardStore(adapter: DashboardAdapter): DashboardStore 
     },
 
     setActiveWorkspace: (workspaceId: string | null) => {
-      // While a user-initiated openWorkspace() is in progress, ignore external
-      // active-workspace events (e.g. from Tauri focus polling). The polling
-      // can briefly report the *old* workspace as frontmost before the new IDE
-      // window actually appears, which would revert the user's selection.
-      if (get()._openingWorkspace) return;
       if (get().activeWorkspaceId === workspaceId) return;
       set({ activeWorkspaceId: workspaceId });
-
-      // When Tauri focus-tracking selects a workspace with needs_attention,
-      // clear it — the user is now looking at this workspace.
+      // When the user navigates to a workspace, clear any pending
+      // needs-attention indicator — they're now looking at it.
       if (workspaceId) {
         get().clearNeedsAttention(workspaceId);
       }

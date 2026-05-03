@@ -1,6 +1,6 @@
 # Band
 
-IDE-agnostic agent orchestrator — dashboard + VS Code extension.
+IDE-agnostic agent orchestrator.
 
 ## Testing Strategy
 
@@ -30,7 +30,7 @@ All issues are created in the `band-app/band` GitHub repo.
 
 ## Architecture: Web Server vs Tauri App
 
-The web server (`apps/web`) handles **data, state, and background processes** only. It must never do window management — no spawning `code`, no AppleScript, no opening/focusing/positioning IDE windows. Window management (VS Code focus, window positioning, folder pickers, Finder reveal) is the Tauri desktop app's responsibility (`apps/dashboard`).
+The web server (`apps/web`) handles **data, state, and background processes** only. It must never invoke macOS-only shell helpers (folder pickers, Finder reveal, opening apps, installing the CLI symlink with administrator privileges). Those bridges live in the Tauri desktop app (`apps/dashboard/src-tauri/src/commands/macos_shell.rs`) and are invoked from the React webview via `@tauri-apps/api`.
 
 ## Band CLI Skill
 

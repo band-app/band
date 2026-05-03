@@ -16,10 +16,8 @@ export const Route = createFileRoute("/workspace/$workspaceId/")({
 function WorkspaceIndex() {
   const { workspaceId } = Route.useParams();
   const decoded = decodeURIComponent(workspaceId);
-  const { settings } = useSettingsQuery();
-  const appMode = settings.appMode ?? "side-panel";
   const isWideScreen = useIsDesktop();
-  const isDesktop = (isWideScreen && !isTauri) || (isTauri && appMode === "full-editor");
+  const isDesktop = isWideScreen || isTauri;
 
   // Desktop: chat is always visible in the left panel — redirect to changes tab
   if (isDesktop) {

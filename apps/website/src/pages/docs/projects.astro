@@ -70,21 +70,9 @@ band projects add /path/to/your/repo --label my-label</code></pre>
   <h2>Project Configuration</h2>
   <p>
     Each project can have a <code>.band/config.json</code> file in its repository root. This
-    file configures per-project behavior such as which applications to open when focusing
-    a workspace, and setup/teardown scripts.
+    file configures setup and teardown scripts that run during workspace lifecycle events.
   </p>
   <pre><code set:html={`{
-  "apps": [
-    {
-      "type": "vscode",
-      "terminals": [
-        { "name": "claude", "command": "band tasks watch && claude --continue" },
-        { "name": "shell", "command": "", "split": "vertical" }
-      ]
-    },
-    { "type": "iterm" },
-    { "type": "chrome", "url": "http://localhost:3000" }
-  ],
   "setup": "npm install",
   "teardown": "docker compose down"
 }`}></code></pre>

@@ -1,15 +1,10 @@
 #[cfg(target_os = "macos")]
-pub mod apps;
-#[cfg(target_os = "macos")]
-pub mod ax_windows;
-#[cfg(target_os = "macos")]
-pub mod ide;
+pub mod macos_shell;
 #[cfg(not(target_os = "macos"))]
-pub mod ide_stub;
-#[cfg(target_os = "macos")]
-pub mod window_manager;
+pub mod macos_shell_stub;
 #[cfg(not(target_os = "macos"))]
-pub use ide_stub as ide;
+pub use macos_shell_stub as macos_shell;
+
 pub mod browser;
 pub mod updater;
 pub mod webserver;

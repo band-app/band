@@ -12,7 +12,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <h2>System Overview</h2>
 
   <ul>
-    <li><strong>Desktop App (Tauri)</strong> — Window management, app launching, and native OS integration.</li>
+    <li><strong>Desktop App (Tauri)</strong> — Hosts the dashboard webview, auto-starts the web server, and provides macOS-only shell helpers (folder picker, reveal in Finder, install the CLI with admin privileges).</li>
     <li><strong>Web Server (Node.js)</strong> — Data management, state, API, and background processes.</li>
     <li><strong>CLI (Rust)</strong> — Command-line interface for scripting and automation.</li>
   </ul>
@@ -21,16 +21,16 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
 
   <p>
     The web server handles <strong>data, state, and background processes</strong> exclusively. It
-    never performs window management — no spawning editors, no AppleScript, no opening or focusing
-    IDE windows.
+    never invokes macOS-only shell helpers — folder pickers, Finder reveal, opening apps, or
+    installing the CLI symlink with administrator privileges all live in the desktop app.
   </p>
 
   <p>
-    Window management is the <strong>desktop app's</strong> responsibility. When a workspace is
-    focused, the desktop app reads the configuration and handles launching editors, positioning
-    windows, opening terminal tabs, and managing IDE focus. This separation ensures the web server
-    can run headlessly (e.g., on a remote machine) while the desktop app manages the local
-    desktop environment.
+    Those bridges are exposed by the <strong>Tauri desktop app</strong>
+    (<code>apps/dashboard/src-tauri/src/commands/macos_shell.rs</code>) and called from the React
+    webview via <code>@tauri-apps/api</code>. The split keeps the web server runnable headlessly
+    (e.g., on a remote machine for tunnel-based access) while the desktop app handles the
+    local-only OS bits.
   </p>
 
   <h2>Git Worktree-Based Workspace Isolation</h2>

@@ -43,7 +43,6 @@ export interface WorkspaceStatus {
   project: string;
   branch: string;
   worktreePath: string;
-  ide: string;
   agent?: AgentInfo;
 }
 
@@ -68,7 +67,6 @@ export interface CodingAgentDefinition {
 
 export interface Settings {
   worktreesDir?: string;
-  defaults?: unknown;
   codingAgents?: CodingAgentDefinition[];
   defaultCodingAgent?: string;
   webServerPort?: number;
@@ -76,7 +74,7 @@ export interface Settings {
   labels?: LabelDefinition[];
   tokenSecret?: string;
   autoStartTunnel?: boolean;
-  /** Extra fields not explicitly modeled (e.g. Tauri app definitions). Preserved across read/write. */
+  /** Extra fields not explicitly modeled. Preserved across read/write. */
   [key: string]: unknown;
 }
 
@@ -219,7 +217,6 @@ export function loadCurrentStatuses(): WorkspaceStatus[] {
     project: row.project,
     branch: row.branch,
     worktreePath: row.worktreePath,
-    ide: row.ide,
     agent: row.agentName
       ? {
           name: row.agentName,
@@ -245,7 +242,6 @@ export function getWorkspaceStatus(workspaceId: string): WorkspaceStatus | null 
     project: row.project,
     branch: row.branch,
     worktreePath: row.worktreePath,
-    ide: row.ide,
     agent: row.agentName
       ? {
           name: row.agentName,
@@ -294,7 +290,6 @@ export function upsertWorkspaceStatus(
         project: ws?.project ?? "",
         branch: ws?.branch ?? "",
         worktreePath: ws?.worktreePath ?? "",
-        ide: "vscode",
         ...mergedAgent,
         updatedAt: now,
       })

@@ -7,15 +7,15 @@
     "frontendDist": "http://localhost:3456",
     "devUrl": "http://localhost:3456",
     "beforeDevCommand": "pnpm -w dev:web",
-    "beforeBuildCommand": "pnpm -w build:web && pnpm build && pnpm -w build:cli && pnpm -w build:extension"
+    "beforeBuildCommand": "pnpm -w build:web && pnpm build && pnpm -w build:cli"
   },
   "app": {
     "windows": [
       {
         "title": "Band",
-        "width": 400,
-        "minWidth": 240,
-        "height": 900,
+        "width": 1200,
+        "minWidth": 800,
+        "height": 800,
         "x": 0,
         "y": 0,
         "resizable": true,
@@ -44,9 +44,7 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "../../web/dist/": "web/dist/",
-      "../../../extensions/vscode/dist/extension.js": "extensions/band/dist/extension.js",
-      "../../../extensions/vscode/package.json": "extensions/band/package.json"
+      "../../web/dist/": "web/dist/"
     }
   },
   "plugins": {}

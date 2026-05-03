@@ -23,7 +23,6 @@ import { useHooksSetup } from "../hooks/use-hooks-setup";
 import { useProjects } from "../hooks/use-projects";
 import { useSettingsQuery } from "../hooks/use-settings-query";
 import {
-  useActiveWorkspaceWatcher,
   useBranchStatusWatcher,
   useSetupStatusWatcher,
   useStatusWatcher,
@@ -86,17 +85,21 @@ export function DashboardShell({ toolbarExtra, hideTitleBar }: DashboardShellPro
   }, []);
 
   useStatusWatcher();
-  useActiveWorkspaceWatcher();
   useBranchStatusWatcher();
   useSetupStatusWatcher();
 
-  const handleSettingsClick = useCallback(async () => {
-    if (isTauri) {
-      const { invoke } = await import("@tauri-apps/api/core");
-      await invoke("open_settings_window");
-    } else {
-      setShowSettingsDialog(true);
-    }
+  const handleSettingsClick = useCallback(() => setShowSettingsDialog(true), []);
+
+  // Tauri's native menu (Cmd+,) calls `window.__bandOpenSettings()` via
+  // webview.eval — same pattern as the zoom menu. Register the global so
+  // the menu can pop the in-app dialog instead of spawning a separate window.
+  useEffect(() => {
+    if (!isTauri) return;
+    const globalKey = "__bandOpenSettings";
+    (window as unknown as Record<string, unknown>)[globalKey] = () => setShowSettingsDialog(true);
+    return () => {
+      delete (window as unknown as Record<string, unknown>)[globalKey];
+    };
   }, []);
 
   return (

@@ -5,7 +5,6 @@ export const workspaceStatuses = sqliteTable("workspace_statuses", {
   project: text("project").notNull(),
   branch: text("branch").notNull(),
   worktreePath: text("worktree_path").notNull(),
-  ide: text("ide").notNull(),
   agentName: text("agent_name"),
   agentStatus: text("agent_status"),
   agentLastActivity: text("agent_last_activity"),

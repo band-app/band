@@ -140,13 +140,3 @@ fi
 # Copy Drizzle migrations
 rm -rf dist/migrations
 cp -R src/lib/db/migrations dist/migrations
-
-# Copy the VS Code extension .vsix so the bundled web server can install
-# it via `code --install-extension` at first run. We piggyback on the
-# apps/web/dist directory (already bundled into Band.app via tauri.conf
-# resources) instead of adding a new resource entry — that would break
-# CI clippy/test where the .vsix doesn't exist as a placeholder.
-VSIX_SRC="../../extensions/vscode/band-vscode-0.1.0.vsix"
-if [ -f "$VSIX_SRC" ]; then
-  cp "$VSIX_SRC" dist/band-vscode-0.1.0.vsix
-fi

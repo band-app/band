@@ -71,39 +71,6 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
     </li>
   </ul>
 
-  <h2>Workspace Settings (Defaults)</h2>
-  <p>
-    Define the default apps configuration that applies to workspaces when no project-level
-    <code>.band/config.json</code> exists. This is entered as a JSON object.
-  </p>
-  <p>
-    Click <strong>Insert template</strong> to populate the field with a standard VS Code
-    configuration:
-  </p>
-  <pre><code set:html={`{
-  "apps": [
-    {
-      "type": "vscode",
-      "terminals": [
-        {
-          "name": "claude",
-          "command": "band tasks watch && claude --continue"
-        },
-        {
-          "name": "shell",
-          "command": "",
-          "split": "vertical"
-        }
-      ]
-    }
-  ]
-}`}></code></pre>
-  <p>
-    This default opens VS Code with two terminal splits: one running the coding agent and
-    another as a general shell. See <a href="/docs/window-management">Window Management</a>
-    for the full configuration reference.
-  </p>
-
   <h2>Notifications</h2>
   <p>
     Configure audio notifications for agent events:

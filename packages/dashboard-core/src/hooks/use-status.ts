@@ -49,25 +49,11 @@ export function useStatusWatcher() {
       (workspaceId) => {
         previousStatuses.current.delete(workspaceId);
         removeStatus(workspaceId);
-        adapter.closeWorkspaceWindows(workspaceId);
       },
     );
 
     return unsubscribe;
   }, [adapter, replaceAllStatuses, updateStatus, removeStatus]);
-}
-
-export function useActiveWorkspaceWatcher() {
-  const adapter = useAdapter();
-  const setActiveWorkspace = useDashboardStore((s) => s.setActiveWorkspace);
-
-  useEffect(() => {
-    const unsubscribe = adapter.subscribeActiveWorkspace((workspaceId) => {
-      setActiveWorkspace(workspaceId);
-    });
-
-    return unsubscribe;
-  }, [adapter, setActiveWorkspace]);
 }
 
 export function useBranchStatusWatcher() {

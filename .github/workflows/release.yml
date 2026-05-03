@@ -124,8 +124,6 @@ jobs:
         run: |
           mkdir -p apps/web/dist
           touch apps/web/dist/start-server.mjs
-          mkdir -p extensions/vscode/dist
-          touch extensions/vscode/dist/extension.js
           cargo clippy --manifest-path apps/dashboard/src-tauri/Cargo.toml -- -D warnings
 
       - name: Test
@@ -134,13 +132,8 @@ jobs:
           cargo test --manifest-path apps/cli/Cargo.toml
           mkdir -p apps/web/dist
           touch apps/web/dist/start-server.mjs
-          mkdir -p extensions/vscode/dist
-          touch extensions/vscode/dist/extension.js
           cargo test --manifest-path apps/dashboard/src-tauri/Cargo.toml
           rm -rf apps/web/dist
-
-      - name: Build VS Code extension (produces .vsix bundled into Band.app)
-        run: pnpm build:extension
 
       - name: Build frontend
         run: |

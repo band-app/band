@@ -11,7 +11,6 @@ const JSON_FILES = [
   "package.json",
   "apps/web/package.json",
   "apps/dashboard/package.json",
-  "extensions/vscode/package.json",
   "packages/ui/package.json",
   "packages/dashboard-core/package.json",
   "packages/coding-agent/package.json",
