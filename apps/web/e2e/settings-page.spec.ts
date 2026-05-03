@@ -132,15 +132,11 @@ test("coding agents section renders and toggling an agent doesn't crash", async 
   await expect(claudeRow).toBeVisible();
 
   // Enable Claude Code so listModels() is called and the model Select
-  // potentially mounts. Even without models the toggle path must not throw.
+  // potentially mounts. The toggle alone is enough to exercise the
+  // listModels effect — saving would close the dialog.
   const claudeSwitch = dialog.getByRole("switch", { name: "Enable Claude Code" });
   await expect(claudeSwitch).toBeVisible();
   await claudeSwitch.click({ force: true });
-
-  // Save so the settings persist and React Query reflects the new agent.
-  // listModels() is called when codingAgents changes; the Save round-trip
-  // exercises that effect end-to-end.
-  await dialog.getByRole("button", { name: "Save" }).click();
 
   // Allow listModels() + any subsequent renders to settle.
   await page.waitForTimeout(500);
