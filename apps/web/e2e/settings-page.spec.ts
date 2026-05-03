@@ -118,6 +118,42 @@ test("toggling LSP and saving persists to settings.json", async ({ page }) => {
   }).toPass({ timeout: 5_000 });
 });
 
+test("coding agents section renders and toggling an agent doesn't crash", async ({ page }) => {
+  // Regression test for the Radix Select empty-string crash that happened
+  // when the Coding Agents section mounted a model dropdown with a "Default"
+  // option whose value was the empty string. Radix Select reserves "" for
+  // its no-selection state and throws when an item uses it. Toggling the
+  // agent on triggers a listModels() call which, if it returns any models,
+  // mounts the dropdown and exercises the sentinel-value fix.
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+
+  await page.goto(`${server.url}/?token=${TOKEN}`);
+  const dialog = await openSettingsDialog(page);
+
+  await dialog.getByRole("button", { name: /Coding Agents/ }).click();
+  await expect(dialog.getByText("Claude Code", { exact: true })).toBeVisible();
+
+  // Enable Claude Code so listModels() is called and the model Select
+  // potentially mounts. Even without models the toggle path must not throw.
+  const claudeSwitch = dialog.getByRole("switch", { name: "Enable Claude Code" });
+  await expect(claudeSwitch).toBeVisible();
+  await claudeSwitch.click({ force: true });
+
+  // Save so the settings persist and React Query reflects the new agent.
+  // listModels() is called when codingAgents changes; the Save round-trip
+  // exercises that effect end-to-end.
+  await dialog.getByRole("button", { name: "Save" }).click();
+
+  // Allow listModels() + any subsequent renders to settle.
+  await page.waitForTimeout(500);
+
+  // The dialog must still be visible — if Radix had thrown, the React tree
+  // would have unmounted into an error boundary.
+  await expect(dialog.getByText("Claude Code", { exact: true })).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
 test("changing theme via segmented control persists the new theme", async ({ page }) => {
   await page.goto(`${server.url}/?token=${TOKEN}`);
   const dialog = await openSettingsDialog(page);
