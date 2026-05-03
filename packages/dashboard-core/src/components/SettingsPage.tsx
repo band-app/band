@@ -193,7 +193,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
             <SettingsSection title="Appearance">
               <SettingsRow
                 label="Theme"
-                description="Choose between system default, light, and dark mode. System follows your OS preference. You can also cycle through themes using the toolbar button."
+                description="Choose between system default, light, and dark mode."
               >
                 <Select
                   value={selectedTheme}
