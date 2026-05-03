@@ -72,6 +72,9 @@ export function SettingsPage({ open, onOpenChange }: Props) {
   const [labels, setLabels] = useState<LabelDefinition[]>(settings.labels ?? []);
   const [autoStartTunnel, setAutoStartTunnel] = useState(settings.autoStartTunnel ?? false);
   const [enableLSP, setEnableLSP] = useState(settings.enableLSP ?? false);
+  const [maxCachedWorkspaces, setMaxCachedWorkspaces] = useState(
+    settings.maxCachedWorkspaces?.toString() ?? "",
+  );
   const [selectedTheme, setSelectedTheme] = useState<Theme>(settings.theme ?? "system");
   const [agentModels, setAgentModels] = useState<
     Record<string, { id: string; name: string; description?: string }[]>
@@ -109,6 +112,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     if (JSON.stringify(labels) !== JSON.stringify(settings.labels ?? [])) return true;
     if (autoStartTunnel !== (settings.autoStartTunnel ?? false)) return true;
     if (enableLSP !== (settings.enableLSP ?? false)) return true;
+    if (maxCachedWorkspaces !== (settings.maxCachedWorkspaces?.toString() ?? "")) return true;
     if (selectedTheme !== (settings.theme ?? "system")) return true;
     return false;
   }, [
@@ -121,6 +125,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     labels,
     autoStartTunnel,
     enableLSP,
+    maxCachedWorkspaces,
     selectedTheme,
     settings,
   ]);
@@ -135,6 +140,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     setLabels(settings.labels ?? []);
     setAutoStartTunnel(settings.autoStartTunnel ?? false);
     setEnableLSP(settings.enableLSP ?? false);
+    setMaxCachedWorkspaces(settings.maxCachedWorkspaces?.toString() ?? "");
     setSelectedTheme(settings.theme ?? "system");
   }, [
     settings.worktreesDir,
@@ -145,6 +151,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     settings.labels,
     settings.autoStartTunnel,
     settings.enableLSP,
+    settings.maxCachedWorkspaces,
     settings.theme,
   ]);
 
@@ -165,6 +172,12 @@ export function SettingsPage({ open, onOpenChange }: Props) {
       if (Number.isNaN(n) || n <= 0 || n >= 65536) return;
       parsedPort = n;
     }
+    let parsedMaxCachedWorkspaces: number | undefined;
+    if (maxCachedWorkspaces.trim()) {
+      const n = parseInt(maxCachedWorkspaces.trim(), 10);
+      if (Number.isNaN(n) || n < 1 || n > 20) return;
+      parsedMaxCachedWorkspaces = n;
+    }
     await updateSettingsMutation.mutateAsync({
       worktreesDir: worktreesDir.trim() || null,
       codingAgents: codingAgents.length > 0 ? codingAgents : undefined,
@@ -175,6 +188,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
       tokenSecret: settings.tokenSecret,
       autoStartTunnel: autoStartTunnel || undefined,
       enableLSP: enableLSP || undefined,
+      maxCachedWorkspaces: parsedMaxCachedWorkspaces,
       theme: selectedTheme,
     });
   };
@@ -266,6 +280,25 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                 description="Enable hover type info and go-to-definition in the code browser. Currently supports TypeScript and JavaScript. Uses additional memory per workspace."
               >
                 <Switch id="enable-lsp" checked={enableLSP} onCheckedChange={setEnableLSP} />
+              </SettingsRow>
+              <SettingsRow
+                variant="responsive"
+                htmlFor="max-cached-workspaces"
+                label="Cached workspaces"
+                description="How many recently visited workspaces to keep alive in memory for instant switching. Higher values use more memory. Leave empty for the default (3)."
+              >
+                <Input
+                  id="max-cached-workspaces"
+                  type="number"
+                  placeholder="3 (default)"
+                  value={maxCachedWorkspaces}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    setMaxCachedWorkspaces(e.target.value)
+                  }
+                  min={1}
+                  max={20}
+                  className="h-8 w-full text-sm sm:w-32"
+                />
               </SettingsRow>
             </SettingsSection>
 

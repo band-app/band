@@ -1,4 +1,4 @@
-import { recordWorkspaceAccess } from "@band-app/dashboard-core";
+import { recordWorkspaceAccess, useSettingsQuery } from "@band-app/dashboard-core";
 import { useRouterState } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
@@ -14,10 +14,12 @@ interface CachedWorkspace {
   lastAccessed: number;
 }
 
-// Keep recently visited workspaces' dockview instances alive in memory so
-// switching between them is instantaneous (no init cost, no layout shift).
-// Bumped from 1 → 5 to eliminate flicker on the common A→B→A switch pattern.
-const MAX_CACHED_WORKSPACES = 5;
+// Default cap on how many workspace dockview instances stay alive in memory
+// at once. Higher values eliminate skeleton flicker on common A↔B↔C cycles
+// at the cost of memory + background work for each cached instance.
+// Override per-user via `settings.maxCachedWorkspaces`.
+const DEFAULT_MAX_CACHED_WORKSPACES = 3;
+const MIN_MAX_CACHED_WORKSPACES = 1;
 
 /**
  * Manages multiple DockviewWorkspaceLayout instances with show/hide semantics.
@@ -25,7 +27,8 @@ const MAX_CACHED_WORKSPACES = 5;
  * Instead of destroying and recreating dockview on workspace switch, this
  * component keeps each visited workspace's dockview alive (hidden via CSS
  * `opacity: 0`) and shows the active one. An LRU strategy evicts the
- * oldest cached instance when the cache exceeds MAX_CACHED_WORKSPACES.
+ * oldest cached instance when the cache exceeds the configured
+ * `maxCachedWorkspaces` setting.
  *
  * IMPORTANT: `activeWorkspaceId` is derived synchronously from pathname (not
  * via useEffect) so the correct workspace is visible from the very first
@@ -38,6 +41,14 @@ export function DockviewInstanceManager() {
   const [cache, setCache] = useState<Map<string, CachedWorkspace>>(new Map());
 
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+
+  // Max cached workspaces is user-configurable via settings. Clamp to a
+  // sensible floor so a misconfigured value can't break caching entirely.
+  const { settings } = useSettingsQuery();
+  const maxCachedWorkspaces = Math.max(
+    MIN_MAX_CACHED_WORKSPACES,
+    settings.maxCachedWorkspaces ?? DEFAULT_MAX_CACHED_WORKSPACES,
+  );
 
   // Derive active workspace synchronously from pathname — no useEffect delay.
   // This ensures the CSS display swap happens in the same render as the URL
@@ -60,7 +71,7 @@ export function DockviewInstanceManager() {
       });
 
       // LRU eviction: remove the oldest entry (excluding current)
-      if (next.size > MAX_CACHED_WORKSPACES) {
+      if (next.size > maxCachedWorkspaces) {
         let oldestKey: string | null = null;
         let oldestTime = Infinity;
         for (const [key, entry] of next) {
