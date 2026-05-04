@@ -28,8 +28,16 @@ The shebang on `bin/band-server.mjs` is `#!/usr/bin/env bun`. Running under Node
 
 ## Install
 
+Bun must be on `PATH` first — the `band-server` shebang is `#!/usr/bin/env bun`. Without it you'll see `env: bun: No such file or directory`.
+
 ```bash
+# 1. Install Bun
+curl -fsSL https://bun.sh/install | bash
+
+# 2. Install the package
 npm i -g @band-app/server     # or: pnpm add -g, bun add -g
+
+# 3. Run
 band-server                   # starts on PORT (default 3456)
 ```
 

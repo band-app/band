@@ -28,8 +28,6 @@ jobs:
     environment: production
     env:
       NODE_OPTIONS: '--max-old-space-size=4096'
-      HAS_APPLE_CERT: ${{ secrets.APPLE_CERTIFICATE != '' && '1' || '' }}
-      HAS_APPLE_API_KEY: ${{ secrets.APPLE_API_KEY != '' && '1' || '' }}
 
     steps:
       - name: Checkout
@@ -149,43 +147,13 @@ jobs:
           pnpm build:web
           pnpm --filter @band-app/dashboard build
 
-      - name: Import Apple certificate
-        if: ${{ env.HAS_APPLE_CERT == '1' }}
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
-        run: |
-          set -euo pipefail
-          CERT_PATH="$RUNNER_TEMP/cert.p12"
-          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
-
-          echo -n "$APPLE_CERTIFICATE" | base64 --decode -o "$CERT_PATH"
-
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-
-          security import "$CERT_PATH" \
-            -P "$APPLE_CERTIFICATE_PASSWORD" \
-            -A -t cert -f pkcs12 \
-            -k "$KEYCHAIN_PATH"
-
-          security list-keychain -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
-          security set-key-partition-list -S apple-tool:,apple:,codesign: \
-            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-
-          rm "$CERT_PATH"
-          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
-
-      - name: Write App Store Connect API key
-        if: ${{ env.HAS_APPLE_API_KEY == '1' }}
-        env:
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-        run: |
-          mkdir -p "$RUNNER_TEMP"
-          echo -n "$APPLE_API_KEY" | base64 --decode -o "$RUNNER_TEMP/api-key.p8"
-          chmod 600 "$RUNNER_TEMP/api-key.p8"
+      - name: Apple sign setup
+        uses: ./.github/actions/apple-sign-setup
+        with:
+          apple-certificate: ${{ secrets.APPLE_CERTIFICATE }}
+          apple-certificate-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          keychain-password: ${{ secrets.KEYCHAIN_PASSWORD }}
+          apple-api-key: ${{ secrets.APPLE_API_KEY }}
 
       - name: Build DMG and updater artifacts
         run: pnpm --filter @band-app/dashboard tauri build --ci --config '{"build":{"beforeBuildCommand":""}}' --config src-tauri/tauri.prod.conf.json
@@ -198,11 +166,9 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY_PATH: ${{ runner.temp }}/api-key.p8
 
-      - name: Cleanup keychain and key
+      - name: Apple sign cleanup
         if: always()
-        run: |
-          security delete-keychain "$RUNNER_TEMP/build.keychain-db" 2>/dev/null || true
-          rm -f "$RUNNER_TEMP/api-key.p8"
+        uses: ./.github/actions/apple-sign-cleanup
 
       - name: Generate changelog
         id: changelog

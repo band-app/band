@@ -35,7 +35,7 @@ Auto-update is built in: the app checks daily and prompts before installing.
 
 ### Nightly
 
-Bleeding-edge builds from the `develop` branch are published to a single rolling [`nightly` release](https://github.com/band-app/band/releases/tag/nightly) every day at 04:00 UTC. Nightly builds:
+Bleeding-edge builds from the `main` branch are published to a single rolling [`nightly` release](https://github.com/band-app/band/releases/tag/nightly) every day at 04:00 UTC. Nightly builds:
 
 - Use a `<version>-nightly.<date>.<sha>` version label so you can see what you're running in **Settings → About**.
 - Are **not** wired to the stable updater channel — you must download new nightlies manually.

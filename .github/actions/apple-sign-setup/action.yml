@@ -1,0 +1,85 @@
+name: Apple sign setup
+description: Import Apple Developer ID certificate into an ephemeral keychain and write the App Store Connect API key. Skips if either secret is empty (unsigned dev build).
+
+inputs:
+  apple-certificate:
+    description: Base64-encoded .p12 export of the Developer ID Application cert + private key
+    required: true
+  apple-certificate-password:
+    description: Password set when exporting the .p12
+    required: true
+  keychain-password:
+    description: Random ephemeral keychain password
+    required: true
+  apple-api-key:
+    description: Base64-encoded App Store Connect API .p8 key
+    required: true
+
+outputs:
+  has-cert:
+    description: '"1" when the certificate was imported, empty otherwise'
+    value: ${{ steps.flags.outputs.has-cert }}
+  has-api-key:
+    description: '"1" when the API key was written, empty otherwise'
+    value: ${{ steps.flags.outputs.has-api-key }}
+
+runs:
+  using: composite
+  steps:
+    - name: Detect available secrets
+      id: flags
+      shell: bash
+      env:
+        APPLE_CERTIFICATE: ${{ inputs.apple-certificate }}
+        APPLE_API_KEY: ${{ inputs.apple-api-key }}
+      run: |
+        if [ -n "$APPLE_CERTIFICATE" ]; then
+          echo "has-cert=1" >> "$GITHUB_OUTPUT"
+        else
+          echo "has-cert=" >> "$GITHUB_OUTPUT"
+        fi
+        if [ -n "$APPLE_API_KEY" ]; then
+          echo "has-api-key=1" >> "$GITHUB_OUTPUT"
+        else
+          echo "has-api-key=" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Import Apple certificate
+      if: steps.flags.outputs.has-cert == '1'
+      shell: bash
+      env:
+        APPLE_CERTIFICATE: ${{ inputs.apple-certificate }}
+        APPLE_CERTIFICATE_PASSWORD: ${{ inputs.apple-certificate-password }}
+        KEYCHAIN_PASSWORD: ${{ inputs.keychain-password }}
+      run: |
+        set -euo pipefail
+        CERT_PATH="$RUNNER_TEMP/cert.p12"
+        KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
+
+        echo -n "$APPLE_CERTIFICATE" | base64 --decode -o "$CERT_PATH"
+
+        security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+        security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+        security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+        security import "$CERT_PATH" \
+          -P "$APPLE_CERTIFICATE_PASSWORD" \
+          -A -t cert -f pkcs12 \
+          -k "$KEYCHAIN_PATH"
+
+        security list-keychain -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
+        security set-key-partition-list -S apple-tool:,apple:,codesign: \
+          -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+        rm "$CERT_PATH"
+        security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+
+    - name: Write App Store Connect API key
+      if: steps.flags.outputs.has-api-key == '1'
+      shell: bash
+      env:
+        APPLE_API_KEY: ${{ inputs.apple-api-key }}
+      run: |
+        mkdir -p "$RUNNER_TEMP"
+        echo -n "$APPLE_API_KEY" | base64 --decode -o "$RUNNER_TEMP/api-key.p8"
+        chmod 600 "$RUNNER_TEMP/api-key.p8"

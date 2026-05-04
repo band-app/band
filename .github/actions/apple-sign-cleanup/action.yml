@@ -1,0 +1,11 @@
+name: Apple sign cleanup
+description: Remove ephemeral keychain and App Store Connect API key file. Always-safe; ignores missing artifacts.
+
+runs:
+  using: composite
+  steps:
+    - name: Cleanup keychain and key
+      shell: bash
+      run: |
+        security delete-keychain "$RUNNER_TEMP/build.keychain-db" 2>/dev/null || true
+        rm -f "$RUNNER_TEMP/api-key.p8"

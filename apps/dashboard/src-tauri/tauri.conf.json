@@ -1,7 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicegui/nicegui/main/nicegui/static/tauri.conf.schema.json",
   "productName": "Band",
-  "mainBinaryName": "band-dashboard",
   "version": "0.1.0",
   "identifier": "app.getband.agent",
   "build": {
