@@ -24,7 +24,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ inputs.ref || 'main' }}
           fetch-depth: 0
@@ -35,7 +35,7 @@ jobs:
           components: clippy, rustfmt
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
 
@@ -45,19 +45,19 @@ jobs:
           bun-version: 1.3.13
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           version: 10
 
       - name: Cache pnpm store
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.pnpm-store
           key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: pnpm-${{ runner.os }}-
 
       - name: Cache Cargo registry
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -66,7 +66,7 @@ jobs:
           restore-keys: cargo-registry-${{ runner.os }}-
 
       - name: Cache Dashboard target
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: apps/dashboard/src-tauri/target
           key: cargo-dashboard-${{ runner.os }}-${{ hashFiles('apps/dashboard/src-tauri/Cargo.lock') }}
