@@ -120,7 +120,9 @@ function SortableProject({
               <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <h2 className="text-sm font-semibold text-foreground truncate">{project.name}</h2>
+                  <h2 className="text-sm font-semibold text-foreground/80 truncate">
+                    {project.name}
+                  </h2>
                 </TooltipTrigger>
                 <TooltipContent side="top">{project.name}</TooltipContent>
               </Tooltip>

@@ -131,8 +131,7 @@ export const WorkspaceCard = memo(function WorkspaceCard({
               <div className="flex items-center gap-2 min-w-0 overflow-hidden">
                 <AgentStatusIndicator agent={status?.agent} isActive={isActive} />
                 <span
-                  className={`text-sm truncate ${isActive ? "font-semibold text-foreground" : "font-medium"}`}
-                  style={isActive ? undefined : { color: "oklch(0.7 0 0)" }}
+                  className={`text-sm truncate ${isActive ? "font-semibold text-foreground" : "font-medium text-muted-foreground"}`}
                 >
                   {worktree.branch}
                 </span>

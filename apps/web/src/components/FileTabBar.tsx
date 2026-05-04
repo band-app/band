@@ -144,7 +144,7 @@ export function FileTabBar({
 
   return (
     <>
-      <div className="flex h-9 shrink-0 items-center border-b border-border/50 bg-background">
+      <div className="flex h-8 shrink-0 items-center border-b border-border/50 bg-background">
         {/* Navigation arrows */}
         {(onGoBack || onGoForward) && (
           <div className="flex shrink-0 items-center gap-0.5 px-1">

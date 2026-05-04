@@ -1257,7 +1257,7 @@ export function DiffView({
           className="hidden shrink-0 flex-col md:flex"
           style={{ width: sidebarWidth }}
         >
-          <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-2">
+          <div className="flex h-8 shrink-0 items-center justify-between border-b border-border px-3">
             <span className="text-xs font-medium text-muted-foreground">Files</span>
             <button
               type="button"

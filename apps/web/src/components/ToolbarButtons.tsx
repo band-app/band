@@ -31,7 +31,12 @@ export function ToolbarButtons() {
         <Tooltip>
           <TooltipTrigger asChild>
             <DropdownMenuTrigger asChild>
-              <Button size="icon-sm" variant="ghost" aria-label="Run agent">
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                className="text-muted-foreground"
+                aria-label="Run agent"
+              >
                 <Zap className="size-5" />
               </Button>
             </DropdownMenuTrigger>

@@ -92,7 +92,7 @@ export function TauriTitleBar({
     <div
       ref={ref}
       data-tauri-drag-region
-      className="h-[38px] shrink-0 flex items-center justify-center relative"
+      className="h-[38px] shrink-0 flex items-center justify-center relative border-b border-border"
     >
       {onToggleSidebar && (
         <button

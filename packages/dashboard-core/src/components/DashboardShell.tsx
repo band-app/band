@@ -110,7 +110,7 @@ export function DashboardShell({ toolbarExtra, hideTitleBar }: DashboardShellPro
         <div
           ref={titleBarRef}
           data-tauri-drag-region
-          className="h-[38px] shrink-0 flex items-center justify-center"
+          className="h-[38px] shrink-0 flex items-center justify-center border-b border-border"
         >
           <span className="text-xs font-medium text-muted-foreground select-none pointer-events-none">
             {appTitle}
@@ -118,13 +118,13 @@ export function DashboardShell({ toolbarExtra, hideTitleBar }: DashboardShellPro
         </div>
       )}
 
-      <div className="@container/toolbar flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
+      <div className="@container/toolbar flex h-10 shrink-0 items-center justify-between border-b border-border px-4">
         <div className="flex items-center gap-1">
           <DropdownMenu>
             <Tooltip>
               <TooltipTrigger asChild>
                 <DropdownMenuTrigger asChild>
-                  <Button size="icon-sm" variant="ghost">
+                  <Button size="icon-sm" variant="ghost" className="text-muted-foreground">
                     <Settings className="size-5" />
                   </Button>
                 </DropdownMenuTrigger>
@@ -149,7 +149,7 @@ export function DashboardShell({ toolbarExtra, hideTitleBar }: DashboardShellPro
                 <Button
                   size="sm"
                   variant="ghost"
-                  className={`text-sm h-8 px-2 gap-1.5 ${labelFilter ? "bg-accent text-accent-foreground" : ""}`}
+                  className={`text-sm h-8 px-2 gap-1.5 ${labelFilter ? "bg-accent text-accent-foreground" : "text-muted-foreground"}`}
                 >
                   {labelFilter ? (
                     <>
@@ -194,7 +194,12 @@ export function DashboardShell({ toolbarExtra, hideTitleBar }: DashboardShellPro
         <div className="flex items-center gap-1">
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button size="icon-sm" variant="ghost" onClick={() => setShowAddDialog(true)}>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                className="text-muted-foreground"
+                onClick={() => setShowAddDialog(true)}
+              >
                 <Plus className="size-5" />
               </Button>
             </TooltipTrigger>

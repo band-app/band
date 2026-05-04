@@ -1,7 +1,50 @@
 import type { FitAddon } from "@xterm/addon-fit";
-import type { Terminal } from "@xterm/xterm";
+import type { ITheme, Terminal } from "@xterm/xterm";
 import { useEffect, useRef } from "react";
 import { openExternalUrl } from "../lib/open-external-url";
+
+/** xterm.js theme that follows the app's dark mode. Background/foreground use the
+ *  same neutrals as the rest of the UI so the terminal blends into the panel. */
+const DARK_TERMINAL_THEME: ITheme = {
+  background: "#181818",
+  foreground: "#e8e8e8",
+  cursor: "#e8e8e8",
+  selectionBackground: "rgba(255, 255, 255, 0.2)",
+};
+
+const LIGHT_TERMINAL_THEME: ITheme = {
+  background: "#ffffff",
+  foreground: "#1e1e1e",
+  cursor: "#1e1e1e",
+  cursorAccent: "#ffffff",
+  selectionBackground: "rgba(0, 0, 0, 0.15)",
+  // Tweak ANSI colors so they remain readable on a white background. The default
+  // bright-yellow / bright-green xterm palette washes out badly in light mode.
+  black: "#000000",
+  red: "#cd3131",
+  green: "#0a8043",
+  yellow: "#946800",
+  blue: "#0451a5",
+  magenta: "#bc05bc",
+  cyan: "#0598bc",
+  white: "#555555",
+  brightBlack: "#666666",
+  brightRed: "#cd3131",
+  brightGreen: "#0a8043",
+  brightYellow: "#946800",
+  brightBlue: "#0451a5",
+  brightMagenta: "#bc05bc",
+  brightCyan: "#0598bc",
+  brightWhite: "#1e1e1e",
+};
+
+function isDarkMode(): boolean {
+  return document.documentElement.classList.contains("dark");
+}
+
+function getTerminalTheme(): ITheme {
+  return isDarkMode() ? DARK_TERMINAL_THEME : LIGHT_TERMINAL_THEME;
+}
 
 export interface PaneMetadata {
   name?: string;
@@ -61,12 +104,17 @@ export function TerminalPanel({
         fontFamily: "'SF Mono', Menlo, Monaco, 'Courier New', monospace",
         macOptionIsMeta: true, // Alt+Left/Right → word navigation on macOS
         scrollback: 10000,
-        theme: {
-          background: "#181818",
-          foreground: "#e8e8e8",
-          cursor: "#e8e8e8",
-          selectionBackground: "rgba(255, 255, 255, 0.2)",
-        },
+        theme: getTerminalTheme(),
+      });
+
+      // Keep the terminal palette in sync with the app theme. ThemeSync toggles
+      // the "dark" class on <html>; we mirror that onto xterm at runtime.
+      const themeObserver = new MutationObserver(() => {
+        terminal.options.theme = getTerminalTheme();
+      });
+      themeObserver.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ["class"],
       });
 
       const fitAddon = new XFitAddon();
@@ -188,6 +236,7 @@ export function TerminalPanel({
       resizeObserver.observe(containerRef.current!);
 
       cleanup = () => {
+        themeObserver.disconnect();
         resizeObserver.disconnect();
         ws.close();
         terminal.dispose();

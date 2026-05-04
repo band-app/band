@@ -26,7 +26,13 @@ export function TunnelToolbarButton() {
           <Button
             size="icon-sm"
             variant="ghost"
-            className={tunnelError ? "text-red-500" : webServerRunning ? "text-green-500" : ""}
+            className={
+              tunnelError
+                ? "text-red-500"
+                : webServerRunning
+                  ? "text-green-500"
+                  : "text-muted-foreground"
+            }
             onClick={openDialog}
           >
             <Globe className="size-5" />
