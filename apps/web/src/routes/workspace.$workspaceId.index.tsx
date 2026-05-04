@@ -76,11 +76,13 @@ function MobileChatContent({ workspaceId }: { workspaceId: string }) {
       .then((data) => {
         if (cancelled) return;
         const chat = data?.chat;
-        if (chat) {
-          const found = settings.codingAgents?.find((a) => a.id === chat.agent);
-          setSupportsSessionListing(agentTypeSupportsSessionListing(found?.type));
-          if (chat.activeSessionId) setInitialSessionId(chat.activeSessionId);
-        }
+        // Fall back to the default coding agent when the chat row hasn't
+        // been created yet (lazy creation on first message send) so the
+        // session-history dropdown is available on a brand-new empty chat.
+        const agentId = chat?.agent ?? settings.defaultCodingAgent;
+        const found = agentId ? settings.codingAgents?.find((a) => a.id === agentId) : undefined;
+        setSupportsSessionListing(agentTypeSupportsSessionListing(found?.type));
+        if (chat?.activeSessionId) setInitialSessionId(chat.activeSessionId);
         setSessionQueryDone(true);
       })
       .catch((err) => {

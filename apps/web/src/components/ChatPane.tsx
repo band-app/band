@@ -116,13 +116,24 @@ export function useChatPaneState(workspaceId: string, chatId: string): ChatPaneS
 
   // Whether the configured agent supports session listing — derived from
   // the agent definition, no filesystem access required.
+  //
+  // Note: the server-side chat record is created lazily on first message
+  // send (see `task-stream.ts` and `tasks.submit`), so for a brand-new
+  // empty chat `chatQuery.data?.chat` is null. Fall back to the default
+  // coding agent from settings in that case so the session-history
+  // dropdown is available before the user types anything. Mirrors the
+  // `chat?.agent ?? defaultAgentId` pattern used in the agent-init effect
+  // below.
   const supportsSessionListing = (() => {
     const settings = settingsQuery.data as Record<string, unknown> | null | undefined;
+    if (!settings) return false;
     const chat = chatQuery.data?.chat;
-    if (!settings || !chat) return false;
     const raw = settings.codingAgents;
     const codingAgents = Array.isArray(raw) ? (raw as Array<{ id: string; type: string }>) : [];
-    const found = codingAgents.find((a) => a.id === chat.agent);
+    const defaultAgentId = settings.defaultCodingAgent as string | undefined;
+    const agentId = chat?.agent ?? defaultAgentId;
+    if (!agentId) return false;
+    const found = codingAgents.find((a) => a.id === agentId);
     return found ? agentTypeSupportsSessionListing(found.type) : false;
   })();
 
