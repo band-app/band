@@ -13,7 +13,6 @@
     "build:cli": "pnpm --filter @band-app/cli build && mkdir -p apps/dashboard/src-tauri/binaries && cp apps/cli/target/release/band \"apps/dashboard/src-tauri/binaries/band-$(rustc -vV | sed -n 's/host: //p')\"",
     "build:cli:dev": "pnpm --filter @band-app/cli build:dev && mkdir -p apps/dashboard/src-tauri/binaries && cp apps/cli/target/debug/band \"apps/dashboard/src-tauri/binaries/band-$(rustc -vV | sed -n 's/host: //p')\"",
     "download:bun": "bash apps/dashboard/src-tauri/scripts/download-bun.sh",
-    "build:extension": "pnpm --filter band-vscode build",
     "test": "pnpm --filter @band-app/server test && cargo test --manifest-path apps/cli/Cargo.toml && pnpm build:cli && mkdir -p apps/web/dist && touch apps/web/dist/start-server.mjs && cargo test --manifest-path apps/dashboard/src-tauri/Cargo.toml; rm -rf apps/web/dist",
     "lint": "biome check . && cargo clippy --manifest-path apps/cli/Cargo.toml -- -D warnings && cargo clippy --manifest-path apps/dashboard/src-tauri/Cargo.toml -- -D warnings",
     "lint:fix": "biome check --fix . && cargo clippy --manifest-path apps/cli/Cargo.toml --fix --allow-dirty && cargo clippy --manifest-path apps/dashboard/src-tauri/Cargo.toml --fix --allow-dirty",

@@ -55,7 +55,6 @@ export {
   useSetupStatusWatcher,
   useStatusWatcher,
 } from "./hooks/use-status";
-export { type BuildInfo, getBuildInfo } from "./lib/build-info";
 export {
   buildLspWsUrl,
   createLspExtension,

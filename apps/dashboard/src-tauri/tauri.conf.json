@@ -8,7 +8,7 @@
     "frontendDist": "http://localhost:3456",
     "devUrl": "http://localhost:3456",
     "beforeDevCommand": "pnpm -w dev:web",
-    "beforeBuildCommand": "pnpm -w build:web && pnpm build && pnpm -w build:cli && pnpm -w build:extension && pnpm -w download:bun"
+    "beforeBuildCommand": "pnpm -w build:web && pnpm build && pnpm -w build:cli && pnpm -w download:bun"
   },
   "app": {
     "windows": [
