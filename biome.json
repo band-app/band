@@ -67,7 +67,9 @@
       "!**/.output",
       "!**/*.gen.ts",
       "!**/apps/dashboard/src-tauri/gen",
-      "!**/.astro"
+      "!**/.astro",
+      "!**/test-results",
+      "!**/playwright-report"
     ]
   }
 }
