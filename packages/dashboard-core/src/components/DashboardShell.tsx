@@ -162,7 +162,12 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar }: DashboardShel
             <Tooltip>
               <TooltipTrigger asChild>
                 <DropdownMenuTrigger asChild>
-                  <Button size="icon-sm" variant="ghost" className="text-muted-foreground">
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    className="text-muted-foreground"
+                    aria-label="Menu"
+                  >
                     <Menu className="size-5" />
                   </Button>
                 </DropdownMenuTrigger>

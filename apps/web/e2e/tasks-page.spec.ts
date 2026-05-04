@@ -56,16 +56,16 @@ function seedTask(
 }
 
 /**
- * Open the Tasks dialog from the dashboard's "Run agent" toolbar dropdown.
- * Returns the dialog locator for further interaction. Use after `page.goto`
- * has loaded the dashboard.
+ * Open the Tasks dialog from the dashboard's hamburger ("Menu") toolbar
+ * dropdown. Returns the dialog locator for further interaction. Use after
+ * `page.goto` has loaded the dashboard.
  */
 async function openTasksDialog(page: Page) {
   // The dashboard React app fetches projects via tRPC on mount, so the
   // toolbar's React click handlers may not be bound by the time `load`
   // fires. Wait for the network to settle before driving the dropdown.
   await page.waitForLoadState("networkidle");
-  const trigger = page.locator('button[aria-label="Run agent"]');
+  const trigger = page.locator('button[aria-label="Menu"]');
   // Retry the open until the menu actually appears — covers any remaining
   // hydration race between the click reaching the DOM and React binding
   // the dropdown's onClick.
