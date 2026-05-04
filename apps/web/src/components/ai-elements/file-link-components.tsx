@@ -412,13 +412,21 @@ function remarkFileLinks() {
 
       while (match !== null) {
         const matchText = match[0];
+        const matchStart = match.index;
+        const matchEnd = matchStart + matchText.length;
+        // Advance the iterator before any `continue` so the loop can never
+        // spin forever on a match that fails the sanity check below.  Hit by
+        // strings like "127.0.0.1:5173" — the regex matches them but
+        // isFilePath rejects, and the previous code skipped the
+        // re-assignment, hanging the chat tab.
+        match = FILE_PATH_WITH_LINE_RE.exec(value);
 
         // Quick sanity check — must parse as a valid file path
         if (!isFilePath(matchText)) continue;
 
         // Add preceding text
-        if (match.index > lastIndex) {
-          parts.push({ type: "text", value: value.slice(lastIndex, match.index) });
+        if (matchStart > lastIndex) {
+          parts.push({ type: "text", value: value.slice(lastIndex, matchStart) });
         }
 
         // Add link node wrapping the matched file path
@@ -428,8 +436,7 @@ function remarkFileLinks() {
           children: [{ type: "text", value: matchText }],
         });
 
-        lastIndex = match.index + matchText.length;
-        match = FILE_PATH_WITH_LINE_RE.exec(value);
+        lastIndex = matchEnd;
       }
 
       // No matches — leave the text node unchanged
