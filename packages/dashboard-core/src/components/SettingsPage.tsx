@@ -26,6 +26,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useAdapter, useCapabilities } from "../context";
 import { useUpdateSettings } from "../hooks/use-settings-mutations";
 import { useSettingsQuery } from "../hooks/use-settings-query";
+import { useExperimentalGitGraph } from "../lib/experimental-flags";
 import { playSound, SOUNDS, type SoundId } from "../lib/sounds";
 import type { CodingAgentDefinition, CodingAgentType, LabelDefinition, Theme } from "../types";
 import { AgentIcon } from "./agent-icons";
@@ -79,6 +80,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
   const [agentModels, setAgentModels] = useState<
     Record<string, { id: string; name: string; description?: string }[]>
   >({});
+  const [gitGraphEnabled, setGitGraphEnabled] = useExperimentalGitGraph();
 
   const adapter = useAdapter();
 
@@ -570,6 +572,21 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                   </Select>
                 </SettingsRow>
               )}
+            </SettingsSection>
+
+            {/* ── Experimental ───────────────────────────────── */}
+            <SettingsSection title="Experimental">
+              <SettingsRow
+                htmlFor="exp-git-graph"
+                label="Git graph panel"
+                description="Adds a Graph panel/tab showing commit history as a branch tree. Layout is best-effort and may render oddly on complex histories."
+              >
+                <Switch
+                  id="exp-git-graph"
+                  checked={gitGraphEnabled}
+                  onCheckedChange={setGitGraphEnabled}
+                />
+              </SettingsRow>
             </SettingsSection>
 
             {/* ── Web Server ─────────────────────────────────── */}

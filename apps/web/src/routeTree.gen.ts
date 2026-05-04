@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as WorkspaceWorkspaceIdRouteImport } from './routes/workspace.$workspaceId'
 import { Route as WorkspaceWorkspaceIdIndexRouteImport } from './routes/workspace.$workspaceId.index'
 import { Route as WorkspaceWorkspaceIdTerminalRouteImport } from './routes/workspace.$workspaceId.terminal'
+import { Route as WorkspaceWorkspaceIdGraphRouteImport } from './routes/workspace.$workspaceId.graph'
 import { Route as WorkspaceWorkspaceIdCodeRouteImport } from './routes/workspace.$workspaceId.code'
 import { Route as WorkspaceWorkspaceIdChangesRouteImport } from './routes/workspace.$workspaceId.changes'
 import { Route as WorkspaceWorkspaceIdCodeIndexRouteImport } from './routes/workspace.$workspaceId.code.index'
@@ -38,6 +39,12 @@ const WorkspaceWorkspaceIdTerminalRoute =
   WorkspaceWorkspaceIdTerminalRouteImport.update({
     id: '/terminal',
     path: '/terminal',
+    getParentRoute: () => WorkspaceWorkspaceIdRoute,
+  } as any)
+const WorkspaceWorkspaceIdGraphRoute =
+  WorkspaceWorkspaceIdGraphRouteImport.update({
+    id: '/graph',
+    path: '/graph',
     getParentRoute: () => WorkspaceWorkspaceIdRoute,
   } as any)
 const WorkspaceWorkspaceIdCodeRoute =
@@ -70,6 +77,7 @@ export interface FileRoutesByFullPath {
   '/workspace/$workspaceId': typeof WorkspaceWorkspaceIdRouteWithChildren
   '/workspace/$workspaceId/changes': typeof WorkspaceWorkspaceIdChangesRoute
   '/workspace/$workspaceId/code': typeof WorkspaceWorkspaceIdCodeRouteWithChildren
+  '/workspace/$workspaceId/graph': typeof WorkspaceWorkspaceIdGraphRoute
   '/workspace/$workspaceId/terminal': typeof WorkspaceWorkspaceIdTerminalRoute
   '/workspace/$workspaceId/': typeof WorkspaceWorkspaceIdIndexRoute
   '/workspace/$workspaceId/code/$': typeof WorkspaceWorkspaceIdCodeSplatRoute
@@ -78,6 +86,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/workspace/$workspaceId/changes': typeof WorkspaceWorkspaceIdChangesRoute
+  '/workspace/$workspaceId/graph': typeof WorkspaceWorkspaceIdGraphRoute
   '/workspace/$workspaceId/terminal': typeof WorkspaceWorkspaceIdTerminalRoute
   '/workspace/$workspaceId': typeof WorkspaceWorkspaceIdIndexRoute
   '/workspace/$workspaceId/code/$': typeof WorkspaceWorkspaceIdCodeSplatRoute
@@ -89,6 +98,7 @@ export interface FileRoutesById {
   '/workspace/$workspaceId': typeof WorkspaceWorkspaceIdRouteWithChildren
   '/workspace/$workspaceId/changes': typeof WorkspaceWorkspaceIdChangesRoute
   '/workspace/$workspaceId/code': typeof WorkspaceWorkspaceIdCodeRouteWithChildren
+  '/workspace/$workspaceId/graph': typeof WorkspaceWorkspaceIdGraphRoute
   '/workspace/$workspaceId/terminal': typeof WorkspaceWorkspaceIdTerminalRoute
   '/workspace/$workspaceId/': typeof WorkspaceWorkspaceIdIndexRoute
   '/workspace/$workspaceId/code/$': typeof WorkspaceWorkspaceIdCodeSplatRoute
@@ -101,6 +111,7 @@ export interface FileRouteTypes {
     | '/workspace/$workspaceId'
     | '/workspace/$workspaceId/changes'
     | '/workspace/$workspaceId/code'
+    | '/workspace/$workspaceId/graph'
     | '/workspace/$workspaceId/terminal'
     | '/workspace/$workspaceId/'
     | '/workspace/$workspaceId/code/$'
@@ -109,6 +120,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/workspace/$workspaceId/changes'
+    | '/workspace/$workspaceId/graph'
     | '/workspace/$workspaceId/terminal'
     | '/workspace/$workspaceId'
     | '/workspace/$workspaceId/code/$'
@@ -119,6 +131,7 @@ export interface FileRouteTypes {
     | '/workspace/$workspaceId'
     | '/workspace/$workspaceId/changes'
     | '/workspace/$workspaceId/code'
+    | '/workspace/$workspaceId/graph'
     | '/workspace/$workspaceId/terminal'
     | '/workspace/$workspaceId/'
     | '/workspace/$workspaceId/code/$'
@@ -158,6 +171,13 @@ declare module '@tanstack/react-router' {
       path: '/terminal'
       fullPath: '/workspace/$workspaceId/terminal'
       preLoaderRoute: typeof WorkspaceWorkspaceIdTerminalRouteImport
+      parentRoute: typeof WorkspaceWorkspaceIdRoute
+    }
+    '/workspace/$workspaceId/graph': {
+      id: '/workspace/$workspaceId/graph'
+      path: '/graph'
+      fullPath: '/workspace/$workspaceId/graph'
+      preLoaderRoute: typeof WorkspaceWorkspaceIdGraphRouteImport
       parentRoute: typeof WorkspaceWorkspaceIdRoute
     }
     '/workspace/$workspaceId/code': {
@@ -210,6 +230,7 @@ const WorkspaceWorkspaceIdCodeRouteWithChildren =
 interface WorkspaceWorkspaceIdRouteChildren {
   WorkspaceWorkspaceIdChangesRoute: typeof WorkspaceWorkspaceIdChangesRoute
   WorkspaceWorkspaceIdCodeRoute: typeof WorkspaceWorkspaceIdCodeRouteWithChildren
+  WorkspaceWorkspaceIdGraphRoute: typeof WorkspaceWorkspaceIdGraphRoute
   WorkspaceWorkspaceIdTerminalRoute: typeof WorkspaceWorkspaceIdTerminalRoute
   WorkspaceWorkspaceIdIndexRoute: typeof WorkspaceWorkspaceIdIndexRoute
 }
@@ -217,6 +238,7 @@ interface WorkspaceWorkspaceIdRouteChildren {
 const WorkspaceWorkspaceIdRouteChildren: WorkspaceWorkspaceIdRouteChildren = {
   WorkspaceWorkspaceIdChangesRoute: WorkspaceWorkspaceIdChangesRoute,
   WorkspaceWorkspaceIdCodeRoute: WorkspaceWorkspaceIdCodeRouteWithChildren,
+  WorkspaceWorkspaceIdGraphRoute: WorkspaceWorkspaceIdGraphRoute,
   WorkspaceWorkspaceIdTerminalRoute: WorkspaceWorkspaceIdTerminalRoute,
   WorkspaceWorkspaceIdIndexRoute: WorkspaceWorkspaceIdIndexRoute,
 }

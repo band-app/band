@@ -6,6 +6,7 @@ import {
   parseFileLocation,
   QuickOpenDialog,
   SearchFilesDialog,
+  useExperimentalGitGraph,
   useSettingsQuery,
   WorkspacePickerDialog,
 } from "@band-app/dashboard-core";
@@ -20,6 +21,7 @@ import {
 } from "dockview";
 import {
   FolderOpen,
+  GitBranch,
   GitCompare,
   Globe,
   MessageSquare,
@@ -33,6 +35,7 @@ import { useWsActive } from "../lib/workspace-visibility-store";
 import { CodeBrowserView } from "./CodeBrowserView";
 import { DockviewBrowserContainer } from "./DockviewBrowserContainer";
 import { DockviewChatContainer } from "./DockviewChatContainer";
+import { GitGraphView } from "./GitGraphView";
 
 // ---------------------------------------------------------------------------
 // Custom dockview theme – prevents the default themeAbyss from being applied
@@ -53,6 +56,7 @@ const PANEL_ICONS: Record<string, React.FC<{ className?: string }>> = {
   files: FolderOpen,
   terminal: TerminalIcon,
   browser: Globe,
+  graph: GitBranch,
 };
 
 const PANEL_SHORTCUTS: Record<string, string> = {
@@ -60,6 +64,7 @@ const PANEL_SHORTCUTS: Record<string, string> = {
   files: "⌘G",
   terminal: "⌘J",
   browser: "⌘B",
+  graph: "⌘Y",
 };
 
 // ---------------------------------------------------------------------------
@@ -101,6 +106,10 @@ interface FilesParams {
 }
 
 interface TerminalParams {
+  workspaceId: string;
+}
+
+interface GraphParams {
   workspaceId: string;
 }
 
@@ -324,6 +333,11 @@ function BrowserPanelComponent({ params, api }: IDockviewPanelProps<BrowserParam
 // Component and tab registries
 // ---------------------------------------------------------------------------
 
+function GraphPanelComponent({ params }: IDockviewPanelProps<GraphParams>) {
+  if (!params.workspaceId) return null;
+  return <GitGraphView workspaceId={params.workspaceId} />;
+}
+
 // biome-ignore lint/suspicious/noExplicitAny: dockview requires generic panel props
 const components: Record<string, React.FunctionComponent<IDockviewPanelProps<any>>> = {
   chat: ChatPanelComponent,
@@ -331,6 +345,7 @@ const components: Record<string, React.FunctionComponent<IDockviewPanelProps<any
   files: FilesPanelComponent,
   terminal: TerminalPanelComponent,
   browser: BrowserPanelComponent,
+  graph: GraphPanelComponent,
 };
 
 const tabComponents: Record<string, React.FunctionComponent<IDockviewPanelHeaderProps>> = {
@@ -369,7 +384,7 @@ function useDiffFileCount(workspaceId: string, isActive: boolean): number {
 // ---------------------------------------------------------------------------
 
 /** All panels that must always be present in the layout. */
-const REQUIRED_PANEL_IDS = ["chat", "changes", "files", "terminal", "browser"] as const;
+const REQUIRED_PANEL_IDS = ["chat", "changes", "files", "terminal", "browser", "graph"] as const;
 
 // ---------------------------------------------------------------------------
 // Layout persistence: shared structure + per-workspace active tabs
@@ -584,11 +599,13 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
 
   // Hidden panels from settings — used to gate panel operations
   const { settings } = useSettingsQuery();
-  const hiddenPanels = useMemo(
-    () =>
-      ((settings as unknown as Record<string, unknown>).hiddenPanels as string[] | undefined) ?? [],
-    [settings],
-  );
+  const [gitGraphEnabled] = useExperimentalGitGraph();
+  const hiddenPanels = useMemo(() => {
+    const fromSettings =
+      ((settings as unknown as Record<string, unknown>).hiddenPanels as string[] | undefined) ?? [];
+    if (gitGraphEnabled || fromSettings.includes("graph")) return fromSettings;
+    return [...fromSettings, "graph"];
+  }, [settings, gitGraphEnabled]);
   const hiddenPanelsRef = useRef(hiddenPanels);
   hiddenPanelsRef.current = hiddenPanels;
 
@@ -781,6 +798,9 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
       } else if (key === "b" && !e.shiftKey && api) {
         e.preventDefault();
         if (!hiddenPanelsRef.current.includes("browser")) api.getPanel("browser")?.api.setActive();
+      } else if (key === "y" && !e.shiftKey && api) {
+        e.preventDefault();
+        if (!hiddenPanelsRef.current.includes("graph")) api.getPanel("graph")?.api.setActive();
       } else if (key === "-") {
         e.preventDefault();
         window.dispatchEvent(new CustomEvent("band:editor-go-back"));
@@ -852,6 +872,9 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
       api.getPanel("browser")?.api.updateParameters({
         workspaceId,
       });
+      api.getPanel("graph")?.api.updateParameters({
+        workspaceId,
+      });
     },
     [
       workspaceId,
@@ -889,6 +912,7 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
         files: "Files",
         terminal: "Terminal",
         browser: "Browser",
+        graph: "Graph",
       };
 
       const opts: Record<string, unknown> = {
@@ -1002,6 +1026,28 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
             id: "browser",
             component: "browser",
             title: "Browser",
+            params: { workspaceId },
+            position: { referencePanel: "chat", direction: "right" },
+          });
+          rightGroupRef = "browser";
+        }
+      }
+
+      if (!hidden.includes("graph")) {
+        if (rightGroupRef) {
+          api.addPanel({
+            id: "graph",
+            component: "graph",
+            title: "Graph",
+            params: { workspaceId },
+            position: { referencePanel: rightGroupRef, direction: "within" },
+            inactive: true,
+          });
+        } else {
+          api.addPanel({
+            id: "graph",
+            component: "graph",
+            title: "Graph",
             params: { workspaceId },
             position: { referencePanel: "chat", direction: "right" },
           });

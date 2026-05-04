@@ -1,6 +1,6 @@
-import { FolderOpen, GitCompare, MessageSquare } from "lucide-react";
+import { FolderOpen, GitBranch, GitCompare, MessageSquare } from "lucide-react";
 
-export type WorkspaceTab = "chat" | "diff" | "code";
+export type WorkspaceTab = "chat" | "diff" | "code" | "graph";
 
 interface WorkspaceTabNavProps {
   activeTab: WorkspaceTab;
@@ -8,12 +8,15 @@ interface WorkspaceTabNavProps {
   /** When provided, tabs render as `<a>` links instead of buttons. */
   tabHrefs?: Partial<Record<WorkspaceTab, string>>;
   diffFileCount?: number;
+  /** When false, hides the experimental Graph tab. Defaults to true. */
+  showGraphTab?: boolean;
 }
 
-const tabs: { id: WorkspaceTab; label: string; icon: typeof MessageSquare }[] = [
+const allTabs: { id: WorkspaceTab; label: string; icon: typeof MessageSquare }[] = [
   { id: "chat", label: "Chat", icon: MessageSquare },
   { id: "diff", label: "Changes", icon: GitCompare },
   { id: "code", label: "Files", icon: FolderOpen },
+  { id: "graph", label: "Graph", icon: GitBranch },
 ];
 
 export function WorkspaceTabNav({
@@ -21,7 +24,9 @@ export function WorkspaceTabNav({
   onTabChange,
   tabHrefs,
   diffFileCount,
+  showGraphTab = true,
 }: WorkspaceTabNavProps) {
+  const tabs = showGraphTab ? allTabs : allTabs.filter((t) => t.id !== "graph");
   return (
     <div className="flex shrink-0 border-b border-border">
       {tabs.map((tab) => {
