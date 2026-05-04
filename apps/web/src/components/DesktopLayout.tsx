@@ -10,10 +10,10 @@ import {
 } from "../lib/sidebar-width";
 
 interface DesktopLayoutProps {
-  toolbarExtra?: ReactNode;
+  toolbarMenuItems?: ReactNode;
 }
 
-export function DesktopLayout({ toolbarExtra }: DesktopLayoutProps) {
+export function DesktopLayout({ toolbarMenuItems }: DesktopLayoutProps) {
   const savedWidth = loadSidebarWidth();
   const defaultLayout = savedWidth ? { sidebar: savedWidth, main: 100 - savedWidth } : undefined;
   const skipFirstLayoutCallback = useRef(true);
@@ -43,7 +43,7 @@ export function DesktopLayout({ toolbarExtra }: DesktopLayoutProps) {
           collapsedSize="0%"
         >
           <div className="h-full border-r border-border overflow-hidden">
-            <DashboardShell toolbarExtra={toolbarExtra} />
+            <DashboardShell toolbarMenuItems={toolbarMenuItems} />
           </div>
         </Panel>
         <Separator className="w-[3px] bg-transparent hover:bg-accent-foreground/20 active:bg-accent-foreground/30 transition-colors cursor-col-resize" />

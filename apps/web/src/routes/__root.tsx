@@ -31,7 +31,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Group, Panel, Separator, usePanelRef } from "react-resizable-panels";
 import { DockviewInstanceManager } from "../components/DockviewInstanceManager";
 import { type PanelItem, TauriTitleBar } from "../components/TauriTitleBar";
-import { ToolbarButtons } from "../components/ToolbarButtons";
+import { ToolbarOverflowMenuItems, ToolbarOverflowProvider } from "../components/ToolbarButtons";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useNavigationHistory } from "../hooks/useNavigationHistory";
 import { useZoom } from "../hooks/useZoom";
@@ -304,52 +304,57 @@ function AppShell() {
   }
 
   return (
-    <div className="flex flex-col h-dvh w-full overflow-hidden bg-background text-foreground">
-      {isTauri && (
-        <TauriTitleBar
-          onToggleSidebar={toggleSidebar}
-          sidebarCollapsed={sidebarCollapsed}
-          workspaceName={activeWorkspaceId ?? undefined}
-          workspacePath={activeWorkspaceId ? workspacePath : undefined}
-          onCopyPath={activeWorkspaceId ? handleCopyPath : undefined}
-          panelItems={activeWorkspaceId ? panelItems : undefined}
-          hiddenPanels={activeWorkspaceId ? hiddenPanels : undefined}
-          onTogglePanelVisibility={activeWorkspaceId ? handleTogglePanelVisibility : undefined}
-        />
-      )}
-      <div className="flex-1 min-h-0 overflow-hidden">
-        <Group
-          orientation="horizontal"
-          defaultLayout={defaultLayout}
-          onLayoutChanged={handleSidebarResize}
-        >
-          <Panel
-            id="sidebar"
-            defaultSize={SIDEBAR_MIN_SIZE}
-            minSize={SIDEBAR_MIN_SIZE}
-            maxSize={SIDEBAR_MAX_SIZE}
-            collapsible
-            collapsedSize="0%"
-            panelRef={sidebarPanelRef}
-            onResize={(size) => {
-              if (size.asPercentage === 0) handleSidebarCollapse();
-              else handleSidebarExpand();
-            }}
+    <ToolbarOverflowProvider>
+      <div className="flex flex-col h-dvh w-full overflow-hidden bg-background text-foreground">
+        {isTauri && (
+          <TauriTitleBar
+            onToggleSidebar={toggleSidebar}
+            sidebarCollapsed={sidebarCollapsed}
+            workspaceName={activeWorkspaceId ?? undefined}
+            workspacePath={activeWorkspaceId ? workspacePath : undefined}
+            onCopyPath={activeWorkspaceId ? handleCopyPath : undefined}
+            panelItems={activeWorkspaceId ? panelItems : undefined}
+            hiddenPanels={activeWorkspaceId ? hiddenPanels : undefined}
+            onTogglePanelVisibility={activeWorkspaceId ? handleTogglePanelVisibility : undefined}
+          />
+        )}
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <Group
+            orientation="horizontal"
+            defaultLayout={defaultLayout}
+            onLayoutChanged={handleSidebarResize}
           >
-            <div className="h-full border-r border-border overflow-hidden">
-              <DashboardShell toolbarExtra={<ToolbarButtons />} hideTitleBar={isTauri} />
-            </div>
-          </Panel>
-          <Separator className="w-[3px] bg-transparent hover:bg-accent-foreground/20 active:bg-accent-foreground/30 transition-colors cursor-col-resize" />
-          <Panel id="main" minSize="20%">
-            <div className="h-full min-w-0 overflow-hidden relative">
-              <Outlet />
-              <DockviewInstanceManager />
-            </div>
-          </Panel>
-        </Group>
+            <Panel
+              id="sidebar"
+              defaultSize={SIDEBAR_MIN_SIZE}
+              minSize={SIDEBAR_MIN_SIZE}
+              maxSize={SIDEBAR_MAX_SIZE}
+              collapsible
+              collapsedSize="0%"
+              panelRef={sidebarPanelRef}
+              onResize={(size) => {
+                if (size.asPercentage === 0) handleSidebarCollapse();
+                else handleSidebarExpand();
+              }}
+            >
+              <div className="h-full border-r border-border overflow-hidden">
+                <DashboardShell
+                  toolbarMenuItems={<ToolbarOverflowMenuItems />}
+                  hideTitleBar={isTauri}
+                />
+              </div>
+            </Panel>
+            <Separator className="w-[3px] bg-transparent hover:bg-accent-foreground/20 active:bg-accent-foreground/30 transition-colors cursor-col-resize" />
+            <Panel id="main" minSize="20%">
+              <div className="h-full min-w-0 overflow-hidden relative">
+                <Outlet />
+                <DockviewInstanceManager />
+              </div>
+            </Panel>
+          </Group>
+        </div>
       </div>
-    </div>
+    </ToolbarOverflowProvider>
   );
 }
 

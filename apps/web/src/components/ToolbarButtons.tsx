@@ -1,61 +1,68 @@
-import {
-  Button,
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@band-app/ui";
-import { ListTodo, Timer, Zap } from "lucide-react";
-import { useCallback, useState } from "react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DropdownMenuItem } from "@band-app/ui";
+import { Globe, ListTodo, Timer } from "lucide-react";
+import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from "react";
+import { useTunnel } from "@/hooks/use-tunnel";
 import { CronjobsPageContent } from "./CronjobsPageContent";
+import { PrereqDialog } from "./PrereqDialog";
 import { TasksPageContent } from "./TasksPageContent";
-import { TunnelToolbarButton } from "./TunnelToolbarButton";
+import { TunnelDialog } from "./TunnelDialog";
 
-export function ToolbarButtons() {
+interface ToolbarOverflowContextValue {
+  openTasks: () => void;
+  openCronjobs: () => void;
+  openTunnel: () => void;
+  /** Tunnel state hint for the menu item (so we can show running/error coloring). */
+  tunnelStatus: "idle" | "running" | "error";
+}
+
+const ToolbarOverflowContext = createContext<ToolbarOverflowContextValue | null>(null);
+
+/**
+ * Owns the dialog state for the toolbar overflow menu (Tasks, Cronjobs, Mobile access).
+ *
+ * The dialogs are rendered as siblings to `children`, so they remain mounted even when
+ * the parent overflow dropdown closes. Menu items live inside the dropdown via
+ * <ToolbarOverflowMenuItems /> and call the context handlers to open the dialogs.
+ */
+export function ToolbarOverflowProvider({ children }: { children: ReactNode }) {
   const [showTasksDialog, setShowTasksDialog] = useState(false);
   const [showCronjobsDialog, setShowCronjobsDialog] = useState(false);
 
-  const handleTasksClick = useCallback(() => setShowTasksDialog(true), []);
-  const handleCronjobsClick = useCallback(() => setShowCronjobsDialog(true), []);
+  const {
+    webServerRunning,
+    tunnelUrl,
+    tunnelError,
+    setTunnelUrl,
+    showPrereq,
+    setShowPrereq,
+    onPrereqReady,
+    showDialog: showTunnelDialog,
+    setShowDialog: setShowTunnelDialog,
+    openDialog: openTunnelDialog,
+    handleStopped: handleTunnelStopped,
+  } = useTunnel();
+
+  const openTasks = useCallback(() => setShowTasksDialog(true), []);
+  const openCronjobs = useCallback(() => setShowCronjobsDialog(true), []);
+  const openTunnel = useCallback(() => openTunnelDialog(), [openTunnelDialog]);
+
+  const tunnelStatus: ToolbarOverflowContextValue["tunnelStatus"] = tunnelError
+    ? "error"
+    : webServerRunning
+      ? "running"
+      : "idle";
+
+  const value = useMemo(
+    () => ({ openTasks, openCronjobs, openTunnel, tunnelStatus }),
+    [openTasks, openCronjobs, openTunnel, tunnelStatus],
+  );
 
   return (
-    <>
-      <DropdownMenu>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <DropdownMenuTrigger asChild>
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                className="text-muted-foreground"
-                aria-label="Run agent"
-              >
-                <Zap className="size-5" />
-              </Button>
-            </DropdownMenuTrigger>
-          </TooltipTrigger>
-          <TooltipContent>Run agent</TooltipContent>
-        </Tooltip>
-        <DropdownMenuContent align="start">
-          <DropdownMenuItem onClick={handleTasksClick}>
-            <ListTodo className="size-4" />
-            Tasks
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={handleCronjobsClick}>
-            <Timer className="size-4" />
-            Cronjobs
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <TunnelToolbarButton />
+    <ToolbarOverflowContext.Provider value={value}>
+      {children}
 
+      {/* Always-mounted dialogs — siblings of `children` so the dropdown closing
+          doesn't tear them down. */}
       <Dialog open={showTasksDialog} onOpenChange={setShowTasksDialog}>
         <DialogContent className="sm:max-w-6xl h-[80vh] flex flex-col p-0 gap-0">
           <DialogHeader className="px-6 pt-6 pb-4 border-b border-border/50 shrink-0">
@@ -73,6 +80,53 @@ export function ToolbarButtons() {
           <CronjobsPageContent />
         </DialogContent>
       </Dialog>
+
+      <PrereqDialog open={showPrereq} onOpenChange={setShowPrereq} onReady={onPrereqReady} />
+      <TunnelDialog
+        open={showTunnelDialog}
+        onOpenChange={setShowTunnelDialog}
+        onStopped={handleTunnelStopped}
+        initialUrl={tunnelUrl}
+        onTunnelUrl={setTunnelUrl}
+      />
+    </ToolbarOverflowContext.Provider>
+  );
+}
+
+/**
+ * Menu items for the dashboard's overflow ("3 dots") dropdown.
+ *
+ * Must be rendered inside a <ToolbarOverflowProvider>. Returns a fragment of
+ * DropdownMenuItem so it can be embedded directly in a DropdownMenuContent.
+ */
+export function ToolbarOverflowMenuItems() {
+  const ctx = useContext(ToolbarOverflowContext);
+  if (!ctx) {
+    throw new Error("ToolbarOverflowMenuItems must be used inside ToolbarOverflowProvider");
+  }
+
+  return (
+    <>
+      <DropdownMenuItem onClick={ctx.openTasks}>
+        <ListTodo className="size-4" />
+        Tasks
+      </DropdownMenuItem>
+      <DropdownMenuItem onClick={ctx.openCronjobs}>
+        <Timer className="size-4" />
+        Cronjobs
+      </DropdownMenuItem>
+      <DropdownMenuItem onClick={ctx.openTunnel}>
+        <Globe
+          className={
+            ctx.tunnelStatus === "error"
+              ? "size-4 text-red-500"
+              : ctx.tunnelStatus === "running"
+                ? "size-4 text-green-500"
+                : "size-4"
+          }
+        />
+        {ctx.tunnelStatus === "running" ? "Mobile access" : "Start tunnel"}
+      </DropdownMenuItem>
     </>
   );
 }

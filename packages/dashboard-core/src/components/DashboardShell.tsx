@@ -16,8 +16,8 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@band-app/ui";
-import { Check, FolderPlus, Pencil, Plus, Settings, Tag, X } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { Check, FolderPlus, Menu, Pencil, Plus, Settings, Tag, X } from "lucide-react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCliSetup } from "../hooks/use-cli-setup";
 import { useHooksSetup } from "../hooks/use-hooks-setup";
 import { useProjects } from "../hooks/use-projects";
@@ -33,14 +33,16 @@ import { ProjectList } from "./ProjectList";
 import { SettingsPage } from "./SettingsPage";
 
 interface DashboardShellProps {
-  toolbarExtra?: ReactNode;
+  /** Extra menu items rendered inside the toolbar's overflow ("3 dots") dropdown,
+   *  appended after the built-in Edit/Settings entries. */
+  toolbarMenuItems?: ReactNode;
   /** Hide the Tauri title bar (e.g. when the parent renders a full-width one). */
   hideTitleBar?: boolean;
 }
 
 const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
-export function DashboardShell({ toolbarExtra, hideTitleBar }: DashboardShellProps) {
+export function DashboardShell({ toolbarMenuItems, hideTitleBar }: DashboardShellProps) {
   const { projects, isLoading: loading } = useProjects();
   const { settings } = useSettingsQuery();
   const labels = settings.labels ?? [];
@@ -90,6 +92,11 @@ export function DashboardShell({ toolbarExtra, hideTitleBar }: DashboardShellPro
 
   const handleSettingsClick = useCallback(() => setShowSettingsDialog(true), []);
 
+  const activeLabel = useMemo(
+    () => (labelFilter ? labels.find((l) => l.id === labelFilter) : null),
+    [labelFilter, labels],
+  );
+
   // Tauri's native menu (Cmd+,) calls `window.__bandOpenSettings()` via
   // webview.eval — same pattern as the zoom menu. Register the global so
   // the menu can pop the in-app dialog instead of spawning a separate window.
@@ -101,6 +108,37 @@ export function DashboardShell({ toolbarExtra, hideTitleBar }: DashboardShellPro
       delete (window as unknown as Record<string, unknown>)[globalKey];
     };
   }, []);
+
+  // Keyboard shortcuts: Cmd+0 → all projects, Cmd+1..9 → nth label.
+  // Skips when focus is in an editable element so it doesn't hijack typing.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
+      if (e.key < "0" || e.key > "9") return;
+
+      const target = e.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable) {
+          return;
+        }
+      }
+
+      const digit = Number(e.key);
+      if (digit === 0) {
+        e.preventDefault();
+        setLabelFilter(null);
+        return;
+      }
+      const lbl = labels[digit - 1];
+      if (lbl) {
+        e.preventDefault();
+        setLabelFilter(lbl.id);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [labels]);
 
   return (
     <div
@@ -118,55 +156,51 @@ export function DashboardShell({ toolbarExtra, hideTitleBar }: DashboardShellPro
         </div>
       )}
 
-      <div className="@container/toolbar flex h-10 shrink-0 items-center justify-between border-b border-border px-4">
-        <div className="flex items-center gap-1">
+      <div className="flex h-10 shrink-0 items-center justify-between border-b border-border px-2">
+        <div className="flex min-w-0 items-center gap-1">
           <DropdownMenu>
             <Tooltip>
               <TooltipTrigger asChild>
                 <DropdownMenuTrigger asChild>
                   <Button size="icon-sm" variant="ghost" className="text-muted-foreground">
-                    <Settings className="size-5" />
+                    <Menu className="size-5" />
                   </Button>
                 </DropdownMenuTrigger>
               </TooltipTrigger>
-              <TooltipContent>Manage</TooltipContent>
+              <TooltipContent>More</TooltipContent>
             </Tooltip>
             <DropdownMenuContent align="start">
               <DropdownMenuItem onClick={() => setEditMode((v) => !v)}>
                 <Pencil className="size-4" />
                 {editMode ? "Done editing" : "Edit list"}
               </DropdownMenuItem>
+              {toolbarMenuItems}
               <DropdownMenuItem onClick={handleSettingsClick}>
                 <Settings className="size-4" />
                 Settings
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          {toolbarExtra}
           {labels.length > 0 && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
                   size="sm"
                   variant="ghost"
-                  className={`text-sm h-8 px-2 gap-1.5 ${labelFilter ? "bg-accent text-accent-foreground" : "text-muted-foreground"}`}
+                  className={`min-w-0 text-sm h-8 px-2 gap-1.5 ${labelFilter ? "bg-accent text-accent-foreground" : "text-muted-foreground"}`}
                 >
-                  {labelFilter ? (
+                  {activeLabel ? (
                     <>
                       <span
                         className="size-2.5 rounded-full shrink-0"
-                        style={{
-                          backgroundColor: labels.find((l) => l.id === labelFilter)?.color,
-                        }}
+                        style={{ backgroundColor: activeLabel.color }}
                       />
-                      <span className="hidden @[19rem]/toolbar:inline">
-                        {labels.find((l) => l.id === labelFilter)?.name}
-                      </span>
+                      <span className="truncate">{activeLabel.name}</span>
                     </>
                   ) : (
                     <>
-                      <Tag className="size-5" />
-                      <span className="hidden @[19rem]/toolbar:inline">All</span>
+                      <Tag className="size-5 shrink-0" />
+                      <span className="truncate">All</span>
                     </>
                   )}
                 </Button>
@@ -174,17 +208,25 @@ export function DashboardShell({ toolbarExtra, hideTitleBar }: DashboardShellPro
               <DropdownMenuContent align="start">
                 <DropdownMenuItem onClick={() => setLabelFilter(null)}>
                   <Tag className="size-3.5 shrink-0 mr-2 text-muted-foreground" />
-                  <span className="flex-1">All</span>
-                  {!labelFilter && <Check className="size-3 ml-2" />}
+                  <span className="truncate">All</span>
+                  {!labelFilter && <Check className="size-3 ml-2 shrink-0" />}
+                  <span className="ml-auto pl-3 text-xs text-muted-foreground tracking-widest">
+                    ⌘0
+                  </span>
                 </DropdownMenuItem>
-                {labels.map((lbl) => (
+                {labels.map((lbl, idx) => (
                   <DropdownMenuItem key={lbl.id} onClick={() => setLabelFilter(lbl.id)}>
                     <span
                       className="size-2.5 rounded-full shrink-0 mr-2"
                       style={{ backgroundColor: lbl.color }}
                     />
-                    <span className="flex-1">{lbl.name}</span>
-                    {labelFilter === lbl.id && <Check className="size-3 ml-2" />}
+                    <span className="truncate">{lbl.name}</span>
+                    {labelFilter === lbl.id && <Check className="size-3 ml-2 shrink-0" />}
+                    {idx < 9 && (
+                      <span className="ml-auto pl-3 text-xs text-muted-foreground tracking-widest">
+                        ⌘{idx + 1}
+                      </span>
+                    )}
                   </DropdownMenuItem>
                 ))}
               </DropdownMenuContent>
