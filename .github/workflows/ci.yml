@@ -76,6 +76,11 @@ jobs:
         with:
           node-version: 22
 
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.13
+
       - name: Build CLI
         run: cargo build --release --manifest-path apps/cli/Cargo.toml
 

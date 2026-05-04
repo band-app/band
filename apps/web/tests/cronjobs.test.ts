@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
+import { SERVER_RUNTIME, SERVER_SCRIPT } from "./helpers/server-runtime";
 
 const PROJECT_ROOT = join(import.meta.dirname, "..");
 const FAKE_AGENT_PATH = join(import.meta.dirname, "fake-agent.mjs");
@@ -45,7 +46,7 @@ async function startServer(
   const port = await getRandomPort();
 
   return new Promise((resolve, reject) => {
-    const child = spawn("node", ["dist/start-server.mjs"], {
+    const child = spawn(SERVER_RUNTIME, [SERVER_SCRIPT], {
       cwd: PROJECT_ROOT,
       env: {
         ...process.env,

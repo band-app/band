@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
+import { SERVER_RUNTIME, SERVER_SCRIPT } from "./helpers/server-runtime";
 
 // Integration tests for issue #344 — persisted activeSessionSummary on the
 // chat record + lazy-loading of sessions.list.
@@ -67,7 +68,7 @@ async function startServer(opts: { tmpHome: string }): Promise<ServerHandle> {
   const port = await getRandomPort();
 
   return new Promise((resolve, reject) => {
-    const child = spawn("node", ["dist/start-server.mjs"], {
+    const child = spawn(SERVER_RUNTIME, [SERVER_SCRIPT], {
       cwd: PROJECT_ROOT,
       env: {
         ...process.env,

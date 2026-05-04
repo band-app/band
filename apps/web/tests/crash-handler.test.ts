@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { SERVER_RUNTIME } from "./helpers/server-runtime";
 
 // The real built server entry point — same binary the Tauri app spawns.
 const serverScript = join(import.meta.dirname, "../dist/start-server.mjs");
@@ -39,10 +40,14 @@ function runServerWithCrash(
   writeFileSync(triggerPath, triggerCode, "utf-8");
 
   return new Promise((resolve, reject) => {
-    const child = spawn("node", [`--import`, pathToFileURL(triggerPath).href, serverScript], {
-      env: { ...process.env, BAND_HOME: bandHome, PORT: "0" },
-      stdio: "pipe",
-    });
+    const child = spawn(
+      SERVER_RUNTIME,
+      ["--preload", pathToFileURL(triggerPath).href, serverScript],
+      {
+        env: { ...process.env, BAND_HOME: bandHome, PORT: "0" },
+        stdio: "pipe",
+      },
+    );
 
     const timer = setTimeout(() => {
       child.kill("SIGKILL");
