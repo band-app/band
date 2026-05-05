@@ -1,8 +1,8 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import { DatabaseSync } from "node:sqlite";
+import { drizzle } from "drizzle-orm/node-sqlite";
+import { migrate } from "drizzle-orm/node-sqlite/migrator";
 import * as schema from "../../src/lib/db/schema";
 
 const migrationsFolder = join(import.meta.dirname, "../../src/lib/db/migrations");
@@ -29,11 +29,11 @@ export function seedState(tmpHome: string, state: StateData): void {
   const bandDir = join(tmpHome, ".band");
   mkdirSync(bandDir, { recursive: true });
 
-  const sqlite = new Database(join(bandDir, "band.db"));
-  sqlite.pragma("journal_mode = WAL");
-  sqlite.pragma("foreign_keys = ON");
+  const sqlite = new DatabaseSync(join(bandDir, "band.db"));
+  sqlite.exec("PRAGMA journal_mode = WAL");
+  sqlite.exec("PRAGMA foreign_keys = ON");
 
-  const db = drizzle(sqlite, { schema });
+  const db = drizzle({ client: sqlite, schema });
   migrate(db, { migrationsFolder });
 
   db.transaction((tx) => {
@@ -81,11 +81,11 @@ export function seedWorkspaceStatuses(tmpHome: string, statuses: WorkspaceStatus
   const bandDir = join(tmpHome, ".band");
   mkdirSync(bandDir, { recursive: true });
 
-  const sqlite = new Database(join(bandDir, "band.db"));
-  sqlite.pragma("journal_mode = WAL");
-  sqlite.pragma("foreign_keys = ON");
+  const sqlite = new DatabaseSync(join(bandDir, "band.db"));
+  sqlite.exec("PRAGMA journal_mode = WAL");
+  sqlite.exec("PRAGMA foreign_keys = ON");
 
-  const db = drizzle(sqlite, { schema });
+  const db = drizzle({ client: sqlite, schema });
   migrate(db, { migrationsFolder });
 
   const now = Date.now();

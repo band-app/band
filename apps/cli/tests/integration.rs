@@ -147,8 +147,8 @@ impl Drop for TestEnv {
 
 /// Seed the `SQLite` database with Drizzle migrations, a test project, and settings.
 ///
-/// Runs a Node.js script that uses `better-sqlite3` (from the web app's
-/// `node_modules`) to apply migrations and insert seed data.
+/// Runs a Node.js script that uses `node:sqlite` to apply migrations and
+/// insert seed data.
 fn seed_db(band_dir: &Path, repo_path: &Path, settings: &serde_json::Value) {
     let seed_script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seed-db.mjs");
     let output = Command::new("node")
@@ -158,6 +158,7 @@ fn seed_db(band_dir: &Path, repo_path: &Path, settings: &serde_json::Value) {
         .arg(repo_path)
         .arg("main")
         .arg(settings.to_string())
+        .env("NODE_OPTIONS", "--no-warnings=ExperimentalWarning")
         .output()
         .expect("seed-db.mjs failed to execute");
 
@@ -191,8 +192,8 @@ fn query_state(band_dir: &Path) -> serde_json::Value {
     let db_path = band_dir.join("band.db");
     let script = format!(
         r#"
-        const Database = (await import("{bsqlite}")).default;
-        const db = new Database("{db}");
+        const {{ DatabaseSync }} = await import("node:sqlite");
+        const db = new DatabaseSync("{db}");
         const projects = db.prepare(
             "SELECT name, path, default_branch as defaultBranch FROM projects ORDER BY sort_order"
         ).all();
@@ -205,15 +206,12 @@ fn query_state(band_dir: &Path) -> serde_json::Value {
         console.log(JSON.stringify({{ projects }}));
         db.close();
         "#,
-        bsqlite = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../apps/web/node_modules/better-sqlite3/lib/index.js")
-            .to_string_lossy()
-            .replace('\\', "/"),
         db = db_path.to_string_lossy().replace('\\', "/"),
     );
 
     let output = Command::new("node")
         .args(["--input-type=module", "-e", &script])
+        .env("NODE_OPTIONS", "--no-warnings=ExperimentalWarning")
         .output()
         .expect("node query failed");
 
@@ -695,23 +693,20 @@ fn query_agent_status(band_dir: &Path, workspace_id: &str) -> Option<String> {
     let db_path = band_dir.join("band.db");
     let script = format!(
         r#"
-        const Database = (await import("{bsqlite}")).default;
-        const db = new Database("{db}");
+        const {{ DatabaseSync }} = await import("node:sqlite");
+        const db = new DatabaseSync("{db}");
         const row = db.prepare(
             "SELECT agent_status FROM workspace_statuses WHERE workspace_id = ?"
         ).get("{ws}");
         console.log(JSON.stringify({{ status: row ? row.agent_status : null }}));
         db.close();
         "#,
-        bsqlite = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../apps/web/node_modules/better-sqlite3/lib/index.js")
-            .to_string_lossy()
-            .replace('\\', "/"),
         db = db_path.to_string_lossy().replace('\\', "/"),
         ws = workspace_id,
     );
     let output = Command::new("node")
         .args(["--input-type=module", "-e", &script])
+        .env("NODE_OPTIONS", "--no-warnings=ExperimentalWarning")
         .output()
         .expect("query_agent_status failed");
     assert!(

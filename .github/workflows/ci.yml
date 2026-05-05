@@ -76,20 +76,8 @@ jobs:
         with:
           node-version: 22
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.3.13
-
       - name: Build CLI
         run: cargo build --release --manifest-path apps/cli/Cargo.toml
-
-      # node-pty 1.1.0 ships no linux-x64 prebuild and falls back to
-      # `node-gyp rebuild` during `pnpm install`. pnpm/action-setup@v6 no
-      # longer surfaces pnpm's bundled node-gyp on PATH, so we install it
-      # explicitly to keep the install step working on ubuntu-latest.
-      - name: Install node-gyp
-        run: npm install -g node-gyp
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -117,8 +105,6 @@ jobs:
           touch apps/web/dist/start-server.mjs
           TRIPLE="$(rustc -vV | sed -n 's/host: //p')"
           cp apps/cli/target/release/band "apps/dashboard/src-tauri/binaries/band-$TRIPLE"
-          touch "apps/dashboard/src-tauri/binaries/bun-$TRIPLE"
-          chmod +x "apps/dashboard/src-tauri/binaries/bun-$TRIPLE"
           cargo clippy --manifest-path apps/dashboard/src-tauri/Cargo.toml -- -D warnings
 
       - name: Build web (needed by tests)

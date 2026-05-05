@@ -13,7 +13,6 @@ esbuild start-server.ts \
   --outfile=dist/start-server.mjs \
   --external:./server/server.js \
   --external:node-pty \
-  --external:bun:sqlite \
   --banner:js="import{createRequire as __cr}from'module';import{fileURLToPath as __fu}from'url';import{dirname as __dn}from'path';const require=__cr(import.meta.url);const __filename=__fu(import.meta.url);const __dirname=__dn(__filename);"
 
 # Copy native modules into dist/ for self-contained builds (Tauri app).
@@ -58,7 +57,9 @@ if [ "${NPM_PUBLISH:-}" != "1" ]; then
     chmod +x dist/node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true
   fi
 
-  # SQLite uses bun:sqlite (built into Bun runtime) — no native module copy needed.
+  # SQLite is provided by Node's built-in `node:sqlite` (Stability 1.2 RC,
+  # available unflagged since Node 22.13). No native module ships in the
+  # bundle for SQLite — the user's `node` binary supplies it.
 
   # -----------------------------------------------------------------------
   # Bundle typescript-language-server + typescript for LSP support.

@@ -3,9 +3,9 @@ import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import { DatabaseSync } from "node:sqlite";
+import { drizzle } from "drizzle-orm/node-sqlite";
+import { migrate } from "drizzle-orm/node-sqlite/migrator";
 
 const PROJECT_ROOT = join(import.meta.dirname, "../..");
 const MIGRATIONS_FOLDER = join(PROJECT_ROOT, "src/lib/db/migrations");
@@ -38,9 +38,9 @@ export function seedState(tmpHome: string, state: { projects: SeedProject[] }): 
 
   // Also seed the SQLite DB so loadState() finds the projects
   const dbPath = join(tmpHome, ".band", "band.db");
-  const sqlite = new Database(dbPath);
-  sqlite.pragma("journal_mode = WAL");
-  const db = drizzle(sqlite);
+  const sqlite = new DatabaseSync(dbPath);
+  sqlite.exec("PRAGMA journal_mode = WAL");
+  const db = drizzle({ client: sqlite });
   migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
 
   for (let i = 0; i < state.projects.length; i++) {
@@ -88,11 +88,10 @@ export async function startServer(
   const port = await getRandomPort();
 
   return new Promise((resolve, reject) => {
-    // The production bundle imports `bun:sqlite` and is shipped to run under
-    // Bun (see apps/web/README.md). Spawning it under Node would throw at
-    // module load. Vitest integration tests use the same approach via
-    // `tests/helpers/server-runtime.ts`.
-    const child = spawn("bun", ["dist/start-server.mjs"], {
+    // The production bundle runs under Node (see apps/web/README.md) and
+    // uses Node's built-in `node:sqlite` for storage. Vitest integration
+    // tests use the same spawn pattern via `tests/helpers/server-runtime.ts`.
+    const child = spawn("node", ["dist/start-server.mjs"], {
       cwd: PROJECT_ROOT,
       env: {
         ...process.env,

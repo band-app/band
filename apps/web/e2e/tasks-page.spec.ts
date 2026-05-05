@@ -1,9 +1,9 @@
 import { rmSync } from "node:fs";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { expect, type Page, test } from "@playwright/test";
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import { drizzle } from "drizzle-orm/node-sqlite";
+import { migrate } from "drizzle-orm/node-sqlite/migrator";
 import {
   createTmpHome,
   type ServerHandle,
@@ -32,9 +32,9 @@ function seedTask(
   },
 ): void {
   const dbPath = join(tmpHome, ".band", "band.db");
-  const sqlite = new Database(dbPath);
-  sqlite.pragma("journal_mode = WAL");
-  const db = drizzle(sqlite);
+  const sqlite = new DatabaseSync(dbPath);
+  sqlite.exec("PRAGMA journal_mode = WAL");
+  const db = drizzle({ client: sqlite });
   migrate(db, { migrationsFolder: join(import.meta.dirname, "../src/lib/db/migrations") });
   sqlite
     .prepare(

@@ -27,16 +27,11 @@ git remote add upstream https://github.com/band-app/band.git
 # Install Rust (if not already installed)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
-# Install Bun (required to run @band-app/server tests and the bundled server)
-curl -fsSL https://bun.sh/install | bash
-
 # Install Node.js dependencies
 pnpm install
 ```
 
-See the [README](README.md) for full prerequisites (Node.js 22+, pnpm 10+, Rust, Bun 1.3+).
-
-Bun is required: `apps/web` uses `bun:sqlite` and ships its own Bun runtime in the desktop bundle. `pnpm test` spawns the web server under Bun, so without Bun on `PATH` the integration tests fail at server startup.
+See the [README](README.md) for full prerequisites (Node.js 22.5+, pnpm 10+, Rust).
 
 ## Making Changes
 

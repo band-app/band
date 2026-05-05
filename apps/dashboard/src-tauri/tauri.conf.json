@@ -7,7 +7,7 @@
     "frontendDist": "http://localhost:3456",
     "devUrl": "http://localhost:3456",
     "beforeDevCommand": "pnpm -w dev:web",
-    "beforeBuildCommand": "pnpm -w build:web && pnpm build && pnpm -w build:cli && pnpm -w download:bun"
+    "beforeBuildCommand": "pnpm -w build:web && pnpm build && pnpm -w build:cli"
   },
   "app": {
     "windows": [
@@ -35,7 +35,7 @@
   "bundle": {
     "active": true,
     "targets": ["app", "dmg"],
-    "externalBin": ["binaries/band", "binaries/bun"],
+    "externalBin": ["binaries/band"],
     "publisher": "Band",
     "copyright": "Copyright © 2026 Band Contributors",
     "category": "DeveloperTool",
