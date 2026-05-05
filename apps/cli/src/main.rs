@@ -39,6 +39,29 @@ enum Commands {
         #[command(subcommand)]
         cmd: TasksCmd,
     },
+    /// Send a message to a workspace chat (defaults to the workspace's active chat panel)
+    Chat {
+        /// Workspace ID (auto-detected from cwd if omitted)
+        workspace_id: Option<String>,
+        /// Message text to send
+        #[arg(long)]
+        message: String,
+        /// Target a specific chat pane instead of the workspace default
+        #[arg(long)]
+        chat_id: Option<String>,
+        /// Maximum number of agentic turns
+        #[arg(long)]
+        max_turns: Option<u32>,
+        /// Agent mode (e.g. 'plan', 'edit')
+        #[arg(long)]
+        mode: Option<String>,
+        /// Model to use for the coding agent (e.g. 'claude-opus-4-20250514')
+        #[arg(long)]
+        model: Option<String>,
+        /// Coding agent ID (e.g. 'claude-code')
+        #[arg(long)]
+        agent: Option<String>,
+    },
     /// Manage chat panes (multi-agent)
     Chats {
         #[command(subcommand)]
@@ -154,26 +177,6 @@ enum TasksCmd {
         /// Filter by status (running, completed, failed)
         #[arg(long)]
         status: Option<String>,
-    },
-    /// Submit a new task to the coding agent
-    Create {
-        /// Workspace ID
-        workspace_id: String,
-        /// Prompt text to send to the agent
-        #[arg(long)]
-        prompt: String,
-        /// Maximum number of agentic turns
-        #[arg(long)]
-        max_turns: Option<u32>,
-        /// Agent mode (e.g. 'plan', 'edit')
-        #[arg(long)]
-        mode: Option<String>,
-        /// Model to use for the coding agent (e.g. 'claude-opus-4-20250514')
-        #[arg(long)]
-        model: Option<String>,
-        /// Coding agent ID to use (e.g. 'claude-code')
-        #[arg(long)]
-        agent: Option<String>,
     },
     /// Cancel a running task
     Cancel {
@@ -508,25 +511,27 @@ fn main() {
             TasksCmd::List { project, status } => {
                 cmd_tasks_list(project.as_deref(), status.as_deref())
             }
-            TasksCmd::Create {
-                workspace_id,
-                prompt,
-                max_turns,
-                mode,
-                model,
-                agent,
-            } => cmd_tasks_create(
-                &workspace_id,
-                &prompt,
-                max_turns,
-                mode.as_deref(),
-                model.as_deref(),
-                agent.as_deref(),
-            ),
             TasksCmd::Cancel { task_id } => cmd_tasks_cancel(&task_id),
             TasksCmd::Rerun { task_id } => cmd_tasks_rerun(&task_id),
             TasksCmd::Watch { .. } => unreachable!(),
         },
+        Commands::Chat {
+            workspace_id,
+            message,
+            chat_id,
+            max_turns,
+            mode,
+            model,
+            agent,
+        } => cmd_chat(
+            workspace_id.as_deref(),
+            &message,
+            chat_id.as_deref(),
+            max_turns,
+            mode.as_deref(),
+            model.as_deref(),
+            agent.as_deref(),
+        ),
         Commands::Chats { cmd } => match cmd {
             ChatsCmd::List { workspace_id } => cmd_chats_list(&workspace_id),
             ChatsCmd::Create {
@@ -917,45 +922,6 @@ fn cmd_tasks_list(project: Option<&str>, status: Option<&str>) -> Result<Command
     })
 }
 
-fn cmd_tasks_create(
-    workspace_id: &str,
-    prompt: &str,
-    max_turns: Option<u32>,
-    mode: Option<&str>,
-    model: Option<&str>,
-    agent: Option<&str>,
-) -> Result<CommandResult, String> {
-    let client = api::ApiClient::from_settings()?;
-    let mut input = serde_json::json!({
-        "workspaceId": workspace_id,
-        "prompt": prompt,
-    });
-    if let Some(max_turns) = max_turns {
-        input["maxTurns"] = serde_json::json!(max_turns);
-    }
-    if let Some(mode) = mode {
-        input["mode"] = serde_json::json!(mode);
-    }
-    if let Some(model) = model {
-        input["model"] = serde_json::json!(model);
-    }
-    if let Some(agent) = agent {
-        input["codingAgentId"] = serde_json::json!(agent);
-    }
-    let data = client.trpc_mutate("tasks.submit", &input)?;
-
-    let id = data.get("id").and_then(|i| i.as_str()).unwrap_or("");
-    let ws = data
-        .get("workspaceId")
-        .and_then(|w| w.as_str())
-        .unwrap_or("");
-
-    Ok(CommandResult {
-        text: format!("{id}\n"),
-        json: serde_json::json!({"id": id, "workspaceId": ws}),
-    })
-}
-
 fn cmd_tasks_cancel(task_id: &str) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
     client.trpc_mutate("tasks.cancel", &serde_json::json!({"taskId": task_id}))?;
@@ -1083,6 +1049,64 @@ fn cmd_chats_remove(chat_id: &str) -> Result<CommandResult, String> {
     Ok(CommandResult {
         text: format!("Chat {chat_id} removed\n"),
         json: serde_json::json!({"ok": true, "chatId": chat_id}),
+    })
+}
+
+/// Send a message to a workspace chat, defaulting to the workspace's active
+/// chat panel when no `--chat-id` is provided. Returns the task id.
+///
+/// Server-side, `tasks.submit` resolves the default chat via
+/// `getOrCreateDefaultChat`, which honors the saved chat layout's active
+/// panel. So passing no `chatId` here matches the chat the user is looking
+/// at in the dashboard.
+fn cmd_chat(
+    workspace_id: Option<&str>,
+    message: &str,
+    chat_id: Option<&str>,
+    max_turns: Option<u32>,
+    mode: Option<&str>,
+    model: Option<&str>,
+    agent: Option<&str>,
+) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let workspace_id = resolve_workspace_id(&client, None, workspace_id)?;
+
+    let mut input = serde_json::json!({
+        "workspaceId": workspace_id,
+        "prompt": message,
+    });
+    if let Some(chat_id) = chat_id {
+        input["chatId"] = serde_json::json!(chat_id);
+    }
+    if let Some(max_turns) = max_turns {
+        input["maxTurns"] = serde_json::json!(max_turns);
+    }
+    if let Some(mode) = mode {
+        input["mode"] = serde_json::json!(mode);
+    }
+    if let Some(model) = model {
+        input["model"] = serde_json::json!(model);
+    }
+    if let Some(agent) = agent {
+        input["codingAgentId"] = serde_json::json!(agent);
+    }
+
+    let data = client.trpc_mutate("tasks.submit", &input)?;
+
+    let id = data.get("id").and_then(|i| i.as_str()).unwrap_or("");
+    let ws = data
+        .get("workspaceId")
+        .and_then(|w| w.as_str())
+        .unwrap_or("");
+    let resolved_chat_id = data.get("chatId").and_then(|c| c.as_str()).unwrap_or("");
+
+    Ok(CommandResult {
+        text: format!("{id}\n"),
+        json: serde_json::json!({
+            "id": id,
+            "workspaceId": ws,
+            "chatId": resolved_chat_id,
+        }),
     })
 }
 
@@ -2400,7 +2424,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "--model", "type": "string", "required": false, "description": "Model to use for the coding agent (e.g. 'claude-opus-4-20250514')"},
                 {"name": "--agent", "type": "string", "required": false, "description": "Coding agent ID to use (overrides workspace default)"},
             ],
-            "notes": "Returns the worktree path. Idempotent — creating an existing workspace returns its path. Runs `.band/config.json` `setup` script if present (non-fatal).\n\n**Always use `--prompt` when the user wants work to begin immediately.** This submits a task to the coding agent right after workspace creation, so the agent starts working without a separate step. Only omit `--prompt` when the user explicitly wants to create the workspace for manual/later use.\n\nWhen to use `--prompt` (most cases):\n```sh\n# User says \"create a workspace and implement X\" or \"start working on X\"\nband workspaces create my-app feat/auth --prompt \"Implement GitHub issue #42: Add JWT authentication\"\n\n# User says \"create a workspace for issue #99 and start implementing\"\nband workspaces create my-app fix/bug-99 --prompt \"Fix issue #99: login redirect loop. See https://github.com/org/repo/issues/99\"\n```\n\nWhen to omit `--prompt` (rare — user explicitly wants no task):\n```sh\n# User says \"just create a workspace, I'll work on it myself\"\nband workspaces create my-app feat/experiment\n```\n\n**Do NOT create a workspace without `--prompt` and then separately run `band tasks create`.** That is two steps for what `--prompt` does in one."
+            "notes": "Returns the worktree path. Idempotent — creating an existing workspace returns its path. Runs `.band/config.json` `setup` script if present (non-fatal).\n\n**Always use `--prompt` when the user wants work to begin immediately.** This submits a task to the coding agent right after workspace creation, so the agent starts working without a separate step. Only omit `--prompt` when the user explicitly wants to create the workspace for manual/later use.\n\nWhen to use `--prompt` (most cases):\n```sh\n# User says \"create a workspace and implement X\" or \"start working on X\"\nband workspaces create my-app feat/auth --prompt \"Implement GitHub issue #42: Add JWT authentication\"\n\n# User says \"create a workspace for issue #99 and start implementing\"\nband workspaces create my-app fix/bug-99 --prompt \"Fix issue #99: login redirect loop. See https://github.com/org/repo/issues/99\"\n```\n\nWhen to omit `--prompt` (rare — user explicitly wants no task):\n```sh\n# User says \"just create a workspace, I'll work on it myself\"\nband workspaces create my-app feat/experiment\n```\n\n**Do NOT create a workspace without `--prompt` and then separately run `band chat`.** That is two steps for what `--prompt` does in one."
         }),
         serde_json::json!({
             "name": "workspaces remove",
@@ -2443,19 +2467,6 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "--status", "type": "string", "required": false, "description": "Filter by status (running, completed, failed)"},
             ],
             "notes": "Text output: `ID\\tSTATUS\\tWORKSPACE\\tPROMPT` (tab-separated table).\nJSON output: `{\"tasks\": [{\"id\": \"...\", \"status\": \"...\", \"project\": \"...\", \"branch\": \"...\", \"prompt\": \"...\"}]}`"
-        }),
-        serde_json::json!({
-            "name": "tasks create",
-            "description": "Submit a new task to the coding agent",
-            "parameters": [
-                {"name": "workspace_id", "type": "string", "required": true, "positional": true, "description": "Workspace ID"},
-                {"name": "--prompt", "type": "string", "required": true, "description": "Prompt text to send to the agent"},
-                {"name": "--max-turns", "type": "integer", "required": false, "description": "Maximum number of agentic turns"},
-                {"name": "--mode", "type": "string", "required": false, "description": "Agent mode (e.g. 'plan', 'edit')"},
-                {"name": "--model", "type": "string", "required": false, "description": "Model to use for the coding agent (e.g. 'claude-opus-4-20250514')"},
-                {"name": "--agent", "type": "string", "required": false, "description": "Coding agent ID to use (overrides workspace default)"},
-            ],
-            "notes": "Submits a new task to the coding agent. Returns the task ID.\nJSON output: `{\"id\": \"...\", \"workspaceId\": \"...\"}`"
         }),
         serde_json::json!({
             "name": "tasks cancel",
@@ -2531,6 +2542,20 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "key", "type": "string", "required": true, "positional": true, "description": "Storage key (project name or workspace ID)"},
                 {"name": "id", "type": "string", "required": true, "positional": true, "description": "Cronjob ID (e.g. cj_1234567890)"},
             ]
+        }),
+        serde_json::json!({
+            "name": "chat",
+            "description": "Send a message to a workspace chat (defaults to the workspace's active chat panel)",
+            "parameters": [
+                {"name": "workspace_id", "type": "string", "required": false, "positional": true, "description": "Workspace ID (auto-detected from cwd if omitted)"},
+                {"name": "--message", "type": "string", "required": true, "description": "Message text to send"},
+                {"name": "--chat-id", "type": "string", "required": false, "description": "Target a specific chat pane instead of the workspace default"},
+                {"name": "--max-turns", "type": "integer", "required": false, "description": "Maximum number of agentic turns"},
+                {"name": "--mode", "type": "string", "required": false, "description": "Agent mode (e.g. 'plan', 'edit')"},
+                {"name": "--model", "type": "string", "required": false, "description": "Model to use for the coding agent (e.g. 'claude-opus-4-20250514')"},
+                {"name": "--agent", "type": "string", "required": false, "description": "Coding agent ID to use (overrides workspace default)"},
+            ],
+            "notes": "Sends a message to the workspace's chat. When `--chat-id` is omitted, the server resolves the workspace's *active* chat panel (the tab the user last focused in the dashboard), falling back to the first panel in the saved layout, then to the first chat in the registry, and finally creating a new \"Chat\" panel if the workspace has none. This means CLI prompts land in the same conversation the user is looking at.\n\nReturns the task ID.\nJSON output: `{\"id\": \"tsk_...\", \"workspaceId\": \"...\", \"chatId\": \"chat_...\"}`\n\nReplaces the removed `tasks create` command. Use `--chat-id` to target a specific chat pane (look it up with `band chats list <workspace_id>`)."
         }),
         serde_json::json!({
             "name": "chats list",

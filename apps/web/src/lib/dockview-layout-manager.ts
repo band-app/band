@@ -95,6 +95,49 @@ function findFirstLeaf(node: GridNode): LeafData | null {
   return null;
 }
 
+function findLeafById(node: GridNode, groupId: string): LeafData | null {
+  if (isLeaf(node)) return node.data.id === groupId ? node.data : null;
+  if (isBranch(node)) {
+    for (const child of node.data) {
+      const found = findLeafById(child, groupId);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+/**
+ * Pick the panel a deterministic "default" lookup should target.
+ *
+ * Preference order:
+ *   1. The `activeView` of the layout's `activeGroup` (the panel the user
+ *      last had focus on).
+ *   2. The `activeView` of the first leaf (first group in the tree).
+ *   3. The first entry of `views` in the first leaf.
+ *
+ * Returns null if no panel can be resolved (empty/invalid layout).
+ */
+export function defaultPanelIdFromLayout(layout: unknown): string | null {
+  if (!layout || !isDockviewLayout(layout)) return null;
+
+  if (layout.activeGroup) {
+    const leaf = findLeafById(layout.grid.root, layout.activeGroup);
+    if (leaf) {
+      if (leaf.activeView && leaf.views.includes(leaf.activeView)) {
+        return leaf.activeView;
+      }
+      if (leaf.views.length > 0) return leaf.views[0];
+    }
+  }
+
+  const firstLeaf = findFirstLeaf(layout.grid.root);
+  if (!firstLeaf) return null;
+  if (firstLeaf.activeView && firstLeaf.views.includes(firstLeaf.activeView)) {
+    return firstLeaf.activeView;
+  }
+  return firstLeaf.views[0] ?? null;
+}
+
 function removeFromGrid(node: GridNode, panelId: string): void {
   if (isLeaf(node)) {
     const idx = node.data.views.indexOf(panelId);
