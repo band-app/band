@@ -1044,7 +1044,7 @@ fn chat_returns_task_id() {
     );
 
     let workspace_id = "my-project-feat-task-test";
-    let output = env.band(&["chat", workspace_id, "--message", "write hello world"]);
+    let output = env.band(&["chats", "chat", workspace_id, "--message", "write hello world"]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
     let out = stdout(&output);
@@ -1061,6 +1061,7 @@ fn chat_json_output_includes_chat_id() {
     env.band(&["workspaces", "create", "my-project", "feat/task-json"]);
 
     let output = env.band(&[
+        "chats",
         "chat",
         "my-project-feat-task-json",
         "--message",
@@ -1098,6 +1099,7 @@ fn chat_conflict_returns_error() {
 
     // Submit first task — will start running
     let out1 = env.band(&[
+        "chats",
         "chat",
         "my-project-feat-conflict",
         "--message",
@@ -1107,6 +1109,7 @@ fn chat_conflict_returns_error() {
 
     // Immediately submit a second task — should fail with conflict
     let out2 = env.band(&[
+        "chats",
         "chat",
         "my-project-feat-conflict",
         "--message",
@@ -1424,6 +1427,7 @@ fn chat_creates_default_panel_when_workspace_has_no_chats() {
 
     // No chats yet — `band chat` should lazily create one and target it.
     let output = env.band(&[
+        "chats",
         "chat",
         "my-project-feat-chat-empty",
         "--message",
@@ -1489,6 +1493,7 @@ fn chat_targets_first_chat_when_no_layout() {
     // Without a saved chat layout, `chat` should fall back to the first
     // chat in the registry (insertion order).
     let output = env.band(&[
+        "chats",
         "chat",
         workspace_id,
         "--message",
@@ -1576,6 +1581,7 @@ fn chat_targets_active_panel_from_layout() {
     // `band chat` without --chat-id should target the active panel from
     // the saved layout — not the first chat in insertion order.
     let output = env.band(&[
+        "chats",
         "chat",
         workspace_id,
         "--message",
@@ -1612,6 +1618,7 @@ fn chat_explicit_chat_id_overrides_default() {
     let second_id = second_json["chat"]["id"].as_str().unwrap().to_string();
 
     let output = env.band(&[
+        "chats",
         "chat",
         workspace_id,
         "--chat-id",
@@ -1645,7 +1652,7 @@ fn chat_auto_detects_workspace_from_cwd() {
     // Run `band chat` with NO workspace_id from inside the worktree.
     let output = env.band_in(
         Path::new(&worktree_path),
-        &["chat", "--message", "auto-detect", "--output", "json"],
+        &["chats", "chat", "--message", "auto-detect", "--output", "json"],
     );
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
@@ -1667,7 +1674,7 @@ fn chat_outside_workspace_fails_with_helpful_error() {
     git(&unrelated, &["init", "-b", "main"]);
     git(&unrelated, &["commit", "--allow-empty", "-m", "init"]);
 
-    let output = env.band_in(&unrelated, &["chat", "--message", "hello"]);
+    let output = env.band_in(&unrelated, &["chats", "chat", "--message", "hello"]);
 
     assert!(
         !output.status.success(),
@@ -1711,7 +1718,12 @@ fn schema_lists_all_commands() {
             "expected `{removed}` to be removed: {names:?}"
         );
     }
-    assert!(names.contains(&"chat"), "missing: {names:?}");
+    // The top-level singular `chat` is gone — `chats chat` replaced it.
+    assert!(
+        !names.contains(&"chat"),
+        "expected top-level `chat` to be removed (now `chats chat`): {names:?}"
+    );
+    assert!(names.contains(&"chats chat"), "missing: {names:?}");
     assert!(names.contains(&"chats list"), "missing: {names:?}");
     assert!(names.contains(&"chats watch"), "missing: {names:?}");
     assert!(names.contains(&"chats stop"), "missing: {names:?}");
@@ -2086,16 +2098,12 @@ fn generate_skills_general_skill_excludes_domain_commands() {
     // live in the sibling skills. Cross-reference prose elsewhere in the
     // skill is allowed and verified separately.
     //
-    // The top-level `band chat` (singular) belongs to `band-chat`, so
-    // assert it doesn't appear as a usage line here. We check for the
-    // command-block form `\nband chat ` to avoid matching `band chats ...`
-    // (which has a trailing `s`).
+    // The whole `band chats *` group (including `chats chat`) belongs to
+    // band-chat. The `tasks` subcommand was fully removed.
     assert!(
-        !cmds.contains("\nband chat "),
-        "general skill Commands section leaks top-level `band chat` command"
+        !cmds.contains("\nband chats "),
+        "general skill Commands section leaks `band chats` command"
     );
-    // The `tasks` subcommand was fully removed — neither submission nor
-    // lifecycle commands should appear.
     assert!(
         !cmds.contains("\nband tasks "),
         "general skill Commands section leaks removed `band tasks` command"
@@ -2104,6 +2112,7 @@ fn generate_skills_general_skill_excludes_domain_commands() {
         "band chats list",
         "band chats create",
         "band chats send",
+        "band chats chat",
         "band terminal list",
         "band terminal create",
         "band terminal send",
@@ -2132,13 +2141,10 @@ fn generate_skills_chat_skill_contains_only_chat_commands() {
     let chat = read_skill(out, "band-chat");
     let cmds = commands_section(&chat);
 
-    // Includes both the top-level `band chat` and the chat-pane lifecycle
-    // commands (`band chats ...`).
-    assert!(
-        cmds.contains("\nband chat "),
-        "band-chat Commands section missing top-level `band chat`"
-    );
+    // The entire `band chats *` group lives here, including the message-
+    // sending entry point `chats chat` (formerly the top-level singular).
     for needle in [
+        "band chats chat",
         "band chats list",
         "band chats create",
         "band chats send",

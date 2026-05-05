@@ -3,16 +3,16 @@ name: band-chat
 version: 0.1.0
 description: Send messages to coding agents, stream their output, and manage chat panes via the Band CLI. Use when the user wants to send a chat message, watch a chat's running task, list, create, stop, or remove agent chat panes. Triggers include "send message to chat", "chat with agent", "watch chat", "stream chat output", "create chat pane", "list chats", "stop chat", "remove chat", "submit prompt to workspace".
 allowed-tools: Bash
-argument-hint: chat|chats [args...]
-commands: chat, chats
+argument-hint: chats [args...]
+commands: chats
 ---
 
-# Band Chat
+# Band Chats
 
-Two related surfaces share this skill:
+All chat operations live under a single `band chats <subcommand>` group:
 
-- **`band chat`** — quick top-level command that sends a message to a workspace's *active* chat panel (auto-detects the workspace from the current directory). This is the primary way to drive a coding agent from the CLI.
-- **`band chats ...`** — full chat-pane lifecycle: list, create, send, stop, and remove. Use this when you need to manage multiple chats per workspace or target a specific chat by ID.
+- **`band chats chat`** — the ergonomic entry point. Sends a message to a workspace's *active* chat panel (auto-detects the workspace from the current directory). This is the primary way to drive a coding agent from the CLI.
+- **`band chats list/create/send/watch/stop/remove`** — full chat-pane lifecycle. Use these when you need to manage multiple chats per workspace or target a specific chat by ID.
 
 Chat panes are agent processes attached to a Band workspace. Each chat pane has its own conversation history and can run a different agent, model, or mode.
 
@@ -42,13 +42,13 @@ All commands support `--output json` (or `BAND_OUTPUT=json` env var) for structu
 ```sh
 # From inside a workspace directory: auto-detects the workspace and
 # targets the active chat panel from the saved layout.
-band chat --message "Fix the failing tests"
+band chats chat --message "Fix the failing tests"
 
 # With an explicit workspace
-band chat ws_abc123 --message "Fix the failing tests"
+band chats chat ws_abc123 --message "Fix the failing tests"
 
 # Target a specific chat pane instead of the active one
-band chat ws_abc123 --chat-id chat_abc --message "Investigate the perf regression"
+band chats chat ws_abc123 --chat-id chat_abc --message "Investigate the perf regression"
 ```
 
 ### Send a one-off message to a new chat pane

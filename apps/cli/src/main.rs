@@ -32,29 +32,6 @@ enum Commands {
         #[command(subcommand)]
         cmd: WorkspacesCmd,
     },
-    /// Send a message to a workspace chat (defaults to the workspace's active chat panel)
-    Chat {
-        /// Workspace ID (auto-detected from cwd if omitted)
-        workspace_id: Option<String>,
-        /// Message text to send
-        #[arg(long)]
-        message: String,
-        /// Target a specific chat pane instead of the workspace default
-        #[arg(long)]
-        chat_id: Option<String>,
-        /// Maximum number of agentic turns
-        #[arg(long)]
-        max_turns: Option<u32>,
-        /// Agent mode (e.g. 'plan', 'edit')
-        #[arg(long)]
-        mode: Option<String>,
-        /// Model to use for the coding agent (e.g. 'claude-opus-4-20250514')
-        #[arg(long)]
-        model: Option<String>,
-        /// Coding agent ID (e.g. 'claude-code')
-        #[arg(long)]
-        agent: Option<String>,
-    },
     /// Manage chat panes (multi-agent)
     Chats {
         #[command(subcommand)]
@@ -162,6 +139,29 @@ enum WorkspacesCmd {
 
 #[derive(Subcommand)]
 enum ChatsCmd {
+    /// Send a message to a workspace chat (defaults to the workspace's active chat panel)
+    Chat {
+        /// Workspace ID (auto-detected from cwd if omitted)
+        workspace_id: Option<String>,
+        /// Message text to send
+        #[arg(long)]
+        message: String,
+        /// Target a specific chat pane instead of the workspace default
+        #[arg(long)]
+        chat_id: Option<String>,
+        /// Maximum number of agentic turns
+        #[arg(long)]
+        max_turns: Option<u32>,
+        /// Agent mode (e.g. 'plan', 'edit')
+        #[arg(long)]
+        mode: Option<String>,
+        /// Model to use for the coding agent (e.g. 'claude-opus-4-20250514')
+        #[arg(long)]
+        model: Option<String>,
+        /// Coding agent ID (e.g. 'claude-code')
+        #[arg(long)]
+        agent: Option<String>,
+    },
     /// List chat panes for a workspace
     List {
         /// Workspace ID
@@ -456,24 +456,24 @@ fn main() {
             ),
             WorkspacesCmd::Remove { project, branch } => cmd_workspaces_remove(&project, &branch),
         },
-        Commands::Chat {
-            workspace_id,
-            message,
-            chat_id,
-            max_turns,
-            mode,
-            model,
-            agent,
-        } => cmd_chat(
-            workspace_id.as_deref(),
-            &message,
-            chat_id.as_deref(),
-            max_turns,
-            mode.as_deref(),
-            model.as_deref(),
-            agent.as_deref(),
-        ),
         Commands::Chats { cmd } => match cmd {
+            ChatsCmd::Chat {
+                workspace_id,
+                message,
+                chat_id,
+                max_turns,
+                mode,
+                model,
+                agent,
+            } => cmd_chat(
+                workspace_id.as_deref(),
+                &message,
+                chat_id.as_deref(),
+                max_turns,
+                mode.as_deref(),
+                model.as_deref(),
+                agent.as_deref(),
+            ),
             ChatsCmd::List { workspace_id } => cmd_chats_list(&workspace_id),
             ChatsCmd::Create {
                 workspace_id,
@@ -2133,7 +2133,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             ]
         }),
         serde_json::json!({
-            "name": "chat",
+            "name": "chats chat",
             "description": "Send a message to a workspace chat (defaults to the workspace's active chat panel)",
             "parameters": [
                 {"name": "workspace_id", "type": "string", "required": false, "positional": true, "description": "Workspace ID (auto-detected from cwd if omitted)"},
