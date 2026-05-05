@@ -37,6 +37,16 @@
       "ignoreBinaries": ["vitest"],
       "ignoreDependencies": ["vitest"]
     },
+    "apps/desktop": {
+      "entry": [
+        "src/main/index.ts",
+        "src/preload/index.cts",
+        "tests/**/*.test.ts",
+        "tests/loader.mjs"
+      ],
+      "project": ["src/**/*.{ts,cts}", "tests/**/*.ts"],
+      "ignoreDependencies": ["electron-builder"]
+    },
     "apps/website": {
       "entry": ["src/**/*.{astro,ts,tsx}"],
       "project": ["src/**/*.{astro,ts,tsx}"],

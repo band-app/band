@@ -1,0 +1,23 @@
+{
+  "name": "@band-app/desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Band desktop shell (Electron). Sibling to apps/dashboard during the Tauri→Electron migration (issue #306).",
+  "type": "module",
+  "main": "dist/main/main/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.main.json && tsc -p tsconfig.preload.json && node scripts/postbuild.mjs",
+    "dev": "pnpm build && electron .",
+    "test": "node --experimental-strip-types --import ./tests/register-loader.mjs --test 'tests/**/*.test.ts'",
+    "clean": "rm -rf dist"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.13",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0",
+    "typescript": "^5.7.0"
+  }
+}

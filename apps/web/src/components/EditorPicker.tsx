@@ -31,7 +31,8 @@ import windSurfIcon from "../assets/icons/app/windsurf.svg";
 import xcodeIcon from "../assets/icons/app/xcode.png";
 import zedIcon from "../assets/icons/app/zed.svg";
 import zedDarkIcon from "../assets/icons/app/zed-dark.svg";
-import { isTauri } from "../lib/is-tauri";
+import { invoke as desktopInvoke } from "../lib/desktop-ipc";
+import { isDesktop } from "../lib/is-tauri";
 
 // ---------------------------------------------------------------------------
 // Icon registry
@@ -139,24 +140,22 @@ export function EditorPicker({ workspacePath, onCopyPath }: EditorPickerProps) {
   const [installed, setInstalled] = useState<Record<string, boolean>>({ finder: true });
 
   useEffect(() => {
-    if (!isTauri) return;
+    if (!isDesktop) return;
 
     let cancelled = false;
-    import("@tauri-apps/api/core").then(({ invoke }) => {
-      Promise.all(
-        MAC_APPS.map((app) =>
-          invoke<boolean>("check_app_exists", { appName: app.openWith })
-            .then((ok) => [app.id, ok] as const)
-            .catch(() => [app.id, false] as const),
-        ),
-      ).then((entries) => {
-        if (cancelled) return;
-        const map: Record<string, boolean> = { finder: true };
-        for (const [id, ok] of entries) {
-          map[id] = ok;
-        }
-        setInstalled(map);
-      });
+    Promise.all(
+      MAC_APPS.map((app) =>
+        desktopInvoke<boolean>("check_app_exists", { appName: app.openWith })
+          .then((ok) => [app.id, ok] as const)
+          .catch(() => [app.id, false] as const),
+      ),
+    ).then((entries) => {
+      if (cancelled) return;
+      const map: Record<string, boolean> = { finder: true };
+      for (const [id, ok] of entries) {
+        map[id] = ok;
+      }
+      setInstalled(map);
     });
 
     return () => {
@@ -199,15 +198,15 @@ export function EditorPicker({ workspacePath, onCopyPath }: EditorPickerProps) {
   // Open action
   const openWith = useCallback(
     async (app: AppDef) => {
+      if (!isDesktop) return;
       if (app.id === "finder") {
-        if (!isTauri) return;
-        const { invoke } = await import("@tauri-apps/api/core");
-        invoke("reveal_in_finder", { path: workspacePath }).catch(() => {});
+        desktopInvoke("reveal_in_finder", { path: workspacePath }).catch(() => {});
         return;
       }
-      if (!isTauri) return;
-      const { invoke } = await import("@tauri-apps/api/core");
-      invoke("open_with_app", { path: workspacePath, appName: app.openWith }).catch(() => {});
+      desktopInvoke("open_with_app", {
+        path: workspacePath,
+        appName: app.openWith,
+      }).catch(() => {});
     },
     [workspacePath],
   );

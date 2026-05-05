@@ -1,7 +1,8 @@
 import type { IDockviewPanelProps } from "dockview";
 import { ArrowLeft, ArrowRight, RotateCw, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { isTauri } from "../lib/is-tauri";
+import { invoke as desktopInvoke, listen as desktopListen } from "../lib/desktop-ipc";
+import { isDesktop } from "../lib/is-tauri";
 import { trpc } from "../lib/trpc-client";
 
 const DEFAULT_URL = "";
@@ -114,9 +115,8 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
   }, []);
 
   const invoke = useCallback(async (cmd: string, args?: Record<string, unknown>) => {
-    if (!isTauri) return;
-    const { invoke: tauriInvoke } = await import("@tauri-apps/api/core");
-    return tauriInvoke(cmd, args);
+    if (!isDesktop) return;
+    return desktopInvoke(cmd, args);
   }, []);
 
   // ------- create or show webview once placeholder has real dimensions -------
@@ -127,7 +127,7 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
   // soon as the placeholder gets a non-zero size (i.e. the tab is shown).
 
   useEffect(() => {
-    if (!isTauri || created || creatingRef.current) return;
+    if (!isDesktop || created || creatingRef.current) return;
     const el = placeholderRef.current;
     if (!el) return;
 
@@ -183,25 +183,25 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
   // ------- listen for URL changes from the Rust side -------
 
   useEffect(() => {
-    if (!isTauri) return;
+    if (!isDesktop) return;
     let unlisten: (() => void) | undefined;
 
     (async () => {
-      const { listen } = await import("@tauri-apps/api/event");
-      unlisten = await listen<{ url: string; workspace_id: string; loading: boolean }>(
-        "browser-url-changed",
-        (event) => {
-          // Only update if the event is for our workspace
-          if (event.payload.workspace_id !== workspaceIdRef.current) return;
-          const url = event.payload.url;
-          setLoading(event.payload.loading);
-          // Don't sync about:blank to the address bar or localStorage
-          if (url === BLANK_URL) return;
-          setCurrentUrl(url);
-          setInputUrl(url);
-          saveUrl(workspaceIdRef.current, url);
-        },
-      );
+      unlisten = await desktopListen<{
+        url: string;
+        workspace_id: string;
+        loading: boolean;
+      }>("browser-url-changed", (event) => {
+        // Only update if the event is for our workspace
+        if (event.payload.workspace_id !== workspaceIdRef.current) return;
+        const url = event.payload.url;
+        setLoading(event.payload.loading);
+        // Don't sync about:blank to the address bar or localStorage
+        if (url === BLANK_URL) return;
+        setCurrentUrl(url);
+        setInputUrl(url);
+        saveUrl(workspaceIdRef.current, url);
+      });
     })();
 
     return () => {
@@ -212,7 +212,7 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
   // ------- visibility tracking (hide/show when tab switches) -------
 
   useEffect(() => {
-    if (!isTauri || !created) return;
+    if (!isDesktop || !created) return;
 
     const handleVisibility = async (visible: boolean) => {
       if (visible) {
@@ -249,7 +249,7 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
   // the webview — CSS display:none on the React tree has no effect on it.
 
   useEffect(() => {
-    if (!isTauri || !created) return;
+    if (!isDesktop || !created) return;
     const wsActive = params.wsActive !== false;
 
     if (!wsActive) {
@@ -267,7 +267,7 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
   // ------- keep webview bounds in sync on resize -------
 
   useEffect(() => {
-    if (!isTauri || !created) return;
+    if (!isDesktop || !created) return;
     const el = placeholderRef.current;
     if (!el) return;
 
@@ -288,11 +288,9 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
 
   useEffect(() => {
     return () => {
-      if (isTauri) {
+      if (isDesktop) {
         const wsId = workspaceIdRef.current;
-        import("@tauri-apps/api/core").then(({ invoke: tauriInvoke }) => {
-          tauriInvoke("browser_destroy", { workspaceId: wsId }).catch(() => {});
-        });
+        desktopInvoke("browser_destroy", { workspaceId: wsId }).catch(() => {});
       }
     };
   }, []);
@@ -382,7 +380,7 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
 
   // ------- non-Tauri fallback -------
 
-  if (!isTauri) {
+  if (!isDesktop) {
     return (
       <div className="flex h-full items-center justify-center text-muted-foreground">
         Browser panel is only available in the desktop app
@@ -500,9 +498,8 @@ export function BrowserPaneComponent({
   }, []);
 
   const invoke = useCallback(async (cmd: string, args?: Record<string, unknown>) => {
-    if (!isTauri) return;
-    const { invoke: tauriInvoke } = await import("@tauri-apps/api/core");
-    return tauriInvoke(cmd, args);
+    if (!isDesktop) return;
+    return desktopInvoke(cmd, args);
   }, []);
 
   // ------- fetch URL from server when no initialUrl param -------
@@ -540,7 +537,7 @@ export function BrowserPaneComponent({
 
   // ------- create or show webview once placeholder has real dimensions -------
   useEffect(() => {
-    if (!isTauri || created || creatingRef.current) return;
+    if (!isDesktop || created || creatingRef.current) return;
     const el = placeholderRef.current;
     if (!el) return;
 
@@ -594,38 +591,38 @@ export function BrowserPaneComponent({
   const urlPersistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (!isTauri) return;
+    if (!isDesktop) return;
     let unlistenUrl: (() => void) | undefined;
     let unlistenTitle: (() => void) | undefined;
 
     (async () => {
-      const { listen } = await import("@tauri-apps/api/event");
-      unlistenUrl = await listen<{ url: string; browser_id: string; loading: boolean }>(
-        "browser-url-changed",
-        (event) => {
-          if (event.payload.browser_id !== browserIdRef.current) return;
-          const url = event.payload.url;
-          setLoading(event.payload.loading);
-          if (url === BLANK_URL) return;
-          setCurrentUrl(url);
-          setInputUrl(url);
+      unlistenUrl = await desktopListen<{
+        url: string;
+        browser_id: string;
+        loading: boolean;
+      }>("browser-url-changed", (event) => {
+        if (event.payload.browser_id !== browserIdRef.current) return;
+        const url = event.payload.url;
+        setLoading(event.payload.loading);
+        if (url === BLANK_URL) return;
+        setCurrentUrl(url);
+        setInputUrl(url);
 
-          // Persist to server (debounced to avoid hammering on redirect chains)
-          if (urlPersistTimer.current) clearTimeout(urlPersistTimer.current);
-          urlPersistTimer.current = setTimeout(() => {
-            trpc.browsers.navigate.mutate({ browserId: browserIdRef.current, url }).catch(() => {});
-          }, 500);
+        // Persist to server (debounced to avoid hammering on redirect chains)
+        if (urlPersistTimer.current) clearTimeout(urlPersistTimer.current);
+        urlPersistTimer.current = setTimeout(() => {
+          trpc.browsers.navigate.mutate({ browserId: browserIdRef.current, url }).catch(() => {});
+        }, 500);
 
-          // Try to extract favicon from the URL's origin
-          try {
-            const origin = new URL(url).origin;
-            setFaviconUrl(browserIdRef.current, `${origin}/favicon.ico`);
-          } catch {
-            // ignore invalid URLs
-          }
-        },
-      );
-      unlistenTitle = await listen<{ browser_id: string; title: string }>(
+        // Try to extract favicon from the URL's origin
+        try {
+          const origin = new URL(url).origin;
+          setFaviconUrl(browserIdRef.current, `${origin}/favicon.ico`);
+        } catch {
+          // ignore invalid URLs
+        }
+      });
+      unlistenTitle = await desktopListen<{ browser_id: string; title: string }>(
         "browser-title-changed",
         (event) => {
           if (event.payload.browser_id !== browserIdRef.current) return;
@@ -649,7 +646,7 @@ export function BrowserPaneComponent({
   // We show/hide based on *visibility*, not active focus, so split views
   // keep both native webviews rendered simultaneously.
   useEffect(() => {
-    if (!isTauri || !created) return;
+    if (!isDesktop || !created) return;
 
     const showWebview = async () => {
       await invoke("browser_show", { browserId });
@@ -678,7 +675,7 @@ export function BrowserPaneComponent({
 
   // ------- workspace-level visibility -------
   useEffect(() => {
-    if (!isTauri || !created) return;
+    if (!isDesktop || !created) return;
     const wsActive = params.wsActive !== false;
 
     if (!wsActive) {
@@ -694,7 +691,7 @@ export function BrowserPaneComponent({
 
   // ------- keep webview bounds in sync on resize -------
   useEffect(() => {
-    if (!isTauri || !created) return;
+    if (!isDesktop || !created) return;
     const el = placeholderRef.current;
     if (!el) return;
 
@@ -710,11 +707,9 @@ export function BrowserPaneComponent({
   // ------- destroy on unmount -------
   useEffect(() => {
     return () => {
-      if (isTauri) {
+      if (isDesktop) {
         const bId = browserIdRef.current;
-        import("@tauri-apps/api/core").then(({ invoke: tauriInvoke }) => {
-          tauriInvoke("browser_destroy", { browserId: bId }).catch(() => {});
-        });
+        desktopInvoke("browser_destroy", { browserId: bId }).catch(() => {});
       }
     };
   }, []);
@@ -797,7 +792,7 @@ export function BrowserPaneComponent({
 
   if (!browserId) return null;
 
-  if (!isTauri) {
+  if (!isDesktop) {
     return (
       <div className="flex h-full items-center justify-center text-muted-foreground">
         Browser panel is only available in the desktop app

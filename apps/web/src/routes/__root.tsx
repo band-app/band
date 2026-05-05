@@ -35,7 +35,7 @@ import { ToolbarOverflowMenuItems, ToolbarOverflowProvider } from "../components
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useNavigationHistory } from "../hooks/useNavigationHistory";
 import { useZoom } from "../hooks/useZoom";
-import { isTauri } from "../lib/is-tauri";
+import { isDesktop } from "../lib/is-tauri";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
 import {
   loadSidebarWidth,
@@ -46,8 +46,8 @@ import {
 import { applyZoomLevel, loadZoomLevel, zoomIn, zoomOut, zoomReset } from "../lib/zoom";
 import "../styles/globals.css";
 
-const adapter = isTauri ? new TauriDashboardAdapter() : new WebDashboardAdapter();
-const capabilities = isTauri ? new NativeShellCapabilities() : new WebCapabilities();
+const adapter = isDesktop ? new TauriDashboardAdapter() : new WebDashboardAdapter();
+const capabilities = isDesktop ? new NativeShellCapabilities() : new WebCapabilities();
 
 export { adapter, capabilities };
 
@@ -195,9 +195,9 @@ function AppShell() {
   );
   // Show desktop split layout when:
   // - In a regular browser on a wide screen, OR
-  // - In Tauri (always full-editor since side-panel mode was extracted)
+  // - Inside the desktop shell (always full-editor since side-panel mode was extracted)
   const isWideScreen = useIsDesktop();
-  const isDesktop = isWideScreen || isTauri;
+  const useDesktopLayout = isWideScreen || isDesktop;
   const router = useRouter();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
 
@@ -265,7 +265,7 @@ function AppShell() {
       { id: "changes", label: "Changes", icon: GitCompare, shortcut: "⌘E" },
       { id: "files", label: "Files", icon: FolderOpen, shortcut: "⌘G" },
       { id: "terminal", label: "Terminal", icon: TerminalIcon, shortcut: "⌘J" },
-      ...(isTauri ? [{ id: "browser", label: "Browser", icon: Globe, shortcut: "⌘B" }] : []),
+      ...(isDesktop ? [{ id: "browser", label: "Browser", icon: Globe, shortcut: "⌘B" }] : []),
     ],
     [],
   );
@@ -299,14 +299,14 @@ function AppShell() {
     [settings, updateSettings],
   );
 
-  if (!isDesktop) {
+  if (!useDesktopLayout) {
     return <Outlet />;
   }
 
   return (
     <ToolbarOverflowProvider>
       <div className="flex flex-col h-dvh w-full overflow-hidden bg-background text-foreground">
-        {isTauri && (
+        {isDesktop && (
           <TauriTitleBar
             onToggleSidebar={toggleSidebar}
             sidebarCollapsed={sidebarCollapsed}
@@ -340,7 +340,7 @@ function AppShell() {
               <div className="h-full border-r border-border overflow-hidden">
                 <DashboardShell
                   toolbarMenuItems={<ToolbarOverflowMenuItems />}
-                  hideTitleBar={isTauri}
+                  hideTitleBar={isDesktop}
                 />
               </div>
             </Panel>

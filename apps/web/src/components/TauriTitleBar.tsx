@@ -10,23 +10,20 @@ import {
 } from "@band-app/ui";
 import { PanelLeft, PanelTop } from "lucide-react";
 import { type RefObject, useEffect, useRef, useState } from "react";
+import { invoke as desktopInvoke, startDragging as desktopStartDragging } from "../lib/desktop-ipc";
+import { isDesktop } from "../lib/is-tauri";
 import { EditorPicker } from "./EditorPicker";
 
 /** Attaches a native mousedown → startDragging listener to a ref. */
-function useTauriDrag(ref: RefObject<HTMLElement | null>) {
+function useDesktopDrag(ref: RefObject<HTMLElement | null>) {
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-
-    let appWindow: { startDragging: () => Promise<void> } | null = null;
-    import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
-      appWindow = getCurrentWindow();
-    });
+    if (!isDesktop) return;
 
     const onMouseDown = (e: MouseEvent) => {
-      if (e.buttons === 1 && appWindow) {
-        appWindow.startDragging();
-      }
+      if (e.buttons !== 1) return;
+      desktopStartDragging().catch(() => {});
     };
     el.addEventListener("mousedown", onMouseDown);
     return () => el.removeEventListener("mousedown", onMouseDown);
@@ -78,12 +75,13 @@ export function TauriTitleBar({
 
   useEffect(() => {
     if (title) return;
-    import("@tauri-apps/api/core").then(({ invoke }) => {
-      invoke<string>("get_app_title").then(setAppTitle);
-    });
+    if (!isDesktop) return;
+    desktopInvoke<string>("get_app_title")
+      .then(setAppTitle)
+      .catch(() => {});
   }, [title]);
 
-  useTauriDrag(ref);
+  useDesktopDrag(ref);
 
   const hasEditorPicker = workspaceName && workspacePath;
   const hasPanels = workspaceName && panelItems && panelItems.length > 0 && onTogglePanelVisibility;
@@ -175,7 +173,7 @@ export function TauriTitleBar({
 /** Invisible draggable region for Tauri windows (no title text). */
 export function TauriDragRegion() {
   const ref = useRef<HTMLDivElement>(null);
-  useTauriDrag(ref);
+  useDesktopDrag(ref);
 
   return <div ref={ref} data-tauri-drag-region className="h-[38px] shrink-0" />;
 }

@@ -27,7 +27,8 @@ import {
 } from "lucide-react";
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRecentFiles } from "../hooks/useRecentFiles";
-import { isTauri } from "../lib/is-tauri";
+import { invoke as desktopInvoke } from "../lib/desktop-ipc";
+import { isDesktop } from "../lib/is-tauri";
 import { trpc } from "../lib/trpc-client";
 import { useWsActive } from "../lib/workspace-visibility-store";
 import { CodeBrowserView } from "./CodeBrowserView";
@@ -1171,22 +1172,19 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
   // webviews render on top of the React DOM, so they would cover dialogs).
   // With multi-tab browsers, we hide/show ALL webviews for this workspace.
   useEffect(() => {
-    if (!isTauri) return;
+    if (!isDesktop) return;
     const isDialogOpen =
       quickOpenOpen || searchFilesOpen || workspacePickerOpen || commandPaletteOpen;
 
-    (async () => {
-      const { invoke } = await import("@tauri-apps/api/core");
-      if (isDialogOpen) {
-        invoke("browser_hide_all_for_workspace", { workspaceId }).catch(() => {});
-      } else {
-        // Only re-show if the browser panel is currently active
-        const browserPanel = apiRef.current?.getPanel("browser");
-        if (browserPanel?.api.isActive) {
-          invoke("browser_show_all_for_workspace", { workspaceId }).catch(() => {});
-        }
+    if (isDialogOpen) {
+      desktopInvoke("browser_hide_all_for_workspace", { workspaceId }).catch(() => {});
+    } else {
+      // Only re-show if the browser panel is currently active
+      const browserPanel = apiRef.current?.getPanel("browser");
+      if (browserPanel?.api.isActive) {
+        desktopInvoke("browser_show_all_for_workspace", { workspaceId }).catch(() => {});
       }
-    })();
+    }
   }, [quickOpenOpen, searchFilesOpen, workspacePickerOpen, commandPaletteOpen, workspaceId]);
 
   return (
