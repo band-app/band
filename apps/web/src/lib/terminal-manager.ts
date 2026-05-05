@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { createLogger } from "@band-app/logger";
 import type { IPty } from "node-pty";
 import { shellPath } from "./process-utils";
+import { addTerminalToLayout } from "./terminal-layout-manager";
 import { resolveWorkspace } from "./workspace";
 
 const log = createLogger("terminal");
@@ -134,6 +135,20 @@ export async function spawnTerminal(
     workspaceTerminals.set(workspaceId, ids);
   }
   ids.add(terminalId);
+
+  // Mirror what `createChat` and `createBrowser` do: register the new
+  // terminal in the saved dockview layout so it survives a server
+  // restart and renders the moment the workspace is opened. Without
+  // this, terminals spawned via the WebSocket handler (terminal-ws.ts)
+  // — and any future non-mutation creation path — would be invisible
+  // in the dashboard. `addPanel` is idempotent, so the existing
+  // explicit call from `terminals.create` (now removed) was
+  // redundant; this helper is the single source of truth.
+  addTerminalToLayout(workspaceId, terminalId, {
+    command: options?.command,
+    cwd: options?.cwd,
+    env: options?.env,
+  });
 
   // Buffer all PTY output for replay on reconnect + notify listeners
   ptyProcess.onData((data: string) => {

@@ -177,20 +177,22 @@ fn seed_db(band_dir: &Path, repo_path: &Path, settings: &serde_json::Value) {
     );
 }
 
-/// Read the saved chat layout for a workspace from the `panel_states`
-/// table. Returns `Value::Null` if no layout has been persisted.
-fn read_chat_layout(band_dir: &Path, workspace_id: &str) -> serde_json::Value {
-    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/read-chat-layout.mjs");
+/// Read a saved dockview layout panel-state row (chat, terminal, or
+/// browser) for a workspace from the `panel_states` table. Returns
+/// `Value::Null` if no layout has been persisted.
+fn read_layout(band_dir: &Path, workspace_id: &str, panel_type: &str) -> serde_json::Value {
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/read-layout.mjs");
     let output = Command::new("node")
         .arg(&script)
         .arg(band_dir)
         .arg(workspace_id)
+        .arg(panel_type)
         .output()
-        .expect("read-chat-layout.mjs failed to execute");
+        .expect("read-layout.mjs failed to execute");
 
     assert!(
         output.status.success(),
-        "read-chat-layout.mjs failed: {}",
+        "read-layout.mjs failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
@@ -1448,6 +1450,105 @@ fn cronjobs_list_text_output_shows_table() {
     assert!(out.contains("0 9 * * 1"), "expected cron expr: {out}");
 }
 
+// --- Layout persistence parity tests ---
+//
+// Every CLI-driven creation of a chat / terminal / browser must persist
+// the new pane to the workspace's saved dockview layout, not just the
+// in-memory registry. Otherwise the dashboard renders nothing for that
+// pane until the user manually re-creates it via the UI. These tests
+// pin the contract at the CLI boundary so future refactors of the
+// underlying `createChat` / `createBrowser` / `spawnTerminal` helpers
+// can't silently regress it.
+
+/// Regression: `band terminals create` must add the new terminal to the
+/// workspace's saved `terminal_layout`. Before the fix, only
+/// `terminals.create` (the tRPC mutation) added it; any other path that
+/// called `spawnTerminal` directly (e.g. the WebSocket handler in
+/// `terminal-ws.ts`) skipped the layout. Moving `addTerminalToLayout`
+/// into `spawnTerminal` makes it a single source of truth.
+#[test]
+fn terminals_create_adds_terminal_to_layout() {
+    let env = TestEnv::new();
+    env.band(&["workspaces", "create", "my-project", "feat/term-layout"]);
+    let workspace_id = "my-project-feat-term-layout";
+
+    let out = env.band(&[
+        "terminals",
+        "create",
+        workspace_id,
+        "--output",
+        "json",
+    ]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let json: serde_json::Value = serde_json::from_str(&stdout(&out)).unwrap();
+    let terminal_id = json["terminalId"].as_str().expect("terminalId in response");
+
+    let layout = read_layout(&env.band_dir, workspace_id, "terminal_layout");
+    assert!(
+        !layout.is_null(),
+        "expected a terminal_layout row to be persisted, got null"
+    );
+    let panels = layout
+        .get("panels")
+        .and_then(|p| p.as_object())
+        .unwrap_or_else(|| panic!("expected layout.panels object: {layout}"));
+    assert!(
+        panels.contains_key(terminal_id),
+        "expected terminal {terminal_id} in layout panels, got {panels:?}"
+    );
+}
+
+/// Regression: same shape as `terminals_create_adds_terminal_to_layout`,
+/// but for browsers. Before the fix, `addBrowserToLayout` was only called
+/// from the `browsers.create` mutation; future callers of `createBrowser`
+/// would skip the layout. Moving the call into `createBrowser` itself
+/// closes that hole.
+#[test]
+fn browsers_create_adds_browser_to_layout() {
+    let env = TestEnv::new();
+    env.band(&["workspaces", "create", "my-project", "feat/browser-layout"]);
+    let workspace_id = "my-project-feat-browser-layout";
+
+    let out = env.band(&[
+        "browsers",
+        "create",
+        workspace_id,
+        "--url",
+        "https://example.com",
+        "--output",
+        "json",
+    ]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let json: serde_json::Value = serde_json::from_str(&stdout(&out)).unwrap();
+    let browser_id = json["browser"]["id"]
+        .as_str()
+        .expect("browser.id in response");
+
+    let layout = read_layout(&env.band_dir, workspace_id, "browser_layout");
+    assert!(
+        !layout.is_null(),
+        "expected a browser_layout row to be persisted, got null"
+    );
+    let panels = layout
+        .get("panels")
+        .and_then(|p| p.as_object())
+        .unwrap_or_else(|| panic!("expected layout.panels object: {layout}"));
+    assert!(
+        panels.contains_key(browser_id),
+        "expected browser {browser_id} in layout panels, got {panels:?}"
+    );
+    // The initial URL flows through `createBrowser` -> `addBrowserToLayout`.
+    let panel = panels.get(browser_id).unwrap();
+    let initial_url = panel
+        .pointer("/params/initialUrl")
+        .and_then(serde_json::Value::as_str);
+    assert_eq!(
+        initial_url,
+        Some("https://example.com"),
+        "expected initialUrl to be persisted in panel params: {panel}"
+    );
+}
+
 // --- Chat command / default-panel resolution tests ---
 
 /// Regression: `band workspaces create --prompt ...` lazily creates a default
@@ -1487,7 +1588,7 @@ fn workspaces_create_prompt_adds_chat_to_layout() {
     // ...AND it shows up in the persisted dockview chat layout. Asserting on
     // the layout shape directly (rather than via the dashboard) is the only
     // way to catch the invisible-chat bug at the CLI layer.
-    let layout = read_chat_layout(&env.band_dir, workspace_id);
+    let layout = read_layout(&env.band_dir, workspace_id, "chat_layout");
     assert!(
         !layout.is_null(),
         "expected a chat_layout row to be persisted, got null"
