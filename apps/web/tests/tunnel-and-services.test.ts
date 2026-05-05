@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -303,12 +303,15 @@ describe("prereqs.check — cloudflared not installed", () => {
     seedState(tmpHome, createDefaultState(tmpHome));
     seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
 
-    // Create a bin dir containing only a symlink to node — cloudflared
-    // won't be found since it's not linked here.
+    // Create a bin dir that contains the server runtime (so the spawned
+    // child can start) plus `which`, but not cloudflared — so the prereq
+    // check returns false.
     const binDir = join(tmpHome, "bin");
     mkdirSync(binDir, { recursive: true });
-    const nodePath = process.execPath;
-    symlinkSync(nodePath, join(binDir, "node"));
+    const runtimePath = execFileSync("which", [SERVER_RUNTIME], {
+      encoding: "utf8",
+    }).trim();
+    symlinkSync(runtimePath, join(binDir, SERVER_RUNTIME));
     // which(1) is needed by checkPrereqs
     symlinkSync("/usr/bin/which", join(binDir, "which"));
 
