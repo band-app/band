@@ -198,8 +198,18 @@ export class GeminiCliAdapter implements CodingAgent {
 
   listModels(): AgentModel[] {
     return [
-      { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", description: "Most capable" },
-      { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", description: "Fast and efficient" },
+      {
+        id: "gemini-2.5-pro",
+        name: "Gemini 2.5 Pro",
+        description: "Most capable",
+        contextWindow: 1_000_000,
+      },
+      {
+        id: "gemini-2.5-flash",
+        name: "Gemini 2.5 Flash",
+        description: "Fast and efficient",
+        contextWindow: 1_000_000,
+      },
     ];
   }
 }

@@ -20,6 +20,10 @@ Unit tests with heavy mocking verify that your mocks work, not that your system 
 
 See `.claude/skills/integration-tests.md` for the full set of rules and examples.
 
+### Exceptions
+
+- `packages/coding-agent/tests/codex-adapter.test.ts` is an event-mapping unit test that mocks `@openai/codex-sdk` via a custom Node loader (`tests/register-mock-loader.mjs` + `tests/mocks/codex-sdk.mjs`). The Codex SDK communicates with a subprocess over stdin/stdout, so MSW does not apply, and exercising the real `codex` binary is impractical in CI. The test is allowed to remain as-is until the SDK exposes a network seam or a stub binary; do not extend this pattern to other adapters.
+
 ## Git Hooks & CI
 
 This repo has a pre-push hook (`.husky/pre-push`) that runs linting, formatting, and clippy checks. **Never bypass git hooks** — do not use `--no-verify` on `git push` or `git commit`. If a hook fails, fix the underlying issue instead of skipping the check.

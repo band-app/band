@@ -92,17 +92,55 @@ interface InternalTask extends TaskInfo {
 const TASKS_KEY = Symbol.for("band.task-runner.tasks");
 const LISTENERS_KEY = Symbol.for("band.task-runner.listeners");
 const BUFFERS_KEY = Symbol.for("band.task-runner.sessionBuffers");
+const USAGE_KEY = Symbol.for("band.task-runner.sessionUsage");
 
 const g = globalThis as unknown as Record<symbol, unknown>;
 if (!g[TASKS_KEY]) g[TASKS_KEY] = new Map<string, InternalTask>();
 if (!g[LISTENERS_KEY]) g[LISTENERS_KEY] = new Map<string, Set<Listener>>();
 if (!g[BUFFERS_KEY]) g[BUFFERS_KEY] = new Map<string, SessionBuffer>();
+if (!g[USAGE_KEY]) g[USAGE_KEY] = new Map<string, SessionUsage>();
 
 /** Tasks keyed by chatId — one running task per chat pane. */
 const tasks = g[TASKS_KEY] as Map<string, InternalTask>;
 /** Event listeners keyed by chatId. */
 const listeners = g[LISTENERS_KEY] as Map<string, Set<Listener>>;
 const sessionBuffers = g[BUFFERS_KEY] as Map<string, SessionBuffer>;
+/**
+ * Latest token-usage snapshot per session. Survives task completion so the
+ * chat UI's context meter still shows accumulated context after the agent
+ * stops streaming. Cleared when the session is replaced (session-id-resolved
+ * remap) or implicitly when a new chat is created. Stored in-memory only.
+ *
+ * Bounded by `MAX_SESSION_USAGE` via insertion-order LRU eviction so a
+ * long-running server doesn't accumulate per-session entries forever.
+ */
+const sessionUsage = g[USAGE_KEY] as Map<string, SessionUsage>;
+const MAX_SESSION_USAGE = 1000;
+
+/** Bounded-LRU set. JS Map preserves insertion order, so deleting the first
+ * key drops the oldest. Re-inserting an existing key bumps it to MRU. */
+function lruSet<K, V>(map: Map<K, V>, key: K, value: V, cap: number): void {
+  if (map.has(key)) map.delete(key);
+  map.set(key, value);
+  while (map.size > cap) {
+    const oldest = map.keys().next().value;
+    if (oldest === undefined) break;
+    map.delete(oldest);
+  }
+}
+
+export interface SessionUsage {
+  /** Provider that produced this snapshot. Drives context-size arithmetic. */
+  provider?: "claude" | "codex" | "gemini" | "opencode" | "cursor";
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens?: number;
+  cacheCreationTokens?: number;
+  reasoningOutputTokens?: number;
+  contextTokens?: number;
+  totalProcessedTokens?: number;
+  maxContextTokens?: number;
+}
 
 function persistTask(task: InternalTask): void {
   const workspace = resolveWorkspace(task.workspaceId);
@@ -516,6 +554,67 @@ async function runTask(chatId: string, task: InternalTask) {
           break;
         }
 
+        case "usage": {
+          // Persist the latest usage for this session so the UI can re-hydrate
+          // the context meter after the task completes or the page reloads.
+          // Prefer monotonic totalProcessedTokens when available. That lets
+          // current context shrink after compaction while still ignoring older
+          // replayed snapshots. Older providers fall back to a context high
+          // water mark.
+          if (task.sessionId) {
+            const prev = sessionUsage.get(task.sessionId);
+            const shouldStore =
+              prev?.totalProcessedTokens !== undefined && event.totalProcessedTokens !== undefined
+                ? event.totalProcessedTokens >= prev.totalProcessedTokens
+                : usageContextSize(event) >= usageContextSize(prev);
+            if (shouldStore) {
+              lruSet(
+                sessionUsage,
+                task.sessionId,
+                {
+                  provider: event.provider,
+                  inputTokens: event.inputTokens,
+                  outputTokens: event.outputTokens,
+                  cacheReadTokens: event.cacheReadTokens,
+                  cacheCreationTokens: event.cacheCreationTokens,
+                  reasoningOutputTokens: event.reasoningOutputTokens,
+                  contextTokens: event.contextTokens,
+                  totalProcessedTokens: event.totalProcessedTokens,
+                  maxContextTokens: event.maxContextTokens,
+                },
+                MAX_SESSION_USAGE,
+              );
+            }
+          }
+          broadcast(chatId, {
+            type: "data-usage" as UIMessageChunk["type"],
+            data: {
+              inputTokens: event.inputTokens,
+              outputTokens: event.outputTokens,
+              ...(event.provider !== undefined && { provider: event.provider }),
+              ...(event.cacheReadTokens !== undefined && {
+                cacheReadTokens: event.cacheReadTokens,
+              }),
+              ...(event.cacheCreationTokens !== undefined && {
+                cacheCreationTokens: event.cacheCreationTokens,
+              }),
+              ...(event.reasoningOutputTokens !== undefined && {
+                reasoningOutputTokens: event.reasoningOutputTokens,
+              }),
+              ...(event.contextTokens !== undefined && {
+                contextTokens: event.contextTokens,
+              }),
+              ...(event.totalProcessedTokens !== undefined && {
+                totalProcessedTokens: event.totalProcessedTokens,
+              }),
+              ...(event.maxContextTokens !== undefined && {
+                maxContextTokens: event.maxContextTokens,
+              }),
+            },
+          } as UIMessageChunk);
+          break;
+        }
+
         case "session-result": {
           endText();
 
@@ -566,6 +665,14 @@ async function runTask(chatId: string, task: InternalTask) {
           if (oldBuf) {
             sessionBuffers.set(event.resolvedSessionId, oldBuf);
             sessionBuffers.delete(event.previousSessionId);
+          }
+
+          // Migrate the latest usage snapshot too, so the context meter
+          // survives the ID swap.
+          const oldUsage = sessionUsage.get(event.previousSessionId);
+          if (oldUsage) {
+            lruSet(sessionUsage, event.resolvedSessionId, oldUsage, MAX_SESSION_USAGE);
+            sessionUsage.delete(event.previousSessionId);
           }
 
           if (task.sessionId === event.previousSessionId) {
@@ -662,6 +769,37 @@ export function getTask(chatId: string): TaskInfo | null {
  */
 export function getSessionBuffer(sessionId: string): SessionBuffer | undefined {
   return sessionBuffers.get(sessionId);
+}
+
+/**
+ * Compute context size for monotonic comparison only (not for display). Used
+ * by the SSE replay guard that throws away stale chunks. Adapters are
+ * expected to populate `contextTokens` directly; the summation fallback is
+ * provider-aware: `cacheCreationTokens` is Claude-only, so its presence
+ * signals Claude semantics where `inputTokens` excludes cached content.
+ */
+function usageContextSize(usage: SessionUsage | undefined): number {
+  if (!usage) return 0;
+  if (usage.contextTokens !== undefined) return usage.contextTokens;
+  // Provider-driven legacy fallback. Claude `inputTokens` excludes cached
+  // content → must add cache fields. Other providers report full prompt.
+  // Pre-provider snapshots use `cacheCreationTokens` presence as a
+  // backward-compatible Claude detector.
+  const isClaude = usage.provider === "claude" || usage.cacheCreationTokens !== undefined;
+  if (isClaude) {
+    return (
+      usage.inputTokens +
+      (usage.cacheReadTokens ?? 0) +
+      (usage.cacheCreationTokens ?? 0) +
+      (usage.reasoningOutputTokens ?? 0)
+    );
+  }
+  return usage.inputTokens + (usage.reasoningOutputTokens ?? 0);
+}
+
+/** Get the latest persisted usage snapshot for a session, if any. */
+export function getSessionUsage(sessionId: string): SessionUsage | undefined {
+  return sessionUsage.get(sessionId);
 }
 
 export function subscribe(chatId: string, listener: Listener): () => void {

@@ -26,6 +26,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useAdapter, useCapabilities } from "../context";
 import { useUpdateSettings } from "../hooks/use-settings-mutations";
 import { useSettingsQuery } from "../hooks/use-settings-query";
+import { useExperimentalContextMeter } from "../lib/experimental-flags";
 import { playSound, SOUNDS, type SoundId } from "../lib/sounds";
 import type { CodingAgentDefinition, CodingAgentType, LabelDefinition, Theme } from "../types";
 import { AgentIcon } from "./agent-icons";
@@ -50,6 +51,16 @@ interface Props {
   open: boolean;
   /** Called when the dialog wants to open or close (Esc, backdrop click, Done button). */
   onOpenChange: (open: boolean) => void;
+}
+
+/** Compact context-window label, e.g. 200000 → "200k", 1_000_000 → "1M". */
+function formatCtxWindow(n: number): string {
+  if (n >= 1_000_000) {
+    const m = n / 1_000_000;
+    return `${Number.isInteger(m) ? m.toFixed(0) : m.toFixed(1)}M`;
+  }
+  if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
+  return String(n);
 }
 
 export function SettingsPage({ open, onOpenChange }: Props) {
@@ -77,8 +88,11 @@ export function SettingsPage({ open, onOpenChange }: Props) {
   );
   const [selectedTheme, setSelectedTheme] = useState<Theme>(settings.theme ?? "system");
   const [agentModels, setAgentModels] = useState<
-    Record<string, { id: string; name: string; description?: string }[]>
+    Record<string, { id: string; name: string; description?: string; contextWindow?: number }[]>
   >({});
+  // Experimental flags live in localStorage (per-device) rather than the
+  // settings store, so they don't participate in `isDirty` / Save.
+  const [contextMeterEnabled, setContextMeterEnabled] = useExperimentalContextMeter();
 
   const adapter = useAdapter();
 
@@ -411,6 +425,17 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                   </Select>
                 </SettingsRow>
               )}
+              <SettingsRow
+                htmlFor="agents-context-meter"
+                label="Context window meter"
+                description="Show a context-usage donut next to the session-history button in the chat input. Token counting accuracy varies by agent — disable if numbers look wrong."
+              >
+                <Switch
+                  id="agents-context-meter"
+                  checked={contextMeterEnabled}
+                  onCheckedChange={setContextMeterEnabled}
+                />
+              </SettingsRow>
               <Accordion type="multiple" className="w-full">
                 {KNOWN_AGENTS.map((known) => {
                   const agent = codingAgents.find((a) => a.type === known.type);
@@ -512,7 +537,14 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                                 <SelectItem value={MODEL_DEFAULT_SENTINEL}>Default</SelectItem>
                                 {models.map((m) => (
                                   <SelectItem key={m.id} value={m.id}>
-                                    {m.name}
+                                    <span className="flex w-full items-baseline justify-between gap-2">
+                                      <span>{m.name}</span>
+                                      {m.contextWindow !== undefined && (
+                                        <span className="text-[10px] uppercase tabular-nums text-muted-foreground">
+                                          {formatCtxWindow(m.contextWindow)} ctx
+                                        </span>
+                                      )}
+                                    </span>
                                   </SelectItem>
                                 ))}
                               </SelectContent>

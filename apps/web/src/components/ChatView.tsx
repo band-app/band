@@ -1,5 +1,5 @@
 import { useChat } from "@ai-sdk/react";
-import { AgentIcon } from "@band-app/dashboard-core";
+import { AgentIcon, useExperimentalContextMeter } from "@band-app/dashboard-core";
 import {
   Badge,
   cn,
@@ -11,6 +11,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuShortcut,
   DropdownMenuTrigger,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
   Tooltip,
   TooltipContent,
   TooltipTrigger,
@@ -205,12 +208,36 @@ function splitMessageAtQueueBoundaries(parts: UIMessageParts): QueueSegment[] {
   return segments;
 }
 
+interface ModelInfo {
+  id: string;
+  name: string;
+  description?: string;
+  /** Approximate max input context window in tokens, when known. */
+  contextWindow?: number;
+}
+
 interface AgentGroup {
   agentId: string;
   agentType: string;
   agentLabel: string;
-  models: { id: string; name: string; description?: string }[];
+  models: ModelInfo[];
   defaultModel?: string;
+}
+
+interface UsageData {
+  /** Provider that produced this snapshot. Drives legacy context-size math. */
+  provider?: "claude" | "codex" | "gemini" | "opencode" | "cursor";
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens?: number;
+  cacheCreationTokens?: number;
+  reasoningOutputTokens?: number;
+  /** Provider-aware total context tokens (preferred over summing fields). */
+  contextTokens?: number;
+  /** Cumulative processed tokens for the session/thread when available. */
+  totalProcessedTokens?: number;
+  /** Authoritative model context window from the agent SDK. */
+  maxContextTokens?: number;
 }
 
 interface ChatViewProps {
@@ -281,6 +308,8 @@ export function ChatView({
   const currentSessionId =
     activeSessionId ?? (initialSessionCleared ? undefined : initialSessionId);
   const [hasMore, setHasMore] = useState(false);
+  const [usage, setUsage] = useState<UsageData | undefined>(undefined);
+  const [contextMeterEnabled] = useExperimentalContextMeter();
   const [loadingOlder, setLoadingOlder] = useState(false);
   const scrollHeightBeforePrependRef = useRef<number | null>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -382,7 +411,7 @@ export function ChatView({
     return () => window.removeEventListener("band:toggle-mode", handler);
   }, [modes, selectedMode, handleModeSelect]);
 
-  const [models, setModels] = useState<{ id: string; name: string; description?: string }[]>([]);
+  const [models, setModels] = useState<ModelInfo[]>([]);
   const [agentGroups, setAgentGroups] = useState<AgentGroup[]>([]);
   // Default model from agent settings (per agent type)
   const [agentDefaultModel, setAgentDefaultModel] = useState<string | undefined>();
@@ -390,6 +419,27 @@ export function ChatView({
   const [userModelOverride, setUserModelOverride] = useState<string | undefined>();
   // Effective model: user override takes precedence, then agent default
   const selectedModel = userModelOverride ?? agentDefaultModel;
+  // Resolved ModelInfo for the active selection — flows the SDK-reported
+  // contextWindow into the meter so it doesn't have to guess from the id.
+  const selectedModelInfo = useMemo(
+    () => models.find((m) => m.id === selectedModel),
+    [models, selectedModel],
+  );
+
+  // Drop the SDK-reported `maxContextTokens` when the model changes — that
+  // value was for the prior model and would otherwise stick until the next
+  // turn refreshes it (e.g. switching Sonnet 1M → Haiku 200k would still
+  // show the 1M denominator). Falling back to undefined lets ContextMeter
+  // use the static MODEL_CONTEXT_WINDOWS entry for the new model in the
+  // meantime.
+  useEffect(() => {
+    if (!selectedModel) return;
+    setUsage((prev) => {
+      if (!prev || prev.maxContextTokens === undefined) return prev;
+      const { maxContextTokens: _drop, ...rest } = prev;
+      return rest;
+    });
+  }, [selectedModel]);
 
   useEffect(() => {
     const modelsP = trpc.models.listAll
@@ -497,6 +547,35 @@ export function ChatView({
         const sid = (dataPart.data as { sessionId: string }).sessionId;
         sessionIdRef.current = sid;
         onActiveSessionChange?.(sid);
+      } else if (
+        dataPart.type === "data-usage" &&
+        dataPart.data != null &&
+        typeof dataPart.data === "object"
+      ) {
+        const data = dataPart.data as Partial<UsageData>;
+        if (typeof data.inputTokens === "number" && typeof data.outputTokens === "number") {
+          const next: UsageData = {
+            provider: data.provider,
+            inputTokens: data.inputTokens,
+            outputTokens: data.outputTokens,
+            cacheReadTokens: data.cacheReadTokens,
+            cacheCreationTokens: data.cacheCreationTokens,
+            reasoningOutputTokens: data.reasoningOutputTokens,
+            contextTokens: data.contextTokens,
+            totalProcessedTokens: data.totalProcessedTokens,
+            maxContextTokens: data.maxContextTokens,
+          };
+          // SSE gap-fill can replay older usage chunks on reconnect. Prefer
+          // monotonic totalProcessedTokens when present so context may shrink
+          // after compaction; older providers fall back to context size.
+          setUsage((prev) => {
+            const shouldUseNext =
+              prev?.totalProcessedTokens !== undefined && next.totalProcessedTokens !== undefined
+                ? next.totalProcessedTokens >= prev.totalProcessedTokens
+                : usageContextSize(next) >= usageContextSize(prev);
+            return shouldUseNext ? next : prev;
+          });
+        }
       }
     },
   });
@@ -648,12 +727,27 @@ export function ChatView({
           chatId,
           sessionId,
         });
-        setMessages(data.messages as UIMessage[]);
+        setMessages(data.messages as unknown as UIMessage[]);
         lastEventIdRef.current = data.lastEventId ?? undefined;
         firstEventIdRef.current = data.firstEventId ?? undefined;
         firstMessageIndexRef.current =
           (data as { firstMessageIndex?: number | null }).firstMessageIndex ?? undefined;
         setHasMore(data.hasMore);
+        // Re-hydrate the context meter from the persisted snapshot so it
+        // survives task completion and page refreshes.
+        if (data.lastUsage) {
+          setUsage({
+            provider: data.lastUsage.provider,
+            inputTokens: data.lastUsage.inputTokens,
+            outputTokens: data.lastUsage.outputTokens,
+            cacheReadTokens: data.lastUsage.cacheReadTokens,
+            cacheCreationTokens: data.lastUsage.cacheCreationTokens,
+            reasoningOutputTokens: data.lastUsage.reasoningOutputTokens,
+            contextTokens: data.lastUsage.contextTokens,
+            totalProcessedTokens: data.lastUsage.totalProcessedTokens,
+            maxContextTokens: data.lastUsage.maxContextTokens,
+          });
+        }
       } finally {
         setLoadingHistory(false);
       }
@@ -695,7 +789,7 @@ export function ChatView({
           scrollHeightBeforePrependRef.current = scrollEl.scrollHeight;
         }
 
-        setMessages((prev) => [...(data.messages as UIMessage[]), ...prev]);
+        setMessages((prev) => [...(data.messages as unknown as UIMessage[]), ...prev]);
         firstEventIdRef.current = data.firstEventId ?? undefined;
         firstMessageIndexRef.current =
           (data as { firstMessageIndex?: number | null }).firstMessageIndex ?? undefined;
@@ -851,6 +945,7 @@ export function ChatView({
       onActiveSessionChange?.(sessionId);
       setMessages([]);
       setQueuedMessages([]);
+      setUsage(undefined);
       trpc.queue.clear.mutate({ workspaceId, chatId }).catch(() => {});
       onShowSessionListChange(false);
       await loadMessages(sessionId);
@@ -880,6 +975,7 @@ export function ChatView({
     onActiveSessionChange?.(undefined);
     setMessages([]);
     setQueuedMessages([]);
+    setUsage(undefined);
     trpc.queue.clear.mutate({ workspaceId, chatId }).catch(() => {});
     onShowSessionListChange(false);
   }, [
@@ -1234,6 +1330,18 @@ export function ChatView({
           <PromptInputActions>
             <div className="flex items-center gap-0.5">
               <PromptInputAttach />
+              {supportsSessionListing && (
+                <SessionHistoryMenu
+                  workspaceId={workspaceId}
+                  chatId={chatId}
+                  activeSessionId={activeSessionId ?? sessionIdRef.current}
+                  onSelectSession={handleSelectSession}
+                  onNewSession={handleNewSession}
+                />
+              )}
+              {contextMeterEnabled && (
+                <ContextMeter usage={usage} model={selectedModel} modelInfo={selectedModelInfo} />
+              )}
               {(agentGroups.length > 0 || models.length > 0) && (
                 <AgentModelMenu
                   agentGroups={agentGroups}
@@ -1248,21 +1356,8 @@ export function ChatView({
               {modes.length > 0 && (
                 <ModeMenu modes={modes} selected={selectedMode} onSelect={handleModeSelect} />
               )}
-              {supportsSessionListing && (
-                <SessionHistoryMenu
-                  workspaceId={workspaceId}
-                  chatId={chatId}
-                  activeSessionId={activeSessionId ?? sessionIdRef.current}
-                  onSelectSession={handleSelectSession}
-                  onNewSession={handleNewSession}
-                />
-              )}
             </div>
-            <PromptInputSubmit
-              status={status}
-              onStop={handleStop}
-              queueCount={queuedMessages.length}
-            />
+            <PromptInputSubmit status={status} onStop={handleStop} />
           </PromptInputActions>
         </PromptInput>
       </div>
@@ -1298,7 +1393,7 @@ function ModeMenu({
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
               <ModeIcon modeId={current?.id ?? ""} className="size-3" />
               {current?.name ?? "Mode"}
@@ -1361,7 +1456,7 @@ function AgentModelMenu({
           type="button"
           disabled={disabled}
           className={cn(
-            "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+            "inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
             disabled && "opacity-50 cursor-not-allowed",
           )}
         >
@@ -1401,7 +1496,7 @@ function AgentModelMenu({
                             isCurrentAgent && model.id === selectedModel ? "bg-accent" : "",
                           )}
                         >
-                          <span className="text-sm font-medium">{model.name}</span>
+                          <ModelLine model={model} />
                           {model.description && (
                             <span className="text-xs text-muted-foreground">
                               {model.description}
@@ -1436,7 +1531,7 @@ function AgentModelMenu({
                   model.id === selectedModel ? "bg-accent" : "",
                 )}
               >
-                <span className="text-sm font-medium">{model.name}</span>
+                <ModelLine model={model} />
                 {model.description && (
                   <span className="text-xs text-muted-foreground">{model.description}</span>
                 )}
@@ -1458,6 +1553,238 @@ function relativeTime(ms: number): string {
   if (days < 30) return `${days}d ago`;
   const months = Math.floor(days / 30);
   return `${months}mo ago`;
+}
+
+// Approximate context window per model. Fallback for the chat context meter
+// when an adapter doesn't report `maxContextTokens` live and the picker
+// doesn't supply a `contextWindow` on the ModelInfo. Claude Code adapter
+// always passes the SDK's `getContextUsage().maxTokens`, so this map is
+// fallback-only for Claude; Codex/Gemini/Cursor SDKs don't expose a context
+// window field, so they rely on this map directly.
+//
+// Order matters: `getContextWindow` walks entries with the longest key first
+// so "claude-opus-4-7[1m]" matches before "claude-opus-4-7".
+const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
+  // Claude — Opus 4.x ships a 200k default and a separate [1m] long-context
+  // tier. Sonnet 4.6 is 1M GA at standard pricing (the [1m] suffix is a
+  // legacy alias). Haiku 4.5 stays at 200k.
+  "claude-opus-4-7[1m]": 1_000_000,
+  "claude-opus-4-6[1m]": 1_000_000,
+  "claude-opus-4-7": 200_000,
+  "claude-opus-4-6": 200_000,
+  "claude-sonnet-4-6[1m]": 1_000_000,
+  "claude-sonnet-4-6": 1_000_000,
+  "claude-haiku-4-5": 200_000,
+  // OpenAI — GPT-5 family runs at 400k inside Codex CLI (the Responses API
+  // tier is 1M but Band shells out to the codex binary which caps at 400k).
+  "gpt-5": 400_000,
+  "gpt-4.1": 1_000_000,
+  "gpt-4o": 128_000,
+  // Gemini 2.5 Pro and Flash are both 1M (~1,048,576).
+  "gemini-2.5-pro": 1_000_000,
+  "gemini-2.5-flash": 1_000_000,
+};
+
+function getContextWindow(model: string | undefined): number {
+  if (!model) return 200_000;
+  if (MODEL_CONTEXT_WINDOWS[model]) return MODEL_CONTEXT_WINDOWS[model];
+  // Prefix match — sort by descending key length so longer/more specific
+  // keys win (e.g. "claude-opus-4-7[1m]" before "claude-opus-4-7").
+  const entries = Object.entries(MODEL_CONTEXT_WINDOWS).sort(([a], [b]) => b.length - a.length);
+  for (const [key, value] of entries) {
+    if (model.startsWith(key)) return value;
+  }
+  return 200_000;
+}
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}k`;
+  return String(n);
+}
+
+/** Compact context-window label, e.g. 200000 → "200k", 1_000_000 → "1M". */
+function formatCtxWindow(n: number): string {
+  if (n >= 1_000_000) {
+    const m = n / 1_000_000;
+    return `${Number.isInteger(m) ? m.toFixed(0) : m.toFixed(1)}M`;
+  }
+  if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
+  return String(n);
+}
+
+function ModelLine({ model }: { model: ModelInfo }) {
+  return (
+    <span className="flex w-full items-baseline justify-between gap-2">
+      <span className="text-sm font-medium">{model.name}</span>
+      {model.contextWindow !== undefined && (
+        <span className="text-[10px] uppercase tabular-nums text-muted-foreground">
+          {formatCtxWindow(model.contextWindow)} ctx
+        </span>
+      )}
+    </span>
+  );
+}
+
+// Donut geometry — 24×24 viewBox keeps the SVG aligned with `size-4`
+// (16px) Tailwind utility while leaving enough whitespace for a 3-unit
+// stroke without clipping. Radius 9, stroke 3 → circumference ≈ 56.55.
+const DONUT_RADIUS = 9;
+const DONUT_CIRCUMFERENCE = 2 * Math.PI * DONUT_RADIUS;
+
+function ContextMeter({
+  usage,
+  model,
+  modelInfo,
+}: {
+  usage: UsageData | undefined;
+  model: string | undefined;
+  modelInfo?: ModelInfo;
+}) {
+  // Adapters compute context size with provider-aware semantics and pass it
+  // through `contextTokens`. Only fall back to summation for legacy snapshots
+  // that predate that field. Provider semantics differ:
+  //   • Claude: `inputTokens` is the *uncached* portion → must add cache.
+  //   • Codex/OpenAI: `inputTokens` is the full prompt (already includes
+  //     cached) → adding `cacheReadTokens` would double-count.
+  // `legacyContextSize` uses the `provider` discriminator (with a
+  // cacheCreationTokens-presence fallback for old snapshots).
+  const contextSize = usage ? (usage.contextTokens ?? legacyContextSize(usage)) : 0;
+  // Window denominator priority:
+  //   1. SDK-reported `maxContextTokens` (Claude only, auto-compact-aware)
+  //   2. `modelInfo.contextWindow` from the adapter's listModels()
+  //   3. Static MODEL_CONTEXT_WINDOWS map keyed by id prefix
+  const window = usage?.maxContextTokens ?? modelInfo?.contextWindow ?? getContextWindow(model);
+  const pct = Math.min(100, (contextSize / window) * 100);
+  const pctRounded = Math.round(pct);
+  const danger = pct >= 85;
+  const warn = !danger && pct >= 65;
+  // Monochrome gray progression — the donut sits among other muted-foreground
+  // affordances in PromptInputActions, so it should read as a quiet status
+  // glyph rather than a colored alert. Higher usage = darker shade.
+  const progressColor = danger
+    ? "stroke-foreground"
+    : warn
+      ? "stroke-muted-foreground"
+      : "stroke-muted-foreground/60";
+  // Empty arc would render as a full ring at strokeDashoffset = circumference,
+  // so dot-treat the 0% case explicitly to match a "nothing yet" affordance.
+  const dashOffset = pct <= 0 ? DONUT_CIRCUMFERENCE : DONUT_CIRCUMFERENCE * (1 - pct / 100);
+
+  // Popover (controlled) instead of Tooltip so the breakdown is reachable on
+  // touch devices where hover doesn't fire reliably. On desktop we still want
+  // the lightweight hover-to-peek feel, so `onPointerEnter`/`onPointerLeave`
+  // open/close the popover when the input is a mouse. Touch and pen taps fall
+  // through to Popover's built-in click toggle.
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          // Match `SessionHistoryMenu`'s button shell so the donut sits
+          // visually on the same row of affordances inside PromptInputActions.
+          aria-label={`Context window: ${pctRounded}% of ${formatTokens(window)}`}
+          className="inline-flex items-center justify-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          onPointerEnter={(e) => {
+            if (e.pointerType === "mouse") setOpen(true);
+          }}
+          onPointerLeave={(e) => {
+            if (e.pointerType === "mouse") setOpen(false);
+          }}
+        >
+          <svg viewBox="0 0 24 24" className="size-5 -rotate-90 shrink-0" aria-hidden="true">
+            <circle
+              cx="12"
+              cy="12"
+              r={DONUT_RADIUS}
+              fill="none"
+              className="stroke-muted-foreground/25"
+              strokeWidth="3"
+            />
+            <circle
+              cx="12"
+              cy="12"
+              r={DONUT_RADIUS}
+              fill="none"
+              className={cn("transition-all", progressColor)}
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeDasharray={DONUT_CIRCUMFERENCE}
+              strokeDashoffset={dashOffset}
+            />
+          </svg>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        // Keep the popover open while the mouse is over its content (otherwise
+        // hovering off the trigger into the popover would close it before the
+        // user can read it). Touch users dismiss via tap-outside / Escape.
+        onPointerEnter={(e) => {
+          if (e.pointerType === "mouse") setOpen(true);
+        }}
+        onPointerLeave={(e) => {
+          if (e.pointerType === "mouse") setOpen(false);
+        }}
+        className="w-auto p-2"
+        side="top"
+        align="end"
+      >
+        <div className="space-y-0.5 text-xs">
+          {usage ? (
+            <>
+              <div>Input: {usage.inputTokens.toLocaleString()}</div>
+              <div>Output: {usage.outputTokens.toLocaleString()}</div>
+              {usage.cacheReadTokens !== undefined && (
+                <div>Cache read: {usage.cacheReadTokens.toLocaleString()}</div>
+              )}
+              {usage.cacheCreationTokens !== undefined && (
+                <div>Cache write: {usage.cacheCreationTokens.toLocaleString()}</div>
+              )}
+              {usage.reasoningOutputTokens !== undefined && (
+                <div>Reasoning output: {usage.reasoningOutputTokens.toLocaleString()}</div>
+              )}
+              {usage.totalProcessedTokens !== undefined &&
+                usage.totalProcessedTokens > contextSize && (
+                  <div>Total processed: {usage.totalProcessedTokens.toLocaleString()}</div>
+                )}
+              <div className="mt-1 border-t pt-1">
+                Context: {contextSize.toLocaleString()} / {window.toLocaleString()} ({pctRounded}%)
+              </div>
+            </>
+          ) : (
+            <div>Context window: {window.toLocaleString()} tokens</div>
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function usageContextSize(usage: UsageData | undefined): number {
+  if (!usage) return 0;
+  return usage.contextTokens ?? legacyContextSize(usage);
+}
+
+/**
+ * Backward-compat fallback for usage snapshots that lack `contextTokens`.
+ * Uses `provider` when set; falls back to `cacheCreationTokens` presence as
+ * a Claude detector for snapshots persisted before the provider field
+ * existed. Claude `inputTokens` excludes cached content (must add cache
+ * fields); other providers report the full prompt.
+ */
+function legacyContextSize(usage: UsageData): number {
+  const isClaude = usage.provider === "claude" || usage.cacheCreationTokens !== undefined;
+  if (isClaude) {
+    return (
+      usage.inputTokens +
+      (usage.cacheReadTokens ?? 0) +
+      (usage.cacheCreationTokens ?? 0) +
+      (usage.reasoningOutputTokens ?? 0)
+    );
+  }
+  return usage.inputTokens + (usage.reasoningOutputTokens ?? 0);
 }
 
 interface SessionHistoryItem {
@@ -1501,9 +1828,9 @@ function SessionHistoryMenu({
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              className="inline-flex items-center justify-center rounded-md px-2 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              className="inline-flex items-center justify-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
-              <Clock className="size-3" />
+              <Clock className="size-4" />
             </button>
           </DropdownMenuTrigger>
         </TooltipTrigger>

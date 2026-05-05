@@ -79,6 +79,10 @@ export {
 } from "./lib/codemirror-setup";
 export type { CommandRegistryDeps, PaletteCommand } from "./lib/command-registry";
 export { buildCommands, formatShortcut, isMacPlatform } from "./lib/command-registry";
+export {
+  EXPERIMENTAL_FLAG_KEYS,
+  useExperimentalContextMeter,
+} from "./lib/experimental-flags";
 export { getFileIcon } from "./lib/file-icon";
 export { type FileLocation, formatFileLocation, parseFileLocation } from "./lib/file-location";
 export { type FilePreviewType, getFilePreviewType } from "./lib/file-type";

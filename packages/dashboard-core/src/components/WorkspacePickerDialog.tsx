@@ -16,13 +16,14 @@ import { useProjects } from "../hooks/use-projects";
 import { getRecentWorkspaceOrder, recordWorkspaceAccess } from "../lib/recent-workspaces";
 import { toWorkspaceId } from "../lib/workspace-id";
 import { useDashboardStore } from "../stores/index";
+import type { AgentInfo } from "../types";
 import { AgentStatusIndicator } from "./AgentStatusIndicator";
 
 interface WorkspaceEntry {
   workspaceId: string;
   projectName: string;
   branch: string;
-  agent?: { status: string } | null;
+  agent?: AgentInfo;
 }
 
 interface WorkspacePickerDialogProps {
@@ -60,7 +61,7 @@ export function WorkspacePickerDialog({ open, onOpenChange }: WorkspacePickerDia
           workspaceId,
           projectName: project.name,
           branch: worktree.branch,
-          agent: statuses[workspaceId]?.agent ?? worktree.agent,
+          agent: statuses.get(workspaceId)?.agent,
         });
       }
     }
