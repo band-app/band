@@ -4,16 +4,25 @@
  * Fake agent binary that speaks the Claude Agent SDK stdin/stdout protocol.
  *
  * Reads FAKE_AGENT_SCENARIO env var pointing to a JSON file containing an
- * array of SDK messages. Outputs them as JSONL to stdout, then exits.
+ * array of SDK messages. Outputs them as JSONL to stdout, then waits for the
+ * SDK to close our stdin before exiting.
  *
  * Handles the SDK's bidirectional protocol:
- * - control_request from SDK (e.g. "initialize"): auto-responds with success
+ * - control_request from SDK (e.g. "initialize", "get_context_usage"):
+ *   auto-responds with success and an empty payload
  * - control_response from SDK (response to our control_request): resolves
  *   any pending _wait_for_stdin waiter
  *
  * Supports a special `{ _wait_for_stdin: true }` directive that pauses output
  * until a control_response is received on stdin (used for testing interactive
  * tool callbacks like canUseTool / AskUserQuestion).
+ *
+ * IMPORTANT: we don't exit immediately after emitting the scenario. Real
+ * adapters may send `control_request`s *after* the terminal `result` event
+ * (e.g. claude-code's `getContextUsage()` call). Exiting early would make
+ * those requests hang because there's no agent left to reply. Instead, we
+ * keep the process alive and exit when stdin EOFs, which the SDK does on
+ * shutdown.
  */
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -43,6 +52,9 @@ let stdinBuffer = "";
 
 process.stdin.resume();
 process.stdin.setEncoding("utf-8");
+// Exit when the SDK closes our stdin. Until then we stay alive so we can
+// answer late control_requests like `get_context_usage`.
+process.stdin.on("end", () => process.exit(exitCode));
 process.stdin.on("data", (chunk) => {
 	stdinBuffer += chunk;
 	let newlineIdx;
@@ -109,5 +121,14 @@ process.stdin.on("data", (chunk) => {
 		}
 		process.stdout.write(JSON.stringify(msg) + "\n");
 	}
-	process.exit(exitCode);
+	if (exitCode !== 0) {
+		// Crash simulation — tests that pin FAKE_AGENT_EXIT_CODE to a
+		// non-zero value want the agent to die now (e.g. simulating a
+		// binary segfault). Don't keep the process alive in that case.
+		process.exit(exitCode);
+	}
+	// Otherwise keep the process alive. The SDK may still send
+	// control_requests (e.g. a `getContextUsage()` triggered by the terminal
+	// `result` event); exiting before responding would hang the SDK promise.
+	// The stdin 'end' listener handles shutdown when the SDK is done with us.
 })();
