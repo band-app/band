@@ -88,7 +88,11 @@ export async function startServer(
   const port = await getRandomPort();
 
   return new Promise((resolve, reject) => {
-    const child = spawn("node", ["dist/start-server.mjs"], {
+    // The production bundle imports `bun:sqlite` and is shipped to run under
+    // Bun (see apps/web/README.md). Spawning it under Node would throw at
+    // module load. Vitest integration tests use the same approach via
+    // `tests/helpers/server-runtime.ts`.
+    const child = spawn("bun", ["dist/start-server.mjs"], {
       cwd: PROJECT_ROOT,
       env: {
         ...process.env,
