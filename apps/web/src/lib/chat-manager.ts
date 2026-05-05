@@ -8,7 +8,7 @@
 
 import { createLogger } from "@band-app/logger";
 import { removeAgent } from "./agent-pool";
-import { getChatLayout } from "./chat-layout-manager";
+import { addChatToLayout, getChatLayout } from "./chat-layout-manager";
 import { defaultPanelIdFromLayout } from "./dockview-layout-manager";
 import {
   deletePanelState,
@@ -171,6 +171,17 @@ export function createChat(workspaceId: string, options?: CreateChatOptions): Ch
   });
 
   addToIndex(session);
+
+  // Mirror what `terminals.create` and `browsers.create` do: register the
+  // new pane in the saved dockview layout so it shows up next time the
+  // workspace is opened. Without this, chats created via the CLI (e.g.
+  // `band workspaces create --prompt`, `band chats create`, or the lazy
+  // `getOrCreateDefaultChat` path) exist as records but are invisible
+  // in the dashboard until the user manually opens a tab. `addPanel`
+  // is idempotent, so the dashboard's own "+ chat" button — which may
+  // also touch the layout client-side — is unaffected.
+  addChatToLayout(workspaceId, session.id, { title: session.name });
+
   log.info({ chatId: session.id, workspaceId, agent: session.agent }, "chat pane created");
   return session;
 }

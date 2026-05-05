@@ -177,6 +177,27 @@ fn seed_db(band_dir: &Path, repo_path: &Path, settings: &serde_json::Value) {
     );
 }
 
+/// Read the saved chat layout for a workspace from the `panel_states`
+/// table. Returns `Value::Null` if no layout has been persisted.
+fn read_chat_layout(band_dir: &Path, workspace_id: &str) -> serde_json::Value {
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/read-chat-layout.mjs");
+    let output = Command::new("node")
+        .arg(&script)
+        .arg(band_dir)
+        .arg(workspace_id)
+        .output()
+        .expect("read-chat-layout.mjs failed to execute");
+
+    assert!(
+        output.status.success(),
+        "read-chat-layout.mjs failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout_str = String::from_utf8_lossy(&output.stdout);
+    serde_json::from_str(stdout_str.trim()).unwrap_or(serde_json::Value::Null)
+}
+
 /// Seed a chat layout (dockview tree) directly into the `panel_states`
 /// table. Used by tests that exercise default-chat-panel resolution
 /// without going through the dashboard UI to drive the layout.
@@ -1429,6 +1450,58 @@ fn cronjobs_list_text_output_shows_table() {
 
 // --- Chat command / default-panel resolution tests ---
 
+/// Regression: `band workspaces create --prompt ...` lazily creates a default
+/// chat pane and submits the prompt to it, but the chat record has to land
+/// in the saved `chat_layout` so the dashboard renders the tab when the user
+/// opens the workspace. Before the fix, only the chats registry was updated,
+/// not the layout — so the chat existed but was invisible in the dashboard.
+#[test]
+fn workspaces_create_prompt_adds_chat_to_layout() {
+    let env = TestEnv::new();
+    let out = env.band(&[
+        "workspaces",
+        "create",
+        "my-project",
+        "feat/prompt-layout",
+        "--prompt",
+        "say hi",
+        "--output",
+        "json",
+    ]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+
+    let workspace_id = "my-project-feat-prompt-layout";
+
+    // The chat exists in the registry.
+    let list = env.band(&["chats", "list", workspace_id, "--output", "json"]);
+    assert!(list.status.success(), "stderr: {}", stderr(&list));
+    let list_json: serde_json::Value = serde_json::from_str(&stdout(&list)).unwrap();
+    let chats = list_json["chats"].as_array().expect("chats array");
+    assert_eq!(
+        chats.len(),
+        1,
+        "expected exactly one chat after `workspaces create --prompt`: {list_json}"
+    );
+    let chat_id = chats[0]["id"].as_str().unwrap();
+
+    // ...AND it shows up in the persisted dockview chat layout. Asserting on
+    // the layout shape directly (rather than via the dashboard) is the only
+    // way to catch the invisible-chat bug at the CLI layer.
+    let layout = read_chat_layout(&env.band_dir, workspace_id);
+    assert!(
+        !layout.is_null(),
+        "expected a chat_layout row to be persisted, got null"
+    );
+    let panels = layout
+        .get("panels")
+        .and_then(|p| p.as_object())
+        .unwrap_or_else(|| panic!("expected layout.panels object: {layout}"));
+    assert!(
+        panels.contains_key(chat_id),
+        "expected chat {chat_id} in layout panels, got {panels:?}"
+    );
+}
+
 #[test]
 fn chat_creates_default_panel_when_workspace_has_no_chats() {
     let env = TestEnv::new();
@@ -1474,15 +1547,20 @@ fn chat_creates_default_panel_when_workspace_has_no_chats() {
 }
 
 #[test]
-fn chat_targets_first_chat_when_no_layout() {
+fn chat_targets_most_recently_added_chat_by_default() {
+    // Every chat created (lazy-default in `workspaces create`, explicit
+    // `chats create`, or via `tasks.submit` lazy-create) now also lands
+    // in the saved chat_layout, with the new pane marked as the active
+    // view of its group. So `chats send` without an explicit chat_id
+    // resolves through `defaultPanelIdFromLayout` -> active panel ->
+    // most recently added chat.
     let env = TestEnv::new();
-    env.band(&["workspaces", "create", "my-project", "feat/chat-no-layout"]);
-    let workspace_id = "my-project-feat-chat-no-layout";
+    env.band(&["workspaces", "create", "my-project", "feat/chat-default"]);
+    let workspace_id = "my-project-feat-chat-default";
 
-    // `workspaces create` lazily creates a default chat panel for the
-    // workspace, so `chats list` already returns one entry. Add a second
-    // pane to exercise the "more than one chat, no layout" path.
-    env.band(&[
+    // `workspaces create` lazily creates the first chat panel and
+    // inserts it into the layout (active). Add a second pane on top.
+    let second = env.band(&[
         "chats",
         "create",
         workspace_id,
@@ -1491,18 +1569,21 @@ fn chat_targets_first_chat_when_no_layout() {
         "--output",
         "json",
     ]);
+    assert!(second.status.success(), "stderr: {}", stderr(&second));
+    let second_id = serde_json::from_str::<serde_json::Value>(&stdout(&second))
+        .unwrap()["chat"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
-    // Snapshot the workspace's chats in registry order so we can assert
-    // that `chat` (no --chat-id) resolves to the first one.
+    // Sanity-check that there really are two chats.
     let list = env.band(&["chats", "list", workspace_id, "--output", "json"]);
-    assert!(list.status.success(), "stderr: {}", stderr(&list));
     let list_json: serde_json::Value = serde_json::from_str(&stdout(&list)).unwrap();
     let chats = list_json["chats"].as_array().expect("chats array");
     assert!(chats.len() >= 2, "expected at least 2 chats: {list_json}");
-    let first_id = chats[0]["id"].as_str().unwrap().to_string();
 
-    // Without a saved chat layout, `chats send` should fall back to the
-    // first chat in the registry (insertion order).
+    // `chats send` (no chat_id) should target the most recently added
+    // chat — i.e. the one we just created — not the lazy-default first.
     let output = env.band(&[
         "chats",
         "send",
@@ -1517,8 +1598,8 @@ fn chat_targets_first_chat_when_no_layout() {
     let json: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
     assert_eq!(
         json["chatId"].as_str().unwrap(),
-        first_id,
-        "expected first chat in the registry to be the default: {json}"
+        second_id,
+        "expected most recently added chat to be the default: {json}"
     );
 }
 
