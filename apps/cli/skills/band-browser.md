@@ -3,8 +3,8 @@ name: band-browser
 version: 0.1.0
 description: Manage Band browser tabs via the CLI. Use when the user wants to create, list, navigate, inspect, or remove a browser tab inside a Band workspace. Triggers include "open browser", "navigate to URL", "browser tab", "browser pane", "remove browser tab".
 allowed-tools: Bash
-argument-hint: browser [list|create|navigate|get|remove] [args...]
-commands: browser
+argument-hint: browsers [list|create|navigate|get|remove] [args...]
+commands: browsers
 ---
 
 # Band Browser Tabs
@@ -36,23 +36,23 @@ All commands support `--output json` (or `BAND_OUTPUT=json` env var) for structu
 
 ```sh
 # Create a new tab pre-loaded with a URL
-bid=$(band browser create ws_abc123 --url https://example.com --name "docs" --output json | jq -r .browser.id)
+bid=$(band browsers create ws_abc123 --url https://example.com --name "docs" --output json | jq -r .browser.id)
 
 # Read the current state
-band browser get "$bid"
+band browsers get "$bid"
 ```
 
 ### Navigate an existing tab
 
 ```sh
-band browser navigate "$bid" https://example.com/changelog
+band browsers navigate "$bid" https://example.com/changelog
 ```
 
 ### List and clean up tabs
 
 ```sh
-band browser list ws_abc123 --output json | jq '.browsers[].id' | \
-  xargs -n1 band browser remove
+band browsers list ws_abc123 --output json | jq '.browsers[].id' | \
+  xargs -n1 band browsers remove
 ```
 
 ## Cross-references

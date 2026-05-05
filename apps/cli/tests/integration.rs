@@ -2113,12 +2113,12 @@ fn generate_skills_general_skill_excludes_domain_commands() {
         "band chats create",
         "band chats send",
         "band chats chat",
-        "band terminal list",
-        "band terminal create",
-        "band terminal send",
-        "band browser list",
-        "band browser create",
-        "band browser navigate",
+        "band terminals list",
+        "band terminals create",
+        "band terminals send",
+        "band browsers list",
+        "band browsers create",
+        "band browsers navigate",
     ] {
         assert!(
             !cmds.contains(needle),
@@ -2159,8 +2159,8 @@ fn generate_skills_chat_skill_contains_only_chat_commands() {
     }
 
     for needle in [
-        "band terminal list",
-        "band browser list",
+        "band terminals list",
+        "band browsers list",
         "band workspaces list",
         "band projects list",
     ] {
@@ -2186,12 +2186,12 @@ fn generate_skills_terminal_skill_contains_only_terminal_commands() {
     let cmds = commands_section(&term);
 
     for needle in [
-        "band terminal list",
-        "band terminal create",
-        "band terminal send",
-        "band terminal output",
-        "band terminal kill",
-        "band terminal attach",
+        "band terminals list",
+        "band terminals create",
+        "band terminals send",
+        "band terminals output",
+        "band terminals kill",
+        "band terminals attach",
     ] {
         assert!(
             cmds.contains(needle),
@@ -2201,7 +2201,7 @@ fn generate_skills_terminal_skill_contains_only_terminal_commands() {
 
     for needle in [
         "band chats list",
-        "band browser list",
+        "band browsers list",
         "band workspaces list",
         "band projects list",
     ] {
@@ -2227,11 +2227,11 @@ fn generate_skills_browser_skill_contains_only_browser_commands() {
     let cmds = commands_section(&browser);
 
     for needle in [
-        "band browser list",
-        "band browser create",
-        "band browser navigate",
-        "band browser get",
-        "band browser remove",
+        "band browsers list",
+        "band browsers create",
+        "band browsers navigate",
+        "band browsers get",
+        "band browsers remove",
     ] {
         assert!(
             cmds.contains(needle),
@@ -2241,7 +2241,7 @@ fn generate_skills_browser_skill_contains_only_browser_commands() {
 
     for needle in [
         "band chats list",
-        "band terminal list",
+        "band terminals list",
         "band workspaces list",
         "band projects list",
     ] {

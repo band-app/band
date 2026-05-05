@@ -38,14 +38,14 @@ enum Commands {
         cmd: ChatsCmd,
     },
     /// Manage browser tabs
-    Browser {
+    Browsers {
         #[command(subcommand)]
-        cmd: BrowserCmd,
+        cmd: BrowsersCmd,
     },
     /// Manage terminal sessions
-    Terminal {
+    Terminals {
         #[command(subcommand)]
-        cmd: TerminalCmd,
+        cmd: TerminalsCmd,
     },
     /// Manage scheduled cronjobs
     Cronjobs {
@@ -210,7 +210,7 @@ enum ChatsCmd {
 }
 
 #[derive(Subcommand)]
-enum BrowserCmd {
+enum BrowsersCmd {
     /// List browser tabs for a workspace
     List {
         /// Workspace ID
@@ -247,7 +247,7 @@ enum BrowserCmd {
 }
 
 #[derive(Subcommand)]
-enum TerminalCmd {
+enum TerminalsCmd {
     /// List terminal sessions for a workspace
     List {
         /// Workspace ID
@@ -396,9 +396,9 @@ fn main() {
     }
 
     // terminal output --follow streams output directly
-    if let Commands::Terminal {
+    if let Commands::Terminals {
         cmd:
-            TerminalCmd::Output {
+            TerminalsCmd::Output {
                 ref terminal_id,
                 lines,
                 follow: true,
@@ -410,8 +410,8 @@ fn main() {
     }
 
     // terminal attach is interactive streaming
-    if let Commands::Terminal {
-        cmd: TerminalCmd::Attach { ref terminal_id },
+    if let Commands::Terminals {
+        cmd: TerminalsCmd::Attach { ref terminal_id },
     } = cli.command
     {
         let exit_code = handle_terminal_attach(terminal_id, json_output);
@@ -493,32 +493,32 @@ fn main() {
             ChatsCmd::Stop { chat_id } => cmd_chats_stop(&chat_id),
             ChatsCmd::Remove { chat_id } => cmd_chats_remove(&chat_id),
         },
-        Commands::Browser { cmd } => match cmd {
-            BrowserCmd::List { workspace_id } => cmd_browser_list(&workspace_id),
-            BrowserCmd::Create {
+        Commands::Browsers { cmd } => match cmd {
+            BrowsersCmd::List { workspace_id } => cmd_browser_list(&workspace_id),
+            BrowsersCmd::Create {
                 workspace_id,
                 url,
                 name,
             } => cmd_browser_create(&workspace_id, url.as_deref(), name.as_deref()),
-            BrowserCmd::Navigate { browser_id, url } => cmd_browser_navigate(&browser_id, &url),
-            BrowserCmd::Get { browser_id } => cmd_browser_get(&browser_id),
-            BrowserCmd::Remove { browser_id } => cmd_browser_remove(&browser_id),
+            BrowsersCmd::Navigate { browser_id, url } => cmd_browser_navigate(&browser_id, &url),
+            BrowsersCmd::Get { browser_id } => cmd_browser_get(&browser_id),
+            BrowsersCmd::Remove { browser_id } => cmd_browser_remove(&browser_id),
         },
-        Commands::Terminal { cmd } => match cmd {
-            TerminalCmd::List { workspace_id } => cmd_terminal_list(&workspace_id),
-            TerminalCmd::Create {
+        Commands::Terminals { cmd } => match cmd {
+            TerminalsCmd::List { workspace_id } => cmd_terminal_list(&workspace_id),
+            TerminalsCmd::Create {
                 workspace_id,
                 command,
                 cwd,
             } => cmd_terminal_create(&workspace_id, command.as_deref(), cwd.as_deref()),
-            TerminalCmd::Send { terminal_id, data } => cmd_terminal_send(&terminal_id, &data),
-            TerminalCmd::Output {
+            TerminalsCmd::Send { terminal_id, data } => cmd_terminal_send(&terminal_id, &data),
+            TerminalsCmd::Output {
                 terminal_id,
                 lines,
                 follow: false,
             } => cmd_terminal_output(&terminal_id, lines),
-            TerminalCmd::Output { .. } | TerminalCmd::Attach { .. } => unreachable!(),
-            TerminalCmd::Kill { terminal_id } => cmd_terminal_kill(&terminal_id),
+            TerminalsCmd::Output { .. } | TerminalsCmd::Attach { .. } => unreachable!(),
+            TerminalsCmd::Kill { terminal_id } => cmd_terminal_kill(&terminal_id),
         },
         Commands::Cronjobs { cmd } => match cmd {
             CronjobsCmd::List { project, workspace } => {
@@ -2200,7 +2200,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "notes": "Removes the chat pane, kills the associated agent process, and cleans up state."
         }),
         serde_json::json!({
-            "name": "browser list",
+            "name": "browsers list",
             "description": "List browser tabs for a workspace",
             "parameters": [
                 {"name": "workspace_id", "type": "string", "required": true, "positional": true, "description": "Workspace ID"},
@@ -2208,7 +2208,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "notes": "Text output: `ID\\tNAME\\tURL\\tSTATUS` (tab-separated table).\nJSON output: `{\"browsers\": [{\"id\": \"...\", \"name\": \"...\", \"url\": \"...\", \"status\": \"...\"}]}`"
         }),
         serde_json::json!({
-            "name": "browser create",
+            "name": "browsers create",
             "description": "Create a new browser tab in a workspace",
             "parameters": [
                 {"name": "workspace_id", "type": "string", "required": true, "positional": true, "description": "Workspace ID"},
@@ -2218,7 +2218,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "notes": "Text output: the new browser tab ID.\nJSON output: `{\"browser\": {\"id\": \"...\", ...}}`"
         }),
         serde_json::json!({
-            "name": "browser navigate",
+            "name": "browsers navigate",
             "description": "Navigate a browser tab to a URL",
             "parameters": [
                 {"name": "browser_id", "type": "string", "required": true, "positional": true, "description": "Browser tab ID"},
@@ -2227,7 +2227,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "notes": "Updates the browser tab's URL in the server state."
         }),
         serde_json::json!({
-            "name": "browser get",
+            "name": "browsers get",
             "description": "Get a browser tab's current state",
             "parameters": [
                 {"name": "browser_id", "type": "string", "required": true, "positional": true, "description": "Browser tab ID"},
@@ -2235,7 +2235,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "notes": "Text output: formatted key-value pairs.\nJSON output: `{\"browser\": {\"id\": \"...\", \"name\": \"...\", \"url\": \"...\", \"status\": \"...\"}}`"
         }),
         serde_json::json!({
-            "name": "browser remove",
+            "name": "browsers remove",
             "description": "Remove a browser tab",
             "parameters": [
                 {"name": "browser_id", "type": "string", "required": true, "positional": true, "description": "Browser tab ID"},
@@ -2243,7 +2243,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "notes": "Removes the browser tab and cleans up state."
         }),
         serde_json::json!({
-            "name": "terminal list",
+            "name": "terminals list",
             "description": "List terminal sessions for a workspace",
             "parameters": [
                 {"name": "workspace_id", "type": "string", "required": true, "positional": true, "description": "Workspace ID"},
@@ -2251,7 +2251,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "notes": "Text output: `TERMINAL ID\\tTITLE\\tPID\\tSCROLLBACK` (tab-separated table).\nJSON output: `{\"terminals\": [{\"terminalId\": \"...\", \"workspaceId\": \"...\", \"pid\": N, \"scrollbackLength\": N, \"title\": \"...\"}]}`"
         }),
         serde_json::json!({
-            "name": "terminal create",
+            "name": "terminals create",
             "description": "Create a new terminal session in a workspace",
             "parameters": [
                 {"name": "workspace_id", "type": "string", "required": true, "positional": true, "description": "Workspace ID"},
@@ -2261,16 +2261,16 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "notes": "Creates a new terminal session with its own PTY process. Returns the terminal ID.\nJSON output: `{\"terminalId\": \"...\", \"workspaceId\": \"...\", \"pid\": N}`"
         }),
         serde_json::json!({
-            "name": "terminal send",
+            "name": "terminals send",
             "description": "Send input to a terminal session",
             "parameters": [
                 {"name": "terminal_id", "type": "string", "required": true, "positional": true, "description": "Terminal ID"},
                 {"name": "--data", "type": "string", "required": true, "description": "Text to send (supports \\n for newline, \\t for tab)"},
             ],
-            "notes": "Writes text to the terminal's PTY stdin. Use \\n to send a newline (execute command).\nExample: band terminal send <id> --data \"ls -la\\n\""
+            "notes": "Writes text to the terminal's PTY stdin. Use \\n to send a newline (execute command).\nExample: band terminals send <id> --data \"ls -la\\n\""
         }),
         serde_json::json!({
-            "name": "terminal output",
+            "name": "terminals output",
             "description": "Get terminal output (scrollback buffer)",
             "parameters": [
                 {"name": "terminal_id", "type": "string", "required": true, "positional": true, "description": "Terminal ID"},
@@ -2280,7 +2280,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "notes": "Without --follow: fetches the current scrollback buffer (up to 100KB).\nWith --follow: streams live terminal output via SSE. Press Ctrl+C to stop."
         }),
         serde_json::json!({
-            "name": "terminal kill",
+            "name": "terminals kill",
             "description": "Kill a terminal session",
             "parameters": [
                 {"name": "terminal_id", "type": "string", "required": true, "positional": true, "description": "Terminal ID"},
@@ -2288,7 +2288,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "notes": "Kills the terminal's PTY process and cleans up the session."
         }),
         serde_json::json!({
-            "name": "terminal attach",
+            "name": "terminals attach",
             "description": "Attach to a terminal (stream output + send input interactively)",
             "parameters": [
                 {"name": "terminal_id", "type": "string", "required": true, "positional": true, "description": "Terminal ID"},

@@ -38,8 +38,8 @@ The Band CLI ships **four domain-specific skills**, each generated from its own 
 
 - `band.md` → `band/SKILL.md` — workspaces, projects, cronjobs, tunnel, settings, schema, notify, generate-skills.
 - `band-chat.md` → `band-chat/SKILL.md` — chat panes (`band chats ...`).
-- `band-terminal.md` → `band-terminal/SKILL.md` — terminal sessions (`band terminal ...`).
-- `band-browser.md` → `band-browser/SKILL.md` — browser tabs (`band browser ...`).
+- `band-terminal.md` → `band-terminal/SKILL.md` — terminal sessions (`band terminals ...`).
+- `band-browser.md` → `band-browser/SKILL.md` — browser tabs (`band browsers ...`).
 
 Each template's frontmatter has a `commands:` field listing comma-separated CLI command-name prefixes; the generator filters the schema by those prefixes so each skill ships only its domain's commands. The split improves trigger precision and keeps each generated SKILL.md scoped to one task type (issue #331).
 

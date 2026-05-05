@@ -3,8 +3,8 @@ name: band-terminal
 version: 0.1.0
 description: Manage Band terminal sessions via the CLI. Use when the user wants to create, list, send input to, read output from, attach to, or kill a terminal session inside a Band workspace. Triggers include "run command in terminal", "create terminal", "send to terminal", "terminal output", "attach terminal", "terminal pane".
 allowed-tools: Bash
-argument-hint: terminal [list|create|send|output|kill|attach] [args...]
-commands: terminal
+argument-hint: terminals [list|create|send|output|kill|attach] [args...]
+commands: terminals
 ---
 
 # Band Terminal Sessions
@@ -36,33 +36,33 @@ All commands support `--output json` (or `BAND_OUTPUT=json` env var) for structu
 
 ```sh
 # Create a terminal running a dev server
-tid=$(band terminal create ws_abc123 --command "npm run dev" --output json | jq -r .terminalId)
+tid=$(band terminals create ws_abc123 --command "npm run dev" --output json | jq -r .terminalId)
 
 # Check the last 20 lines
-band terminal output "$tid" --lines 20
+band terminals output "$tid" --lines 20
 
 # Stream live output
-band terminal output "$tid" --follow
+band terminals output "$tid" --follow
 ```
 
 ### Send a command to an existing terminal
 
 ```sh
 # Note the trailing \n — it presses enter
-band terminal send "$tid" --data "echo hello\n"
+band terminals send "$tid" --data "echo hello\n"
 ```
 
 ### Attach interactively
 
 ```sh
-band terminal attach "$tid"
+band terminals attach "$tid"
 # Type commands; Ctrl+C detaches.
 ```
 
 ### Kill a terminal when done
 
 ```sh
-band terminal kill "$tid"
+band terminals kill "$tid"
 ```
 
 ## Cross-references
