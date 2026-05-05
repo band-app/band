@@ -13,7 +13,7 @@
     "bin"
   ],
   "engines": {
-    "node": ">=22"
+    "node": ">=22.5.0"
   },
   "os": [
     "darwin",
@@ -25,13 +25,12 @@
     "start": "node dist/start-server.mjs",
     "build:test-server": "esbuild test-server.ts --bundle --platform=node --format=esm --outfile=dist/test-server.mjs --banner:js=\"import{createRequire as __cr}from'module';import{fileURLToPath as __fu}from'url';import{dirname as __dn}from'path';const require=__cr(import.meta.url);const __filename=__fu(import.meta.url);const __dirname=__dn(__filename);\"",
     "pretest": "pnpm build",
-    "test": "vitest run",
-    "test:e2e": "playwright test",
-    "test:e2e:ui": "playwright test --ui",
+    "test": "NODE_OPTIONS='--no-warnings=ExperimentalWarning' vitest run",
+    "test:e2e": "NODE_OPTIONS='--no-warnings=ExperimentalWarning' playwright test",
+    "test:e2e:ui": "NODE_OPTIONS='--no-warnings=ExperimentalWarning' playwright test --ui",
     "postinstall": "chmod +x node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true"
   },
   "dependencies": {
-    "better-sqlite3": "^12.8.0",
     "node-pty": "^1.1.0",
     "react-resizable-panels": "^4.9.0",
     "typescript-language-server": "^5.1.3",
@@ -63,7 +62,6 @@
     "@trpc/client": "^11.12.0",
     "@trpc/openapi": "11.16.0-alpha",
     "@trpc/server": "^11.12.0",
-    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.19.13",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
@@ -77,8 +75,8 @@
     "clsx": "^2.1.1",
     "croner": "^10.0.1",
     "dockview": "^5.2.0",
-    "drizzle-kit": "^0.31.9",
-    "drizzle-orm": "^0.45.1",
+    "drizzle-kit": "1.0.0-rc.1",
+    "drizzle-orm": "1.0.0-rc.1",
     "esbuild": "^0.25.0",
     "jsdom": "^29.0.2",
     "lucide-react": "^0.576.0",

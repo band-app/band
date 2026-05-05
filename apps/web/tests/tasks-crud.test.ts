@@ -3,9 +3,9 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import { DatabaseSync } from "node:sqlite";
+import { drizzle } from "drizzle-orm/node-sqlite";
+import { migrate } from "drizzle-orm/node-sqlite/migrator";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { SERVER_RUNTIME, SERVER_SCRIPT } from "./helpers/server-runtime";
@@ -131,12 +131,12 @@ async function trpcData<T>(res: Response): Promise<T> {
 // DB seeding helpers
 // ---------------------------------------------------------------------------
 
-function openDb(tmpHome: string): InstanceType<typeof Database> {
+function openDb(tmpHome: string): DatabaseSync {
   const dbPath = join(tmpHome, ".band", "band.db");
   mkdirSync(join(tmpHome, ".band"), { recursive: true });
-  const sqlite = new Database(dbPath);
-  sqlite.pragma("journal_mode = WAL");
-  migrate(drizzle(sqlite), { migrationsFolder: MIGRATIONS_FOLDER });
+  const sqlite = new DatabaseSync(dbPath);
+  sqlite.exec("PRAGMA journal_mode = WAL");
+  migrate(drizzle({ client: sqlite }), { migrationsFolder: MIGRATIONS_FOLDER });
   return sqlite;
 }
 

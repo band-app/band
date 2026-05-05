@@ -2,9 +2,9 @@
 
 Web server + dashboard frontend for Band. Provides the tRPC API, WebSocket layer, and bundled UI consumed by the Tauri desktop app and (optionally) standalone npm consumers.
 
-## Runtime: Node.js
+## Runtime: Node.js 22.5+
 
-This package runs under [Node.js](https://nodejs.org) v22+. The shebang on `bin/band-server.mjs` is `#!/usr/bin/env node`.
+This package runs under [Node.js](https://nodejs.org) v22.5 or newer. The shebang on `bin/band-server.mjs` is `#!/usr/bin/env node`.
 
 ```bash
 # Run the server
@@ -13,20 +13,20 @@ band-server
 node dist/start-server.mjs
 ```
 
-### `better-sqlite3` and the NODE_MODULE_VERSION risk (interim)
+## SQLite via `node:sqlite`
 
-SQLite is provided by the [`better-sqlite3`](https://github.com/WiseLibs/better-sqlite3) native module. The `.node` binary shipped inside the bundle is built against the Node version used during `pnpm install`. At runtime, the host `node` must match that ABI; if it doesn't, `require("better-sqlite3")` fails with `ERR_DLOPEN_FAILED` / "was compiled against a different Node.js version".
+SQLite is provided by Node's built-in [`node:sqlite`](https://nodejs.org/api/sqlite.html) module — no native module ships in the bundle. This eliminates the `NODE_MODULE_VERSION` ABI mismatch that affects packages like `better-sqlite3`: whatever Node the user runs supplies `node:sqlite` directly, so the binary always matches the runtime.
 
-This is a known interim trade-off. We previously experimented with bundling [Bun](https://bun.sh) + `bun:sqlite` to avoid the ABI mismatch, but Bun's `node:http` shim does not fire `upgrade` events on `httpServer.on("upgrade", …)` (see [oven-sh/bun#18945](https://github.com/oven-sh/bun/issues/18945), [#5951](https://github.com/oven-sh/bun/issues/5951), [#24107](https://github.com/oven-sh/bun/issues/24107)), which silently breaks our tRPC subscription, terminal, and LSP WebSockets.
+`node:sqlite` is at **Stability 1.2 — Release Candidate** in current Node, available unflagged since 22.13.0. The API has been stable across Node 22.5 → 23.x → 24.x. The startup `ExperimentalWarning` is suppressed in `src/lib/suppress-warnings.ts`.
 
-The planned [Electron migration](#) replaces the host-Node dependency with an embedded runtime whose ABI we control. Until then, the desktop app expects a system `node` on `PATH`.
+We were briefly on `bun:sqlite` (PR #353) to dodge the same ABI problem, but Bun's `node:http` shim doesn't fire `upgrade` events on `httpServer.on("upgrade", …)`, breaking tRPC subscription, terminal, and LSP WebSockets ([oven-sh/bun#18945](https://github.com/oven-sh/bun/issues/18945), [#5951](https://github.com/oven-sh/bun/issues/5951), [#24107](https://github.com/oven-sh/bun/issues/24107)). `node:sqlite` gets us the same ABI-stability win without changing the JS runtime.
 
 ## Install
 
-Node v22+ must be on `PATH` first.
+Node v22.5+ must be on `PATH` first.
 
 ```bash
-# 1. Install Node.js 22+ (https://nodejs.org)
+# 1. Install Node.js 22.5+ (https://nodejs.org)
 
 # 2. Install the package
 npm i -g @band-app/server     # or: pnpm add -g
@@ -63,11 +63,10 @@ dist/
 ├── migrations/                # drizzle SQL migrations
 ├── openapi.json               # generated tRPC OpenAPI spec
 └── node_modules/              # only externalized native deps + helpers
-    ├── node-pty/              # native PTY (.node + spawn-helper)
-    ├── better-sqlite3/        # native SQLite (.node)
-    ├── bindings/              # better-sqlite3 .node loader
-    ├── file-uri-to-path/      # bindings dependency
+    ├── node-pty/              # native PTY (.node + spawn-helper, NAPI — ABI-stable)
     ├── typescript/
     ├── typescript-language-server/
     └── @openai/codex/         # Codex SDK package.json (codex CLI is system-installed)
 ```
+
+No SQLite native module ships in the bundle.

@@ -266,6 +266,9 @@ pub(crate) fn ensure_webserver_running() -> Result<(u16, String), String> {
         .current_dir(&web_dir)
         .env("PATH", shell_path())
         .env("PORT", port.to_string())
+        // Silence the `node:sqlite` ExperimentalWarning (Stability 1.2 RC).
+        // Drop once Node marks the module Stable.
+        .env("NODE_OPTIONS", "--no-warnings=ExperimentalWarning")
         .stdout(log_out)
         .stderr(log_err);
     set_process_group(&mut cmd);
@@ -323,6 +326,9 @@ pub async fn webserver_start(state: State<'_, WebServerState>) -> Result<(), Str
         .current_dir(&web_dir)
         .env("PATH", shell_path())
         .env("PORT", port.to_string())
+        // Silence the `node:sqlite` ExperimentalWarning (Stability 1.2 RC).
+        // Drop once Node marks the module Stable.
+        .env("NODE_OPTIONS", "--no-warnings=ExperimentalWarning")
         .stdout(log_out)
         .stderr(log_err);
     set_process_group(&mut cmd);

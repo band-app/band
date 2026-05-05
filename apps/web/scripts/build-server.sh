@@ -13,7 +13,6 @@ esbuild start-server.ts \
   --outfile=dist/start-server.mjs \
   --external:./server/server.js \
   --external:node-pty \
-  --external:better-sqlite3 \
   --banner:js="import{createRequire as __cr}from'module';import{fileURLToPath as __fu}from'url';import{dirname as __dn}from'path';const require=__cr(import.meta.url);const __filename=__fu(import.meta.url);const __dirname=__dn(__filename);"
 
 # Copy native modules into dist/ for self-contained builds (Tauri app).
@@ -58,24 +57,9 @@ if [ "${NPM_PUBLISH:-}" != "1" ]; then
     chmod +x dist/node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true
   fi
 
-  # Copy better-sqlite3 native module and its dependencies.
-  # better-sqlite3 ships a Node-ABI .node binary; the bundle relies on the
-  # user's host `node` matching the NODE_MODULE_VERSION it was built against.
-  # See apps/web/README.md for the interim ABI risk note.
-  mkdir -p dist/node_modules/better-sqlite3/build/Release
-  cp node_modules/better-sqlite3/package.json dist/node_modules/better-sqlite3/
-  cp -R node_modules/better-sqlite3/lib dist/node_modules/better-sqlite3/
-  cp -RL node_modules/better-sqlite3/build/Release/better_sqlite3.node dist/node_modules/better-sqlite3/build/Release/
-
-  # better-sqlite3 uses 'bindings' (+ file-uri-to-path) to locate .node at runtime
-  SQLITE_REAL="$(cd node_modules/better-sqlite3 && pwd -P)"
-  SQLITE_PEERS="$(dirname "$SQLITE_REAL")"
-  BINDINGS_REAL="$(cd "$SQLITE_PEERS/bindings" && pwd -P)"
-  BINDINGS_PEERS="$(dirname "$BINDINGS_REAL")"
-  mkdir -p dist/node_modules/bindings
-  cp -RL "$BINDINGS_REAL"/* dist/node_modules/bindings/
-  mkdir -p dist/node_modules/file-uri-to-path
-  cp -RL "$BINDINGS_PEERS/file-uri-to-path"/* dist/node_modules/file-uri-to-path/
+  # SQLite is provided by Node's built-in `node:sqlite` (Stability 1.2 RC,
+  # available unflagged since Node 22.13). No native module ships in the
+  # bundle for SQLite — the user's `node` binary supplies it.
 
   # -----------------------------------------------------------------------
   # Bundle typescript-language-server + typescript for LSP support.

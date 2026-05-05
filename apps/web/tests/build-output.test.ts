@@ -37,10 +37,11 @@ describe("build output", () => {
     expect(readdirSync(prebuildsDir).length).toBeGreaterThan(0);
   });
 
-  it("contains better-sqlite3 native binary", () => {
-    expect(
-      existsSync(join(dist, "node_modules/better-sqlite3/build/Release/better_sqlite3.node")),
-    ).toBe(true);
+  it("does NOT bundle a SQLite native module", () => {
+    // SQLite is provided by Node's built-in `node:sqlite` (RC since 22.13).
+    // Nothing for SQLite should ship under dist/node_modules/.
+    expect(existsSync(join(dist, "node_modules/better-sqlite3"))).toBe(false);
+    expect(existsSync(join(dist, "node_modules/bindings"))).toBe(false);
   });
 
   it.skipIf(skipSdkChecks)("does NOT bundle Claude Code SDK native binary", () => {

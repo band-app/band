@@ -69,7 +69,8 @@
       "!**/apps/dashboard/src-tauri/gen",
       "!**/.astro",
       "!**/test-results",
-      "!**/playwright-report"
+      "!**/playwright-report",
+      "!**/apps/web/src/lib/db/migrations"
     ]
   }
 }

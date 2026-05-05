@@ -31,7 +31,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 pnpm install
 ```
 
-See the [README](README.md) for full prerequisites (Node.js 22+, pnpm 10+, Rust).
+See the [README](README.md) for full prerequisites (Node.js 22.5+, pnpm 10+, Rust).
 
 ## Making Changes
 

@@ -68,7 +68,7 @@ packages/
 
 ## Prerequisites
 
-- [Node.js](https://nodejs.org) v22+
+- [Node.js](https://nodejs.org) v22.5+ (we use the built-in `node:sqlite` module)
 - [pnpm](https://pnpm.io) v10+
 - [Rust](https://rustup.rs) (for Tauri dashboard and CLI)
 - macOS
