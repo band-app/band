@@ -172,7 +172,7 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar }: DashboardShel
                   </Button>
                 </DropdownMenuTrigger>
               </TooltipTrigger>
-              <TooltipContent>More</TooltipContent>
+              <TooltipContent side="bottom">More</TooltipContent>
             </Tooltip>
             <DropdownMenuContent align="start">
               <DropdownMenuItem onClick={() => setEditMode((v) => !v)}>
@@ -250,7 +250,7 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar }: DashboardShel
                 <Plus className="size-5" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Add project</TooltipContent>
+            <TooltipContent side="bottom">Add project</TooltipContent>
           </Tooltip>
         </div>
       </div>
