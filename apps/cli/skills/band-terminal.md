@@ -13,7 +13,7 @@ Terminal sessions are PTY processes attached to a Band workspace. Each terminal 
 
 This skill is focused on **terminal management only**. For broader operations see the sibling skills:
 
-- **`band`** — workspaces, projects, tasks, cronjobs, tunnel, settings.
+- **`band`** — workspaces, projects, cronjobs, tunnel, settings.
 - **`band-chat`** — agent chat panes inside a workspace.
 - **`band-browser`** — browser tabs inside a workspace.
 

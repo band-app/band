@@ -1,11 +1,9 @@
 mod api;
-mod render;
 mod skills;
 mod state;
 mod validate;
 
 use clap::{Parser, Subcommand};
-use std::collections::HashMap;
 use std::fmt::Write;
 use std::io::BufRead;
 use std::process;
@@ -33,11 +31,6 @@ enum Commands {
     Workspaces {
         #[command(subcommand)]
         cmd: WorkspacesCmd,
-    },
-    /// Manage coding agent tasks
-    Tasks {
-        #[command(subcommand)]
-        cmd: TasksCmd,
     },
     /// Send a message to a workspace chat (defaults to the workspace's active chat panel)
     Chat {
@@ -164,43 +157,6 @@ enum WorkspacesCmd {
         project: String,
         /// Branch name
         branch: String,
-    },
-}
-
-#[derive(Subcommand)]
-enum TasksCmd {
-    /// List tasks
-    List {
-        /// Filter by project name
-        #[arg(long)]
-        project: Option<String>,
-        /// Filter by status (running, completed, failed)
-        #[arg(long)]
-        status: Option<String>,
-    },
-    /// Cancel a running task
-    Cancel {
-        /// Task ID (e.g. `tsk_1234567890`)
-        task_id: String,
-    },
-    /// Re-run a completed or failed task
-    Rerun {
-        /// Task ID (e.g. `tsk_1234567890`)
-        task_id: String,
-    },
-    /// Stream task output in real-time
-    Watch {
-        /// Task ID (optional if --workspace is provided)
-        id: Option<String>,
-        /// Watch the latest task for this workspace
-        #[arg(long)]
-        workspace: Option<String>,
-        /// Show full tool inputs and outputs
-        #[arg(long, short = 'v')]
-        verbose: bool,
-        /// Tool call visibility: auto (default), off, full
-        #[arg(long, default_value = "auto")]
-        tools: String,
     },
 }
 
@@ -434,27 +390,6 @@ fn main() {
         return;
     }
 
-    // Watch streams output directly, handle separately
-    if let Commands::Tasks {
-        cmd:
-            TasksCmd::Watch {
-                ref id,
-                ref workspace,
-                verbose,
-                ref tools,
-            },
-    } = cli.command
-    {
-        let tool_display = match tools.as_str() {
-            "off" => render::ToolDisplay::Off,
-            "full" => render::ToolDisplay::Full,
-            _ => render::ToolDisplay::Auto,
-        };
-        let config = render::RenderConfig::new(verbose, tool_display);
-        let exit_code = handle_watch(id.as_deref(), workspace.as_deref(), json_output, config);
-        process::exit(exit_code);
-    }
-
     // terminal output --follow streams output directly
     if let Commands::Terminal {
         cmd:
@@ -506,14 +441,6 @@ fn main() {
                 agent.as_deref(),
             ),
             WorkspacesCmd::Remove { project, branch } => cmd_workspaces_remove(&project, &branch),
-        },
-        Commands::Tasks { cmd } => match cmd {
-            TasksCmd::List { project, status } => {
-                cmd_tasks_list(project.as_deref(), status.as_deref())
-            }
-            TasksCmd::Cancel { task_id } => cmd_tasks_cancel(&task_id),
-            TasksCmd::Rerun { task_id } => cmd_tasks_rerun(&task_id),
-            TasksCmd::Watch { .. } => unreachable!(),
         },
         Commands::Chat {
             workspace_id,
@@ -869,84 +796,6 @@ fn cmd_workspaces_remove(project: &str, branch: &str) -> Result<CommandResult, S
     })
 }
 
-// --- Tasks commands ---
-
-fn cmd_tasks_list(project: Option<&str>, status: Option<&str>) -> Result<CommandResult, String> {
-    let client = api::ApiClient::from_settings()?;
-
-    let mut input = serde_json::json!({});
-    if let Some(p) = project {
-        input["project"] = serde_json::json!(p);
-    }
-    if let Some(s) = status {
-        input["status"] = serde_json::json!(s);
-    }
-
-    let data = client.trpc_query("tasks.list", &input)?;
-    let tasks = data
-        .get("tasks")
-        .and_then(|t| t.as_array())
-        .cloned()
-        .unwrap_or_default();
-
-    let mut rows: Vec<[String; 4]> = Vec::new();
-    let mut json_tasks = Vec::new();
-    for task in &tasks {
-        let id = task.get("id").and_then(|v| v.as_str()).unwrap_or("");
-        let prompt = task.get("prompt").and_then(|v| v.as_str()).unwrap_or("");
-        let task_status = task.get("status").and_then(|v| v.as_str()).unwrap_or("");
-        let project_name = task.get("project").and_then(|v| v.as_str()).unwrap_or("");
-        let branch = task.get("branch").and_then(|v| v.as_str()).unwrap_or("");
-
-        let truncated_prompt = if prompt.len() > 60 {
-            format!("{}...", &prompt[..57])
-        } else {
-            prompt.to_string()
-        };
-
-        rows.push([
-            id.to_string(),
-            task_status.to_string(),
-            format!("{project_name}/{branch}"),
-            truncated_prompt,
-        ]);
-
-        json_tasks.push(task.clone());
-    }
-
-    let text = format_table(&["ID", "STATUS", "WORKSPACE", "PROMPT"], &rows);
-
-    Ok(CommandResult {
-        text,
-        json: serde_json::json!({"tasks": json_tasks}),
-    })
-}
-
-fn cmd_tasks_cancel(task_id: &str) -> Result<CommandResult, String> {
-    let client = api::ApiClient::from_settings()?;
-    client.trpc_mutate("tasks.cancel", &serde_json::json!({"taskId": task_id}))?;
-
-    Ok(CommandResult {
-        text: format!("Task {task_id} cancelled\n"),
-        json: serde_json::json!({"cancelled": true, "taskId": task_id}),
-    })
-}
-
-fn cmd_tasks_rerun(task_id: &str) -> Result<CommandResult, String> {
-    let client = api::ApiClient::from_settings()?;
-    let data = client.trpc_mutate("tasks.rerun", &serde_json::json!({"taskId": task_id}))?;
-
-    let workspace_id = data
-        .get("workspaceId")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-
-    Ok(CommandResult {
-        text: format!("Task re-run started for workspace {workspace_id}\n"),
-        json: data,
-    })
-}
-
 // --- Chats commands ---
 
 fn cmd_chats_list(workspace_id: &str) -> Result<CommandResult, String> {
@@ -1069,7 +918,7 @@ fn cmd_chat(
     agent: Option<&str>,
 ) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
-    let workspace_id = resolve_workspace_id(&client, None, workspace_id)?;
+    let workspace_id = resolve_workspace_id(&client, workspace_id)?;
 
     let mut input = serde_json::json!({
         "workspaceId": workspace_id,
@@ -1768,364 +1617,17 @@ fn cmd_cronjobs_trigger(key: &str, id: &str) -> Result<CommandResult, String> {
     })
 }
 
-fn handle_watch(
-    id: Option<&str>,
-    workspace: Option<&str>,
-    json_output: bool,
-    config: render::RenderConfig,
-) -> i32 {
-    match cmd_tasks_watch(id, workspace, json_output, config) {
-        Ok(success) => i32::from(!success),
-        Err(e) => {
-            if json_output {
-                eprintln!("{}", serde_json::json!({"error": e}));
-            } else {
-                eprintln!("error: {e}");
-            }
-            1
-        }
-    }
-}
-
-fn cmd_tasks_watch(
-    id: Option<&str>,
-    workspace: Option<&str>,
-    json_output: bool,
-    config: render::RenderConfig,
-) -> Result<bool, String> {
-    let client = api::ApiClient::from_settings()?;
-    let workspace_id = resolve_workspace_id(&client, id, workspace)?;
-
-    if !json_output {
-        let label = id.unwrap_or(&workspace_id);
-        eprintln!("[watching task {label} on {workspace_id}]");
-        eprintln!();
-    }
-
-    let mut response = client.trpc_subscribe(
-        "tasks.stream",
-        &serde_json::json!({"workspaceId": workspace_id}),
-    )?;
-    let status = response.status().as_u16();
-
-    if status == 401 {
-        return Err("Authentication failed. Check tokenSecret in settings".to_string());
-    }
-    if status >= 400 {
-        let body: serde_json::Value = response
-            .body_mut()
-            .read_json()
-            .unwrap_or(serde_json::Value::Null);
-        let msg = body
-            .get("error")
-            .and_then(|e| e.get("message"))
-            .and_then(|m| m.as_str())
-            .unwrap_or("Unknown server error");
-        return Err(msg.to_string());
-    }
-
-    let mut body = response.into_body();
-    let reader = std::io::BufReader::new(body.as_reader());
-    stream_sse_events(reader, json_output, config, &client)
-}
-
-fn stream_sse_events(
-    reader: impl BufRead,
-    json_output: bool,
-    config: render::RenderConfig,
-    client: &api::ApiClient,
-) -> Result<bool, String> {
-    let mut line_buf = String::new();
-    let mut data_buf = String::new();
-    let mut renderer = render::Renderer::new(config);
-    let mut reader = reader;
-
-    loop {
-        line_buf.clear();
-        match reader.read_line(&mut line_buf) {
-            Ok(0) => break, // EOF
-            Ok(_) => {}
-            Err(e) => return Err(format!("Connection error: {e}")),
-        }
-
-        let line = line_buf.trim_end();
-
-        if line.is_empty() {
-            if !data_buf.is_empty() {
-                let action = process_sse_data(&data_buf, json_output, &mut renderer)?;
-                data_buf.clear();
-                match action {
-                    render::RenderAction::Finish => return Ok(renderer.task_succeeded),
-                    render::RenderAction::NeedsInput(req) => {
-                        handle_interactive_input(&req, client)?;
-                    }
-                    render::RenderAction::Continue => {}
-                }
-            }
-            continue;
-        }
-
-        if let Some(data) = line.strip_prefix("data: ") {
-            if !data_buf.is_empty() {
-                data_buf.push('\n');
-            }
-            data_buf.push_str(data);
-        }
-        // Ignore id:, event:, and comment lines
-    }
-
-    Ok(renderer.task_succeeded)
-}
-
-fn process_sse_data(
-    data: &str,
-    json_output: bool,
-    renderer: &mut render::Renderer,
-) -> Result<render::RenderAction, String> {
-    let chunk: serde_json::Value =
-        serde_json::from_str(data).map_err(|e| format!("Invalid JSON in SSE: {e}"))?;
-
-    if json_output {
-        let chunk_type = chunk.get("type").and_then(|t| t.as_str()).unwrap_or("");
-        println!("{}", serde_json::to_string(&chunk).unwrap_or_default());
-        if chunk_type == "finish" {
-            Ok(render::RenderAction::Finish)
-        } else {
-            Ok(render::RenderAction::Continue)
-        }
-    } else {
-        Ok(renderer.render_chunk(&chunk))
-    }
-}
-
-// ── Interactive input handling ──────────────────────────────────────
-
-fn handle_interactive_input(
-    req: &render::InteractiveRequest,
-    client: &api::ApiClient,
-) -> Result<(), String> {
-    use std::io::IsTerminal;
-
-    let is_tty = std::io::stdin().is_terminal();
-
-    let answers = match &req.kind {
-        render::InteractiveKind::PlanApproval => prompt_plan_approval(is_tty)?,
-        render::InteractiveKind::AskUserQuestion { questions } => {
-            prompt_questions(questions, is_tty)?
-        }
-    };
-
-    client.trpc_mutate(
-        "chat.answer",
-        &serde_json::json!({
-            "approvalId": req.approval_id,
-            "answers": answers,
-        }),
-    )?;
-
-    Ok(())
-}
-
-fn prompt_plan_approval(is_tty: bool) -> Result<HashMap<String, String>, String> {
-    use std::io::Write as _;
-
-    if !is_tty {
-        eprintln!("  (non-interactive: auto-approving plan)");
-        let mut answers = HashMap::new();
-        answers.insert("plan".to_string(), "approved".to_string());
-        return Ok(answers);
-    }
-
-    for attempt in 0..3 {
-        eprint!("  Approve plan? [y/n]: ");
-        std::io::stderr().flush().ok();
-
-        let mut input = String::new();
-        std::io::stdin()
-            .read_line(&mut input)
-            .map_err(|e| format!("Failed to read input: {e}"))?;
-
-        let trimmed = input.trim().to_lowercase();
-        match trimmed.as_str() {
-            "y" | "yes" => {
-                eprintln!("  Plan approved — agent continuing");
-                let mut answers = HashMap::new();
-                answers.insert("plan".to_string(), "approved".to_string());
-                return Ok(answers);
-            }
-            "n" | "no" => {
-                eprintln!("  Plan rejected");
-                let mut answers = HashMap::new();
-                answers.insert("plan".to_string(), "rejected".to_string());
-                return Ok(answers);
-            }
-            _ => {
-                if attempt < 2 {
-                    eprintln!("  Please enter y or n.");
-                }
-            }
-        }
-    }
-
-    // After 3 invalid attempts, default to approved.
-    eprintln!("  (defaulting to approved)");
-    let mut answers = HashMap::new();
-    answers.insert("plan".to_string(), "approved".to_string());
-    Ok(answers)
-}
-
-fn prompt_questions(
-    questions: &[render::QuestionData],
-    is_tty: bool,
-) -> Result<HashMap<String, String>, String> {
-    let mut answers = HashMap::new();
-
-    for q in questions {
-        if q.options.is_empty() {
-            continue;
-        }
-
-        if !is_tty {
-            let first_label = &q.options[0].label;
-            eprintln!("  (non-interactive: selecting \"{first_label}\")");
-            answers.insert(q.question.clone(), first_label.clone());
-            continue;
-        }
-
-        let selected = if q.multi_select {
-            prompt_multi_select(q)?
-        } else {
-            prompt_single_select(q)?
-        };
-
-        if !selected.is_empty() {
-            answers.insert(q.question.clone(), selected);
-        }
-    }
-
-    Ok(answers)
-}
-
-fn prompt_single_select(q: &render::QuestionData) -> Result<String, String> {
-    use std::io::Write as _;
-
-    let num_options = q.options.len();
-
-    for attempt in 0..3 {
-        eprint!("  Select option [1-{num_options}]: ");
-        std::io::stderr().flush().ok();
-
-        let mut input = String::new();
-        std::io::stdin()
-            .read_line(&mut input)
-            .map_err(|e| format!("Failed to read input: {e}"))?;
-
-        if let Some(label) = parse_single_selection(input.trim(), &q.options) {
-            eprintln!("  Selected: {label}");
-            return Ok(label);
-        }
-
-        if attempt < 2 {
-            eprintln!("  Invalid selection. Enter a number from 1 to {num_options}.");
-        }
-    }
-
-    // Default to first option after 3 failed attempts.
-    let label = q.options[0].label.clone();
-    eprintln!("  (defaulting to \"{label}\")");
-    Ok(label)
-}
-
-fn prompt_multi_select(q: &render::QuestionData) -> Result<String, String> {
-    use std::io::Write as _;
-
-    let num_options = q.options.len();
-
-    for attempt in 0..3 {
-        eprint!("  Select options (comma-separated, e.g. 1,3) [1-{num_options}]: ");
-        std::io::stderr().flush().ok();
-
-        let mut input = String::new();
-        std::io::stdin()
-            .read_line(&mut input)
-            .map_err(|e| format!("Failed to read input: {e}"))?;
-
-        let labels = parse_multi_selection(input.trim(), &q.options);
-        if !labels.is_empty() {
-            eprintln!("  Selected: {labels}");
-            return Ok(labels);
-        }
-
-        if attempt < 2 {
-            eprintln!(
-                "  Invalid selection. Enter numbers from 1 to {num_options}, separated by commas."
-            );
-        }
-    }
-
-    // Default to first option after 3 failed attempts.
-    let label = q.options[0].label.clone();
-    eprintln!("  (defaulting to \"{label}\")");
-    Ok(label)
-}
-
-fn parse_single_selection(input: &str, options: &[render::OptionData]) -> Option<String> {
-    let num: usize = input.parse().ok()?;
-    if num >= 1 && num <= options.len() {
-        Some(options[num - 1].label.clone())
-    } else {
-        None
-    }
-}
-
-fn parse_multi_selection(input: &str, options: &[render::OptionData]) -> String {
-    let labels: Vec<&str> = input
-        .split(',')
-        .filter_map(|s| {
-            let num: usize = s.trim().parse().ok()?;
-            if num >= 1 && num <= options.len() {
-                Some(options[num - 1].label.as_str())
-            } else {
-                None
-            }
-        })
-        .collect();
-    labels.join(", ")
-}
-
-/// Resolve a task ID (tsk_*) or workspace ID to a workspace ID.
-/// When neither `id` nor `workspace` is given, auto-detects from the current
-/// working directory by matching the git toplevel against registered workspace paths.
+/// Resolve an explicit workspace ID, or auto-detect it from the current
+/// working directory by matching `git rev-parse --show-toplevel` against
+/// registered workspace paths.
 fn resolve_workspace_id(
     client: &api::ApiClient,
-    id: Option<&str>,
     workspace: Option<&str>,
 ) -> Result<String, String> {
     if let Some(ws) = workspace {
         return Ok(ws.to_string());
     }
 
-    if let Some(id) = id {
-        if id.starts_with("tsk_") {
-            let data = client.trpc_query("tasks.list", &serde_json::json!({}))?;
-            let tasks = data
-                .get("tasks")
-                .and_then(|t| t.as_array())
-                .ok_or("Failed to list tasks")?;
-            let task = tasks
-                .iter()
-                .find(|t| t.get("id").and_then(|i| i.as_str()) == Some(id))
-                .ok_or(format!("Task '{id}' not found"))?;
-            let workspace_id = task
-                .get("workspaceId")
-                .and_then(|w| w.as_str())
-                .ok_or("Task has no workspace ID")?;
-            return Ok(workspace_id.to_string());
-        }
-        return Ok(id.to_string());
-    }
-
-    // Auto-detect: match current git toplevel against registered workspace paths.
     detect_workspace_from_cwd(client)
 }
 
@@ -2138,7 +1640,7 @@ fn detect_workspace_from_cwd(client: &api::ApiClient) -> Result<String, String> 
         .map_err(|e| format!("Failed to run git: {e}"))?;
 
     if !git_output.status.success() {
-        return Err("Not in a git repository. Specify a task ID or --workspace.".to_string());
+        return Err("Not in a git repository. Specify --workspace.".to_string());
     }
 
     let toplevel = String::from_utf8_lossy(&git_output.stdout)
@@ -2170,7 +1672,7 @@ fn detect_workspace_from_cwd(client: &api::ApiClient) -> Result<String, String> 
     }
 
     Err(format!(
-        "No workspace found for '{toplevel}'. Specify a task ID or --workspace."
+        "No workspace found for '{toplevel}'. Specify --workspace."
     ))
 }
 
@@ -2460,40 +1962,6 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "notes": "Stops the remote tunnel."
         }),
         serde_json::json!({
-            "name": "tasks list",
-            "description": "List tasks, optionally filtered by project or status",
-            "parameters": [
-                {"name": "--project", "type": "string", "required": false, "description": "Filter by project name"},
-                {"name": "--status", "type": "string", "required": false, "description": "Filter by status (running, completed, failed)"},
-            ],
-            "notes": "Text output: `ID\\tSTATUS\\tWORKSPACE\\tPROMPT` (tab-separated table).\nJSON output: `{\"tasks\": [{\"id\": \"...\", \"status\": \"...\", \"project\": \"...\", \"branch\": \"...\", \"prompt\": \"...\"}]}`"
-        }),
-        serde_json::json!({
-            "name": "tasks cancel",
-            "description": "Cancel a running task",
-            "parameters": [
-                {"name": "task_id", "type": "string", "required": true, "positional": true, "description": "Task ID (e.g. tsk_1234567890)"},
-            ],
-            "notes": "Cancels a running task.\nJSON output: `{\"cancelled\": true, \"taskId\": \"...\"}`"
-        }),
-        serde_json::json!({
-            "name": "tasks rerun",
-            "description": "Re-run a completed or failed task",
-            "parameters": [
-                {"name": "task_id", "type": "string", "required": true, "positional": true, "description": "Task ID (e.g. tsk_1234567890)"},
-            ],
-            "notes": "Re-runs a completed or failed task."
-        }),
-        serde_json::json!({
-            "name": "tasks watch",
-            "description": "Stream task output in real-time",
-            "parameters": [
-                {"name": "id", "type": "string", "required": false, "positional": true, "description": "Task ID (optional if --workspace is provided)"},
-                {"name": "--workspace", "type": "string", "required": false, "description": "Watch the latest task for this workspace"},
-            ],
-            "notes": "Streams task output in real-time. Either provide a task ID or `--workspace` to watch the latest task for that workspace."
-        }),
-        serde_json::json!({
             "name": "cronjobs list",
             "description": "List cronjobs, optionally filtered by project or workspace",
             "parameters": [
@@ -2555,7 +2023,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "--model", "type": "string", "required": false, "description": "Model to use for the coding agent (e.g. 'claude-opus-4-20250514')"},
                 {"name": "--agent", "type": "string", "required": false, "description": "Coding agent ID to use (overrides workspace default)"},
             ],
-            "notes": "Sends a message to the workspace's chat. When `--chat-id` is omitted, the server resolves the workspace's *active* chat panel (the tab the user last focused in the dashboard), falling back to the first panel in the saved layout, then to the first chat in the registry, and finally creating a new \"Chat\" panel if the workspace has none. This means CLI prompts land in the same conversation the user is looking at.\n\nReturns the task ID.\nJSON output: `{\"id\": \"tsk_...\", \"workspaceId\": \"...\", \"chatId\": \"chat_...\"}`\n\nReplaces the removed `tasks create` command. Use `--chat-id` to target a specific chat pane (look it up with `band chats list <workspace_id>`)."
+            "notes": "Sends a message to the workspace's chat. When `--chat-id` is omitted, the server resolves the workspace's *active* chat panel (the tab the user last focused in the dashboard), falling back to the first panel in the saved layout, then to the first chat in the registry, and finally creating a new \"Chat\" panel if the workspace has none. This means CLI prompts land in the same conversation the user is looking at.\n\nReturns the task ID.\nJSON output: `{\"id\": \"tsk_...\", \"workspaceId\": \"...\", \"chatId\": \"chat_...\"}`\n\nReplaces the removed `tasks` subcommand. Use `--chat-id` to target a specific chat pane (look it up with `band chats list <workspace_id>`)."
         }),
         serde_json::json!({
             "name": "chats list",

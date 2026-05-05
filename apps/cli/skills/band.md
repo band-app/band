@@ -1,17 +1,17 @@
 ---
 name: band
 version: 0.1.0
-description: Programmatic workspace management for Band. Use when the user wants to create, list, or remove Band workspaces or projects, manage tasks, manage tunnels, manage cronjobs, or check settings via the Band CLI. Triggers include "create workspace", "list projects", "watch task", "band workspace", "band project", "schedule a job". For sending chat messages to coding agents, see the `band-chat` skill.
+description: Programmatic workspace management for Band. Use when the user wants to create, list, or remove Band workspaces or projects, manage tunnels, manage cronjobs, or check settings via the Band CLI. Triggers include "create workspace", "list projects", "band workspace", "band project", "schedule a job". For sending chat messages to coding agents, see the `band-chat` skill.
 allowed-tools: Bash
 argument-hint: [command] [args...]
-commands: projects, workspaces, tasks, cronjobs, tunnel, settings, notify, schema, generate-skills
+commands: projects, workspaces, cronjobs, tunnel, settings, notify, schema, generate-skills
 ---
 
 # Band CLI
 
 Thin client for the Band web server. All state, git operations, and script execution happen server-side.
 
-This skill covers **core workspace, project, task, cronjob, and tunnel** management. For domain-specific commands, see the sibling skills:
+This skill covers **core workspace, project, cronjob, and tunnel** management. For domain-specific commands, see the sibling skills:
 
 - **`band-chat`** — top-level `band chat` for quick prompts plus chat-pane lifecycle (`band chats list/create/send/stop/remove`)
 - **`band-terminal`** — terminal sessions (`band terminal list/create/send/output/kill/attach`)
@@ -67,24 +67,12 @@ band workspaces create my-app feat/auth --prompt "Add JWT authentication to the 
 band workspaces list --output json | jq '.workspaces[] | select(.project == "my-app") | .branch'
 ```
 
-### Task management
-
-```sh
-# List running tasks
-band tasks list --status running
-
-# Watch task output
-band tasks watch --workspace ws_abc123
-
-# Cancel a stuck task
-band tasks cancel tsk_1234567890
-
-# Re-run a failed task
-band tasks rerun tsk_1234567890
-```
+### Drive a coding agent
 
 To send a message to a workspace's chat (the primary way to drive the
-coding agent), use `band chat` — see the **`band-chat`** skill.
+coding agent), use `band chat` — see the **`band-chat`** skill. Task
+lifecycle (status, cancel, re-run) is managed inside the dashboard
+rather than from the CLI.
 
 ### Project management
 

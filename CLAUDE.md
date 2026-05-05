@@ -36,7 +36,7 @@ The web server (`apps/web`) handles **data, state, and background processes** on
 
 The Band CLI ships **four domain-specific skills**, each generated from its own template in `apps/cli/skills/` plus the CLI schema:
 
-- `band.md` → `band/SKILL.md` — workspaces, projects, tasks, cronjobs, tunnel, settings, schema, notify, generate-skills.
+- `band.md` → `band/SKILL.md` — workspaces, projects, cronjobs, tunnel, settings, schema, notify, generate-skills.
 - `band-chat.md` → `band-chat/SKILL.md` — chat panes (`band chats ...`).
 - `band-terminal.md` → `band-terminal/SKILL.md` — terminal sessions (`band terminal ...`).
 - `band-browser.md` → `band-browser/SKILL.md` — browser tabs (`band browser ...`).

@@ -18,7 +18,7 @@ Chat panes are agent processes attached to a Band workspace. Each chat pane has 
 
 This skill is focused on **chat pane management only**. For broader operations see the sibling skills:
 
-- **`band`** — workspaces, projects, tasks, cronjobs, tunnel, settings.
+- **`band`** — workspaces, projects, cronjobs, tunnel, settings.
 - **`band-terminal`** — terminal sessions inside a workspace.
 - **`band-browser`** — browser tabs inside a workspace.
 
@@ -90,7 +90,7 @@ band chats remove "$chat"
 ## Cross-references
 
 - To find the workspace ID, use `band workspaces list` (see the `band` skill).
-- To watch the agent's task output, use `band tasks watch` (see the `band` skill).
+- Task lifecycle (status, cancel, re-run) is managed inside the Band dashboard, not from the CLI.
 
 ## Configuration
 

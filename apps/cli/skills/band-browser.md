@@ -13,7 +13,7 @@ Browser tabs are web views attached to a Band workspace. Each tab has its own UR
 
 This skill is focused on **browser tab management only**. For broader operations see the sibling skills:
 
-- **`band`** — workspaces, projects, tasks, cronjobs, tunnel, settings.
+- **`band`** — workspaces, projects, cronjobs, tunnel, settings.
 - **`band-chat`** — agent chat panes inside a workspace.
 - **`band-terminal`** — terminal sessions inside a workspace.
 
