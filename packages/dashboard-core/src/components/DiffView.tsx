@@ -81,6 +81,28 @@ function storeDiffMode(mode: DiffMode) {
   } catch {}
 }
 
+const COMPARE_BRANCH_KEY_PREFIX = "band:diff-compare-branch:";
+
+function getStoredCompareBranch(workspaceId: string): string | null {
+  try {
+    return localStorage.getItem(COMPARE_BRANCH_KEY_PREFIX + workspaceId);
+  } catch {
+    return null;
+  }
+}
+
+function storeCompareBranch(workspaceId: string, branch: string | null) {
+  try {
+    if (branch) {
+      localStorage.setItem(COMPARE_BRANCH_KEY_PREFIX + workspaceId, branch);
+    } else {
+      localStorage.removeItem(COMPARE_BRANCH_KEY_PREFIX + workspaceId);
+    }
+  } catch {}
+}
+
+const UNCOMMITTED_VALUE = "__uncommitted__";
+
 const EXPAND_ALL_KEY = "band:diff-expand-all";
 
 function getStoredExpandAll(): boolean {
@@ -819,6 +841,10 @@ export function DiffView({
   const [viewMode, setViewModeState] = useState<ViewMode>(getStoredViewMode);
   const [diffMode, setDiffModeState] = useState<DiffMode>(getStoredDiffMode);
   const [expandAll, setExpandAllState] = useState(getStoredExpandAll);
+  const [compareBranch, setCompareBranchState] = useState<string | null>(() =>
+    getStoredCompareBranch(workspaceId),
+  );
+  const [availableBranches, setAvailableBranches] = useState<string[]>([]);
   const setViewMode = useCallback((mode: ViewMode) => {
     setViewModeState(mode);
     storeViewMode(mode);
@@ -827,6 +853,45 @@ export function DiffView({
     setDiffModeState(mode);
     storeDiffMode(mode);
   }, []);
+  const setCompareBranch = useCallback(
+    (branch: string | null) => {
+      setCompareBranchState(branch);
+      storeCompareBranch(workspaceId, branch);
+    },
+    [workspaceId],
+  );
+
+  // Reload stored compareBranch when workspace changes
+  useEffect(() => {
+    setCompareBranchState(getStoredCompareBranch(workspaceId));
+  }, [workspaceId]);
+
+  // Fetch list of branches for the workspace
+  useEffect(() => {
+    const listWorkspaceBranches = adapter.listWorkspaceBranches;
+    if (!listWorkspaceBranches) return;
+    let cancelled = false;
+    listWorkspaceBranches
+      .call(adapter, workspaceId)
+      .then((result) => {
+        if (cancelled) return;
+        setAvailableBranches(result.branches);
+        // Drop the stored selection if it no longer exists in the workspace
+        setCompareBranchState((current) => {
+          if (current && !result.branches.includes(current)) {
+            storeCompareBranch(workspaceId, null);
+            return null;
+          }
+          return current;
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setAvailableBranches([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [adapter, workspaceId]);
   const setExpandAll = useCallback((v: boolean) => {
     setExpandAllState(v);
     storeExpandAll(v);
@@ -1085,7 +1150,7 @@ export function DiffView({
       if (!revertFile) return;
 
       revertFile
-        .call(adapter, workspaceId, filename, diffMode)
+        .call(adapter, workspaceId, filename, diffMode, compareBranch ?? undefined)
         .then(() => {
           // Remove from diff cache
           setDiffCache((prev) => {
@@ -1101,7 +1166,7 @@ export function DiffView({
           console.error("Failed to revert file:", err);
         });
     },
-    [adapter, workspaceId, diffMode],
+    [adapter, workspaceId, diffMode, compareBranch],
   );
 
   // -------------------------------------------------------------------------
@@ -1123,7 +1188,7 @@ export function DiffView({
 
     const fetchSummary = (forceRefresh = false) => {
       getWorkspaceDiffSummary
-        .call(adapter, workspaceId, diffMode)
+        .call(adapter, workspaceId, diffMode, compareBranch ?? undefined)
         .then((result) => {
           if (!cancelled) {
             const fingerprint = JSON.stringify({
@@ -1205,7 +1270,41 @@ export function DiffView({
       fetchSummaryRef.current = null;
       unsubscribe?.();
     };
-  }, [adapter, workspaceId, active, onStatsChange, diffMode, fetchFileDiff]);
+  }, [adapter, workspaceId, active, onStatsChange, diffMode, compareBranch, fetchFileDiff]);
+
+  // ---------------------------------------------------------------------------
+  // Diff target dropdown — combines diff mode + branch selection into one menu
+  // ---------------------------------------------------------------------------
+  const branchOptions =
+    availableBranches.length > 0 ? availableBranches : baseBranch ? [baseBranch] : [];
+  const selectedBranch = compareBranch ?? branchOptions[0] ?? baseBranch ?? null;
+  const diffSelectValue =
+    diffMode === "uncommitted" ? UNCOMMITTED_VALUE : (selectedBranch ?? UNCOMMITTED_VALUE);
+
+  const handleDiffSelectChange = (value: string) => {
+    if (value === UNCOMMITTED_VALUE) {
+      setDiffMode("uncommitted");
+    } else {
+      setDiffMode("branch");
+      setCompareBranch(value);
+    }
+  };
+
+  const renderDiffSelect = () => (
+    <Select value={diffSelectValue} onValueChange={handleDiffSelectChange}>
+      <SelectTrigger className="h-7 w-auto gap-1 rounded-md border-border/50 bg-muted/50 px-2.5 text-xs">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={UNCOMMITTED_VALUE}>Uncommitted</SelectItem>
+        {branchOptions.map((branch) => (
+          <SelectItem key={branch} value={branch}>
+            {branch}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
 
   if (loading) {
     return (
@@ -1227,15 +1326,7 @@ export function DiffView({
     return (
       <div className="flex h-full flex-col overflow-hidden">
         <div className="flex shrink-0 items-center justify-end border-b border-border px-4 py-2">
-          <Select value={diffMode} onValueChange={(v) => setDiffMode(v as DiffMode)}>
-            <SelectTrigger className="h-7 w-auto gap-1 rounded-md border-border/50 bg-muted/50 px-2.5 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="uncommitted">Uncommitted</SelectItem>
-              <SelectItem value="branch">{baseBranch ?? "base"}</SelectItem>
-            </SelectContent>
-          </Select>
+          {renderDiffSelect()}
         </div>
         <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
           No changes
@@ -1354,15 +1445,7 @@ export function DiffView({
                 <ChevronsUpDown className="size-3.5" />
               )}
             </button>
-            <Select value={diffMode} onValueChange={(v) => setDiffMode(v as DiffMode)}>
-              <SelectTrigger className="h-7 w-auto gap-1 rounded-md border-border/50 bg-muted/50 px-2.5 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="uncommitted">Uncommitted</SelectItem>
-                <SelectItem value="branch">{baseBranch ?? "base"}</SelectItem>
-              </SelectContent>
-            </Select>
+            {renderDiffSelect()}
             <div className="hidden items-center rounded-md border border-border/50 bg-muted/50 md:flex">
               <button
                 type="button"

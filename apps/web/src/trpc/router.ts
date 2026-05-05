@@ -685,12 +685,64 @@ const workspaceRouter = t.router({
       return { config };
     }),
 
+  listBranches: publicProcedure
+    .input(z.object({ workspaceId: z.string() }))
+    .query(async ({ input }) => {
+      const workspace = resolveWorkspace(input.workspaceId);
+      if (!workspace) {
+        throw new Error("Workspace not found");
+      }
+
+      const cwd = workspace.worktree.path;
+      const defaultBranch = workspace.project.defaultBranch;
+
+      let headBranch: string | null = null;
+      try {
+        headBranch = (await execGit(["rev-parse", "--abbrev-ref", "HEAD"], cwd)).trim();
+      } catch {
+        // No commits yet
+      }
+
+      let branches: string[] = [];
+      try {
+        const output = await execGit(
+          ["for-each-ref", "--format=%(refname:short)", "refs/heads/"],
+          cwd,
+        );
+        branches = output
+          .trim()
+          .split("\n")
+          .map((b) => b.trim())
+          .filter(Boolean);
+      } catch {
+        // No branches
+      }
+
+      // Exclude HEAD branch (you don't compare against yourself); ensure default present.
+      const filtered = branches.filter((b) => b !== headBranch);
+      if (!filtered.includes(defaultBranch)) {
+        filtered.unshift(defaultBranch);
+      } else {
+        // Move defaultBranch to the front for stable ordering.
+        const idx = filtered.indexOf(defaultBranch);
+        filtered.splice(idx, 1);
+        filtered.unshift(defaultBranch);
+      }
+
+      return {
+        branches: filtered,
+        defaultBranch,
+        headBranch: headBranch ?? defaultBranch,
+      };
+    }),
+
   getDiff: publicProcedure
     .input(
       z.object({
         workspaceId: z.string(),
         contextLines: z.number().int().min(0).max(99999).optional(),
         diffMode: z.enum(["uncommitted", "branch"]).optional(),
+        compareBranch: z.string().optional(),
       }),
     )
     .query(async ({ input }) => {
@@ -701,6 +753,8 @@ const workspaceRouter = t.router({
 
       const cwd = workspace.worktree.path;
       const defaultBranch = workspace.project.defaultBranch;
+      const compareBranch =
+        input.diffMode === "uncommitted" ? defaultBranch : (input.compareBranch ?? defaultBranch);
 
       let headBranch: string;
       try {
@@ -720,7 +774,7 @@ const workspaceRouter = t.router({
         }
       } else {
         try {
-          mergeBase = (await execGit(["merge-base", defaultBranch, "HEAD"], cwd)).trim();
+          mergeBase = (await execGit(["merge-base", compareBranch, "HEAD"], cwd)).trim();
         } catch {
           mergeBase = (await execGit(["hash-object", "-t", "tree", "/dev/null"], cwd)).trim();
         }
@@ -789,7 +843,7 @@ const workspaceRouter = t.router({
       return {
         diff,
         stats: { filesChanged, insertions, deletions },
-        baseBranch: defaultBranch,
+        baseBranch: compareBranch,
         headBranch,
         fileStatuses,
       };
@@ -800,6 +854,7 @@ const workspaceRouter = t.router({
       z.object({
         workspaceId: z.string(),
         diffMode: z.enum(["uncommitted", "branch"]).optional(),
+        compareBranch: z.string().optional(),
       }),
     )
     .query(async ({ input }) => {
@@ -810,6 +865,8 @@ const workspaceRouter = t.router({
 
       const cwd = workspace.worktree.path;
       const defaultBranch = workspace.project.defaultBranch;
+      const compareBranch =
+        input.diffMode === "uncommitted" ? defaultBranch : (input.compareBranch ?? defaultBranch);
 
       let headBranch: string;
       try {
@@ -829,7 +886,7 @@ const workspaceRouter = t.router({
         }
       } else {
         try {
-          mergeBase = (await execGit(["merge-base", defaultBranch, "HEAD"], cwd)).trim();
+          mergeBase = (await execGit(["merge-base", compareBranch, "HEAD"], cwd)).trim();
         } catch {
           mergeBase = (await execGit(["hash-object", "-t", "tree", "/dev/null"], cwd)).trim();
         }
@@ -883,7 +940,7 @@ const workspaceRouter = t.router({
 
       return {
         stats: { filesChanged, insertions, deletions },
-        baseBranch: defaultBranch,
+        baseBranch: compareBranch,
         headBranch,
         fileStatuses,
         mergeBase,
@@ -948,6 +1005,7 @@ const workspaceRouter = t.router({
         workspaceId: z.string(),
         filePath: z.string(),
         diffMode: z.enum(["uncommitted", "branch"]),
+        compareBranch: z.string().optional(),
       }),
     )
     .mutation(async ({ input }) => {
@@ -978,9 +1036,9 @@ const workspaceRouter = t.router({
           ref = (await execGit(["hash-object", "-t", "tree", "/dev/null"], cwd)).trim();
         }
       } else {
-        const defaultBranch = workspace.project.defaultBranch;
+        const compareBranch = input.compareBranch ?? workspace.project.defaultBranch;
         try {
-          ref = (await execGit(["merge-base", defaultBranch, "HEAD"], cwd)).trim();
+          ref = (await execGit(["merge-base", compareBranch, "HEAD"], cwd)).trim();
         } catch {
           ref = (await execGit(["hash-object", "-t", "tree", "/dev/null"], cwd)).trim();
         }
