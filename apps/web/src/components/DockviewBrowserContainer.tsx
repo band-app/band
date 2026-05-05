@@ -623,14 +623,17 @@ export function DockviewBrowserContainer({
         }
 
         // Prune panels whose browser records no longer exist on the server.
+        let dropped = 0;
         if (knownBrowserIds) {
           const orphans = event.api.panels.filter((p) => !knownBrowserIds.has(p.id));
           for (const orphan of orphans) {
             event.api.removePanel(orphan);
+            dropped++;
           }
           // If all panels were orphaned, create a fresh default tab.
           if (event.api.panels.length === 0) {
             createDefaultPanel(event.api, workspaceId);
+            dropped++;
           }
         }
 
@@ -638,6 +641,18 @@ export function DockviewBrowserContainer({
         setTimeout(() => {
           isRestoringRef.current = false;
         }, 0);
+
+        // Persist the cleaned-up layout if orphans were removed. The
+        // dockview events that fired during `removePanel` landed inside
+        // the restoration window and were swallowed by
+        // `schedulePersist`'s `isRestoringRef` guard, so without this
+        // explicit save the saved `browser_layout` row would never
+        // converge with `browsers.list`.
+        if (dropped > 0) {
+          persistToServer(workspaceId, event.api.toJSON(), {
+            queryClient: queryClientRef.current,
+          });
+        }
       } else {
         // No saved layout — create a default tab
         createDefaultPanel(event.api, workspaceId);

@@ -707,14 +707,17 @@ export function DockviewChatContainer({
         // e.g. the user removed them via `band chats remove` while the
         // dashboard was closed. Mirrors `DockviewBrowserContainer`'s
         // orphan check.
+        let dropped = 0;
         if (knownChatIds) {
           const orphans = event.api.panels.filter((p) => !knownChatIds.has(p.id));
           for (const orphan of orphans) {
             event.api.removePanel(orphan);
+            dropped++;
           }
           // If all panels were orphaned, create a fresh default tab.
           if (event.api.panels.length === 0) {
             createDefaultPanel(event.api, workspaceId);
+            dropped++;
           }
         }
 
@@ -722,6 +725,20 @@ export function DockviewChatContainer({
         setTimeout(() => {
           isRestoringRef.current = false;
         }, 0);
+
+        // If we removed orphans (or replaced them with a default), persist
+        // the cleaned-up layout immediately. The dockview events that
+        // fired while `removePanel` was running landed inside the
+        // restoration window and were swallowed by `schedulePersist`'s
+        // `isRestoringRef` guard. Without this explicit save, the saved
+        // `chat_layout` row would still reference the dead panels — the
+        // dashboard would prune them on every mount but the DB would
+        // never converge.
+        if (dropped > 0) {
+          persistToServer(workspaceId, event.api.toJSON(), {
+            queryClient: queryClientRef.current,
+          });
+        }
       } else {
         // No saved layout — create a default tab
         createDefaultPanel(event.api, workspaceId);

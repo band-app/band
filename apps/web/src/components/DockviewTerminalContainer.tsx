@@ -584,14 +584,17 @@ export function DockviewTerminalContainer({
 
         // Prune panels whose terminal sessions no longer exist on the server
         // (e.g. PTYs died during server restart).
+        let dropped = 0;
         if (knownTerminalIds) {
           const orphans = event.api.panels.filter((p) => !knownTerminalIds.has(p.id));
           for (const orphan of orphans) {
             event.api.removePanel(orphan);
+            dropped++;
           }
           // If all panels were orphaned, create a fresh default terminal.
           if (event.api.panels.length === 0) {
             createDefaultTerminal(event.api, workspaceId);
+            dropped++;
           }
         }
 
@@ -599,6 +602,18 @@ export function DockviewTerminalContainer({
         setTimeout(() => {
           isRestoringRef.current = false;
         }, 0);
+
+        // Persist the cleaned-up layout if orphans were removed. The
+        // dockview events that fired during `removePanel` landed inside
+        // the restoration window and were swallowed by
+        // `schedulePersist`'s `isRestoringRef` guard, so without this
+        // explicit save the saved `terminal_layout` row would never
+        // converge with `terminal.list`.
+        if (dropped > 0) {
+          persistToServer(workspaceId, event.api.toJSON(), {
+            queryClient: queryClientRef.current,
+          });
+        }
       } else {
         // No saved layout — check for workspace terminal config, then create default
         seedFromConfigOrDefault(event.api, workspaceId, queryClientRef.current);
