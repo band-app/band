@@ -6,6 +6,7 @@ packages:
 onlyBuiltDependencies:
   - '@nothumanwork/cursor-agents-sdk'
   - better-sqlite3
+  - electron
   - esbuild
   - node-pty
   - sharp

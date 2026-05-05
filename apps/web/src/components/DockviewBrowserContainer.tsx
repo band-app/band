@@ -19,7 +19,8 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { isTauri } from "../lib/is-tauri";
+import { invoke as desktopInvoke } from "../lib/desktop-ipc";
+import { isDesktop } from "../lib/is-tauri";
 import { trpc } from "../lib/trpc-client";
 import { BrowserPaneComponent, type BrowserPaneParams, useFavicon } from "./BrowserPanel";
 
@@ -543,7 +544,7 @@ export function DockviewBrowserContainer({
         if (!activeGroup) return;
         const direction = e.shiftKey ? "below" : "right";
         handleSplit(activeGroup.id, direction);
-      } else if (key === "r" && !e.shiftKey && isTauri) {
+      } else if (key === "r" && !e.shiftKey && isDesktop) {
         const api = apiRef.current;
         if (!api) return;
         const active = api.activePanel;
@@ -551,11 +552,9 @@ export function DockviewBrowserContainer({
         if (!browserId) return;
         e.preventDefault();
         e.stopPropagation();
-        import("@tauri-apps/api/core")
-          .then(({ invoke }) => invoke("browser_reload", { browserId }))
-          .catch((err) => {
-            console.error("[DockviewBrowserContainer] browser_reload failed:", err);
-          });
+        desktopInvoke("browser_reload", { browserId }).catch((err) => {
+          console.error("[DockviewBrowserContainer] browser_reload failed:", err);
+        });
       }
     };
     window.addEventListener("keydown", handler, true);

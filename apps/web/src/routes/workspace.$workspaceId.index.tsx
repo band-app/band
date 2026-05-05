@@ -6,7 +6,7 @@ import { ChatView } from "../components/ChatView";
 import { useAgentSwitcherContext } from "../hooks/useAgentSwitcherContext";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useSessionListContext } from "../hooks/useSessionListContext";
-import { isTauri } from "../lib/is-tauri";
+import { isDesktop } from "../lib/is-tauri";
 import { trpc } from "../lib/trpc-client";
 
 export const Route = createFileRoute("/workspace/$workspaceId/")({
@@ -17,10 +17,10 @@ function WorkspaceIndex() {
   const { workspaceId } = Route.useParams();
   const decoded = decodeURIComponent(workspaceId);
   const isWideScreen = useIsDesktop();
-  const isDesktop = isWideScreen || isTauri;
+  const useDesktopLayout = isWideScreen || isDesktop;
 
   // Desktop: chat is always visible in the left panel — redirect to changes tab
-  if (isDesktop) {
+  if (useDesktopLayout) {
     return <Navigate to="/workspace/$workspaceId/changes" params={{ workspaceId }} replace />;
   }
 

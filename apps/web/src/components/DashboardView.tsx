@@ -1,14 +1,14 @@
 import { DashboardShell } from "@band-app/dashboard-core";
 import { useIsDesktop } from "../hooks/useIsDesktop";
-import { isTauri } from "../lib/is-tauri";
+import { isDesktop } from "../lib/is-tauri";
 import { DesktopLayout } from "./DesktopLayout";
 import { ToolbarOverflowMenuItems, ToolbarOverflowProvider } from "./ToolbarButtons";
 
 export function DashboardView() {
   const isWideScreen = useIsDesktop();
-  const isDesktop = isWideScreen || isTauri;
+  const useDesktopLayout = isWideScreen || isDesktop;
 
-  if (isDesktop) {
+  if (useDesktopLayout) {
     return (
       <ToolbarOverflowProvider>
         <DesktopLayout toolbarMenuItems={<ToolbarOverflowMenuItems />} />

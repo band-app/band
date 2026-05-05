@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { MessageSquare } from "lucide-react";
 import { DashboardView } from "../components/DashboardView";
 import { useIsDesktop } from "../hooks/useIsDesktop";
-import { isTauri } from "../lib/is-tauri";
+import { isDesktop } from "../lib/is-tauri";
 
 export const Route = createFileRoute("/")({
   component: DashboardPage,
@@ -10,11 +10,11 @@ export const Route = createFileRoute("/")({
 
 function DashboardPage() {
   const isWideScreen = useIsDesktop();
-  // Desktop split layout is active in Tauri or in a wide browser window.
-  const isDesktop = isWideScreen || isTauri;
+  // Desktop split layout is active inside the desktop shell or in a wide browser window.
+  const useDesktopLayout = isWideScreen || isDesktop;
 
   // Desktop: sidebar is rendered by root layout, just show empty state
-  if (isDesktop) {
+  if (useDesktopLayout) {
     return (
       <div className="flex h-full items-center justify-center">
         <div className="flex flex-col items-center gap-3 text-center px-8">

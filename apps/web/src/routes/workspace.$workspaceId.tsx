@@ -20,7 +20,7 @@ import { TauriDragRegion } from "../components/TauriTitleBar";
 import { AgentSwitcherContext } from "../hooks/useAgentSwitcherContext";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { SessionListContext } from "../hooks/useSessionListContext";
-import { isTauri } from "../lib/is-tauri";
+import { isDesktop } from "../lib/is-tauri";
 import { trpc } from "../lib/trpc-client";
 
 export const Route = createFileRoute("/workspace/$workspaceId")({
@@ -123,7 +123,7 @@ function WorkspaceLayout() {
   const { workspaceId } = Route.useParams();
   const decoded = decodeURIComponent(workspaceId);
   const isWideScreen = useIsDesktop();
-  const isDesktop = isWideScreen || isTauri;
+  const useDesktopLayout = isWideScreen || isDesktop;
   const [hydrated, setHydrated] = useState(false);
   const [diffStats, setDiffStats] = useState<DiffStats | null>(null);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
@@ -168,7 +168,7 @@ function WorkspaceLayout() {
   return (
     <DiffStatsContext.Provider value={{ diffStats, setDiffStats }}>
       <div className={`h-full ${hydrated ? "" : "invisible"}`}>
-        {isDesktop ? (
+        {useDesktopLayout ? (
           <DesktopWorkspaceLayout workspaceId={decoded} encodedId={workspaceId} />
         ) : (
           <MobileWorkspaceLayout workspaceId={decoded} encodedId={workspaceId} />
@@ -346,7 +346,7 @@ function MobileWorkspaceLayout({
             transform: appOffsetTop ? `translateY(${appOffsetTop}px)` : undefined,
           }}
         >
-          {isTauri && <TauriDragRegion />}
+          {isDesktop && <TauriDragRegion />}
           <header className="flex shrink-0 items-center gap-3 border-b border-border/50 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
             <button
               type="button"

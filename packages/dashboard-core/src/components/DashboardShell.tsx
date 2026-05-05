@@ -40,7 +40,44 @@ interface DashboardShellProps {
   hideTitleBar?: boolean;
 }
 
+// Desktop-shell detection. Both Tauri and Electron expose a global for this;
+// Electron's `__BAND_DESKTOP__` is set by `apps/desktop/src/preload/index.ts`.
 const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+const isElectron = typeof window !== "undefined" && "__BAND_DESKTOP__" in window;
+const isDesktop = isTauri || isElectron;
+
+interface ElectronBridge {
+  invoke(channel: string, args?: unknown): Promise<unknown>;
+  startDragging(): Promise<void>;
+}
+
+function electronBridge(): ElectronBridge | null {
+  if (!isElectron) return null;
+  const bridge = (window as unknown as { __BAND_DESKTOP__?: ElectronBridge }).__BAND_DESKTOP__;
+  return bridge ?? null;
+}
+
+async function desktopInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  const bridge = electronBridge();
+  if (bridge) return (await bridge.invoke(cmd, args)) as T;
+  if (isTauri) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<T>(cmd, args);
+  }
+  throw new Error(`desktopInvoke('${cmd}') called outside a desktop shell`);
+}
+
+async function desktopStartDragging(): Promise<void> {
+  const bridge = electronBridge();
+  if (bridge) {
+    await bridge.startDragging();
+    return;
+  }
+  if (isTauri) {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    await getCurrentWindow().startDragging();
+  }
+}
 
 export function DashboardShell({ toolbarMenuItems, hideTitleBar }: DashboardShellProps) {
   const { projects, isLoading: loading } = useProjects();
@@ -60,27 +97,22 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar }: DashboardShel
   const titleBarRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!isTauri) return;
-    import("@tauri-apps/api/core").then(({ invoke }) => {
-      invoke<string>("get_app_title").then(setAppTitle);
-    });
+    if (!isDesktop) return;
+    desktopInvoke<string>("get_app_title")
+      .then(setAppTitle)
+      .catch(() => {});
   }, []);
 
-  // Attach native mousedown listener for window dragging.
-  // Uses the official Tauri pattern: startDragging() on primary button press.
+  // Attach native mousedown listener for window dragging — primary button press
+  // forwards to the shell's startDragging verb (Tauri's getCurrentWindow or
+  // Electron's preload bridge).
   useEffect(() => {
     const el = titleBarRef.current;
-    if (!isTauri || !el) return;
-
-    let appWindow: { startDragging: () => Promise<void> } | null = null;
-    import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
-      appWindow = getCurrentWindow();
-    });
+    if (!isDesktop || !el) return;
 
     const onMouseDown = (e: MouseEvent) => {
-      if (e.buttons === 1 && appWindow) {
-        appWindow.startDragging();
-      }
+      if (e.buttons !== 1) return;
+      desktopStartDragging().catch(() => {});
     };
     el.addEventListener("mousedown", onMouseDown);
     return () => el.removeEventListener("mousedown", onMouseDown);
@@ -97,11 +129,12 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar }: DashboardShel
     [labelFilter, labels],
   );
 
-  // Tauri's native menu (Cmd+,) calls `window.__bandOpenSettings()` via
-  // webview.eval — same pattern as the zoom menu. Register the global so
-  // the menu can pop the in-app dialog instead of spawning a separate window.
+  // The desktop shell's native menu (Cmd+,) calls `window.__bandOpenSettings()`
+  // via webview.eval / executeJavaScript — same pattern as the zoom menu.
+  // Register the global so the menu can pop the in-app dialog instead of
+  // spawning a separate window.
   useEffect(() => {
-    if (!isTauri) return;
+    if (!isDesktop) return;
     const globalKey = "__bandOpenSettings";
     (window as unknown as Record<string, unknown>)[globalKey] = () => setShowSettingsDialog(true);
     return () => {
@@ -142,9 +175,9 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar }: DashboardShel
 
   return (
     <div
-      className={`${hideTitleBar ? "h-full" : "h-dvh"} w-full overflow-hidden flex flex-col bg-background text-foreground p-0 ${isTauri ? "" : "pt-[env(safe-area-inset-top)]"}`}
+      className={`${hideTitleBar ? "h-full" : "h-dvh"} w-full overflow-hidden flex flex-col bg-background text-foreground p-0 ${isDesktop ? "" : "pt-[env(safe-area-inset-top)]"}`}
     >
-      {isTauri && !hideTitleBar && (
+      {isDesktop && !hideTitleBar && (
         <div
           ref={titleBarRef}
           data-tauri-drag-region
