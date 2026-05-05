@@ -959,7 +959,8 @@ fn cmd_chats_watch(chat_id: Option<&str>) -> Result<(), String> {
     use std::io::Write as _;
 
     let client = api::ApiClient::from_settings()?;
-    let chat_id = resolve_default_panel(&client, chat_id, "chats.list", "chats", "id", "chat pane")?;
+    let chat_id =
+        resolve_default_panel(&client, chat_id, "chats.list", "chats", "id", "chat pane")?;
     let path = format!("/api/tasks/{}/stream", urlencoded_path_segment(&chat_id));
     let mut response = client.get_raw_stream(&path)?;
     let status = response.status().as_u16();
@@ -1048,7 +1049,8 @@ fn urlencoded_path_segment(s: &str) -> String {
 
 fn cmd_chats_stop(chat_id: Option<&str>) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
-    let chat_id = resolve_default_panel(&client, chat_id, "chats.list", "chats", "id", "chat pane")?;
+    let chat_id =
+        resolve_default_panel(&client, chat_id, "chats.list", "chats", "id", "chat pane")?;
     client.trpc_mutate("chats.stop", &serde_json::json!({"chatId": chat_id}))?;
 
     Ok(CommandResult {
@@ -1059,7 +1061,8 @@ fn cmd_chats_stop(chat_id: Option<&str>) -> Result<CommandResult, String> {
 
 fn cmd_chats_remove(chat_id: Option<&str>) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
-    let chat_id = resolve_default_panel(&client, chat_id, "chats.list", "chats", "id", "chat pane")?;
+    let chat_id =
+        resolve_default_panel(&client, chat_id, "chats.list", "chats", "id", "chat pane")?;
     client.trpc_mutate("chats.remove", &serde_json::json!({"chatId": chat_id}))?;
 
     Ok(CommandResult {
@@ -1351,11 +1354,7 @@ fn cmd_terminal_kill(terminal_id: Option<&str>) -> Result<CommandResult, String>
     })
 }
 
-fn handle_terminal_follow(
-    terminal_id: Option<&str>,
-    lines: Option<u32>,
-    json_output: bool,
-) -> i32 {
+fn handle_terminal_follow(terminal_id: Option<&str>, lines: Option<u32>, json_output: bool) -> i32 {
     match cmd_terminal_follow(terminal_id, lines, json_output) {
         Ok(()) => 0,
         Err(e) => {

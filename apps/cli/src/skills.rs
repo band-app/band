@@ -113,9 +113,9 @@ fn matches_filter(name: &str, filter: Option<&str>) -> bool {
 /// `prefix + " "` so that `terminal` matches `terminal list` but not
 /// `terminal-something-else`.
 fn matches_any_prefix(command_name: &str, prefixes: &[String]) -> bool {
-    prefixes.iter().any(|p| {
-        command_name == p || command_name.starts_with(&format!("{p} "))
-    })
+    prefixes
+        .iter()
+        .any(|p| command_name == p || command_name.starts_with(&format!("{p} ")))
 }
 
 /// Parse the `commands:` frontmatter field as a list of comma-separated prefixes.

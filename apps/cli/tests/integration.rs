@@ -1497,13 +1497,7 @@ fn terminals_create_adds_terminal_to_layout() {
     env.band(&["workspaces", "create", "my-project", "feat/term-layout"]);
     let workspace_id = "my-project-feat-term-layout";
 
-    let out = env.band(&[
-        "terminals",
-        "create",
-        workspace_id,
-        "--output",
-        "json",
-    ]);
+    let out = env.band(&["terminals", "create", workspace_id, "--output", "json"]);
     assert!(out.status.success(), "stderr: {}", stderr(&out));
     let json: serde_json::Value = serde_json::from_str(&stdout(&out)).unwrap();
     let terminal_id = json["terminalId"].as_str().expect("terminalId in response");
@@ -1664,7 +1658,12 @@ fn workspaces_remove_clears_all_panel_states() {
 #[test]
 fn chats_remove_strips_chat_from_layout() {
     let env = TestEnv::new();
-    env.band(&["workspaces", "create", "my-project", "feat/chat-remove-layout"]);
+    env.band(&[
+        "workspaces",
+        "create",
+        "my-project",
+        "feat/chat-remove-layout",
+    ]);
     let workspace_id = "my-project-feat-chat-remove-layout";
 
     // `workspaces create` lazily creates a default chat. Add a second so
@@ -1680,8 +1679,8 @@ fn chats_remove_strips_chat_from_layout() {
         "json",
     ]);
     assert!(second.status.success(), "stderr: {}", stderr(&second));
-    let second_id = serde_json::from_str::<serde_json::Value>(&stdout(&second))
-        .unwrap()["chat"]["id"]
+    let second_id = serde_json::from_str::<serde_json::Value>(&stdout(&second)).unwrap()["chat"]
+        ["id"]
         .as_str()
         .unwrap()
         .to_string();
@@ -1888,8 +1887,8 @@ fn chat_targets_most_recently_added_chat_by_default() {
         "json",
     ]);
     assert!(second.status.success(), "stderr: {}", stderr(&second));
-    let second_id = serde_json::from_str::<serde_json::Value>(&stdout(&second))
-        .unwrap()["chat"]["id"]
+    let second_id = serde_json::from_str::<serde_json::Value>(&stdout(&second)).unwrap()["chat"]
+        ["id"]
         .as_str()
         .unwrap()
         .to_string();
@@ -2065,7 +2064,14 @@ fn chat_auto_detects_workspace_from_cwd() {
     // Run `band chats send` with NO workspace from inside the worktree.
     let output = env.band_in(
         Path::new(&worktree_path),
-        &["chats", "send", "--message", "auto-detect", "--output", "json"],
+        &[
+            "chats",
+            "send",
+            "--message",
+            "auto-detect",
+            "--output",
+            "json",
+        ],
     );
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
@@ -2125,7 +2131,13 @@ fn schema_lists_all_commands() {
     // The `tasks` subcommand was fully removed — agent task submission
     // happens via the top-level `chat` command, and lifecycle management
     // moved server-side.
-    for removed in ["tasks list", "tasks create", "tasks cancel", "tasks rerun", "tasks watch"] {
+    for removed in [
+        "tasks list",
+        "tasks create",
+        "tasks cancel",
+        "tasks rerun",
+        "tasks watch",
+    ] {
         assert!(
             !names.contains(&removed),
             "expected `{removed}` to be removed: {names:?}"
@@ -2256,10 +2268,7 @@ fn band_against_mock(
 ) -> std::process::Output {
     let band_dir = tmp.path().join(".band");
     fs::create_dir_all(&band_dir).ok();
-    seed_settings_only(
-        &band_dir,
-        &serde_json::json!({"tokenSecret": "mock-token"}),
-    );
+    seed_settings_only(&band_dir, &serde_json::json!({"tokenSecret": "mock-token"}));
 
     Command::new(env!("CARGO_BIN_EXE_band"))
         .args(args)
@@ -2364,8 +2373,7 @@ fn band_offline(args: &[&str]) -> std::process::Output {
 /// Read the generated SKILL.md for a given skill name from the output dir.
 fn read_skill(output_dir: &Path, name: &str) -> String {
     let path = output_dir.join(name).join("SKILL.md");
-    fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()))
+    fs::read_to_string(&path).unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()))
 }
 
 /// Extract the auto-generated `## Commands` section from a SKILL.md.
@@ -2413,11 +2421,7 @@ fn generate_skills_emits_all_four_domain_skills() {
     let tmp = tempfile::tempdir().expect("create tempdir");
     let out = tmp.path();
 
-    let output = band_offline(&[
-        "generate-skills",
-        "--output-dir",
-        out.to_str().unwrap(),
-    ]);
+    let output = band_offline(&["generate-skills", "--output-dir", out.to_str().unwrap()]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
     for name in ["band", "band-chat", "band-terminal", "band-browser"] {
@@ -2435,21 +2439,14 @@ fn generate_skills_emits_all_four_domain_skills() {
 fn generate_skills_each_skill_has_non_empty_description() {
     let tmp = tempfile::tempdir().expect("create tempdir");
     let out = tmp.path();
-    let output = band_offline(&[
-        "generate-skills",
-        "--output-dir",
-        out.to_str().unwrap(),
-    ]);
+    let output = band_offline(&["generate-skills", "--output-dir", out.to_str().unwrap()]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
     for name in ["band", "band-chat", "band-terminal", "band-browser"] {
         let skill = read_skill(out, name);
         let desc = frontmatter_field(&skill, "description")
             .unwrap_or_else(|| panic!("{name} has no description"));
-        assert!(
-            !desc.is_empty(),
-            "{name} description must be non-empty"
-        );
+        assert!(!desc.is_empty(), "{name} description must be non-empty");
         // The description must be specific enough to mention what triggers
         // the skill — sanity-check that each domain's description references
         // its own keyword and not the others'.
@@ -2485,11 +2482,7 @@ fn generate_skills_each_skill_has_non_empty_description() {
 fn generate_skills_general_skill_excludes_domain_commands() {
     let tmp = tempfile::tempdir().expect("create tempdir");
     let out = tmp.path();
-    let output = band_offline(&[
-        "generate-skills",
-        "--output-dir",
-        out.to_str().unwrap(),
-    ]);
+    let output = band_offline(&["generate-skills", "--output-dir", out.to_str().unwrap()]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
     let band = read_skill(out, "band");
@@ -2548,11 +2541,7 @@ fn generate_skills_general_skill_excludes_domain_commands() {
 fn generate_skills_chat_skill_contains_only_chat_commands() {
     let tmp = tempfile::tempdir().expect("create tempdir");
     let out = tmp.path();
-    let output = band_offline(&[
-        "generate-skills",
-        "--output-dir",
-        out.to_str().unwrap(),
-    ]);
+    let output = band_offline(&["generate-skills", "--output-dir", out.to_str().unwrap()]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
     let chat = read_skill(out, "band-chat");
@@ -2591,11 +2580,7 @@ fn generate_skills_chat_skill_contains_only_chat_commands() {
 fn generate_skills_terminal_skill_contains_only_terminal_commands() {
     let tmp = tempfile::tempdir().expect("create tempdir");
     let out = tmp.path();
-    let output = band_offline(&[
-        "generate-skills",
-        "--output-dir",
-        out.to_str().unwrap(),
-    ]);
+    let output = band_offline(&["generate-skills", "--output-dir", out.to_str().unwrap()]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
     let term = read_skill(out, "band-terminal");
@@ -2632,11 +2617,7 @@ fn generate_skills_terminal_skill_contains_only_terminal_commands() {
 fn generate_skills_browser_skill_contains_only_browser_commands() {
     let tmp = tempfile::tempdir().expect("create tempdir");
     let out = tmp.path();
-    let output = band_offline(&[
-        "generate-skills",
-        "--output-dir",
-        out.to_str().unwrap(),
-    ]);
+    let output = band_offline(&["generate-skills", "--output-dir", out.to_str().unwrap()]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
     let browser = read_skill(out, "band-browser");
@@ -2703,10 +2684,7 @@ fn generate_skills_json_output_lists_generated_skills() {
     let json: serde_json::Value = serde_json::from_str(&stdout(&output))
         .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)));
     let skills = json["skills"].as_array().expect("skills array");
-    let names: Vec<&str> = skills
-        .iter()
-        .map(|s| s["name"].as_str().unwrap())
-        .collect();
+    let names: Vec<&str> = skills.iter().map(|s| s["name"].as_str().unwrap()).collect();
 
     assert_eq!(names.len(), 4, "expected 4 skills, got {names:?}");
     assert!(names.contains(&"band"));
