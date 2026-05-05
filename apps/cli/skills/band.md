@@ -13,7 +13,7 @@ Thin client for the Band web server. All state, git operations, and script execu
 
 This skill covers **core workspace, project, cronjob, and tunnel** management. For domain-specific commands, see the sibling skills:
 
-- **`band-chat`** — chat panes (`band chats chat/list/create/send/watch/stop/remove`)
+- **`band-chat`** — chat panes (`band chats list/create/send/watch/stop/remove`)
 - **`band-terminal`** — terminal sessions (`band terminals list/create/send/output/kill/attach`)
 - **`band-browser`** — browser tabs (`band browsers list/create/navigate/get/remove`)
 
@@ -70,7 +70,7 @@ band workspaces list --output json | jq '.workspaces[] | select(.project == "my-
 ### Drive a coding agent
 
 To send a message to a workspace's chat (the primary way to drive the
-coding agent), use `band chats chat` — see the **`band-chat`** skill. Task
+coding agent), use `band chats send` — see the **`band-chat`** skill. Task
 lifecycle (status, cancel, re-run) is managed inside the dashboard
 rather than from the CLI.
 

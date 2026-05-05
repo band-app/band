@@ -139,29 +139,6 @@ enum WorkspacesCmd {
 
 #[derive(Subcommand)]
 enum ChatsCmd {
-    /// Send a message to a workspace chat (defaults to the workspace's active chat panel)
-    Chat {
-        /// Workspace ID (auto-detected from cwd if omitted)
-        workspace_id: Option<String>,
-        /// Message text to send
-        #[arg(long)]
-        message: String,
-        /// Target a specific chat pane instead of the workspace default
-        #[arg(long)]
-        chat_id: Option<String>,
-        /// Maximum number of agentic turns
-        #[arg(long)]
-        max_turns: Option<u32>,
-        /// Agent mode (e.g. 'plan', 'edit')
-        #[arg(long)]
-        mode: Option<String>,
-        /// Model to use for the coding agent (e.g. 'claude-opus-4-20250514')
-        #[arg(long)]
-        model: Option<String>,
-        /// Coding agent ID (e.g. 'claude-code')
-        #[arg(long)]
-        agent: Option<String>,
-    },
     /// List chat panes for a workspace
     List {
         /// Workspace ID (auto-detected from cwd if omitted)
@@ -184,13 +161,28 @@ enum ChatsCmd {
         #[arg(long)]
         mode: Option<String>,
     },
-    /// Send a message to a chat pane
+    /// Send a message to a workspace chat (defaults to the workspace's active chat panel)
     Send {
-        /// Chat pane ID (defaults to the cwd workspace's first chat pane)
+        /// Chat pane ID (defaults to the workspace's active chat panel)
         chat_id: Option<String>,
         /// Message text
         #[arg(long)]
         message: String,
+        /// Workspace ID (auto-detected from cwd if omitted)
+        #[arg(long)]
+        workspace: Option<String>,
+        /// Maximum number of agentic turns
+        #[arg(long)]
+        max_turns: Option<u32>,
+        /// Agent mode (e.g. 'plan', 'edit')
+        #[arg(long)]
+        mode: Option<String>,
+        /// Model to use for the coding agent (e.g. 'claude-opus-4-20250514')
+        #[arg(long)]
+        model: Option<String>,
+        /// Coding agent ID (e.g. 'claude-code')
+        #[arg(long)]
+        agent: Option<String>,
     },
     /// Stream a chat pane's running task as raw NDJSON
     Watch {
@@ -458,23 +450,6 @@ fn main() {
             WorkspacesCmd::Remove { project, branch } => cmd_workspaces_remove(&project, &branch),
         },
         Commands::Chats { cmd } => match cmd {
-            ChatsCmd::Chat {
-                workspace_id,
-                message,
-                chat_id,
-                max_turns,
-                mode,
-                model,
-                agent,
-            } => cmd_chat(
-                workspace_id.as_deref(),
-                &message,
-                chat_id.as_deref(),
-                max_turns,
-                mode.as_deref(),
-                model.as_deref(),
-                agent.as_deref(),
-            ),
             ChatsCmd::List { workspace_id } => cmd_chats_list(workspace_id.as_deref()),
             ChatsCmd::Create {
                 workspace_id,
@@ -489,7 +464,23 @@ fn main() {
                 model.as_deref(),
                 mode.as_deref(),
             ),
-            ChatsCmd::Send { chat_id, message } => cmd_chats_send(chat_id.as_deref(), &message),
+            ChatsCmd::Send {
+                chat_id,
+                message,
+                workspace,
+                max_turns,
+                mode,
+                model,
+                agent,
+            } => cmd_chats_send(
+                chat_id.as_deref(),
+                &message,
+                workspace.as_deref(),
+                max_turns,
+                mode.as_deref(),
+                model.as_deref(),
+                agent.as_deref(),
+            ),
             ChatsCmd::Watch { .. } => unreachable!(),
             ChatsCmd::Stop { chat_id } => cmd_chats_stop(chat_id.as_deref()),
             ChatsCmd::Remove { chat_id } => cmd_chats_remove(chat_id.as_deref()),
@@ -888,19 +879,63 @@ fn cmd_chats_create(
     })
 }
 
-fn cmd_chats_send(chat_id: Option<&str>, message: &str) -> Result<CommandResult, String> {
+/// Send a message to a workspace chat, defaulting to the workspace's active
+/// chat panel when no `chat_id` is provided. Returns the task id.
+///
+/// Calls `tasks.submit` server-side, which resolves the default chat via
+/// `getOrCreateDefaultChat` — honoring the saved chat layout's active panel,
+/// then the first panel in the saved layout, then the first chat in the
+/// registry, and finally lazy-creating a new "Chat" panel if the workspace
+/// has none. So passing no `chat_id` here matches the chat the user is
+/// looking at in the dashboard.
+fn cmd_chats_send(
+    chat_id: Option<&str>,
+    message: &str,
+    workspace_id: Option<&str>,
+    max_turns: Option<u32>,
+    mode: Option<&str>,
+    model: Option<&str>,
+    agent: Option<&str>,
+) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
-    let chat_id = resolve_default_panel(&client, chat_id, "chats.list", "chats", "id", "chat pane")?;
-    let data = client.trpc_mutate(
-        "chats.send",
-        &serde_json::json!({"chatId": chat_id, "message": message}),
-    )?;
+    let workspace_id = resolve_workspace_id(&client, workspace_id)?;
 
-    let task_id = data.get("id").and_then(|v| v.as_str()).unwrap_or("");
+    let mut input = serde_json::json!({
+        "workspaceId": workspace_id,
+        "prompt": message,
+    });
+    if let Some(chat_id) = chat_id {
+        input["chatId"] = serde_json::json!(chat_id);
+    }
+    if let Some(max_turns) = max_turns {
+        input["maxTurns"] = serde_json::json!(max_turns);
+    }
+    if let Some(mode) = mode {
+        input["mode"] = serde_json::json!(mode);
+    }
+    if let Some(model) = model {
+        input["model"] = serde_json::json!(model);
+    }
+    if let Some(agent) = agent {
+        input["codingAgentId"] = serde_json::json!(agent);
+    }
+
+    let data = client.trpc_mutate("tasks.submit", &input)?;
+
+    let id = data.get("id").and_then(|i| i.as_str()).unwrap_or("");
+    let ws = data
+        .get("workspaceId")
+        .and_then(|w| w.as_str())
+        .unwrap_or("");
+    let resolved_chat_id = data.get("chatId").and_then(|c| c.as_str()).unwrap_or("");
 
     Ok(CommandResult {
-        text: format!("{task_id}\n"),
-        json: data,
+        text: format!("{id}\n"),
+        json: serde_json::json!({
+            "id": id,
+            "workspaceId": ws,
+            "chatId": resolved_chat_id,
+        }),
     })
 }
 
@@ -1030,64 +1065,6 @@ fn cmd_chats_remove(chat_id: Option<&str>) -> Result<CommandResult, String> {
     Ok(CommandResult {
         text: format!("Chat {chat_id} removed\n"),
         json: serde_json::json!({"ok": true, "chatId": chat_id}),
-    })
-}
-
-/// Send a message to a workspace chat, defaulting to the workspace's active
-/// chat panel when no `--chat-id` is provided. Returns the task id.
-///
-/// Server-side, `tasks.submit` resolves the default chat via
-/// `getOrCreateDefaultChat`, which honors the saved chat layout's active
-/// panel. So passing no `chatId` here matches the chat the user is looking
-/// at in the dashboard.
-fn cmd_chat(
-    workspace_id: Option<&str>,
-    message: &str,
-    chat_id: Option<&str>,
-    max_turns: Option<u32>,
-    mode: Option<&str>,
-    model: Option<&str>,
-    agent: Option<&str>,
-) -> Result<CommandResult, String> {
-    let client = api::ApiClient::from_settings()?;
-    let workspace_id = resolve_workspace_id(&client, workspace_id)?;
-
-    let mut input = serde_json::json!({
-        "workspaceId": workspace_id,
-        "prompt": message,
-    });
-    if let Some(chat_id) = chat_id {
-        input["chatId"] = serde_json::json!(chat_id);
-    }
-    if let Some(max_turns) = max_turns {
-        input["maxTurns"] = serde_json::json!(max_turns);
-    }
-    if let Some(mode) = mode {
-        input["mode"] = serde_json::json!(mode);
-    }
-    if let Some(model) = model {
-        input["model"] = serde_json::json!(model);
-    }
-    if let Some(agent) = agent {
-        input["codingAgentId"] = serde_json::json!(agent);
-    }
-
-    let data = client.trpc_mutate("tasks.submit", &input)?;
-
-    let id = data.get("id").and_then(|i| i.as_str()).unwrap_or("");
-    let ws = data
-        .get("workspaceId")
-        .and_then(|w| w.as_str())
-        .unwrap_or("");
-    let resolved_chat_id = data.get("chatId").and_then(|c| c.as_str()).unwrap_or("");
-
-    Ok(CommandResult {
-        text: format!("{id}\n"),
-        json: serde_json::json!({
-            "id": id,
-            "workspaceId": ws,
-            "chatId": resolved_chat_id,
-        }),
     })
 }
 
@@ -2256,20 +2233,6 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             ]
         }),
         serde_json::json!({
-            "name": "chats chat",
-            "description": "Send a message to a workspace chat (defaults to the workspace's active chat panel)",
-            "parameters": [
-                {"name": "workspace_id", "type": "string", "required": false, "positional": true, "description": "Workspace ID (auto-detected from cwd if omitted)"},
-                {"name": "--message", "type": "string", "required": true, "description": "Message text to send"},
-                {"name": "--chat-id", "type": "string", "required": false, "description": "Target a specific chat pane instead of the workspace default"},
-                {"name": "--max-turns", "type": "integer", "required": false, "description": "Maximum number of agentic turns"},
-                {"name": "--mode", "type": "string", "required": false, "description": "Agent mode (e.g. 'plan', 'edit')"},
-                {"name": "--model", "type": "string", "required": false, "description": "Model to use for the coding agent (e.g. 'claude-opus-4-20250514')"},
-                {"name": "--agent", "type": "string", "required": false, "description": "Coding agent ID to use (overrides workspace default)"},
-            ],
-            "notes": "Sends a message to the workspace's chat. When `--chat-id` is omitted, the server resolves the workspace's *active* chat panel (the tab the user last focused in the dashboard), falling back to the first panel in the saved layout, then to the first chat in the registry, and finally creating a new \"Chat\" panel if the workspace has none. This means CLI prompts land in the same conversation the user is looking at.\n\nReturns the task ID.\nJSON output: `{\"id\": \"tsk_...\", \"workspaceId\": \"...\", \"chatId\": \"chat_...\"}`\n\nReplaces the removed `tasks` subcommand. Use `--chat-id` to target a specific chat pane (look it up with `band chats list <workspace_id>`)."
-        }),
-        serde_json::json!({
             "name": "chats list",
             "description": "List chat panes for a workspace",
             "parameters": [
@@ -2291,12 +2254,17 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
         }),
         serde_json::json!({
             "name": "chats send",
-            "description": "Send a message to a chat pane",
+            "description": "Send a message to a workspace chat (defaults to the workspace's active chat panel)",
             "parameters": [
-                {"name": "chat_id", "type": "string", "required": false, "positional": true, "description": "Chat pane ID (defaults to the cwd workspace's first chat pane)"},
-                {"name": "--message", "type": "string", "required": true, "description": "Message text"},
+                {"name": "chat_id", "type": "string", "required": false, "positional": true, "description": "Chat pane ID (defaults to the workspace's active chat panel)"},
+                {"name": "--message", "type": "string", "required": true, "description": "Message text to send"},
+                {"name": "--workspace", "type": "string", "required": false, "description": "Workspace ID (auto-detected from cwd if omitted)"},
+                {"name": "--max-turns", "type": "integer", "required": false, "description": "Maximum number of agentic turns"},
+                {"name": "--mode", "type": "string", "required": false, "description": "Agent mode (e.g. 'plan', 'edit')"},
+                {"name": "--model", "type": "string", "required": false, "description": "Model to use for the coding agent (e.g. 'claude-opus-4-20250514')"},
+                {"name": "--agent", "type": "string", "required": false, "description": "Coding agent ID to use (overrides workspace default)"},
             ],
-            "notes": "Submits a task to the chat pane's agent. Returns the task ID."
+            "notes": "Sends a message to a workspace chat via `tasks.submit`. When `chat_id` is omitted, the server resolves the workspace's *active* chat panel (the tab the user last focused in the dashboard), falling back to the first panel in the saved layout, then to the first chat in the registry, and finally creating a new \"Chat\" panel if the workspace has none. This means CLI prompts land in the same conversation the user is looking at.\n\nReturns the task ID.\nJSON output: `{\"id\": \"tsk_...\", \"workspaceId\": \"...\", \"chatId\": \"chat_...\"}`\n\nReplaces the removed `tasks` subcommand. Use the positional `chat_id` to target a specific chat pane (look it up with `band chats list`)."
         }),
         serde_json::json!({
             "name": "chats watch",

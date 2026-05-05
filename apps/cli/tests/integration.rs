@@ -1044,7 +1044,14 @@ fn chat_returns_task_id() {
     );
 
     let workspace_id = "my-project-feat-task-test";
-    let output = env.band(&["chats", "chat", workspace_id, "--message", "write hello world"]);
+    let output = env.band(&[
+        "chats",
+        "send",
+        "--workspace",
+        workspace_id,
+        "--message",
+        "write hello world",
+    ]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
     let out = stdout(&output);
@@ -1062,7 +1069,8 @@ fn chat_json_output_includes_chat_id() {
 
     let output = env.band(&[
         "chats",
-        "chat",
+        "send",
+        "--workspace",
         "my-project-feat-task-json",
         "--message",
         "hello",
@@ -1100,7 +1108,8 @@ fn chat_conflict_returns_error() {
     // Submit first task — will start running
     let out1 = env.band(&[
         "chats",
-        "chat",
+        "send",
+        "--workspace",
         "my-project-feat-conflict",
         "--message",
         "first task",
@@ -1110,7 +1119,8 @@ fn chat_conflict_returns_error() {
     // Immediately submit a second task — should fail with conflict
     let out2 = env.band(&[
         "chats",
-        "chat",
+        "send",
+        "--workspace",
         "my-project-feat-conflict",
         "--message",
         "second task",
@@ -1425,10 +1435,11 @@ fn chat_creates_default_panel_when_workspace_has_no_chats() {
     let create = env.band(&["workspaces", "create", "my-project", "feat/chat-empty"]);
     assert!(create.status.success(), "stderr: {}", stderr(&create));
 
-    // No chats yet — `band chat` should lazily create one and target it.
+    // No chats yet — `band chats send` should lazily create one and target it.
     let output = env.band(&[
         "chats",
-        "chat",
+        "send",
+        "--workspace",
         "my-project-feat-chat-empty",
         "--message",
         "first message",
@@ -1490,11 +1501,12 @@ fn chat_targets_first_chat_when_no_layout() {
     assert!(chats.len() >= 2, "expected at least 2 chats: {list_json}");
     let first_id = chats[0]["id"].as_str().unwrap().to_string();
 
-    // Without a saved chat layout, `chat` should fall back to the first
-    // chat in the registry (insertion order).
+    // Without a saved chat layout, `chats send` should fall back to the
+    // first chat in the registry (insertion order).
     let output = env.band(&[
         "chats",
-        "chat",
+        "send",
+        "--workspace",
         workspace_id,
         "--message",
         "hello",
@@ -1578,11 +1590,13 @@ fn chat_targets_active_panel_from_layout() {
     });
     seed_chat_layout(&env.band_dir, workspace_id, &layout);
 
-    // `band chat` without --chat-id should target the active panel from
-    // the saved layout — not the first chat in insertion order.
+    // `band chats send` without an explicit chat_id should target the
+    // active panel from the saved layout — not the first chat in
+    // insertion order.
     let output = env.band(&[
         "chats",
-        "chat",
+        "send",
+        "--workspace",
         workspace_id,
         "--message",
         "to active panel",
@@ -1619,10 +1633,10 @@ fn chat_explicit_chat_id_overrides_default() {
 
     let output = env.band(&[
         "chats",
-        "chat",
-        workspace_id,
-        "--chat-id",
+        "send",
         &second_id,
+        "--workspace",
+        workspace_id,
         "--message",
         "directly",
         "--output",
@@ -1649,10 +1663,10 @@ fn chat_auto_detects_workspace_from_cwd() {
     );
     let worktree_path = stdout(&create_out);
 
-    // Run `band chat` with NO workspace_id from inside the worktree.
+    // Run `band chats send` with NO workspace from inside the worktree.
     let output = env.band_in(
         Path::new(&worktree_path),
-        &["chats", "chat", "--message", "auto-detect", "--output", "json"],
+        &["chats", "send", "--message", "auto-detect", "--output", "json"],
     );
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
@@ -1674,7 +1688,7 @@ fn chat_outside_workspace_fails_with_helpful_error() {
     git(&unrelated, &["init", "-b", "main"]);
     git(&unrelated, &["commit", "--allow-empty", "-m", "init"]);
 
-    let output = env.band_in(&unrelated, &["chats", "chat", "--message", "hello"]);
+    let output = env.band_in(&unrelated, &["chats", "send", "--message", "hello"]);
 
     assert!(
         !output.status.success(),
@@ -1718,12 +1732,17 @@ fn schema_lists_all_commands() {
             "expected `{removed}` to be removed: {names:?}"
         );
     }
-    // The top-level singular `chat` is gone — `chats chat` replaced it.
-    assert!(
-        !names.contains(&"chat"),
-        "expected top-level `chat` to be removed (now `chats chat`): {names:?}"
-    );
-    assert!(names.contains(&"chats chat"), "missing: {names:?}");
+    // The chat surface lives entirely under `chats *`. The top-level
+    // singular `chat` and the redundant `chats chat` are both gone —
+    // message submission goes through `chats send` (which calls
+    // `tasks.submit` server-side with full agent-config flags).
+    for removed in ["chat", "chats chat"] {
+        assert!(
+            !names.contains(&removed),
+            "expected `{removed}` to be removed (now `chats send`): {names:?}"
+        );
+    }
+    assert!(names.contains(&"chats send"), "missing: {names:?}");
     assert!(names.contains(&"chats list"), "missing: {names:?}");
     assert!(names.contains(&"chats watch"), "missing: {names:?}");
     assert!(names.contains(&"chats stop"), "missing: {names:?}");
@@ -2098,8 +2117,8 @@ fn generate_skills_general_skill_excludes_domain_commands() {
     // live in the sibling skills. Cross-reference prose elsewhere in the
     // skill is allowed and verified separately.
     //
-    // The whole `band chats *` group (including `chats chat`) belongs to
-    // band-chat. The `tasks` subcommand was fully removed.
+    // The whole `band chats *` group belongs to band-chat. The `tasks`
+    // subcommand was fully removed.
     assert!(
         !cmds.contains("\nband chats "),
         "general skill Commands section leaks `band chats` command"
@@ -2112,7 +2131,6 @@ fn generate_skills_general_skill_excludes_domain_commands() {
         "band chats list",
         "band chats create",
         "band chats send",
-        "band chats chat",
         "band terminals list",
         "band terminals create",
         "band terminals send",
@@ -2141,10 +2159,9 @@ fn generate_skills_chat_skill_contains_only_chat_commands() {
     let chat = read_skill(out, "band-chat");
     let cmds = commands_section(&chat);
 
-    // The entire `band chats *` group lives here, including the message-
-    // sending entry point `chats chat` (formerly the top-level singular).
+    // The entire `band chats *` group lives here. `chats send` is the
+    // message-sending entry point (replaces the old `chats chat`).
     for needle in [
-        "band chats chat",
         "band chats list",
         "band chats create",
         "band chats send",

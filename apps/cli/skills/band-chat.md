@@ -9,10 +9,9 @@ commands: chats
 
 # Band Chats
 
-All chat operations live under a single `band chats <subcommand>` group:
+All chat operations live under a single `band chats <subcommand>` group: `list/create/send/watch/stop/remove`.
 
-- **`band chats chat`** — the ergonomic entry point. Sends a message to a workspace's *active* chat panel (auto-detects the workspace from the current directory). This is the primary way to drive a coding agent from the CLI.
-- **`band chats list/create/send/watch/stop/remove`** — full chat-pane lifecycle. Use these when you need to manage multiple chats per workspace or target a specific chat by ID.
+The primary way to drive a coding agent from the CLI is `band chats send` — it sends a message to a workspace's *active* chat panel (auto-detected from cwd) and lazy-creates a "Chat" panel if the workspace has none.
 
 Chat panes are agent processes attached to a Band workspace. Each chat pane has its own conversation history and can run a different agent, model, or mode.
 
@@ -37,30 +36,35 @@ All commands support `--output json` (or `BAND_OUTPUT=json` env var) for structu
 
 ## Default workspace and chat resolution
 
-Every `band chats` subcommand auto-detects the workspace from the current working directory (matched against registered workspace paths) when `[workspace_id]` is omitted, and resolves to the workspace's first chat pane when `[chat_id]` is omitted. So the typical flow from inside a workspace is just `band chats chat --message "..."` — no IDs to type.
+Every `band chats` subcommand auto-detects the workspace from the current working directory (matched against registered workspace paths) when no workspace is given, and resolves to the workspace's *active* chat panel when no chat ID is given. So the typical flow from inside a workspace is just `band chats send --message "..."` — no IDs to type.
 
 You only need to pass an explicit ID when:
 
-- you're not inside the workspace's directory, or
-- the workspace has multiple chats and you want to target a specific one (`--chat-id chat_abc` for `chats chat`, or pass the chat ID positionally for `chats send/watch/stop/remove`).
+- you're not inside the workspace's directory (use `--workspace <ws_id>` for `chats send`, or pass the workspace ID positionally for `chats list/create`), or
+- the workspace has multiple chats and you want to target a specific one (pass the chat ID positionally to `chats send/watch/stop/remove`).
 
 ## Workflows
 
-### Send a quick message to the active chat (most common)
+### Send a message (most common)
 
 ```sh
 # From inside a workspace directory: workspace auto-detected from cwd,
 # chat auto-resolved to the active panel from the saved dashboard layout.
-band chats chat --message "Fix the failing tests"
+# If the workspace has no chats yet, the server lazy-creates one.
+band chats send --message "Fix the failing tests"
 
 # With an explicit workspace (when not in its cwd)
-band chats chat ws_abc123 --message "Fix the failing tests"
+band chats send --workspace ws_abc123 --message "Fix the failing tests"
 
 # Target a specific chat pane instead of the active one
-band chats chat --chat-id chat_abc --message "Investigate the perf regression"
+band chats send chat_abc --message "Investigate the perf regression"
+
+# Override agent / model / mode for one-off prompts
+band chats send --mode plan --model claude-opus-4-20250514 \
+  --message "Plan the migration to v2 of the auth API"
 ```
 
-### Send a one-off message to a new chat pane
+### Send a message to a freshly-created chat
 
 ```sh
 # Create a chat pane (workspace auto-detected) and capture its ID
