@@ -1,7 +1,7 @@
 ---
 name: band-chat
 version: 0.1.0
-description: Send messages to coding agents and manage chat panes via the Band CLI. Use when the user wants to send a chat message to a workspace, list, create, stop, or remove agent chat panes. Triggers include "send message to chat", "chat with agent", "create chat pane", "list chats", "stop chat", "remove chat", "submit prompt to workspace".
+description: Send messages to coding agents, stream their output, and manage chat panes via the Band CLI. Use when the user wants to send a chat message, watch a chat's running task, list, create, stop, or remove agent chat panes. Triggers include "send message to chat", "chat with agent", "watch chat", "stream chat output", "create chat pane", "list chats", "stop chat", "remove chat", "submit prompt to workspace".
 allowed-tools: Bash
 argument-hint: chat|chats [args...]
 commands: chat, chats
@@ -77,6 +77,22 @@ band chats create ws_abc123 \
   --mode plan
 ```
 
+### Watch a chat's running task as raw NDJSON
+
+```sh
+# Stream every event the agent emits (text deltas, tool calls, results)
+# as one JSON object per line on stdout. Output is always raw JSON.
+band chats watch "$chat"
+
+# Pipe through jq for live filtering — for example, only text deltas:
+band chats watch "$chat" | jq -r 'select(.type == "text-delta") | .delta'
+
+# Exits immediately with no output if the chat has no running task,
+# so it's safe to invoke speculatively after `band chats send`.
+band chats send "$chat" --message "Summarize the diff"
+band chats watch "$chat"
+```
+
 ### Stop and remove a chat
 
 ```sh
@@ -90,7 +106,7 @@ band chats remove "$chat"
 ## Cross-references
 
 - To find the workspace ID, use `band workspaces list` (see the `band` skill).
-- Task lifecycle (status, cancel, re-run) is managed inside the Band dashboard, not from the CLI.
+- Use `band chats watch` to stream a running task; `band chats stop` to abort it. Both target a specific chat by ID.
 
 ## Configuration
 

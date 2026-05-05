@@ -192,6 +192,11 @@ enum ChatsCmd {
         #[arg(long)]
         message: String,
     },
+    /// Stream a chat pane's running task as raw NDJSON
+    Watch {
+        /// Chat pane ID
+        chat_id: String,
+    },
     /// Stop a running chat pane
     Stop {
         /// Chat pane ID
@@ -413,6 +418,15 @@ fn main() {
         process::exit(exit_code);
     }
 
+    // chats watch streams the chat's running task as raw NDJSON
+    if let Commands::Chats {
+        cmd: ChatsCmd::Watch { ref chat_id },
+    } = cli.command
+    {
+        let exit_code = handle_chats_watch(chat_id);
+        process::exit(exit_code);
+    }
+
     let result = match cli.command {
         Commands::Projects { cmd } => match cmd {
             ProjectsCmd::List => cmd_projects_list(),
@@ -475,6 +489,7 @@ fn main() {
                 mode.as_deref(),
             ),
             ChatsCmd::Send { chat_id, message } => cmd_chats_send(&chat_id, &message),
+            ChatsCmd::Watch { .. } => unreachable!(),
             ChatsCmd::Stop { chat_id } => cmd_chats_stop(&chat_id),
             ChatsCmd::Remove { chat_id } => cmd_chats_remove(&chat_id),
         },
@@ -879,6 +894,112 @@ fn cmd_chats_send(chat_id: &str, message: &str) -> Result<CommandResult, String>
         text: format!("{task_id}\n"),
         json: data,
     })
+}
+
+/// Stream a chat pane's currently-running task as raw NDJSON.
+///
+/// Connects to `GET /api/tasks/<chat_id>/stream` (the same SSE endpoint the
+/// dashboard uses) and dumps each `data: {...}` payload to stdout, one JSON
+/// object per line. The output is always raw JSON regardless of `--output`.
+/// Exits 0 with no output when the chat has no running task (HTTP 204).
+fn handle_chats_watch(chat_id: &str) -> i32 {
+    match cmd_chats_watch(chat_id) {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!("{}", serde_json::json!({"error": e}));
+            1
+        }
+    }
+}
+
+fn cmd_chats_watch(chat_id: &str) -> Result<(), String> {
+    use std::io::Write as _;
+
+    let client = api::ApiClient::from_settings()?;
+    let path = format!("/api/tasks/{}/stream", urlencoded_path_segment(chat_id));
+    let mut response = client.get_raw_stream(&path)?;
+    let status = response.status().as_u16();
+
+    if status == 401 {
+        return Err("Authentication failed. Check tokenSecret in settings".to_string());
+    }
+    if status == 204 {
+        // No running task — nothing to stream.
+        return Ok(());
+    }
+    if status >= 400 {
+        let body: serde_json::Value = response
+            .body_mut()
+            .read_json()
+            .unwrap_or(serde_json::Value::Null);
+        let msg = body
+            .get("error")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("Unknown server error");
+        return Err(msg.to_string());
+    }
+
+    let mut body = response.into_body();
+    let mut reader = std::io::BufReader::new(body.as_reader());
+    let mut line_buf = String::new();
+    let mut data_buf = String::new();
+    let mut stdout = std::io::stdout().lock();
+
+    loop {
+        line_buf.clear();
+        match reader.read_line(&mut line_buf) {
+            Ok(0) => break, // EOF
+            Ok(_) => {}
+            Err(e) => return Err(format!("Connection error: {e}")),
+        }
+
+        let line = line_buf.trim_end();
+
+        if line.is_empty() {
+            // End of an SSE event — flush the accumulated data buffer as one
+            // NDJSON line. Server emits multi-line `data:` for some events;
+            // join them with `\n` per the SSE spec, then validate as JSON.
+            if !data_buf.is_empty() {
+                let _ = serde_json::from_str::<serde_json::Value>(&data_buf)
+                    .map_err(|e| format!("Invalid JSON in SSE event: {e}\nbody: {data_buf}"))?;
+                writeln!(stdout, "{data_buf}").map_err(|e| format!("Write error: {e}"))?;
+                let _ = stdout.flush();
+                data_buf.clear();
+            }
+            continue;
+        }
+
+        if let Some(data) = line.strip_prefix("data: ") {
+            if !data_buf.is_empty() {
+                data_buf.push('\n');
+            }
+            data_buf.push_str(data);
+        }
+        // Ignore id:, event:, retry:, and comment lines.
+    }
+
+    Ok(())
+}
+
+/// URL-encode a single path segment (chat id). Only allows the unreserved
+/// character set; everything else is percent-encoded so a hostile chat id
+/// can't smuggle path components or query strings into the request URL.
+fn urlencoded_path_segment(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char);
+            }
+            _ => {
+                const HEX: &[u8; 16] = b"0123456789ABCDEF";
+                out.push('%');
+                out.push(HEX[(b >> 4) as usize] as char);
+                out.push(HEX[(b & 0x0f) as usize] as char);
+            }
+        }
+    }
+    out
 }
 
 fn cmd_chats_stop(chat_id: &str) -> Result<CommandResult, String> {
@@ -2053,6 +2174,14 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "--message", "type": "string", "required": true, "description": "Message text"},
             ],
             "notes": "Submits a task to the chat pane's agent. Returns the task ID."
+        }),
+        serde_json::json!({
+            "name": "chats watch",
+            "description": "Stream a chat pane's running task as raw NDJSON",
+            "parameters": [
+                {"name": "chat_id", "type": "string", "required": true, "positional": true, "description": "Chat pane ID"},
+            ],
+            "notes": "Connects to the chat's task SSE stream and dumps each event as one JSON object per line on stdout. Output is always raw JSON regardless of `--output`. Exits 0 immediately when the chat has no running task."
         }),
         serde_json::json!({
             "name": "chats stop",

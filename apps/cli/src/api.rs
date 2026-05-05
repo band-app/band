@@ -94,6 +94,20 @@ impl ApiClient {
             .map_err(|e| format!("Cannot connect to Band web server. Make sure it's running.\n{e}"))
     }
 
+    /// Open a streaming GET to a non-tRPC server path (e.g. `/api/tasks/<id>/stream`).
+    /// Returns the raw response whose body can be read incrementally.
+    pub fn get_raw_stream(&self, path: &str) -> Result<http::Response<Body>, String> {
+        let url = format!("{}{path}", self.base_url);
+
+        let mut req = self.agent.get(&url);
+        if let Some(ref token) = self.token {
+            req = req.header("Cookie", &format!("band_token={token}"));
+        }
+
+        req.call()
+            .map_err(|e| format!("Cannot connect to Band web server. Make sure it's running.\n{e}"))
+    }
+
     pub fn trpc_mutate(
         &self,
         procedure: &str,

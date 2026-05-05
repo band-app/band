@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -1712,6 +1712,9 @@ fn schema_lists_all_commands() {
         );
     }
     assert!(names.contains(&"chat"), "missing: {names:?}");
+    assert!(names.contains(&"chats list"), "missing: {names:?}");
+    assert!(names.contains(&"chats watch"), "missing: {names:?}");
+    assert!(names.contains(&"chats stop"), "missing: {names:?}");
     assert!(names.contains(&"tunnel status"), "missing: {names:?}");
     assert!(names.contains(&"tunnel start"), "missing: {names:?}");
     assert!(names.contains(&"tunnel stop"), "missing: {names:?}");
@@ -1752,6 +1755,167 @@ fn schema_unknown_command_fails() {
     assert!(
         json["error"].as_str().unwrap().contains("Unknown command"),
         "json: {json}"
+    );
+}
+
+// --- chats watch tests (mock SSE server) ---
+//
+// `band chats watch` streams `GET /api/tasks/<chat_id>/stream`. To exercise
+// the SSE-decoding path without standing up a full agent run we use a
+// lightweight mock HTTP server that returns a canned response on the first
+// connection. These tests cover (1) the happy path where each `data:`
+// payload is dumped as one NDJSON line, (2) the 204 "no running task" path,
+// and (3) the URL-encoding of the chat_id path segment.
+
+/// Mock HTTP/SSE server that serves one canned response then closes.
+struct MockHttpServer {
+    port: u16,
+    /// Captured request path (set after the first connection completes).
+    request_path: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+    _handle: std::thread::JoinHandle<()>,
+}
+
+impl MockHttpServer {
+    fn new(response: String) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let request_path = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let path_for_thread = std::sync::Arc::clone(&request_path);
+
+        let handle = std::thread::spawn(move || {
+            use std::io::Write;
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 4096];
+            let n = stream.read(&mut buf).unwrap_or(0);
+            // Parse request line: "METHOD PATH HTTP/1.1"
+            let req = String::from_utf8_lossy(&buf[..n]);
+            if let Some(line) = req.lines().next() {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    *path_for_thread.lock().unwrap() = Some(parts[1].to_string());
+                }
+            }
+            let _ = stream.write_all(response.as_bytes());
+            let _ = stream.flush();
+        });
+
+        Self {
+            port,
+            request_path,
+            _handle: handle,
+        }
+    }
+
+    /// Wait briefly for the request to land, then return the captured path.
+    fn captured_path(&self) -> Option<String> {
+        for _ in 0..50 {
+            if let Some(p) = self.request_path.lock().unwrap().clone() {
+                return Some(p);
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        None
+    }
+}
+
+/// Run the `band` binary against a mock HTTP server.
+fn band_against_mock(
+    tmp: &tempfile::TempDir,
+    mock: &MockHttpServer,
+    args: &[&str],
+) -> std::process::Output {
+    let band_dir = tmp.path().join(".band");
+    fs::create_dir_all(&band_dir).ok();
+    seed_settings_only(
+        &band_dir,
+        &serde_json::json!({"tokenSecret": "mock-token"}),
+    );
+
+    Command::new(env!("CARGO_BIN_EXE_band"))
+        .args(args)
+        .env("BAND_HOME", &band_dir)
+        .env("BAND_SERVER_URL", format!("http://127.0.0.1:{}", mock.port))
+        .output()
+        .expect("failed to execute band")
+}
+
+#[test]
+fn chats_watch_dumps_each_sse_event_as_ndjson_line() {
+    use std::fmt::Write as _;
+
+    let chunks = [
+        serde_json::json!({"type": "text-delta", "delta": "Hello "}),
+        serde_json::json!({"type": "text-delta", "delta": "world!"}),
+        serde_json::json!({"type": "finish"}),
+    ];
+    let mut sse_body = String::new();
+    for c in &chunks {
+        write!(sse_body, "data: {}\n\n", serde_json::to_string(c).unwrap()).unwrap();
+    }
+    let response = format!(
+        "HTTP/1.1 200 OK\r\n\
+         Content-Type: text/event-stream\r\n\
+         Connection: close\r\n\
+         \r\n\
+         {sse_body}"
+    );
+
+    let mock = MockHttpServer::new(response);
+    let tmp = tempfile::tempdir().unwrap();
+    let out = band_against_mock(&tmp, &mock, &["chats", "watch", "chat_abc"]);
+
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let stdout_str = stdout(&out);
+
+    // Each SSE event becomes exactly one NDJSON line on stdout.
+    let lines: Vec<&str> = stdout_str.lines().collect();
+    assert_eq!(
+        lines.len(),
+        chunks.len(),
+        "expected {} lines, got {}: {stdout_str}",
+        chunks.len(),
+        lines.len()
+    );
+    for (i, line) in lines.iter().enumerate() {
+        let parsed: serde_json::Value = serde_json::from_str(line)
+            .unwrap_or_else(|e| panic!("line {i} is not JSON: {e}\nline: {line}"));
+        assert_eq!(parsed, chunks[i], "line {i}: {line}");
+    }
+}
+
+#[test]
+fn chats_watch_no_running_task_exits_zero_with_empty_stdout() {
+    // Server returns 204 No Content when there's no active task.
+    let response = "HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n".to_string();
+    let mock = MockHttpServer::new(response);
+    let tmp = tempfile::tempdir().unwrap();
+    let out = band_against_mock(&tmp, &mock, &["chats", "watch", "chat_idle"]);
+
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(stdout(&out), "", "expected empty stdout for 204");
+}
+
+#[test]
+fn chats_watch_url_encodes_chat_id_path_segment() {
+    // A hostile chat_id with a `/` must be percent-encoded so it can't
+    // smuggle path components into the request URL.
+    let response = "HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n".to_string();
+    let mock = MockHttpServer::new(response);
+    let tmp = tempfile::tempdir().unwrap();
+    let _ = band_against_mock(&tmp, &mock, &["chats", "watch", "evil/../escape"]);
+
+    let path = mock.captured_path().expect("mock did not capture a path");
+    assert!(
+        path.starts_with("/api/tasks/"),
+        "expected /api/tasks/ prefix: {path}"
+    );
+    assert!(
+        !path.contains("/../"),
+        "chat_id slashes should be encoded, got: {path}"
+    );
+    assert!(
+        path.contains("evil%2F..%2Fescape"),
+        "expected percent-encoded chat_id segment: {path}"
     );
 }
 
@@ -1978,6 +2142,7 @@ fn generate_skills_chat_skill_contains_only_chat_commands() {
         "band chats list",
         "band chats create",
         "band chats send",
+        "band chats watch",
         "band chats stop",
         "band chats remove",
     ] {
