@@ -29,7 +29,9 @@ export interface StatusEvent {
     | "browser-created"
     | "browser-removed"
     | "terminal-created"
-    | "terminal-killed";
+    | "terminal-killed"
+    | "chat-created"
+    | "chat-removed";
   status?: WorkspaceStatus;
   statuses?: WorkspaceStatus[];
   workspaceId?: string;
@@ -42,6 +44,7 @@ export interface StatusEvent {
   runningSetups?: string[];
   browserId?: string;
   terminalId?: string;
+  chatId?: string;
 }
 
 type StatusListener = (event: StatusEvent) => void;

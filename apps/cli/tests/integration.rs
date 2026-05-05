@@ -1549,6 +1549,83 @@ fn browsers_create_adds_browser_to_layout() {
     );
 }
 
+/// Regression: `band chats remove` must not only delete the chat record
+/// but also strip the panel from the saved `chat_layout` row. Mirrors
+/// what `terminal.kill` and `browsers.remove` do for their respective
+/// layouts. Without this, an open dashboard would show a ghost tab for
+/// a chat whose record is gone — and the dashboard's orphan-pruning
+/// pass on next mount would have to clean it up.
+#[test]
+fn chats_remove_strips_chat_from_layout() {
+    let env = TestEnv::new();
+    env.band(&["workspaces", "create", "my-project", "feat/chat-remove-layout"]);
+    let workspace_id = "my-project-feat-chat-remove-layout";
+
+    // `workspaces create` lazily creates a default chat. Add a second so
+    // we can assert the *target* chat is removed without affecting the
+    // other.
+    let second = env.band(&[
+        "chats",
+        "create",
+        workspace_id,
+        "--name",
+        "Second",
+        "--output",
+        "json",
+    ]);
+    assert!(second.status.success(), "stderr: {}", stderr(&second));
+    let second_id = serde_json::from_str::<serde_json::Value>(&stdout(&second))
+        .unwrap()["chat"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // Snapshot pre-state: layout contains both chats.
+    let before = read_layout(&env.band_dir, workspace_id, "chat_layout");
+    let before_panels = before.get("panels").and_then(|p| p.as_object()).unwrap();
+    assert!(
+        before_panels.contains_key(&second_id),
+        "pre-condition: second chat should be in layout: {before}"
+    );
+    assert_eq!(before_panels.len(), 2, "pre-condition: 2 panels in layout");
+
+    // Remove the second chat via the CLI.
+    let remove = env.band(&["chats", "remove", &second_id]);
+    assert!(remove.status.success(), "stderr: {}", stderr(&remove));
+
+    // Layout no longer references the removed chat, but the other panel
+    // is preserved.
+    let after = read_layout(&env.band_dir, workspace_id, "chat_layout");
+    let after_panels = after
+        .get("panels")
+        .and_then(|p| p.as_object())
+        .unwrap_or_else(|| panic!("expected layout.panels object after remove: {after}"));
+    assert!(
+        !after_panels.contains_key(&second_id),
+        "expected removed chat {second_id} to be stripped from layout, got {after_panels:?}"
+    );
+    assert_eq!(
+        after_panels.len(),
+        1,
+        "expected exactly one remaining chat panel: {after}"
+    );
+
+    // And `chats list` agrees — the removed chat is gone from the registry too.
+    let list = env.band(&["chats", "list", workspace_id, "--output", "json"]);
+    let list_json: serde_json::Value = serde_json::from_str(&stdout(&list)).unwrap();
+    let chats = list_json["chats"].as_array().unwrap();
+    assert_eq!(
+        chats.len(),
+        1,
+        "expected exactly one chat remaining in registry: {list_json}"
+    );
+    assert_ne!(
+        chats[0]["id"].as_str().unwrap(),
+        second_id,
+        "the surviving chat shouldn't be the one we removed"
+    );
+}
+
 // --- Chat command / default-panel resolution tests ---
 
 /// Regression: `band workspaces create --prompt ...` lazily creates a default

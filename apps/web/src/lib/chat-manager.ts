@@ -8,7 +8,7 @@
 
 import { createLogger } from "@band-app/logger";
 import { removeAgent } from "./agent-pool";
-import { addChatToLayout, getChatLayout } from "./chat-layout-manager";
+import { addChatToLayout, getChatLayout, removeChatFromLayout } from "./chat-layout-manager";
 import { defaultPanelIdFromLayout } from "./dockview-layout-manager";
 import {
   deletePanelState,
@@ -18,6 +18,7 @@ import {
   updatePanelState,
 } from "./panel-state-store";
 import { getAgentDefinition, loadSettings } from "./state";
+import { emit } from "./watcher";
 
 const log = createLogger("chat-manager");
 
@@ -182,6 +183,10 @@ export function createChat(workspaceId: string, options?: CreateChatOptions): Ch
   // also touch the layout client-side — is unaffected.
   addChatToLayout(workspaceId, session.id, { title: session.name });
 
+  // Notify any open dashboard so it can sync its dockview without a
+  // page reload. Same pattern as `terminal-created` / `browser-created`.
+  emit({ kind: "chat-created", workspaceId, chatId: session.id });
+
   log.info({ chatId: session.id, workspaceId, agent: session.agent }, "chat pane created");
   return session;
 }
@@ -328,7 +333,9 @@ export function updateChatSessionSummary(
 }
 
 /**
- * Remove a chat pane. Kills its agent process, removes from DB and in-memory maps.
+ * Remove a chat pane. Kills its agent process, removes from DB,
+ * the saved layout, and in-memory maps. Emits a `chat-removed` event
+ * so any open dashboard can sync its dockview.
  */
 export function removeChat(chatId: string): boolean {
   const session = chatSessions.get(chatId);
@@ -340,8 +347,18 @@ export function removeChat(chatId: string): boolean {
   // Remove from DB
   deletePanelState(chatId);
 
+  // Drop the panel from the saved dockview layout. Mirrors what
+  // `terminal.kill` and `browsers.remove` do via their respective
+  // `remove*FromLayout` helpers — keeps the layout in sync with
+  // the registry so an open dashboard doesn't show a ghost tab.
+  removeChatFromLayout(session.workspaceId, chatId);
+
   // Remove from in-memory maps
   removeFromIndex(chatId);
+
+  // Notify any open dashboard. Same pattern as `browser-removed` /
+  // `terminal-killed`.
+  emit({ kind: "chat-removed", workspaceId: session.workspaceId, chatId });
 
   log.info({ chatId, workspaceId: session.workspaceId }, "chat pane removed");
   return true;
