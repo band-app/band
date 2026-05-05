@@ -128,6 +128,12 @@ export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
       action: () => activatePanel(deps, "browser"),
     },
     {
+      id: "show-graph",
+      label: "Show Git Graph",
+      shortcut: "Cmd+Y",
+      action: () => activatePanel(deps, "graph"),
+    },
+    {
       id: "editor-go-back",
       label: "Go Back",
       shortcut: "Cmd+-",

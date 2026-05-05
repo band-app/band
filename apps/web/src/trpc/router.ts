@@ -883,6 +883,78 @@ const workspaceRouter = t.router({
       };
     }),
 
+  getCommitGraph: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        limit: z.number().int().min(1).max(2000).optional(),
+      }),
+    )
+    .query(async ({ input }) => {
+      const workspace = resolveWorkspace(input.workspaceId);
+      if (!workspace) {
+        throw new Error("Workspace not found");
+      }
+      const cwd = workspace.worktree.path;
+      const limit = input.limit ?? 500;
+
+      // Field separator (US, 0x1f) and record separator (RS, 0x1e) avoid
+      // collisions with subject lines that contain pipes/quotes.
+      const FS = "\x1f";
+      const RS = "\x1e";
+      const fmt = ["%H", "%P", "%an", "%ae", "%at", "%s", "%D"].join(FS) + RS;
+
+      let stdout = "";
+      try {
+        stdout = await execGit(
+          ["log", "--all", "--date-order", `--max-count=${limit}`, `--pretty=format:${fmt}`],
+          cwd,
+        );
+      } catch {
+        return { commits: [], head: null, refs: [] };
+      }
+
+      type Commit = {
+        sha: string;
+        parents: string[];
+        author: string;
+        email: string;
+        ts: number;
+        subject: string;
+        refs: string[];
+      };
+
+      const commits: Commit[] = [];
+      for (const raw of stdout.split(RS)) {
+        const rec = raw.replace(/^\n/, "");
+        if (!rec) continue;
+        const parts = rec.split(FS);
+        if (parts.length < 7) continue;
+        const [sha, parentsStr, author, email, tsStr, subject, refsStr] = parts;
+        commits.push({
+          sha,
+          parents: parentsStr ? parentsStr.split(" ").filter(Boolean) : [],
+          author,
+          email,
+          ts: Number.parseInt(tsStr, 10) || 0,
+          subject,
+          refs: refsStr
+            ? refsStr
+                .split(",")
+                .map((r) => r.trim())
+                .filter(Boolean)
+            : [],
+        });
+      }
+
+      let head: string | null = null;
+      try {
+        head = (await execGit(["rev-parse", "HEAD"], cwd)).trim();
+      } catch {}
+
+      return { commits, head, refs: [] };
+    }),
+
   getFileDiff: publicProcedure
     .input(
       z.object({

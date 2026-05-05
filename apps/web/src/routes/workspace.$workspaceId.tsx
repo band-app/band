@@ -2,6 +2,7 @@ import {
   type DiffStats,
   QuickOpenDialog,
   useDashboardStore,
+  useExperimentalGitGraph,
   type WorkspaceTab,
   WorkspaceTabNav,
 } from "@band-app/dashboard-core";
@@ -90,6 +91,7 @@ function useActiveTab(workspaceId: string): WorkspaceTab {
   const prefix = `/workspace/${workspaceId}`;
   if (pathname.startsWith(`${prefix}/changes`)) return "diff";
   if (pathname.startsWith(`${prefix}/code`)) return "code";
+  if (pathname.startsWith(`${prefix}/graph`)) return "graph";
   return "chat";
 }
 
@@ -214,6 +216,7 @@ function MobileWorkspaceLayout({
 }) {
   const activeTab = useActiveTab(encodedId);
   const diffFileCount = useDiffFileCount(workspaceId);
+  const [gitGraphEnabled] = useExperimentalGitGraph();
   const navigate = useNavigate();
   const { height: appHeight, offsetTop: appOffsetTop } = useAppHeight();
   const [showSessionList, setShowSessionList] = useState(false);
@@ -323,6 +326,7 @@ function MobileWorkspaceLayout({
     chat: `/workspace/${encodedId}`,
     diff: `/workspace/${encodedId}/changes`,
     code: `/workspace/${encodedId}/code`,
+    graph: `/workspace/${encodedId}/graph`,
   };
 
   return (
@@ -363,6 +367,7 @@ function MobileWorkspaceLayout({
             activeTab={activeTab}
             tabHrefs={tabHrefs}
             diffFileCount={diffFileCount}
+            showGraphTab={gitGraphEnabled}
           />
           <main className="flex min-h-0 flex-1 flex-col">
             <Outlet />
