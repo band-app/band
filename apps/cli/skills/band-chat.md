@@ -35,42 +35,51 @@ All commands support `--output json` (or `BAND_OUTPUT=json` env var) for structu
 
 <!-- COMMANDS -->
 
+## Default workspace and chat resolution
+
+Every `band chats` subcommand auto-detects the workspace from the current working directory (matched against registered workspace paths) when `[workspace_id]` is omitted, and resolves to the workspace's first chat pane when `[chat_id]` is omitted. So the typical flow from inside a workspace is just `band chats chat --message "..."` — no IDs to type.
+
+You only need to pass an explicit ID when:
+
+- you're not inside the workspace's directory, or
+- the workspace has multiple chats and you want to target a specific one (`--chat-id chat_abc` for `chats chat`, or pass the chat ID positionally for `chats send/watch/stop/remove`).
+
 ## Workflows
 
 ### Send a quick message to the active chat (most common)
 
 ```sh
-# From inside a workspace directory: auto-detects the workspace and
-# targets the active chat panel from the saved layout.
+# From inside a workspace directory: workspace auto-detected from cwd,
+# chat auto-resolved to the active panel from the saved dashboard layout.
 band chats chat --message "Fix the failing tests"
 
-# With an explicit workspace
+# With an explicit workspace (when not in its cwd)
 band chats chat ws_abc123 --message "Fix the failing tests"
 
 # Target a specific chat pane instead of the active one
-band chats chat ws_abc123 --chat-id chat_abc --message "Investigate the perf regression"
+band chats chat --chat-id chat_abc --message "Investigate the perf regression"
 ```
 
 ### Send a one-off message to a new chat pane
 
 ```sh
-# Create a chat pane and capture its ID
-chat=$(band chats create ws_abc123 --name "review" --output json | jq -r .chat.id)
+# Create a chat pane (workspace auto-detected) and capture its ID
+chat=$(band chats create --name "review" --output json | jq -r .chat.id)
 
-# Send the prompt
+# Send the prompt to that specific chat
 band chats send "$chat" --message "Summarize the changes on this branch"
 ```
 
-### List chats for a workspace
+### List chats in the current workspace
 
 ```sh
-band chats list ws_abc123 --output json | jq '.chats[] | select(.status == "running")'
+band chats list --output json | jq '.chats[] | select(.status == "running")'
 ```
 
 ### Run a chat with a specific agent and model
 
 ```sh
-band chats create ws_abc123 \
+band chats create \
   --name "planning" \
   --agent claude-code \
   --model claude-opus-4-20250514 \
@@ -80,33 +89,36 @@ band chats create ws_abc123 \
 ### Watch a chat's running task as raw NDJSON
 
 ```sh
-# Stream every event the agent emits (text deltas, tool calls, results)
-# as one JSON object per line on stdout. Output is always raw JSON.
-band chats watch "$chat"
+# No chat_id: stream the cwd workspace's first chat pane.
+band chats watch
 
 # Pipe through jq for live filtering — for example, only text deltas:
-band chats watch "$chat" | jq -r 'select(.type == "text-delta") | .delta'
+band chats watch | jq -r 'select(.type == "text-delta") | .delta'
 
 # Exits immediately with no output if the chat has no running task,
 # so it's safe to invoke speculatively after `band chats send`.
-band chats send "$chat" --message "Summarize the diff"
-band chats watch "$chat"
+band chats send --message "Summarize the diff"
+band chats watch
 ```
 
 ### Stop and remove a chat
 
 ```sh
-# Abort the running task without removing the chat
-band chats stop "$chat"
+# Abort the running task in the cwd workspace's first chat
+band chats stop
 
-# Permanently remove the chat (kills the agent process)
-band chats remove "$chat"
+# Permanently remove that chat (kills the agent process)
+band chats remove
+
+# Or target a specific chat by ID
+band chats stop chat_abc
+band chats remove chat_abc
 ```
 
 ## Cross-references
 
-- To find the workspace ID, use `band workspaces list` (see the `band` skill).
-- Use `band chats watch` to stream a running task; `band chats stop` to abort it. Both target a specific chat by ID.
+- To find the workspace ID explicitly, use `band workspaces list` (see the `band` skill).
+- `band chats watch` streams a chat's running task; `band chats stop` aborts it. Both default to the cwd workspace's first chat pane when no ID is given.
 
 ## Configuration
 

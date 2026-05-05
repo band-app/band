@@ -164,13 +164,13 @@ enum ChatsCmd {
     },
     /// List chat panes for a workspace
     List {
-        /// Workspace ID
-        workspace_id: String,
+        /// Workspace ID (auto-detected from cwd if omitted)
+        workspace_id: Option<String>,
     },
     /// Create a new chat pane
     Create {
-        /// Workspace ID
-        workspace_id: String,
+        /// Workspace ID (auto-detected from cwd if omitted)
+        workspace_id: Option<String>,
         /// Display name for the chat pane
         #[arg(long)]
         name: Option<String>,
@@ -186,26 +186,26 @@ enum ChatsCmd {
     },
     /// Send a message to a chat pane
     Send {
-        /// Chat pane ID
-        chat_id: String,
+        /// Chat pane ID (defaults to the cwd workspace's first chat pane)
+        chat_id: Option<String>,
         /// Message text
         #[arg(long)]
         message: String,
     },
     /// Stream a chat pane's running task as raw NDJSON
     Watch {
-        /// Chat pane ID
-        chat_id: String,
+        /// Chat pane ID (defaults to the cwd workspace's first chat pane)
+        chat_id: Option<String>,
     },
     /// Stop a running chat pane
     Stop {
-        /// Chat pane ID
-        chat_id: String,
+        /// Chat pane ID (defaults to the cwd workspace's first chat pane)
+        chat_id: Option<String>,
     },
     /// Remove a chat pane
     Remove {
-        /// Chat pane ID
-        chat_id: String,
+        /// Chat pane ID (defaults to the cwd workspace's first chat pane)
+        chat_id: Option<String>,
     },
 }
 
@@ -213,13 +213,13 @@ enum ChatsCmd {
 enum BrowsersCmd {
     /// List browser tabs for a workspace
     List {
-        /// Workspace ID
-        workspace_id: String,
+        /// Workspace ID (auto-detected from cwd if omitted)
+        workspace_id: Option<String>,
     },
     /// Create a new browser tab
     Create {
-        /// Workspace ID
-        workspace_id: String,
+        /// Workspace ID (auto-detected from cwd if omitted)
+        workspace_id: Option<String>,
         /// Initial URL to navigate to
         #[arg(long)]
         url: Option<String>,
@@ -229,20 +229,21 @@ enum BrowsersCmd {
     },
     /// Navigate a browser tab to a URL
     Navigate {
-        /// Browser tab ID
-        browser_id: String,
         /// URL to navigate to
         url: String,
+        /// Browser tab ID (defaults to the cwd workspace's first browser tab)
+        #[arg(long)]
+        browser_id: Option<String>,
     },
     /// Get a browser tab's current state
     Get {
-        /// Browser tab ID
-        browser_id: String,
+        /// Browser tab ID (defaults to the cwd workspace's first browser tab)
+        browser_id: Option<String>,
     },
     /// Remove a browser tab
     Remove {
-        /// Browser tab ID
-        browser_id: String,
+        /// Browser tab ID (defaults to the cwd workspace's first browser tab)
+        browser_id: Option<String>,
     },
 }
 
@@ -250,13 +251,13 @@ enum BrowsersCmd {
 enum TerminalsCmd {
     /// List terminal sessions for a workspace
     List {
-        /// Workspace ID
-        workspace_id: String,
+        /// Workspace ID (auto-detected from cwd if omitted)
+        workspace_id: Option<String>,
     },
     /// Create a new terminal session
     Create {
-        /// Workspace ID
-        workspace_id: String,
+        /// Workspace ID (auto-detected from cwd if omitted)
+        workspace_id: Option<String>,
         /// Shell command to auto-run after spawn
         #[arg(long)]
         command: Option<String>,
@@ -266,16 +267,16 @@ enum TerminalsCmd {
     },
     /// Send input to a terminal session
     Send {
-        /// Terminal ID
-        terminal_id: String,
+        /// Terminal ID (defaults to the cwd workspace's first terminal)
+        terminal_id: Option<String>,
         /// Text to send (supports \\n for newline, \\t for tab)
         #[arg(long)]
         data: String,
     },
     /// Get terminal output (scrollback buffer)
     Output {
-        /// Terminal ID
-        terminal_id: String,
+        /// Terminal ID (defaults to the cwd workspace's first terminal)
+        terminal_id: Option<String>,
         /// Number of lines to show (from end of buffer)
         #[arg(long, short = 'n')]
         lines: Option<u32>,
@@ -285,13 +286,13 @@ enum TerminalsCmd {
     },
     /// Kill a terminal session
     Kill {
-        /// Terminal ID
-        terminal_id: String,
+        /// Terminal ID (defaults to the cwd workspace's first terminal)
+        terminal_id: Option<String>,
     },
     /// Attach to a terminal (stream output + send input interactively)
     Attach {
-        /// Terminal ID
-        terminal_id: String,
+        /// Terminal ID (defaults to the cwd workspace's first terminal)
+        terminal_id: Option<String>,
     },
 }
 
@@ -405,7 +406,7 @@ fn main() {
             },
     } = cli.command
     {
-        let exit_code = handle_terminal_follow(terminal_id, lines, json_output);
+        let exit_code = handle_terminal_follow(terminal_id.as_deref(), lines, json_output);
         process::exit(exit_code);
     }
 
@@ -414,7 +415,7 @@ fn main() {
         cmd: TerminalsCmd::Attach { ref terminal_id },
     } = cli.command
     {
-        let exit_code = handle_terminal_attach(terminal_id, json_output);
+        let exit_code = handle_terminal_attach(terminal_id.as_deref(), json_output);
         process::exit(exit_code);
     }
 
@@ -423,7 +424,7 @@ fn main() {
         cmd: ChatsCmd::Watch { ref chat_id },
     } = cli.command
     {
-        let exit_code = handle_chats_watch(chat_id);
+        let exit_code = handle_chats_watch(chat_id.as_deref());
         process::exit(exit_code);
     }
 
@@ -474,7 +475,7 @@ fn main() {
                 model.as_deref(),
                 agent.as_deref(),
             ),
-            ChatsCmd::List { workspace_id } => cmd_chats_list(&workspace_id),
+            ChatsCmd::List { workspace_id } => cmd_chats_list(workspace_id.as_deref()),
             ChatsCmd::Create {
                 workspace_id,
                 name,
@@ -482,43 +483,47 @@ fn main() {
                 model,
                 mode,
             } => cmd_chats_create(
-                &workspace_id,
+                workspace_id.as_deref(),
                 name.as_deref(),
                 agent.as_deref(),
                 model.as_deref(),
                 mode.as_deref(),
             ),
-            ChatsCmd::Send { chat_id, message } => cmd_chats_send(&chat_id, &message),
+            ChatsCmd::Send { chat_id, message } => cmd_chats_send(chat_id.as_deref(), &message),
             ChatsCmd::Watch { .. } => unreachable!(),
-            ChatsCmd::Stop { chat_id } => cmd_chats_stop(&chat_id),
-            ChatsCmd::Remove { chat_id } => cmd_chats_remove(&chat_id),
+            ChatsCmd::Stop { chat_id } => cmd_chats_stop(chat_id.as_deref()),
+            ChatsCmd::Remove { chat_id } => cmd_chats_remove(chat_id.as_deref()),
         },
         Commands::Browsers { cmd } => match cmd {
-            BrowsersCmd::List { workspace_id } => cmd_browser_list(&workspace_id),
+            BrowsersCmd::List { workspace_id } => cmd_browser_list(workspace_id.as_deref()),
             BrowsersCmd::Create {
                 workspace_id,
                 url,
                 name,
-            } => cmd_browser_create(&workspace_id, url.as_deref(), name.as_deref()),
-            BrowsersCmd::Navigate { browser_id, url } => cmd_browser_navigate(&browser_id, &url),
-            BrowsersCmd::Get { browser_id } => cmd_browser_get(&browser_id),
-            BrowsersCmd::Remove { browser_id } => cmd_browser_remove(&browser_id),
+            } => cmd_browser_create(workspace_id.as_deref(), url.as_deref(), name.as_deref()),
+            BrowsersCmd::Navigate { url, browser_id } => {
+                cmd_browser_navigate(browser_id.as_deref(), &url)
+            }
+            BrowsersCmd::Get { browser_id } => cmd_browser_get(browser_id.as_deref()),
+            BrowsersCmd::Remove { browser_id } => cmd_browser_remove(browser_id.as_deref()),
         },
         Commands::Terminals { cmd } => match cmd {
-            TerminalsCmd::List { workspace_id } => cmd_terminal_list(&workspace_id),
+            TerminalsCmd::List { workspace_id } => cmd_terminal_list(workspace_id.as_deref()),
             TerminalsCmd::Create {
                 workspace_id,
                 command,
                 cwd,
-            } => cmd_terminal_create(&workspace_id, command.as_deref(), cwd.as_deref()),
-            TerminalsCmd::Send { terminal_id, data } => cmd_terminal_send(&terminal_id, &data),
+            } => cmd_terminal_create(workspace_id.as_deref(), command.as_deref(), cwd.as_deref()),
+            TerminalsCmd::Send { terminal_id, data } => {
+                cmd_terminal_send(terminal_id.as_deref(), &data)
+            }
             TerminalsCmd::Output {
                 terminal_id,
                 lines,
                 follow: false,
-            } => cmd_terminal_output(&terminal_id, lines),
+            } => cmd_terminal_output(terminal_id.as_deref(), lines),
             TerminalsCmd::Output { .. } | TerminalsCmd::Attach { .. } => unreachable!(),
-            TerminalsCmd::Kill { terminal_id } => cmd_terminal_kill(&terminal_id),
+            TerminalsCmd::Kill { terminal_id } => cmd_terminal_kill(terminal_id.as_deref()),
         },
         Commands::Cronjobs { cmd } => match cmd {
             CronjobsCmd::List { project, workspace } => {
@@ -813,8 +818,9 @@ fn cmd_workspaces_remove(project: &str, branch: &str) -> Result<CommandResult, S
 
 // --- Chats commands ---
 
-fn cmd_chats_list(workspace_id: &str) -> Result<CommandResult, String> {
+fn cmd_chats_list(workspace_id: Option<&str>) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
+    let workspace_id = resolve_workspace_id(&client, workspace_id)?;
     let data = client.trpc_query(
         "chats.list",
         &serde_json::json!({"workspaceId": workspace_id}),
@@ -851,13 +857,14 @@ fn cmd_chats_list(workspace_id: &str) -> Result<CommandResult, String> {
 }
 
 fn cmd_chats_create(
-    workspace_id: &str,
+    workspace_id: Option<&str>,
     name: Option<&str>,
     agent: Option<&str>,
     model: Option<&str>,
     mode: Option<&str>,
 ) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
+    let workspace_id = resolve_workspace_id(&client, workspace_id)?;
     let mut input = serde_json::json!({"workspaceId": workspace_id});
     if let Some(n) = name {
         input["name"] = serde_json::json!(n);
@@ -881,8 +888,9 @@ fn cmd_chats_create(
     })
 }
 
-fn cmd_chats_send(chat_id: &str, message: &str) -> Result<CommandResult, String> {
+fn cmd_chats_send(chat_id: Option<&str>, message: &str) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
+    let chat_id = resolve_default_panel(&client, chat_id, "chats.list", "chats", "id", "chat pane")?;
     let data = client.trpc_mutate(
         "chats.send",
         &serde_json::json!({"chatId": chat_id, "message": message}),
@@ -902,7 +910,7 @@ fn cmd_chats_send(chat_id: &str, message: &str) -> Result<CommandResult, String>
 /// dashboard uses) and dumps each `data: {...}` payload to stdout, one JSON
 /// object per line. The output is always raw JSON regardless of `--output`.
 /// Exits 0 with no output when the chat has no running task (HTTP 204).
-fn handle_chats_watch(chat_id: &str) -> i32 {
+fn handle_chats_watch(chat_id: Option<&str>) -> i32 {
     match cmd_chats_watch(chat_id) {
         Ok(()) => 0,
         Err(e) => {
@@ -912,11 +920,12 @@ fn handle_chats_watch(chat_id: &str) -> i32 {
     }
 }
 
-fn cmd_chats_watch(chat_id: &str) -> Result<(), String> {
+fn cmd_chats_watch(chat_id: Option<&str>) -> Result<(), String> {
     use std::io::Write as _;
 
     let client = api::ApiClient::from_settings()?;
-    let path = format!("/api/tasks/{}/stream", urlencoded_path_segment(chat_id));
+    let chat_id = resolve_default_panel(&client, chat_id, "chats.list", "chats", "id", "chat pane")?;
+    let path = format!("/api/tasks/{}/stream", urlencoded_path_segment(&chat_id));
     let mut response = client.get_raw_stream(&path)?;
     let status = response.status().as_u16();
 
@@ -1002,8 +1011,9 @@ fn urlencoded_path_segment(s: &str) -> String {
     out
 }
 
-fn cmd_chats_stop(chat_id: &str) -> Result<CommandResult, String> {
+fn cmd_chats_stop(chat_id: Option<&str>) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
+    let chat_id = resolve_default_panel(&client, chat_id, "chats.list", "chats", "id", "chat pane")?;
     client.trpc_mutate("chats.stop", &serde_json::json!({"chatId": chat_id}))?;
 
     Ok(CommandResult {
@@ -1012,8 +1022,9 @@ fn cmd_chats_stop(chat_id: &str) -> Result<CommandResult, String> {
     })
 }
 
-fn cmd_chats_remove(chat_id: &str) -> Result<CommandResult, String> {
+fn cmd_chats_remove(chat_id: Option<&str>) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
+    let chat_id = resolve_default_panel(&client, chat_id, "chats.list", "chats", "id", "chat pane")?;
     client.trpc_mutate("chats.remove", &serde_json::json!({"chatId": chat_id}))?;
 
     Ok(CommandResult {
@@ -1082,8 +1093,9 @@ fn cmd_chat(
 
 // --- Browser commands ---
 
-fn cmd_browser_list(workspace_id: &str) -> Result<CommandResult, String> {
+fn cmd_browser_list(workspace_id: Option<&str>) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
+    let workspace_id = resolve_workspace_id(&client, workspace_id)?;
     let data = client.trpc_query(
         "browsers.list",
         &serde_json::json!({"workspaceId": workspace_id}),
@@ -1120,11 +1132,12 @@ fn cmd_browser_list(workspace_id: &str) -> Result<CommandResult, String> {
 }
 
 fn cmd_browser_create(
-    workspace_id: &str,
+    workspace_id: Option<&str>,
     url: Option<&str>,
     name: Option<&str>,
 ) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
+    let workspace_id = resolve_workspace_id(&client, workspace_id)?;
     let mut input = serde_json::json!({"workspaceId": workspace_id});
     if let Some(u) = url {
         input["url"] = serde_json::json!(u);
@@ -1145,8 +1158,16 @@ fn cmd_browser_create(
     })
 }
 
-fn cmd_browser_navigate(browser_id: &str, url: &str) -> Result<CommandResult, String> {
+fn cmd_browser_navigate(browser_id: Option<&str>, url: &str) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
+    let browser_id = resolve_default_panel(
+        &client,
+        browser_id,
+        "browsers.list",
+        "browsers",
+        "id",
+        "browser tab",
+    )?;
     client.trpc_mutate(
         "browsers.navigate",
         &serde_json::json!({"browserId": browser_id, "url": url}),
@@ -1158,8 +1179,16 @@ fn cmd_browser_navigate(browser_id: &str, url: &str) -> Result<CommandResult, St
     })
 }
 
-fn cmd_browser_get(browser_id: &str) -> Result<CommandResult, String> {
+fn cmd_browser_get(browser_id: Option<&str>) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
+    let browser_id = resolve_default_panel(
+        &client,
+        browser_id,
+        "browsers.list",
+        "browsers",
+        "id",
+        "browser tab",
+    )?;
     let data = client.trpc_query(
         "browsers.get",
         &serde_json::json!({"browserId": browser_id}),
@@ -1182,8 +1211,16 @@ fn cmd_browser_get(browser_id: &str) -> Result<CommandResult, String> {
     })
 }
 
-fn cmd_browser_remove(browser_id: &str) -> Result<CommandResult, String> {
+fn cmd_browser_remove(browser_id: Option<&str>) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
+    let browser_id = resolve_default_panel(
+        &client,
+        browser_id,
+        "browsers.list",
+        "browsers",
+        "id",
+        "browser tab",
+    )?;
     client.trpc_mutate(
         "browsers.remove",
         &serde_json::json!({"browserId": browser_id}),
@@ -1197,8 +1234,9 @@ fn cmd_browser_remove(browser_id: &str) -> Result<CommandResult, String> {
 
 // --- Terminal commands ---
 
-fn cmd_terminal_list(workspace_id: &str) -> Result<CommandResult, String> {
+fn cmd_terminal_list(workspace_id: Option<&str>) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
+    let workspace_id = resolve_workspace_id(&client, workspace_id)?;
     let data = client.trpc_query(
         "terminal.list",
         &serde_json::json!({"workspaceId": workspace_id}),
@@ -1241,11 +1279,12 @@ fn cmd_terminal_list(workspace_id: &str) -> Result<CommandResult, String> {
 }
 
 fn cmd_terminal_create(
-    workspace_id: &str,
+    workspace_id: Option<&str>,
     command: Option<&str>,
     cwd: Option<&str>,
 ) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
+    let workspace_id = resolve_workspace_id(&client, workspace_id)?;
     let mut input = serde_json::json!({"workspaceId": workspace_id});
     if let Some(cmd) = command {
         input["command"] = serde_json::json!(cmd);
@@ -1265,8 +1304,16 @@ fn cmd_terminal_create(
     })
 }
 
-fn cmd_terminal_send(terminal_id: &str, data: &str) -> Result<CommandResult, String> {
+fn cmd_terminal_send(terminal_id: Option<&str>, data: &str) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
+    let terminal_id = resolve_default_panel(
+        &client,
+        terminal_id,
+        "terminal.list",
+        "terminals",
+        "terminalId",
+        "terminal session",
+    )?;
     // Unescape common escape sequences
     let unescaped = data.replace("\\n", "\n").replace("\\t", "\t");
     client.trpc_mutate(
@@ -1280,8 +1327,19 @@ fn cmd_terminal_send(terminal_id: &str, data: &str) -> Result<CommandResult, Str
     })
 }
 
-fn cmd_terminal_output(terminal_id: &str, lines: Option<u32>) -> Result<CommandResult, String> {
+fn cmd_terminal_output(
+    terminal_id: Option<&str>,
+    lines: Option<u32>,
+) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
+    let terminal_id = resolve_default_panel(
+        &client,
+        terminal_id,
+        "terminal.list",
+        "terminals",
+        "terminalId",
+        "terminal session",
+    )?;
     let mut input = serde_json::json!({"terminalId": terminal_id});
     if let Some(n) = lines {
         input["lines"] = serde_json::json!(n);
@@ -1295,8 +1353,16 @@ fn cmd_terminal_output(terminal_id: &str, lines: Option<u32>) -> Result<CommandR
     })
 }
 
-fn cmd_terminal_kill(terminal_id: &str) -> Result<CommandResult, String> {
+fn cmd_terminal_kill(terminal_id: Option<&str>) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
+    let terminal_id = resolve_default_panel(
+        &client,
+        terminal_id,
+        "terminal.list",
+        "terminals",
+        "terminalId",
+        "terminal session",
+    )?;
     client.trpc_mutate(
         "terminal.kill",
         &serde_json::json!({"terminalId": terminal_id}),
@@ -1308,7 +1374,11 @@ fn cmd_terminal_kill(terminal_id: &str) -> Result<CommandResult, String> {
     })
 }
 
-fn handle_terminal_follow(terminal_id: &str, lines: Option<u32>, json_output: bool) -> i32 {
+fn handle_terminal_follow(
+    terminal_id: Option<&str>,
+    lines: Option<u32>,
+    json_output: bool,
+) -> i32 {
     match cmd_terminal_follow(terminal_id, lines, json_output) {
         Ok(()) => 0,
         Err(e) => {
@@ -1323,13 +1393,21 @@ fn handle_terminal_follow(terminal_id: &str, lines: Option<u32>, json_output: bo
 }
 
 fn cmd_terminal_follow(
-    terminal_id: &str,
+    terminal_id: Option<&str>,
     lines: Option<u32>,
     json_output: bool,
 ) -> Result<(), String> {
     use std::io::Write;
 
     let client = api::ApiClient::from_settings()?;
+    let terminal_id = resolve_default_panel(
+        &client,
+        terminal_id,
+        "terminal.list",
+        "terminals",
+        "terminalId",
+        "terminal session",
+    )?;
 
     // If --lines was provided without --follow, that's handled elsewhere.
     // Here we stream live output, optionally replaying scrollback first.
@@ -1430,7 +1508,7 @@ fn stream_terminal_sse(reader: impl BufRead, json_output: bool) -> Result<(), St
     Ok(())
 }
 
-fn handle_terminal_attach(terminal_id: &str, json_output: bool) -> i32 {
+fn handle_terminal_attach(terminal_id: Option<&str>, json_output: bool) -> i32 {
     match cmd_terminal_attach(terminal_id, json_output) {
         Ok(()) => 0,
         Err(e) => {
@@ -1512,14 +1590,22 @@ fn stream_terminal_output(tid: &str, done: &AtomicBool) {
     }
 }
 
-fn cmd_terminal_attach(terminal_id: &str, json_output: bool) -> Result<(), String> {
+fn cmd_terminal_attach(terminal_id: Option<&str>, json_output: bool) -> Result<(), String> {
     let client = api::ApiClient::from_settings()?;
+    let terminal_id = resolve_default_panel(
+        &client,
+        terminal_id,
+        "terminal.list",
+        "terminals",
+        "terminalId",
+        "terminal session",
+    )?;
 
     if !json_output {
         eprintln!("[attached to terminal {terminal_id} — type input, press Ctrl+C to detach]");
     }
 
-    let tid = terminal_id.to_string();
+    let tid = terminal_id.clone();
     let done = Arc::new(AtomicBool::new(false));
     let done_clone = done.clone();
 
@@ -1750,6 +1836,43 @@ fn resolve_workspace_id(
     }
 
     detect_workspace_from_cwd(client)
+}
+
+/// Resolve a panel ID for a chat / terminal / browser. When `panel_id` is
+/// `Some`, returns it as-is. When `None`, auto-detects the workspace from
+/// the current working directory, queries `list_proc`, and returns the
+/// `id_field` of the first panel returned by the server.
+///
+/// This gives every panel-targeted command (`chats send`, `terminals output`,
+/// `browsers navigate`, …) a uniform "default panel" behavior so the user
+/// rarely has to type IDs when working inside a workspace.
+fn resolve_default_panel(
+    client: &api::ApiClient,
+    panel_id: Option<&str>,
+    list_proc: &str,
+    list_field: &str,
+    id_field: &str,
+    domain_label: &str,
+) -> Result<String, String> {
+    if let Some(id) = panel_id {
+        return Ok(id.to_string());
+    }
+    let ws = resolve_workspace_id(client, None)?;
+    let data = client.trpc_query(list_proc, &serde_json::json!({"workspaceId": ws}))?;
+    let panels = data
+        .get(list_field)
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| format!("Server returned no {list_field} array"))?;
+    let first = panels.first().ok_or_else(|| {
+        format!(
+            "No {domain_label} found in workspace '{ws}'. Create one first or pass an explicit id."
+        )
+    })?;
+    let id = first
+        .get(id_field)
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| format!("First {domain_label} has no {id_field} field"))?;
+    Ok(id.to_string())
 }
 
 /// Detect the current workspace by matching `git rev-parse --show-toplevel`
@@ -2150,7 +2273,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "name": "chats list",
             "description": "List chat panes for a workspace",
             "parameters": [
-                {"name": "workspace_id", "type": "string", "required": true, "positional": true, "description": "Workspace ID"},
+                {"name": "workspace_id", "type": "string", "required": false, "positional": true, "description": "Workspace ID (auto-detected from cwd if omitted)"},
             ],
             "notes": "Text output: `ID\\tNAME\\tAGENT\\tSTATUS` (tab-separated table).\nJSON output: `{\"chats\": [{\"id\": \"...\", \"name\": \"...\", \"agent\": \"...\", \"status\": \"...\"}]}`"
         }),
@@ -2158,7 +2281,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "name": "chats create",
             "description": "Create a new chat pane in a workspace",
             "parameters": [
-                {"name": "workspace_id", "type": "string", "required": true, "positional": true, "description": "Workspace ID"},
+                {"name": "workspace_id", "type": "string", "required": false, "positional": true, "description": "Workspace ID (auto-detected from cwd if omitted)"},
                 {"name": "--name", "type": "string", "required": false, "description": "Display name for the chat pane"},
                 {"name": "--agent", "type": "string", "required": false, "description": "Coding agent ID (e.g. 'claude-code')"},
                 {"name": "--model", "type": "string", "required": false, "description": "Model override"},
@@ -2170,7 +2293,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "name": "chats send",
             "description": "Send a message to a chat pane",
             "parameters": [
-                {"name": "chat_id", "type": "string", "required": true, "positional": true, "description": "Chat pane ID"},
+                {"name": "chat_id", "type": "string", "required": false, "positional": true, "description": "Chat pane ID (defaults to the cwd workspace's first chat pane)"},
                 {"name": "--message", "type": "string", "required": true, "description": "Message text"},
             ],
             "notes": "Submits a task to the chat pane's agent. Returns the task ID."
@@ -2179,7 +2302,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "name": "chats watch",
             "description": "Stream a chat pane's running task as raw NDJSON",
             "parameters": [
-                {"name": "chat_id", "type": "string", "required": true, "positional": true, "description": "Chat pane ID"},
+                {"name": "chat_id", "type": "string", "required": false, "positional": true, "description": "Chat pane ID (defaults to the cwd workspace's first chat pane)"},
             ],
             "notes": "Connects to the chat's task SSE stream and dumps each event as one JSON object per line on stdout. Output is always raw JSON regardless of `--output`. Exits 0 immediately when the chat has no running task."
         }),
@@ -2187,7 +2310,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "name": "chats stop",
             "description": "Stop a running chat pane",
             "parameters": [
-                {"name": "chat_id", "type": "string", "required": true, "positional": true, "description": "Chat pane ID"},
+                {"name": "chat_id", "type": "string", "required": false, "positional": true, "description": "Chat pane ID (defaults to the cwd workspace's first chat pane)"},
             ],
             "notes": "Aborts the running task and sets chat status to stopped."
         }),
@@ -2195,7 +2318,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "name": "chats remove",
             "description": "Remove a chat pane (kills agent, cleans up state)",
             "parameters": [
-                {"name": "chat_id", "type": "string", "required": true, "positional": true, "description": "Chat pane ID"},
+                {"name": "chat_id", "type": "string", "required": false, "positional": true, "description": "Chat pane ID (defaults to the cwd workspace's first chat pane)"},
             ],
             "notes": "Removes the chat pane, kills the associated agent process, and cleans up state."
         }),
@@ -2203,7 +2326,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "name": "browsers list",
             "description": "List browser tabs for a workspace",
             "parameters": [
-                {"name": "workspace_id", "type": "string", "required": true, "positional": true, "description": "Workspace ID"},
+                {"name": "workspace_id", "type": "string", "required": false, "positional": true, "description": "Workspace ID (auto-detected from cwd if omitted)"},
             ],
             "notes": "Text output: `ID\\tNAME\\tURL\\tSTATUS` (tab-separated table).\nJSON output: `{\"browsers\": [{\"id\": \"...\", \"name\": \"...\", \"url\": \"...\", \"status\": \"...\"}]}`"
         }),
@@ -2211,7 +2334,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "name": "browsers create",
             "description": "Create a new browser tab in a workspace",
             "parameters": [
-                {"name": "workspace_id", "type": "string", "required": true, "positional": true, "description": "Workspace ID"},
+                {"name": "workspace_id", "type": "string", "required": false, "positional": true, "description": "Workspace ID (auto-detected from cwd if omitted)"},
                 {"name": "--url", "type": "string", "required": false, "description": "Initial URL to navigate to"},
                 {"name": "--name", "type": "string", "required": false, "description": "Display name for the browser tab"},
             ],
@@ -2221,16 +2344,16 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "name": "browsers navigate",
             "description": "Navigate a browser tab to a URL",
             "parameters": [
-                {"name": "browser_id", "type": "string", "required": true, "positional": true, "description": "Browser tab ID"},
                 {"name": "url", "type": "string", "required": true, "positional": true, "description": "URL to navigate to"},
+                {"name": "--browser-id", "type": "string", "required": false, "description": "Browser tab ID (defaults to the cwd workspace's first browser tab)"},
             ],
-            "notes": "Updates the browser tab's URL in the server state."
+            "notes": "Updates the browser tab's URL in the server state. When `--browser-id` is omitted, auto-detects the workspace from cwd and targets that workspace's first browser tab."
         }),
         serde_json::json!({
             "name": "browsers get",
             "description": "Get a browser tab's current state",
             "parameters": [
-                {"name": "browser_id", "type": "string", "required": true, "positional": true, "description": "Browser tab ID"},
+                {"name": "browser_id", "type": "string", "required": false, "positional": true, "description": "Browser tab ID (defaults to the cwd workspace's first browser tab)"},
             ],
             "notes": "Text output: formatted key-value pairs.\nJSON output: `{\"browser\": {\"id\": \"...\", \"name\": \"...\", \"url\": \"...\", \"status\": \"...\"}}`"
         }),
@@ -2238,7 +2361,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "name": "browsers remove",
             "description": "Remove a browser tab",
             "parameters": [
-                {"name": "browser_id", "type": "string", "required": true, "positional": true, "description": "Browser tab ID"},
+                {"name": "browser_id", "type": "string", "required": false, "positional": true, "description": "Browser tab ID (defaults to the cwd workspace's first browser tab)"},
             ],
             "notes": "Removes the browser tab and cleans up state."
         }),
@@ -2246,7 +2369,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "name": "terminals list",
             "description": "List terminal sessions for a workspace",
             "parameters": [
-                {"name": "workspace_id", "type": "string", "required": true, "positional": true, "description": "Workspace ID"},
+                {"name": "workspace_id", "type": "string", "required": false, "positional": true, "description": "Workspace ID (auto-detected from cwd if omitted)"},
             ],
             "notes": "Text output: `TERMINAL ID\\tTITLE\\tPID\\tSCROLLBACK` (tab-separated table).\nJSON output: `{\"terminals\": [{\"terminalId\": \"...\", \"workspaceId\": \"...\", \"pid\": N, \"scrollbackLength\": N, \"title\": \"...\"}]}`"
         }),
@@ -2254,7 +2377,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "name": "terminals create",
             "description": "Create a new terminal session in a workspace",
             "parameters": [
-                {"name": "workspace_id", "type": "string", "required": true, "positional": true, "description": "Workspace ID"},
+                {"name": "workspace_id", "type": "string", "required": false, "positional": true, "description": "Workspace ID (auto-detected from cwd if omitted)"},
                 {"name": "--command", "type": "string", "required": false, "description": "Shell command to auto-run after spawn"},
                 {"name": "--cwd", "type": "string", "required": false, "description": "Working directory (relative to workspace root)"},
             ],
@@ -2264,7 +2387,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "name": "terminals send",
             "description": "Send input to a terminal session",
             "parameters": [
-                {"name": "terminal_id", "type": "string", "required": true, "positional": true, "description": "Terminal ID"},
+                {"name": "terminal_id", "type": "string", "required": false, "positional": true, "description": "Terminal ID (defaults to the cwd workspace's first terminal)"},
                 {"name": "--data", "type": "string", "required": true, "description": "Text to send (supports \\n for newline, \\t for tab)"},
             ],
             "notes": "Writes text to the terminal's PTY stdin. Use \\n to send a newline (execute command).\nExample: band terminals send <id> --data \"ls -la\\n\""
@@ -2273,7 +2396,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "name": "terminals output",
             "description": "Get terminal output (scrollback buffer)",
             "parameters": [
-                {"name": "terminal_id", "type": "string", "required": true, "positional": true, "description": "Terminal ID"},
+                {"name": "terminal_id", "type": "string", "required": false, "positional": true, "description": "Terminal ID (defaults to the cwd workspace's first terminal)"},
                 {"name": "--lines", "type": "integer", "required": false, "description": "Number of lines to show (from end of buffer)"},
                 {"name": "--follow", "type": "boolean", "required": false, "description": "Stream live output (like tail -f)"},
             ],
@@ -2283,7 +2406,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "name": "terminals kill",
             "description": "Kill a terminal session",
             "parameters": [
-                {"name": "terminal_id", "type": "string", "required": true, "positional": true, "description": "Terminal ID"},
+                {"name": "terminal_id", "type": "string", "required": false, "positional": true, "description": "Terminal ID (defaults to the cwd workspace's first terminal)"},
             ],
             "notes": "Kills the terminal's PTY process and cleans up the session."
         }),
@@ -2291,7 +2414,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "name": "terminals attach",
             "description": "Attach to a terminal (stream output + send input interactively)",
             "parameters": [
-                {"name": "terminal_id", "type": "string", "required": true, "positional": true, "description": "Terminal ID"},
+                {"name": "terminal_id", "type": "string", "required": false, "positional": true, "description": "Terminal ID (defaults to the cwd workspace's first terminal)"},
             ],
             "notes": "Streams terminal output to stdout while reading stdin line-by-line and sending it to the terminal.\nPress Ctrl+C to detach. Best for running commands, not full TUI interaction (use web UI for that)."
         }),

@@ -30,44 +30,57 @@ All commands support `--output json` (or `BAND_OUTPUT=json` env var) for structu
 
 <!-- COMMANDS -->
 
+## Default workspace and terminal resolution
+
+Every `band terminals` subcommand auto-detects the workspace from the current working directory (matched against registered workspace paths) when `[workspace_id]` is omitted, and resolves to the workspace's first terminal session when `[terminal_id]` is omitted. So the typical flow from inside a workspace is just `band terminals send --data "..."` — no IDs to type.
+
+You only need to pass an explicit ID when you're outside the workspace's cwd or you want to target a specific terminal among several.
+
 ## Workflows
 
 ### Run a dev server and watch the output
 
 ```sh
-# Create a terminal running a dev server
-tid=$(band terminals create ws_abc123 --command "npm run dev" --output json | jq -r .terminalId)
+# Create a terminal in the current workspace
+tid=$(band terminals create --command "npm run dev" --output json | jq -r .terminalId)
 
-# Check the last 20 lines
-band terminals output "$tid" --lines 20
+# Check the last 20 lines (no terminal_id → the cwd workspace's first terminal)
+band terminals output --lines 20
 
 # Stream live output
-band terminals output "$tid" --follow
+band terminals output --follow
 ```
 
 ### Send a command to an existing terminal
 
 ```sh
-# Note the trailing \n — it presses enter
+# Defaults to the cwd workspace's first terminal. Trailing \n presses enter.
+band terminals send --data "echo hello\n"
+
+# Or target a specific terminal:
 band terminals send "$tid" --data "echo hello\n"
 ```
 
 ### Attach interactively
 
 ```sh
-band terminals attach "$tid"
+band terminals attach
 # Type commands; Ctrl+C detaches.
 ```
 
 ### Kill a terminal when done
 
 ```sh
+# Kill the cwd workspace's first terminal
+band terminals kill
+
+# Or kill a specific terminal
 band terminals kill "$tid"
 ```
 
 ## Cross-references
 
-- To find the workspace ID, use `band workspaces list` (see the `band` skill).
+- To find the workspace ID explicitly, use `band workspaces list` (see the `band` skill).
 - For agent-driven work in a workspace, use `band-chat` instead of running the agent in a terminal.
 
 ## Configuration

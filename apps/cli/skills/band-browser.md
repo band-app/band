@@ -30,34 +30,44 @@ All commands support `--output json` (or `BAND_OUTPUT=json` env var) for structu
 
 <!-- COMMANDS -->
 
+## Default workspace and browser resolution
+
+Every `band browsers` subcommand auto-detects the workspace from the current working directory (matched against registered workspace paths) when `[workspace_id]` is omitted, and resolves to the workspace's first browser tab when `[browser_id]` (or `--browser-id`) is omitted. So the typical flow from inside a workspace is just `band browsers navigate <url>` — no IDs to type.
+
+You only need to pass an explicit ID when you're outside the workspace's cwd or you want to target a specific tab among several.
+
 ## Workflows
 
 ### Open a tab and inspect its state
 
 ```sh
-# Create a new tab pre-loaded with a URL
-bid=$(band browsers create ws_abc123 --url https://example.com --name "docs" --output json | jq -r .browser.id)
+# Create a new tab pre-loaded with a URL (workspace auto-detected from cwd)
+bid=$(band browsers create --url https://example.com --name "docs" --output json | jq -r .browser.id)
 
-# Read the current state
-band browsers get "$bid"
+# Read the current state — no browser_id needed if it's the only tab
+band browsers get
 ```
 
-### Navigate an existing tab
+### Navigate the active tab
 
 ```sh
-band browsers navigate "$bid" https://example.com/changelog
+# URL is positional; --browser-id is an optional flag.
+band browsers navigate https://example.com/changelog
+
+# Or target a specific tab:
+band browsers navigate https://example.com/changelog --browser-id "$bid"
 ```
 
 ### List and clean up tabs
 
 ```sh
-band browsers list ws_abc123 --output json | jq '.browsers[].id' | \
+band browsers list --output json | jq '.browsers[].id' | \
   xargs -n1 band browsers remove
 ```
 
 ## Cross-references
 
-- To find the workspace ID, use `band workspaces list` (see the `band` skill).
+- To find the workspace ID explicitly, use `band workspaces list` (see the `band` skill).
 - For shell access, see `band-terminal`. For agent chats, see `band-chat`.
 
 ## Configuration
