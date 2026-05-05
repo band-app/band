@@ -1,42 +1,32 @@
-import type { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
-import { createRequire } from "node:module";
 import { join } from "node:path";
-import type { BunSQLiteDatabase } from "drizzle-orm/bun-sqlite";
+// TODO(electron-migration): better-sqlite3 ships a Node-ABI native module
+// (NODE_MODULE_VERSION). The bundle ships a `.node` built against the Node
+// version used to install dependencies — at runtime users invoke the server
+// under their host `node`, so the ABI must match. This is acceptable as an
+// interim state. The planned Electron migration replaces this with an
+// embedded runtime whose Node version we control.
+import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { bandHome } from "../state";
 import * as schema from "./schema";
 
-// `bun:sqlite` and `drizzle-orm/bun-sqlite` only resolve under the Bun
-// runtime. Importing them statically would crash anything that touches
-// this module under Node (vitest, type-checks, IDE tooling) — even
-// though those callers never open the DB. We require them lazily so
-// only `getDb()` callers — i.e. the spawned Bun server — ever resolve
-// the Bun-only specifiers.
-const lazyRequire = createRequire(import.meta.url);
-
 const migrationsFolder = join(import.meta.dirname, "migrations");
 
-let _db: BunSQLiteDatabase<typeof schema> | null = null;
-let _sqlite: Database | null = null;
+let _db: ReturnType<typeof drizzle<typeof schema>> | null = null;
+let _sqlite: InstanceType<typeof Database> | null = null;
 
 export function getDb() {
   if (_db) return _db;
-
-  const { Database } = lazyRequire("bun:sqlite") as typeof import("bun:sqlite");
-  const { drizzle } = lazyRequire(
-    "drizzle-orm/bun-sqlite",
-  ) as typeof import("drizzle-orm/bun-sqlite");
-  const { migrate } = lazyRequire(
-    "drizzle-orm/bun-sqlite/migrator",
-  ) as typeof import("drizzle-orm/bun-sqlite/migrator");
 
   const home = bandHome();
   mkdirSync(home, { recursive: true });
   const dbPath = join(home, "band.db");
 
-  _sqlite = new Database(dbPath, { create: true });
-  _sqlite.run("PRAGMA journal_mode = WAL");
-  _sqlite.run("PRAGMA foreign_keys = ON");
+  _sqlite = new Database(dbPath);
+  _sqlite.pragma("journal_mode = WAL");
+  _sqlite.pragma("foreign_keys = ON");
 
   _db = drizzle(_sqlite, { schema });
   migrate(_db, { migrationsFolder });

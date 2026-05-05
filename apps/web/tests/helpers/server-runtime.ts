@@ -1,5 +1,5 @@
 // Single source of truth for spawning the production web server in tests.
-// The server requires Bun (bun:sqlite). When the suite migrates to `bun test`
-// these tests can drop the spawn entirely.
-export const SERVER_RUNTIME = "bun";
+// The server runs under Node — better-sqlite3 is a Node-ABI native module
+// loaded at startup.
+export const SERVER_RUNTIME = "node";
 export const SERVER_SCRIPT = "dist/start-server.mjs";

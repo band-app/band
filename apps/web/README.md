@@ -2,40 +2,34 @@
 
 Web server + dashboard frontend for Band. Provides the tRPC API, WebSocket layer, and bundled UI consumed by the Tauri desktop app and (optionally) standalone npm consumers.
 
-## Runtime: Bun (required)
+## Runtime: Node.js
 
-This package requires the [Bun](https://bun.sh) runtime — not Node.js.
+This package runs under [Node.js](https://nodejs.org) v22+. The shebang on `bin/band-server.mjs` is `#!/usr/bin/env node`.
 
 ```bash
-# Install Bun
-curl -fsSL https://bun.sh/install | bash
-
 # Run the server
 band-server
 # or:
-bun dist/start-server.mjs
+node dist/start-server.mjs
 ```
 
-### Why Bun
+### `better-sqlite3` and the NODE_MODULE_VERSION risk (interim)
 
-- **`bun:sqlite`** — built-in, eliminates the `better-sqlite3` native module and its `NODE_MODULE_VERSION` ABI mismatch (the bundled `.node` was built against one Node version, the user's `node` may be a different one → `ERR_DLOPEN_FAILED`).
-- **Stable N-API ABI** — `node-pty` and other native deps load cleanly across Bun patch versions.
-- **Single binary** — the desktop app ships its own Bun at `Band.app/Contents/MacOS/bun`, so end-users of the desktop app don't need Bun (or anything else) installed.
+SQLite is provided by the [`better-sqlite3`](https://github.com/WiseLibs/better-sqlite3) native module. The `.node` binary shipped inside the bundle is built against the Node version used during `pnpm install`. At runtime, the host `node` must match that ABI; if it doesn't, `require("better-sqlite3")` fails with `ERR_DLOPEN_FAILED` / "was compiled against a different Node.js version".
 
-### Node.js is *not* supported
+This is a known interim trade-off. We previously experimented with bundling [Bun](https://bun.sh) + `bun:sqlite` to avoid the ABI mismatch, but Bun's `node:http` shim does not fire `upgrade` events on `httpServer.on("upgrade", …)` (see [oven-sh/bun#18945](https://github.com/oven-sh/bun/issues/18945), [#5951](https://github.com/oven-sh/bun/issues/5951), [#24107](https://github.com/oven-sh/bun/issues/24107)), which silently breaks our tRPC subscription, terminal, and LSP WebSockets.
 
-The shebang on `bin/band-server.mjs` is `#!/usr/bin/env bun`. Running under Node throws at module load (`Cannot find package 'bun:sqlite'`).
+The planned [Electron migration](#) replaces the host-Node dependency with an embedded runtime whose ABI we control. Until then, the desktop app expects a system `node` on `PATH`.
 
 ## Install
 
-Bun must be on `PATH` first — the `band-server` shebang is `#!/usr/bin/env bun`. Without it you'll see `env: bun: No such file or directory`.
+Node v22+ must be on `PATH` first.
 
 ```bash
-# 1. Install Bun
-curl -fsSL https://bun.sh/install | bash
+# 1. Install Node.js 22+ (https://nodejs.org)
 
 # 2. Install the package
-npm i -g @band-app/server     # or: pnpm add -g, bun add -g
+npm i -g @band-app/server     # or: pnpm add -g
 
 # 3. Run
 band-server                   # starts on PORT (default 3456)
@@ -52,14 +46,12 @@ Environment:
 
 ```bash
 pnpm install          # at repo root
-pnpm dev:web          # vite dev (Bun runtime, in-process)
+pnpm dev:web          # vite dev (Node runtime, in-process)
 pnpm --filter @band-app/server build
 pnpm --filter @band-app/server test    # vitest under Node
 ```
 
-Dev runs vite under Bun (`bun --bun vite dev`) so SSR module evaluation can resolve `bun:sqlite`. Tests run vitest under Node and use `better-sqlite3` directly (kept as a devDependency). The production bundle (`dist/start-server.mjs`) uses `bun:sqlite` and runs under Bun.
-
-`tests/sync-state.test.ts` is excluded from vitest because it imports `src/lib/db/connection.ts` which statically imports `bun:sqlite`. Re-enable when the suite migrates to `bun test`.
+The vitest suite, the production bundle (`dist/start-server.mjs`), and the Playwright e2e helper all run under Node.
 
 ## Bundle layout (`dist/`)
 
@@ -72,10 +64,10 @@ dist/
 ├── openapi.json               # generated tRPC OpenAPI spec
 └── node_modules/              # only externalized native deps + helpers
     ├── node-pty/              # native PTY (.node + spawn-helper)
+    ├── better-sqlite3/        # native SQLite (.node)
+    ├── bindings/              # better-sqlite3 .node loader
+    ├── file-uri-to-path/      # bindings dependency
     ├── typescript/
     ├── typescript-language-server/
-    ├── @anthropic-ai/         # Claude Agent SDK platform binary
     └── @openai/codex/         # Codex SDK package.json (codex CLI is system-installed)
 ```
-
-No `better-sqlite3` ships in the bundle — SQLite is `bun:sqlite`.

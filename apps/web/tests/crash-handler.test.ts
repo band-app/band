@@ -42,7 +42,7 @@ function runServerWithCrash(
   return new Promise((resolve, reject) => {
     const child = spawn(
       SERVER_RUNTIME,
-      ["--preload", pathToFileURL(triggerPath).href, serverScript],
+      ["--import", pathToFileURL(triggerPath).href, serverScript],
       {
         env: { ...process.env, BAND_HOME: bandHome, PORT: "0" },
         stdio: "pipe",
