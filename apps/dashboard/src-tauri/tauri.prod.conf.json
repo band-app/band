@@ -13,7 +13,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEYyRTAzMDhCMjYyMTM4RjIKUldUeU9DRW1pekRnOHI3S2pvWHZIQjNkK0RUTG8vZzNhNG9aUUIzNTNCT2ZnQ0dlRkFsYmZjalMK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDYwODlFNjU5QkY0MzY2N0MKUldSOFprTy9XZWFKWUxOdzRZeHBFNDIrNkd6NmsxSjhZNkJxUHA0RnNlMDlrV1lqS2k5WVRxLzkK",
       "endpoints": ["https://github.com/band-app/band/releases/latest/download/latest.json"]
     }
   }
