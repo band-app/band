@@ -221,10 +221,11 @@ enum BrowsersCmd {
     },
     /// Navigate a browser tab to a URL
     Navigate {
-        /// URL to navigate to
-        url: String,
         /// Browser tab ID (defaults to the cwd workspace's first browser tab)
         browser_id: Option<String>,
+        /// URL to navigate to
+        #[arg(long)]
+        url: String,
     },
     /// Get a browser tab's current state
     Get {
@@ -2311,10 +2312,10 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "name": "browsers navigate",
             "description": "Navigate a browser tab to a URL",
             "parameters": [
-                {"name": "url", "type": "string", "required": true, "positional": true, "description": "URL to navigate to"},
                 {"name": "browser_id", "type": "string", "required": false, "positional": true, "description": "Browser tab ID (defaults to the cwd workspace's first browser tab)"},
+                {"name": "--url", "type": "string", "required": true, "description": "URL to navigate to"},
             ],
-            "notes": "Updates the browser tab's URL in the server state. When `browser_id` is omitted, auto-detects the workspace from cwd and targets that workspace's first browser tab. Same positional shape as `browsers get` / `browsers remove`."
+            "notes": "Updates the browser tab's URL in the server state. When `browser_id` is omitted, auto-detects the workspace from cwd and targets that workspace's first browser tab. Mirrors the shape of `chats send [chat_id] --message ...` and `terminals send [terminal_id] --data ...` — panel ID is positional, data is a flag."
         }),
         serde_json::json!({
             "name": "browsers get",
