@@ -254,16 +254,33 @@ export class DockviewLayoutManager {
 
       this.save(workspaceId, raw);
     } else {
+      // Match dockview's `toJSON()` shape exactly so the dashboard's
+      // `fromJSON` round-trip succeeds. Specifically: the grid root must
+      // be a `branch` containing the leaf — dockview rejects a bare
+      // `leaf` as the grid root and the catch in `DockviewChatContainer`
+      // (and its sibling containers) falls back to `createDefaultPanel`,
+      // which mints a brand-new chat ID and orphans whatever pane the
+      // CLI just lazy-created. The pixel sizes are nominal placeholders;
+      // dockview reflows them on first paint based on the real container
+      // dimensions.
       const groupId = `group_${panel.id}`;
+      const width = 500;
+      const height = 500;
       const layout: DockviewLayout = {
         grid: {
           root: {
-            type: "leaf",
-            data: { id: groupId, views: [panel.id], activeView: panel.id },
-            size: 1,
+            type: "branch",
+            data: [
+              {
+                type: "leaf",
+                data: { id: groupId, views: [panel.id], activeView: panel.id },
+                size: width,
+              },
+            ],
+            size: height,
           },
-          height: 500,
-          width: 500,
+          height,
+          width,
           orientation: "HORIZONTAL",
         },
         panels: { [panel.id]: panel },

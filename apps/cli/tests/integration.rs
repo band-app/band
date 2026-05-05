@@ -1784,6 +1784,40 @@ fn workspaces_create_prompt_adds_chat_to_layout() {
         panels.contains_key(chat_id),
         "expected chat {chat_id} in layout panels, got {panels:?}"
     );
+
+    // The grid root MUST be a `branch` — that's the shape dockview's
+    // `toJSON()` produces and the only shape `fromJSON()` round-trips
+    // cleanly. Earlier the helper produced a bare `leaf` as root with
+    // `size: 1`, which dockview's `fromJSON` rejected. The catch in
+    // `DockviewChatContainer.onReady` then fell back to
+    // `createDefaultPanel`, minted a brand-new chat ID with
+    // `newChatId()`, and the server-created lazy-default chat (the one
+    // running the user's --prompt task) was orphaned out of the layout
+    // — so opening the workspace showed an *empty* tab with a freshly-
+    // generated chat ID instead of the prompt the user just submitted.
+    //
+    // Pin the dockview-native shape: `grid.root.type === "branch"` with
+    // a child leaf containing the chat.
+    let root_type = layout
+        .pointer("/grid/root/type")
+        .and_then(serde_json::Value::as_str);
+    assert_eq!(
+        root_type,
+        Some("branch"),
+        "expected grid.root.type=='branch' (dockview-native), got: {layout}"
+    );
+    let leaves = layout
+        .pointer("/grid/root/data")
+        .and_then(serde_json::Value::as_array)
+        .unwrap_or_else(|| panic!("expected grid.root.data array: {layout}"));
+    assert!(
+        leaves.iter().any(|node| {
+            node.pointer("/data/views")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|views| views.iter().any(|v| v.as_str() == Some(chat_id)))
+        }),
+        "expected branch.data leaves to contain chat {chat_id}, got {leaves:?}"
+    );
 }
 
 #[test]
