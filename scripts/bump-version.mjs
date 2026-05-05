@@ -71,8 +71,20 @@ function parseArgs() {
 }
 
 function getCurrentVersion() {
-  const pkg = JSON.parse(readFileSync(resolve(ROOT, "package.json"), "utf8"));
-  return pkg.version;
+  // Prefer the latest git tag as the source of truth: the release workflow
+  // bumps package.json files only on the runner and never commits them back
+  // to main, so the in-repo package.json versions can lag behind the actual
+  // released versions. Fall back to package.json only when no tags exist.
+  try {
+    const tag = execSync("git describe --tags --abbrev=0", {
+      cwd: ROOT,
+      encoding: "utf8",
+    }).trim();
+    return tag.replace(/^v/, "");
+  } catch {
+    const pkg = JSON.parse(readFileSync(resolve(ROOT, "package.json"), "utf8"));
+    return pkg.version;
+  }
 }
 
 function bumpVersion(current, type) {
