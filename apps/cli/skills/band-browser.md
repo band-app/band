@@ -32,7 +32,7 @@ All commands support `--output json` (or `BAND_OUTPUT=json` env var) for structu
 
 ## Default workspace and browser resolution
 
-Every `band browsers` subcommand auto-detects the workspace from the current working directory (matched against registered workspace paths) when `[workspace_id]` is omitted, and resolves to the workspace's first browser tab when `[browser_id]` (or `--browser-id`) is omitted. So the typical flow from inside a workspace is just `band browsers navigate <url>` — no IDs to type.
+Every `band browsers` subcommand auto-detects the workspace from the current working directory (matched against registered workspace paths) when `[workspace_id]` is omitted, and resolves to the workspace's first browser tab when `[browser_id]` is omitted. So the typical flow from inside a workspace is just `band browsers navigate <url>` — no IDs to type.
 
 You only need to pass an explicit ID when you're outside the workspace's cwd or you want to target a specific tab among several.
 
@@ -51,11 +51,11 @@ band browsers get
 ### Navigate the active tab
 
 ```sh
-# URL is positional; --browser-id is an optional flag.
+# URL is required; browser_id is an optional second positional.
 band browsers navigate https://example.com/changelog
 
 # Or target a specific tab:
-band browsers navigate https://example.com/changelog --browser-id "$bid"
+band browsers navigate https://example.com/changelog "$bid"
 ```
 
 ### List and clean up tabs

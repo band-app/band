@@ -224,7 +224,6 @@ enum BrowsersCmd {
         /// URL to navigate to
         url: String,
         /// Browser tab ID (defaults to the cwd workspace's first browser tab)
-        #[arg(long)]
         browser_id: Option<String>,
     },
     /// Get a browser tab's current state
@@ -2313,9 +2312,9 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "description": "Navigate a browser tab to a URL",
             "parameters": [
                 {"name": "url", "type": "string", "required": true, "positional": true, "description": "URL to navigate to"},
-                {"name": "--browser-id", "type": "string", "required": false, "description": "Browser tab ID (defaults to the cwd workspace's first browser tab)"},
+                {"name": "browser_id", "type": "string", "required": false, "positional": true, "description": "Browser tab ID (defaults to the cwd workspace's first browser tab)"},
             ],
-            "notes": "Updates the browser tab's URL in the server state. When `--browser-id` is omitted, auto-detects the workspace from cwd and targets that workspace's first browser tab."
+            "notes": "Updates the browser tab's URL in the server state. When `browser_id` is omitted, auto-detects the workspace from cwd and targets that workspace's first browser tab. Same positional shape as `browsers get` / `browsers remove`."
         }),
         serde_json::json!({
             "name": "browsers get",
