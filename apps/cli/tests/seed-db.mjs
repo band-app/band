@@ -4,10 +4,14 @@
 //
 // Creates band.db with Drizzle migrations applied, a single project row,
 // and optionally writes settings to settings.json.
+//
+// Uses Node's built-in `node:sqlite` (Stability 1.2 RC, available unflagged
+// since Node 22.13). No native module dep on the web app's node_modules.
 
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 const [bandDir, projectName, projectPath, defaultBranch, settingsJson] =
   process.argv.slice(2);
@@ -25,53 +29,61 @@ const migrationsDir = resolve(
   "../../web/src/lib/db/migrations"
 );
 
-// Use better-sqlite3 from the web app's node_modules
-const Database = (
-  await import(
-    resolve(import.meta.dirname, "../../web/node_modules/better-sqlite3/lib/index.js")
-  )
-).default;
+const db = new DatabaseSync(join(bandDir, "band.db"));
+db.exec("PRAGMA journal_mode = WAL");
+db.exec("PRAGMA foreign_keys = ON");
 
-const db = new Database(join(bandDir, "band.db"));
-db.pragma("journal_mode = WAL");
-db.pragma("foreign_keys = ON");
-
-// Create the Drizzle migrations journal table
+// Drizzle 1.0's `__drizzle_migrations` v1 schema (hash, created_at, name,
+// applied_at). Writing it directly skips the v0 → v1 upgrader path.
 db.exec(`CREATE TABLE IF NOT EXISTS "__drizzle_migrations" (
-  id SERIAL PRIMARY KEY,
+  id INTEGER PRIMARY KEY,
   hash text NOT NULL,
-  created_at numeric
+  created_at numeric,
+  name text,
+  applied_at TEXT
 )`);
 
-// Read journal metadata
-const journal = JSON.parse(
-  readFileSync(join(migrationsDir, "meta", "_journal.json"), "utf-8")
-);
+// Drizzle 1.0 migrations live in per-migration folders named
+// <14-char-timestamp>_<slug>/, each containing a migration.sql.
+function folderMillis(folderName) {
+  const ds = folderName.slice(0, 14);
+  const year = parseInt(ds.slice(0, 4), 10);
+  const month = parseInt(ds.slice(4, 6), 10) - 1;
+  const day = parseInt(ds.slice(6, 8), 10);
+  const hour = parseInt(ds.slice(8, 10), 10);
+  const minute = parseInt(ds.slice(10, 12), 10);
+  const second = parseInt(ds.slice(12, 14), 10);
+  return Date.UTC(year, month, day, hour, minute, second);
+}
 
-// Apply each migration SQL file and register in journal
-const sqlFiles = readdirSync(migrationsDir)
-  .filter((f) => f.endsWith(".sql"))
+const migrationFolders = readdirSync(migrationsDir)
+  .filter((f) => {
+    try {
+      return statSync(join(migrationsDir, f)).isDirectory();
+    } catch {
+      return false;
+    }
+  })
+  .filter((f) => /^\d{14}_/.test(f))
   .sort();
 
-for (const file of sqlFiles) {
-  const content = readFileSync(join(migrationsDir, file), "utf-8");
-  const statements = content.split("--> statement-breakpoint");
-  for (const stmt of statements) {
+for (const folder of migrationFolders) {
+  const sqlPath = join(migrationsDir, folder, "migration.sql");
+  const content = readFileSync(sqlPath, "utf-8");
+
+  for (const stmt of content.split("--> statement-breakpoint")) {
     const trimmed = stmt.trim();
     if (trimmed) db.exec(trimmed);
   }
 
   const hash = createHash("sha256").update(content).digest("hex");
-  const tag = file.replace(".sql", "");
-  const entry = journal.entries.find((e) => e.tag === tag);
-  if (entry) {
-    db.prepare(
-      'INSERT INTO "__drizzle_migrations" (hash, created_at) VALUES (?, ?)'
-    ).run(hash, entry.when);
-  }
+  const appliedAt = new Date().toISOString();
+  db.prepare(
+    'INSERT INTO "__drizzle_migrations" (hash, created_at, name, applied_at) VALUES (?, ?, ?, ?)'
+  ).run(hash, folderMillis(folder), folder, appliedAt);
 }
 
-// Seed the test project and its default worktree
+// Seed the test project and its default worktree.
 db.prepare(
   "INSERT INTO projects (name, path, default_branch, sort_order) VALUES (?, ?, ?, 0)"
 ).run(projectName, projectPath, defaultBranch);
@@ -82,7 +94,7 @@ db.prepare(
 
 db.close();
 
-// Seed settings to settings.json if provided
+// Seed settings to settings.json if provided.
 if (settingsJson) {
   writeFileSync(join(bandDir, "settings.json"), settingsJson, "utf-8");
 }
