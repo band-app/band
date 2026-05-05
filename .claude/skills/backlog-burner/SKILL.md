@@ -5,7 +5,7 @@ description: Master orchestrator that burns through a project backlog. Runs as a
 
 # Backlog Burner — Master Orchestrator
 
-Supervises all workspaces in a project. On every run: checks what's idle, what's approved, what needs attention, and what's next in the backlog. Dispatches work via `band tasks create` and cleans up finished workspaces.
+Supervises all workspaces in a project. On every run: checks what's idle, what's approved, what needs attention, and what's next in the backlog. Dispatches work via `band chat` and cleans up finished workspaces.
 
 This skill is designed to run as a **project-scoped cronjob on the main branch**. Set it up with:
 
@@ -60,7 +60,7 @@ For each open PR where `reviewDecision == "APPROVED"` or has an `approved` label
 3. Submit a merge task:
 
 ```sh
-band tasks create <workspace_id> --prompt "The PR #<number> has been approved. Merge it and clean up:
+band chat <workspace_id> --message "The PR #<number> has been approved. Merge it and clean up:
 
 1. Wait for CI: gh pr checks <number> --watch --fail-fast
 2. If CI passes, squash merge: gh pr merge <number> --squash --delete-branch
@@ -97,7 +97,7 @@ git -C <worktree_path> rev-list --count main..HEAD
 Submit task to continue work:
 
 ```sh
-band tasks create <workspace_id> --prompt "Continue implementing issue #<number>. Read the progress comment on the GitHub issue for context on what has been done. Pick up where the last agent left off. When implementation is complete, create a PR."
+band chat <workspace_id> --message "Continue implementing issue #<number>. Read the progress comment on the GitHub issue for context on what has been done. Pick up where the last agent left off. When implementation is complete, create a PR."
 ```
 
 **If workspace is fresh (no commits ahead, no PR):**
@@ -106,7 +106,7 @@ Fetch the issue and submit the full implementation prompt:
 
 ```sh
 ISSUE_BODY=$(gh issue view <number> --repo $REPO --json title,body -q '.title + "\n\n" + .body')
-band tasks create <workspace_id> --prompt "Implement GitHub issue #<number>:\n\n$ISSUE_BODY\n\nTrack progress by maintaining a comment on the issue with a checklist. Create a PR when done."
+band chat <workspace_id> --message "Implement GitHub issue #<number>:\n\n$ISSUE_BODY\n\nTrack progress by maintaining a comment on the issue with a checklist. Create a PR when done."
 ```
 
 ### 4. Pick Up New Issues from the Backlog

@@ -72,19 +72,27 @@ impl TestEnv {
 
         // Wait for "listening" on stdout with a timeout.
         // Spawn a reader thread so we can enforce a deadline without blocking
-        // the test forever if the server fails to start.
+        // the test forever if the server fails to start. The thread keeps
+        // draining stdout for the full lifetime of the server — otherwise
+        // the OS pipe buffer fills up under chatty pino logging and the
+        // server blocks on its next write, causing later requests to hang
+        // or get reset.
         let stdout = child.stdout.take().unwrap();
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let reader = BufReader::new(stdout);
+            let mut signaled = false;
             for line in reader.lines() {
                 let line = line.unwrap_or_default();
-                if line.contains("listening") {
+                if !signaled && line.contains("listening") {
                     let _ = tx.send(true);
-                    return;
+                    signaled = true;
                 }
+                // Continue reading to keep the pipe drained.
             }
-            let _ = tx.send(false);
+            if !signaled {
+                let _ = tx.send(false);
+            }
         });
         let found = rx.recv_timeout(Duration::from_secs(30)).unwrap_or(false);
         if !found {
@@ -165,6 +173,26 @@ fn seed_db(band_dir: &Path, repo_path: &Path, settings: &serde_json::Value) {
     assert!(
         output.status.success(),
         "seed-db.mjs failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// Seed a chat layout (dockview tree) directly into the `panel_states`
+/// table. Used by tests that exercise default-chat-panel resolution
+/// without going through the dashboard UI to drive the layout.
+fn seed_chat_layout(band_dir: &Path, workspace_id: &str, layout: &serde_json::Value) {
+    let seed_script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/seed-chat-layout.mjs");
+    let output = Command::new("node")
+        .arg(&seed_script)
+        .arg(band_dir)
+        .arg(workspace_id)
+        .arg(layout.to_string())
+        .output()
+        .expect("seed-chat-layout.mjs failed to execute");
+
+    assert!(
+        output.status.success(),
+        "seed-chat-layout.mjs failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 }
@@ -1025,7 +1053,7 @@ fn tasks_list_json_empty() {
 }
 
 #[test]
-fn tasks_create_returns_task_id() {
+fn chat_returns_task_id() {
     let env = TestEnv::new();
 
     // Create a workspace first
@@ -1037,13 +1065,7 @@ fn tasks_create_returns_task_id() {
     );
 
     let workspace_id = "my-project-feat-task-test";
-    let output = env.band(&[
-        "tasks",
-        "create",
-        workspace_id,
-        "--prompt",
-        "write hello world",
-    ]);
+    let output = env.band(&["chat", workspace_id, "--message", "write hello world"]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
     let out = stdout(&output);
@@ -1054,16 +1076,15 @@ fn tasks_create_returns_task_id() {
 }
 
 #[test]
-fn tasks_create_json_output() {
+fn chat_json_output_includes_chat_id() {
     let env = TestEnv::new();
 
     env.band(&["workspaces", "create", "my-project", "feat/task-json"]);
 
     let output = env.band(&[
-        "tasks",
-        "create",
+        "chat",
         "my-project-feat-task-json",
-        "--prompt",
+        "--message",
         "hello",
         "--output",
         "json",
@@ -1081,6 +1102,13 @@ fn tasks_create_json_output() {
         "my-project-feat-task-json",
         "json: {json}"
     );
+    // No --chat-id was passed, so the server resolved the default panel.
+    // The chatId should be populated and look like a chat id.
+    let resolved = json["chatId"].as_str().unwrap_or("");
+    assert!(
+        resolved.starts_with("chat_"),
+        "expected resolved chatId to start with chat_: {json}"
+    );
 }
 
 #[test]
@@ -1090,10 +1118,9 @@ fn tasks_list_shows_submitted_task() {
     env.band(&["workspaces", "create", "my-project", "feat/task-list"]);
 
     let create_out = env.band(&[
-        "tasks",
-        "create",
+        "chat",
         "my-project-feat-task-list",
-        "--prompt",
+        "--message",
         "do something",
         "--output",
         "json",
@@ -1120,13 +1147,7 @@ fn tasks_list_filter_by_project() {
 
     env.band(&["workspaces", "create", "my-project", "feat/filter-proj"]);
 
-    env.band(&[
-        "tasks",
-        "create",
-        "my-project-feat-filter-proj",
-        "--prompt",
-        "hello",
-    ]);
+    env.band(&["chat", "my-project-feat-filter-proj", "--message", "hello"]);
 
     let output = env.band(&[
         "tasks",
@@ -1160,27 +1181,25 @@ fn tasks_cancel_nonexistent_fails() {
 }
 
 #[test]
-fn tasks_create_conflict_returns_error() {
+fn chat_conflict_returns_error() {
     let env = TestEnv::new();
 
     env.band(&["workspaces", "create", "my-project", "feat/conflict"]);
 
     // Submit first task — will start running
     let out1 = env.band(&[
-        "tasks",
-        "create",
+        "chat",
         "my-project-feat-conflict",
-        "--prompt",
+        "--message",
         "first task",
     ]);
     assert!(out1.status.success(), "stderr: {}", stderr(&out1));
 
     // Immediately submit a second task — should fail with conflict
     let out2 = env.band(&[
-        "tasks",
-        "create",
+        "chat",
         "my-project-feat-conflict",
-        "--prompt",
+        "--message",
         "second task",
     ]);
     // Might succeed (if first finished fast) or fail with conflict
@@ -1196,10 +1215,9 @@ fn tasks_watch_json_streams_events() {
 
     // Submit a task (it will likely fail since no agent is configured)
     env.band(&[
-        "tasks",
-        "create",
+        "chat",
         "my-project-feat-watch-test",
-        "--prompt",
+        "--message",
         "hello world",
     ]);
 
@@ -1234,10 +1252,9 @@ fn tasks_watch_text_no_ansi_when_piped() {
 
     env.band(&["workspaces", "create", "my-project", "feat/watch-ansi"]);
     env.band(&[
-        "tasks",
-        "create",
+        "chat",
         "my-project-feat-watch-ansi",
-        "--prompt",
+        "--message",
         "hello world",
     ]);
 
@@ -1270,10 +1287,9 @@ fn tasks_watch_verbose_flag_accepted() {
 
     env.band(&["workspaces", "create", "my-project", "feat/watch-verbose"]);
     env.band(&[
-        "tasks",
-        "create",
+        "chat",
         "my-project-feat-watch-verbose",
-        "--prompt",
+        "--message",
         "hello",
     ]);
 
@@ -1298,10 +1314,9 @@ fn tasks_watch_tools_off_hides_tools() {
 
     env.band(&["workspaces", "create", "my-project", "feat/watch-tools-off"]);
     env.band(&[
-        "tasks",
-        "create",
+        "chat",
         "my-project-feat-watch-tools-off",
-        "--prompt",
+        "--message",
         "hello",
     ]);
 
@@ -1336,13 +1351,7 @@ fn tasks_watch_auto_detect_workspace_from_cwd() {
     );
     let worktree_path = stdout(&create_out);
 
-    env.band(&[
-        "tasks",
-        "create",
-        "my-project-feat-watch-cwd",
-        "--prompt",
-        "hello",
-    ]);
+    env.band(&["chat", "my-project-feat-watch-cwd", "--message", "hello"]);
 
     std::thread::sleep(std::time::Duration::from_millis(2000));
 
@@ -1390,10 +1399,9 @@ fn tasks_list_text_output() {
 
     env.band(&["workspaces", "create", "my-project", "feat/task-text"]);
     env.band(&[
-        "tasks",
-        "create",
+        "chat",
         "my-project-feat-task-text",
-        "--prompt",
+        "--message",
         "test task",
     ]);
 
@@ -1701,6 +1709,272 @@ fn cronjobs_list_text_output_shows_table() {
     assert!(out.contains("0 9 * * 1"), "expected cron expr: {out}");
 }
 
+// --- Chat command / default-panel resolution tests ---
+
+#[test]
+fn chat_creates_default_panel_when_workspace_has_no_chats() {
+    let env = TestEnv::new();
+    let create = env.band(&["workspaces", "create", "my-project", "feat/chat-empty"]);
+    assert!(create.status.success(), "stderr: {}", stderr(&create));
+
+    // No chats yet — `band chat` should lazily create one and target it.
+    let output = env.band(&[
+        "chat",
+        "my-project-feat-chat-empty",
+        "--message",
+        "first message",
+        "--output",
+        "json",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output))
+        .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)));
+    let resolved_chat = json["chatId"].as_str().unwrap_or("");
+    assert!(
+        resolved_chat.starts_with("chat_"),
+        "expected a chat id to be resolved: {json}"
+    );
+
+    // The chat now exists in the workspace's chat list.
+    let list = env.band(&[
+        "chats",
+        "list",
+        "my-project-feat-chat-empty",
+        "--output",
+        "json",
+    ]);
+    assert!(list.status.success(), "stderr: {}", stderr(&list));
+    let list_json: serde_json::Value = serde_json::from_str(&stdout(&list)).unwrap();
+    let chats = list_json["chats"].as_array().expect("chats array");
+    assert!(
+        chats.iter().any(|c| c["id"] == resolved_chat),
+        "expected resolved chat in workspace list: {list_json}"
+    );
+}
+
+#[test]
+fn chat_targets_first_chat_when_no_layout() {
+    let env = TestEnv::new();
+    env.band(&["workspaces", "create", "my-project", "feat/chat-no-layout"]);
+    let workspace_id = "my-project-feat-chat-no-layout";
+
+    // `workspaces create` lazily creates a default chat panel for the
+    // workspace, so `chats list` already returns one entry. Add a second
+    // pane to exercise the "more than one chat, no layout" path.
+    env.band(&[
+        "chats",
+        "create",
+        workspace_id,
+        "--name",
+        "Second",
+        "--output",
+        "json",
+    ]);
+
+    // Snapshot the workspace's chats in registry order so we can assert
+    // that `chat` (no --chat-id) resolves to the first one.
+    let list = env.band(&["chats", "list", workspace_id, "--output", "json"]);
+    assert!(list.status.success(), "stderr: {}", stderr(&list));
+    let list_json: serde_json::Value = serde_json::from_str(&stdout(&list)).unwrap();
+    let chats = list_json["chats"].as_array().expect("chats array");
+    assert!(chats.len() >= 2, "expected at least 2 chats: {list_json}");
+    let first_id = chats[0]["id"].as_str().unwrap().to_string();
+
+    // Without a saved chat layout, `chat` should fall back to the first
+    // chat in the registry (insertion order).
+    let output = env.band(&[
+        "chat",
+        workspace_id,
+        "--message",
+        "hello",
+        "--output",
+        "json",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(
+        json["chatId"].as_str().unwrap(),
+        first_id,
+        "expected first chat in the registry to be the default: {json}"
+    );
+}
+
+#[test]
+fn chat_targets_active_panel_from_layout() {
+    let env = TestEnv::new();
+    env.band(&["workspaces", "create", "my-project", "feat/chat-layout"]);
+    let workspace_id = "my-project-feat-chat-layout";
+
+    // Add a second pane on top of the auto-created default. We'll mark
+    // this one as active in the layout below.
+    let second = env.band(&[
+        "chats",
+        "create",
+        workspace_id,
+        "--name",
+        "Active",
+        "--output",
+        "json",
+    ]);
+    assert!(second.status.success(), "stderr: {}", stderr(&second));
+    let second_json: serde_json::Value = serde_json::from_str(&stdout(&second)).unwrap();
+    let second_id = second_json["chat"]["id"].as_str().unwrap().to_string();
+
+    // Snapshot the registry-order first chat so the assertion below is
+    // sharp: we want to verify the resolution differs from "first chat".
+    let list = env.band(&["chats", "list", workspace_id, "--output", "json"]);
+    let list_json: serde_json::Value = serde_json::from_str(&stdout(&list)).unwrap();
+    let first_id = list_json["chats"][0]["id"].as_str().unwrap().to_string();
+    assert_ne!(first_id, second_id, "list should have at least 2 chats");
+
+    // Persist a chat layout that marks `second_id` as the active view of
+    // the active group — mimicking the user clicking that tab in the
+    // dashboard. The layout shape mirrors what
+    // DockviewLayoutManager.addPanel writes.
+    let group_id = format!("group_{second_id}");
+    let layout = serde_json::json!({
+        "grid": {
+            "root": {
+                "type": "leaf",
+                "data": {
+                    "id": group_id,
+                    "views": [first_id.clone(), second_id.clone()],
+                    "activeView": second_id.clone(),
+                },
+                "size": 1,
+            },
+            "height": 500,
+            "width": 500,
+            "orientation": "HORIZONTAL",
+        },
+        "panels": {
+            first_id.clone(): {
+                "id": first_id,
+                "contentComponent": "chatTab",
+                "tabComponent": "chatTab",
+                "title": "First",
+                "params": {"workspaceId": workspace_id, "chatId": first_id.clone()},
+            },
+            second_id.clone(): {
+                "id": second_id,
+                "contentComponent": "chatTab",
+                "tabComponent": "chatTab",
+                "title": "Active",
+                "params": {"workspaceId": workspace_id, "chatId": second_id.clone()},
+            },
+        },
+        "activeGroup": group_id,
+    });
+    seed_chat_layout(&env.band_dir, workspace_id, &layout);
+
+    // `band chat` without --chat-id should target the active panel from
+    // the saved layout — not the first chat in insertion order.
+    let output = env.band(&[
+        "chat",
+        workspace_id,
+        "--message",
+        "to active panel",
+        "--output",
+        "json",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(
+        json["chatId"].as_str().unwrap(),
+        second_id,
+        "expected layout's active panel to be the default: {json}"
+    );
+}
+
+#[test]
+fn chat_explicit_chat_id_overrides_default() {
+    let env = TestEnv::new();
+    env.band(&["workspaces", "create", "my-project", "feat/chat-explicit"]);
+    let workspace_id = "my-project-feat-chat-explicit";
+
+    env.band(&["chats", "create", workspace_id, "--name", "First"]);
+    let second = env.band(&[
+        "chats",
+        "create",
+        workspace_id,
+        "--name",
+        "Second",
+        "--output",
+        "json",
+    ]);
+    let second_json: serde_json::Value = serde_json::from_str(&stdout(&second)).unwrap();
+    let second_id = second_json["chat"]["id"].as_str().unwrap().to_string();
+
+    let output = env.band(&[
+        "chat",
+        workspace_id,
+        "--chat-id",
+        &second_id,
+        "--message",
+        "directly",
+        "--output",
+        "json",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(
+        json["chatId"].as_str().unwrap(),
+        second_id,
+        "expected --chat-id to win over default resolution: {json}"
+    );
+}
+
+#[test]
+fn chat_auto_detects_workspace_from_cwd() {
+    let env = TestEnv::new();
+
+    let create_out = env.band(&["workspaces", "create", "my-project", "feat/chat-cwd"]);
+    assert!(
+        create_out.status.success(),
+        "stderr: {}",
+        stderr(&create_out)
+    );
+    let worktree_path = stdout(&create_out);
+
+    // Run `band chat` with NO workspace_id from inside the worktree.
+    let output = env.band_in(
+        Path::new(&worktree_path),
+        &["chat", "--message", "auto-detect", "--output", "json"],
+    );
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(
+        json["workspaceId"].as_str().unwrap(),
+        "my-project-feat-chat-cwd",
+        "expected workspace to be auto-detected from cwd: {json}"
+    );
+}
+
+#[test]
+fn chat_outside_workspace_fails_with_helpful_error() {
+    let env = TestEnv::new();
+
+    // A git repo that is NOT a registered workspace.
+    let unrelated = env.tmp.path().join("chat-unrelated");
+    fs::create_dir_all(&unrelated).unwrap();
+    git(&unrelated, &["init", "-b", "main"]);
+    git(&unrelated, &["commit", "--allow-empty", "-m", "init"]);
+
+    let output = env.band_in(&unrelated, &["chat", "--message", "hello"]);
+
+    assert!(
+        !output.status.success(),
+        "expected failure when not in a registered workspace"
+    );
+    let err = stderr(&output);
+    assert!(
+        err.contains("No workspace found"),
+        "expected helpful error: {err}"
+    );
+}
+
 // --- Schema tests ---
 
 #[test]
@@ -1724,10 +1998,14 @@ fn schema_lists_all_commands() {
     assert!(names.contains(&"workspaces remove"), "missing: {names:?}");
     assert!(names.contains(&"settings"), "missing: {names:?}");
     assert!(names.contains(&"tasks list"), "missing: {names:?}");
-    assert!(names.contains(&"tasks create"), "missing: {names:?}");
+    assert!(
+        !names.contains(&"tasks create"),
+        "expected `tasks create` to be removed (replaced by `chat`): {names:?}"
+    );
     assert!(names.contains(&"tasks cancel"), "missing: {names:?}");
     assert!(names.contains(&"tasks rerun"), "missing: {names:?}");
     assert!(names.contains(&"tasks watch"), "missing: {names:?}");
+    assert!(names.contains(&"chat"), "missing: {names:?}");
     assert!(names.contains(&"tunnel status"), "missing: {names:?}");
     assert!(names.contains(&"tunnel start"), "missing: {names:?}");
     assert!(names.contains(&"tunnel stop"), "missing: {names:?}");

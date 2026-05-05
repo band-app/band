@@ -1,7 +1,7 @@
 ---
 name: band-cli
 version: 0.1.0
-description: Programmatic workspace management for Band. Use when the user wants to create, list, or remove Band workspaces or projects, manage tasks, manage tunnels, manage terminal sessions, or check settings via the Band CLI.
+description: Programmatic workspace management for Band. Use when the user wants to create, list, or remove Band workspaces or projects, send chat messages to coding agents, manage tasks, manage tunnels, manage terminal sessions, or check settings via the Band CLI.
 allowed-tools: Bash
 argument-hint: [command] [args...]
 ---
@@ -60,14 +60,21 @@ band workspaces create my-app feat/auth --prompt "Add JWT authentication to the 
 band workspaces list --output json | jq '.workspaces[] | select(.project == "my-app") | .branch'
 ```
 
-### Task management
+### Chat / task management
 
 ```sh
+# Send a message to the workspace's default chat panel (auto-detects
+# the workspace from the current directory, picks the active chat tab)
+band chat --message "Fix the failing tests"
+
+# Same, but with an explicit workspace
+band chat ws_abc123 --message "Fix the failing tests"
+
+# Target a specific chat pane instead of the default one
+band chat ws_abc123 --chat-id chat_abc --message "Investigate the perf regression"
+
 # List running tasks
 band tasks list --status running
-
-# Submit a task to a workspace
-band tasks create ws_abc123 --prompt "Fix the failing tests"
 
 # Watch task output
 band tasks watch --workspace ws_abc123

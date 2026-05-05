@@ -8,6 +8,8 @@
 
 import { createLogger } from "@band-app/logger";
 import { removeAgent } from "./agent-pool";
+import { getChatLayout } from "./chat-layout-manager";
+import { defaultPanelIdFromLayout } from "./dockview-layout-manager";
 import {
   deletePanelState,
   deletePanelStatesForWorkspace,
@@ -397,11 +399,31 @@ export function loadChatsFromDb(): number {
 
 /**
  * Get or create a default chat pane for a workspace.
- * Used for backward compatibility when the client hasn't been updated to
- * pass chatId yet — ensures every workspace has at least one chat pane.
+ *
+ * Resolution order:
+ *   1. The active panel from the saved chat layout (e.g. the tab the user
+ *      last focused in the dashboard). This makes CLI commands like
+ *      `band chat ...` target the same chat the user is looking at.
+ *   2. The first chat panel in the saved layout, even if not active.
+ *   3. The first chat in the in-memory registry (insertion order).
+ *   4. A freshly-created "Chat" panel if the workspace has none yet.
+ *
+ * Used by the CLI (`band chat`), cronjobs, and tRPC routes that accept an
+ * optional chatId — all of them want a single deterministic answer to
+ * "which chat does this workspace mean by default".
  */
 export function getOrCreateDefaultChat(workspaceId: string): ChatSession {
   const chats = listChats(workspaceId);
-  if (chats.length > 0) return chats[0];
+
+  if (chats.length > 0) {
+    const layout = getChatLayout(workspaceId);
+    const layoutDefault = defaultPanelIdFromLayout(layout);
+    if (layoutDefault) {
+      const match = chats.find((c) => c.id === layoutDefault);
+      if (match) return match;
+    }
+    return chats[0];
+  }
+
   return createChat(workspaceId, { name: "Chat" });
 }
