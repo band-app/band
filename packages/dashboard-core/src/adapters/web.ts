@@ -225,22 +225,36 @@ export class WebDashboardAdapter implements DashboardAdapter {
     workspaceId: string,
     contextLines?: number,
     diffMode?: DiffMode,
+    compareBranch?: string,
   ): Promise<WorkspaceDiff> {
     return (await this.trpc.workspace.getDiff.query({
       workspaceId,
       contextLines,
       diffMode,
+      compareBranch,
     })) as WorkspaceDiff;
   }
 
   async getWorkspaceDiffSummary(
     workspaceId: string,
     diffMode?: DiffMode,
+    compareBranch?: string,
   ): Promise<WorkspaceDiffSummary> {
     return (await this.trpc.workspace.getDiffSummary.query({
       workspaceId,
       diffMode,
+      compareBranch,
     })) as WorkspaceDiffSummary;
+  }
+
+  async listWorkspaceBranches(
+    workspaceId: string,
+  ): Promise<{ branches: string[]; defaultBranch: string; headBranch: string }> {
+    return (await this.trpc.workspace.listBranches.query({ workspaceId })) as {
+      branches: string[];
+      defaultBranch: string;
+      headBranch: string;
+    };
   }
 
   async getFileDiff(
@@ -269,8 +283,18 @@ export class WebDashboardAdapter implements DashboardAdapter {
     await this.trpc.workspace.saveFile.mutate({ workspaceId, path, content });
   }
 
-  async revertFile(workspaceId: string, filePath: string, diffMode: string): Promise<void> {
-    await this.trpc.workspace.revertFile.mutate({ workspaceId, filePath, diffMode });
+  async revertFile(
+    workspaceId: string,
+    filePath: string,
+    diffMode: string,
+    compareBranch?: string,
+  ): Promise<void> {
+    await this.trpc.workspace.revertFile.mutate({
+      workspaceId,
+      filePath,
+      diffMode: diffMode as "uncommitted" | "branch",
+      compareBranch,
+    });
   }
 
   getWorkspaceFileUrl(workspaceId: string, path: string): string {
