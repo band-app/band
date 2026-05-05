@@ -529,7 +529,7 @@ export const PromptInputSubmit = ({
       {isStreaming && (
         <button
           type="button"
-          className="inline-flex size-8 lg:size-7 shrink-0 items-center justify-center rounded-full bg-foreground text-background transition-colors hover:bg-foreground/80"
+          className="inline-flex size-8 lg:size-7 shrink-0 items-center justify-center rounded-full bg-secondary text-secondary-foreground transition-colors hover:bg-secondary/80"
           onClick={onStop}
         >
           <SquareIcon className="size-4 lg:size-3.5 fill-current" />
