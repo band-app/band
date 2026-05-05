@@ -7,6 +7,7 @@
  */
 
 import { createLogger } from "@band-app/logger";
+import { addBrowserToLayout } from "./browser-layout-manager";
 import {
   deletePanelState,
   deletePanelStatesForWorkspace,
@@ -128,6 +129,18 @@ export function createBrowser(workspaceId: string, options?: CreateBrowserOption
   });
 
   addToIndex(tab);
+
+  // Mirror what `createChat` does: register the new tab in the saved
+  // dockview layout so it survives a server restart and renders the
+  // moment the workspace is opened. `addPanel` is idempotent, so any
+  // mutation/handler that already calls `addBrowserToLayout` after
+  // `createBrowser` (the `browsers.create` tRPC mutation does) is
+  // unaffected — the second call refreshes metadata and bails.
+  addBrowserToLayout(workspaceId, tab.id, {
+    title: tab.name,
+    initialUrl: tab.url || undefined,
+  });
+
   log.info({ browserId: tab.id, workspaceId, url: tab.url }, "browser tab created");
   return tab;
 }

@@ -106,6 +106,14 @@ function findLeafById(node: GridNode, groupId: string): LeafData | null {
   return null;
 }
 
+function leafContainsView(node: GridNode, panelId: string): boolean {
+  if (isLeaf(node)) return node.data.views.includes(panelId);
+  if (isBranch(node)) {
+    return node.data.some((child) => leafContainsView(child, panelId));
+  }
+  return false;
+}
+
 /**
  * Pick the panel a deterministic "default" lookup should target.
  *
@@ -225,26 +233,54 @@ export class DockviewLayoutManager {
     const raw = this.get(workspaceId);
 
     if (raw && isDockviewLayout(raw)) {
+      // Idempotent: if the panel is already in the layout (registered in
+      // `panels` AND present in some leaf's `views`), refresh its metadata
+      // and bail. Otherwise we'd push a duplicate id into `views` on a
+      // re-add and dockview would render two tabs for one panel.
+      const alreadyInGrid = leafContainsView(raw.grid.root, panel.id);
+      if (raw.panels[panel.id] && alreadyInGrid) {
+        raw.panels[panel.id] = panel;
+        this.save(workspaceId, raw);
+        return;
+      }
+
       raw.panels[panel.id] = panel;
 
       const leaf = findFirstLeaf(raw.grid.root);
-      if (leaf) {
+      if (leaf && !leaf.views.includes(panel.id)) {
         leaf.views.push(panel.id);
         leaf.activeView = panel.id;
       }
 
       this.save(workspaceId, raw);
     } else {
+      // Match dockview's `toJSON()` shape exactly so the dashboard's
+      // `fromJSON` round-trip succeeds. Specifically: the grid root must
+      // be a `branch` containing the leaf — dockview rejects a bare
+      // `leaf` as the grid root and the catch in `DockviewChatContainer`
+      // (and its sibling containers) falls back to `createDefaultPanel`,
+      // which mints a brand-new chat ID and orphans whatever pane the
+      // CLI just lazy-created. The pixel sizes are nominal placeholders;
+      // dockview reflows them on first paint based on the real container
+      // dimensions.
       const groupId = `group_${panel.id}`;
+      const width = 500;
+      const height = 500;
       const layout: DockviewLayout = {
         grid: {
           root: {
-            type: "leaf",
-            data: { id: groupId, views: [panel.id], activeView: panel.id },
-            size: 1,
+            type: "branch",
+            data: [
+              {
+                type: "leaf",
+                data: { id: groupId, views: [panel.id], activeView: panel.id },
+                size: width,
+              },
+            ],
+            size: height,
           },
-          height: 500,
-          width: 500,
+          height,
+          width,
           orientation: "HORIZONTAL",
         },
         panels: { [panel.id]: panel },

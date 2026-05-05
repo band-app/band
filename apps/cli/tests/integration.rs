@@ -177,6 +177,54 @@ fn seed_db(band_dir: &Path, repo_path: &Path, settings: &serde_json::Value) {
     );
 }
 
+/// List every `panel_states` row for a workspace. Each entry is
+/// `{ id, workspace_id, panel_type }`. Used by tests that assert
+/// teardown cleanup is complete (i.e. removing the workspace strips
+/// all chat/terminal/browser/layout rows associated with it).
+fn list_panel_states(band_dir: &Path, workspace_id: &str) -> Vec<serde_json::Value> {
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/list-panel-states.mjs");
+    let output = Command::new("node")
+        .arg(&script)
+        .arg(band_dir)
+        .arg(workspace_id)
+        .output()
+        .expect("list-panel-states.mjs failed to execute");
+
+    assert!(
+        output.status.success(),
+        "list-panel-states.mjs failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout_str = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout_str.trim()).expect("list-panel-states.mjs returned bad JSON");
+    parsed.as_array().cloned().unwrap_or_default()
+}
+
+/// Read a saved dockview layout panel-state row (chat, terminal, or
+/// browser) for a workspace from the `panel_states` table. Returns
+/// `Value::Null` if no layout has been persisted.
+fn read_layout(band_dir: &Path, workspace_id: &str, panel_type: &str) -> serde_json::Value {
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/read-layout.mjs");
+    let output = Command::new("node")
+        .arg(&script)
+        .arg(band_dir)
+        .arg(workspace_id)
+        .arg(panel_type)
+        .output()
+        .expect("read-layout.mjs failed to execute");
+
+    assert!(
+        output.status.success(),
+        "read-layout.mjs failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout_str = String::from_utf8_lossy(&output.stdout);
+    serde_json::from_str(stdout_str.trim()).unwrap_or(serde_json::Value::Null)
+}
+
 /// Seed a chat layout (dockview tree) directly into the `panel_states`
 /// table. Used by tests that exercise default-chat-panel resolution
 /// without going through the dashboard UI to drive the layout.
@@ -1029,28 +1077,7 @@ fn workspaces_create_rejects_empty_branch() {
     );
 }
 
-// --- Tasks tests ---
-
-#[test]
-fn tasks_list_empty() {
-    let env = TestEnv::new();
-    let output = env.band(&["tasks", "list"]);
-
-    assert!(output.status.success(), "stderr: {}", stderr(&output));
-    // No tasks yet — should have empty output or just headers
-}
-
-#[test]
-fn tasks_list_json_empty() {
-    let env = TestEnv::new();
-    let output = env.band(&["tasks", "list", "--output", "json"]);
-
-    assert!(output.status.success(), "stderr: {}", stderr(&output));
-    let json: serde_json::Value = serde_json::from_str(&stdout(&output))
-        .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)));
-    let tasks = json["tasks"].as_array().expect("tasks array");
-    assert!(tasks.is_empty(), "expected no tasks: {json}");
-}
+// --- Chat tests ---
 
 #[test]
 fn chat_returns_task_id() {
@@ -1065,7 +1092,14 @@ fn chat_returns_task_id() {
     );
 
     let workspace_id = "my-project-feat-task-test";
-    let output = env.band(&["chat", workspace_id, "--message", "write hello world"]);
+    let output = env.band(&[
+        "chats",
+        "send",
+        "--workspace",
+        workspace_id,
+        "--message",
+        "write hello world",
+    ]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
     let out = stdout(&output);
@@ -1082,7 +1116,9 @@ fn chat_json_output_includes_chat_id() {
     env.band(&["workspaces", "create", "my-project", "feat/task-json"]);
 
     let output = env.band(&[
-        "chat",
+        "chats",
+        "send",
+        "--workspace",
         "my-project-feat-task-json",
         "--message",
         "hello",
@@ -1112,75 +1148,6 @@ fn chat_json_output_includes_chat_id() {
 }
 
 #[test]
-fn tasks_list_shows_submitted_task() {
-    let env = TestEnv::new();
-
-    env.band(&["workspaces", "create", "my-project", "feat/task-list"]);
-
-    let create_out = env.band(&[
-        "chat",
-        "my-project-feat-task-list",
-        "--message",
-        "do something",
-        "--output",
-        "json",
-    ]);
-    assert!(create_out.status.success());
-    let create_json: serde_json::Value = serde_json::from_str(&stdout(&create_out)).unwrap();
-    let task_id = create_json["id"].as_str().unwrap();
-
-    let output = env.band(&["tasks", "list", "--output", "json"]);
-    assert!(output.status.success(), "stderr: {}", stderr(&output));
-
-    let json: serde_json::Value = serde_json::from_str(&stdout(&output))
-        .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)));
-    let tasks = json["tasks"].as_array().expect("tasks array");
-    assert!(
-        tasks.iter().any(|t| t["id"] == task_id),
-        "expected task {task_id} in list: {json}"
-    );
-}
-
-#[test]
-fn tasks_list_filter_by_project() {
-    let env = TestEnv::new();
-
-    env.band(&["workspaces", "create", "my-project", "feat/filter-proj"]);
-
-    env.band(&["chat", "my-project-feat-filter-proj", "--message", "hello"]);
-
-    let output = env.band(&[
-        "tasks",
-        "list",
-        "--project",
-        "my-project",
-        "--output",
-        "json",
-    ]);
-    assert!(output.status.success(), "stderr: {}", stderr(&output));
-
-    let json: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
-    let tasks = json["tasks"].as_array().expect("tasks array");
-    assert!(
-        tasks.iter().all(|t| t["project"] == "my-project"),
-        "all tasks should match project filter: {json}"
-    );
-}
-
-#[test]
-fn tasks_cancel_nonexistent_fails() {
-    let env = TestEnv::new();
-    let output = env.band(&["tasks", "cancel", "tsk_nonexistent"]);
-
-    assert!(!output.status.success());
-    let err = stderr(&output);
-    assert!(
-        err.contains("not found") || err.contains("No running task") || err.contains("Not found"),
-        "stderr: {err}"
-    );
-}
-
-#[test]
 fn chat_conflict_returns_error() {
     let env = TestEnv::new();
 
@@ -1188,7 +1155,9 @@ fn chat_conflict_returns_error() {
 
     // Submit first task — will start running
     let out1 = env.band(&[
-        "chat",
+        "chats",
+        "send",
+        "--workspace",
         "my-project-feat-conflict",
         "--message",
         "first task",
@@ -1197,7 +1166,9 @@ fn chat_conflict_returns_error() {
 
     // Immediately submit a second task — should fail with conflict
     let out2 = env.band(&[
-        "chat",
+        "chats",
+        "send",
+        "--workspace",
         "my-project-feat-conflict",
         "--message",
         "second task",
@@ -1205,211 +1176,6 @@ fn chat_conflict_returns_error() {
     // Might succeed (if first finished fast) or fail with conflict
     // We just verify it doesn't crash and returns a reasonable response
     let _ = out2;
-}
-
-#[test]
-fn tasks_watch_json_streams_events() {
-    let env = TestEnv::new();
-
-    env.band(&["workspaces", "create", "my-project", "feat/watch-test"]);
-
-    // Submit a task (it will likely fail since no agent is configured)
-    env.band(&[
-        "chat",
-        "my-project-feat-watch-test",
-        "--message",
-        "hello world",
-    ]);
-
-    // Wait for the task to complete (fail)
-    std::thread::sleep(std::time::Duration::from_millis(2000));
-
-    // Watch should replay buffered events as NDJSON and exit
-    let output = env.band(&[
-        "tasks",
-        "watch",
-        "--workspace",
-        "my-project-feat-watch-test",
-        "--output",
-        "json",
-    ]);
-    assert!(output.status.success() || !output.status.success()); // may exit 0 or 1
-
-    let out = stdout(&output);
-    // Should have at least one NDJSON line
-    if !out.is_empty() {
-        for line in out.lines() {
-            // Each line should be valid JSON
-            let _: serde_json::Value = serde_json::from_str(line)
-                .unwrap_or_else(|e| panic!("invalid NDJSON line: {e}\nline: {line}"));
-        }
-    }
-}
-
-#[test]
-fn tasks_watch_text_no_ansi_when_piped() {
-    let env = TestEnv::new();
-
-    env.band(&["workspaces", "create", "my-project", "feat/watch-ansi"]);
-    env.band(&[
-        "chat",
-        "my-project-feat-watch-ansi",
-        "--message",
-        "hello world",
-    ]);
-
-    std::thread::sleep(std::time::Duration::from_millis(2000));
-
-    // Watch in text mode (default) — piped, so no ANSI expected
-    let output = env.band(&[
-        "tasks",
-        "watch",
-        "--workspace",
-        "my-project-feat-watch-ansi",
-    ]);
-
-    let err = stderr(&output);
-    // Should show the watching banner
-    assert!(
-        err.contains("[watching task"),
-        "expected banner in stderr: {err}"
-    );
-    // When piped (as in tests), no ANSI escape codes should be present
-    assert!(
-        !err.contains("\x1b["),
-        "expected no ANSI codes when piped: {err}"
-    );
-}
-
-#[test]
-fn tasks_watch_verbose_flag_accepted() {
-    let env = TestEnv::new();
-
-    env.band(&["workspaces", "create", "my-project", "feat/watch-verbose"]);
-    env.band(&[
-        "chat",
-        "my-project-feat-watch-verbose",
-        "--message",
-        "hello",
-    ]);
-
-    std::thread::sleep(std::time::Duration::from_millis(2000));
-
-    let output = env.band(&[
-        "tasks",
-        "watch",
-        "--workspace",
-        "my-project-feat-watch-verbose",
-        "--verbose",
-    ]);
-
-    // Should not crash — verbose flag is accepted
-    let err = stderr(&output);
-    assert!(err.contains("[watching task"), "expected banner: {err}");
-}
-
-#[test]
-fn tasks_watch_tools_off_hides_tools() {
-    let env = TestEnv::new();
-
-    env.band(&["workspaces", "create", "my-project", "feat/watch-tools-off"]);
-    env.band(&[
-        "chat",
-        "my-project-feat-watch-tools-off",
-        "--message",
-        "hello",
-    ]);
-
-    std::thread::sleep(std::time::Duration::from_millis(2000));
-
-    let output = env.band(&[
-        "tasks",
-        "watch",
-        "--workspace",
-        "my-project-feat-watch-tools-off",
-        "--tools",
-        "off",
-    ]);
-
-    let err = stderr(&output);
-    // Tool indicator symbols should not appear
-    assert!(
-        !err.contains("\u{25b8}"),
-        "expected no tool markers with --tools=off: {err}"
-    );
-}
-
-#[test]
-fn tasks_watch_auto_detect_workspace_from_cwd() {
-    let env = TestEnv::new();
-
-    let create_out = env.band(&["workspaces", "create", "my-project", "feat/watch-cwd"]);
-    assert!(
-        create_out.status.success(),
-        "stderr: {}",
-        stderr(&create_out)
-    );
-    let worktree_path = stdout(&create_out);
-
-    env.band(&["chat", "my-project-feat-watch-cwd", "--message", "hello"]);
-
-    std::thread::sleep(std::time::Duration::from_millis(2000));
-
-    // Run `band tasks watch` with NO --workspace, but from inside the worktree directory
-    let output = env.band_in(Path::new(&worktree_path), &["tasks", "watch"]);
-
-    let err = stderr(&output);
-    // Should auto-detect and show the watching banner with the workspace ID
-    assert!(
-        err.contains("[watching task"),
-        "expected auto-detected watch banner: {err}"
-    );
-    assert!(
-        err.contains("my-project-feat-watch-cwd"),
-        "expected workspace ID in banner: {err}"
-    );
-}
-
-#[test]
-fn tasks_watch_auto_detect_fails_outside_workspace() {
-    let env = TestEnv::new();
-
-    // Create a git repo that is NOT a registered workspace
-    let unrelated = env.tmp.path().join("unrelated-repo");
-    fs::create_dir_all(&unrelated).unwrap();
-    git(&unrelated, &["init", "-b", "main"]);
-    git(&unrelated, &["commit", "--allow-empty", "-m", "init"]);
-
-    let output = env.band_in(&unrelated, &["tasks", "watch"]);
-
-    assert!(
-        !output.status.success(),
-        "expected failure when not in a workspace"
-    );
-    let err = stderr(&output);
-    assert!(
-        err.contains("No workspace found"),
-        "expected helpful error message: {err}"
-    );
-}
-
-#[test]
-fn tasks_list_text_output() {
-    let env = TestEnv::new();
-
-    env.band(&["workspaces", "create", "my-project", "feat/task-text"]);
-    env.band(&[
-        "chat",
-        "my-project-feat-task-text",
-        "--message",
-        "test task",
-    ]);
-
-    let output = env.band(&["tasks", "list"]);
-    assert!(output.status.success(), "stderr: {}", stderr(&output));
-
-    let out = stdout(&output);
-    assert!(out.contains("tsk_"), "expected task ID in output: {out}");
 }
 
 // --- Cronjobs tests ---
@@ -1709,7 +1475,349 @@ fn cronjobs_list_text_output_shows_table() {
     assert!(out.contains("0 9 * * 1"), "expected cron expr: {out}");
 }
 
+// --- Layout persistence parity tests ---
+//
+// Every CLI-driven creation of a chat / terminal / browser must persist
+// the new pane to the workspace's saved dockview layout, not just the
+// in-memory registry. Otherwise the dashboard renders nothing for that
+// pane until the user manually re-creates it via the UI. These tests
+// pin the contract at the CLI boundary so future refactors of the
+// underlying `createChat` / `createBrowser` / `spawnTerminal` helpers
+// can't silently regress it.
+
+/// Regression: `band terminals create` must add the new terminal to the
+/// workspace's saved `terminal_layout`. Before the fix, only
+/// `terminals.create` (the tRPC mutation) added it; any other path that
+/// called `spawnTerminal` directly (e.g. the WebSocket handler in
+/// `terminal-ws.ts`) skipped the layout. Moving `addTerminalToLayout`
+/// into `spawnTerminal` makes it a single source of truth.
+#[test]
+fn terminals_create_adds_terminal_to_layout() {
+    let env = TestEnv::new();
+    env.band(&["workspaces", "create", "my-project", "feat/term-layout"]);
+    let workspace_id = "my-project-feat-term-layout";
+
+    let out = env.band(&["terminals", "create", workspace_id, "--output", "json"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let json: serde_json::Value = serde_json::from_str(&stdout(&out)).unwrap();
+    let terminal_id = json["terminalId"].as_str().expect("terminalId in response");
+
+    let layout = read_layout(&env.band_dir, workspace_id, "terminal_layout");
+    assert!(
+        !layout.is_null(),
+        "expected a terminal_layout row to be persisted, got null"
+    );
+    let panels = layout
+        .get("panels")
+        .and_then(|p| p.as_object())
+        .unwrap_or_else(|| panic!("expected layout.panels object: {layout}"));
+    assert!(
+        panels.contains_key(terminal_id),
+        "expected terminal {terminal_id} in layout panels, got {panels:?}"
+    );
+}
+
+/// Regression: same shape as `terminals_create_adds_terminal_to_layout`,
+/// but for browsers. Before the fix, `addBrowserToLayout` was only called
+/// from the `browsers.create` mutation; future callers of `createBrowser`
+/// would skip the layout. Moving the call into `createBrowser` itself
+/// closes that hole.
+#[test]
+fn browsers_create_adds_browser_to_layout() {
+    let env = TestEnv::new();
+    env.band(&["workspaces", "create", "my-project", "feat/browser-layout"]);
+    let workspace_id = "my-project-feat-browser-layout";
+
+    let out = env.band(&[
+        "browsers",
+        "create",
+        workspace_id,
+        "--url",
+        "https://example.com",
+        "--output",
+        "json",
+    ]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let json: serde_json::Value = serde_json::from_str(&stdout(&out)).unwrap();
+    let browser_id = json["browser"]["id"]
+        .as_str()
+        .expect("browser.id in response");
+
+    let layout = read_layout(&env.band_dir, workspace_id, "browser_layout");
+    assert!(
+        !layout.is_null(),
+        "expected a browser_layout row to be persisted, got null"
+    );
+    let panels = layout
+        .get("panels")
+        .and_then(|p| p.as_object())
+        .unwrap_or_else(|| panic!("expected layout.panels object: {layout}"));
+    assert!(
+        panels.contains_key(browser_id),
+        "expected browser {browser_id} in layout panels, got {panels:?}"
+    );
+    // The initial URL flows through `createBrowser` -> `addBrowserToLayout`.
+    let panel = panels.get(browser_id).unwrap();
+    let initial_url = panel
+        .pointer("/params/initialUrl")
+        .and_then(serde_json::Value::as_str);
+    assert_eq!(
+        initial_url,
+        Some("https://example.com"),
+        "expected initialUrl to be persisted in panel params: {panel}"
+    );
+}
+
+/// Regression: `band workspaces create --prompt ...` followed by
+/// `band workspaces remove` must wipe every `panel_states` row tied
+/// to that workspace. The lazy-create path in `workspaces.create`
+/// goes through a different code path than `chats.create` (it calls
+/// `getOrCreateDefaultChat` server-side rather than the explicit CLI
+/// mutation), so it's worth a dedicated test to make sure both paths
+/// teardown cleanly.
+#[test]
+fn workspaces_create_with_prompt_then_remove_clears_panel_states() {
+    let env = TestEnv::new();
+    let create = env.band(&[
+        "workspaces",
+        "create",
+        "my-project",
+        "feat/prompt-teardown",
+        "--prompt",
+        "say hi",
+    ]);
+    assert!(create.status.success(), "stderr: {}", stderr(&create));
+    let workspace_id = "my-project-feat-prompt-teardown";
+
+    let before = list_panel_states(&env.band_dir, workspace_id);
+    assert!(
+        !before.is_empty(),
+        "pre-condition: lazy-created chat + layout should be present: {before:?}"
+    );
+
+    let out = env.band(&["workspaces", "remove", "my-project", "feat/prompt-teardown"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+
+    let after = list_panel_states(&env.band_dir, workspace_id);
+    assert!(
+        after.is_empty(),
+        "expected panel_states empty after `workspaces remove`, got {after:?}"
+    );
+}
+
+/// Regression: `band workspaces remove` must wipe every `panel_states`
+/// row associated with the workspace — chat records, browser records,
+/// and the three layout rows (`chat_layout_<id>`, `terminal_layout_<id>`,
+/// `browser_layout_<id>`). A leak means stale state survives across
+/// recreations of a workspace with the same name.
+#[test]
+fn workspaces_remove_clears_all_panel_states() {
+    let env = TestEnv::new();
+    env.band(&["workspaces", "create", "my-project", "feat/teardown"]);
+    let workspace_id = "my-project-feat-teardown";
+
+    // Seed the workspace with one of each pane type so all relevant
+    // panel_states rows exist.
+    env.band(&["chats", "create", workspace_id, "--name", "Side"]);
+    env.band(&[
+        "browsers",
+        "create",
+        workspace_id,
+        "--url",
+        "https://example.com",
+    ]);
+    env.band(&["terminals", "create", workspace_id]);
+
+    // Pre-condition: panel_states has multiple rows for this workspace
+    // (1 chat record, 1 browser record, 3 layout rows — chat/terminal/browser).
+    let before = list_panel_states(&env.band_dir, workspace_id);
+    assert!(
+        before.len() >= 5,
+        "pre-condition: expected at least 5 panel_states rows (chat, browser, 3 layouts), got: {before:?}"
+    );
+
+    // Tear down the workspace.
+    let out = env.band(&["workspaces", "remove", "my-project", "feat/teardown"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+
+    // Every row keyed to this workspace should be gone — no chat records,
+    // no browser records, no chat_layout / terminal_layout / browser_layout.
+    let after = list_panel_states(&env.band_dir, workspace_id);
+    assert!(
+        after.is_empty(),
+        "expected panel_states to be empty after `workspaces remove`, got {after:?}"
+    );
+}
+
+/// Regression: `band chats remove` must not only delete the chat record
+/// but also strip the panel from the saved `chat_layout` row. Mirrors
+/// what `terminal.kill` and `browsers.remove` do for their respective
+/// layouts. Without this, an open dashboard would show a ghost tab for
+/// a chat whose record is gone — and the dashboard's orphan-pruning
+/// pass on next mount would have to clean it up.
+#[test]
+fn chats_remove_strips_chat_from_layout() {
+    let env = TestEnv::new();
+    env.band(&[
+        "workspaces",
+        "create",
+        "my-project",
+        "feat/chat-remove-layout",
+    ]);
+    let workspace_id = "my-project-feat-chat-remove-layout";
+
+    // `workspaces create` lazily creates a default chat. Add a second so
+    // we can assert the *target* chat is removed without affecting the
+    // other.
+    let second = env.band(&[
+        "chats",
+        "create",
+        workspace_id,
+        "--name",
+        "Second",
+        "--output",
+        "json",
+    ]);
+    assert!(second.status.success(), "stderr: {}", stderr(&second));
+    let second_id = serde_json::from_str::<serde_json::Value>(&stdout(&second)).unwrap()["chat"]
+        ["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // Snapshot pre-state: layout contains both chats.
+    let before = read_layout(&env.band_dir, workspace_id, "chat_layout");
+    let before_panels = before.get("panels").and_then(|p| p.as_object()).unwrap();
+    assert!(
+        before_panels.contains_key(&second_id),
+        "pre-condition: second chat should be in layout: {before}"
+    );
+    assert_eq!(before_panels.len(), 2, "pre-condition: 2 panels in layout");
+
+    // Remove the second chat via the CLI.
+    let remove = env.band(&["chats", "remove", &second_id]);
+    assert!(remove.status.success(), "stderr: {}", stderr(&remove));
+
+    // Layout no longer references the removed chat, but the other panel
+    // is preserved.
+    let after = read_layout(&env.band_dir, workspace_id, "chat_layout");
+    let after_panels = after
+        .get("panels")
+        .and_then(|p| p.as_object())
+        .unwrap_or_else(|| panic!("expected layout.panels object after remove: {after}"));
+    assert!(
+        !after_panels.contains_key(&second_id),
+        "expected removed chat {second_id} to be stripped from layout, got {after_panels:?}"
+    );
+    assert_eq!(
+        after_panels.len(),
+        1,
+        "expected exactly one remaining chat panel: {after}"
+    );
+
+    // And `chats list` agrees — the removed chat is gone from the registry too.
+    let list = env.band(&["chats", "list", workspace_id, "--output", "json"]);
+    let list_json: serde_json::Value = serde_json::from_str(&stdout(&list)).unwrap();
+    let chats = list_json["chats"].as_array().unwrap();
+    assert_eq!(
+        chats.len(),
+        1,
+        "expected exactly one chat remaining in registry: {list_json}"
+    );
+    assert_ne!(
+        chats[0]["id"].as_str().unwrap(),
+        second_id,
+        "the surviving chat shouldn't be the one we removed"
+    );
+}
+
 // --- Chat command / default-panel resolution tests ---
+
+/// Regression: `band workspaces create --prompt ...` lazily creates a default
+/// chat pane and submits the prompt to it, but the chat record has to land
+/// in the saved `chat_layout` so the dashboard renders the tab when the user
+/// opens the workspace. Before the fix, only the chats registry was updated,
+/// not the layout — so the chat existed but was invisible in the dashboard.
+#[test]
+fn workspaces_create_prompt_adds_chat_to_layout() {
+    let env = TestEnv::new();
+    let out = env.band(&[
+        "workspaces",
+        "create",
+        "my-project",
+        "feat/prompt-layout",
+        "--prompt",
+        "say hi",
+        "--output",
+        "json",
+    ]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+
+    let workspace_id = "my-project-feat-prompt-layout";
+
+    // The chat exists in the registry.
+    let list = env.band(&["chats", "list", workspace_id, "--output", "json"]);
+    assert!(list.status.success(), "stderr: {}", stderr(&list));
+    let list_json: serde_json::Value = serde_json::from_str(&stdout(&list)).unwrap();
+    let chats = list_json["chats"].as_array().expect("chats array");
+    assert_eq!(
+        chats.len(),
+        1,
+        "expected exactly one chat after `workspaces create --prompt`: {list_json}"
+    );
+    let chat_id = chats[0]["id"].as_str().unwrap();
+
+    // ...AND it shows up in the persisted dockview chat layout. Asserting on
+    // the layout shape directly (rather than via the dashboard) is the only
+    // way to catch the invisible-chat bug at the CLI layer.
+    let layout = read_layout(&env.band_dir, workspace_id, "chat_layout");
+    assert!(
+        !layout.is_null(),
+        "expected a chat_layout row to be persisted, got null"
+    );
+    let panels = layout
+        .get("panels")
+        .and_then(|p| p.as_object())
+        .unwrap_or_else(|| panic!("expected layout.panels object: {layout}"));
+    assert!(
+        panels.contains_key(chat_id),
+        "expected chat {chat_id} in layout panels, got {panels:?}"
+    );
+
+    // The grid root MUST be a `branch` — that's the shape dockview's
+    // `toJSON()` produces and the only shape `fromJSON()` round-trips
+    // cleanly. Earlier the helper produced a bare `leaf` as root with
+    // `size: 1`, which dockview's `fromJSON` rejected. The catch in
+    // `DockviewChatContainer.onReady` then fell back to
+    // `createDefaultPanel`, minted a brand-new chat ID with
+    // `newChatId()`, and the server-created lazy-default chat (the one
+    // running the user's --prompt task) was orphaned out of the layout
+    // — so opening the workspace showed an *empty* tab with a freshly-
+    // generated chat ID instead of the prompt the user just submitted.
+    //
+    // Pin the dockview-native shape: `grid.root.type === "branch"` with
+    // a child leaf containing the chat.
+    let root_type = layout
+        .pointer("/grid/root/type")
+        .and_then(serde_json::Value::as_str);
+    assert_eq!(
+        root_type,
+        Some("branch"),
+        "expected grid.root.type=='branch' (dockview-native), got: {layout}"
+    );
+    let leaves = layout
+        .pointer("/grid/root/data")
+        .and_then(serde_json::Value::as_array)
+        .unwrap_or_else(|| panic!("expected grid.root.data array: {layout}"));
+    assert!(
+        leaves.iter().any(|node| {
+            node.pointer("/data/views")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|views| views.iter().any(|v| v.as_str() == Some(chat_id)))
+        }),
+        "expected branch.data leaves to contain chat {chat_id}, got {leaves:?}"
+    );
+}
 
 #[test]
 fn chat_creates_default_panel_when_workspace_has_no_chats() {
@@ -1717,9 +1825,11 @@ fn chat_creates_default_panel_when_workspace_has_no_chats() {
     let create = env.band(&["workspaces", "create", "my-project", "feat/chat-empty"]);
     assert!(create.status.success(), "stderr: {}", stderr(&create));
 
-    // No chats yet — `band chat` should lazily create one and target it.
+    // No chats yet — `band chats send` should lazily create one and target it.
     let output = env.band(&[
-        "chat",
+        "chats",
+        "send",
+        "--workspace",
         "my-project-feat-chat-empty",
         "--message",
         "first message",
@@ -1754,15 +1864,20 @@ fn chat_creates_default_panel_when_workspace_has_no_chats() {
 }
 
 #[test]
-fn chat_targets_first_chat_when_no_layout() {
+fn chat_targets_most_recently_added_chat_by_default() {
+    // Every chat created (lazy-default in `workspaces create`, explicit
+    // `chats create`, or via `tasks.submit` lazy-create) now also lands
+    // in the saved chat_layout, with the new pane marked as the active
+    // view of its group. So `chats send` without an explicit chat_id
+    // resolves through `defaultPanelIdFromLayout` -> active panel ->
+    // most recently added chat.
     let env = TestEnv::new();
-    env.band(&["workspaces", "create", "my-project", "feat/chat-no-layout"]);
-    let workspace_id = "my-project-feat-chat-no-layout";
+    env.band(&["workspaces", "create", "my-project", "feat/chat-default"]);
+    let workspace_id = "my-project-feat-chat-default";
 
-    // `workspaces create` lazily creates a default chat panel for the
-    // workspace, so `chats list` already returns one entry. Add a second
-    // pane to exercise the "more than one chat, no layout" path.
-    env.band(&[
+    // `workspaces create` lazily creates the first chat panel and
+    // inserts it into the layout (active). Add a second pane on top.
+    let second = env.band(&[
         "chats",
         "create",
         workspace_id,
@@ -1771,20 +1886,25 @@ fn chat_targets_first_chat_when_no_layout() {
         "--output",
         "json",
     ]);
+    assert!(second.status.success(), "stderr: {}", stderr(&second));
+    let second_id = serde_json::from_str::<serde_json::Value>(&stdout(&second)).unwrap()["chat"]
+        ["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
-    // Snapshot the workspace's chats in registry order so we can assert
-    // that `chat` (no --chat-id) resolves to the first one.
+    // Sanity-check that there really are two chats.
     let list = env.band(&["chats", "list", workspace_id, "--output", "json"]);
-    assert!(list.status.success(), "stderr: {}", stderr(&list));
     let list_json: serde_json::Value = serde_json::from_str(&stdout(&list)).unwrap();
     let chats = list_json["chats"].as_array().expect("chats array");
     assert!(chats.len() >= 2, "expected at least 2 chats: {list_json}");
-    let first_id = chats[0]["id"].as_str().unwrap().to_string();
 
-    // Without a saved chat layout, `chat` should fall back to the first
-    // chat in the registry (insertion order).
+    // `chats send` (no chat_id) should target the most recently added
+    // chat — i.e. the one we just created — not the lazy-default first.
     let output = env.band(&[
-        "chat",
+        "chats",
+        "send",
+        "--workspace",
         workspace_id,
         "--message",
         "hello",
@@ -1795,8 +1915,8 @@ fn chat_targets_first_chat_when_no_layout() {
     let json: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
     assert_eq!(
         json["chatId"].as_str().unwrap(),
-        first_id,
-        "expected first chat in the registry to be the default: {json}"
+        second_id,
+        "expected most recently added chat to be the default: {json}"
     );
 }
 
@@ -1868,10 +1988,13 @@ fn chat_targets_active_panel_from_layout() {
     });
     seed_chat_layout(&env.band_dir, workspace_id, &layout);
 
-    // `band chat` without --chat-id should target the active panel from
-    // the saved layout — not the first chat in insertion order.
+    // `band chats send` without an explicit chat_id should target the
+    // active panel from the saved layout — not the first chat in
+    // insertion order.
     let output = env.band(&[
-        "chat",
+        "chats",
+        "send",
+        "--workspace",
         workspace_id,
         "--message",
         "to active panel",
@@ -1907,10 +2030,11 @@ fn chat_explicit_chat_id_overrides_default() {
     let second_id = second_json["chat"]["id"].as_str().unwrap().to_string();
 
     let output = env.band(&[
-        "chat",
-        workspace_id,
-        "--chat-id",
+        "chats",
+        "send",
         &second_id,
+        "--workspace",
+        workspace_id,
         "--message",
         "directly",
         "--output",
@@ -1937,10 +2061,17 @@ fn chat_auto_detects_workspace_from_cwd() {
     );
     let worktree_path = stdout(&create_out);
 
-    // Run `band chat` with NO workspace_id from inside the worktree.
+    // Run `band chats send` with NO workspace from inside the worktree.
     let output = env.band_in(
         Path::new(&worktree_path),
-        &["chat", "--message", "auto-detect", "--output", "json"],
+        &[
+            "chats",
+            "send",
+            "--message",
+            "auto-detect",
+            "--output",
+            "json",
+        ],
     );
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
@@ -1962,7 +2093,7 @@ fn chat_outside_workspace_fails_with_helpful_error() {
     git(&unrelated, &["init", "-b", "main"]);
     git(&unrelated, &["commit", "--allow-empty", "-m", "init"]);
 
-    let output = env.band_in(&unrelated, &["chat", "--message", "hello"]);
+    let output = env.band_in(&unrelated, &["chats", "send", "--message", "hello"]);
 
     assert!(
         !output.status.success(),
@@ -1997,15 +2128,35 @@ fn schema_lists_all_commands() {
     assert!(names.contains(&"workspaces create"), "missing: {names:?}");
     assert!(names.contains(&"workspaces remove"), "missing: {names:?}");
     assert!(names.contains(&"settings"), "missing: {names:?}");
-    assert!(names.contains(&"tasks list"), "missing: {names:?}");
-    assert!(
-        !names.contains(&"tasks create"),
-        "expected `tasks create` to be removed (replaced by `chat`): {names:?}"
-    );
-    assert!(names.contains(&"tasks cancel"), "missing: {names:?}");
-    assert!(names.contains(&"tasks rerun"), "missing: {names:?}");
-    assert!(names.contains(&"tasks watch"), "missing: {names:?}");
-    assert!(names.contains(&"chat"), "missing: {names:?}");
+    // The `tasks` subcommand was fully removed — agent task submission
+    // happens via the top-level `chat` command, and lifecycle management
+    // moved server-side.
+    for removed in [
+        "tasks list",
+        "tasks create",
+        "tasks cancel",
+        "tasks rerun",
+        "tasks watch",
+    ] {
+        assert!(
+            !names.contains(&removed),
+            "expected `{removed}` to be removed: {names:?}"
+        );
+    }
+    // The chat surface lives entirely under `chats *`. The top-level
+    // singular `chat` and the redundant `chats chat` are both gone —
+    // message submission goes through `chats send` (which calls
+    // `tasks.submit` server-side with full agent-config flags).
+    for removed in ["chat", "chats chat"] {
+        assert!(
+            !names.contains(&removed),
+            "expected `{removed}` to be removed (now `chats send`): {names:?}"
+        );
+    }
+    assert!(names.contains(&"chats send"), "missing: {names:?}");
+    assert!(names.contains(&"chats list"), "missing: {names:?}");
+    assert!(names.contains(&"chats watch"), "missing: {names:?}");
+    assert!(names.contains(&"chats stop"), "missing: {names:?}");
     assert!(names.contains(&"tunnel status"), "missing: {names:?}");
     assert!(names.contains(&"tunnel start"), "missing: {names:?}");
     assert!(names.contains(&"tunnel stop"), "missing: {names:?}");
@@ -2049,72 +2200,75 @@ fn schema_unknown_command_fails() {
     );
 }
 
-// --- Watch rendering tests (mock SSE server) ---
+// --- chats watch tests (mock SSE server) ---
+//
+// `band chats watch` streams `GET /api/tasks/<chat_id>/stream`. To exercise
+// the SSE-decoding path without standing up a full agent run we use a
+// lightweight mock HTTP server that returns a canned response on the first
+// connection. These tests cover (1) the happy path where each `data:`
+// payload is dumped as one NDJSON line, (2) the 204 "no running task" path,
+// and (3) the URL-encoding of the chat_id path segment.
 
-/// A lightweight mock server that accepts one connection and writes canned SSE data.
-struct MockSseServer {
+/// Mock HTTP/SSE server that serves one canned response then closes.
+struct MockHttpServer {
     port: u16,
+    /// Captured request path (set after the first connection completes).
+    request_path: std::sync::Arc<std::sync::Mutex<Option<String>>>,
     _handle: std::thread::JoinHandle<()>,
 }
 
-impl MockSseServer {
-    /// Start a mock server that will serve `sse_body` as the response to the first GET request.
-    fn new(sse_body: String) -> Self {
+impl MockHttpServer {
+    fn new(response: String) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
+        let request_path = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let path_for_thread = std::sync::Arc::clone(&request_path);
 
         let handle = std::thread::spawn(move || {
             use std::io::Write;
-            // Accept a single connection
             let (mut stream, _) = listener.accept().unwrap();
-            // Read the request (drain it so the client doesn't hang)
             let mut buf = [0u8; 4096];
-            let _ = stream.read(&mut buf);
-            // Write HTTP response with SSE body
-            let response = format!(
-                "HTTP/1.1 200 OK\r\n\
-                 Content-Type: text/event-stream\r\n\
-                 Connection: close\r\n\
-                 \r\n\
-                 {sse_body}"
-            );
+            let n = stream.read(&mut buf).unwrap_or(0);
+            // Parse request line: "METHOD PATH HTTP/1.1"
+            let req = String::from_utf8_lossy(&buf[..n]);
+            if let Some(line) = req.lines().next() {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    *path_for_thread.lock().unwrap() = Some(parts[1].to_string());
+                }
+            }
             let _ = stream.write_all(response.as_bytes());
             let _ = stream.flush();
-            // Close triggers EOF for the client
         });
 
         Self {
             port,
+            request_path,
             _handle: handle,
         }
     }
-}
 
-/// Build SSE data from a list of JSON chunks.
-fn build_sse(chunks: &[serde_json::Value]) -> String {
-    use std::fmt::Write;
-    let mut buf = String::new();
-    for chunk in chunks {
-        let _ = write!(buf, "data: {}\n\n", serde_json::to_string(chunk).unwrap());
+    /// Wait briefly for the request to land, then return the captured path.
+    fn captured_path(&self) -> Option<String> {
+        for _ in 0..50 {
+            if let Some(p) = self.request_path.lock().unwrap().clone() {
+                return Some(p);
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        None
     }
-    buf
 }
 
-/// Run the band CLI against a mock SSE server instead of the real web server.
-fn band_with_mock(
+/// Run the `band` binary against a mock HTTP server.
+fn band_against_mock(
     tmp: &tempfile::TempDir,
-    mock: &MockSseServer,
+    mock: &MockHttpServer,
     args: &[&str],
 ) -> std::process::Output {
     let band_dir = tmp.path().join(".band");
     fs::create_dir_all(&band_dir).ok();
-    // Seed settings in DB so ApiClient::from_settings works
-    seed_settings_only(
-        &band_dir,
-        &serde_json::json!({
-            "tokenSecret": "mock-token"
-        }),
-    );
+    seed_settings_only(&band_dir, &serde_json::json!({"tokenSecret": "mock-token"}));
 
     Command::new(env!("CARGO_BIN_EXE_band"))
         .args(args)
@@ -2125,611 +2279,426 @@ fn band_with_mock(
 }
 
 #[test]
-fn watch_render_text_deltas() {
-    let chunks = vec![
+fn chats_watch_dumps_each_sse_event_as_ndjson_line() {
+    use std::fmt::Write as _;
+
+    let chunks = [
         serde_json::json!({"type": "text-delta", "delta": "Hello "}),
         serde_json::json!({"type": "text-delta", "delta": "world!"}),
-        serde_json::json!({"type": "text-end"}),
         serde_json::json!({"type": "finish"}),
     ];
-    let mock = MockSseServer::new(build_sse(&chunks));
-    let tmp = tempfile::tempdir().unwrap();
-
-    let output = band_with_mock(&tmp, &mock, &["tasks", "watch", "--workspace", "ws-1"]);
-
-    assert!(output.status.success(), "stderr: {}", stderr(&output));
-    let out = stdout(&output);
-    assert_eq!(out, "Hello world!", "stdout: {out}");
-}
-
-#[test]
-fn watch_render_tool_input_shows_marker() {
-    let chunks = vec![
-        serde_json::json!({
-            "type": "tool-input-available",
-            "toolCallId": "tc_1",
-            "toolName": "Read",
-            "input": {"file_path": "/src/main.rs"}
-        }),
-        serde_json::json!({"type": "finish"}),
-    ];
-    let mock = MockSseServer::new(build_sse(&chunks));
-    let tmp = tempfile::tempdir().unwrap();
-
-    let output = band_with_mock(&tmp, &mock, &["tasks", "watch", "--workspace", "ws-1"]);
-
-    let err = stderr(&output);
-    // Should have the tool marker and tool summary
-    assert!(
-        err.contains("\u{25b8}"),
-        "expected tool marker in stderr: {err}"
-    );
-    assert!(
-        err.contains("Read: /src/main.rs"),
-        "expected tool summary: {err}"
-    );
-}
-
-#[test]
-fn watch_render_tool_input_hidden_with_tools_off() {
-    let chunks = vec![
-        serde_json::json!({
-            "type": "tool-input-available",
-            "toolCallId": "tc_1",
-            "toolName": "Read",
-            "input": {"file_path": "/src/main.rs"}
-        }),
-        serde_json::json!({"type": "finish"}),
-    ];
-    let mock = MockSseServer::new(build_sse(&chunks));
-    let tmp = tempfile::tempdir().unwrap();
-
-    let output = band_with_mock(
-        &tmp,
-        &mock,
-        &["tasks", "watch", "--workspace", "ws-1", "--tools", "off"],
-    );
-
-    let err = stderr(&output);
-    assert!(
-        !err.contains("\u{25b8}"),
-        "tool marker should be hidden: {err}"
-    );
-    assert!(
-        !err.contains("Read:"),
-        "tool summary should be hidden: {err}"
-    );
-}
-
-#[test]
-fn watch_render_tool_output_shown_in_verbose() {
-    let chunks = vec![
-        serde_json::json!({
-            "type": "tool-input-available",
-            "toolCallId": "tc_1",
-            "toolName": "Bash",
-            "input": {"command": "echo hi"}
-        }),
-        serde_json::json!({
-            "type": "tool-output-available",
-            "toolCallId": "tc_1",
-            "output": "hi\n"
-        }),
-        serde_json::json!({"type": "finish"}),
-    ];
-    let mock = MockSseServer::new(build_sse(&chunks));
-    let tmp = tempfile::tempdir().unwrap();
-
-    let output = band_with_mock(
-        &tmp,
-        &mock,
-        &["tasks", "watch", "--workspace", "ws-1", "--verbose"],
-    );
-
-    let err = stderr(&output);
-    // Verbose mode should show the start marker
-    assert!(err.contains("\u{25b8}"), "expected start marker: {err}");
-    // Verbose mode should show input JSON
-    assert!(err.contains("echo hi"), "expected input in verbose: {err}");
-    // Verbose mode should show completion marker
-    assert!(
-        err.contains("\u{2713}"),
-        "expected completion marker: {err}"
-    );
-    // Verbose mode should show tool output
-    assert!(err.contains("hi"), "expected tool output in verbose: {err}");
-}
-
-#[test]
-fn watch_render_tool_output_hidden_in_default() {
-    let chunks = vec![
-        serde_json::json!({
-            "type": "tool-input-available",
-            "toolCallId": "tc_1",
-            "toolName": "Read",
-            "input": {"file_path": "/src/lib.rs"}
-        }),
-        serde_json::json!({
-            "type": "tool-output-available",
-            "toolCallId": "tc_1",
-            "output": "fn main() {}"
-        }),
-        serde_json::json!({"type": "finish"}),
-    ];
-    let mock = MockSseServer::new(build_sse(&chunks));
-    let tmp = tempfile::tempdir().unwrap();
-
-    let output = band_with_mock(&tmp, &mock, &["tasks", "watch", "--workspace", "ws-1"]);
-
-    let err = stderr(&output);
-    // Default mode should show start marker but NOT completion marker
-    assert!(err.contains("\u{25b8}"), "expected start marker: {err}");
-    assert!(
-        !err.contains("\u{2713}"),
-        "completion marker should be hidden in default: {err}"
-    );
-    assert!(
-        !err.contains("fn main()"),
-        "tool output should be hidden in default: {err}"
-    );
-}
-
-#[test]
-fn watch_render_error_chunk() {
-    let chunks = vec![
-        serde_json::json!({"type": "text-delta", "delta": "Working..."}),
-        serde_json::json!({"type": "text-end"}),
-        serde_json::json!({"type": "error", "errorText": "Agent crashed unexpectedly"}),
-        serde_json::json!({"type": "finish"}),
-    ];
-    let mock = MockSseServer::new(build_sse(&chunks));
-    let tmp = tempfile::tempdir().unwrap();
-
-    let output = band_with_mock(&tmp, &mock, &["tasks", "watch", "--workspace", "ws-1"]);
-
-    // Error should cause non-zero exit
-    assert!(!output.status.success(), "expected failure exit code");
-    let err = stderr(&output);
-    assert!(err.contains("Error:"), "expected 'Error:' in stderr: {err}");
-    assert!(
-        err.contains("Agent crashed unexpectedly"),
-        "expected error text: {err}"
-    );
-}
-
-#[test]
-fn watch_render_data_result_with_duration_and_cost() {
-    let chunks = vec![
-        serde_json::json!({"type": "text-delta", "delta": "Done."}),
-        serde_json::json!({"type": "text-end"}),
-        serde_json::json!({
-            "type": "data-result",
-            "data": {
-                "durationMs": 125_000,
-                "costUsd": 0.42,
-                "numTurns": 12
-            }
-        }),
-        serde_json::json!({"type": "finish"}),
-    ];
-    let mock = MockSseServer::new(build_sse(&chunks));
-    let tmp = tempfile::tempdir().unwrap();
-
-    let output = band_with_mock(&tmp, &mock, &["tasks", "watch", "--workspace", "ws-1"]);
-
-    assert!(output.status.success(), "stderr: {}", stderr(&output));
-    let err = stderr(&output);
-    assert!(
-        err.contains("Task completed in 2m 5s"),
-        "expected duration: {err}"
-    );
-    assert!(err.contains("$0.42"), "expected cost: {err}");
-    assert!(err.contains("12 turns"), "expected turns: {err}");
-}
-
-#[test]
-fn watch_render_full_conversation() {
-    let chunks = vec![
-        serde_json::json!({"type": "text-delta", "delta": "Let me fix that bug.\n"}),
-        serde_json::json!({"type": "text-end"}),
-        serde_json::json!({
-            "type": "tool-input-available",
-            "toolCallId": "tc_1",
-            "toolName": "Read",
-            "input": {"file_path": "/src/app.rs"}
-        }),
-        serde_json::json!({
-            "type": "tool-output-available",
-            "toolCallId": "tc_1",
-            "output": "fn main() { println!(\"hello\"); }"
-        }),
-        serde_json::json!({
-            "type": "tool-input-available",
-            "toolCallId": "tc_2",
-            "toolName": "Edit",
-            "input": {"file_path": "/src/app.rs"}
-        }),
-        serde_json::json!({
-            "type": "tool-output-available",
-            "toolCallId": "tc_2",
-            "output": "OK"
-        }),
-        serde_json::json!({"type": "text-delta", "delta": "Fixed it.\n"}),
-        serde_json::json!({"type": "text-end"}),
-        serde_json::json!({
-            "type": "data-result",
-            "data": {"durationMs": 5000}
-        }),
-        serde_json::json!({"type": "finish"}),
-    ];
-    let mock = MockSseServer::new(build_sse(&chunks));
-    let tmp = tempfile::tempdir().unwrap();
-
-    let output = band_with_mock(&tmp, &mock, &["tasks", "watch", "--workspace", "ws-1"]);
-
-    assert!(output.status.success(), "stderr: {}", stderr(&output));
-    let out = stdout(&output);
-    assert!(
-        out.contains("Let me fix that bug."),
-        "expected first text: {out}"
-    );
-    assert!(out.contains("Fixed it."), "expected second text: {out}");
-
-    let err = stderr(&output);
-    assert!(
-        err.contains("Read: /src/app.rs"),
-        "expected Read tool: {err}"
-    );
-    assert!(
-        err.contains("Edit: /src/app.rs"),
-        "expected Edit tool: {err}"
-    );
-    assert!(
-        err.contains("Task completed in 5s"),
-        "expected completion: {err}"
-    );
-}
-
-#[test]
-fn watch_render_json_mode_outputs_ndjson() {
-    let chunks = vec![
-        serde_json::json!({"type": "text-delta", "delta": "hi"}),
-        serde_json::json!({
-            "type": "tool-input-available",
-            "toolCallId": "tc_1",
-            "toolName": "Bash",
-            "input": {"command": "ls"}
-        }),
-        serde_json::json!({"type": "finish"}),
-    ];
-    let mock = MockSseServer::new(build_sse(&chunks));
-    let tmp = tempfile::tempdir().unwrap();
-
-    let output = band_with_mock(
-        &tmp,
-        &mock,
-        &["tasks", "watch", "--workspace", "ws-1", "--output", "json"],
-    );
-
-    let out = stdout(&output);
-    let lines: Vec<&str> = out.lines().collect();
-    assert_eq!(lines.len(), 3, "expected 3 NDJSON lines: {out}");
-    for line in &lines {
-        let v: serde_json::Value = serde_json::from_str(line)
-            .unwrap_or_else(|e| panic!("invalid NDJSON: {e}\nline: {line}"));
-        assert!(v.get("type").is_some(), "expected 'type' field: {v}");
+    let mut sse_body = String::new();
+    for c in &chunks {
+        write!(sse_body, "data: {}\n\n", serde_json::to_string(c).unwrap()).unwrap();
     }
-    // JSON mode should NOT have tool markers or banners on stderr
-    let err = stderr(&output);
-    assert!(
-        !err.contains("[watching task"),
-        "no banner in json mode: {err}"
+    let response = format!(
+        "HTTP/1.1 200 OK\r\n\
+         Content-Type: text/event-stream\r\n\
+         Connection: close\r\n\
+         \r\n\
+         {sse_body}"
     );
+
+    let mock = MockHttpServer::new(response);
+    let tmp = tempfile::tempdir().unwrap();
+    let out = band_against_mock(&tmp, &mock, &["chats", "watch", "chat_abc"]);
+
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    let stdout_str = stdout(&out);
+
+    // Each SSE event becomes exactly one NDJSON line on stdout.
+    let lines: Vec<&str> = stdout_str.lines().collect();
+    assert_eq!(
+        lines.len(),
+        chunks.len(),
+        "expected {} lines, got {}: {stdout_str}",
+        chunks.len(),
+        lines.len()
+    );
+    for (i, line) in lines.iter().enumerate() {
+        let parsed: serde_json::Value = serde_json::from_str(line)
+            .unwrap_or_else(|e| panic!("line {i} is not JSON: {e}\nline: {line}"));
+        assert_eq!(parsed, chunks[i], "line {i}: {line}");
+    }
 }
 
 #[test]
-fn watch_render_no_ansi_when_piped() {
-    let chunks = vec![
-        serde_json::json!({
-            "type": "tool-input-available",
-            "toolCallId": "tc_1",
-            "toolName": "Read",
-            "input": {"file_path": "/src/main.rs"}
-        }),
-        serde_json::json!({"type": "error", "errorText": "something failed"}),
-        serde_json::json!({
-            "type": "data-result",
-            "data": {"durationMs": 1000}
-        }),
-        serde_json::json!({"type": "finish"}),
-    ];
-    let mock = MockSseServer::new(build_sse(&chunks));
+fn chats_watch_no_running_task_exits_zero_with_empty_stdout() {
+    // Server returns 204 No Content when there's no active task.
+    let response = "HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n".to_string();
+    let mock = MockHttpServer::new(response);
     let tmp = tempfile::tempdir().unwrap();
+    let out = band_against_mock(&tmp, &mock, &["chats", "watch", "chat_idle"]);
 
-    let output = band_with_mock(&tmp, &mock, &["tasks", "watch", "--workspace", "ws-1"]);
-
-    let err = stderr(&output);
-    // CLI is piped in tests, so no ANSI escape codes should appear
-    assert!(
-        !err.contains("\x1b["),
-        "expected no ANSI codes when piped: {err}"
-    );
-    // But content should still be present
-    assert!(
-        err.contains("Read: /src/main.rs"),
-        "expected tool text: {err}"
-    );
-    assert!(err.contains("Error:"), "expected error text: {err}");
-    assert!(
-        err.contains("Task completed"),
-        "expected completion text: {err}"
-    );
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+    assert_eq!(stdout(&out), "", "expected empty stdout for 204");
 }
 
 #[test]
-fn watch_render_verbose_shows_tool_input_json() {
-    let chunks = vec![
-        serde_json::json!({
-            "type": "tool-input-available",
-            "toolCallId": "tc_1",
-            "toolName": "Grep",
-            "input": {"pattern": "TODO", "path": "/src"}
-        }),
-        serde_json::json!({"type": "finish"}),
-    ];
-    let mock = MockSseServer::new(build_sse(&chunks));
+fn chats_watch_url_encodes_chat_id_path_segment() {
+    // A hostile chat_id with a `/` must be percent-encoded so it can't
+    // smuggle path components into the request URL.
+    let response = "HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n".to_string();
+    let mock = MockHttpServer::new(response);
     let tmp = tempfile::tempdir().unwrap();
+    let _ = band_against_mock(&tmp, &mock, &["chats", "watch", "evil/../escape"]);
 
-    let output = band_with_mock(
-        &tmp,
-        &mock,
-        &["tasks", "watch", "--workspace", "ws-1", "--verbose"],
-    );
-
-    let err = stderr(&output);
-    // Verbose should show the formatted JSON input
+    let path = mock.captured_path().expect("mock did not capture a path");
     assert!(
-        err.contains("\"pattern\""),
-        "expected 'pattern' key in verbose output: {err}"
-    );
-    assert!(err.contains("\"TODO\""), "expected pattern value: {err}");
-    assert!(err.contains("\"path\""), "expected 'path' key: {err}");
-}
-
-#[test]
-fn watch_render_tools_full_shows_completion_and_output() {
-    let chunks = vec![
-        serde_json::json!({
-            "type": "tool-input-available",
-            "toolCallId": "tc_1",
-            "toolName": "Bash",
-            "input": {"command": "npm test"}
-        }),
-        serde_json::json!({
-            "type": "tool-output-available",
-            "toolCallId": "tc_1",
-            "output": "PASS all 5 tests"
-        }),
-        serde_json::json!({"type": "finish"}),
-    ];
-    let mock = MockSseServer::new(build_sse(&chunks));
-    let tmp = tempfile::tempdir().unwrap();
-
-    // Use --tools=full (same as --verbose for tool display)
-    let output = band_with_mock(
-        &tmp,
-        &mock,
-        &["tasks", "watch", "--workspace", "ws-1", "--tools", "full"],
-    );
-
-    let err = stderr(&output);
-    assert!(err.contains("\u{25b8}"), "expected start marker: {err}");
-    assert!(
-        err.contains("\u{2713}"),
-        "expected completion marker: {err}"
+        path.starts_with("/api/tasks/"),
+        "expected /api/tasks/ prefix: {path}"
     );
     assert!(
-        err.contains("PASS all 5 tests"),
-        "expected tool output: {err}"
+        !path.contains("/../"),
+        "chat_id slashes should be encoded, got: {path}"
+    );
+    assert!(
+        path.contains("evil%2F..%2Fescape"),
+        "expected percent-encoded chat_id segment: {path}"
     );
 }
 
-#[test]
-fn watch_render_text_then_tools_then_text() {
-    // Verify spacing when text and tools interleave
-    let chunks = vec![
-        serde_json::json!({"type": "text-delta", "delta": "First message\n"}),
-        serde_json::json!({"type": "text-end"}),
-        serde_json::json!({
-            "type": "tool-input-available",
-            "toolCallId": "tc_1",
-            "toolName": "Read",
-            "input": {"file_path": "/a.rs"}
-        }),
-        serde_json::json!({
-            "type": "tool-input-available",
-            "toolCallId": "tc_2",
-            "toolName": "Read",
-            "input": {"file_path": "/b.rs"}
-        }),
-        serde_json::json!({"type": "text-delta", "delta": "Second message"}),
-        serde_json::json!({"type": "text-end"}),
-        serde_json::json!({"type": "finish"}),
-    ];
-    let mock = MockSseServer::new(build_sse(&chunks));
-    let tmp = tempfile::tempdir().unwrap();
+// --- generate-skills tests ---
 
-    let output = band_with_mock(&tmp, &mock, &["tasks", "watch", "--workspace", "ws-1"]);
+/// Run the `band` binary with no `BAND_HOME` and no server. Used by tests for
+/// pure commands (like `generate-skills` and `schema`) that don't talk to the
+/// web server.
+fn band_offline(args: &[&str]) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_band"))
+        .args(args)
+        .output()
+        .expect("failed to execute band")
+}
 
-    let out = stdout(&output);
-    assert!(out.contains("First message"), "expected first msg: {out}");
-    assert!(out.contains("Second message"), "expected second msg: {out}");
+/// Read the generated SKILL.md for a given skill name from the output dir.
+fn read_skill(output_dir: &Path, name: &str) -> String {
+    let path = output_dir.join(name).join("SKILL.md");
+    fs::read_to_string(&path).unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()))
+}
 
-    let err = stderr(&output);
-    assert!(err.contains("Read: /a.rs"), "expected first tool: {err}");
-    assert!(err.contains("Read: /b.rs"), "expected second tool: {err}");
+/// Extract the auto-generated `## Commands` section from a SKILL.md.
+///
+/// The generator replaces the `<!-- COMMANDS -->` placeholder with a block
+/// that starts with `## Commands` and ends at the next top-level `## ` heading
+/// in the template (e.g. `## Workflows`). Tests use this to assert each
+/// domain's skill ships only its own schema-derived commands while still
+/// allowing cross-reference prose to mention sibling skills' commands.
+fn commands_section(skill: &str) -> &str {
+    let start = skill
+        .find("## Commands")
+        .unwrap_or_else(|| panic!("SKILL.md has no `## Commands` section"));
+    let rest = &skill[start..];
+    // Skip the heading itself when searching for the next `## ` heading.
+    let after_heading = &rest["## Commands".len()..];
+    let end_offset = after_heading
+        .find("\n## ")
+        .map_or(rest.len(), |i| "## Commands".len() + i + 1);
+    &rest[..end_offset]
+}
+
+/// Extract a single frontmatter field from a SKILL.md file's YAML header.
+fn frontmatter_field<'a>(skill: &'a str, key: &'a str) -> Option<&'a str> {
+    let mut lines = skill.lines();
+    // First line must be the opening `---`.
+    if lines.next().map(str::trim) != Some("---") {
+        return None;
+    }
+    for line in lines {
+        if line.trim() == "---" {
+            return None;
+        }
+        if let Some(rest) = line.strip_prefix(key) {
+            if let Some(value) = rest.strip_prefix(':') {
+                return Some(value.trim());
+            }
+        }
+    }
+    None
 }
 
 #[test]
-fn watch_render_data_result_without_optional_fields() {
-    let chunks = vec![
-        serde_json::json!({
-            "type": "data-result",
-            "data": {"durationMs": 3000}
-        }),
-        serde_json::json!({"type": "finish"}),
-    ];
-    let mock = MockSseServer::new(build_sse(&chunks));
-    let tmp = tempfile::tempdir().unwrap();
+fn generate_skills_emits_all_four_domain_skills() {
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let out = tmp.path();
 
-    let output = band_with_mock(&tmp, &mock, &["tasks", "watch", "--workspace", "ws-1"]);
+    let output = band_offline(&["generate-skills", "--output-dir", out.to_str().unwrap()]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
 
-    assert!(output.status.success());
-    let err = stderr(&output);
-    assert!(
-        err.contains("Task completed in 3s"),
-        "expected duration only: {err}"
-    );
-    // Should NOT contain cost or turns when not provided
-    assert!(!err.contains('$'), "no cost expected: {err}");
-    assert!(!err.contains("turns"), "no turns expected: {err}");
+    for name in ["band", "band-chat", "band-terminal", "band-browser"] {
+        let path = out.join(name).join("SKILL.md");
+        assert!(
+            path.exists(),
+            "expected {} to exist; out={}",
+            path.display(),
+            stdout(&output)
+        );
+    }
 }
 
 #[test]
-fn watch_render_multiple_tool_calls_with_summaries() {
-    let chunks = vec![
-        serde_json::json!({
-            "type": "tool-input-available",
-            "toolCallId": "tc_1",
-            "toolName": "Bash",
-            "input": {"command": "cargo build"}
-        }),
-        serde_json::json!({
-            "type": "tool-input-available",
-            "toolCallId": "tc_2",
-            "toolName": "Grep",
-            "input": {"pattern": "fn main", "path": "/src"}
-        }),
-        serde_json::json!({
-            "type": "tool-input-available",
-            "toolCallId": "tc_3",
-            "toolName": "Glob",
-            "input": {"pattern": "**/*.rs"}
-        }),
-        serde_json::json!({"type": "finish"}),
-    ];
-    let mock = MockSseServer::new(build_sse(&chunks));
-    let tmp = tempfile::tempdir().unwrap();
+fn generate_skills_each_skill_has_non_empty_description() {
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let out = tmp.path();
+    let output = band_offline(&["generate-skills", "--output-dir", out.to_str().unwrap()]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
 
-    let output = band_with_mock(&tmp, &mock, &["tasks", "watch", "--workspace", "ws-1"]);
-
-    let err = stderr(&output);
-    assert!(
-        err.contains("Bash: cargo build"),
-        "expected Bash summary: {err}"
-    );
-    assert!(err.contains("Grep: /src"), "expected Grep summary: {err}");
-    assert!(
-        err.contains("Glob: **/*.rs"),
-        "expected Glob summary: {err}"
-    );
+    for name in ["band", "band-chat", "band-terminal", "band-browser"] {
+        let skill = read_skill(out, name);
+        let desc = frontmatter_field(&skill, "description")
+            .unwrap_or_else(|| panic!("{name} has no description"));
+        assert!(!desc.is_empty(), "{name} description must be non-empty");
+        // The description must be specific enough to mention what triggers
+        // the skill — sanity-check that each domain's description references
+        // its own keyword and not the others'.
+        let lower = desc.to_lowercase();
+        match name {
+            "band-chat" => {
+                assert!(lower.contains("chat"), "{name}: {desc}");
+                assert!(
+                    !lower.contains("terminal") && !lower.contains("browser"),
+                    "{name} description leaks other domains: {desc}"
+                );
+            }
+            "band-terminal" => {
+                assert!(lower.contains("terminal"), "{name}: {desc}");
+                assert!(
+                    !lower.contains(" chat ") && !lower.contains("browser"),
+                    "{name} description leaks other domains: {desc}"
+                );
+            }
+            "band-browser" => {
+                assert!(lower.contains("browser"), "{name}: {desc}");
+                assert!(
+                    !lower.contains(" chat ") && !lower.contains("terminal"),
+                    "{name} description leaks other domains: {desc}"
+                );
+            }
+            _ => {}
+        }
+    }
 }
 
 #[test]
-fn watch_render_tool_with_no_matching_summary_key() {
-    // When tool input has no recognized key, just show tool name
-    let chunks = vec![
-        serde_json::json!({
-            "type": "tool-input-available",
-            "toolCallId": "tc_1",
-            "toolName": "CustomTool",
-            "input": {"foo": "bar"}
-        }),
-        serde_json::json!({"type": "finish"}),
-    ];
-    let mock = MockSseServer::new(build_sse(&chunks));
-    let tmp = tempfile::tempdir().unwrap();
+fn generate_skills_general_skill_excludes_domain_commands() {
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let out = tmp.path();
+    let output = band_offline(&["generate-skills", "--output-dir", out.to_str().unwrap()]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
 
-    let output = band_with_mock(&tmp, &mock, &["tasks", "watch", "--workspace", "ws-1"]);
+    let band = read_skill(out, "band");
+    let cmds = commands_section(&band);
 
-    let err = stderr(&output);
-    assert!(err.contains("CustomTool"), "expected tool name: {err}");
-    // Should NOT have "CustomTool:" (with colon) since no summary value
+    // Includes general commands.
+    for needle in [
+        "band projects list",
+        "band workspaces create",
+        "band workspaces remove",
+        "band cronjobs create",
+        "band tunnel start",
+        "band settings",
+        "band schema",
+        "band generate-skills",
+    ] {
+        assert!(
+            cmds.contains(needle),
+            "general skill Commands section missing `{needle}`"
+        );
+    }
+
+    // The Commands section must not document any domain commands — those
+    // live in the sibling skills. Cross-reference prose elsewhere in the
+    // skill is allowed and verified separately.
+    //
+    // The whole `band chats *` group belongs to band-chat. The `tasks`
+    // subcommand was fully removed.
     assert!(
-        !err.contains("CustomTool:"),
-        "no colon when no summary key: {err}"
+        !cmds.contains("\nband chats "),
+        "general skill Commands section leaks `band chats` command"
     );
+    assert!(
+        !cmds.contains("\nband tasks "),
+        "general skill Commands section leaks removed `band tasks` command"
+    );
+    for needle in [
+        "band chats list",
+        "band chats create",
+        "band chats send",
+        "band terminals list",
+        "band terminals create",
+        "band terminals send",
+        "band browsers list",
+        "band browsers create",
+        "band browsers navigate",
+    ] {
+        assert!(
+            !cmds.contains(needle),
+            "general skill Commands section leaks domain command `{needle}`"
+        );
+    }
 }
 
 #[test]
-fn watch_render_tool_not_inline_with_text() {
-    // Regression: tool calls must not appear on the same line as text output.
-    // The text-end chunk resets in_text, but if the last delta didn't end with \n,
-    // the tool line would appear visually inline on the terminal.
-    let chunks = vec![
-        serde_json::json!({"type": "text-delta", "delta": "Analyzing code:"}),
-        serde_json::json!({"type": "text-end"}),
-        serde_json::json!({
-            "type": "tool-input-available",
-            "toolCallId": "tc_1",
-            "toolName": "Read",
-            "input": {"file_path": "/src/main.rs"}
-        }),
-        serde_json::json!({"type": "finish"}),
-    ];
-    let mock = MockSseServer::new(build_sse(&chunks));
-    let tmp = tempfile::tempdir().unwrap();
+fn generate_skills_chat_skill_contains_only_chat_commands() {
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let out = tmp.path();
+    let output = band_offline(&["generate-skills", "--output-dir", out.to_str().unwrap()]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
 
-    let output = band_with_mock(&tmp, &mock, &["tasks", "watch", "--workspace", "ws-1"]);
+    let chat = read_skill(out, "band-chat");
+    let cmds = commands_section(&chat);
 
-    // stdout should end with a newline (the renderer adds one before the tool line)
-    let raw_stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        raw_stdout.ends_with('\n'),
-        "stdout should end with newline when tool follows non-newline text: {raw_stdout:?}"
-    );
-    // Tool line should be on its own line in stderr, not mixed into stdout
-    let err = stderr(&output);
-    assert!(
-        err.contains("Read: /src/main.rs"),
-        "tool line present: {err}"
-    );
+    // The entire `band chats *` group lives here. `chats send` is the
+    // message-sending entry point (replaces the old `chats chat`).
+    for needle in [
+        "band chats list",
+        "band chats create",
+        "band chats send",
+        "band chats watch",
+        "band chats stop",
+        "band chats remove",
+    ] {
+        assert!(
+            cmds.contains(needle),
+            "band-chat Commands section missing `{needle}`"
+        );
+    }
+
+    for needle in [
+        "band terminals list",
+        "band browsers list",
+        "band workspaces list",
+        "band projects list",
+    ] {
+        assert!(
+            !cmds.contains(needle),
+            "band-chat Commands section leaks foreign command `{needle}`"
+        );
+    }
 }
 
 #[test]
-fn watch_render_verbose_truncates_long_output() {
-    let long_output = "x".repeat(3000);
-    let chunks = vec![
-        serde_json::json!({
-            "type": "tool-input-available",
-            "toolCallId": "tc_1",
-            "toolName": "Bash",
-            "input": {"command": "cat bigfile"}
-        }),
-        serde_json::json!({
-            "type": "tool-output-available",
-            "toolCallId": "tc_1",
-            "output": long_output
-        }),
-        serde_json::json!({"type": "finish"}),
-    ];
-    let mock = MockSseServer::new(build_sse(&chunks));
-    let tmp = tempfile::tempdir().unwrap();
+fn generate_skills_terminal_skill_contains_only_terminal_commands() {
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let out = tmp.path();
+    let output = band_offline(&["generate-skills", "--output-dir", out.to_str().unwrap()]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
 
-    let output = band_with_mock(
-        &tmp,
-        &mock,
-        &["tasks", "watch", "--workspace", "ws-1", "--verbose"],
-    );
+    let term = read_skill(out, "band-terminal");
+    let cmds = commands_section(&term);
 
-    let err = stderr(&output);
-    assert!(
-        err.contains("[...truncated]"),
-        "expected truncation marker: {err}"
-    );
-    // Full 3000-char output should not appear
-    assert!(
-        !err.contains(&"x".repeat(3000)),
-        "should not contain full output"
-    );
+    for needle in [
+        "band terminals list",
+        "band terminals create",
+        "band terminals send",
+        "band terminals output",
+        "band terminals kill",
+        "band terminals attach",
+    ] {
+        assert!(
+            cmds.contains(needle),
+            "band-terminal Commands section missing `{needle}`"
+        );
+    }
+
+    for needle in [
+        "band chats list",
+        "band browsers list",
+        "band workspaces list",
+        "band projects list",
+    ] {
+        assert!(
+            !cmds.contains(needle),
+            "band-terminal Commands section leaks foreign command `{needle}`"
+        );
+    }
+}
+
+#[test]
+fn generate_skills_browser_skill_contains_only_browser_commands() {
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let out = tmp.path();
+    let output = band_offline(&["generate-skills", "--output-dir", out.to_str().unwrap()]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let browser = read_skill(out, "band-browser");
+    let cmds = commands_section(&browser);
+
+    for needle in [
+        "band browsers list",
+        "band browsers create",
+        "band browsers navigate",
+        "band browsers get",
+        "band browsers remove",
+    ] {
+        assert!(
+            cmds.contains(needle),
+            "band-browser Commands section missing `{needle}`"
+        );
+    }
+
+    for needle in [
+        "band chats list",
+        "band terminals list",
+        "band workspaces list",
+        "band projects list",
+    ] {
+        assert!(
+            !cmds.contains(needle),
+            "band-browser Commands section leaks foreign command `{needle}`"
+        );
+    }
+}
+
+#[test]
+fn generate_skills_filter_limits_to_one_skill() {
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let out = tmp.path();
+    let output = band_offline(&[
+        "generate-skills",
+        "--output-dir",
+        out.to_str().unwrap(),
+        "--filter",
+        "chat",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    assert!(out.join("band-chat").join("SKILL.md").exists());
+    assert!(!out.join("band").join("SKILL.md").exists());
+    assert!(!out.join("band-terminal").join("SKILL.md").exists());
+    assert!(!out.join("band-browser").join("SKILL.md").exists());
+}
+
+#[test]
+fn generate_skills_json_output_lists_generated_skills() {
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let out = tmp.path();
+    let output = band_offline(&[
+        "generate-skills",
+        "--output-dir",
+        out.to_str().unwrap(),
+        "--output",
+        "json",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output))
+        .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)));
+    let skills = json["skills"].as_array().expect("skills array");
+    let names: Vec<&str> = skills.iter().map(|s| s["name"].as_str().unwrap()).collect();
+
+    assert_eq!(names.len(), 4, "expected 4 skills, got {names:?}");
+    assert!(names.contains(&"band"));
+    assert!(names.contains(&"band-chat"));
+    assert!(names.contains(&"band-terminal"));
+    assert!(names.contains(&"band-browser"));
+
+    // Every skill must report at least one command.
+    for skill in skills {
+        let count = skill["commandCount"].as_u64().unwrap_or(0);
+        assert!(
+            count > 0,
+            "skill {} has no commands",
+            skill["name"].as_str().unwrap_or("?")
+        );
+    }
 }

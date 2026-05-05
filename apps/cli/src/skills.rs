@@ -3,8 +3,19 @@ use std::fmt::Write;
 use std::fs;
 use std::path::Path;
 
-/// Service skill template with `<!-- COMMANDS -->` placeholder.
-const BAND_CLI_TEMPLATE: &str = include_str!("../skills/band-cli.md");
+/// Domain-specific skill templates with `<!-- COMMANDS -->` placeholders.
+///
+/// Each template has a `commands:` frontmatter field that lists the
+/// space-separated command-name prefixes from the CLI schema that should be
+/// embedded into that skill's COMMANDS section. Splitting the monolithic
+/// skill into focused per-domain skills improves trigger precision and keeps
+/// each generated SKILL.md scoped to one task type (issue #331).
+const SKILL_TEMPLATES: &[(&str, &str)] = &[
+    ("band", include_str!("../skills/band.md")),
+    ("band-chat", include_str!("../skills/band-chat.md")),
+    ("band-terminal", include_str!("../skills/band-terminal.md")),
+    ("band-browser", include_str!("../skills/band-browser.md")),
+];
 
 pub fn generate_skills(output_dir: &str, filter: Option<&str>) -> Result<CommandResult, String> {
     let schema = crate::build_schema(None)?;
@@ -18,22 +29,50 @@ pub fn generate_skills(output_dir: &str, filter: Option<&str>) -> Result<Command
 
     let mut generated: Vec<serde_json::Value> = Vec::new();
 
-    // Generate service skill
-    let svc_name =
-        parse_frontmatter_field(BAND_CLI_TEMPLATE, "name").unwrap_or("band-cli".to_string());
-    let svc_desc = parse_frontmatter_field(BAND_CLI_TEMPLATE, "description").unwrap_or_default();
-    if matches_filter(&svc_name, filter) {
-        let content = generate_service_skill(commands);
-        let dir_path = output_path.join(&svc_name);
+    for (default_name, template) in SKILL_TEMPLATES {
+        let name = parse_frontmatter_field(template, "name")
+            .unwrap_or_else(|| (*default_name).to_string());
+        let description = parse_frontmatter_field(template, "description").unwrap_or_default();
+        let prefixes = parse_command_prefixes(template);
+
+        if !matches_filter(&name, filter) {
+            continue;
+        }
+
+        if prefixes.is_empty() {
+            return Err(format!(
+                "Skill template '{name}' is missing a non-empty 'commands:' frontmatter field"
+            ));
+        }
+
+        let matched: Vec<&serde_json::Value> = commands
+            .iter()
+            .filter(|c| {
+                c["name"]
+                    .as_str()
+                    .is_some_and(|cn| matches_any_prefix(cn, &prefixes))
+            })
+            .collect();
+
+        if matched.is_empty() {
+            return Err(format!(
+                "Skill template '{name}' matched no commands from the schema (prefixes: {prefixes:?})"
+            ));
+        }
+
+        let content = generate_skill_content(template, &matched);
+        let dir_path = output_path.join(&name);
         fs::create_dir_all(&dir_path)
             .map_err(|e| format!("Failed to create directory {}: {e}", dir_path.display()))?;
         fs::write(dir_path.join("SKILL.md"), &content)
-            .map_err(|e| format!("Failed to write {svc_name}/SKILL.md: {e}"))?;
+            .map_err(|e| format!("Failed to write {name}/SKILL.md: {e}"))?;
+
         generated.push(serde_json::json!({
-            "name": svc_name,
-            "type": "service",
-            "description": svc_desc,
-            "path": format!("{svc_name}/SKILL.md"),
+            "name": name,
+            "description": description,
+            "commandPrefixes": prefixes,
+            "commandCount": matched.len(),
+            "path": format!("{name}/SKILL.md"),
         }));
     }
 
@@ -46,9 +85,9 @@ pub fn generate_skills(output_dir: &str, filter: Option<&str>) -> Result<Command
     for entry in &generated {
         let _ = writeln!(
             text,
-            "  {} ({})",
+            "  {} ({} command(s))",
             entry["name"].as_str().unwrap_or(""),
-            entry["type"].as_str().unwrap_or("")
+            entry["commandCount"].as_u64().unwrap_or(0),
         );
     }
 
@@ -66,6 +105,29 @@ fn matches_filter(name: &str, filter: Option<&str>) -> bool {
         None => true,
         Some(f) => name.to_lowercase().contains(&f.to_lowercase()),
     }
+}
+
+/// Returns true when `command_name` matches any of the prefixes.
+///
+/// A "match" is either exact equality or `command_name` starting with
+/// `prefix + " "` so that `terminal` matches `terminal list` but not
+/// `terminal-something-else`.
+fn matches_any_prefix(command_name: &str, prefixes: &[String]) -> bool {
+    prefixes
+        .iter()
+        .any(|p| command_name == p || command_name.starts_with(&format!("{p} ")))
+}
+
+/// Parse the `commands:` frontmatter field as a list of comma-separated prefixes.
+fn parse_command_prefixes(content: &str) -> Vec<String> {
+    parse_frontmatter_field(content, "commands")
+        .map(|raw| {
+            raw.split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Parse a single field from YAML frontmatter delimited by `---`.
@@ -92,7 +154,7 @@ fn parse_frontmatter_field(content: &str, key: &str) -> Option<String> {
 
 const COMMANDS_PLACEHOLDER: &str = "<!-- COMMANDS -->";
 
-fn generate_service_skill(commands: &[serde_json::Value]) -> String {
+fn generate_skill_content(template: &str, commands: &[&serde_json::Value]) -> String {
     let mut cmds = String::new();
     let _ = writeln!(cmds, "## Commands");
     let _ = writeln!(cmds);
@@ -114,7 +176,7 @@ fn generate_service_skill(commands: &[serde_json::Value]) -> String {
         }
     }
 
-    BAND_CLI_TEMPLATE.replace(COMMANDS_PLACEHOLDER, cmds.trim_end())
+    template.replace(COMMANDS_PLACEHOLDER, cmds.trim_end())
 }
 
 fn format_usage_line(cmd: &serde_json::Value) -> String {

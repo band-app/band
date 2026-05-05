@@ -1,11 +1,9 @@
 mod api;
-mod render;
 mod skills;
 mod state;
 mod validate;
 
 use clap::{Parser, Subcommand};
-use std::collections::HashMap;
 use std::fmt::Write;
 use std::io::BufRead;
 use std::process;
@@ -34,48 +32,20 @@ enum Commands {
         #[command(subcommand)]
         cmd: WorkspacesCmd,
     },
-    /// Manage coding agent tasks
-    Tasks {
-        #[command(subcommand)]
-        cmd: TasksCmd,
-    },
-    /// Send a message to a workspace chat (defaults to the workspace's active chat panel)
-    Chat {
-        /// Workspace ID (auto-detected from cwd if omitted)
-        workspace_id: Option<String>,
-        /// Message text to send
-        #[arg(long)]
-        message: String,
-        /// Target a specific chat pane instead of the workspace default
-        #[arg(long)]
-        chat_id: Option<String>,
-        /// Maximum number of agentic turns
-        #[arg(long)]
-        max_turns: Option<u32>,
-        /// Agent mode (e.g. 'plan', 'edit')
-        #[arg(long)]
-        mode: Option<String>,
-        /// Model to use for the coding agent (e.g. 'claude-opus-4-20250514')
-        #[arg(long)]
-        model: Option<String>,
-        /// Coding agent ID (e.g. 'claude-code')
-        #[arg(long)]
-        agent: Option<String>,
-    },
     /// Manage chat panes (multi-agent)
     Chats {
         #[command(subcommand)]
         cmd: ChatsCmd,
     },
     /// Manage browser tabs
-    Browser {
+    Browsers {
         #[command(subcommand)]
-        cmd: BrowserCmd,
+        cmd: BrowsersCmd,
     },
     /// Manage terminal sessions
-    Terminal {
+    Terminals {
         #[command(subcommand)]
-        cmd: TerminalCmd,
+        cmd: TerminalsCmd,
     },
     /// Manage scheduled cronjobs
     Cronjobs {
@@ -168,53 +138,16 @@ enum WorkspacesCmd {
 }
 
 #[derive(Subcommand)]
-enum TasksCmd {
-    /// List tasks
-    List {
-        /// Filter by project name
-        #[arg(long)]
-        project: Option<String>,
-        /// Filter by status (running, completed, failed)
-        #[arg(long)]
-        status: Option<String>,
-    },
-    /// Cancel a running task
-    Cancel {
-        /// Task ID (e.g. `tsk_1234567890`)
-        task_id: String,
-    },
-    /// Re-run a completed or failed task
-    Rerun {
-        /// Task ID (e.g. `tsk_1234567890`)
-        task_id: String,
-    },
-    /// Stream task output in real-time
-    Watch {
-        /// Task ID (optional if --workspace is provided)
-        id: Option<String>,
-        /// Watch the latest task for this workspace
-        #[arg(long)]
-        workspace: Option<String>,
-        /// Show full tool inputs and outputs
-        #[arg(long, short = 'v')]
-        verbose: bool,
-        /// Tool call visibility: auto (default), off, full
-        #[arg(long, default_value = "auto")]
-        tools: String,
-    },
-}
-
-#[derive(Subcommand)]
 enum ChatsCmd {
     /// List chat panes for a workspace
     List {
-        /// Workspace ID
-        workspace_id: String,
+        /// Workspace ID (auto-detected from cwd if omitted)
+        workspace_id: Option<String>,
     },
     /// Create a new chat pane
     Create {
-        /// Workspace ID
-        workspace_id: String,
+        /// Workspace ID (auto-detected from cwd if omitted)
+        workspace_id: Option<String>,
         /// Display name for the chat pane
         #[arg(long)]
         name: Option<String>,
@@ -228,37 +161,57 @@ enum ChatsCmd {
         #[arg(long)]
         mode: Option<String>,
     },
-    /// Send a message to a chat pane
+    /// Send a message to a workspace chat (defaults to the workspace's active chat panel)
     Send {
-        /// Chat pane ID
-        chat_id: String,
+        /// Chat pane ID (defaults to the workspace's active chat panel)
+        chat_id: Option<String>,
         /// Message text
         #[arg(long)]
         message: String,
+        /// Workspace ID (auto-detected from cwd if omitted)
+        #[arg(long)]
+        workspace: Option<String>,
+        /// Maximum number of agentic turns
+        #[arg(long)]
+        max_turns: Option<u32>,
+        /// Agent mode (e.g. 'plan', 'edit')
+        #[arg(long)]
+        mode: Option<String>,
+        /// Model to use for the coding agent (e.g. 'claude-opus-4-20250514')
+        #[arg(long)]
+        model: Option<String>,
+        /// Coding agent ID (e.g. 'claude-code')
+        #[arg(long)]
+        agent: Option<String>,
+    },
+    /// Stream a chat pane's running task as raw NDJSON
+    Watch {
+        /// Chat pane ID (defaults to the cwd workspace's first chat pane)
+        chat_id: Option<String>,
     },
     /// Stop a running chat pane
     Stop {
-        /// Chat pane ID
-        chat_id: String,
+        /// Chat pane ID (defaults to the cwd workspace's first chat pane)
+        chat_id: Option<String>,
     },
     /// Remove a chat pane
     Remove {
-        /// Chat pane ID
-        chat_id: String,
+        /// Chat pane ID (defaults to the cwd workspace's first chat pane)
+        chat_id: Option<String>,
     },
 }
 
 #[derive(Subcommand)]
-enum BrowserCmd {
+enum BrowsersCmd {
     /// List browser tabs for a workspace
     List {
-        /// Workspace ID
-        workspace_id: String,
+        /// Workspace ID (auto-detected from cwd if omitted)
+        workspace_id: Option<String>,
     },
     /// Create a new browser tab
     Create {
-        /// Workspace ID
-        workspace_id: String,
+        /// Workspace ID (auto-detected from cwd if omitted)
+        workspace_id: Option<String>,
         /// Initial URL to navigate to
         #[arg(long)]
         url: Option<String>,
@@ -268,34 +221,35 @@ enum BrowserCmd {
     },
     /// Navigate a browser tab to a URL
     Navigate {
-        /// Browser tab ID
-        browser_id: String,
+        /// Browser tab ID (defaults to the cwd workspace's first browser tab)
+        browser_id: Option<String>,
         /// URL to navigate to
+        #[arg(long)]
         url: String,
     },
     /// Get a browser tab's current state
     Get {
-        /// Browser tab ID
-        browser_id: String,
+        /// Browser tab ID (defaults to the cwd workspace's first browser tab)
+        browser_id: Option<String>,
     },
     /// Remove a browser tab
     Remove {
-        /// Browser tab ID
-        browser_id: String,
+        /// Browser tab ID (defaults to the cwd workspace's first browser tab)
+        browser_id: Option<String>,
     },
 }
 
 #[derive(Subcommand)]
-enum TerminalCmd {
+enum TerminalsCmd {
     /// List terminal sessions for a workspace
     List {
-        /// Workspace ID
-        workspace_id: String,
+        /// Workspace ID (auto-detected from cwd if omitted)
+        workspace_id: Option<String>,
     },
     /// Create a new terminal session
     Create {
-        /// Workspace ID
-        workspace_id: String,
+        /// Workspace ID (auto-detected from cwd if omitted)
+        workspace_id: Option<String>,
         /// Shell command to auto-run after spawn
         #[arg(long)]
         command: Option<String>,
@@ -305,16 +259,16 @@ enum TerminalCmd {
     },
     /// Send input to a terminal session
     Send {
-        /// Terminal ID
-        terminal_id: String,
+        /// Terminal ID (defaults to the cwd workspace's first terminal)
+        terminal_id: Option<String>,
         /// Text to send (supports \\n for newline, \\t for tab)
         #[arg(long)]
         data: String,
     },
     /// Get terminal output (scrollback buffer)
     Output {
-        /// Terminal ID
-        terminal_id: String,
+        /// Terminal ID (defaults to the cwd workspace's first terminal)
+        terminal_id: Option<String>,
         /// Number of lines to show (from end of buffer)
         #[arg(long, short = 'n')]
         lines: Option<u32>,
@@ -324,13 +278,13 @@ enum TerminalCmd {
     },
     /// Kill a terminal session
     Kill {
-        /// Terminal ID
-        terminal_id: String,
+        /// Terminal ID (defaults to the cwd workspace's first terminal)
+        terminal_id: Option<String>,
     },
     /// Attach to a terminal (stream output + send input interactively)
     Attach {
-        /// Terminal ID
-        terminal_id: String,
+        /// Terminal ID (defaults to the cwd workspace's first terminal)
+        terminal_id: Option<String>,
     },
 }
 
@@ -434,47 +388,35 @@ fn main() {
         return;
     }
 
-    // Watch streams output directly, handle separately
-    if let Commands::Tasks {
-        cmd:
-            TasksCmd::Watch {
-                ref id,
-                ref workspace,
-                verbose,
-                ref tools,
-            },
-    } = cli.command
-    {
-        let tool_display = match tools.as_str() {
-            "off" => render::ToolDisplay::Off,
-            "full" => render::ToolDisplay::Full,
-            _ => render::ToolDisplay::Auto,
-        };
-        let config = render::RenderConfig::new(verbose, tool_display);
-        let exit_code = handle_watch(id.as_deref(), workspace.as_deref(), json_output, config);
-        process::exit(exit_code);
-    }
-
     // terminal output --follow streams output directly
-    if let Commands::Terminal {
+    if let Commands::Terminals {
         cmd:
-            TerminalCmd::Output {
+            TerminalsCmd::Output {
                 ref terminal_id,
                 lines,
                 follow: true,
             },
     } = cli.command
     {
-        let exit_code = handle_terminal_follow(terminal_id, lines, json_output);
+        let exit_code = handle_terminal_follow(terminal_id.as_deref(), lines, json_output);
         process::exit(exit_code);
     }
 
     // terminal attach is interactive streaming
-    if let Commands::Terminal {
-        cmd: TerminalCmd::Attach { ref terminal_id },
+    if let Commands::Terminals {
+        cmd: TerminalsCmd::Attach { ref terminal_id },
     } = cli.command
     {
-        let exit_code = handle_terminal_attach(terminal_id, json_output);
+        let exit_code = handle_terminal_attach(terminal_id.as_deref(), json_output);
+        process::exit(exit_code);
+    }
+
+    // chats watch streams the chat's running task as raw NDJSON
+    if let Commands::Chats {
+        cmd: ChatsCmd::Watch { ref chat_id },
+    } = cli.command
+    {
+        let exit_code = handle_chats_watch(chat_id.as_deref());
         process::exit(exit_code);
     }
 
@@ -507,33 +449,8 @@ fn main() {
             ),
             WorkspacesCmd::Remove { project, branch } => cmd_workspaces_remove(&project, &branch),
         },
-        Commands::Tasks { cmd } => match cmd {
-            TasksCmd::List { project, status } => {
-                cmd_tasks_list(project.as_deref(), status.as_deref())
-            }
-            TasksCmd::Cancel { task_id } => cmd_tasks_cancel(&task_id),
-            TasksCmd::Rerun { task_id } => cmd_tasks_rerun(&task_id),
-            TasksCmd::Watch { .. } => unreachable!(),
-        },
-        Commands::Chat {
-            workspace_id,
-            message,
-            chat_id,
-            max_turns,
-            mode,
-            model,
-            agent,
-        } => cmd_chat(
-            workspace_id.as_deref(),
-            &message,
-            chat_id.as_deref(),
-            max_turns,
-            mode.as_deref(),
-            model.as_deref(),
-            agent.as_deref(),
-        ),
         Commands::Chats { cmd } => match cmd {
-            ChatsCmd::List { workspace_id } => cmd_chats_list(&workspace_id),
+            ChatsCmd::List { workspace_id } => cmd_chats_list(workspace_id.as_deref()),
             ChatsCmd::Create {
                 workspace_id,
                 name,
@@ -541,42 +458,63 @@ fn main() {
                 model,
                 mode,
             } => cmd_chats_create(
-                &workspace_id,
+                workspace_id.as_deref(),
                 name.as_deref(),
                 agent.as_deref(),
                 model.as_deref(),
                 mode.as_deref(),
             ),
-            ChatsCmd::Send { chat_id, message } => cmd_chats_send(&chat_id, &message),
-            ChatsCmd::Stop { chat_id } => cmd_chats_stop(&chat_id),
-            ChatsCmd::Remove { chat_id } => cmd_chats_remove(&chat_id),
+            ChatsCmd::Send {
+                chat_id,
+                message,
+                workspace,
+                max_turns,
+                mode,
+                model,
+                agent,
+            } => cmd_chats_send(
+                chat_id.as_deref(),
+                &message,
+                workspace.as_deref(),
+                max_turns,
+                mode.as_deref(),
+                model.as_deref(),
+                agent.as_deref(),
+            ),
+            ChatsCmd::Watch { .. } => unreachable!(),
+            ChatsCmd::Stop { chat_id } => cmd_chats_stop(chat_id.as_deref()),
+            ChatsCmd::Remove { chat_id } => cmd_chats_remove(chat_id.as_deref()),
         },
-        Commands::Browser { cmd } => match cmd {
-            BrowserCmd::List { workspace_id } => cmd_browser_list(&workspace_id),
-            BrowserCmd::Create {
+        Commands::Browsers { cmd } => match cmd {
+            BrowsersCmd::List { workspace_id } => cmd_browser_list(workspace_id.as_deref()),
+            BrowsersCmd::Create {
                 workspace_id,
                 url,
                 name,
-            } => cmd_browser_create(&workspace_id, url.as_deref(), name.as_deref()),
-            BrowserCmd::Navigate { browser_id, url } => cmd_browser_navigate(&browser_id, &url),
-            BrowserCmd::Get { browser_id } => cmd_browser_get(&browser_id),
-            BrowserCmd::Remove { browser_id } => cmd_browser_remove(&browser_id),
+            } => cmd_browser_create(workspace_id.as_deref(), url.as_deref(), name.as_deref()),
+            BrowsersCmd::Navigate { url, browser_id } => {
+                cmd_browser_navigate(browser_id.as_deref(), &url)
+            }
+            BrowsersCmd::Get { browser_id } => cmd_browser_get(browser_id.as_deref()),
+            BrowsersCmd::Remove { browser_id } => cmd_browser_remove(browser_id.as_deref()),
         },
-        Commands::Terminal { cmd } => match cmd {
-            TerminalCmd::List { workspace_id } => cmd_terminal_list(&workspace_id),
-            TerminalCmd::Create {
+        Commands::Terminals { cmd } => match cmd {
+            TerminalsCmd::List { workspace_id } => cmd_terminal_list(workspace_id.as_deref()),
+            TerminalsCmd::Create {
                 workspace_id,
                 command,
                 cwd,
-            } => cmd_terminal_create(&workspace_id, command.as_deref(), cwd.as_deref()),
-            TerminalCmd::Send { terminal_id, data } => cmd_terminal_send(&terminal_id, &data),
-            TerminalCmd::Output {
+            } => cmd_terminal_create(workspace_id.as_deref(), command.as_deref(), cwd.as_deref()),
+            TerminalsCmd::Send { terminal_id, data } => {
+                cmd_terminal_send(terminal_id.as_deref(), &data)
+            }
+            TerminalsCmd::Output {
                 terminal_id,
                 lines,
                 follow: false,
-            } => cmd_terminal_output(&terminal_id, lines),
-            TerminalCmd::Output { .. } | TerminalCmd::Attach { .. } => unreachable!(),
-            TerminalCmd::Kill { terminal_id } => cmd_terminal_kill(&terminal_id),
+            } => cmd_terminal_output(terminal_id.as_deref(), lines),
+            TerminalsCmd::Output { .. } | TerminalsCmd::Attach { .. } => unreachable!(),
+            TerminalsCmd::Kill { terminal_id } => cmd_terminal_kill(terminal_id.as_deref()),
         },
         Commands::Cronjobs { cmd } => match cmd {
             CronjobsCmd::List { project, workspace } => {
@@ -869,88 +807,11 @@ fn cmd_workspaces_remove(project: &str, branch: &str) -> Result<CommandResult, S
     })
 }
 
-// --- Tasks commands ---
-
-fn cmd_tasks_list(project: Option<&str>, status: Option<&str>) -> Result<CommandResult, String> {
-    let client = api::ApiClient::from_settings()?;
-
-    let mut input = serde_json::json!({});
-    if let Some(p) = project {
-        input["project"] = serde_json::json!(p);
-    }
-    if let Some(s) = status {
-        input["status"] = serde_json::json!(s);
-    }
-
-    let data = client.trpc_query("tasks.list", &input)?;
-    let tasks = data
-        .get("tasks")
-        .and_then(|t| t.as_array())
-        .cloned()
-        .unwrap_or_default();
-
-    let mut rows: Vec<[String; 4]> = Vec::new();
-    let mut json_tasks = Vec::new();
-    for task in &tasks {
-        let id = task.get("id").and_then(|v| v.as_str()).unwrap_or("");
-        let prompt = task.get("prompt").and_then(|v| v.as_str()).unwrap_or("");
-        let task_status = task.get("status").and_then(|v| v.as_str()).unwrap_or("");
-        let project_name = task.get("project").and_then(|v| v.as_str()).unwrap_or("");
-        let branch = task.get("branch").and_then(|v| v.as_str()).unwrap_or("");
-
-        let truncated_prompt = if prompt.len() > 60 {
-            format!("{}...", &prompt[..57])
-        } else {
-            prompt.to_string()
-        };
-
-        rows.push([
-            id.to_string(),
-            task_status.to_string(),
-            format!("{project_name}/{branch}"),
-            truncated_prompt,
-        ]);
-
-        json_tasks.push(task.clone());
-    }
-
-    let text = format_table(&["ID", "STATUS", "WORKSPACE", "PROMPT"], &rows);
-
-    Ok(CommandResult {
-        text,
-        json: serde_json::json!({"tasks": json_tasks}),
-    })
-}
-
-fn cmd_tasks_cancel(task_id: &str) -> Result<CommandResult, String> {
-    let client = api::ApiClient::from_settings()?;
-    client.trpc_mutate("tasks.cancel", &serde_json::json!({"taskId": task_id}))?;
-
-    Ok(CommandResult {
-        text: format!("Task {task_id} cancelled\n"),
-        json: serde_json::json!({"cancelled": true, "taskId": task_id}),
-    })
-}
-
-fn cmd_tasks_rerun(task_id: &str) -> Result<CommandResult, String> {
-    let client = api::ApiClient::from_settings()?;
-    let data = client.trpc_mutate("tasks.rerun", &serde_json::json!({"taskId": task_id}))?;
-
-    let workspace_id = data
-        .get("workspaceId")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-
-    Ok(CommandResult {
-        text: format!("Task re-run started for workspace {workspace_id}\n"),
-        json: data,
-    })
-}
-
 // --- Chats commands ---
 
-fn cmd_chats_list(workspace_id: &str) -> Result<CommandResult, String> {
+fn cmd_chats_list(workspace_id: Option<&str>) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
+    let workspace_id = resolve_workspace_id(&client, workspace_id)?;
     let data = client.trpc_query(
         "chats.list",
         &serde_json::json!({"workspaceId": workspace_id}),
@@ -987,13 +848,14 @@ fn cmd_chats_list(workspace_id: &str) -> Result<CommandResult, String> {
 }
 
 fn cmd_chats_create(
-    workspace_id: &str,
+    workspace_id: Option<&str>,
     name: Option<&str>,
     agent: Option<&str>,
     model: Option<&str>,
     mode: Option<&str>,
 ) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
+    let workspace_id = resolve_workspace_id(&client, workspace_id)?;
     let mut input = serde_json::json!({"workspaceId": workspace_id});
     if let Some(n) = name {
         input["name"] = serde_json::json!(n);
@@ -1017,59 +879,26 @@ fn cmd_chats_create(
     })
 }
 
-fn cmd_chats_send(chat_id: &str, message: &str) -> Result<CommandResult, String> {
-    let client = api::ApiClient::from_settings()?;
-    let data = client.trpc_mutate(
-        "chats.send",
-        &serde_json::json!({"chatId": chat_id, "message": message}),
-    )?;
-
-    let task_id = data.get("id").and_then(|v| v.as_str()).unwrap_or("");
-
-    Ok(CommandResult {
-        text: format!("{task_id}\n"),
-        json: data,
-    })
-}
-
-fn cmd_chats_stop(chat_id: &str) -> Result<CommandResult, String> {
-    let client = api::ApiClient::from_settings()?;
-    client.trpc_mutate("chats.stop", &serde_json::json!({"chatId": chat_id}))?;
-
-    Ok(CommandResult {
-        text: format!("Chat {chat_id} stopped\n"),
-        json: serde_json::json!({"ok": true, "chatId": chat_id}),
-    })
-}
-
-fn cmd_chats_remove(chat_id: &str) -> Result<CommandResult, String> {
-    let client = api::ApiClient::from_settings()?;
-    client.trpc_mutate("chats.remove", &serde_json::json!({"chatId": chat_id}))?;
-
-    Ok(CommandResult {
-        text: format!("Chat {chat_id} removed\n"),
-        json: serde_json::json!({"ok": true, "chatId": chat_id}),
-    })
-}
-
 /// Send a message to a workspace chat, defaulting to the workspace's active
-/// chat panel when no `--chat-id` is provided. Returns the task id.
+/// chat panel when no `chat_id` is provided. Returns the task id.
 ///
-/// Server-side, `tasks.submit` resolves the default chat via
-/// `getOrCreateDefaultChat`, which honors the saved chat layout's active
-/// panel. So passing no `chatId` here matches the chat the user is looking
-/// at in the dashboard.
-fn cmd_chat(
-    workspace_id: Option<&str>,
-    message: &str,
+/// Calls `tasks.submit` server-side, which resolves the default chat via
+/// `getOrCreateDefaultChat` — honoring the saved chat layout's active panel,
+/// then the first panel in the saved layout, then the first chat in the
+/// registry, and finally lazy-creating a new "Chat" panel if the workspace
+/// has none. So passing no `chat_id` here matches the chat the user is
+/// looking at in the dashboard.
+fn cmd_chats_send(
     chat_id: Option<&str>,
+    message: &str,
+    workspace_id: Option<&str>,
     max_turns: Option<u32>,
     mode: Option<&str>,
     model: Option<&str>,
     agent: Option<&str>,
 ) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
-    let workspace_id = resolve_workspace_id(&client, None, workspace_id)?;
+    let workspace_id = resolve_workspace_id(&client, workspace_id)?;
 
     let mut input = serde_json::json!({
         "workspaceId": workspace_id,
@@ -1110,10 +939,143 @@ fn cmd_chat(
     })
 }
 
+/// Stream a chat pane's currently-running task as raw NDJSON.
+///
+/// Connects to `GET /api/tasks/<chat_id>/stream` (the same SSE endpoint the
+/// dashboard uses) and dumps each `data: {...}` payload to stdout, one JSON
+/// object per line. The output is always raw JSON regardless of `--output`.
+/// Exits 0 with no output when the chat has no running task (HTTP 204).
+fn handle_chats_watch(chat_id: Option<&str>) -> i32 {
+    match cmd_chats_watch(chat_id) {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!("{}", serde_json::json!({"error": e}));
+            1
+        }
+    }
+}
+
+fn cmd_chats_watch(chat_id: Option<&str>) -> Result<(), String> {
+    use std::io::Write as _;
+
+    let client = api::ApiClient::from_settings()?;
+    let chat_id =
+        resolve_default_panel(&client, chat_id, "chats.list", "chats", "id", "chat pane")?;
+    let path = format!("/api/tasks/{}/stream", urlencoded_path_segment(&chat_id));
+    let mut response = client.get_raw_stream(&path)?;
+    let status = response.status().as_u16();
+
+    if status == 401 {
+        return Err("Authentication failed. Check tokenSecret in settings".to_string());
+    }
+    if status == 204 {
+        // No running task — nothing to stream.
+        return Ok(());
+    }
+    if status >= 400 {
+        let body: serde_json::Value = response
+            .body_mut()
+            .read_json()
+            .unwrap_or(serde_json::Value::Null);
+        let msg = body
+            .get("error")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("Unknown server error");
+        return Err(msg.to_string());
+    }
+
+    let mut body = response.into_body();
+    let mut reader = std::io::BufReader::new(body.as_reader());
+    let mut line_buf = String::new();
+    let mut data_buf = String::new();
+    let mut stdout = std::io::stdout().lock();
+
+    loop {
+        line_buf.clear();
+        match reader.read_line(&mut line_buf) {
+            Ok(0) => break, // EOF
+            Ok(_) => {}
+            Err(e) => return Err(format!("Connection error: {e}")),
+        }
+
+        let line = line_buf.trim_end();
+
+        if line.is_empty() {
+            // End of an SSE event — flush the accumulated data buffer as one
+            // NDJSON line. Server emits multi-line `data:` for some events;
+            // join them with `\n` per the SSE spec, then validate as JSON.
+            if !data_buf.is_empty() {
+                let _ = serde_json::from_str::<serde_json::Value>(&data_buf)
+                    .map_err(|e| format!("Invalid JSON in SSE event: {e}\nbody: {data_buf}"))?;
+                writeln!(stdout, "{data_buf}").map_err(|e| format!("Write error: {e}"))?;
+                let _ = stdout.flush();
+                data_buf.clear();
+            }
+            continue;
+        }
+
+        if let Some(data) = line.strip_prefix("data: ") {
+            if !data_buf.is_empty() {
+                data_buf.push('\n');
+            }
+            data_buf.push_str(data);
+        }
+        // Ignore id:, event:, retry:, and comment lines.
+    }
+
+    Ok(())
+}
+
+/// URL-encode a single path segment (chat id). Only allows the unreserved
+/// character set; everything else is percent-encoded so a hostile chat id
+/// can't smuggle path components or query strings into the request URL.
+fn urlencoded_path_segment(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char);
+            }
+            _ => {
+                const HEX: &[u8; 16] = b"0123456789ABCDEF";
+                out.push('%');
+                out.push(HEX[(b >> 4) as usize] as char);
+                out.push(HEX[(b & 0x0f) as usize] as char);
+            }
+        }
+    }
+    out
+}
+
+fn cmd_chats_stop(chat_id: Option<&str>) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let chat_id =
+        resolve_default_panel(&client, chat_id, "chats.list", "chats", "id", "chat pane")?;
+    client.trpc_mutate("chats.stop", &serde_json::json!({"chatId": chat_id}))?;
+
+    Ok(CommandResult {
+        text: format!("Chat {chat_id} stopped\n"),
+        json: serde_json::json!({"ok": true, "chatId": chat_id}),
+    })
+}
+
+fn cmd_chats_remove(chat_id: Option<&str>) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let chat_id =
+        resolve_default_panel(&client, chat_id, "chats.list", "chats", "id", "chat pane")?;
+    client.trpc_mutate("chats.remove", &serde_json::json!({"chatId": chat_id}))?;
+
+    Ok(CommandResult {
+        text: format!("Chat {chat_id} removed\n"),
+        json: serde_json::json!({"ok": true, "chatId": chat_id}),
+    })
+}
+
 // --- Browser commands ---
 
-fn cmd_browser_list(workspace_id: &str) -> Result<CommandResult, String> {
+fn cmd_browser_list(workspace_id: Option<&str>) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
+    let workspace_id = resolve_workspace_id(&client, workspace_id)?;
     let data = client.trpc_query(
         "browsers.list",
         &serde_json::json!({"workspaceId": workspace_id}),
@@ -1150,11 +1112,12 @@ fn cmd_browser_list(workspace_id: &str) -> Result<CommandResult, String> {
 }
 
 fn cmd_browser_create(
-    workspace_id: &str,
+    workspace_id: Option<&str>,
     url: Option<&str>,
     name: Option<&str>,
 ) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
+    let workspace_id = resolve_workspace_id(&client, workspace_id)?;
     let mut input = serde_json::json!({"workspaceId": workspace_id});
     if let Some(u) = url {
         input["url"] = serde_json::json!(u);
@@ -1175,8 +1138,16 @@ fn cmd_browser_create(
     })
 }
 
-fn cmd_browser_navigate(browser_id: &str, url: &str) -> Result<CommandResult, String> {
+fn cmd_browser_navigate(browser_id: Option<&str>, url: &str) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
+    let browser_id = resolve_default_panel(
+        &client,
+        browser_id,
+        "browsers.list",
+        "browsers",
+        "id",
+        "browser tab",
+    )?;
     client.trpc_mutate(
         "browsers.navigate",
         &serde_json::json!({"browserId": browser_id, "url": url}),
@@ -1188,8 +1159,16 @@ fn cmd_browser_navigate(browser_id: &str, url: &str) -> Result<CommandResult, St
     })
 }
 
-fn cmd_browser_get(browser_id: &str) -> Result<CommandResult, String> {
+fn cmd_browser_get(browser_id: Option<&str>) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
+    let browser_id = resolve_default_panel(
+        &client,
+        browser_id,
+        "browsers.list",
+        "browsers",
+        "id",
+        "browser tab",
+    )?;
     let data = client.trpc_query(
         "browsers.get",
         &serde_json::json!({"browserId": browser_id}),
@@ -1212,8 +1191,16 @@ fn cmd_browser_get(browser_id: &str) -> Result<CommandResult, String> {
     })
 }
 
-fn cmd_browser_remove(browser_id: &str) -> Result<CommandResult, String> {
+fn cmd_browser_remove(browser_id: Option<&str>) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
+    let browser_id = resolve_default_panel(
+        &client,
+        browser_id,
+        "browsers.list",
+        "browsers",
+        "id",
+        "browser tab",
+    )?;
     client.trpc_mutate(
         "browsers.remove",
         &serde_json::json!({"browserId": browser_id}),
@@ -1227,8 +1214,9 @@ fn cmd_browser_remove(browser_id: &str) -> Result<CommandResult, String> {
 
 // --- Terminal commands ---
 
-fn cmd_terminal_list(workspace_id: &str) -> Result<CommandResult, String> {
+fn cmd_terminal_list(workspace_id: Option<&str>) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
+    let workspace_id = resolve_workspace_id(&client, workspace_id)?;
     let data = client.trpc_query(
         "terminal.list",
         &serde_json::json!({"workspaceId": workspace_id}),
@@ -1271,11 +1259,12 @@ fn cmd_terminal_list(workspace_id: &str) -> Result<CommandResult, String> {
 }
 
 fn cmd_terminal_create(
-    workspace_id: &str,
+    workspace_id: Option<&str>,
     command: Option<&str>,
     cwd: Option<&str>,
 ) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
+    let workspace_id = resolve_workspace_id(&client, workspace_id)?;
     let mut input = serde_json::json!({"workspaceId": workspace_id});
     if let Some(cmd) = command {
         input["command"] = serde_json::json!(cmd);
@@ -1295,8 +1284,16 @@ fn cmd_terminal_create(
     })
 }
 
-fn cmd_terminal_send(terminal_id: &str, data: &str) -> Result<CommandResult, String> {
+fn cmd_terminal_send(terminal_id: Option<&str>, data: &str) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
+    let terminal_id = resolve_default_panel(
+        &client,
+        terminal_id,
+        "terminal.list",
+        "terminals",
+        "terminalId",
+        "terminal session",
+    )?;
     // Unescape common escape sequences
     let unescaped = data.replace("\\n", "\n").replace("\\t", "\t");
     client.trpc_mutate(
@@ -1310,8 +1307,19 @@ fn cmd_terminal_send(terminal_id: &str, data: &str) -> Result<CommandResult, Str
     })
 }
 
-fn cmd_terminal_output(terminal_id: &str, lines: Option<u32>) -> Result<CommandResult, String> {
+fn cmd_terminal_output(
+    terminal_id: Option<&str>,
+    lines: Option<u32>,
+) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
+    let terminal_id = resolve_default_panel(
+        &client,
+        terminal_id,
+        "terminal.list",
+        "terminals",
+        "terminalId",
+        "terminal session",
+    )?;
     let mut input = serde_json::json!({"terminalId": terminal_id});
     if let Some(n) = lines {
         input["lines"] = serde_json::json!(n);
@@ -1325,8 +1333,16 @@ fn cmd_terminal_output(terminal_id: &str, lines: Option<u32>) -> Result<CommandR
     })
 }
 
-fn cmd_terminal_kill(terminal_id: &str) -> Result<CommandResult, String> {
+fn cmd_terminal_kill(terminal_id: Option<&str>) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
+    let terminal_id = resolve_default_panel(
+        &client,
+        terminal_id,
+        "terminal.list",
+        "terminals",
+        "terminalId",
+        "terminal session",
+    )?;
     client.trpc_mutate(
         "terminal.kill",
         &serde_json::json!({"terminalId": terminal_id}),
@@ -1338,7 +1354,7 @@ fn cmd_terminal_kill(terminal_id: &str) -> Result<CommandResult, String> {
     })
 }
 
-fn handle_terminal_follow(terminal_id: &str, lines: Option<u32>, json_output: bool) -> i32 {
+fn handle_terminal_follow(terminal_id: Option<&str>, lines: Option<u32>, json_output: bool) -> i32 {
     match cmd_terminal_follow(terminal_id, lines, json_output) {
         Ok(()) => 0,
         Err(e) => {
@@ -1353,13 +1369,21 @@ fn handle_terminal_follow(terminal_id: &str, lines: Option<u32>, json_output: bo
 }
 
 fn cmd_terminal_follow(
-    terminal_id: &str,
+    terminal_id: Option<&str>,
     lines: Option<u32>,
     json_output: bool,
 ) -> Result<(), String> {
     use std::io::Write;
 
     let client = api::ApiClient::from_settings()?;
+    let terminal_id = resolve_default_panel(
+        &client,
+        terminal_id,
+        "terminal.list",
+        "terminals",
+        "terminalId",
+        "terminal session",
+    )?;
 
     // If --lines was provided without --follow, that's handled elsewhere.
     // Here we stream live output, optionally replaying scrollback first.
@@ -1460,7 +1484,7 @@ fn stream_terminal_sse(reader: impl BufRead, json_output: bool) -> Result<(), St
     Ok(())
 }
 
-fn handle_terminal_attach(terminal_id: &str, json_output: bool) -> i32 {
+fn handle_terminal_attach(terminal_id: Option<&str>, json_output: bool) -> i32 {
     match cmd_terminal_attach(terminal_id, json_output) {
         Ok(()) => 0,
         Err(e) => {
@@ -1542,14 +1566,22 @@ fn stream_terminal_output(tid: &str, done: &AtomicBool) {
     }
 }
 
-fn cmd_terminal_attach(terminal_id: &str, json_output: bool) -> Result<(), String> {
+fn cmd_terminal_attach(terminal_id: Option<&str>, json_output: bool) -> Result<(), String> {
     let client = api::ApiClient::from_settings()?;
+    let terminal_id = resolve_default_panel(
+        &client,
+        terminal_id,
+        "terminal.list",
+        "terminals",
+        "terminalId",
+        "terminal session",
+    )?;
 
     if !json_output {
         eprintln!("[attached to terminal {terminal_id} — type input, press Ctrl+C to detach]");
     }
 
-    let tid = terminal_id.to_string();
+    let tid = terminal_id.clone();
     let done = Arc::new(AtomicBool::new(false));
     let done_clone = done.clone();
 
@@ -1768,365 +1800,55 @@ fn cmd_cronjobs_trigger(key: &str, id: &str) -> Result<CommandResult, String> {
     })
 }
 
-fn handle_watch(
-    id: Option<&str>,
-    workspace: Option<&str>,
-    json_output: bool,
-    config: render::RenderConfig,
-) -> i32 {
-    match cmd_tasks_watch(id, workspace, json_output, config) {
-        Ok(success) => i32::from(!success),
-        Err(e) => {
-            if json_output {
-                eprintln!("{}", serde_json::json!({"error": e}));
-            } else {
-                eprintln!("error: {e}");
-            }
-            1
-        }
-    }
-}
-
-fn cmd_tasks_watch(
-    id: Option<&str>,
-    workspace: Option<&str>,
-    json_output: bool,
-    config: render::RenderConfig,
-) -> Result<bool, String> {
-    let client = api::ApiClient::from_settings()?;
-    let workspace_id = resolve_workspace_id(&client, id, workspace)?;
-
-    if !json_output {
-        let label = id.unwrap_or(&workspace_id);
-        eprintln!("[watching task {label} on {workspace_id}]");
-        eprintln!();
-    }
-
-    let mut response = client.trpc_subscribe(
-        "tasks.stream",
-        &serde_json::json!({"workspaceId": workspace_id}),
-    )?;
-    let status = response.status().as_u16();
-
-    if status == 401 {
-        return Err("Authentication failed. Check tokenSecret in settings".to_string());
-    }
-    if status >= 400 {
-        let body: serde_json::Value = response
-            .body_mut()
-            .read_json()
-            .unwrap_or(serde_json::Value::Null);
-        let msg = body
-            .get("error")
-            .and_then(|e| e.get("message"))
-            .and_then(|m| m.as_str())
-            .unwrap_or("Unknown server error");
-        return Err(msg.to_string());
-    }
-
-    let mut body = response.into_body();
-    let reader = std::io::BufReader::new(body.as_reader());
-    stream_sse_events(reader, json_output, config, &client)
-}
-
-fn stream_sse_events(
-    reader: impl BufRead,
-    json_output: bool,
-    config: render::RenderConfig,
-    client: &api::ApiClient,
-) -> Result<bool, String> {
-    let mut line_buf = String::new();
-    let mut data_buf = String::new();
-    let mut renderer = render::Renderer::new(config);
-    let mut reader = reader;
-
-    loop {
-        line_buf.clear();
-        match reader.read_line(&mut line_buf) {
-            Ok(0) => break, // EOF
-            Ok(_) => {}
-            Err(e) => return Err(format!("Connection error: {e}")),
-        }
-
-        let line = line_buf.trim_end();
-
-        if line.is_empty() {
-            if !data_buf.is_empty() {
-                let action = process_sse_data(&data_buf, json_output, &mut renderer)?;
-                data_buf.clear();
-                match action {
-                    render::RenderAction::Finish => return Ok(renderer.task_succeeded),
-                    render::RenderAction::NeedsInput(req) => {
-                        handle_interactive_input(&req, client)?;
-                    }
-                    render::RenderAction::Continue => {}
-                }
-            }
-            continue;
-        }
-
-        if let Some(data) = line.strip_prefix("data: ") {
-            if !data_buf.is_empty() {
-                data_buf.push('\n');
-            }
-            data_buf.push_str(data);
-        }
-        // Ignore id:, event:, and comment lines
-    }
-
-    Ok(renderer.task_succeeded)
-}
-
-fn process_sse_data(
-    data: &str,
-    json_output: bool,
-    renderer: &mut render::Renderer,
-) -> Result<render::RenderAction, String> {
-    let chunk: serde_json::Value =
-        serde_json::from_str(data).map_err(|e| format!("Invalid JSON in SSE: {e}"))?;
-
-    if json_output {
-        let chunk_type = chunk.get("type").and_then(|t| t.as_str()).unwrap_or("");
-        println!("{}", serde_json::to_string(&chunk).unwrap_or_default());
-        if chunk_type == "finish" {
-            Ok(render::RenderAction::Finish)
-        } else {
-            Ok(render::RenderAction::Continue)
-        }
-    } else {
-        Ok(renderer.render_chunk(&chunk))
-    }
-}
-
-// ── Interactive input handling ──────────────────────────────────────
-
-fn handle_interactive_input(
-    req: &render::InteractiveRequest,
-    client: &api::ApiClient,
-) -> Result<(), String> {
-    use std::io::IsTerminal;
-
-    let is_tty = std::io::stdin().is_terminal();
-
-    let answers = match &req.kind {
-        render::InteractiveKind::PlanApproval => prompt_plan_approval(is_tty)?,
-        render::InteractiveKind::AskUserQuestion { questions } => {
-            prompt_questions(questions, is_tty)?
-        }
-    };
-
-    client.trpc_mutate(
-        "chat.answer",
-        &serde_json::json!({
-            "approvalId": req.approval_id,
-            "answers": answers,
-        }),
-    )?;
-
-    Ok(())
-}
-
-fn prompt_plan_approval(is_tty: bool) -> Result<HashMap<String, String>, String> {
-    use std::io::Write as _;
-
-    if !is_tty {
-        eprintln!("  (non-interactive: auto-approving plan)");
-        let mut answers = HashMap::new();
-        answers.insert("plan".to_string(), "approved".to_string());
-        return Ok(answers);
-    }
-
-    for attempt in 0..3 {
-        eprint!("  Approve plan? [y/n]: ");
-        std::io::stderr().flush().ok();
-
-        let mut input = String::new();
-        std::io::stdin()
-            .read_line(&mut input)
-            .map_err(|e| format!("Failed to read input: {e}"))?;
-
-        let trimmed = input.trim().to_lowercase();
-        match trimmed.as_str() {
-            "y" | "yes" => {
-                eprintln!("  Plan approved — agent continuing");
-                let mut answers = HashMap::new();
-                answers.insert("plan".to_string(), "approved".to_string());
-                return Ok(answers);
-            }
-            "n" | "no" => {
-                eprintln!("  Plan rejected");
-                let mut answers = HashMap::new();
-                answers.insert("plan".to_string(), "rejected".to_string());
-                return Ok(answers);
-            }
-            _ => {
-                if attempt < 2 {
-                    eprintln!("  Please enter y or n.");
-                }
-            }
-        }
-    }
-
-    // After 3 invalid attempts, default to approved.
-    eprintln!("  (defaulting to approved)");
-    let mut answers = HashMap::new();
-    answers.insert("plan".to_string(), "approved".to_string());
-    Ok(answers)
-}
-
-fn prompt_questions(
-    questions: &[render::QuestionData],
-    is_tty: bool,
-) -> Result<HashMap<String, String>, String> {
-    let mut answers = HashMap::new();
-
-    for q in questions {
-        if q.options.is_empty() {
-            continue;
-        }
-
-        if !is_tty {
-            let first_label = &q.options[0].label;
-            eprintln!("  (non-interactive: selecting \"{first_label}\")");
-            answers.insert(q.question.clone(), first_label.clone());
-            continue;
-        }
-
-        let selected = if q.multi_select {
-            prompt_multi_select(q)?
-        } else {
-            prompt_single_select(q)?
-        };
-
-        if !selected.is_empty() {
-            answers.insert(q.question.clone(), selected);
-        }
-    }
-
-    Ok(answers)
-}
-
-fn prompt_single_select(q: &render::QuestionData) -> Result<String, String> {
-    use std::io::Write as _;
-
-    let num_options = q.options.len();
-
-    for attempt in 0..3 {
-        eprint!("  Select option [1-{num_options}]: ");
-        std::io::stderr().flush().ok();
-
-        let mut input = String::new();
-        std::io::stdin()
-            .read_line(&mut input)
-            .map_err(|e| format!("Failed to read input: {e}"))?;
-
-        if let Some(label) = parse_single_selection(input.trim(), &q.options) {
-            eprintln!("  Selected: {label}");
-            return Ok(label);
-        }
-
-        if attempt < 2 {
-            eprintln!("  Invalid selection. Enter a number from 1 to {num_options}.");
-        }
-    }
-
-    // Default to first option after 3 failed attempts.
-    let label = q.options[0].label.clone();
-    eprintln!("  (defaulting to \"{label}\")");
-    Ok(label)
-}
-
-fn prompt_multi_select(q: &render::QuestionData) -> Result<String, String> {
-    use std::io::Write as _;
-
-    let num_options = q.options.len();
-
-    for attempt in 0..3 {
-        eprint!("  Select options (comma-separated, e.g. 1,3) [1-{num_options}]: ");
-        std::io::stderr().flush().ok();
-
-        let mut input = String::new();
-        std::io::stdin()
-            .read_line(&mut input)
-            .map_err(|e| format!("Failed to read input: {e}"))?;
-
-        let labels = parse_multi_selection(input.trim(), &q.options);
-        if !labels.is_empty() {
-            eprintln!("  Selected: {labels}");
-            return Ok(labels);
-        }
-
-        if attempt < 2 {
-            eprintln!(
-                "  Invalid selection. Enter numbers from 1 to {num_options}, separated by commas."
-            );
-        }
-    }
-
-    // Default to first option after 3 failed attempts.
-    let label = q.options[0].label.clone();
-    eprintln!("  (defaulting to \"{label}\")");
-    Ok(label)
-}
-
-fn parse_single_selection(input: &str, options: &[render::OptionData]) -> Option<String> {
-    let num: usize = input.parse().ok()?;
-    if num >= 1 && num <= options.len() {
-        Some(options[num - 1].label.clone())
-    } else {
-        None
-    }
-}
-
-fn parse_multi_selection(input: &str, options: &[render::OptionData]) -> String {
-    let labels: Vec<&str> = input
-        .split(',')
-        .filter_map(|s| {
-            let num: usize = s.trim().parse().ok()?;
-            if num >= 1 && num <= options.len() {
-                Some(options[num - 1].label.as_str())
-            } else {
-                None
-            }
-        })
-        .collect();
-    labels.join(", ")
-}
-
-/// Resolve a task ID (tsk_*) or workspace ID to a workspace ID.
-/// When neither `id` nor `workspace` is given, auto-detects from the current
-/// working directory by matching the git toplevel against registered workspace paths.
+/// Resolve an explicit workspace ID, or auto-detect it from the current
+/// working directory by matching `git rev-parse --show-toplevel` against
+/// registered workspace paths.
 fn resolve_workspace_id(
     client: &api::ApiClient,
-    id: Option<&str>,
     workspace: Option<&str>,
 ) -> Result<String, String> {
     if let Some(ws) = workspace {
         return Ok(ws.to_string());
     }
 
-    if let Some(id) = id {
-        if id.starts_with("tsk_") {
-            let data = client.trpc_query("tasks.list", &serde_json::json!({}))?;
-            let tasks = data
-                .get("tasks")
-                .and_then(|t| t.as_array())
-                .ok_or("Failed to list tasks")?;
-            let task = tasks
-                .iter()
-                .find(|t| t.get("id").and_then(|i| i.as_str()) == Some(id))
-                .ok_or(format!("Task '{id}' not found"))?;
-            let workspace_id = task
-                .get("workspaceId")
-                .and_then(|w| w.as_str())
-                .ok_or("Task has no workspace ID")?;
-            return Ok(workspace_id.to_string());
-        }
+    detect_workspace_from_cwd(client)
+}
+
+/// Resolve a panel ID for a chat / terminal / browser. When `panel_id` is
+/// `Some`, returns it as-is. When `None`, auto-detects the workspace from
+/// the current working directory, queries `list_proc`, and returns the
+/// `id_field` of the first panel returned by the server.
+///
+/// This gives every panel-targeted command (`chats send`, `terminals output`,
+/// `browsers navigate`, …) a uniform "default panel" behavior so the user
+/// rarely has to type IDs when working inside a workspace.
+fn resolve_default_panel(
+    client: &api::ApiClient,
+    panel_id: Option<&str>,
+    list_proc: &str,
+    list_field: &str,
+    id_field: &str,
+    domain_label: &str,
+) -> Result<String, String> {
+    if let Some(id) = panel_id {
         return Ok(id.to_string());
     }
-
-    // Auto-detect: match current git toplevel against registered workspace paths.
-    detect_workspace_from_cwd(client)
+    let ws = resolve_workspace_id(client, None)?;
+    let data = client.trpc_query(list_proc, &serde_json::json!({"workspaceId": ws}))?;
+    let panels = data
+        .get(list_field)
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| format!("Server returned no {list_field} array"))?;
+    let first = panels.first().ok_or_else(|| {
+        format!(
+            "No {domain_label} found in workspace '{ws}'. Create one first or pass an explicit id."
+        )
+    })?;
+    let id = first
+        .get(id_field)
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| format!("First {domain_label} has no {id_field} field"))?;
+    Ok(id.to_string())
 }
 
 /// Detect the current workspace by matching `git rev-parse --show-toplevel`
@@ -2138,7 +1860,7 @@ fn detect_workspace_from_cwd(client: &api::ApiClient) -> Result<String, String> 
         .map_err(|e| format!("Failed to run git: {e}"))?;
 
     if !git_output.status.success() {
-        return Err("Not in a git repository. Specify a task ID or --workspace.".to_string());
+        return Err("Not in a git repository. Specify --workspace.".to_string());
     }
 
     let toplevel = String::from_utf8_lossy(&git_output.stdout)
@@ -2170,7 +1892,7 @@ fn detect_workspace_from_cwd(client: &api::ApiClient) -> Result<String, String> 
     }
 
     Err(format!(
-        "No workspace found for '{toplevel}'. Specify a task ID or --workspace."
+        "No workspace found for '{toplevel}'. Specify --workspace."
     ))
 }
 
@@ -2460,40 +2182,6 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "notes": "Stops the remote tunnel."
         }),
         serde_json::json!({
-            "name": "tasks list",
-            "description": "List tasks, optionally filtered by project or status",
-            "parameters": [
-                {"name": "--project", "type": "string", "required": false, "description": "Filter by project name"},
-                {"name": "--status", "type": "string", "required": false, "description": "Filter by status (running, completed, failed)"},
-            ],
-            "notes": "Text output: `ID\\tSTATUS\\tWORKSPACE\\tPROMPT` (tab-separated table).\nJSON output: `{\"tasks\": [{\"id\": \"...\", \"status\": \"...\", \"project\": \"...\", \"branch\": \"...\", \"prompt\": \"...\"}]}`"
-        }),
-        serde_json::json!({
-            "name": "tasks cancel",
-            "description": "Cancel a running task",
-            "parameters": [
-                {"name": "task_id", "type": "string", "required": true, "positional": true, "description": "Task ID (e.g. tsk_1234567890)"},
-            ],
-            "notes": "Cancels a running task.\nJSON output: `{\"cancelled\": true, \"taskId\": \"...\"}`"
-        }),
-        serde_json::json!({
-            "name": "tasks rerun",
-            "description": "Re-run a completed or failed task",
-            "parameters": [
-                {"name": "task_id", "type": "string", "required": true, "positional": true, "description": "Task ID (e.g. tsk_1234567890)"},
-            ],
-            "notes": "Re-runs a completed or failed task."
-        }),
-        serde_json::json!({
-            "name": "tasks watch",
-            "description": "Stream task output in real-time",
-            "parameters": [
-                {"name": "id", "type": "string", "required": false, "positional": true, "description": "Task ID (optional if --workspace is provided)"},
-                {"name": "--workspace", "type": "string", "required": false, "description": "Watch the latest task for this workspace"},
-            ],
-            "notes": "Streams task output in real-time. Either provide a task ID or `--workspace` to watch the latest task for that workspace."
-        }),
-        serde_json::json!({
             "name": "cronjobs list",
             "description": "List cronjobs, optionally filtered by project or workspace",
             "parameters": [
@@ -2544,24 +2232,10 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             ]
         }),
         serde_json::json!({
-            "name": "chat",
-            "description": "Send a message to a workspace chat (defaults to the workspace's active chat panel)",
-            "parameters": [
-                {"name": "workspace_id", "type": "string", "required": false, "positional": true, "description": "Workspace ID (auto-detected from cwd if omitted)"},
-                {"name": "--message", "type": "string", "required": true, "description": "Message text to send"},
-                {"name": "--chat-id", "type": "string", "required": false, "description": "Target a specific chat pane instead of the workspace default"},
-                {"name": "--max-turns", "type": "integer", "required": false, "description": "Maximum number of agentic turns"},
-                {"name": "--mode", "type": "string", "required": false, "description": "Agent mode (e.g. 'plan', 'edit')"},
-                {"name": "--model", "type": "string", "required": false, "description": "Model to use for the coding agent (e.g. 'claude-opus-4-20250514')"},
-                {"name": "--agent", "type": "string", "required": false, "description": "Coding agent ID to use (overrides workspace default)"},
-            ],
-            "notes": "Sends a message to the workspace's chat. When `--chat-id` is omitted, the server resolves the workspace's *active* chat panel (the tab the user last focused in the dashboard), falling back to the first panel in the saved layout, then to the first chat in the registry, and finally creating a new \"Chat\" panel if the workspace has none. This means CLI prompts land in the same conversation the user is looking at.\n\nReturns the task ID.\nJSON output: `{\"id\": \"tsk_...\", \"workspaceId\": \"...\", \"chatId\": \"chat_...\"}`\n\nReplaces the removed `tasks create` command. Use `--chat-id` to target a specific chat pane (look it up with `band chats list <workspace_id>`)."
-        }),
-        serde_json::json!({
             "name": "chats list",
             "description": "List chat panes for a workspace",
             "parameters": [
-                {"name": "workspace_id", "type": "string", "required": true, "positional": true, "description": "Workspace ID"},
+                {"name": "workspace_id", "type": "string", "required": false, "positional": true, "description": "Workspace ID (auto-detected from cwd if omitted)"},
             ],
             "notes": "Text output: `ID\\tNAME\\tAGENT\\tSTATUS` (tab-separated table).\nJSON output: `{\"chats\": [{\"id\": \"...\", \"name\": \"...\", \"agent\": \"...\", \"status\": \"...\"}]}`"
         }),
@@ -2569,7 +2243,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "name": "chats create",
             "description": "Create a new chat pane in a workspace",
             "parameters": [
-                {"name": "workspace_id", "type": "string", "required": true, "positional": true, "description": "Workspace ID"},
+                {"name": "workspace_id", "type": "string", "required": false, "positional": true, "description": "Workspace ID (auto-detected from cwd if omitted)"},
                 {"name": "--name", "type": "string", "required": false, "description": "Display name for the chat pane"},
                 {"name": "--agent", "type": "string", "required": false, "description": "Coding agent ID (e.g. 'claude-code')"},
                 {"name": "--model", "type": "string", "required": false, "description": "Model override"},
@@ -2579,18 +2253,31 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
         }),
         serde_json::json!({
             "name": "chats send",
-            "description": "Send a message to a chat pane",
+            "description": "Send a message to a workspace chat (defaults to the workspace's active chat panel)",
             "parameters": [
-                {"name": "chat_id", "type": "string", "required": true, "positional": true, "description": "Chat pane ID"},
-                {"name": "--message", "type": "string", "required": true, "description": "Message text"},
+                {"name": "chat_id", "type": "string", "required": false, "positional": true, "description": "Chat pane ID (defaults to the workspace's active chat panel)"},
+                {"name": "--message", "type": "string", "required": true, "description": "Message text to send"},
+                {"name": "--workspace", "type": "string", "required": false, "description": "Workspace ID (auto-detected from cwd if omitted)"},
+                {"name": "--max-turns", "type": "integer", "required": false, "description": "Maximum number of agentic turns"},
+                {"name": "--mode", "type": "string", "required": false, "description": "Agent mode (e.g. 'plan', 'edit')"},
+                {"name": "--model", "type": "string", "required": false, "description": "Model to use for the coding agent (e.g. 'claude-opus-4-20250514')"},
+                {"name": "--agent", "type": "string", "required": false, "description": "Coding agent ID to use (overrides workspace default)"},
             ],
-            "notes": "Submits a task to the chat pane's agent. Returns the task ID."
+            "notes": "Sends a message to a workspace chat via `tasks.submit`. When `chat_id` is omitted, the server resolves the workspace's *active* chat panel (the tab the user last focused in the dashboard), falling back to the first panel in the saved layout, then to the first chat in the registry, and finally creating a new \"Chat\" panel if the workspace has none. This means CLI prompts land in the same conversation the user is looking at.\n\nReturns the task ID.\nJSON output: `{\"id\": \"tsk_...\", \"workspaceId\": \"...\", \"chatId\": \"chat_...\"}`\n\nReplaces the removed `tasks` subcommand. Use the positional `chat_id` to target a specific chat pane (look it up with `band chats list`)."
+        }),
+        serde_json::json!({
+            "name": "chats watch",
+            "description": "Stream a chat pane's running task as raw NDJSON",
+            "parameters": [
+                {"name": "chat_id", "type": "string", "required": false, "positional": true, "description": "Chat pane ID (defaults to the cwd workspace's first chat pane)"},
+            ],
+            "notes": "Connects to the chat's task SSE stream and dumps each event as one JSON object per line on stdout. Output is always raw JSON regardless of `--output`. Exits 0 immediately when the chat has no running task."
         }),
         serde_json::json!({
             "name": "chats stop",
             "description": "Stop a running chat pane",
             "parameters": [
-                {"name": "chat_id", "type": "string", "required": true, "positional": true, "description": "Chat pane ID"},
+                {"name": "chat_id", "type": "string", "required": false, "positional": true, "description": "Chat pane ID (defaults to the cwd workspace's first chat pane)"},
             ],
             "notes": "Aborts the running task and sets chat status to stopped."
         }),
@@ -2598,103 +2285,103 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "name": "chats remove",
             "description": "Remove a chat pane (kills agent, cleans up state)",
             "parameters": [
-                {"name": "chat_id", "type": "string", "required": true, "positional": true, "description": "Chat pane ID"},
+                {"name": "chat_id", "type": "string", "required": false, "positional": true, "description": "Chat pane ID (defaults to the cwd workspace's first chat pane)"},
             ],
             "notes": "Removes the chat pane, kills the associated agent process, and cleans up state."
         }),
         serde_json::json!({
-            "name": "browser list",
+            "name": "browsers list",
             "description": "List browser tabs for a workspace",
             "parameters": [
-                {"name": "workspace_id", "type": "string", "required": true, "positional": true, "description": "Workspace ID"},
+                {"name": "workspace_id", "type": "string", "required": false, "positional": true, "description": "Workspace ID (auto-detected from cwd if omitted)"},
             ],
             "notes": "Text output: `ID\\tNAME\\tURL\\tSTATUS` (tab-separated table).\nJSON output: `{\"browsers\": [{\"id\": \"...\", \"name\": \"...\", \"url\": \"...\", \"status\": \"...\"}]}`"
         }),
         serde_json::json!({
-            "name": "browser create",
+            "name": "browsers create",
             "description": "Create a new browser tab in a workspace",
             "parameters": [
-                {"name": "workspace_id", "type": "string", "required": true, "positional": true, "description": "Workspace ID"},
+                {"name": "workspace_id", "type": "string", "required": false, "positional": true, "description": "Workspace ID (auto-detected from cwd if omitted)"},
                 {"name": "--url", "type": "string", "required": false, "description": "Initial URL to navigate to"},
                 {"name": "--name", "type": "string", "required": false, "description": "Display name for the browser tab"},
             ],
             "notes": "Text output: the new browser tab ID.\nJSON output: `{\"browser\": {\"id\": \"...\", ...}}`"
         }),
         serde_json::json!({
-            "name": "browser navigate",
+            "name": "browsers navigate",
             "description": "Navigate a browser tab to a URL",
             "parameters": [
-                {"name": "browser_id", "type": "string", "required": true, "positional": true, "description": "Browser tab ID"},
-                {"name": "url", "type": "string", "required": true, "positional": true, "description": "URL to navigate to"},
+                {"name": "browser_id", "type": "string", "required": false, "positional": true, "description": "Browser tab ID (defaults to the cwd workspace's first browser tab)"},
+                {"name": "--url", "type": "string", "required": true, "description": "URL to navigate to"},
             ],
-            "notes": "Updates the browser tab's URL in the server state."
+            "notes": "Updates the browser tab's URL in the server state. When `browser_id` is omitted, auto-detects the workspace from cwd and targets that workspace's first browser tab. Mirrors the shape of `chats send [chat_id] --message ...` and `terminals send [terminal_id] --data ...` — panel ID is positional, data is a flag."
         }),
         serde_json::json!({
-            "name": "browser get",
+            "name": "browsers get",
             "description": "Get a browser tab's current state",
             "parameters": [
-                {"name": "browser_id", "type": "string", "required": true, "positional": true, "description": "Browser tab ID"},
+                {"name": "browser_id", "type": "string", "required": false, "positional": true, "description": "Browser tab ID (defaults to the cwd workspace's first browser tab)"},
             ],
             "notes": "Text output: formatted key-value pairs.\nJSON output: `{\"browser\": {\"id\": \"...\", \"name\": \"...\", \"url\": \"...\", \"status\": \"...\"}}`"
         }),
         serde_json::json!({
-            "name": "browser remove",
+            "name": "browsers remove",
             "description": "Remove a browser tab",
             "parameters": [
-                {"name": "browser_id", "type": "string", "required": true, "positional": true, "description": "Browser tab ID"},
+                {"name": "browser_id", "type": "string", "required": false, "positional": true, "description": "Browser tab ID (defaults to the cwd workspace's first browser tab)"},
             ],
             "notes": "Removes the browser tab and cleans up state."
         }),
         serde_json::json!({
-            "name": "terminal list",
+            "name": "terminals list",
             "description": "List terminal sessions for a workspace",
             "parameters": [
-                {"name": "workspace_id", "type": "string", "required": true, "positional": true, "description": "Workspace ID"},
+                {"name": "workspace_id", "type": "string", "required": false, "positional": true, "description": "Workspace ID (auto-detected from cwd if omitted)"},
             ],
             "notes": "Text output: `TERMINAL ID\\tTITLE\\tPID\\tSCROLLBACK` (tab-separated table).\nJSON output: `{\"terminals\": [{\"terminalId\": \"...\", \"workspaceId\": \"...\", \"pid\": N, \"scrollbackLength\": N, \"title\": \"...\"}]}`"
         }),
         serde_json::json!({
-            "name": "terminal create",
+            "name": "terminals create",
             "description": "Create a new terminal session in a workspace",
             "parameters": [
-                {"name": "workspace_id", "type": "string", "required": true, "positional": true, "description": "Workspace ID"},
+                {"name": "workspace_id", "type": "string", "required": false, "positional": true, "description": "Workspace ID (auto-detected from cwd if omitted)"},
                 {"name": "--command", "type": "string", "required": false, "description": "Shell command to auto-run after spawn"},
                 {"name": "--cwd", "type": "string", "required": false, "description": "Working directory (relative to workspace root)"},
             ],
             "notes": "Creates a new terminal session with its own PTY process. Returns the terminal ID.\nJSON output: `{\"terminalId\": \"...\", \"workspaceId\": \"...\", \"pid\": N}`"
         }),
         serde_json::json!({
-            "name": "terminal send",
+            "name": "terminals send",
             "description": "Send input to a terminal session",
             "parameters": [
-                {"name": "terminal_id", "type": "string", "required": true, "positional": true, "description": "Terminal ID"},
+                {"name": "terminal_id", "type": "string", "required": false, "positional": true, "description": "Terminal ID (defaults to the cwd workspace's first terminal)"},
                 {"name": "--data", "type": "string", "required": true, "description": "Text to send (supports \\n for newline, \\t for tab)"},
             ],
-            "notes": "Writes text to the terminal's PTY stdin. Use \\n to send a newline (execute command).\nExample: band terminal send <id> --data \"ls -la\\n\""
+            "notes": "Writes text to the terminal's PTY stdin. Use \\n to send a newline (execute command).\nExample: band terminals send <id> --data \"ls -la\\n\""
         }),
         serde_json::json!({
-            "name": "terminal output",
+            "name": "terminals output",
             "description": "Get terminal output (scrollback buffer)",
             "parameters": [
-                {"name": "terminal_id", "type": "string", "required": true, "positional": true, "description": "Terminal ID"},
+                {"name": "terminal_id", "type": "string", "required": false, "positional": true, "description": "Terminal ID (defaults to the cwd workspace's first terminal)"},
                 {"name": "--lines", "type": "integer", "required": false, "description": "Number of lines to show (from end of buffer)"},
                 {"name": "--follow", "type": "boolean", "required": false, "description": "Stream live output (like tail -f)"},
             ],
             "notes": "Without --follow: fetches the current scrollback buffer (up to 100KB).\nWith --follow: streams live terminal output via SSE. Press Ctrl+C to stop."
         }),
         serde_json::json!({
-            "name": "terminal kill",
+            "name": "terminals kill",
             "description": "Kill a terminal session",
             "parameters": [
-                {"name": "terminal_id", "type": "string", "required": true, "positional": true, "description": "Terminal ID"},
+                {"name": "terminal_id", "type": "string", "required": false, "positional": true, "description": "Terminal ID (defaults to the cwd workspace's first terminal)"},
             ],
             "notes": "Kills the terminal's PTY process and cleans up the session."
         }),
         serde_json::json!({
-            "name": "terminal attach",
+            "name": "terminals attach",
             "description": "Attach to a terminal (stream output + send input interactively)",
             "parameters": [
-                {"name": "terminal_id", "type": "string", "required": true, "positional": true, "description": "Terminal ID"},
+                {"name": "terminal_id", "type": "string", "required": false, "positional": true, "description": "Terminal ID (defaults to the cwd workspace's first terminal)"},
             ],
             "notes": "Streams terminal output to stdout while reading stdin line-by-line and sending it to the terminal.\nPress Ctrl+C to detach. Best for running commands, not full TUI interaction (use web UI for that)."
         }),

@@ -1,4 +1,4 @@
-import { AgentIcon } from "@band-app/dashboard-core";
+import { AgentIcon, useAdapter } from "@band-app/dashboard-core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   type DockviewApi,
@@ -80,6 +80,13 @@ interface ChatPersistOptions {
 
 interface ChatLayoutData {
   layout: unknown | null;
+  /**
+   * Set of chat ids that exist on the server *right now*. Used at mount
+   * time to prune orphan panels from the saved layout — same defense
+   * that `DockviewBrowserContainer` and `DockviewTerminalContainer`
+   * already apply.
+   */
+  chatIds: Set<string>;
 }
 
 function persistToServer(workspaceId: string, layout: unknown, opts?: ChatPersistOptions): void {
@@ -421,20 +428,26 @@ export function DockviewChatContainer({
   visible,
   wsActive,
 }: DockviewChatContainerProps) {
+  const adapter = useAdapter();
   const queryClient = useQueryClient();
   const apiRef = useRef<DockviewApi | null>(null);
   const isRestoringRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Fetch layout via React Query — cached across mounts so re-visiting
-  // a workspace renders instantly from the cache.
+  // Fetch layout AND chat records via React Query — cached across mounts
+  // so re-visiting a workspace renders instantly from the cache. Mirrors
+  // the dual-query pattern in `DockviewBrowserContainer`.
   const { data: initialData } = useQuery<ChatLayoutData>({
     queryKey: chatLayoutKey(workspaceId),
     queryFn: async () => {
-      const { tree } = await trpc.chatLayout.get
-        .query({ workspaceId })
-        .catch(() => ({ tree: null }));
-      return { layout: tree };
+      const [{ tree }, { chats }] = await Promise.all([
+        trpc.chatLayout.get.query({ workspaceId }).catch(() => ({ tree: null })),
+        trpc.chats.list.query({ workspaceId }).catch(() => ({ chats: [] as { id: string }[] })),
+      ]);
+      return {
+        layout: tree,
+        chatIds: new Set(chats.map((c: { id: string }) => c.id)),
+      };
     },
     staleTime: Number.POSITIVE_INFINITY, // never auto-refetch — we manage persistence ourselves
   });
@@ -552,10 +565,13 @@ export function DockviewChatContainer({
       api.removePanel(panel);
     }
 
-    // Don't delete the chat record — it holds the active session and
-    // agent config so the user can reopen a tab for the same agent
-    // later.  The record is lightweight and cleaned up when the
-    // workspace is deleted.
+    // Delete the server-side chat record so closed tabs don't linger —
+    // mirrors `browsers.remove` and `terminal.kill`. The mutation also
+    // strips the panel from the saved layout and emits `chat-removed`
+    // so any other open dashboard tabs sync automatically.
+    trpc.chats.remove.mutate({ chatId }).catch((err) => {
+      console.error("[DockviewChatContainer] failed to remove chat:", err);
+    });
     // Layout change listeners will auto-persist
   }, []);
 
@@ -621,6 +637,40 @@ export function DockviewChatContainer({
     return () => window.removeEventListener("keydown", handler, true);
   }, [visible, closeTab, handleSplit, handleAddTab]);
 
+  // Sync dockview panels when chats are created/removed externally (e.g. CLI).
+  // Mirrors the `browser-created` / `terminal-created` subscription in the
+  // sibling containers — without this, a `band chats create` (or the lazy
+  // `getOrCreateDefaultChat` path triggered by `band workspaces create
+  // --prompt`) would not show up in an already-open dashboard until reload.
+  useEffect(() => {
+    return adapter.subscribeStatusEvents((event) => {
+      if (event.workspaceId !== workspaceId) return;
+      const api = apiRef.current;
+      if (!api) return;
+
+      if (event.kind === "chat-created" && typeof event.chatId === "string") {
+        // Skip if this panel already exists (we created it ourselves)
+        if (api.getPanel(event.chatId)) return;
+        api.addPanel({
+          id: event.chatId,
+          component: "chatTab",
+          tabComponent: "chatTab",
+          title: "Chat",
+          params: { workspaceId, chatId: event.chatId },
+        });
+      } else if (event.kind === "chat-removed" && typeof event.chatId === "string") {
+        const panel = api.getPanel(event.chatId);
+        if (panel) {
+          api.removePanel(panel);
+          // If that was the last panel, create a fresh default tab.
+          if (api.panels.length === 0) {
+            createDefaultPanel(api, workspaceId);
+          }
+        }
+      }
+    });
+  }, [adapter, workspaceId]);
+
   // Visibility is now propagated via ChatVisibilityContext (React context)
   // instead of updateParameters — see the Provider wrapping DockviewReact.
 
@@ -628,14 +678,17 @@ export function DockviewChatContainer({
   addTabRef.current = { onAdd: handleAddTab, onSplit: handleSplit };
   closeTabRef.current = closeTab;
 
-  // Use a ref for the initial layout so onReady's closure captures the latest
+  // Use refs for the initial data so onReady's closure captures the latest
   const initialLayoutRef = useRef<unknown | null>(null);
   initialLayoutRef.current = initialData?.layout ?? null;
+  const initialChatIdsRef = useRef<Set<string> | null>(null);
+  initialChatIdsRef.current = initialData?.chatIds ?? null;
 
   const onReady = useCallback(
     (event: DockviewReadyEvent) => {
       apiRef.current = event.api;
       const savedLayout = initialLayoutRef.current;
+      const knownChatIds = initialChatIdsRef.current;
 
       if (savedLayout && isDockviewLayout(savedLayout)) {
         // Restore full dockview layout (preserves groups, splits, sizes)
@@ -650,10 +703,42 @@ export function DockviewChatContainer({
 
         // Visibility is propagated via ChatVisibilityContext — no param update needed.
 
+        // Prune panels whose chat records no longer exist on the server —
+        // e.g. the user removed them via `band chats remove` while the
+        // dashboard was closed. Mirrors `DockviewBrowserContainer`'s
+        // orphan check.
+        let dropped = 0;
+        if (knownChatIds) {
+          const orphans = event.api.panels.filter((p) => !knownChatIds.has(p.id));
+          for (const orphan of orphans) {
+            event.api.removePanel(orphan);
+            dropped++;
+          }
+          // If all panels were orphaned, create a fresh default tab.
+          if (event.api.panels.length === 0) {
+            createDefaultPanel(event.api, workspaceId);
+            dropped++;
+          }
+        }
+
         // Allow persistence after restoration settles
         setTimeout(() => {
           isRestoringRef.current = false;
         }, 0);
+
+        // If we removed orphans (or replaced them with a default), persist
+        // the cleaned-up layout immediately. The dockview events that
+        // fired while `removePanel` was running landed inside the
+        // restoration window and were swallowed by `schedulePersist`'s
+        // `isRestoringRef` guard. Without this explicit save, the saved
+        // `chat_layout` row would still reference the dead panels — the
+        // dashboard would prune them on every mount but the DB would
+        // never converge.
+        if (dropped > 0) {
+          persistToServer(workspaceId, event.api.toJSON(), {
+            queryClient: queryClientRef.current,
+          });
+        }
       } else {
         // No saved layout — create a default tab
         createDefaultPanel(event.api, workspaceId);

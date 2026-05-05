@@ -12,7 +12,6 @@ import { Cron } from "croner";
 import { z } from "zod";
 import { createMetadataAgent, getOrCreateAgent, replaceAgent } from "../lib/agent-pool";
 import {
-  addBrowserToLayout,
   deleteBrowserLayout,
   getBrowserLayout,
   removeBrowserFromLayout,
@@ -97,7 +96,6 @@ import {
 import { listTasks, loadTask } from "../lib/task-store";
 import { loadWorkspaceTerminalConfig } from "../lib/terminal-config";
 import {
-  addTerminalToLayout,
   deleteTerminalLayout,
   getTerminalLayout,
   removeTerminalFromLayout,
@@ -2342,14 +2340,13 @@ const browsersRouter = t.router({
       }),
     )
     .mutation(({ input }) => {
+      // `createBrowser` registers the tab in both the in-memory registry
+      // and the saved dockview layout (mirrors `createChat`); no separate
+      // `addBrowserToLayout` call needed here.
       const browser = createBrowser(input.workspaceId, {
         id: input.id,
         name: input.name,
         url: input.url,
-      });
-      addBrowserToLayout(input.workspaceId, browser.id, {
-        title: input.name,
-        initialUrl: input.url,
       });
       emit({ kind: "browser-created", workspaceId: input.workspaceId, browserId: browser.id });
       return { browser };
@@ -2536,12 +2533,10 @@ const terminalRouter = t.router({
     )
     .mutation(async ({ input }) => {
       const terminalId = input.id ?? randomUUID();
+      // `spawnTerminal` registers the session and writes to the saved
+      // dockview layout (mirrors `createChat` / `createBrowser`); no
+      // separate `addTerminalToLayout` call needed here.
       const session = await spawnTerminal(input.workspaceId, terminalId, {
-        command: input.command,
-        cwd: input.cwd,
-        env: input.env,
-      });
-      addTerminalToLayout(input.workspaceId, terminalId, {
         command: input.command,
         cwd: input.cwd,
         env: input.env,
