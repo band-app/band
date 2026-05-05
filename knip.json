@@ -17,6 +17,7 @@
         "start-server.ts"
       ],
       "project": ["src/**/*.{ts,tsx}", "tests/**/*.ts", "e2e/**/*.ts"],
+      "ignoreBinaries": ["dist/start-server.mjs"],
       "ignoreDependencies": [
         "tailwindcss",
         "tw-animate-css",

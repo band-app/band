@@ -25,12 +25,13 @@ jobs:
   release:
     name: Release
     runs-on: macos-latest
+    environment: production
     env:
       NODE_OPTIONS: '--max-old-space-size=4096'
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -40,25 +41,25 @@ jobs:
           components: clippy, rustfmt
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
           registry-url: 'https://registry.npmjs.org'
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           version: 10
 
       - name: Cache pnpm store
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.pnpm-store
           key: pnpm-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: pnpm-${{ runner.os }}-
 
       - name: Cache Cargo registry
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -67,14 +68,14 @@ jobs:
           restore-keys: cargo-registry-${{ runner.os }}-
 
       - name: Cache CLI target
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: apps/cli/target
           key: cargo-cli-${{ runner.os }}-${{ hashFiles('apps/cli/Cargo.lock') }}
           restore-keys: cargo-cli-${{ runner.os }}-
 
       - name: Cache Dashboard target
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: apps/dashboard/src-tauri/target
           key: cargo-dashboard-${{ runner.os }}-${{ hashFiles('apps/dashboard/src-tauri/Cargo.lock') }}
@@ -120,6 +121,9 @@ jobs:
       - name: Build CLI
         run: pnpm build:cli
 
+      - name: Download Bun runtime
+        run: pnpm download:bun
+
       - name: Lint (cargo clippy — Dashboard)
         run: |
           mkdir -p apps/web/dist
@@ -136,15 +140,35 @@ jobs:
           rm -rf apps/web/dist
 
       - name: Build frontend
+        env:
+          BAND_BUILD_SHA: ${{ github.sha }}
+          BAND_BUILD_CHANNEL: stable
         run: |
           pnpm build:web
           pnpm --filter @band-app/dashboard build
+
+      - name: Apple sign setup
+        uses: ./.github/actions/apple-sign-setup
+        with:
+          apple-certificate: ${{ secrets.APPLE_CERTIFICATE }}
+          apple-certificate-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          keychain-password: ${{ secrets.KEYCHAIN_PASSWORD }}
+          apple-api-key: ${{ secrets.APPLE_API_KEY }}
 
       - name: Build DMG and updater artifacts
         run: pnpm --filter @band-app/dashboard tauri build --ci --config '{"build":{"beforeBuildCommand":""}}' --config src-tauri/tauri.prod.conf.json
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_PATH: ${{ runner.temp }}/api-key.p8
+
+      - name: Apple sign cleanup
+        if: always()
+        uses: ./.github/actions/apple-sign-cleanup
 
       - name: Generate changelog
         id: changelog
@@ -213,7 +237,7 @@ jobs:
           cat latest.json
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ steps.version.outputs.new_version }}
           name: v${{ steps.version.outputs.new_version }}

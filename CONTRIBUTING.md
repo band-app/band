@@ -27,11 +27,16 @@ git remote add upstream https://github.com/band-app/band.git
 # Install Rust (if not already installed)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
+# Install Bun (required to run @band-app/server tests and the bundled server)
+curl -fsSL https://bun.sh/install | bash
+
 # Install Node.js dependencies
 pnpm install
 ```
 
-See the [README](README.md) for full prerequisites (Node.js 22+, pnpm 10+, Rust).
+See the [README](README.md) for full prerequisites (Node.js 22+, pnpm 10+, Rust, Bun 1.3+).
+
+Bun is required: `apps/web` uses `bun:sqlite` and ships its own Bun runtime in the desktop bundle. `pnpm test` spawns the web server under Bun, so without Bun on `PATH` the integration tests fail at server startup.
 
 ## Making Changes
 
@@ -110,6 +115,22 @@ This project uses **integration tests** as the primary testing approach. Do not 
 - **MSW for external APIs.** Mock only third-party APIs you don't own, using [MSW](https://mswjs.io/) at the network layer.
 - **Node.js built-in test runner.** Use `node:test` with `node:assert/strict`.
 - **Never modify production code to make a test pass.**
+
+## Building Locally vs. Signed Releases
+
+Local builds (`pnpm build:dashboard` or `pnpm tauri build`) produce **unsigned** `.dmg` artifacts. macOS Gatekeeper will warn that the app is "damaged" or "from an unidentified developer" on first launch — this is expected for fork builds.
+
+Signed + notarized releases are produced **only** by the official `release.yml` and `nightly.yml` GitHub Actions workflows running on `band-app/band`. Apple Developer certificates and App Store Connect API keys live in a protected `production` GitHub Environment with required reviewers and `main`-branch restrictions, so:
+
+- Forks cannot trigger signed builds (secrets are not exposed to fork PRs).
+- Pull requests cannot exfiltrate signing credentials — release workflows only run via `workflow_dispatch` from maintainers.
+
+If you need to test a fork build on your own Mac, either:
+
+1. Right-click the `.app` → **Open** → confirm once, **or**
+2. `xattr -dr com.apple.quarantine /path/to/Band.app` to clear the quarantine flag.
+
+Do not request signing access for a fork — sign your build with your own Developer ID if you need notarization.
 
 ## Code of Conduct
 

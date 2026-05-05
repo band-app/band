@@ -1,4 +1,5 @@
-import { createReadStream, statSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { createReadStream, readFileSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { createLogger } from "@band-app/logger";
 import tailwindcss from "@tailwindcss/vite";
@@ -306,9 +307,42 @@ function trpcDevPlugin(): Plugin {
   };
 }
 
+function readBuildInfo() {
+  const pkg = JSON.parse(readFileSync(resolve(import.meta.dirname, "package.json"), "utf8")) as {
+    version: string;
+  };
+  let sha = process.env.BAND_BUILD_SHA ?? "";
+  if (!sha) {
+    try {
+      sha = execFileSync("git", ["rev-parse", "--short", "HEAD"], {
+        cwd: import.meta.dirname,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim();
+    } catch {
+      sha = "dev";
+    }
+  }
+  const channel = process.env.BAND_BUILD_CHANNEL ?? "dev";
+  return {
+    version: pkg.version,
+    sha,
+    date: new Date().toISOString(),
+    channel,
+  };
+}
+
+const buildInfo = readBuildInfo();
+
 export default defineConfig(({ command }) => ({
   server: {
     allowedHosts: [".trycloudflare.com"],
+  },
+  define: {
+    __BAND_VERSION__: JSON.stringify(buildInfo.version),
+    __BAND_BUILD_SHA__: JSON.stringify(buildInfo.sha),
+    __BAND_BUILD_DATE__: JSON.stringify(buildInfo.date),
+    __BAND_BUILD_CHANNEL__: JSON.stringify(buildInfo.channel),
   },
   plugins: [trpcDevPlugin(), tanstackStart(), react(), tailwindcss()],
   resolve: {
