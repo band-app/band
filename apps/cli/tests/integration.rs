@@ -2733,3 +2733,383 @@ fn watch_render_verbose_truncates_long_output() {
         "should not contain full output"
     );
 }
+
+// --- generate-skills tests ---
+
+/// Run the `band` binary with no `BAND_HOME` and no server. Used by tests for
+/// pure commands (like `generate-skills` and `schema`) that don't talk to the
+/// web server.
+fn band_offline(args: &[&str]) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_band"))
+        .args(args)
+        .output()
+        .expect("failed to execute band")
+}
+
+/// Read the generated SKILL.md for a given skill name from the output dir.
+fn read_skill(output_dir: &Path, name: &str) -> String {
+    let path = output_dir.join(name).join("SKILL.md");
+    fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()))
+}
+
+/// Extract the auto-generated `## Commands` section from a SKILL.md.
+///
+/// The generator replaces the `<!-- COMMANDS -->` placeholder with a block
+/// that starts with `## Commands` and ends at the next top-level `## ` heading
+/// in the template (e.g. `## Workflows`). Tests use this to assert each
+/// domain's skill ships only its own schema-derived commands while still
+/// allowing cross-reference prose to mention sibling skills' commands.
+fn commands_section(skill: &str) -> &str {
+    let start = skill
+        .find("## Commands")
+        .unwrap_or_else(|| panic!("SKILL.md has no `## Commands` section"));
+    let rest = &skill[start..];
+    // Skip the heading itself when searching for the next `## ` heading.
+    let after_heading = &rest["## Commands".len()..];
+    let end_offset = after_heading
+        .find("\n## ")
+        .map_or(rest.len(), |i| "## Commands".len() + i + 1);
+    &rest[..end_offset]
+}
+
+/// Extract a single frontmatter field from a SKILL.md file's YAML header.
+fn frontmatter_field<'a>(skill: &'a str, key: &'a str) -> Option<&'a str> {
+    let mut lines = skill.lines();
+    // First line must be the opening `---`.
+    if lines.next().map(str::trim) != Some("---") {
+        return None;
+    }
+    for line in lines {
+        if line.trim() == "---" {
+            return None;
+        }
+        if let Some(rest) = line.strip_prefix(key) {
+            if let Some(value) = rest.strip_prefix(':') {
+                return Some(value.trim());
+            }
+        }
+    }
+    None
+}
+
+#[test]
+fn generate_skills_emits_all_four_domain_skills() {
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let out = tmp.path();
+
+    let output = band_offline(&[
+        "generate-skills",
+        "--output-dir",
+        out.to_str().unwrap(),
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    for name in ["band", "band-chat", "band-terminal", "band-browser"] {
+        let path = out.join(name).join("SKILL.md");
+        assert!(
+            path.exists(),
+            "expected {} to exist; out={}",
+            path.display(),
+            stdout(&output)
+        );
+    }
+}
+
+#[test]
+fn generate_skills_each_skill_has_non_empty_description() {
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let out = tmp.path();
+    let output = band_offline(&[
+        "generate-skills",
+        "--output-dir",
+        out.to_str().unwrap(),
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    for name in ["band", "band-chat", "band-terminal", "band-browser"] {
+        let skill = read_skill(out, name);
+        let desc = frontmatter_field(&skill, "description")
+            .unwrap_or_else(|| panic!("{name} has no description"));
+        assert!(
+            !desc.is_empty(),
+            "{name} description must be non-empty"
+        );
+        // The description must be specific enough to mention what triggers
+        // the skill — sanity-check that each domain's description references
+        // its own keyword and not the others'.
+        let lower = desc.to_lowercase();
+        match name {
+            "band-chat" => {
+                assert!(lower.contains("chat"), "{name}: {desc}");
+                assert!(
+                    !lower.contains("terminal") && !lower.contains("browser"),
+                    "{name} description leaks other domains: {desc}"
+                );
+            }
+            "band-terminal" => {
+                assert!(lower.contains("terminal"), "{name}: {desc}");
+                assert!(
+                    !lower.contains(" chat ") && !lower.contains("browser"),
+                    "{name} description leaks other domains: {desc}"
+                );
+            }
+            "band-browser" => {
+                assert!(lower.contains("browser"), "{name}: {desc}");
+                assert!(
+                    !lower.contains(" chat ") && !lower.contains("terminal"),
+                    "{name} description leaks other domains: {desc}"
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
+#[test]
+fn generate_skills_general_skill_excludes_domain_commands() {
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let out = tmp.path();
+    let output = band_offline(&[
+        "generate-skills",
+        "--output-dir",
+        out.to_str().unwrap(),
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let band = read_skill(out, "band");
+    let cmds = commands_section(&band);
+
+    // Includes general commands.
+    for needle in [
+        "band projects list",
+        "band workspaces create",
+        "band workspaces remove",
+        "band tasks list",
+        "band tasks watch",
+        "band cronjobs create",
+        "band tunnel start",
+        "band settings",
+        "band schema",
+        "band generate-skills",
+    ] {
+        assert!(
+            cmds.contains(needle),
+            "general skill Commands section missing `{needle}`"
+        );
+    }
+
+    // The Commands section must not document any domain commands — those
+    // live in the sibling skills. Cross-reference prose elsewhere in the
+    // skill is allowed and verified separately.
+    //
+    // The top-level `band chat` (singular) belongs to `band-chat`, so
+    // assert it doesn't appear as a usage line here. We check for the
+    // command-block form `\nband chat ` to avoid matching `band chats ...`
+    // (which has a trailing `s`).
+    assert!(
+        !cmds.contains("\nband chat "),
+        "general skill Commands section leaks top-level `band chat` command"
+    );
+    for needle in [
+        "band chats list",
+        "band chats create",
+        "band chats send",
+        "band terminal list",
+        "band terminal create",
+        "band terminal send",
+        "band browser list",
+        "band browser create",
+        "band browser navigate",
+    ] {
+        assert!(
+            !cmds.contains(needle),
+            "general skill Commands section leaks domain command `{needle}`"
+        );
+    }
+}
+
+#[test]
+fn generate_skills_chat_skill_contains_only_chat_commands() {
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let out = tmp.path();
+    let output = band_offline(&[
+        "generate-skills",
+        "--output-dir",
+        out.to_str().unwrap(),
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let chat = read_skill(out, "band-chat");
+    let cmds = commands_section(&chat);
+
+    // Includes both the top-level `band chat` and the chat-pane lifecycle
+    // commands (`band chats ...`).
+    assert!(
+        cmds.contains("\nband chat "),
+        "band-chat Commands section missing top-level `band chat`"
+    );
+    for needle in [
+        "band chats list",
+        "band chats create",
+        "band chats send",
+        "band chats stop",
+        "band chats remove",
+    ] {
+        assert!(
+            cmds.contains(needle),
+            "band-chat Commands section missing `{needle}`"
+        );
+    }
+
+    for needle in [
+        "band terminal list",
+        "band browser list",
+        "band workspaces list",
+        "band projects list",
+        "band tasks list",
+    ] {
+        assert!(
+            !cmds.contains(needle),
+            "band-chat Commands section leaks foreign command `{needle}`"
+        );
+    }
+}
+
+#[test]
+fn generate_skills_terminal_skill_contains_only_terminal_commands() {
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let out = tmp.path();
+    let output = band_offline(&[
+        "generate-skills",
+        "--output-dir",
+        out.to_str().unwrap(),
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let term = read_skill(out, "band-terminal");
+    let cmds = commands_section(&term);
+
+    for needle in [
+        "band terminal list",
+        "band terminal create",
+        "band terminal send",
+        "band terminal output",
+        "band terminal kill",
+        "band terminal attach",
+    ] {
+        assert!(
+            cmds.contains(needle),
+            "band-terminal Commands section missing `{needle}`"
+        );
+    }
+
+    for needle in [
+        "band chats list",
+        "band browser list",
+        "band workspaces list",
+        "band projects list",
+    ] {
+        assert!(
+            !cmds.contains(needle),
+            "band-terminal Commands section leaks foreign command `{needle}`"
+        );
+    }
+}
+
+#[test]
+fn generate_skills_browser_skill_contains_only_browser_commands() {
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let out = tmp.path();
+    let output = band_offline(&[
+        "generate-skills",
+        "--output-dir",
+        out.to_str().unwrap(),
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let browser = read_skill(out, "band-browser");
+    let cmds = commands_section(&browser);
+
+    for needle in [
+        "band browser list",
+        "band browser create",
+        "band browser navigate",
+        "band browser get",
+        "band browser remove",
+    ] {
+        assert!(
+            cmds.contains(needle),
+            "band-browser Commands section missing `{needle}`"
+        );
+    }
+
+    for needle in [
+        "band chats list",
+        "band terminal list",
+        "band workspaces list",
+        "band projects list",
+    ] {
+        assert!(
+            !cmds.contains(needle),
+            "band-browser Commands section leaks foreign command `{needle}`"
+        );
+    }
+}
+
+#[test]
+fn generate_skills_filter_limits_to_one_skill() {
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let out = tmp.path();
+    let output = band_offline(&[
+        "generate-skills",
+        "--output-dir",
+        out.to_str().unwrap(),
+        "--filter",
+        "chat",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    assert!(out.join("band-chat").join("SKILL.md").exists());
+    assert!(!out.join("band").join("SKILL.md").exists());
+    assert!(!out.join("band-terminal").join("SKILL.md").exists());
+    assert!(!out.join("band-browser").join("SKILL.md").exists());
+}
+
+#[test]
+fn generate_skills_json_output_lists_generated_skills() {
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let out = tmp.path();
+    let output = band_offline(&[
+        "generate-skills",
+        "--output-dir",
+        out.to_str().unwrap(),
+        "--output",
+        "json",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output))
+        .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)));
+    let skills = json["skills"].as_array().expect("skills array");
+    let names: Vec<&str> = skills
+        .iter()
+        .map(|s| s["name"].as_str().unwrap())
+        .collect();
+
+    assert_eq!(names.len(), 4, "expected 4 skills, got {names:?}");
+    assert!(names.contains(&"band"));
+    assert!(names.contains(&"band-chat"));
+    assert!(names.contains(&"band-terminal"));
+    assert!(names.contains(&"band-browser"));
+
+    // Every skill must report at least one command.
+    for skill in skills {
+        let count = skill["commandCount"].as_u64().unwrap_or(0);
+        assert!(
+            count > 0,
+            "skill {} has no commands",
+            skill["name"].as_str().unwrap_or("?")
+        );
+    }
+}

@@ -1,14 +1,21 @@
 ---
-name: band-cli
+name: band
 version: 0.1.0
-description: Programmatic workspace management for Band. Use when the user wants to create, list, or remove Band workspaces or projects, send chat messages to coding agents, manage tasks, manage tunnels, manage terminal sessions, or check settings via the Band CLI.
+description: Programmatic workspace management for Band. Use when the user wants to create, list, or remove Band workspaces or projects, manage tasks, manage tunnels, manage cronjobs, or check settings via the Band CLI. Triggers include "create workspace", "list projects", "watch task", "band workspace", "band project", "schedule a job". For sending chat messages to coding agents, see the `band-chat` skill.
 allowed-tools: Bash
 argument-hint: [command] [args...]
+commands: projects, workspaces, tasks, cronjobs, tunnel, settings, notify, schema, generate-skills
 ---
 
 # Band CLI
 
 Thin client for the Band web server. All state, git operations, and script execution happen server-side.
+
+This skill covers **core workspace, project, task, cronjob, and tunnel** management. For domain-specific commands, see the sibling skills:
+
+- **`band-chat`** — top-level `band chat` for quick prompts plus chat-pane lifecycle (`band chats list/create/send/stop/remove`)
+- **`band-terminal`** — terminal sessions (`band terminal list/create/send/output/kill/attach`)
+- **`band-browser`** — browser tabs (`band browser list/create/navigate/get/remove`)
 
 ## Prerequisites
 
@@ -60,19 +67,9 @@ band workspaces create my-app feat/auth --prompt "Add JWT authentication to the 
 band workspaces list --output json | jq '.workspaces[] | select(.project == "my-app") | .branch'
 ```
 
-### Chat / task management
+### Task management
 
 ```sh
-# Send a message to the workspace's default chat panel (auto-detects
-# the workspace from the current directory, picks the active chat tab)
-band chat --message "Fix the failing tests"
-
-# Same, but with an explicit workspace
-band chat ws_abc123 --message "Fix the failing tests"
-
-# Target a specific chat pane instead of the default one
-band chat ws_abc123 --chat-id chat_abc --message "Investigate the perf regression"
-
 # List running tasks
 band tasks list --status running
 
@@ -86,27 +83,8 @@ band tasks cancel tsk_1234567890
 band tasks rerun tsk_1234567890
 ```
 
-### Terminal management
-
-```sh
-# Create a terminal running a dev server
-tid=$(band terminal create my-app-feat-auth --command "npm run dev" --output json | jq -r .terminalId)
-
-# Check the output
-band terminal output "$tid" --lines 20
-
-# Stream live output
-band terminal output "$tid" --follow
-
-# Send a command to the terminal
-band terminal send "$tid" --data "echo hello\n"
-
-# Attach interactively
-band terminal attach "$tid"
-
-# Kill the terminal when done
-band terminal kill "$tid"
-```
+To send a message to a workspace's chat (the primary way to drive the
+coding agent), use `band chat` — see the **`band-chat`** skill.
 
 ### Project management
 
