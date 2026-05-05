@@ -177,6 +177,31 @@ fn seed_db(band_dir: &Path, repo_path: &Path, settings: &serde_json::Value) {
     );
 }
 
+/// List every `panel_states` row for a workspace. Each entry is
+/// `{ id, workspace_id, panel_type }`. Used by tests that assert
+/// teardown cleanup is complete (i.e. removing the workspace strips
+/// all chat/terminal/browser/layout rows associated with it).
+fn list_panel_states(band_dir: &Path, workspace_id: &str) -> Vec<serde_json::Value> {
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/list-panel-states.mjs");
+    let output = Command::new("node")
+        .arg(&script)
+        .arg(band_dir)
+        .arg(workspace_id)
+        .output()
+        .expect("list-panel-states.mjs failed to execute");
+
+    assert!(
+        output.status.success(),
+        "list-panel-states.mjs failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout_str = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout_str.trim()).expect("list-panel-states.mjs returned bad JSON");
+    parsed.as_array().cloned().unwrap_or_default()
+}
+
 /// Read a saved dockview layout panel-state row (chat, terminal, or
 /// browser) for a workspace from the `panel_states` table. Returns
 /// `Value::Null` if no layout has been persisted.
@@ -1546,6 +1571,87 @@ fn browsers_create_adds_browser_to_layout() {
         initial_url,
         Some("https://example.com"),
         "expected initialUrl to be persisted in panel params: {panel}"
+    );
+}
+
+/// Regression: `band workspaces create --prompt ...` followed by
+/// `band workspaces remove` must wipe every `panel_states` row tied
+/// to that workspace. The lazy-create path in `workspaces.create`
+/// goes through a different code path than `chats.create` (it calls
+/// `getOrCreateDefaultChat` server-side rather than the explicit CLI
+/// mutation), so it's worth a dedicated test to make sure both paths
+/// teardown cleanly.
+#[test]
+fn workspaces_create_with_prompt_then_remove_clears_panel_states() {
+    let env = TestEnv::new();
+    let create = env.band(&[
+        "workspaces",
+        "create",
+        "my-project",
+        "feat/prompt-teardown",
+        "--prompt",
+        "say hi",
+    ]);
+    assert!(create.status.success(), "stderr: {}", stderr(&create));
+    let workspace_id = "my-project-feat-prompt-teardown";
+
+    let before = list_panel_states(&env.band_dir, workspace_id);
+    assert!(
+        !before.is_empty(),
+        "pre-condition: lazy-created chat + layout should be present: {before:?}"
+    );
+
+    let out = env.band(&["workspaces", "remove", "my-project", "feat/prompt-teardown"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+
+    let after = list_panel_states(&env.band_dir, workspace_id);
+    assert!(
+        after.is_empty(),
+        "expected panel_states empty after `workspaces remove`, got {after:?}"
+    );
+}
+
+/// Regression: `band workspaces remove` must wipe every `panel_states`
+/// row associated with the workspace — chat records, browser records,
+/// and the three layout rows (`chat_layout_<id>`, `terminal_layout_<id>`,
+/// `browser_layout_<id>`). A leak means stale state survives across
+/// recreations of a workspace with the same name.
+#[test]
+fn workspaces_remove_clears_all_panel_states() {
+    let env = TestEnv::new();
+    env.band(&["workspaces", "create", "my-project", "feat/teardown"]);
+    let workspace_id = "my-project-feat-teardown";
+
+    // Seed the workspace with one of each pane type so all relevant
+    // panel_states rows exist.
+    env.band(&["chats", "create", workspace_id, "--name", "Side"]);
+    env.band(&[
+        "browsers",
+        "create",
+        workspace_id,
+        "--url",
+        "https://example.com",
+    ]);
+    env.band(&["terminals", "create", workspace_id]);
+
+    // Pre-condition: panel_states has multiple rows for this workspace
+    // (1 chat record, 1 browser record, 3 layout rows — chat/terminal/browser).
+    let before = list_panel_states(&env.band_dir, workspace_id);
+    assert!(
+        before.len() >= 5,
+        "pre-condition: expected at least 5 panel_states rows (chat, browser, 3 layouts), got: {before:?}"
+    );
+
+    // Tear down the workspace.
+    let out = env.band(&["workspaces", "remove", "my-project", "feat/teardown"]);
+    assert!(out.status.success(), "stderr: {}", stderr(&out));
+
+    // Every row keyed to this workspace should be gone — no chat records,
+    // no browser records, no chat_layout / terminal_layout / browser_layout.
+    let after = list_panel_states(&env.band_dir, workspace_id);
+    assert!(
+        after.is_empty(),
+        "expected panel_states to be empty after `workspaces remove`, got {after:?}"
     );
 }
 
