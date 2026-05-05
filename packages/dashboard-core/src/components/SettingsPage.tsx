@@ -392,6 +392,17 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                   </Select>
                 </SettingsRow>
               )}
+              <SettingsRow
+                htmlFor="agents-context-meter"
+                label="Context window meter"
+                description="Show a context-usage donut next to the session-history button in the chat input. Token counting accuracy varies by agent — disable if numbers look wrong."
+              >
+                <Switch
+                  id="agents-context-meter"
+                  checked={contextMeterEnabled}
+                  onCheckedChange={setContextMeterEnabled}
+                />
+              </SettingsRow>
               <Accordion type="multiple" className="w-full">
                 {KNOWN_AGENTS.map((known) => {
                   const agent = codingAgents.find((a) => a.type === known.type);
@@ -590,24 +601,6 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                   id="auto-start-tunnel"
                   checked={autoStartTunnel}
                   onCheckedChange={setAutoStartTunnel}
-                />
-              </SettingsRow>
-            </SettingsSection>
-
-            {/* ── Experimental ───────────────────────────────── */}
-            <SettingsSection
-              title="Experimental"
-              description="Unstable features that may change or break between releases. Stored per device — not synced across the workspace."
-            >
-              <SettingsRow
-                htmlFor="exp-context-meter"
-                label="Context window meter"
-                description="Show a context-usage donut next to the session-history button. Token counting accuracy varies by provider — disable if numbers look wrong."
-              >
-                <Switch
-                  id="exp-context-meter"
-                  checked={contextMeterEnabled}
-                  onCheckedChange={setContextMeterEnabled}
                 />
               </SettingsRow>
             </SettingsSection>

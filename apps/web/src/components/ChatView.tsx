@@ -10,6 +10,9 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
   Tooltip,
   TooltipContent,
   TooltipTrigger,
@@ -1259,9 +1262,6 @@ export function ChatView({
 
       <div className="mx-auto w-full max-w-3xl shrink-0 px-3 lg:px-4 pt-2 pb-4 standalone:pb-[env(safe-area-inset-bottom)]">
         <TaskListWidget tasks={taskMap} workspaceId={workspaceId} />
-        {contextMeterEnabled && (
-          <ContextMeter usage={usage} model={selectedModel} modelInfo={selectedModelInfo} />
-        )}
         <PromptInput
           onSubmit={handleSubmit}
           draftKey={workspaceId}
@@ -1278,6 +1278,18 @@ export function ChatView({
           <PromptInputActions>
             <div className="flex items-center gap-0.5">
               <PromptInputAttach />
+              {supportsSessionListing && (
+                <SessionHistoryMenu
+                  workspaceId={workspaceId}
+                  chatId={chatId}
+                  activeSessionId={activeSessionId ?? sessionIdRef.current}
+                  onSelectSession={handleSelectSession}
+                  onNewSession={handleNewSession}
+                />
+              )}
+              {contextMeterEnabled && (
+                <ContextMeter usage={usage} model={selectedModel} modelInfo={selectedModelInfo} />
+              )}
               {(agentGroups.length > 0 || models.length > 0) && (
                 <AgentModelMenu
                   agentGroups={agentGroups}
@@ -1292,21 +1304,8 @@ export function ChatView({
               {modes.length > 0 && (
                 <ModeMenu modes={modes} selected={selectedMode} onSelect={handleModeSelect} />
               )}
-              {supportsSessionListing && (
-                <SessionHistoryMenu
-                  workspaceId={workspaceId}
-                  chatId={chatId}
-                  activeSessionId={activeSessionId ?? sessionIdRef.current}
-                  onSelectSession={handleSelectSession}
-                  onNewSession={handleNewSession}
-                />
-              )}
             </div>
-            <PromptInputSubmit
-              status={status}
-              onStop={handleStop}
-              queueCount={queuedMessages.length}
-            />
+            <PromptInputSubmit status={status} onStop={handleStop} />
           </PromptInputActions>
         </PromptInput>
       </div>
@@ -1342,7 +1341,7 @@ function ModeMenu({
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
               <ModeIcon modeId={current?.id ?? ""} className="size-3" />
               {current?.name ?? "Mode"}
@@ -1405,7 +1404,7 @@ function AgentModelMenu({
           type="button"
           disabled={disabled}
           className={cn(
-            "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+            "inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
             disabled && "opacity-50 cursor-not-allowed",
           )}
         >
@@ -1575,6 +1574,12 @@ function ModelLine({ model }: { model: ModelInfo }) {
   );
 }
 
+// Donut geometry — 24×24 viewBox keeps the SVG aligned with `size-4`
+// (16px) Tailwind utility while leaving enough whitespace for a 3-unit
+// stroke without clipping. Radius 9, stroke 3 → circumference ≈ 56.55.
+const DONUT_RADIUS = 9;
+const DONUT_CIRCUMFERENCE = 2 * Math.PI * DONUT_RADIUS;
+
 function ContextMeter({
   usage,
   model,
@@ -1599,24 +1604,81 @@ function ContextMeter({
   //   3. Static MODEL_CONTEXT_WINDOWS map keyed by id prefix
   const window = usage?.maxContextTokens ?? modelInfo?.contextWindow ?? getContextWindow(model);
   const pct = Math.min(100, (contextSize / window) * 100);
+  const pctRounded = Math.round(pct);
   const danger = pct >= 85;
   const warn = !danger && pct >= 65;
-  const barColor = danger ? "bg-destructive" : warn ? "bg-amber-500" : "bg-primary/60";
+  // Monochrome gray progression — the donut sits among other muted-foreground
+  // affordances in PromptInputActions, so it should read as a quiet status
+  // glyph rather than a colored alert. Higher usage = darker shade.
+  const progressColor = danger
+    ? "stroke-foreground"
+    : warn
+      ? "stroke-muted-foreground"
+      : "stroke-muted-foreground/60";
+  // Empty arc would render as a full ring at strokeDashoffset = circumference,
+  // so dot-treat the 0% case explicitly to match a "nothing yet" affordance.
+  const dashOffset = pct <= 0 ? DONUT_CIRCUMFERENCE : DONUT_CIRCUMFERENCE * (1 - pct / 100);
+
+  // Popover (controlled) instead of Tooltip so the breakdown is reachable on
+  // touch devices where hover doesn't fire reliably. On desktop we still want
+  // the lightweight hover-to-peek feel, so `onPointerEnter`/`onPointerLeave`
+  // open/close the popover when the input is a mouse. Touch and pen taps fall
+  // through to Popover's built-in click toggle.
+  const [open, setOpen] = useState(false);
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <div className="mb-1 flex items-center gap-2 px-1 text-[11px] text-muted-foreground">
-          <span className="tabular-nums">
-            {formatTokens(contextSize)} / {formatTokens(window)}
-          </span>
-          <div className="h-1 flex-1 overflow-hidden rounded-full bg-border">
-            <div className={cn("h-full transition-all", barColor)} style={{ width: `${pct}%` }} />
-          </div>
-          <span className="tabular-nums">{Math.round(pct)}%</span>
-        </div>
-      </TooltipTrigger>
-      <TooltipContent>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          // Match `SessionHistoryMenu`'s button shell so the donut sits
+          // visually on the same row of affordances inside PromptInputActions.
+          aria-label={`Context window: ${pctRounded}% of ${formatTokens(window)}`}
+          className="inline-flex items-center justify-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          onPointerEnter={(e) => {
+            if (e.pointerType === "mouse") setOpen(true);
+          }}
+          onPointerLeave={(e) => {
+            if (e.pointerType === "mouse") setOpen(false);
+          }}
+        >
+          <svg viewBox="0 0 24 24" className="size-5 -rotate-90 shrink-0" aria-hidden="true">
+            <circle
+              cx="12"
+              cy="12"
+              r={DONUT_RADIUS}
+              fill="none"
+              className="stroke-muted-foreground/25"
+              strokeWidth="3"
+            />
+            <circle
+              cx="12"
+              cy="12"
+              r={DONUT_RADIUS}
+              fill="none"
+              className={cn("transition-all", progressColor)}
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeDasharray={DONUT_CIRCUMFERENCE}
+              strokeDashoffset={dashOffset}
+            />
+          </svg>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        // Keep the popover open while the mouse is over its content (otherwise
+        // hovering off the trigger into the popover would close it before the
+        // user can read it). Touch users dismiss via tap-outside / Escape.
+        onPointerEnter={(e) => {
+          if (e.pointerType === "mouse") setOpen(true);
+        }}
+        onPointerLeave={(e) => {
+          if (e.pointerType === "mouse") setOpen(false);
+        }}
+        className="w-auto p-2"
+        side="top"
+        align="end"
+      >
         <div className="space-y-0.5 text-xs">
           {usage ? (
             <>
@@ -1636,15 +1698,15 @@ function ContextMeter({
                   <div>Total processed: {usage.totalProcessedTokens.toLocaleString()}</div>
                 )}
               <div className="mt-1 border-t pt-1">
-                Context: {contextSize.toLocaleString()} / {window.toLocaleString()}
+                Context: {contextSize.toLocaleString()} / {window.toLocaleString()} ({pctRounded}%)
               </div>
             </>
           ) : (
             <div>Context window: {window.toLocaleString()} tokens</div>
           )}
         </div>
-      </TooltipContent>
-    </Tooltip>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -1714,9 +1776,9 @@ function SessionHistoryMenu({
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              className="inline-flex items-center justify-center rounded-md px-2 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              className="inline-flex items-center justify-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
-              <Clock className="size-3" />
+              <Clock className="size-4" />
             </button>
           </DropdownMenuTrigger>
         </TooltipTrigger>

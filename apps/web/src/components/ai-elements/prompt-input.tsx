@@ -1,7 +1,7 @@
 import type { SelectionToChatDetail } from "@band-app/dashboard-core";
-import { Badge, cn } from "@band-app/ui";
+import { cn } from "@band-app/ui";
 import type { ChatStatus } from "ai";
-import { ArrowUpIcon, Clock, FileIcon, Loader2, Paperclip, SquareIcon, X } from "lucide-react";
+import { ArrowUpIcon, FileIcon, Loader2, Paperclip, SquareIcon, X } from "lucide-react";
 import type {
   ComponentProps,
   DragEvent,
@@ -406,13 +406,15 @@ export const PromptInputAttach = ({ className, ...props }: PromptInputAttachProp
       <button
         type="button"
         className={cn(
-          "inline-flex size-8 lg:size-7 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+          // Match the icon-button shell used by SessionHistoryMenu / ModeMenu /
+          // AgentModelMenu in the action row so all affordances line up.
+          "inline-flex shrink-0 items-center justify-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
           className,
         )}
         onClick={() => fileInputRef.current?.click()}
         {...props}
       >
-        <Paperclip className="size-5 lg:size-4" />
+        <Paperclip className="size-4" />
       </button>
     </>
   );
@@ -503,14 +505,12 @@ export const PromptInputTextarea = ({
 export type PromptInputSubmitProps = ComponentProps<"button"> & {
   status?: ChatStatus;
   onStop?: () => void;
-  queueCount?: number;
 };
 
 export const PromptInputSubmit = ({
   className,
   status,
   onStop,
-  queueCount,
   ...props
 }: PromptInputSubmitProps) => {
   const { hasContent } = useContext(PromptInputContext);
@@ -520,12 +520,6 @@ export const PromptInputSubmit = ({
 
   return (
     <div className="flex items-center gap-1">
-      {queueCount != null && queueCount > 0 && (
-        <Badge variant="secondary" className="text-xs tabular-nums">
-          <Clock className="size-3" />
-          {queueCount}
-        </Badge>
-      )}
       {isStreaming && (
         <button
           type="button"
