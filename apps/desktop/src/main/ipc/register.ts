@@ -25,6 +25,7 @@ import type {
   OpenWithAppArgs,
   RevealInFinderArgs,
 } from "../../shared/types.js";
+import type { CliPathOptions } from "../services/cli-paths.js";
 import { type ManagedProcess, webserverStart, webserverStop } from "../services/web-server.js";
 import { browserHandlers } from "./browser.js";
 import {
@@ -42,6 +43,13 @@ export interface RegisterOptions {
   webDir: string;
   managed: ManagedProcess;
   browserManager: BrowserViewManager;
+  /**
+   * Host paths used by the bundled-CLI resolver in `installCli` (issue #364).
+   * `app.isPackaged`, `process.resourcesPath`, and `app.getAppPath()` from
+   * the bootstrap. Captured at registration time so the IPC handler can
+   * resolve the sidecar binary inside the trust boundary.
+   */
+  cliPaths: CliPathOptions;
 }
 
 /**
@@ -80,7 +88,7 @@ export function registerIpc(opts: RegisterOptions): () => void {
   handle(Channels.checkAppExists, (args: CheckAppExistsArgs) => checkAppExists(args.appName));
   handle(Channels.openWithApp, (args: OpenWithAppArgs) => openWithApp(args.path, args.appName));
   handle(Channels.installCli, (args: InstallCliArgs) =>
-    installCli(args.binaryPath, args.symlinkPath),
+    installCli(args.binaryPath, args.symlinkPath, opts.cliPaths),
   );
   handle(Channels.openExternal, (args: OpenExternalArgs) => openExternal(args.url));
 

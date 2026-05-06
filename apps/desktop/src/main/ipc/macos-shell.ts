@@ -17,6 +17,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { type BrowserWindow, dialog, shell } from "electron";
 
+import { type CliPathOptions, resolveCliBinary } from "../services/cli-paths.js";
+
 const NOT_SUPPORTED = "Not supported on this platform";
 
 // ---------------------------------------------------------------------------
@@ -113,12 +115,37 @@ export async function openWithApp(path: string, appName: string): Promise<void> 
  * Create a symlink with administrator privileges. Pops a macOS password
  * dialog via osascript. Direct port of the Rust impl, including the same
  * single-quote escaping (replace `'` with `'\''` then JSON-quote).
+ *
+ * `paths` carries the host context so the handler can resolve the bundled
+ * sidecar (issue #364): in packaged builds the binary lives at
+ * `process.resourcesPath/binaries/band` regardless of what the renderer
+ * supplies, so we trust the resolver over the renderer's argument. In dev,
+ * we fall through to the renderer-supplied path because the web server's
+ * own `findCliBinary` already knows how to locate the cargo target.
+ *
+ * Resolving in the main process keeps the symlink target inside the trust
+ * boundary of the desktop shell — the renderer can't trick us into linking
+ * `/usr/local/bin/band` to an attacker-controlled path.
  */
-export async function installCli(binaryPath: string, symlinkPath: string): Promise<void> {
+export async function installCli(
+  binaryPath: string,
+  symlinkPath: string,
+  paths?: CliPathOptions,
+): Promise<void> {
   if (process.platform !== "darwin") {
     throw new Error(NOT_SUPPORTED);
   }
-  const escapedBinary = binaryPath.replaceAll("'", "'\\''");
+  // In packaged mode the bundled sidecar is the only trustworthy source.
+  // In dev we accept the renderer-supplied path (web server already
+  // resolved a cargo target) but still prefer the resolver if it finds a
+  // local cargo build — keeps behaviour consistent across `pnpm dev:desktop`
+  // and a packaged `Band.app`.
+  const resolved = paths ? resolveCliBinary(paths) : null;
+  const sourcePath = paths?.isPackaged
+    ? (resolved ?? throwMissingBundledBinary())
+    : (resolved ?? binaryPath);
+
+  const escapedBinary = sourcePath.replaceAll("'", "'\\''");
   const escapedSymlink = symlinkPath.replaceAll("'", "'\\''");
   const cmd = `ln -sf '${escapedBinary}' '${escapedSymlink}'`;
   // The osascript `do shell script` string is double-quote delimited, so we
@@ -146,6 +173,18 @@ export async function installCli(binaryPath: string, symlinkPath: string): Promi
       reject(new Error(`Failed to install CLI: ${stderr || "unknown error"}`));
     });
   });
+}
+
+/**
+ * Bail out when a packaged build is missing the bundled CLI binary. This is
+ * a deployment error (`build:cli:desktop` was skipped before
+ * `electron-builder`) — there is no useful fallback in a sandboxed `.app`.
+ */
+function throwMissingBundledBinary(): never {
+  throw new Error(
+    "Bundled CLI binary not found in the packaged app. " +
+      "Run `pnpm build:cli:desktop` before electron-builder.",
+  );
 }
 
 // ---------------------------------------------------------------------------
