@@ -35,28 +35,7 @@ export function findCliBinary(): string | null {
     }
   }
 
-  // --- Strategy B: Tauri sidecar binary in macOS .app bundle ---
-  // When running inside Band.app (Tauri shell), the CLI sidecar lives next
-  // to the main executable at .app/Contents/MacOS/band. The web server's
-  // cwd is .app/Contents/Resources/web/, so walk up to Contents/MacOS.
-  if (platform() === "darwin") {
-    const macOsCandidates = [
-      // From cwd (Resources/web/) → Contents/MacOS/band
-      resolve(process.cwd(), "..", "..", "MacOS", "band"),
-      // From bundled dist file (Resources/web/dist/) → Contents/MacOS/band
-      resolve(import.meta.dirname, "..", "..", "..", "MacOS", "band"),
-    ];
-    for (const p of macOsCandidates) {
-      try {
-        lstatSync(p);
-        return p;
-      } catch {
-        // Continue
-      }
-    }
-  }
-
-  // --- Strategy C: Electron extraResources layout (issue #364) ---
+  // --- Strategy B: Electron extraResources layout (issue #364) ---
   // electron-builder ships the sidecar at <Resources>/binaries/band on every
   // platform. The web server runs as a child of the main process with cwd
   // set to <Resources>/web/dist by `services/web-server.ts`, so the sidecar
@@ -101,18 +80,28 @@ export async function checkCli(): Promise<CliStatus> {
       return "NotInstalled";
     }
 
-    // Accept our own cargo build output OR the Tauri/Electron sidecar
-    // binaries. Tauri ships the sidecar at .app/Contents/MacOS/band; the
-    // Electron shell (issue #364) ships it as an extraResource at
-    // <Resources>/binaries/band — that path is platform-agnostic, so the
-    // matcher just looks for the trailing `/binaries/band` segment.
+    // Accept our own cargo build output OR the Electron sidecar binary
+    // (shipped as an extraResource at <Resources>/binaries/band — platform-
+    // agnostic, so the matcher just looks for the trailing `/binaries/band`
+    // segment).
     const isCargoBuild = target.includes(join("apps", "cli", "target"));
-    const isTauriSidecar = target.includes(join("Contents", "MacOS", "band"));
     const isElectronSidecar = target.endsWith(join("binaries", "band"));
-    if (!isCargoBuild && !isTauriSidecar && !isElectronSidecar) {
-      return "ConflictingBinary";
+    if (isCargoBuild || isElectronSidecar) {
+      return "Installed";
     }
-    return "Installed";
+
+    // A symlink that resolves into a Band.app bundle but doesn't match the
+    // Electron sidecar layout is a stale leftover from the Tauri build,
+    // where the CLI sidecar lived at Contents/MacOS/band. On macOS's case-
+    // insensitive filesystem that path now resolves to the Electron main
+    // binary, which is not a CLI — invoking it spawns a second Electron
+    // process that kills the user's web server on port 3456. Treat as
+    // "NotInstalled" so first-time setup repairs it.
+    const isStaleAppLink = target.toLowerCase().includes("/band.app/contents/macos/");
+    if (isStaleAppLink) {
+      return "NotInstalled";
+    }
+    return "ConflictingBinary";
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "ENOENT") {
@@ -175,9 +164,9 @@ export async function installCli(_opts: InstallCliOptions = {}): Promise<void> {
   }
 
   if (platform() === "darwin") {
-    // Elevation must happen in the Tauri desktop app (foreground GUI process).
+    // Elevation must happen in the desktop shell (foreground GUI process).
     // Throw a recognizable error so the hybrid adapter can catch it and
-    // delegate to the Tauri `install_cli` command.
+    // delegate to the Electron `install_cli` IPC command.
     throw new Error("elevation-required");
   }
 
