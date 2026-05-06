@@ -8,8 +8,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.main.json && tsc -p tsconfig.preload.json && node scripts/postbuild.mjs",
     "dev": "pnpm build && electron .",
-    "test": "node --experimental-strip-types --import ./tests/register-loader.mjs --test 'tests/**/*.test.ts'",
-    "clean": "rm -rf dist"
+    "test": "node --experimental-strip-types --import ./tests/register-loader.mjs --test 'tests/**/*.test.ts' 'tests/**/*.test.mjs'",
+    "package": "electron-builder build --config electron-builder.yml",
+    "clean": "rm -rf dist dist-builder"
   },
   "engines": {
     "node": ">=22.5.0"

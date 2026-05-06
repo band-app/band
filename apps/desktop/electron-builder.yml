@@ -5,12 +5,24 @@
 #   - Phase 6 (#363): GitHub `publish` block + macOS code-signing scaffold so
 #     `electron-updater` (apps/desktop/src/main/updater.ts) can pick up
 #     releases from `band-app/band` and verify signatures.
-#   - Phase 8 (TBD):  remaining packaging targets, signing key wiring, and
-#     notarisation.
+#   - Phase 8 (#365): macOS targets at parity with the existing Tauri DMG —
+#     hardened-runtime entitlements, notarization via notarytool, deep-sign
+#     hook for nested native binaries under `Resources/web/`.
+#     Windows + Linux are out of scope for this phase: the runtime in
+#     `apps/desktop/src/main/` and the bundled web server (apps/web,
+#     `"os": ["darwin", "linux"]`) currently assume a Unix-y host (POSIX
+#     shell for `shellPath`, `lsof` for port reclamation, `node` on PATH for
+#     spawning the bundled server). Adding those platforms is its own issue.
 #
 # Cross-references:
 #   - Tauri sidecar:        apps/dashboard/src-tauri/tauri.conf.json (`externalBin`).
 #   - Tauri updater config: apps/dashboard/src-tauri/tauri.prod.conf.json (pubkey, endpoints).
+#   - Tauri entitlements:   apps/dashboard/src-tauri/entitlements.plist
+#                           → apps/desktop/build/entitlements.mac.plist (audited
+#                             port — drops automation.apple-events; see plist
+#                             header for justification).
+#   - Tauri deep-sign:      apps/dashboard/src-tauri/scripts/sign-mac-deps.sh
+#                           → apps/desktop/scripts/after-sign.mjs (Phase 8 port).
 #   - Web bundle path:      apps/desktop/src/main/services/web-paths.ts.
 #   - CLI bundle path:      apps/desktop/src/main/services/cli-paths.ts.
 #   - Updater logic:        apps/desktop/src/main/updater.ts.
@@ -20,6 +32,10 @@ productName: Band
 copyright: Copyright © 2026 Band Contributors
 
 directories:
+  # `build/` ships the macOS icon (icon.icns) + entitlements.
+  # electron-builder auto-discovers `build/icon.icns` and
+  # `build/entitlements.mac.plist`. Phase 8 ships macOS only — Windows
+  # icon.ico / Linux icon.png will return when those platforms are added.
   buildResources: build
   output: dist-builder
 
@@ -46,6 +62,14 @@ files:
   - dist/**/*
   - package.json
 
+# afterSign runs *after* electron-builder has signed the .app on macOS but
+# *before* it packs the .dmg / .zip. The hook does two things:
+#   1. Deep-signs nested native binaries under `Resources/web/` (.node, .dylib,
+#      spawn-helper) — same job as Tauri's scripts/sign-mac-deps.sh.
+#   2. Calls `notarytool` to submit the .app for Apple notarization.
+# On non-macOS hosts, both hooks short-circuit cleanly.
+afterSign: scripts/after-sign.mjs
+
 # Publish to the existing GitHub releases endpoint. The Tauri shell pointed
 # its updater at `https://github.com/band-app/band/releases/latest/download/latest.json`
 # (see tauri.prod.conf.json); the electron-updater equivalent is the GitHub
@@ -63,16 +87,30 @@ mac:
   category: public.app-category.developer-tools
   minimumSystemVersion: "11.0"
   hardenedRuntime: true
+  # Skip Apple's online Gatekeeper check during the build — notarization is
+  # driven separately by the afterSign hook (scripts/notarize.mjs).
   gatekeeperAssess: false
-  # Signing is handled by Phase 8 / ops; CSC_LINK + CSC_KEY_PASSWORD env vars
-  # drive code signing in CI. Locally builds run unsigned.
+  # Entitlements ported from apps/dashboard/src-tauri/entitlements.plist.
+  # `entitlementsInherit` applies the same plist to nested helper bundles
+  # (Renderer, GPU, Plugin) so V8/JIT works in every Electron sub-process.
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
+  # Notarization is wired via the afterSign hook (scripts/notarize.mjs) so
+  # the build falls through cleanly when the App Store Connect API key is
+  # absent (local dev builds). Setting `notarize: false` disables
+  # electron-builder's built-in flow in favor of our hook.
+  notarize: false
+  # Universal builds are produced as separate x64 / arm64 artifacts; we do
+  # not assemble a single fat binary because the bundled web resources also
+  # ship per-arch native modules.
   target:
     - target: dmg
       arch:
         - x64
         - arm64
+    # zip is required for electron-updater diff downloads — the .app inside
+    # the .dmg cannot be auto-updated in place because macOS mounts the DMG
+    # read-only. See https://www.electron.build/auto-update.
     - target: zip
       arch:
         - x64
@@ -80,11 +118,19 @@ mac:
 
 dmg:
   writeUpdateInfo: true
+  # Drag-to-Applications layout matches the Tauri DMG.
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
 
 # Signing key configuration for auto-updates: electron-updater verifies the
-# downloaded artifact against the certificate the .app was signed with on
-# macOS, and against `publisherName` on Windows. The minisign keypair Tauri
-# used (TAURI_SIGNING_PRIVATE_KEY / pubkey in tauri.prod.conf.json) does not
-# apply here — electron-updater piggy-backs on platform code signing instead.
-# The legacy minisign artifacts can stay in the same GitHub release for
-# backward compatibility with users still on the Tauri shell.
+# downloaded artifact against the certificate the .app was signed with. The
+# minisign keypair Tauri used (TAURI_SIGNING_PRIVATE_KEY / pubkey in
+# tauri.prod.conf.json) does not apply here — electron-updater piggy-backs
+# on platform code signing instead. The legacy minisign artifacts can stay
+# in the same GitHub release for backward compatibility with users still on
+# the Tauri shell.
