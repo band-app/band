@@ -6,7 +6,10 @@ import type { FileEntry } from "../types";
 
 interface FileBrowserProps {
   workspaceId: string;
+  /** Single-click on a file. Defaults to a "preview" open if onOpenFilePinned is also provided. */
   onOpenFile: (path: string) => void;
+  /** Double-click on a file — opens as a pinned (persistent) tab. Optional. */
+  onOpenFilePinned?: (path: string) => void;
   /** Compact mode for sidebar use — smaller items */
   compact?: boolean;
   /** Currently selected file path for highlighting and auto-expand */
@@ -50,6 +53,7 @@ interface TreeNodeProps {
   loadingPaths: Set<string>;
   onToggle: (dirPath: string) => void;
   onOpenFile: (filePath: string) => void;
+  onOpenFilePinned?: (filePath: string) => void;
   compact?: boolean;
   selectedFile?: string;
   selectedRef?: React.RefObject<HTMLButtonElement | null>;
@@ -64,6 +68,7 @@ function TreeNode({
   loadingPaths,
   onToggle,
   onOpenFile,
+  onOpenFilePinned,
   compact,
   selectedFile,
   selectedRef,
@@ -86,12 +91,19 @@ function TreeNode({
     }
   };
 
+  const handleDoubleClick = () => {
+    if (!isDir && onOpenFilePinned) {
+      onOpenFilePinned(entryPath);
+    }
+  };
+
   return (
     <>
       <button
         ref={isSelected ? selectedRef : undefined}
         type="button"
         onClick={handleClick}
+        onDoubleClick={handleDoubleClick}
         className={`flex w-full items-center text-left hover:bg-accent/50 ${
           compact ? "h-[26px] gap-1 pr-3 text-xs" : "h-[30px] gap-1.5 pr-4 text-sm"
         } ${isSelected ? "bg-accent text-accent-foreground" : ""}`}
@@ -162,6 +174,7 @@ function TreeNode({
               loadingPaths={loadingPaths}
               onToggle={onToggle}
               onOpenFile={onOpenFile}
+              onOpenFilePinned={onOpenFilePinned}
               compact={compact}
               selectedFile={selectedFile}
               selectedRef={selectedRef}
@@ -176,7 +189,13 @@ function TreeNode({
 // ---------------------------------------------------------------------------
 // FileBrowser — tree root, manages state & data fetching
 // ---------------------------------------------------------------------------
-export function FileBrowser({ workspaceId, onOpenFile, compact, selectedFile }: FileBrowserProps) {
+export function FileBrowser({
+  workspaceId,
+  onOpenFile,
+  onOpenFilePinned,
+  compact,
+  selectedFile,
+}: FileBrowserProps) {
   const adapter = useAdapter();
 
   // React state mirroring the module-level caches so changes trigger renders
@@ -344,6 +363,7 @@ export function FileBrowser({ workspaceId, onOpenFile, compact, selectedFile }: 
             loadingPaths={loadingPaths}
             onToggle={toggleExpand}
             onOpenFile={onOpenFile}
+            onOpenFilePinned={onOpenFilePinned}
             compact={compact}
             selectedFile={selectedFile}
             selectedRef={selectedRef}

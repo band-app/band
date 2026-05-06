@@ -422,9 +422,11 @@ export function CodeBrowserView({
       const fp = viewFilePathRef.current;
       if (fp) {
         tabState.update(fp, { editedContent: content ?? undefined });
+        // Editing auto-pins a preview tab — VS Code-style.
+        if (content !== null) fileTabs.pinTab(fp);
       }
     },
-    [tabState.update],
+    [tabState.update, fileTabs.pinTab],
   );
 
   // -------------------------------------------------------------------------
@@ -570,14 +572,46 @@ export function CodeBrowserView({
   const handleSelectFile = useCallback(
     (filePath: string) => {
       pushDepartureAndArrival({ filePath });
-      fileTabs.openTab(filePath);
+      // Pin any dirty preview tab before replacing it — never silently drop unsaved edits.
+      const previewTab = fileTabs.openTabs.find((t) => t.isPreview);
+      if (previewTab && previewTab.filePath !== filePath && tabState.isDirty(previewTab.filePath)) {
+        fileTabs.pinTab(previewTab.filePath);
+      }
+      const evicted = fileTabs.openTabPreview(filePath);
+      // Release editor state for the evicted preview tab so memory and
+      // localStorage don't grow unbounded as the user clicks through files.
+      if (evicted && evicted !== filePath) {
+        delete savedEditorStatesRef.current[evicted];
+        tabState.removeFile(evicted);
+      }
       setViewFilePath(filePath);
       setViewLine(undefined);
       setViewLineEnd(undefined);
       setViewColumn(undefined);
       onSelectFile?.(filePath);
     },
-    [onSelectFile, pushDepartureAndArrival, fileTabs.openTab],
+    [
+      onSelectFile,
+      pushDepartureAndArrival,
+      fileTabs.openTabPreview,
+      fileTabs.pinTab,
+      fileTabs.openTabs,
+      tabState.isDirty,
+      tabState.removeFile,
+    ],
+  );
+
+  const handleSelectFilePinned = useCallback(
+    (filePath: string) => {
+      pushDepartureAndArrival({ filePath });
+      fileTabs.openTabPinned(filePath);
+      setViewFilePath(filePath);
+      setViewLine(undefined);
+      setViewLineEnd(undefined);
+      setViewColumn(undefined);
+      onSelectFile?.(filePath);
+    },
+    [onSelectFile, pushDepartureAndArrival, fileTabs.openTabPinned],
   );
 
   const handleBack = useCallback(() => {
@@ -682,7 +716,21 @@ export function CodeBrowserView({
       if (!sameFile) skipFileEffectRef.current = true;
       // Clear saved editor state so the explicit line takes precedence
       delete savedEditorStatesRef.current[entry.filePath];
-      fileTabs.openTab(entry.filePath);
+      // History navigation reuses the preview slot — same as single-click in tree.
+      // Pin any dirty preview first to avoid silently dropping unsaved edits.
+      const previewTab = fileTabs.openTabs.find((t) => t.isPreview);
+      if (
+        previewTab &&
+        previewTab.filePath !== entry.filePath &&
+        tabState.isDirty(previewTab.filePath)
+      ) {
+        fileTabs.pinTab(previewTab.filePath);
+      }
+      const evicted = fileTabs.openTabPreview(entry.filePath);
+      if (evicted && evicted !== entry.filePath) {
+        delete savedEditorStatesRef.current[evicted];
+        tabState.removeFile(evicted);
+      }
       setViewFilePath(entry.filePath);
       setViewLine(entry.line);
       setViewLineEnd(undefined);
@@ -701,7 +749,15 @@ export function CodeBrowserView({
         focusOnViewReadyRef.current = true;
       }
     },
-    [viewFilePath, onSelectFile, fileTabs.openTab],
+    [
+      viewFilePath,
+      onSelectFile,
+      fileTabs.openTabPreview,
+      fileTabs.pinTab,
+      fileTabs.openTabs,
+      tabState.isDirty,
+      tabState.removeFile,
+    ],
   );
 
   const handleEditorGoBack = useCallback(() => {
@@ -874,6 +930,7 @@ export function CodeBrowserView({
           <FileBrowser
             workspaceId={workspaceId}
             onOpenFile={handleSelectFile}
+            onOpenFilePinned={handleSelectFilePinned}
             selectedFile={viewFilePath}
           />
         )
@@ -905,6 +962,7 @@ export function CodeBrowserView({
                 <FileBrowser
                   workspaceId={workspaceId}
                   onOpenFile={handleSelectFile}
+                  onOpenFilePinned={handleSelectFilePinned}
                   compact
                   selectedFile={viewFilePath}
                 />
@@ -936,6 +994,7 @@ export function CodeBrowserView({
                 activeTabPath={fileTabs.activeTabPath}
                 onSelectTab={handleTabSelect}
                 onCloseTab={handleTabClose}
+                onPinTab={fileTabs.pinTab}
                 onGoBack={handleEditorGoBack}
                 onGoForward={handleEditorGoForward}
                 canGoBack={editorHistory.canGoBack}
