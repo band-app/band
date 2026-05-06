@@ -199,6 +199,15 @@ jobs:
           # uploads explicitly so the artifacts land on the same GitHub
           # release as the Tauri DMG.
           ELECTRON_BUILDER_PUBLISH: never
+          # Even with publish=never, electron-builder still instantiates the
+          # GitHub publisher declared in electron-builder.yml to compute
+          # artifact metadata (latest-mac.yml / app-update.yml). That
+          # construction requires GH_TOKEN/GITHUB_TOKEN to be set, otherwise
+          # PublishManager.artifactCreatedWithoutExplicitPublishConfig throws
+          # "GitHub Personal Access Token is not set" once per artifact and
+          # fails the job. The auto-issued GITHUB_TOKEN is sufficient — no
+          # upload happens because publish=never.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Apple sign cleanup
         if: always()
