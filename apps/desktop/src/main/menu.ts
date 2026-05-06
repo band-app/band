@@ -15,12 +15,13 @@
  * the Tauri shell uses (`webview.eval`); here we use Electron's
  * `executeJavaScript`.
  *
- * Phase 5 of issue #306. The "Check for Updates…" entry is still deferred
- * to Phase 6 (electron-updater).
+ * Phase 5 of issue #306 added everything except "Check for Updates…",
+ * which Phase 6 (issue #363) wires up here against `electron-updater`.
  */
 
 import { app, BrowserWindow, Menu, type MenuItemConstructorOptions } from "electron";
 import { dashLog } from "./services/log.js";
+import { checkForUpdate, UPDATER_ENABLED } from "./updater.js";
 
 /** Run JS in whichever window is focused, falling back to the main window. */
 function evalInFocused(js: string): void {
@@ -86,8 +87,26 @@ export function buildAppMenu(): Menu {
 
   const appName = app.name ?? "Band";
 
+  // Match the Tauri shell: when the updater is disabled (dev / unsigned
+  // local builds) the menu item is omitted entirely rather than greyed out.
+  // See lib.rs::run for the equivalent `if UPDATER_ENABLED { ... }` branch.
+  const updaterItems: MenuItemConstructorOptions[] = UPDATER_ENABLED
+    ? [
+        { type: "separator" },
+        {
+          label: "Check for Updates…",
+          click: () => {
+            void checkForUpdate(true).catch((err) => {
+              dashLog(`menu: check for updates failed: ${String(err)}`);
+            });
+          },
+        },
+      ]
+    : [];
+
   const bandSubmenu: MenuItemConstructorOptions[] = [
     { role: "about", label: `About ${appName}` },
+    ...updaterItems,
     { type: "separator" },
     { role: "services" },
     { type: "separator" },

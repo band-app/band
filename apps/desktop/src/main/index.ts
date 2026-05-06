@@ -24,6 +24,7 @@ import { killPort } from "./services/port.js";
 import { getConfiguredPort } from "./services/settings.js";
 import { resolveWebDir } from "./services/web-paths.js";
 import { ensureWebserverRunning, ManagedProcess } from "./services/web-server.js";
+import { scheduleStartupCheck } from "./updater.js";
 import { createMainWindow } from "./window.js";
 
 interface AppState {
@@ -31,6 +32,7 @@ interface AppState {
   managed: ManagedProcess;
   browserManager: BrowserViewManager | null;
   unregisterIpc: (() => void) | null;
+  cancelStartupUpdateCheck: (() => void) | null;
   cleanedUp: boolean;
   port: number;
   /** Empty string in dev mode where we don't own the server. */
@@ -42,6 +44,7 @@ const state: AppState = {
   managed: new ManagedProcess(),
   browserManager: null,
   unregisterIpc: null,
+  cancelStartupUpdateCheck: null,
   cleanedUp: false,
   port: getConfiguredPort(),
   webDir: "",
@@ -89,6 +92,9 @@ async function cleanupOnce(): Promise<void> {
   if (state.cleanedUp) return;
   state.cleanedUp = true;
 
+  // Cancel any pending startup update check so its dialog doesn't pop up
+  // mid-shutdown (the 10s delay can outlive Cmd+Q on a quick quit).
+  state.cancelStartupUpdateCheck?.();
   state.unregisterIpc?.();
   state.browserManager?.destroyAll();
   await state.managed.kill();
@@ -147,6 +153,14 @@ async function bootstrap(): Promise<void> {
       resourcesPath: process.resourcesPath,
       appPath: app.getAppPath(),
     },
+  });
+
+  // Auto-update check 10s after launch (matches the Tauri shell's
+  // `tokio::time::sleep(Duration::from_secs(10))` in lib.rs::run). No-op
+  // unless `BAND_UPDATER_ENABLED=1` is set AND we're in a packaged build —
+  // see updater.ts for the full gating.
+  state.cancelStartupUpdateCheck = scheduleStartupCheck(app.isPackaged, {
+    parentWindow: state.mainWindow,
   });
 
   state.mainWindow.on("close", () => {

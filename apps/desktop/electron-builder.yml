@@ -1,17 +1,27 @@
 # electron-builder configuration for the Band desktop shell.
 #
-# Phase 7 of the Tauri → Electron migration (issue #364) — this file currently
-# only declares the resources that need to be bundled (web server output and
-# the Band CLI sidecar). Phase 8 will fill in the remaining packaging targets,
-# code-signing, and notarisation.
+# Built up across the Tauri → Electron migration:
+#   - Phase 7 (#364): web bundle + CLI sidecar `extraResources`, asar `files`.
+#   - Phase 6 (#363): GitHub `publish` block + macOS code-signing scaffold so
+#     `electron-updater` (apps/desktop/src/main/updater.ts) can pick up
+#     releases from `band-app/band` and verify signatures.
+#   - Phase 8 (TBD):  remaining packaging targets, signing key wiring, and
+#     notarisation.
 #
 # Cross-references:
-#   - Tauri sidecar:   apps/dashboard/src-tauri/tauri.conf.json (`externalBin`).
-#   - Web bundle path: apps/desktop/src/main/services/web-paths.ts.
-#   - CLI bundle path: apps/desktop/src/main/services/cli-paths.ts.
+#   - Tauri sidecar:        apps/dashboard/src-tauri/tauri.conf.json (`externalBin`).
+#   - Tauri updater config: apps/dashboard/src-tauri/tauri.prod.conf.json (pubkey, endpoints).
+#   - Web bundle path:      apps/desktop/src/main/services/web-paths.ts.
+#   - CLI bundle path:      apps/desktop/src/main/services/cli-paths.ts.
+#   - Updater logic:        apps/desktop/src/main/updater.ts.
 
 appId: app.getband.agent
 productName: Band
+copyright: Copyright © 2026 Band Contributors
+
+directories:
+  buildResources: build
+  output: dist-builder
 
 # `extraResources` files are copied verbatim into the packaged app's
 # `Resources/` directory (`Band.app/Contents/Resources/` on macOS,
@@ -35,3 +45,46 @@ extraResources:
 files:
   - dist/**/*
   - package.json
+
+# Publish to the existing GitHub releases endpoint. The Tauri shell pointed
+# its updater at `https://github.com/band-app/band/releases/latest/download/latest.json`
+# (see tauri.prod.conf.json); the electron-updater equivalent is the GitHub
+# provider, which fetches `latest-mac.yml` / `latest.yml` from the same
+# release. The repo coordinates are pinned here so the generated
+# `app-update.yml` doesn't drift if `package.json#repository` ever changes.
+publish:
+  provider: github
+  owner: band-app
+  repo: band
+  # Channel left at default ("latest"); updater.ts overrides at runtime if
+  # we ever ship beta channels.
+
+mac:
+  category: public.app-category.developer-tools
+  minimumSystemVersion: "11.0"
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  # Signing is handled by Phase 8 / ops; CSC_LINK + CSC_KEY_PASSWORD env vars
+  # drive code signing in CI. Locally builds run unsigned.
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+    - target: zip
+      arch:
+        - x64
+        - arm64
+
+dmg:
+  writeUpdateInfo: true
+
+# Signing key configuration for auto-updates: electron-updater verifies the
+# downloaded artifact against the certificate the .app was signed with on
+# macOS, and against `publisherName` on Windows. The minisign keypair Tauri
+# used (TAURI_SIGNING_PRIVATE_KEY / pubkey in tauri.prod.conf.json) does not
+# apply here — electron-updater piggy-backs on platform code signing instead.
+# The legacy minisign artifacts can stay in the same GitHub release for
+# backward compatibility with users still on the Tauri shell.
