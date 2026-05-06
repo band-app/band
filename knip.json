@@ -46,7 +46,9 @@
         "tests/loader.mjs",
         "scripts/*.mjs"
       ],
-      "project": ["src/**/*.{ts,cts}", "tests/**/*.{ts,mjs}", "scripts/**/*.mjs"]
+      "project": ["src/**/*.{ts,cts}", "tests/**/*.{ts,mjs}", "scripts/**/*.mjs"],
+      "ignoreBinaries": ["tsc", "electron", "electron-builder"],
+      "ignoreDependencies": ["electron-builder"]
     },
     "apps/website": {
       "entry": ["src/**/*.{astro,ts,tsx}"],
