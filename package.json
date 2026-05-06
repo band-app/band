@@ -10,7 +10,7 @@
     "dev:web": "pnpm --filter @band-app/server dev",
     "dev:docs": "pnpm --filter @band-app/docs dev",
     "build:dashboard": "pnpm --filter @band-app/dashboard tauri build",
-    "build:desktop": "pnpm --filter @band-app/desktop build",
+    "build:desktop": "pnpm build:cli:desktop && pnpm build:web && pnpm --filter @band-app/desktop build && pnpm --filter @band-app/desktop package",
     "build:web": "pnpm --filter @band-app/server build",
     "build:cli": "pnpm --filter @band-app/cli build && mkdir -p apps/dashboard/src-tauri/binaries && cp apps/cli/target/release/band \"apps/dashboard/src-tauri/binaries/band-$(rustc -vV | sed -n 's/host: //p')\"",
     "build:cli:dev": "pnpm --filter @band-app/cli build:dev && mkdir -p apps/dashboard/src-tauri/binaries && cp apps/cli/target/debug/band \"apps/dashboard/src-tauri/binaries/band-$(rustc -vV | sed -n 's/host: //p')\"",

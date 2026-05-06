@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened-runtime entitlements for the Band desktop shell (Electron).
+
+  Derived from apps/dashboard/src-tauri/entitlements.plist with one entry
+  audited out (see "Intentionally NOT set" below). Issue #365:
+
+    - allow-jit / allow-unsigned-executable-memory: required by V8 (Electron's
+      Chromium renderer JITs JavaScript). Tauri uses these for the same
+      reason inside the WKWebView host process.
+    - disable-library-validation: needed because we ship native .node addons
+      and .dylibs inside Resources/web/ that are signed with our Developer ID
+      but linked at runtime by the bundled Node-based web server.
+    - allow-dyld-environment-variables: lets the bundled web server consume
+      DYLD_* env vars when launching child processes (e.g. node-pty's
+      spawn-helper).
+    - network.client / network.server: the bundled web server binds to
+      localhost and the dashboard renderer talks to it over HTTP/WS.
+    - files.user-selected.read-write: project pickers (folder dialogs) read
+      from arbitrary user-selected directories.
+
+  Intentionally NOT set:
+    - automation.apple-events: the Tauri shell carried this defensively, but
+      our only AppleScript use (installCli's `osascript -e 'do shell script
+      ... with administrator privileges'`) doesn't send events to other apps
+      — `do shell script` is a StandardAdditions command that goes through
+      Authorization Services, not TCC's apple-events path. Audited and
+      dropped in #365.
+-->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+  <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+  <true/>
+  <key>com.apple.security.network.client</key>
+  <true/>
+  <key>com.apple.security.network.server</key>
+  <true/>
+  <key>com.apple.security.files.user-selected.read-write</key>
+  <true/>
+</dict>
+</plist>

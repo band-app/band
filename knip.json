@@ -42,10 +42,11 @@
         "src/main/index.ts",
         "src/preload/index.cts",
         "tests/**/*.test.ts",
-        "tests/loader.mjs"
+        "tests/**/*.test.mjs",
+        "tests/loader.mjs",
+        "scripts/*.mjs"
       ],
-      "project": ["src/**/*.{ts,cts}", "tests/**/*.ts"],
-      "ignoreDependencies": ["electron-builder"]
+      "project": ["src/**/*.{ts,cts}", "tests/**/*.{ts,mjs}", "scripts/**/*.mjs"]
     },
     "apps/website": {
       "entry": ["src/**/*.{astro,ts,tsx}"],

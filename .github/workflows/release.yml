@@ -163,6 +163,43 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY_PATH: ${{ runner.temp }}/api-key.p8
 
+      # Phase 8 of the Tauri → Electron migration (issue #365): produce the
+      # Electron-packaged macOS artifacts side-by-side with the Tauri DMG
+      # while the runtime is dual-shipped. Phase 9 will retire the Tauri job.
+      # `build:cli:desktop` reuses the already-built CLI from the Tauri step
+      # but re-runs `pnpm --filter @band-app/cli build` (release profile);
+      # the cargo cache makes that a no-op.
+      - name: Build desktop (Electron) macOS artifacts
+        run: pnpm build:desktop
+        env:
+          # Reuse the Apple signing identity wired up by apple-sign-setup.
+          # electron-builder reads APPLE_SIGNING_IDENTITY directly to sign
+          # the outer .app; deep-sign-mac.mjs reads it to sign the nested
+          # native binaries inside Resources/web/.
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Notarization is intentionally disabled while the Electron build
+          # is shaking out — the resulting DMG is signed but not stapled, so
+          # users will see a Gatekeeper prompt on first open. The Tauri DMG
+          # (built in the previous step) remains the notarized artifact
+          # users should install. To re-enable: drop SKIP_NOTARIZE and add:
+          #
+          #   APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          #   APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          #   APPLE_API_KEY_PATH: ${{ runner.temp }}/api-key.p8
+          #
+          # All three GitHub secrets already exist (audited #365). Note the
+          # env-var names differ from the Tauri step above: Tauri reads
+          # `APPLE_API_KEY` as the key ID, our `notarize.mjs` uses the more
+          # conventional `APPLE_API_KEY_ID` — same secret, different name.
+          # The .p8 file at `$RUNNER_TEMP/api-key.p8` is written once by the
+          # `apple-sign-setup` action and persists through this job.
+          SKIP_NOTARIZE: "1"
+          # Skip electron-builder's auto-publish — the release step below
+          # uploads explicitly so the artifacts land on the same GitHub
+          # release as the Tauri DMG.
+          ELECTRON_BUILDER_PUBLISH: never
+
       - name: Apple sign cleanup
         if: always()
         uses: ./.github/actions/apple-sign-cleanup
@@ -244,6 +281,9 @@ jobs:
             ${{ steps.manifest.outputs.app_tar }}
             ${{ steps.manifest.outputs.sig_file }}
             latest.json
+            apps/desktop/dist-builder/*.dmg
+            apps/desktop/dist-builder/*-mac.zip
+            apps/desktop/dist-builder/latest-mac.yml
 
       - name: Publish to npm
         working-directory: apps/web
