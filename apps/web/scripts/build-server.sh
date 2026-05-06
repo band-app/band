@@ -15,7 +15,7 @@ esbuild start-server.ts \
   --external:node-pty \
   --banner:js="import{createRequire as __cr}from'module';import{fileURLToPath as __fu}from'url';import{dirname as __dn}from'path';const require=__cr(import.meta.url);const __filename=__fu(import.meta.url);const __dirname=__dn(__filename);"
 
-# Copy native modules into dist/ for self-contained builds (Tauri app).
+# Copy native modules into dist/ for self-contained builds (Electron app).
 # When building for npm publish, skip this — npm consumers install native
 # modules as regular dependencies.
 if [ "${NPM_PUBLISH:-}" != "1" ]; then
@@ -111,7 +111,7 @@ SHIM
 
   # NOTE: We deliberately do NOT bundle the @anthropic-ai/claude-agent-sdk
   # platform-specific native binary (~206MB on macOS arm64). Bundling it
-  # makes the Tauri app balloon to ~300MB. Band users are developers using
+  # makes the Electron app balloon to ~300MB. Band users are developers using
   # AI coding agents, so they already have `claude` installed on PATH —
   # the SDK resolves it from there at runtime.
 

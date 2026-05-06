@@ -172,7 +172,7 @@ export function useSearch({
   }, [onFindInFile, handleOpenSearch]);
 
   // Direct Cmd+F / Ctrl+F handler so the search works even when
-  // the parent layout does not provide a FindInFileContext (e.g. Tauri / mobile).
+  // the parent layout does not provide a FindInFileContext (e.g. desktop / mobile).
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;

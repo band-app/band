@@ -3,7 +3,7 @@
   "productName": "Band",
   "private": true,
   "version": "0.1.0",
-  "description": "Band desktop shell (Electron). Sibling to apps/dashboard during the Tauri→Electron migration (issue #306).",
+  "description": "Band desktop shell (Electron). Hosts the React renderer from apps/web and provides the IPC bridges, native menu, and updater.",
   "type": "module",
   "main": "dist/main/main/index.js",
   "scripts": {

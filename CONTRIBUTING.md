@@ -113,7 +113,7 @@ This project uses **integration tests** as the primary testing approach. Do not 
 
 ## Building Locally vs. Signed Releases
 
-Local builds (`pnpm build:dashboard` or `pnpm tauri build`) produce **unsigned** `.dmg` artifacts. macOS Gatekeeper will warn that the app is "damaged" or "from an unidentified developer" on first launch — this is expected for fork builds.
+Local builds (`pnpm build:desktop`) produce **unsigned** `.dmg` artifacts. macOS Gatekeeper will warn that the app is "damaged" or "from an unidentified developer" on first launch — this is expected for fork builds.
 
 Signed + notarized releases are produced **only** by the official `release.yml` and `nightly.yml` GitHub Actions workflows running on `band-app/band`. Apple Developer certificates and App Store Connect API keys live in a protected `production` GitHub Environment with required reviewers and `main`-branch restrictions, so:
 

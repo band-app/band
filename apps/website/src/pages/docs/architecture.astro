@@ -12,7 +12,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <h2>System Overview</h2>
 
   <ul>
-    <li><strong>Desktop App (Tauri)</strong> — Hosts the dashboard webview, auto-starts the web server, and provides macOS-only shell helpers (folder picker, reveal in Finder, install the CLI with admin privileges).</li>
+    <li><strong>Desktop App (Electron)</strong> — Hosts the dashboard webview, auto-starts the web server, and provides macOS-only shell helpers (folder picker, reveal in Finder, install the CLI with admin privileges).</li>
     <li><strong>Web Server (Node.js)</strong> — Data management, state, API, and background processes.</li>
     <li><strong>CLI (Rust)</strong> — Command-line interface for scripting and automation.</li>
   </ul>
@@ -26,11 +26,12 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   </p>
 
   <p>
-    Those bridges are exposed by the <strong>Tauri desktop app</strong>
-    (<code>apps/dashboard/src-tauri/src/commands/macos_shell.rs</code>) and called from the React
-    webview via <code>@tauri-apps/api</code>. The split keeps the web server runnable headlessly
-    (e.g., on a remote machine for tunnel-based access) while the desktop app handles the
-    local-only OS bits.
+    Those bridges are exposed by the <strong>Electron desktop app</strong>
+    (<code>apps/desktop/src/main/ipc/macos-shell.ts</code>) and called from the React
+    webview via the IPC bridge in <code>apps/web/src/lib/desktop-ipc.ts</code> (which talks to the
+    preload script at <code>apps/desktop/src/preload/index.cts</code>). The split keeps the web
+    server runnable headlessly (e.g., on a remote machine for tunnel-based access) while the
+    desktop app handles the local-only OS bits.
   </p>
 
   <h2>Git Worktree-Based Workspace Isolation</h2>
@@ -71,7 +72,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
 
   <ul>
     <li>The web dashboard (browser client).</li>
-    <li>The desktop app (Tauri frontend).</li>
+    <li>The desktop app (Electron frontend).</li>
     <li>The CLI (via HTTP requests).</li>
     <li>IDE extensions (for status reporting).</li>
   </ul>

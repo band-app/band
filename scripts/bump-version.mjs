@@ -10,7 +10,6 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const JSON_FILES = [
   "package.json",
   "apps/web/package.json",
-  "apps/dashboard/package.json",
   "apps/desktop/package.json",
   "packages/ui/package.json",
   "packages/dashboard-core/package.json",
@@ -20,10 +19,7 @@ const JSON_FILES = [
 
 const TOML_FILES = [
   "apps/cli/Cargo.toml",
-  "apps/dashboard/src-tauri/Cargo.toml",
 ];
-
-const TAURI_CONF = "apps/dashboard/src-tauri/tauri.conf.json";
 
 function parseArgs() {
   const args = process.argv.slice(2);
@@ -183,9 +179,8 @@ function updateCargoLock(dryRun) {
   if (dryRun) return;
   for (const toml of TOML_FILES) {
     const dir = resolve(ROOT, dirname(toml));
-    // Use `cargo generate-lockfile` instead of `cargo check` to avoid triggering
-    // build scripts (e.g. Tauri's build script requires the sidecar binary which
-    // hasn't been built yet at this point in the release pipeline).
+    // Use `cargo generate-lockfile` instead of `cargo check` so we don't
+    // accidentally execute crate build scripts during the release pipeline.
     console.log(`  Updating Cargo.lock in ${dirname(toml)}...`);
     execSync("cargo generate-lockfile", { cwd: dir, stdio: "inherit" });
   }
@@ -220,9 +215,6 @@ console.log("\nJSON files:");
 for (const file of JSON_FILES) {
   updateJsonFile(file, newVersion, opts.dryRun);
 }
-
-console.log("\nTauri config:");
-updateJsonFile(TAURI_CONF, newVersion, opts.dryRun);
 
 console.log("\nCargo.toml files:");
 for (const file of TOML_FILES) {

@@ -183,7 +183,7 @@ export function getAgentDefinition(settings: Settings, agentId?: string): Coding
 
 export function saveSettings(settings: Settings): void {
   const filePath = settingsFile();
-  // Merge with existing file contents to preserve unknown fields (e.g. Tauri extras)
+  // Merge with existing file contents to preserve unknown fields (e.g. desktop-shell extras)
   let existing: Record<string, unknown> = {};
   try {
     existing = JSON.parse(readFileSync(filePath, "utf-8"));

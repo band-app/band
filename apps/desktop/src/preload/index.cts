@@ -2,9 +2,9 @@
  * Preload script — exposes a minimal, allowlisted IPC surface to the renderer.
  *
  * The renderer side (in `apps/web`) reads `window.__BAND_DESKTOP__` via
- * `apps/web/src/lib/desktop-ipc.ts`. The shape of the API (`invoke(channel,
- * args)` / `on(event, cb)`) intentionally mirrors Tauri's `@tauri-apps/api`
- * so the bridge can dispatch to either shell without reshaping arguments.
+ * `apps/web/src/lib/desktop-ipc.ts`. The API shape (`invoke(channel, args)`
+ * / `on(event, cb)`) is intentionally simple so renderer call sites do not
+ * need to know about Electron's IPC primitives.
  *
  * Compiled as CommonJS (`module: CommonJS`). Electron's sandboxed preload
  * runtime is CJS-only: ESM `import` statements throw `SyntaxError: Cannot
@@ -38,7 +38,6 @@ const ALLOWED_INVOKE_CHANNELS = new Set<string>([
   "webserver_start",
   "webserver_stop",
   "get_app_title",
-  "window_start_dragging",
   // Phase 2 — macOS shell + open_external
   "pick_folder",
   "reveal_in_finder",
@@ -70,8 +69,7 @@ const api = {
   version: 1 as const,
 
   /**
-   * Invoke a main-process handler. Mirrors Tauri's `invoke(cmd, args)`
-   * signature so the bridge layer can dispatch transparently.
+   * Invoke a main-process handler.
    *
    * Channels are gated by the allowlist; unknown channels reject so a
    * compromised renderer cannot poke at arbitrary `ipcMain.handle` slots.
@@ -85,7 +83,7 @@ const api = {
 
   /**
    * Subscribe to a main-process-emitted event. Returns an unlisten function
-   * matching the shape of Tauri's `listen()` resolution.
+   * the renderer calls to detach the listener.
    */
   on(event: string, cb: (payload: unknown) => void): Unlisten {
     if (!ALLOWED_EVENT_NAMES.has(event)) {
@@ -94,15 +92,6 @@ const api = {
     const handler = (_e: IpcRendererEvent, payload: unknown) => cb(payload);
     ipcRenderer.on(event, handler);
     return () => ipcRenderer.removeListener(event, handler);
-  },
-
-  /**
-   * Native window dragging — equivalent of Tauri's
-   * `getCurrentWindow().startDragging()`. Wired via a dedicated channel
-   * because it's a window method, not a generic command.
-   */
-  startDragging(): Promise<void> {
-    return ipcRenderer.invoke("window_start_dragging") as Promise<void>;
   },
 };
 

@@ -1,14 +1,14 @@
 import { useEffect } from "react";
-import { isDesktop } from "../lib/is-tauri";
+import { isDesktop } from "../lib/is-desktop";
 import { zoomIn, zoomOut, zoomReset } from "../lib/zoom";
 
 /**
  * Browser-mode keyboard shortcut handler for zoom.
  *
  * Registers Cmd+= (zoom in), Cmd+- (zoom out), and Cmd+0 (reset).
- * Only active outside the desktop shell — when running in Tauri or
- * Electron the native View menu accelerators intercept these keys
- * before they reach the webview (Phase 5 wires Electron's menu).
+ * Only active outside the desktop shell — when running inside Electron the
+ * native View menu accelerators intercept these keys before they reach the
+ * webview (see `apps/desktop/src/main/menu.ts`).
  */
 export function useZoom(): void {
   useEffect(() => {

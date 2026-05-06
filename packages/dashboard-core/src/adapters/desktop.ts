@@ -2,21 +2,16 @@ import type { PlatformCapabilities } from "../adapter";
 import { WebCapabilities, WebDashboardAdapter } from "./web";
 
 // ---------------------------------------------------------------------------
-// Shell detection — both Tauri and Electron expose detectable globals during
-// the issue #306 migration. Either is treated as "desktop shell" by the
-// adapter; the underlying invoke implementation chooses the right transport.
+// Shell detection — the Electron preload (`apps/desktop/src/preload/index.cts`)
+// exposes `window.__BAND_DESKTOP__`. Anything else is a regular browser tab.
 // ---------------------------------------------------------------------------
-
-function isTauri(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-}
 
 function isElectron(): boolean {
   return typeof window !== "undefined" && "__BAND_DESKTOP__" in window;
 }
 
 function isDesktopShell(): boolean {
-  return isTauri() || isElectron();
+  return isElectron();
 }
 
 interface ElectronBridge {
@@ -30,21 +25,17 @@ function electronBridge(): ElectronBridge | null {
 }
 
 /**
- * Dispatches an `invoke()` call to whichever desktop shell is present. Channel
- * names match Tauri's snake-case command registry (`apps/dashboard/src-tauri/
- * src/lib.rs`) and Electron's IPC channel names (`apps/desktop/src/shared/
- * ipc-channels.ts`) — they are identical by design.
+ * Dispatches an `invoke()` call to the Electron desktop shell. Channel names
+ * match the IPC channel registry in
+ * `apps/desktop/src/shared/ipc-channels.ts` and are gated by the preload
+ * allowlist.
  */
 async function desktopInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   const bridge = electronBridge();
   if (bridge) {
     return (await bridge.invoke(cmd, args)) as T;
   }
-  if (isTauri()) {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<T>(cmd, args);
-  }
-  throw new Error(`desktopInvoke('${cmd}') called outside a desktop shell`);
+  throw new Error(`desktopInvoke('${cmd}') called outside the desktop shell`);
 }
 
 /**
@@ -54,11 +45,8 @@ async function desktopInvoke<T>(cmd: string, args?: Record<string, unknown>): Pr
  * the macOS admin password dialog when the web server reports
  * "elevation-required". The desktop shell is the foreground GUI process, so
  * it can show the dialog reliably; the web server cannot.
- *
- * Class name retained from the Tauri-only era for migration stability — see
- * issue #306 for the cutover plan.
  */
-export class TauriDashboardAdapter extends WebDashboardAdapter {
+export class DesktopDashboardAdapter extends WebDashboardAdapter {
   async installCli(opts?: { allowPrompt?: boolean }): Promise<void> {
     try {
       // Try the web server path first (works when /usr/local/bin is writable).
@@ -88,8 +76,7 @@ export class TauriDashboardAdapter extends WebDashboardAdapter {
 
 /**
  * Native-shell capabilities: thin wrappers over the desktop shell's OS
- * features (reveal in Finder, pick folder, open external URL). All channel
- * names match between Tauri and Electron.
+ * features (reveal in Finder, pick folder, open external URL).
  */
 export class NativeShellCapabilities implements PlatformCapabilities {
   private web = new WebCapabilities();
@@ -118,11 +105,6 @@ export class NativeShellCapabilities implements PlatformCapabilities {
       window.open(url, "_blank");
       return;
     }
-    if (isElectron()) {
-      await desktopInvoke("open_external", { url });
-      return;
-    }
-    const { open } = await import("@tauri-apps/plugin-shell");
-    await open(url);
+    await desktopInvoke("open_external", { url });
   }
 }

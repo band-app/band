@@ -1,10 +1,6 @@
 /**
  * Register every `ipcMain.handle` for the renderer's command surface.
  *
- * Channel names match Tauri exactly so the bridge in
- * `apps/web/src/lib/desktop-ipc.ts` can dispatch the same `invoke(cmd, args)`
- * payloads to either shell.
- *
  * One `ipcMain.handle` per command. Handlers return Promises (or values that
  * resolve to Promises via `Promise.resolve` semantics) so the renderer's
  * `invoke()` always returns a Promise.
@@ -65,7 +61,9 @@ export function registerIpc(opts: RegisterOptions): () => void {
     handlers.push([channel, wrapped as (args: unknown) => unknown]);
   };
 
-  // ---- Phase 1: web server + window ----
+  // ---- Web server + window ----
+  // Native window dragging is handled via CSS `-webkit-app-region: drag` on
+  // the title bar — no IPC handler needed.
   handle(Channels.webserverStart, () =>
     webserverStart({ webDir: opts.webDir, managed: opts.managed }),
   );
@@ -73,16 +71,10 @@ export function registerIpc(opts: RegisterOptions): () => void {
     webserverStop({ webDir: opts.webDir, managed: opts.managed }),
   );
   handle(Channels.getAppTitle, () => getAppTitle());
-  handle(Channels.windowStartDragging, () => {
-    // Electron has no public "start dragging" API. macOS forwards mouse-
-    // down events on `-webkit-app-region: drag` regions automatically. We
-    // expose a no-op so the renderer's bridge doesn't reject — Phase 5
-    // wires the title bar to use the CSS region instead.
-  });
 
-  // ---- Phase 2: macOS shell ----
-  // Args are camelCase because the renderer (Tauri-shaped) sends camelCase
-  // and Electron has no FFI-level case conversion.
+  // ---- macOS shell ----
+  // Args are camelCase because they're forwarded to the handlers as typed
+  // objects — Electron's IPC has no FFI-level case conversion.
   handle(Channels.pickFolder, () => pickFolder(opts.mainWindow));
   handle(Channels.revealInFinder, (args: RevealInFinderArgs) => revealInFinder(args.path));
   handle(Channels.checkAppExists, (args: CheckAppExistsArgs) => checkAppExists(args.appName));
@@ -92,7 +84,7 @@ export function registerIpc(opts: RegisterOptions): () => void {
   );
   handle(Channels.openExternal, (args: OpenExternalArgs) => openExternal(args.url));
 
-  // ---- Phase 3: browser panels ----
+  // ---- Browser panels ----
   const bm = { manager: opts.browserManager };
   handle(Channels.browserCreate, (args: BrowserCreateArgs) => browserHandlers.create(bm, args));
   handle(Channels.browserNavigate, (args: BrowserNavigateArgs) =>

@@ -20,7 +20,7 @@ import React, {
   useState,
 } from "react";
 import { invoke as desktopInvoke } from "../lib/desktop-ipc";
-import { isDesktop } from "../lib/is-tauri";
+import { isDesktop } from "../lib/is-desktop";
 import { trpc } from "../lib/trpc-client";
 import { BrowserPaneComponent, type BrowserPaneParams, useFavicon } from "./BrowserPanel";
 
@@ -479,7 +479,7 @@ export function DockviewBrowserContainer({
   // - Cmd/Ctrl+W → close the active browser tab
   // - Cmd/Ctrl+D → split right (vertical split)
   // - Cmd/Ctrl+Shift+D → split down (horizontal split)
-  // - Cmd/Ctrl+R → reload the active browser tab (Tauri only)
+  // - Cmd/Ctrl+R → reload the active browser tab (desktop only)
   // - Ctrl+(Shift)+Tab → cycle through tabs in the active group
   useEffect(() => {
     if (!visible) return;

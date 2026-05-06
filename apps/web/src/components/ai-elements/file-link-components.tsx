@@ -327,7 +327,7 @@ function FileLinkedAnchor(props: ComponentProps<"a"> & ExtraProps) {
     );
   }
 
-  // Default link rendering — open external links in system browser (Tauri)
+  // Default link rendering — open external links in system browser (desktop)
   return (
     <a href={href} target="_blank" rel="noopener noreferrer" onClick={handleClick} {...rest}>
       {children}

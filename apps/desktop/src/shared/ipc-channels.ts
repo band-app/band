@@ -2,21 +2,18 @@
  * Single source of truth for IPC channel and event names. Both the Electron
  * main process and the renderer (via the preload bridge) reference these.
  *
- * Channel names match the Tauri command names (snake_case) so the React
- * frontend's call sites can be drop-in replaced with the bridge in
- * `apps/web/src/lib/desktop-ipc.ts`. See plan in /Users/amirilovic/.claude/plans
- * and the original Tauri handler list in
- * `apps/dashboard/src-tauri/src/lib.rs`.
+ * Channels use snake_case so the renderer's call shapes match what the IPC
+ * layer registers. Native window dragging is wired via CSS
+ * `-webkit-app-region: drag` on the title bar — no IPC channel needed.
  */
 
 export const Channels = {
-  // Phase 1 — web server lifecycle + window
+  // Web server lifecycle + window
   webserverStart: "webserver_start",
   webserverStop: "webserver_stop",
   getAppTitle: "get_app_title",
-  windowStartDragging: "window_start_dragging",
 
-  // Phase 2 — macOS shell bridges + open_external
+  // macOS shell bridges + open_external
   pickFolder: "pick_folder",
   revealInFinder: "reveal_in_finder",
   checkAppExists: "check_app_exists",
@@ -24,7 +21,7 @@ export const Channels = {
   installCli: "install_cli",
   openExternal: "open_external",
 
-  // Phase 3 — browser panels
+  // Browser panels
   browserCreate: "browser_create",
   browserNavigate: "browser_navigate",
   browserGoBack: "browser_go_back",

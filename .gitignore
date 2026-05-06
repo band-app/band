@@ -8,15 +8,10 @@ band
 __pycache__/
 target/
 *.vsix
-apps/dashboard/src-tauri/icons/android/
-apps/dashboard/src-tauri/icons/ios/
-apps/dashboard/src-tauri/gen/
 *.tsbuildinfo
 test-results/
 playwright-report/
 screenshots/
 .last-run.json
-apps/dashboard/src-tauri/binaries/*
-!apps/dashboard/src-tauri/binaries/.gitkeep
 apps/desktop/binaries/*
 !apps/desktop/binaries/.gitkeep

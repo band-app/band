@@ -2,7 +2,7 @@
   "$schema": "https://unpkg.com/knip@latest/schema.json",
   "ignoreWorkspaces": ["apps/cli"],
   "exclude": ["exports", "types", "unresolved"],
-  "ignoreBinaries": ["rustc", "wrangler"],
+  "ignoreBinaries": ["wrangler"],
   "workspaces": {
     ".": {
       "entry": ["scripts/*.mjs"],
@@ -32,11 +32,6 @@
         "vscode-jsonrpc"
       ]
     },
-    "apps/dashboard": {
-      "entry": ["vitest.config.ts"],
-      "ignoreBinaries": ["vitest"],
-      "ignoreDependencies": ["vitest"]
-    },
     "apps/desktop": {
       "entry": [
         "src/main/index.ts",
@@ -46,9 +41,7 @@
         "tests/loader.mjs",
         "scripts/*.mjs"
       ],
-      "project": ["src/**/*.{ts,cts}", "tests/**/*.{ts,mjs}", "scripts/**/*.mjs"],
-      "ignoreBinaries": ["tsc", "electron", "electron-builder"],
-      "ignoreDependencies": ["electron-builder"]
+      "project": ["src/**/*.{ts,cts}", "tests/**/*.{ts,mjs}", "scripts/**/*.mjs"]
     },
     "apps/website": {
       "entry": ["src/**/*.{astro,ts,tsx}"],
@@ -60,7 +53,7 @@
       "project": ["src/**/*.{ts,tsx}"]
     },
     "packages/dashboard-core": {
-      "entry": ["src/index.ts", "src/adapters/web.ts", "src/adapters/tauri.ts"],
+      "entry": ["src/index.ts", "src/adapters/web.ts", "src/adapters/desktop.ts"],
       "project": ["src/**/*.{ts,tsx}"],
       "ignoreDependencies": ["@babel/runtime", "@codemirror/lint"]
     },

@@ -9,7 +9,6 @@
     "**/target/**",
     "**/.astro/**",
     "**/*.gen.ts",
-    "**/apps/dashboard/src-tauri/gen/**",
     "**/pnpm-lock.yaml",
     "**/*.lock",
     "**/apps/web/src/lib/db/migrations/**",

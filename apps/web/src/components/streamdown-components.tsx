@@ -3,7 +3,7 @@ import { openExternalUrl } from "../lib/open-external-url";
 
 /**
  * Custom `<a>` element for Streamdown that opens external links in the system
- * browser rather than navigating the Tauri webview.
+ * browser rather than navigating the desktop webview.
  *
  * Pass this via the Streamdown `components` prop:
  *

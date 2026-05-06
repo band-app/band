@@ -22,7 +22,7 @@ Only the latest release is supported with security updates.
 
 This policy covers the Band codebase including:
 
-- Tauri desktop app (`apps/dashboard`)
+- Electron desktop app (`apps/desktop`)
 - Web server (`apps/web`)
 - CLI (`apps/cli`)
 - VS Code extension (`extensions/vscode`)

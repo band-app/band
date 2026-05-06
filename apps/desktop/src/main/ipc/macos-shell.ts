@@ -1,14 +1,12 @@
 /**
- * macOS shell bridges. Direct port of
- * `apps/dashboard/src-tauri/src/commands/macos_shell.rs`.
+ * macOS shell bridges.
  *
  *   - `pickFolder` — system folder picker (cross-platform via Electron's `dialog`).
  *   - `revealInFinder` — open the path in the platform's file manager.
  *   - `checkAppExists` — look in /Applications and friends, fall back to `which`.
  *   - `openWithApp` — `open -a <app> <path>` (macOS only).
  *   - `installCli` — symlink the CLI binary via `osascript` admin prompt (macOS only).
- *   - `openExternal` — `shell.openExternal(url)` (cross-platform; replaces
- *     the renderer's use of `@tauri-apps/plugin-shell`).
+ *   - `openExternal` — `shell.openExternal(url)` (cross-platform).
  */
 
 import { spawn, spawnSync } from "node:child_process";
@@ -192,8 +190,8 @@ function throwMissingBundledBinary(): never {
 // ---------------------------------------------------------------------------
 
 /**
- * Open a URL in the user's default browser. Replaces the renderer's use of
- * `@tauri-apps/plugin-shell`'s `open()` from `apps/web/src/lib/open-external-url.ts`.
+ * Open a URL in the user's default browser. Backs the `open_external` IPC
+ * channel called from `apps/web/src/lib/open-external-url.ts`.
  */
 export async function openExternal(url: string): Promise<void> {
   await shell.openExternal(url);

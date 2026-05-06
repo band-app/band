@@ -32,7 +32,7 @@ import xcodeIcon from "../assets/icons/app/xcode.png";
 import zedIcon from "../assets/icons/app/zed.svg";
 import zedDarkIcon from "../assets/icons/app/zed-dark.svg";
 import { invoke as desktopInvoke } from "../lib/desktop-ipc";
-import { isDesktop } from "../lib/is-tauri";
+import { isDesktop } from "../lib/is-desktop";
 
 // ---------------------------------------------------------------------------
 // Icon registry
