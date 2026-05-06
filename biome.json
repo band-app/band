@@ -60,6 +60,7 @@
       "**/*.css",
       "!**/node_modules",
       "!**/dist",
+      "!**/dist-builder",
       "!**/build",
       "!**/target",
       "!**/.next",
