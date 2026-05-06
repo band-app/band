@@ -1,0 +1,37 @@
+# electron-builder configuration for the Band desktop shell.
+#
+# Phase 7 of the Tauri → Electron migration (issue #364) — this file currently
+# only declares the resources that need to be bundled (web server output and
+# the Band CLI sidecar). Phase 8 will fill in the remaining packaging targets,
+# code-signing, and notarisation.
+#
+# Cross-references:
+#   - Tauri sidecar:   apps/dashboard/src-tauri/tauri.conf.json (`externalBin`).
+#   - Web bundle path: apps/desktop/src/main/services/web-paths.ts.
+#   - CLI bundle path: apps/desktop/src/main/services/cli-paths.ts.
+
+appId: app.getband.agent
+productName: Band
+
+# `extraResources` files are copied verbatim into the packaged app's
+# `Resources/` directory (`Band.app/Contents/Resources/` on macOS,
+# `resources/` next to the executable on Linux/Windows). Both entries match
+# the runtime resolvers in `services/web-paths.ts` and `services/cli-paths.ts`,
+# which read `process.resourcesPath` in packaged builds.
+extraResources:
+  # Bundled web server. Mirrors the Tauri `bundle.resources` map that ships
+  # `apps/web/dist/` into `Resources/web/`.
+  - from: ../web/dist
+    to: web/dist
+  # Bundled CLI sidecar. Populated by `apps/desktop/scripts/copy-cli-binary.mjs`
+  # before electron-builder runs (see root `build:cli:desktop`). The runtime
+  # path resolver expects this exact relative location.
+  - from: binaries/band
+    to: binaries/band
+
+# Limit the JS bundle shipped inside the .asar to the compiled main + preload
+# output and the package manifest. Source TypeScript and tsconfig files are
+# excluded so the asar stays small.
+files:
+  - dist/**/*
+  - package.json

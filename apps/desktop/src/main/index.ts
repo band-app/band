@@ -142,6 +142,11 @@ async function bootstrap(): Promise<void> {
     webDir: state.webDir,
     managed: state.managed,
     browserManager: state.browserManager,
+    cliPaths: {
+      isPackaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      appPath: app.getAppPath(),
+    },
   });
 
   state.mainWindow.on("close", () => {

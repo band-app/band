@@ -36,9 +36,9 @@ export function findCliBinary(): string | null {
   }
 
   // --- Strategy B: Tauri sidecar binary in macOS .app bundle ---
-  // When running inside Band.app, the CLI sidecar lives next to the main
-  // executable at .app/Contents/MacOS/band.  The web server's cwd is
-  // .app/Contents/Resources/web/, so walk up to Contents/MacOS.
+  // When running inside Band.app (Tauri shell), the CLI sidecar lives next
+  // to the main executable at .app/Contents/MacOS/band. The web server's
+  // cwd is .app/Contents/Resources/web/, so walk up to Contents/MacOS.
   if (platform() === "darwin") {
     const macOsCandidates = [
       // From cwd (Resources/web/) → Contents/MacOS/band
@@ -53,6 +53,30 @@ export function findCliBinary(): string | null {
       } catch {
         // Continue
       }
+    }
+  }
+
+  // --- Strategy C: Electron extraResources layout (issue #364) ---
+  // electron-builder ships the sidecar at <Resources>/binaries/band on every
+  // platform. The web server runs as a child of the main process with cwd
+  // set to <Resources>/web/dist by `services/web-server.ts`, so the sidecar
+  // is one level up and across into `binaries/`. We try both the cwd-based
+  // and module-relative paths so the resolution survives a future change to
+  // the spawn cwd (the import.meta.dirname path matches the bundled file's
+  // installed location).
+  const exe = platform() === "win32" ? "band.exe" : "band";
+  const electronCandidates = [
+    // From cwd (<Resources>/web/dist) → <Resources>/binaries/band
+    resolve(process.cwd(), "..", "..", "binaries", exe),
+    // From the bundled dist file (<Resources>/web/dist/...) → <Resources>/binaries/band
+    resolve(import.meta.dirname, "..", "..", "..", "binaries", exe),
+  ];
+  for (const p of electronCandidates) {
+    try {
+      lstatSync(p);
+      return p;
+    } catch {
+      // Continue
     }
   }
 
@@ -77,10 +101,15 @@ export async function checkCli(): Promise<CliStatus> {
       return "NotInstalled";
     }
 
-    // Accept our own cargo build output OR the Tauri sidecar binary
+    // Accept our own cargo build output OR the Tauri/Electron sidecar
+    // binaries. Tauri ships the sidecar at .app/Contents/MacOS/band; the
+    // Electron shell (issue #364) ships it as an extraResource at
+    // <Resources>/binaries/band — that path is platform-agnostic, so the
+    // matcher just looks for the trailing `/binaries/band` segment.
     const isCargoBuild = target.includes(join("apps", "cli", "target"));
-    const isSidecar = target.includes(join("Contents", "MacOS", "band"));
-    if (!isCargoBuild && !isSidecar) {
+    const isTauriSidecar = target.includes(join("Contents", "MacOS", "band"));
+    const isElectronSidecar = target.endsWith(join("binaries", "band"));
+    if (!isCargoBuild && !isTauriSidecar && !isElectronSidecar) {
       return "ConflictingBinary";
     }
     return "Installed";
