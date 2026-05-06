@@ -26,6 +26,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import {
   type CheckForUpdateDeps,
   checkForUpdate,
+  pickAutoUpdater,
   scheduleStartupCheck,
   type UpdaterLike,
 } from "../src/main/updater.ts";
@@ -342,5 +343,38 @@ describe("scheduleStartupCheck", () => {
 
     await delay(80);
     assert.equal(updater.checkForUpdatesCalls, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// pickAutoUpdater
+// ---------------------------------------------------------------------------
+//
+// Regression test for the bug shipped through v0.5.3: `electron-updater`
+// exposes `autoUpdater` via a CJS getter, and Node's dynamic-`import()` ESM
+// interop does not hoist getter-defined props onto the namespace's named
+// exports — they're reachable only through `.default`. The original code
+// read `mod.autoUpdater`, got `undefined`, and threw
+//   "Cannot set properties of undefined (setting 'autoDownload')"
+// when the user clicked "Check for Updates…".
+
+describe("pickAutoUpdater", () => {
+  test("prefers .default.autoUpdater (CJS-via-import shape)", () => {
+    const fake = {} as UpdaterLike;
+    const mod = { default: { autoUpdater: fake } };
+    assert.equal(pickAutoUpdater(mod), fake);
+  });
+
+  test("falls back to .autoUpdater when .default is absent", () => {
+    const fake = {} as UpdaterLike;
+    const mod = { autoUpdater: fake };
+    assert.equal(pickAutoUpdater(mod), fake);
+  });
+
+  test("throws when neither shape exposes a singleton", () => {
+    // This is the v0.5.3 shipped state: named keys are present but
+    // `autoUpdater` is undefined because Node didn't hoist the CJS getter.
+    const mod = { default: {}, AppUpdater: class {} };
+    assert.throws(() => pickAutoUpdater(mod), /did not expose autoUpdater singleton/);
   });
 });

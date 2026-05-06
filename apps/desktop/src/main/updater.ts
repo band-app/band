@@ -105,13 +105,51 @@ export interface CheckForUpdateDeps {
 const ZERO_DEPS: Readonly<CheckForUpdateDeps> = Object.freeze({});
 
 /**
+ * Pick the `autoUpdater` singleton out of an `import()`ed electron-updater
+ * module. Exported for tests — see notes below for the bug it documents.
+ *
+ * `electron-updater` is CJS and exposes its `autoUpdater` singleton via a
+ * lazy CJS getter:
+ *
+ *   Object.defineProperty(exports, "autoUpdater", {
+ *     get: () => _autoUpdater ?? doLoadAutoUpdater(),
+ *   });
+ *
+ * Node's dynamic-`import()` ESM⇄CJS interop does NOT hoist getter-defined
+ * properties onto the namespace's named exports. They're reachable only
+ * through `.default` (which IS the entire `module.exports`). So
+ * `mod.autoUpdater` resolves to `undefined`, and downstream code blows up
+ * with "Cannot set properties of undefined (setting 'autoDownload')" —
+ * which is exactly what every shipped DMG up to v0.5.3 did when the user
+ * clicked "Check for Updates…".
+ *
+ * We try `.default.autoUpdater` first, fall back to `.autoUpdater` for
+ * any future bundler / interop combo that does hoist it, and throw with a
+ * clear message if neither resolves so the existing `checkForUpdate`
+ * try/catch can surface the failure as a dialog instead of leaving the
+ * user clicking into the void.
+ */
+export function pickAutoUpdater(mod: unknown): UpdaterLike {
+  const m = mod as { default?: { autoUpdater?: unknown }; autoUpdater?: unknown };
+  const candidate = m.default?.autoUpdater ?? m.autoUpdater;
+  if (!candidate) {
+    throw new Error(
+      "electron-updater did not expose autoUpdater singleton " +
+        "(checked mod.default.autoUpdater and mod.autoUpdater)",
+    );
+  }
+  return candidate as UpdaterLike;
+}
+
+/**
  * Lazy-load the live `electron-updater` singleton. Only called when no
- * `deps.updater` was supplied — i.e. in production. Tests never reach this.
+ * `deps.updater` was supplied — i.e. in production. Tests inject a fake
+ * via `deps.updater` and never reach this.
  */
 async function loadDefaultUpdater(): Promise<UpdaterLike> {
   // eslint-disable-next-line @typescript-eslint/consistent-type-imports
   const mod = await import("electron-updater");
-  return mod.autoUpdater as unknown as UpdaterLike;
+  return pickAutoUpdater(mod);
 }
 
 async function loadElectron(): Promise<typeof import("electron")> {
