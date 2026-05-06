@@ -7,7 +7,21 @@
  * the outer .app. The deep-sign of nested binaries happens earlier in
  * scripts/after-pack.mjs (before the outer seal is computed); by the
  * time we reach notarize, every Mach-O inside the bundle already carries
- * a valid Developer ID signature. Notarization requirements:
+ * a valid Developer ID signature.
+ *
+ * The flow itself is the canonical Apple workflow:
+ *
+ *   ditto -c -k --keepParent <app> <zip>   ← notarytool requires a .zip,
+ *   xcrun notarytool submit <zip> --wait   ← .pkg, or .dmg (the older
+ *   xcrun stapler staple <app>             ← `altool` accepted a raw .app,
+ *                                            notarytool does not). Stapling
+ *                                            writes the ticket into the
+ *                                            .app itself, so any .dmg /
+ *                                            .zip electron-builder later
+ *                                            produces from this .app
+ *                                            inherits the ticket.
+ *
+ * Notarization requirements:
  *
  *   - The .app has been signed with a Developer ID Application certificate
  *     and the hardened runtime is enabled (electron-builder + the
@@ -37,7 +51,9 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, join } from "node:path";
 
 /**
  * @typedef {object} NotarizeCredentials
@@ -202,62 +218,81 @@ export function notarize(opts) {
 
   const runner = opts.runner ?? defaultRunner;
 
-  // `--wait` blocks until Apple returns a final state. `--output-format json`
-  // gives us a single parseable line on completion so we can extract the
-  // submission ID and final status without scraping human-readable output.
-  log(`[notarize] submitting ${opts.appPath} (auth: ${creds.kind})`);
-  const submitArgs = [
-    "notarytool",
-    "submit",
-    opts.appPath,
-    ...creds.args,
-    "--wait",
-    "--output-format",
-    "json",
-  ];
-
-  /** @type {string | undefined} */
-  let submitStdout;
+  // notarytool no longer accepts a raw .app bundle (the older `altool` did);
+  // it requires a .zip / .pkg / .dmg. Apple's documented workflow is:
+  //   ditto -c -k --keepParent <app> <zip>   ← create archive
+  //   xcrun notarytool submit <zip> --wait   ← submit archive
+  //   xcrun stapler staple <app>             ← staple the *original* .app
+  // The staple is written into the .app bundle itself, so any subsequent
+  // .dmg / .zip electron-builder produces from that .app inherits the
+  // ticket. We zip into an os.tmpdir() so the throwaway archive doesn't
+  // leak into dist-builder/.
+  const tmpDir = mkdtempSync(join(tmpdir(), "band-notarize-"));
+  const zipPath = join(tmpDir, `${basename(opts.appPath)}.zip`);
   try {
-    submitStdout = runner("xcrun", submitArgs, { capture: true });
-  } catch (err) {
-    // notarytool itself failed (network error, auth error, etc.). It may
-    // have printed the submission ID to stdout before bailing — try to
-    // capture and surface it.
-    const stdoutFromErr =
-      err && typeof err === "object" && "stdout" in err
-        ? String(/** @type {{ stdout?: unknown }} */ (err).stdout ?? "")
-        : "";
-    const parsed = parseSubmitOutput(stdoutFromErr);
-    if (parsed?.id) {
-      dumpNotarizationLog(parsed.id, creds, runner, log);
+    log(`[notarize] zipping ${opts.appPath} → ${zipPath}`);
+    runner("ditto", ["-c", "-k", "--keepParent", opts.appPath, zipPath]);
+
+    // `--wait` blocks until Apple returns a final state. `--output-format
+    // json` gives us a single parseable line on completion so we can
+    // extract the submission ID and final status without scraping
+    // human-readable output.
+    log(`[notarize] submitting ${zipPath} (auth: ${creds.kind})`);
+    const submitArgs = [
+      "notarytool",
+      "submit",
+      zipPath,
+      ...creds.args,
+      "--wait",
+      "--output-format",
+      "json",
+    ];
+
+    /** @type {string | undefined} */
+    let submitStdout;
+    try {
+      submitStdout = runner("xcrun", submitArgs, { capture: true });
+    } catch (err) {
+      // notarytool itself failed (network error, auth error, etc.). It may
+      // have printed the submission ID to stdout before bailing — try to
+      // capture and surface it.
+      const stdoutFromErr =
+        err && typeof err === "object" && "stdout" in err
+          ? String(/** @type {{ stdout?: unknown }} */ (err).stdout ?? "")
+          : "";
+      const parsed = parseSubmitOutput(stdoutFromErr);
+      if (parsed?.id) {
+        dumpNotarizationLog(parsed.id, creds, runner, log);
+      }
+      throw new Error(
+        `[notarize] notarytool submit failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
-    throw new Error(
-      `[notarize] notarytool submit failed: ${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
 
-  const result = parseSubmitOutput(submitStdout);
-  if (!result || !result.id) {
-    throw new Error(
-      `[notarize] could not parse notarytool output (got: ${JSON.stringify(submitStdout)})`,
-    );
-  }
+    const result = parseSubmitOutput(submitStdout);
+    if (!result || !result.id) {
+      throw new Error(
+        `[notarize] could not parse notarytool output (got: ${JSON.stringify(submitStdout)})`,
+      );
+    }
 
-  if (result.status !== "Accepted") {
-    // Apple finished the scan and rejected. Fetch the issues array so the
-    // CI log carries the actual reason.
-    dumpNotarizationLog(result.id, creds, runner, log);
-    throw new Error(
-      `[notarize] Apple rejected submission ${result.id} (status: ${result.status}${
-        result.message ? `, message: ${result.message}` : ""
-      }). See the notarytool log dumped above for the offending paths.`,
-    );
-  }
+    if (result.status !== "Accepted") {
+      // Apple finished the scan and rejected. Fetch the issues array so the
+      // CI log carries the actual reason.
+      dumpNotarizationLog(result.id, creds, runner, log);
+      throw new Error(
+        `[notarize] Apple rejected submission ${result.id} (status: ${result.status}${
+          result.message ? `, message: ${result.message}` : ""
+        }). See the notarytool log dumped above for the offending paths.`,
+      );
+    }
 
-  log(`[notarize] accepted (submission: ${result.id})`);
-  log("[notarize] stapling ticket");
-  runner("xcrun", ["stapler", "staple", opts.appPath]);
-  log("[notarize] done");
-  return "submitted";
+    log(`[notarize] accepted (submission: ${result.id})`);
+    log("[notarize] stapling ticket");
+    runner("xcrun", ["stapler", "staple", opts.appPath]);
+    log("[notarize] done");
+    return "submitted";
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
 }

@@ -157,14 +157,28 @@ describe("notarize", () => {
       });
 
       assert.equal(result, "submitted");
-      assert.equal(calls.length, 2);
+      // Three calls: ditto (zip the .app), notarytool submit (the zip),
+      // stapler (the original .app).
+      assert.equal(calls.length, 3);
 
-      // Submit call uses --output-format json so we can parse the response.
-      assert.equal(calls[0].cmd, "xcrun");
-      assert.deepEqual(calls[0].args, [
+      // 1) ditto creates the archive notarytool requires. The zip path
+      //    lives in an os.tmpdir()/band-notarize-* directory the script
+      //    creates per-invocation.
+      assert.equal(calls[0].cmd, "ditto");
+      assert.equal(calls[0].args[0], "-c");
+      assert.equal(calls[0].args[1], "-k");
+      assert.equal(calls[0].args[2], "--keepParent");
+      assert.equal(calls[0].args[3], appPath);
+      assert.match(calls[0].args[4], /band-notarize-.*\/Band\.app\.zip$/);
+      assert.notEqual(calls[0].opts?.capture, true);
+
+      // 2) Submit the zip (NOT the .app — notarytool rejects raw .app).
+      const zipPath = calls[0].args[4];
+      assert.equal(calls[1].cmd, "xcrun");
+      assert.deepEqual(calls[1].args, [
         "notarytool",
         "submit",
-        appPath,
+        zipPath,
         "--key",
         keyPath,
         "--key-id",
@@ -175,12 +189,13 @@ describe("notarize", () => {
         "--output-format",
         "json",
       ]);
-      assert.equal(calls[0].opts?.capture, true);
+      assert.equal(calls[1].opts?.capture, true);
 
-      // Stapler call doesn't need capture.
-      assert.equal(calls[1].cmd, "xcrun");
-      assert.deepEqual(calls[1].args, ["stapler", "staple", appPath]);
-      assert.notEqual(calls[1].opts?.capture, true);
+      // 3) Staple the *original* .app, not the zip — the ticket is written
+      //    into the bundle and propagates into any later .dmg/.zip.
+      assert.equal(calls[2].cmd, "xcrun");
+      assert.deepEqual(calls[2].args, ["stapler", "staple", appPath]);
+      assert.notEqual(calls[2].opts?.capture, true);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -207,10 +222,14 @@ describe("notarize", () => {
       });
 
       assert.equal(result, "submitted");
-      assert.deepEqual(calls[0].args, [
+      // calls[0] is the ditto zip step; submit is calls[1] and references
+      // the zip path the script just created (not the .app).
+      assert.equal(calls[0].cmd, "ditto");
+      const zipPath = calls[0].args[4];
+      assert.deepEqual(calls[1].args, [
         "notarytool",
         "submit",
-        appPath,
+        zipPath,
         "--apple-id",
         "dev@example.com",
         "--password",
@@ -274,11 +293,12 @@ describe("notarize", () => {
         /Apple rejected submission submission-bad.*Invalid/,
       );
 
-      // We expect exactly: 1 submit (capture) + 1 log fetch (capture). No
-      // stapler call should have been issued.
-      assert.equal(calls.length, 2);
-      assert.deepEqual(calls[0].args.slice(0, 2), ["notarytool", "submit"]);
-      assert.deepEqual(calls[1].args, [
+      // We expect exactly: 1 ditto (zip) + 1 submit (capture) + 1 log
+      // fetch (capture). No stapler call should have been issued.
+      assert.equal(calls.length, 3);
+      assert.equal(calls[0].cmd, "ditto");
+      assert.deepEqual(calls[1].args.slice(0, 2), ["notarytool", "submit"]);
+      assert.deepEqual(calls[2].args, [
         "notarytool",
         "log",
         "submission-bad",
@@ -289,7 +309,7 @@ describe("notarize", () => {
         "--issuer",
         "00000000-0000-0000-0000-000000000000",
       ]);
-      assert.equal(calls[1].opts?.capture, true);
+      assert.equal(calls[2].opts?.capture, true);
 
       // The diagnostic log JSON should appear in the captured log output —
       // that's the whole point of this flow: a CI failure shows the issues
@@ -340,10 +360,12 @@ describe("notarize", () => {
         /notarytool submit failed/,
       );
 
-      // submit (threw) + log (recovered the id from the partial stdout).
-      assert.equal(calls.length, 2);
-      assert.equal(calls[1].args[1], "log");
-      assert.equal(calls[1].args[2], "submission-fail");
+      // ditto + submit (threw) + log (recovered the id from the partial
+      // stdout).
+      assert.equal(calls.length, 3);
+      assert.equal(calls[0].cmd, "ditto");
+      assert.equal(calls[2].args[1], "log");
+      assert.equal(calls[2].args[2], "submission-fail");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -377,9 +399,12 @@ describe("notarize", () => {
         /notarytool submit failed/,
       );
 
-      // Only the failed submit attempt — no log fetch because we couldn't
-      // recover a submission id to query.
-      assert.equal(calls.length, 1);
+      // ditto (zip) + the failed submit attempt — no log fetch because
+      // we couldn't recover a submission id to query from the unparseable
+      // stdout.
+      assert.equal(calls.length, 2);
+      assert.equal(calls[0].cmd, "ditto");
+      assert.deepEqual(calls[1].args.slice(0, 2), ["notarytool", "submit"]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
