@@ -21,7 +21,7 @@
 
 import { app, BrowserWindow, Menu, type MenuItemConstructorOptions } from "electron";
 import { dashLog } from "./services/log.js";
-import { checkForUpdate, UPDATER_ENABLED } from "./updater.js";
+import { checkForUpdate, isUpdaterEnabled } from "./updater.js";
 
 /** Run JS in whichever window is focused, falling back to the main window. */
 function evalInFocused(js: string): void {
@@ -87,10 +87,10 @@ export function buildAppMenu(): Menu {
 
   const appName = app.name ?? "Band";
 
-  // Match the Tauri shell: when the updater is disabled (dev / unsigned
-  // local builds) the menu item is omitted entirely rather than greyed out.
-  // See lib.rs::run for the equivalent `if UPDATER_ENABLED { ... }` branch.
-  const updaterItems: MenuItemConstructorOptions[] = UPDATER_ENABLED
+  // Match the Tauri shell: when the updater is disabled (dev runs) the
+  // menu item is omitted entirely rather than greyed out. See lib.rs::run
+  // for the equivalent `if UPDATER_ENABLED { ... }` branch.
+  const updaterItems: MenuItemConstructorOptions[] = isUpdaterEnabled(app.isPackaged)
     ? [
         { type: "separator" },
         {

@@ -40,18 +40,23 @@ import { dashLog } from "./services/log.js";
 /**
  * Whether the updater is enabled at runtime.
  *
- * Mirror of Tauri's `option_env!("TAURI_SIGNING_PRIVATE_KEY").is_some()`,
- * which compiled the updater plugin out of dev/local builds. The Electron
- * equivalent is environment-driven because `electron-updater` is always
- * present in the bundle:
+ * Tauri gated this on `option_env!("TAURI_SIGNING_PRIVATE_KEY").is_some()`,
+ * a compile-time check that baked a boolean into the binary. The first port
+ * to Electron mirrored that with a `process.env.BAND_UPDATER_ENABLED` read
+ * — which is wrong, because env variables exported during the CI build
+ * step do not survive into the user's launch environment, so the flag was
+ * always `false` in shipped DMGs and the auto-updater never fired.
  *
- *   - In CI release builds, `BAND_UPDATER_ENABLED=1` is exported alongside
- *     the code-signing variables (CSC_LINK / CSC_KEY_PASSWORD).
- *   - In local builds and `pnpm dev:desktop`, the variable is unset, so we
- *     short-circuit before touching `autoUpdater` (which would otherwise
- *     log "skip checkForUpdates because application is not packed").
+ * Replacement: gate purely on `app.isPackaged`. `electron-updater` itself
+ * refuses to run in unpacked dev (logs "skip checkForUpdates because
+ * application is not packed"), and our local electron-builder dev DMGs go
+ * through code-signing the same way CI builds do, so the packaged check
+ * is the right boundary. Callers pass `app.isPackaged` in (so this module
+ * doesn't need to import electron eagerly — see file-header note).
  */
-export const UPDATER_ENABLED: boolean = process.env.BAND_UPDATER_ENABLED === "1";
+export function isUpdaterEnabled(isPackaged: boolean): boolean {
+  return isPackaged;
+}
 
 /**
  * The subset of the `electron-updater` `AppUpdater` interface we use. Tests
@@ -332,13 +337,10 @@ export function scheduleStartupCheck(
   isPackaged: boolean,
   deps: CheckForUpdateDeps & { delayMs?: number } = {},
 ): () => void {
-  if (!UPDATER_ENABLED) {
-    return () => undefined;
-  }
-  // Skip in unpacked dev runs even if BAND_UPDATER_ENABLED is set —
-  // electron-updater refuses to operate without a packaged
-  // `app-update.yml` and would log a confusing warning every launch.
-  if (!isPackaged) {
+  // Skip in unpacked dev runs — electron-updater refuses to operate
+  // without a packaged `app-update.yml` and would log a confusing warning
+  // on every launch.
+  if (!isUpdaterEnabled(isPackaged)) {
     return () => undefined;
   }
 

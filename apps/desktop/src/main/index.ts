@@ -157,8 +157,7 @@ async function bootstrap(): Promise<void> {
 
   // Auto-update check 10s after launch (matches the Tauri shell's
   // `tokio::time::sleep(Duration::from_secs(10))` in lib.rs::run). No-op
-  // unless `BAND_UPDATER_ENABLED=1` is set AND we're in a packaged build —
-  // see updater.ts for the full gating.
+  // in unpacked dev runs (`!app.isPackaged`) — see updater.ts.
   state.cancelStartupUpdateCheck = scheduleStartupCheck(app.isPackaged, {
     parentWindow: state.mainWindow,
   });

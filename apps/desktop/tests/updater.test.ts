@@ -20,10 +20,15 @@
  */
 
 import { strict as assert } from "node:assert";
-import { afterEach, beforeEach, describe, test } from "node:test";
+import { describe, test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 
-import { type CheckForUpdateDeps, checkForUpdate, type UpdaterLike } from "../src/main/updater.ts";
+import {
+  type CheckForUpdateDeps,
+  checkForUpdate,
+  scheduleStartupCheck,
+  type UpdaterLike,
+} from "../src/main/updater.ts";
 
 // ---------------------------------------------------------------------------
 // FakeUpdater: same event surface as electron-updater's AppUpdater singleton
@@ -295,41 +300,10 @@ describe("checkForUpdate listener teardown", () => {
 });
 
 describe("scheduleStartupCheck", () => {
-  // Each test below toggles BAND_UPDATER_ENABLED. Because it's read once at
-  // module init time, we re-import the module fresh per test via a dynamic
-  // import + a unique cache-busting query param.
-  let originalEnv: string | undefined;
-
-  beforeEach(() => {
-    originalEnv = process.env.BAND_UPDATER_ENABLED;
-  });
-  afterEach(() => {
-    if (originalEnv === undefined) delete process.env.BAND_UPDATER_ENABLED;
-    else process.env.BAND_UPDATER_ENABLED = originalEnv;
-  });
-
-  test("returns no-op when UPDATER_ENABLED is false (env unset)", async () => {
-    delete process.env.BAND_UPDATER_ENABLED;
-    const mod = await freshUpdaterModule();
-    const updater = new FakeUpdater({ checkOutcome: "available" });
-    const cancel = mod.scheduleStartupCheck(true, {
-      updater,
-      delayMs: 5,
-      showInfo: async () => undefined,
-      showConfirm: async () => false,
-    });
-
-    await delay(30);
-    cancel();
-    assert.equal(updater.checkForUpdatesCalls, 0);
-  });
-
-  test("returns no-op when not packaged, even with UPDATER_ENABLED=1", async () => {
-    process.env.BAND_UPDATER_ENABLED = "1";
-    const mod = await freshUpdaterModule();
+  test("returns no-op when not packaged (dev runs)", async () => {
     const updater = new FakeUpdater({ checkOutcome: "available" });
 
-    mod.scheduleStartupCheck(false, {
+    scheduleStartupCheck(false, {
       updater,
       delayMs: 5,
       showInfo: async () => undefined,
@@ -340,12 +314,10 @@ describe("scheduleStartupCheck", () => {
     assert.equal(updater.checkForUpdatesCalls, 0);
   });
 
-  test("fires checkForUpdate after delay when enabled + packaged", async () => {
-    process.env.BAND_UPDATER_ENABLED = "1";
-    const mod = await freshUpdaterModule();
+  test("fires checkForUpdate after delay when packaged", async () => {
     const updater = new FakeUpdater({ checkOutcome: "not-available" });
 
-    mod.scheduleStartupCheck(true, {
+    scheduleStartupCheck(true, {
       updater,
       delayMs: 10,
       showInfo: async () => undefined,
@@ -358,11 +330,9 @@ describe("scheduleStartupCheck", () => {
   });
 
   test("cancellation prevents the deferred check from running", async () => {
-    process.env.BAND_UPDATER_ENABLED = "1";
-    const mod = await freshUpdaterModule();
     const updater = new FakeUpdater({ checkOutcome: "available" });
 
-    const cancel = mod.scheduleStartupCheck(true, {
+    const cancel = scheduleStartupCheck(true, {
       updater,
       delayMs: 50,
       showInfo: async () => undefined,
@@ -374,14 +344,3 @@ describe("scheduleStartupCheck", () => {
     assert.equal(updater.checkForUpdatesCalls, 0);
   });
 });
-
-/**
- * Force a fresh module load so `UPDATER_ENABLED` (evaluated at module init)
- * picks up the current value of `process.env.BAND_UPDATER_ENABLED`. Node's
- * ESM cache keys on resolved URL, so a unique query param sidesteps it.
- */
-async function freshUpdaterModule(): Promise<typeof import("../src/main/updater.ts")> {
-  const url = new URL("../src/main/updater.ts", import.meta.url);
-  url.searchParams.set("t", String(Date.now()) + Math.random().toString(36).slice(2));
-  return import(url.href);
-}

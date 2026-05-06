@@ -1,5 +1,6 @@
 {
   "name": "@band-app/desktop",
+  "productName": "Band",
   "private": true,
   "version": "0.1.0",
   "description": "Band desktop shell (Electron). Sibling to apps/dashboard during the Tauri→Electron migration (issue #306).",
