@@ -3,61 +3,60 @@
 /**
  * electron-builder afterSign hook.
  *
- * electron-builder calls this exported default function once it has signed
- * the .app with the primary Developer ID Application certificate. The .app
- * still needs three more steps before it can be packed into a .dmg/.zip:
+ * Runs after electron-builder has signed the outer .app with the primary
+ * Developer ID Application certificate. At this point the bundle is fully
+ * sealed: `Contents/_CodeSignature/CodeResources` records hashes for
+ * every file under `Contents/Resources/`, and any modification to those
+ * files would invalidate the seal and trigger Gatekeeper's "is damaged"
+ * dialog on first launch.
  *
- *   1. Deep-sign nested native binaries inside `Resources/web/` (.node,
- *      .dylib, spawn-helper). electron-builder doesn't recurse into
- *      `extraResources` content. See scripts/deep-sign-mac.mjs.
- *   2. Sign the CLI sidecar at `Resources/binaries/band` (the Rust Mach-O
- *      executable). Same gap as (1) — electron-builder treats every
- *      `extraResources` entry as a verbatim copy. The CLI binary has no
- *      `.node`/`.dylib`/`spawn-helper` naming convention so the heuristic
- *      walker in (1) skips it; we sign it explicitly via `signFile`.
- *   3. Submit the .app to Apple's notarization service via notarytool. We
- *      drive this ourselves (instead of electron-builder's built-in
- *      `notarize` flag) so the build falls through cleanly when API
- *      credentials are absent — same pattern as the signing steps.
+ * That's why the deep-sign work (nested .node / .dylib / spawn-helper
+ * inside Resources/web/, plus the CLI sidecar at Resources/binaries/band)
+ * lives in scripts/after-pack.mjs instead — it MUST happen before the
+ * outer sign so the seal is computed against already-signed nested files.
+ *
+ * The only step left for afterSign is notarization: submit the signed
+ * .app to Apple via `notarytool` and staple the resulting ticket so the
+ * .dmg can be distributed online without the Gatekeeper grace-period
+ * warning. The hook short-circuits cleanly when:
+ *
+ *   - SKIP_NOTARIZE=1 is set (CI escape hatch — see release.yml).
+ *   - The host is not macOS.
+ *   - No App Store Connect API key / app-specific password is configured
+ *     (typical for forks / local dev builds).
  *
  * Hook contract (electron-builder docs):
- *   https://www.electron.build/configuration#afterPack
+ *   https://www.electron.build/configuration#aftersign
  *   - Receives an AfterPackContext-like object with `electronPlatformName`,
  *     `appOutDir`, `packager`, etc.
  *   - For non-mas/non-mac builds we no-op.
  *
  * The optional second `opts` argument is a dependency-injection seam for
- * orchestration tests. electron-builder calls `afterSign(context)` with one
- * argument; tests pass `afterSign(context, { runner, log })` to capture
- * codesign invocations without shelling out to the real binary.
+ * orchestration tests. electron-builder calls `afterSign(context)` with
+ * one argument; tests pass `afterSign(context, { runner, log })` to
+ * capture xcrun invocations without shelling out to the real binary.
  */
 
 import { existsSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 
-import { deepSignMac, defaultEntitlements, signFile } from "./deep-sign-mac.mjs";
 import { notarize } from "./notarize.mjs";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /**
  * @param {object} context  AfterPackContext from electron-builder.
  * @param {string} context.electronPlatformName  e.g. "darwin", "win32", "linux".
- * @param {string} context.appOutDir  Directory containing the freshly built .app
+ * @param {string} context.appOutDir  Directory containing the freshly signed .app
  *                                    (e.g. dist-builder/mac-arm64/Band.app).
  * @param {object} [context.packager]
  * @param {object} [context.packager.appInfo]
  * @param {string} [context.packager.appInfo.productFilename]  e.g. "Band".
  * @param {object} [opts]  Optional injection seam (see file header).
- * @param {(cmd: string, args: string[]) => void} [opts.runner]
+ * @param {(cmd: string, args: string[], runOpts?: { capture?: boolean }) => string | undefined} [opts.runner]
  * @param {(msg: string) => void} [opts.log]
  */
 export default async function afterSign(context, opts = {}) {
   const platform = context.electronPlatformName;
   if (platform !== "darwin" && platform !== "mas") {
-    // Windows/Linux signing happens inline during electron-builder's pack
-    // step; nothing more to do here.
     return;
   }
 
@@ -67,35 +66,5 @@ export default async function afterSign(context, opts = {}) {
     throw new Error(`[after-sign] expected .app bundle at ${appPath}`);
   }
 
-  const localEntitlements = resolve(__dirname, "..", "build", "entitlements.mac.plist");
-  const entitlements = existsSync(localEntitlements) ? localEntitlements : defaultEntitlements();
-
-  // 1. Deep-sign nested native binaries inside Resources/web/.
-  //    electron-builder ships extraResources verbatim, so the structure is:
-  //      Band.app/Contents/Resources/web/dist/...
-  const webResources = join(appPath, "Contents", "Resources", "web");
-  if (existsSync(webResources)) {
-    deepSignMac({ root: webResources, entitlements, runner: opts.runner, log: opts.log });
-  } else {
-    (opts.log ?? ((m) => console.log(m)))(
-      `[after-sign] ${webResources} not found — skipping deep-sign (no extraResources?)`,
-    );
-  }
-
-  // 2. Sign the CLI sidecar (Rust Mach-O at Resources/binaries/band).
-  //    Tauri's `externalBin` mechanism signed this automatically; electron-
-  //    builder's `extraResources` does not. Without this step notarization
-  //    rejects with "code object is not signed at all" pointing at band.
-  const cliBinary = join(appPath, "Contents", "Resources", "binaries", "band");
-  if (existsSync(cliBinary)) {
-    signFile({ path: cliBinary, entitlements, runner: opts.runner, log: opts.log });
-  } else {
-    (opts.log ?? ((m) => console.log(m)))(
-      `[after-sign] ${cliBinary} not found — skipping CLI sign (no sidecar?)`,
-    );
-  }
-
-  // 3. Submit the .app for notarization. The hook short-circuits on missing
-  //    credentials so unsigned dev builds still succeed.
   notarize({ appPath, runner: opts.runner, log: opts.log });
 }

@@ -3,12 +3,15 @@
 /**
  * Submit a packaged .app to Apple's notarization service via `notarytool`.
  *
- * Invoked from scripts/after-sign.mjs once the deep-sign step has finished.
- * Notarization requirements:
+ * Invoked from scripts/after-sign.mjs after electron-builder has signed
+ * the outer .app. The deep-sign of nested binaries happens earlier in
+ * scripts/after-pack.mjs (before the outer seal is computed); by the
+ * time we reach notarize, every Mach-O inside the bundle already carries
+ * a valid Developer ID signature. Notarization requirements:
  *
  *   - The .app has been signed with a Developer ID Application certificate
- *     and the hardened runtime is enabled (electron-builder + the deep-sign
- *     hook handle that).
+ *     and the hardened runtime is enabled (electron-builder + the
+ *     afterPack hook handle that).
  *   - Either an App Store Connect API key (preferred — non-interactive) or
  *     an app-specific password is provided via env.
  *

@@ -62,12 +62,28 @@ files:
   - dist/**/*
   - package.json
 
-# afterSign runs *after* electron-builder has signed the .app on macOS but
-# *before* it packs the .dmg / .zip. The hook does two things:
-#   1. Deep-signs nested native binaries under `Resources/web/` (.node, .dylib,
-#      spawn-helper) — same job as Tauri's scripts/sign-mac-deps.sh.
-#   2. Calls `notarytool` to submit the .app for Apple notarization.
-# On non-macOS hosts, both hooks short-circuit cleanly.
+# Hook lifecycle order on macOS:
+#   afterPack → (electron-builder codesigns the outer .app) → afterSign
+#
+# afterPack runs *before* electron-builder seals the outer bundle, so
+# anything we modify under Contents/Resources/ here is included in the
+# final _CodeSignature/CodeResources hashes. This is where the deep-sign
+# work lives:
+#   1. Deep-signs nested native binaries under `Resources/web/` (.node,
+#      .dylib, spawn-helper) — same job as Tauri's
+#      scripts/sign-mac-deps.sh.
+#   2. Signs the CLI sidecar at `Resources/binaries/band` (no
+#      .node/.dylib/spawn-helper naming → walker would skip it).
+# Doing this in afterSign would invalidate the outer seal and Gatekeeper
+# would reject the .app as "damaged" on first launch.
+afterPack: scripts/after-pack.mjs
+
+# afterSign runs *after* electron-builder has signed the outer .app and
+# every nested binary already carries a valid signature. Only step left:
+#   3. Submit the .app to Apple's notarization service via notarytool and
+#      staple the resulting ticket.
+# notarize.mjs short-circuits cleanly when SKIP_NOTARIZE=1 or
+# notarization credentials are missing (forks / local dev builds).
 afterSign: scripts/after-sign.mjs
 
 # Publish to the existing GitHub releases endpoint. The Tauri shell pointed
