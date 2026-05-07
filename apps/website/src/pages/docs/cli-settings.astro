@@ -5,87 +5,81 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <h1>band settings</h1>
 
   <p>
-    The <code>band settings</code> command displays the current Band configuration, including server
-    connection details, output format, and home directory paths. This is useful for debugging
-    connection issues or verifying your environment setup.
+    The <code>band settings</code> command prints the live <code>settings.get</code>
+    response from the Band server as pretty-printed JSON. It's a thin pass-through, so
+    the exact shape always matches whatever the server is currently storing in
+    <code>~/.band/settings.json</code>.
   </p>
 
   <h2>Usage</h2>
 
-  <pre><code>band settings</code></pre>
+  <pre><code>band settings              # pretty-printed JSON to stdout
+band settings --output json # JSON without the trailing newline (for piping)</code></pre>
 
   <p>Example output:</p>
 
-  <pre><code>Band Settings
-─────────────────────────────────────
-Server URL:    http://localhost:3001
-Home:          /Users/dev/.band
-Output:        text
-Token:         (not set)
-Server:        connected (v0.12.0)</code></pre>
+  <pre><code set:html={`{'{'}
+  "worktreesDir": "/Users/dev/.band/worktrees",
+  "codingAgents": [
+    {'{'}
+      "id": "claude-code",
+      "type": "claude-code",
+      "label": "Claude Code",
+      "command": "claude"
+    {'}'}
+  ],
+  "defaultCodingAgent": "claude-code",
+  "webServerPort": 3456,
+  "notifications": {'{'}
+    "soundOnNeedsAttention": true
+  {'}'},
+  "labels": [],
+  "tokenSecret": "…",
+  "autoStartTunnel": false
+{'}'}`}></code></pre>
 
-  <h2>Configuration Sources</h2>
+  <h2>CLI configuration vs. server settings</h2>
 
   <p>
-    Settings are resolved from multiple sources, with the following precedence (highest to lowest):
+    The command above shows what the <em>server</em> has stored. The <code>band</code>
+    CLI itself reads its connection configuration from environment variables:
   </p>
 
-  <ol>
-    <li><strong>Command-line flags</strong> — e.g., <code>--output json</code> on any command.</li>
-    <li><strong>Environment variables</strong> — <code>BAND_SERVER_URL</code>, <code>BAND_TOKEN</code>, <code>BAND_OUTPUT</code>, <code>BAND_HOME</code>.</li>
-    <li><strong>Default values</strong> — Built-in defaults (server at <code>localhost:3001</code>, text output, home at <code>~/.band</code>).</li>
-  </ol>
-
-  <h2>Settings Reference</h2>
-
   <ul>
-    <li>
-      <strong>Server URL</strong> — The address of the Band web server. Defaults to
-      <code>http://localhost:3001</code>. Override with <code>BAND_SERVER_URL</code>.
-    </li>
-    <li>
-      <strong>Home</strong> — The Band home directory where worktrees, database, and configuration
-      files are stored. Defaults to <code>~/.band</code>. Override with <code>BAND_HOME</code>.
-    </li>
-    <li>
-      <strong>Output</strong> — The default output format (<code>text</code> or <code>json</code>).
-      Override with <code>BAND_OUTPUT</code> or <code>--output</code> flag.
-    </li>
-    <li>
-      <strong>Token</strong> — Authentication token for remote server access. Set via
-      <code>BAND_TOKEN</code>. Not needed for local connections.
-    </li>
-    <li>
-      <strong>Server</strong> — Connection status and server version. Shown as "connected" with the
-      version number, or "unreachable" if the server is not running.
-    </li>
+    <li><code>BAND_SERVER_URL</code> — server URL (default: <code>http://localhost:3456</code>).</li>
+    <li><code>BAND_TOKEN</code> — auth token. Not needed if the CLI can read it from <code>~/.band/settings.json</code>.</li>
+    <li><code>BAND_OUTPUT</code> — default output format, <code>text</code> or <code>json</code>. Equivalent to passing <code>--output</code> on every command.</li>
+    <li><code>BAND_HOME</code> — alternate Band home directory (default: <code>~/.band</code>).</li>
   </ul>
 
-  <h2>JSON Output</h2>
+  <p>
+    Precedence is highest to lowest: command-line flag (<code>--output</code>),
+    environment variable, then built-in default.
+  </p>
 
-  <pre><code>band settings --output json</code></pre>
+  <h2>Server settings reference</h2>
 
-  <pre><code set:html={`{'{'}
-  "serverUrl": "http://localhost:3001",
-  "home": "/Users/dev/.band",
-  "output": "text",
-  "token": null,
-  "server": {'{'}
-    "status": "connected",
-    "version": "0.12.0"
-  {'}'}
-{'}'}`}></code></pre>
+  <ul>
+    <li><strong>worktreesDir</strong> — directory where new worktrees are created. Defaults to <code>~/.band/worktrees</code>.</li>
+    <li><strong>codingAgents</strong> — array of agent definitions. Each entry has <code>id</code>, <code>type</code> (<code>claude-code</code>, <code>codex</code>, or <code>opencode</code>), <code>label</code>, and optional <code>command</code> / <code>model</code> overrides.</li>
+    <li><strong>defaultCodingAgent</strong> — id of the entry used for new chat panes by default.</li>
+    <li><strong>webServerPort</strong> — port the web server listens on (default: <code>3456</code>).</li>
+    <li><strong>notifications.soundOnNeedsAttention</strong> — play a sound when an agent transitions to <em>needs attention</em>.</li>
+    <li><strong>labels</strong> — color-coded project labels.</li>
+    <li><strong>tokenSecret</strong> — auth token. 64-hex-character string generated on first launch.</li>
+    <li><strong>autoStartTunnel</strong> — start the Cloudflare tunnel automatically on server boot.</li>
+  </ul>
 
   <h2>Troubleshooting</h2>
 
   <p>
-    If <code>band settings</code> shows "unreachable" for the server status, verify that:
+    If <code>band settings</code> errors with a connection failure, verify that:
   </p>
 
   <ul>
     <li>The Band desktop app or web server is running.</li>
-    <li>The <code>BAND_SERVER_URL</code> points to the correct address and port.</li>
+    <li><code>BAND_SERVER_URL</code> points to the correct address and port.</li>
     <li>No firewall is blocking the connection.</li>
-    <li>If connecting remotely, ensure the tunnel is active and <code>BAND_TOKEN</code> is set.</li>
+    <li>If connecting remotely, the tunnel is up and <code>BAND_TOKEN</code> is set.</li>
   </ul>
 </DocsLayout>

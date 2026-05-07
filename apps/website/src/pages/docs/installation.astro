@@ -7,30 +7,35 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
 
   <p>
     Band is distributed as a macOS desktop application. The app bundles both the dashboard UI
-    and the web server that manages your projects, workspaces, and tasks.
+    and the web server that manages your projects, workspaces, and chat panes.
   </p>
 
   <h2>System requirements</h2>
 
   <ul>
-    <li><strong>macOS 13 (Ventura)</strong> or later</li>
-    <li>Apple Silicon (M1/M2/M3/M4) or Intel Mac</li>
-    <li><strong>Git</strong> installed and available on your PATH</li>
-    <li>A coding agent such as Claude Code installed and configured</li>
+    <li><strong>macOS 11 (Big Sur)</strong> or later</li>
+    <li>Apple Silicon (M1 and later) or Intel Mac &mdash; both architectures are shipped as separate signed builds</li>
+    <li><strong>Git</strong> installed and available on your <code>PATH</code></li>
+    <li>A coding agent CLI such as <code>claude</code>, <code>codex</code>, or <code>opencode</code> installed and configured</li>
   </ul>
 
   <h2>Download</h2>
 
   <p>
     Download the latest <code>.dmg</code> file from the
-    <a href="https://github.com/topdev1de/band/releases" target="_blank" rel="noopener">
-      GitHub Releases page</a>. Choose the build that matches your Mac's architecture:
+    <a href="https://github.com/band-app/band/releases" target="_blank" rel="noopener">
+      GitHub Releases page</a>. Each release ships per-architecture artifacts:
   </p>
 
   <ul>
-    <li><code>Band_x.x.x_aarch64.dmg</code> for Apple Silicon Macs (M1 and later)</li>
-    <li><code>Band_x.x.x_x64.dmg</code> for Intel Macs</li>
+    <li><code>Band-&lt;version&gt;-arm64.dmg</code> for Apple Silicon Macs (M1 and later)</li>
+    <li><code>Band-&lt;version&gt;.dmg</code> for Intel Macs</li>
   </ul>
+
+  <p>
+    The matching <code>.zip</code> archives are used by the in-app auto-updater
+    (<code>electron-updater</code>) — you don't need to download them manually.
+  </p>
 
   <h2>Install the app</h2>
 
@@ -42,10 +47,11 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   </ol>
 
   <p>
-    On first launch, macOS may show a security prompt because the app is not notarized through
-    the Mac App Store. If you see "Band can't be opened because Apple cannot check it for
-    malicious software," go to <strong>System Settings &rarr; Privacy &amp; Security</strong>
-    and click <strong>Open Anyway</strong>.
+    Releases are signed with an Apple Developer ID and notarized via <code>notarytool</code>, so
+    Gatekeeper should not show a "damaged" or "from an unidentified developer" warning on first
+    launch. Local builds compiled from source are unsigned — see
+    <a href="https://github.com/band-app/band/blob/main/CONTRIBUTING.md#building-locally-vs-signed-releases"
+      target="_blank" rel="noopener">CONTRIBUTING.md</a> for how to handle those.
   </p>
 
   <h2>First launch</h2>
@@ -55,22 +61,27 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   </p>
 
   <ol>
-    <li>Creates the <code>~/.band</code> directory to store configuration and state.</li>
-    <li>Starts the web server on <strong>port 3456</strong>.</li>
+    <li>Creates the <code>~/.band</code> directory to store configuration and state (<code>band.db</code>, <code>settings.json</code>, logs).</li>
+    <li>Generates a token in <code>~/.band/settings.json</code> for authenticated access from the CLI and remote tunnel.</li>
+    <li>Starts the web server on <strong>port 3456</strong> (configurable via the <code>webServerPort</code> setting).</li>
+    <li>Detects installed coding agents (<code>claude</code>, <code>codex</code>, <code>opencode</code>) and seeds the <code>codingAgents</code> setting with the ones it finds.</li>
+    <li>Installs Claude Code hooks (<code>PreToolUse</code>, <code>PermissionRequest</code>, <code>UserPromptSubmit</code>, <code>PostToolUse</code>, <code>Stop</code>) so agent status is reported back to Band.</li>
+    <li>Prompts to install the <code>band</code> CLI symlink at <code>/usr/local/bin/band</code> (requires admin password).</li>
     <li>Opens the dashboard window.</li>
   </ol>
 
   <p>
-    The web server runs in the background as long as Band is open. You can access the dashboard
-    from any browser at <code>http://localhost:3456</code>.
+    The web server runs in the background as long as Band is open. You can also access the
+    dashboard from any browser at <code>http://localhost:3456</code> (you'll be prompted for the
+    token from <code>~/.band/settings.json</code> the first time).
   </p>
 
   <h2>The Band CLI</h2>
 
   <p>
-    Band includes a command-line interface that lets you manage projects, workspaces, and tasks
-    from your terminal. The CLI binary is bundled with the desktop app and communicates with
-    the web server over HTTP.
+    Band includes a command-line interface that lets you manage projects, workspaces, chat panes,
+    terminals, browser tabs, and cronjobs from your terminal. The CLI binary is bundled with the
+    desktop app and communicates with the web server over HTTP.
   </p>
 
   <p>
@@ -80,22 +91,22 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <pre><code>band projects list</code></pre>
 
   <p>
-    If the CLI is not on your PATH, you may need to add it. The binary is located inside the
-    app bundle or can be installed separately.
+    If <code>band</code> is not on your <code>PATH</code>, open <strong>Settings &rarr; About</strong>
+    in the dashboard and click <strong>Install CLI</strong> — that creates the
+    <code>/usr/local/bin/band</code> symlink with admin privileges.
   </p>
 
   <h2>Verify the server is running</h2>
 
   <p>
     You can confirm the web server is up by visiting
-    <a href="http://localhost:3456">http://localhost:3456</a> in your browser or by running:
+    <a href="http://localhost:3456">http://localhost:3456</a> in your browser. To poll the health
+    endpoint from a script, include the token from <code>~/.band/settings.json</code>:
   </p>
 
-  <pre><code>curl http://localhost:3456/api/health</code></pre>
-
-  <p>
-    If you see a response, the server is running and you are ready to add your first project.
-  </p>
+  <pre><code set:html={`TOKEN=$(jq -r .tokenSecret ~/.band/settings.json)
+curl "http://localhost:3456/api/health?token=$TOKEN"
+# {"status":"ok","app":"band-web-server","hostname":"…"}`}></code></pre>
 
   <h2>Next step</h2>
 

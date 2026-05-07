@@ -5,24 +5,24 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <h1>Remote Access</h1>
 
   <p>
-    Band supports remote access to your dashboard and API through a Cloudflare tunnel. This allows
-    you to monitor agent activity, create tasks, and review code from any device — including your
-    phone — without exposing ports or configuring a VPN.
+    Band supports remote access to your dashboard and API through a Cloudflare tunnel. This
+    allows you to send messages to agents, watch chat output, and review diffs from any
+    device — including your phone — without opening ports or configuring a VPN.
   </p>
 
   <h2>How It Works</h2>
 
   <p>
     Band uses <strong>cloudflared</strong> (Cloudflare's tunnel client) to create a secure,
-    encrypted connection between your local machine and Cloudflare's network. Traffic is routed
-    through Cloudflare's infrastructure, and a temporary public URL is generated for your session.
+    encrypted connection between your local machine and Cloudflare's network. Traffic is
+    routed through Cloudflare's infrastructure, and a temporary public URL is generated
+    for your session.
   </p>
 
   <ol>
     <li>Band starts a cloudflared tunnel process on your machine.</li>
     <li>Cloudflare assigns a temporary public URL (e.g., <code>https://abc-def-123.trycloudflare.com</code>).</li>
-    <li>Band generates an authentication token for the session.</li>
-    <li>Remote clients connect using the URL and token.</li>
+    <li>Remote clients authenticate with the persistent token from <code>~/.band/settings.json</code>.</li>
   </ol>
 
   <h2>Prerequisites</h2>
@@ -51,13 +51,16 @@ sudo apt install cloudflared
   <pre><code>band tunnel start</code></pre>
 
   <p>
-    The command outputs the public URL and an authentication token. Both are needed to connect
-    from a remote device.
+    The command prints the public URL on stdout. The auth token is the
+    <code>tokenSecret</code> stored in <code>~/.band/settings.json</code> — it's the
+    same token used for local API access.
   </p>
 
-  <pre><code>Tunnel started.
-URL:   https://abc-def-123.trycloudflare.com
-Token: bnd_a1b2c3d4e5f6...</code></pre>
+  <pre><code>$ band tunnel start
+https://abc-def-123.trycloudflare.com
+
+$ jq -r .tokenSecret ~/.band/settings.json
+0123456789abcdef…   # 64-character hex token</code></pre>
 
   <h2>Stopping the Tunnel</h2>
 
@@ -84,15 +87,16 @@ Token: bnd_a1b2c3d4e5f6...</code></pre>
   <h2>Token-Based Authentication</h2>
 
   <p>
-    Every tunnel session is protected by a randomly generated token. Remote clients must provide
-    this token to access the Band API and dashboard.
+    Every request to the Band API — local or remote — is protected by a token. The
+    token is generated on first launch (a 64-character hex string) and stored in
+    <code>~/.band/settings.json</code> under <code>tokenSecret</code>.
   </p>
 
   <ul>
-    <li>The token is displayed when the tunnel starts.</li>
-    <li>Set <code>BAND_TOKEN</code> for CLI access from remote machines.</li>
-    <li>The web interface shows a login screen where you can paste the token.</li>
-    <li>Tokens are rotated each time the tunnel restarts.</li>
+    <li>Read it from <code>~/.band/settings.json</code> with <code>jq -r .tokenSecret ~/.band/settings.json</code>, or open the dashboard's mobile-access panel.</li>
+    <li>Set <code>BAND_TOKEN</code> for CLI access from a remote machine.</li>
+    <li>The web interface accepts the token as a <code>?token=…</code> query parameter on first navigation; the server then sets a cookie so subsequent requests work without it.</li>
+    <li>The token is <strong>not</strong> rotated when the tunnel restarts; it persists in <code>settings.json</code> until you delete that field.</li>
   </ul>
 
   <h2>Mobile Access via QR Code</h2>
@@ -113,7 +117,7 @@ Token: bnd_a1b2c3d4e5f6...</code></pre>
   <ul>
     <li>All traffic is encrypted end-to-end through Cloudflare's network.</li>
     <li>The authentication token is required for all API requests and dashboard access.</li>
-    <li>Tokens are single-session — restarting the tunnel invalidates old tokens.</li>
+    <li>The same token guards local and remote requests; rotate it by deleting <code>tokenSecret</code> from <code>~/.band/settings.json</code> and restarting the server.</li>
     <li>The tunnel can be stopped at any time to immediately revoke remote access.</li>
     <li>No ports are opened on your local firewall.</li>
   </ul>

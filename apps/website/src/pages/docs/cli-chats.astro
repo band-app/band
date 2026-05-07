@@ -1,0 +1,121 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+---
+<DocsLayout title="band chats — Band Docs">
+  <h1>band chats</h1>
+
+  <p>
+    The <code>band chats</code> command group manages <strong>chat panes</strong> inside a
+    workspace. A chat pane is an agent process bound to a workspace — it has its own
+    conversation history and can run a different coding agent, model, or mode from any
+    other pane in the same workspace. <code>band chats send</code> is the primary way to
+    drive an agent from the CLI: it sends a message to the workspace's active chat panel,
+    lazy-creating one if the workspace has none yet.
+  </p>
+
+  <h2>Default workspace and chat resolution</h2>
+
+  <p>
+    Every <code>band chats</code> subcommand auto-detects the workspace from the current
+    working directory (matched against registered workspace paths) when no workspace is
+    given, and resolves to the workspace's <em>active</em> chat panel when no chat ID is
+    given. From inside a workspace, you typically just run
+    <code>band chats send --message "…"</code> — no IDs to type. Pass an explicit ID only
+    when you're outside the workspace's cwd or you want to target a specific chat.
+  </p>
+
+  <h2>List chats</h2>
+
+  <p>List chat panes for a workspace (defaults to the cwd workspace).</p>
+
+  <pre><code>band chats list
+band chats list ws_abc123        # explicit workspace ID</code></pre>
+
+  <h2>Create a chat pane</h2>
+
+  <pre><code>band chats create                       # cwd workspace, default agent
+band chats create --name "planning" --agent claude-code \
+  --model claude-opus-4-20250514 --mode plan</code></pre>
+
+  <p>Options:</p>
+  <ul>
+    <li><code>workspace_id</code> (positional, optional) — auto-detected from cwd if omitted.</li>
+    <li><code>--name</code> — display name for the chat pane.</li>
+    <li><code>--agent</code> — agent type (e.g. <code>claude-code</code>, <code>codex</code>, <code>opencode</code>).</li>
+    <li><code>--model</code> — model override.</li>
+    <li><code>--mode</code> — agent mode (e.g. <code>plan</code>, <code>edit</code>).</li>
+  </ul>
+
+  <h2>Send a message</h2>
+
+  <p>
+    The most common command. Sends a prompt to the chat pane and starts a new task. Output
+    streams to the dashboard; use <code>band chats watch</code> to follow it from the CLI.
+  </p>
+
+  <pre><code># From inside a workspace directory: workspace and chat auto-resolved.
+band chats send --message "Fix the failing tests"
+
+# Outside the workspace's cwd
+band chats send --workspace ws_abc123 --message "Fix the failing tests"
+
+# Target a specific chat pane instead of the active one
+band chats send chat_abc --message "Investigate the perf regression"
+
+# Override agent / model / mode for one-off prompts
+band chats send --mode plan --model claude-opus-4-20250514 \
+  --message "Plan the migration to v2 of the auth API"</code></pre>
+
+  <p>Options:</p>
+  <ul>
+    <li><code>chat_id</code> (positional, optional) — defaults to the workspace's active chat.</li>
+    <li><code>--message &lt;text&gt;</code> — the message to send (required).</li>
+    <li><code>--workspace &lt;id&gt;</code> — override the auto-detected workspace.</li>
+    <li><code>--max-turns</code>, <code>--mode</code>, <code>--model</code>, <code>--agent</code> — per-message overrides.</li>
+  </ul>
+
+  <h2>Watch a chat's running task</h2>
+
+  <p>
+    Stream the chat's running task as raw NDJSON to stdout. Exits immediately with no
+    output if the chat has no running task, so it's safe to invoke speculatively after
+    <code>band chats send</code>.
+  </p>
+
+  <pre><code># Stream the cwd workspace's first chat pane
+band chats watch
+
+# Pipe through jq for live filtering — only text deltas
+band chats watch | jq -r 'select(.type == "text-delta") | .delta'
+
+# Target a specific chat
+band chats watch chat_abc</code></pre>
+
+  <h2>Stop a chat's running task</h2>
+
+  <p>Abort the running task in a chat pane. The agent process is signalled and the chat status flips to <code>completed</code>.</p>
+
+  <pre><code>band chats stop                  # cwd workspace's first chat
+band chats stop chat_abc</code></pre>
+
+  <h2>Remove a chat pane</h2>
+
+  <p>Permanently remove a chat pane and its agent process.</p>
+
+  <pre><code>band chats remove                # cwd workspace's first chat
+band chats remove chat_abc</code></pre>
+
+  <h2>JSON output</h2>
+
+  <pre><code>band chats list --output json
+band chats list --output json | jq '.chats[] | select(.status == "running")'</code></pre>
+
+  <h2>Chat status</h2>
+
+  <ul>
+    <li><strong>waiting</strong> — Idle. The chat exists but no task is running.</li>
+    <li><strong>running</strong> — Agent is actively working on a task.</li>
+    <li><strong>completed</strong> — The last task finished successfully.</li>
+    <li><strong>failed</strong> — The last task ended with an unrecoverable error.</li>
+  </ul>
+</DocsLayout>

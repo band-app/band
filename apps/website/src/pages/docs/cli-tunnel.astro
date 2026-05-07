@@ -5,16 +5,16 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <h1>band tunnel</h1>
 
   <p>
-    The <code>band tunnel</code> command group manages the Cloudflare tunnel that enables remote
-    access to your Band server. When the tunnel is running, you can access the dashboard and API
-    from any device over the internet — including your phone.
+    The <code>band tunnel</code> command group manages the Cloudflare tunnel that enables
+    remote access to your Band server. When the tunnel is running, you can access the
+    dashboard and API from any device over the internet — including your phone.
   </p>
 
   <h2>Prerequisites</h2>
 
   <p>
-    The tunnel feature requires <strong>cloudflared</strong> to be installed on your system.
-    Cloudflared is Cloudflare's open-source tunnel client.
+    The tunnel feature requires <strong>cloudflared</strong> to be installed on your
+    system. Cloudflared is Cloudflare's open-source tunnel client.
   </p>
 
   <pre><code># macOS
@@ -26,77 +26,80 @@ sudo apt install cloudflared
 # Or download from https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/</code></pre>
 
   <p>
-    You do not need a Cloudflare account. Band uses cloudflared's quick tunnel feature, which
-    generates a temporary public URL without any configuration.
+    You do not need a Cloudflare account. Band uses cloudflared's quick tunnel feature,
+    which generates a temporary public URL without any configuration.
   </p>
 
-  <h2>Check Tunnel Status</h2>
+  <h2>Check tunnel status</h2>
 
-  <p>Display the current tunnel state, URL, and connection info.</p>
+  <p>Display whether the tunnel is running and, if so, its public URL.</p>
 
   <pre><code>band tunnel status</code></pre>
 
   <p>Example output when running:</p>
 
-  <pre><code>Status:    running
-URL:       https://abc-def-123.trycloudflare.com
-Uptime:    2h 34m
-Subdomain: abc-def-123</code></pre>
+  <pre><code>running: yes
+url: https://abc-def-123.trycloudflare.com</code></pre>
 
   <p>Example output when stopped:</p>
 
-  <pre><code>Status:    stopped</code></pre>
+  <pre><code>running: no</code></pre>
 
-  <h2>Start the Tunnel</h2>
-
-  <p>
-    Start a Cloudflare tunnel to make your local Band server accessible from the internet.
-  </p>
-
-  <pre><code>band tunnel start</code></pre>
+  <h2>Start the tunnel</h2>
 
   <p>
-    Once started, Band generates an authentication token and prints the public URL. You can share
-    this URL along with the token to access Band from another device.
+    Start a Cloudflare tunnel and print the public URL on stdout.
   </p>
 
-  <h2>Stop the Tunnel</h2>
+  <pre><code>band tunnel start
+# https://abc-def-123.trycloudflare.com</code></pre>
+
+  <p>
+    The URL plus the auth token from <code>~/.band/settings.json</code> is what you
+    need to access Band from another device.
+  </p>
+
+  <h2>Stop the tunnel</h2>
 
   <p>Shut down the tunnel and revoke the public URL.</p>
 
   <pre><code>band tunnel stop</code></pre>
 
-  <h2>Custom Subdomains</h2>
+  <h2>Custom subdomains</h2>
 
   <p>
-    By default, cloudflared assigns a random subdomain. If you have a Cloudflare account and a
-    configured domain, you can set up a persistent subdomain through Cloudflare's dashboard. This
-    gives you a stable URL like <code>https://band.yourdomain.com</code>.
+    By default, cloudflared assigns a random <code>*.trycloudflare.com</code> subdomain.
+    If you have a Cloudflare account and a configured domain, you can set up a persistent
+    subdomain through Cloudflare's dashboard. This gives you a stable URL like
+    <code>https://band.yourdomain.com</code>.
   </p>
 
   <h2>Security</h2>
 
   <p>
-    When the tunnel is active, Band generates a random authentication token. Remote clients must
-    include this token (via the <code>BAND_TOKEN</code> environment variable or the login screen in
-    the web interface) to access the API.
+    Band requires a token for every authenticated request — local or remote. The token
+    is generated on first launch (a 64-character hex string) and stored in
+    <code>~/.band/settings.json</code> under <code>tokenSecret</code>.
   </p>
 
   <ul>
-    <li>The token is displayed when the tunnel starts.</li>
-    <li>The token is also available via <code>band tunnel status --output json</code>.</li>
-    <li>Tokens are rotated each time the tunnel is restarted.</li>
-    <li>The dashboard shows a QR code for easy mobile access with the token embedded.</li>
+    <li>Read the token via <code>jq -r .tokenSecret ~/.band/settings.json</code> or by opening Settings &rarr; About in the dashboard.</li>
+    <li>Pass it to remote clients via the <code>BAND_TOKEN</code> environment variable, the <code>?token=…</code> query string on first navigation (the server then sets a cookie), or the dashboard's mobile-friendly QR code.</li>
+    <li>The token is <strong>not</strong> rotated when the tunnel restarts; it persists in <code>settings.json</code> until you delete that field.</li>
   </ul>
 
-  <h2>JSON Output</h2>
+  <h2>JSON output</h2>
 
-  <pre><code>band tunnel status --output json</code></pre>
+  <pre><code>band tunnel status --output json
+band tunnel start  --output json</code></pre>
 
   <pre><code set:html={`{'{'}
-  "status": "running",
-  "url": "https://abc-def-123.trycloudflare.com",
-  "token": "bnd_a1b2c3d4e5f6...",
-  "uptimeSeconds": 9240
+  "running": true,
+  "url": "https://abc-def-123.trycloudflare.com"
 {'}'}`}></code></pre>
+
+  <p>
+    Note that <code>tunnel.status</code> does not include the auth token —
+    read it from <code>~/.band/settings.json</code> as described above.
+  </p>
 </DocsLayout>

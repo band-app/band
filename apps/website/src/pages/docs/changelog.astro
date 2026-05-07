@@ -6,7 +6,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <h1>Changelog</h1>
   <p>
     Notable changes and releases for Band. For the complete commit history, see the
-    <a href="https://github.com/topdev1de/band/releases">GitHub releases page</a>.
+    <a href="https://github.com/band-app/band/releases">GitHub releases page</a>.
   </p>
 
   <h2>v0.1.0 — Initial Release</h2>
@@ -14,27 +14,26 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
 
   <h3>Features</h3>
   <ul>
-    <li><strong>Desktop dashboard</strong> — Tauri-based native macOS app with project sidebar, workspace list, and status indicators</li>
+    <li><strong>Desktop dashboard</strong> — Native macOS Electron app with project sidebar, workspace list, and status indicators. Signed and notarized via Apple Developer ID.</li>
     <li><strong>Web interface</strong> — Browser-based dashboard with responsive layout for desktop and mobile</li>
     <li><strong>Multi-IDE support</strong> — VS Code, Cursor, Zed, Windsurf, Kiro, all JetBrains IDEs, Xcode, iTerm2, Warp, Ghostty, Chrome, Safari, Firefox</li>
-    <li><strong>Multi-agent support</strong> — Claude Code, Cursor CLI, and Gemini CLI with pluggable adapter pattern</li>
+    <li><strong>Multi-agent support</strong> — Claude Code, Codex, and OpenCode via a pluggable adapter pattern</li>
     <li><strong>Git worktree workspaces</strong> — Isolated branch-per-task workflow with automatic worktree management</li>
-    <li><strong>Task management</strong> — Submit, cancel, re-run, and watch agent tasks with real-time streaming output</li>
-    <li><strong>Scheduled tasks</strong> — Cron-based automation for recurring agent work</li>
+    <li><strong>Chat panes</strong> — Per-workspace multi-agent chat panes with message streaming, abort, and history paging</li>
+    <li><strong>Scheduled cronjobs</strong> — Cron-based automation for recurring agent work, scoped to a project or a specific workspace</li>
     <li><strong>Remote access</strong> — Built-in Cloudflare tunnel with token-based authentication and QR code for mobile</li>
-    <li><strong>CLI</strong> — Full command-line interface for all operations with JSON output mode</li>
-    <li><strong>Window management</strong> — Auto-position IDE windows when focusing a workspace</li>
-    <li><strong>Project configuration</strong> — Per-project <code>.band/config.json</code> with setup/teardown scripts and app presets</li>
-    <li><strong>VS Code extension</strong> — Auto-activation, terminal management, and agent status reporting</li>
-    <li><strong>Agent status protocol</strong> — Real-time status detection via Claude Code hooks and file-based communication</li>
+    <li><strong>CLI</strong> — Resource-based command groups (<code>projects</code>, <code>workspaces</code>, <code>chats</code>, <code>terminals</code>, <code>browsers</code>, <code>cronjobs</code>, <code>tunnel</code>, <code>settings</code>) with JSON output mode</li>
+    <li><strong>Project configuration</strong> — Per-project <code>.band/config.json</code> with setup/teardown commands and app presets</li>
+    <li><strong>Claude Code hooks</strong> — Auto-installed <code>PreToolUse</code>, <code>PermissionRequest</code>, <code>UserPromptSubmit</code>, <code>PostToolUse</code>, and <code>Stop</code> hooks that report agent status back to Band via <code>band notify</code></li>
   </ul>
 
   <h3>Architecture</h3>
   <ul>
-    <li>Desktop app built with Tauri 2.0 and React</li>
-    <li>Web server built with Node.js, Vite, and TanStack Router</li>
+    <li>Desktop shell built with Electron + TypeScript</li>
+    <li>Dashboard frontend built with React 19, TanStack Router, and Vite</li>
+    <li>Web server built with Node.js 22.5+ and tRPC</li>
     <li>CLI built with Rust</li>
-    <li>tRPC API with HTTP and WebSocket subscriptions</li>
-    <li>SQLite for persistent state</li>
+    <li>SQLite via Node's built-in <code>node:sqlite</code> module for persistent state</li>
+    <li>tRPC over HTTP with Server-Sent Events for chat streaming and WebSocket for terminals and LSP</li>
   </ul>
 </DocsLayout>

@@ -46,8 +46,11 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   </ul>
 
   <p>
-    Chat is streamed in real time over WebSocket, so you see agent output as soon as it is
-    generated. You can also send messages to the agent directly from the chat input.
+    Chat output is streamed in real time over Server-Sent Events
+    (<code>/api/tasks/&lt;chatId&gt;/stream</code>), so you see agent output as soon as
+    it is generated. You can also send messages to the agent directly from the chat
+    input. (Terminals and language servers use raw WebSockets — see
+    <a href="/docs/architecture">Architecture</a>.)
   </p>
 
   <h2>Code Viewer</h2>

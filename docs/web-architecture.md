@@ -1,6 +1,8 @@
 # Web App Architecture
 
-The web server (`apps/web`) follows a 3-tier architecture: **API**, **Services**, and **Infra**. Each tier has a single responsibility and a clear dependency direction.
+> **Status: target architecture, not current state.** The existing `apps/web/src/` layout is flatter — most server logic lives directly under `apps/web/src/lib/` (e.g. `chat-manager.ts`, `agent-pool.ts`, `git.ts`, `lsp-manager.ts`) and tRPC procedures live under `apps/web/src/trpc/`. This document describes the **API → Services → Infra** structure that new code should be migrated toward, not the layout you will find today. See `apps/web/src/trpc/router.ts` for the actual entry point.
+
+The web server (`apps/web`) is moving toward a 3-tier architecture: **API**, **Services**, and **Infra**. Each tier has a single responsibility and a clear dependency direction.
 
 ```
 API (routers)  -->  Services (business logic)  -->  Infra (DB, git, external clients)

@@ -7,10 +7,26 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
 
   <p>
     Band is an <strong>agent orchestrator</strong> that helps developers manage AI coding
-    agents across multiple projects and workspaces. It bundles its own dashboard, code editor,
-    terminal, chat, and CLI so you can dispatch tasks, monitor progress, and manage the git
-    worktrees that keep your work organized — all from one app.
+    agents across multiple projects and workspaces. It bundles a dashboard, code viewer,
+    terminal panes, chat panes, browser tabs, and a CLI so you can drive coding agents,
+    monitor progress, and manage the git worktrees that keep your work organized — all
+    from one app.
   </p>
+
+  <figure class="my-8 overflow-hidden rounded-xl border border-border shadow-lg">
+    <img
+      src="/screenshot-dashboard.png"
+      alt="The Band dashboard: workspace sidebar on the left, chat pane in the middle showing a coding-agent conversation, and a side-by-side code diff on the right."
+      width="2004"
+      height="1413"
+      loading="lazy"
+      decoding="async"
+      class="block h-auto w-full"
+    />
+    <figcaption class="border-t border-border bg-card/50 px-4 py-2 text-center text-sm text-muted-foreground">
+      The Band desktop app — workspace sidebar, chat pane, and a side-by-side diff for the active worktree.
+    </figcaption>
+  </figure>
 
   <h2>Who is Band for?</h2>
 
@@ -67,9 +83,10 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <h2>Platform support</h2>
 
   <p>
-    Band is currently available for <strong>macOS</strong> only (macOS 13 Ventura or later).
-    The desktop app is an Electron application, and the CLI is a standalone Rust binary that
-    ships alongside it. Windows and Linux support is planned for a future release.
+    Band is currently available for <strong>macOS</strong> only (macOS 11 Big Sur or
+    later). The desktop app is an Electron application, and the CLI is a standalone Rust
+    binary that ships alongside it. Both Apple Silicon and Intel Macs are supported.
+    Windows and Linux support is planned for a future release.
   </p>
 
   <h2>Next steps</h2>

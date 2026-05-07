@@ -63,16 +63,21 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
 
   <h2>CI Integration Patterns</h2>
   <p>
-    Band exposes a web server that you can call from CI pipelines to trigger tasks
-    programmatically.
+    Band exposes an HTTP server you can call from CI pipelines to drive agents
+    programmatically. The CLI talks to that server over HTTP, so any environment with
+    network access to it (local socket, Cloudflare tunnel, or VPN) can submit work.
   </p>
   <ol>
-    <li>Ensure the Band server is accessible from your CI environment (running on a known host and port).</li>
-    <li>In your CI pipeline, use the Band CLI or HTTP API to submit a task:
-      <pre><code>band task submit --workspace "myproject/main" --prompt "Run the full test suite and fix any failures"</code></pre>
+    <li>Ensure the Band server is reachable from your CI runner — set <code>BAND_SERVER_URL</code> and <code>BAND_TOKEN</code> if it's behind a tunnel.</li>
+    <li>Create or reuse a workspace, then send a message to its chat pane. The recommended one-shot pattern is to combine both in <code>workspaces create</code>:
+      <pre><code>band workspaces create my-app ci/auto-fix \
+  --prompt "Run the full test suite and fix any failures" \
+  --output json | jq -r .workspaceId</code></pre>
     </li>
-    <li>Poll the task status or use webhooks to wait for completion.</li>
-    <li>Based on the task result, continue or fail the CI pipeline.</li>
+    <li>Stream the chat's running task and exit when it finishes:
+      <pre><code>band chats watch | jq -r 'select(.type == "session-result") | .reason'</code></pre>
+    </li>
+    <li>Inspect the resulting branch (push it, open a PR) or remove the workspace if the run failed.</li>
   </ol>
   <p>
     This pattern is useful for automated fix-and-retry workflows: if CI fails, trigger

@@ -1,13 +1,19 @@
 /**
- * Resolve the app icon path. We reuse the Tauri icon set
- * (`apps/dashboard/src-tauri/icons/`) so both shells display the same icon
- * during the migration; Phase 8's `electron-builder` bakes platform-specific
- * formats (`.icns`, `.ico`) into the packaged app directly.
+ * Resolve the app icon path used for the dev-mode dock icon and the
+ * Windows/Linux `BrowserWindow.icon` field.
  *
- * In dev we always return PNG: Electron's `BrowserWindow.icon` and
- * `app.dock.setIcon()` both accept PNG on every platform, while `.icns`
- * only loads through the OS bundle path (Info.plist) which we don't have
- * until packaging.
+ * In packaged macOS builds the dock icon comes from the bundled `.icns`
+ * (resolved via `Info.plist`'s `CFBundleIconFile`), so we don't need a PNG
+ * at runtime. In dev there's no app bundle, so we override Electron's
+ * default icon by pointing `app.dock.setIcon()` at a PNG instead — that's
+ * what this resolver returns.
+ *
+ * The PNGs live alongside `icon.icns` under `apps/desktop/build/`, which
+ * `electron-builder` already treats as `directories.buildResources` so
+ * the same files work for packaged Windows/Linux targets if we add them.
+ *
+ * Returns `null` if no icon was found — callers fall back to whatever the
+ * platform supplies by default.
  */
 
 import { existsSync } from "node:fs";
@@ -20,7 +26,7 @@ const __dirname = dirname(__filename);
 
 /** Pick the best available PNG (HiDPI first). */
 function pickPng(dir: string): string | null {
-  const candidates = ["128x128@2x.png", "icon.png", "128x128.png"];
+  const candidates = ["icon@2x.png", "icon.png"];
   for (const name of candidates) {
     const path = resolve(dir, name);
     if (existsSync(path)) return path;
@@ -31,20 +37,23 @@ function pickPng(dir: string): string | null {
 /**
  * Find the icons directory across dev and packaged layouts.
  *
- *   - Dev: walk up from `dist/main/main/` to the repo root and use the
- *     existing `apps/dashboard/src-tauri/icons/` until Phase 7 copies them.
- *   - Packaged: `process.resourcesPath/icons/`.
+ *   - Packaged: `process.resourcesPath/icons/` (only present if we ever
+ *     bundle PNGs as `extraResources`; today macOS uses `.icns` from the
+ *     bundle, so this falls through to `null`).
+ *   - Dev: walk up from the compiled main bundle (`dist/main/main/`) to
+ *     the repo and use `apps/desktop/build/`, which holds `icon.icns`
+ *     and the matching PNGs.
  */
 function iconsDir(): string | null {
   if (app.isPackaged) {
     const resources = resolve(process.resourcesPath, "icons");
     return existsSync(resources) ? resources : null;
   }
-  // Walk up looking for apps/dashboard/src-tauri/icons.
+  // Walk up looking for apps/desktop/build/.
   let current = __dirname;
   for (let i = 0; i < 10; i++) {
-    const candidate = resolve(current, "apps", "dashboard", "src-tauri", "icons");
-    if (existsSync(candidate)) return candidate;
+    const candidate = resolve(current, "apps", "desktop", "build");
+    if (existsSync(resolve(candidate, "icon.png"))) return candidate;
     const parent = resolve(current, "..");
     if (parent === current) break;
     current = parent;
