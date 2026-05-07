@@ -12,7 +12,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
 
   <h2>Supported Agents</h2>
   <p>
-    Band currently ships adapters for four coding agents. Each adapter implements the
+    Band currently ships adapters for six coding agents. Each adapter implements the
     same <code>CodingAgent</code> interface, so switching between agents requires only a
     settings change — no workflow modifications.
   </p>
@@ -23,12 +23,18 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
         <th>Feature</th>
         <th>Claude Code</th>
         <th>Cursor CLI</th>
+        <th>OpenAI Codex (SDK)</th>
+        <th>Codex (CLI)</th>
         <th>Gemini CLI</th>
+        <th>OpenCode</th>
       </tr>
     </thead>
     <tbody>
       <tr>
         <td>Cost tracking</td>
+        <td>Yes</td>
+        <td>No</td>
+        <td>Yes</td>
         <td>Yes</td>
         <td>No</td>
         <td>No</td>
@@ -38,15 +44,15 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
         <td>Yes</td>
         <td>No</td>
         <td>No</td>
-      </tr>
-      <tr>
-        <td>Session resume</td>
-        <td>Yes</td>
         <td>Yes</td>
         <td>No</td>
+        <td>Yes</td>
       </tr>
       <tr>
         <td>Real-time streaming</td>
+        <td>Yes</td>
+        <td>Yes</td>
+        <td>Yes</td>
         <td>Yes</td>
         <td>Yes</td>
         <td>Yes</td>
@@ -56,15 +62,15 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
         <td>Yes</td>
         <td>Yes</td>
         <td>Yes</td>
-      </tr>
-      <tr>
-        <td>User input prompts</td>
         <td>Yes</td>
-        <td>No</td>
-        <td>No</td>
+        <td>Yes</td>
+        <td>Yes</td>
       </tr>
       <tr>
         <td>Custom model selection</td>
+        <td>Yes</td>
+        <td>Yes</td>
+        <td>Yes</td>
         <td>Yes</td>
         <td>Yes</td>
         <td>Yes</td>
@@ -73,26 +79,39 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
         <td>Skill discovery</td>
         <td>Yes</td>
         <td>No</td>
+        <td>No</td>
+        <td>No</td>
         <td>Yes</td>
+        <td>No</td>
       </tr>
     </tbody>
   </table>
+
+  <p>
+    The two Codex adapters cover different runtimes:
+    <code>openai-codex</code> uses the <code>@openai/codex-sdk</code> Node SDK
+    in-process, while <code>codex</code> shells out to the standalone
+    <code>codex</code> CLI binary.
+  </p>
 
   <h2>The Adapter Pattern</h2>
   <p>
     Band uses a factory function (<code>createCodingAgent</code>) that accepts a
     configuration object with a <code>type</code> field and returns the appropriate
-    adapter. Each adapter implements the <code>CodingAgent</code> interface:
+    adapter. Each adapter implements the <code>CodingAgent</code> interface
+    (defined in <code>packages/coding-agent/src/types.ts</code>):
   </p>
   <ul>
-    <li><strong>runSession(prompt, sessionId?)</strong> — Starts an agent session and yields a stream of events (text deltas, tool calls, tool results, session results).</li>
-    <li><strong>abort()</strong> — Cancels the currently running session.</li>
+    <li><strong>runSession(prompt, sessionId?, options?)</strong> — Starts an agent session and yields an async generator of events.</li>
+    <li><strong>abort()</strong> — Cancels the currently running session (optional).</li>
     <li><strong>listSessions(dir)</strong> — Returns previous sessions for a directory (where supported).</li>
-    <li><strong>getSessionMessages(sessionId, dir)</strong> — Retrieves the message history for a session.</li>
-    <li><strong>listSkills()</strong> — Discovers available skills in the workspace.</li>
+    <li><strong>getSessionInfo(sessionId, dir)</strong> / <strong>getLatestSession(dir)</strong> — Fast lookup of a single session's metadata.</li>
+    <li><strong>getSessionMessages(sessionId, dir, options?)</strong> — Reads paginated message history with a tail / offset+limit cursor.</li>
+    <li><strong>listSkills()</strong>, <strong>listModes()</strong>, <strong>listModels()</strong> — Capability discovery (where supported).</li>
   </ul>
   <p>
-    All adapters emit a common set of <code>AgentEvent</code> types:
+    All adapters emit a common set of <code>AgentEvent</code> types
+    (see <code>packages/coding-agent/src/events.ts</code>):
     <code>session-start</code>, <code>text-delta</code>, <code>tool-use</code>,
     <code>tool-result</code>, <code>session-result</code>, and <code>error</code>.
     The Band task runner consumes these events and broadcasts them to the dashboard UI
@@ -102,27 +121,31 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <h2>Selecting the Default Agent</h2>
   <p>
     Open the Band dashboard and navigate to <strong>Settings</strong>. Under the
-    <strong>Coding Agent</strong> section, select your preferred agent type from the
-    dropdown. The available options are:
+    <strong>Coding Agents</strong> section, configure the agents available on your
+    machine and pick a default. The agent <code>type</code> values are:
   </p>
   <ul>
-    <li><code>claude-code</code> — Claude Code (default)</li>
+    <li><code>claude-code</code> — Claude Code (auto-detected from <code>claude</code> on PATH)</li>
     <li><code>cursor-cli</code> — Cursor CLI</li>
+    <li><code>openai-codex</code> — OpenAI Codex via the Node SDK</li>
+    <li><code>codex</code> — Codex CLI binary (auto-detected from <code>codex</code> on PATH)</li>
     <li><code>gemini-cli</code> — Gemini CLI</li>
+    <li><code>opencode</code> — OpenCode (auto-detected from <code>opencode</code> on PATH)</li>
   </ul>
   <p>
-    You can also specify a custom executable path if the agent CLI is not on your
-    system <code>PATH</code>. The setting is stored in Band's configuration database
-    and applies to all new agent sessions. Existing running sessions are not affected
-    until they complete and a new session starts.
+    Each agent entry can specify its own <code>command</code> (custom executable path)
+    and <code>model</code>. The <code>defaultCodingAgent</code> setting picks which one
+    new chat panes use unless a per-pane override is set. Existing running sessions
+    keep their original agent until they complete and a new session starts.
   </p>
 
   <h2>Agent Pool</h2>
   <p>
-    Band maintains an in-memory agent pool keyed by workspace ID. When a task is
-    submitted, Band checks the pool for an existing agent instance. If none exists, it
-    creates one using the current settings. This means each workspace gets its own
-    isolated agent instance with its own working directory, session state, and
-    configuration. Agents are removed from the pool when a workspace is deleted.
+    Band maintains an in-memory agent pool keyed by chat pane ID. When a message is
+    sent, Band checks the pool for an existing agent instance. If none exists, it
+    creates one using the chat pane's configured agent type, model, and mode. This
+    means each chat pane gets its own isolated agent instance with its own working
+    directory, session state, and configuration. Agents are removed from the pool
+    when a chat pane is removed or the workspace is deleted.
   </p>
 </DocsLayout>

@@ -1,0 +1,86 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+---
+<DocsLayout title="band terminals — Band Docs">
+  <h1>band terminals</h1>
+
+  <p>
+    The <code>band terminals</code> command group manages PTY-backed terminal sessions
+    inside a workspace. Each terminal has its own shell process and scrollback buffer.
+    Terminals are useful for running long-lived processes (dev servers, watchers, REPLs)
+    and reading their output from scripts.
+  </p>
+
+  <p>
+    For agent-driven work, prefer <a href="/docs/cli-chats"><code>band chats</code></a> —
+    it gives you streaming events, abort, and conversation history out of the box.
+  </p>
+
+  <h2>Default workspace and terminal resolution</h2>
+
+  <p>
+    Every <code>band terminals</code> subcommand auto-detects the workspace from the
+    current working directory when <code>[workspace_id]</code> is omitted, and resolves
+    to the workspace's first terminal session when <code>[terminal_id]</code> is omitted.
+  </p>
+
+  <h2>List terminals</h2>
+
+  <pre><code>band terminals list
+band terminals list ws_abc123</code></pre>
+
+  <h2>Create a terminal</h2>
+
+  <pre><code>band terminals create                                # cwd workspace, default shell
+band terminals create --command "npm run dev"        # auto-runs a command on spawn
+band terminals create --cwd packages/web             # subdirectory of the workspace</code></pre>
+
+  <p>Options:</p>
+  <ul>
+    <li><code>workspace_id</code> (positional, optional) — auto-detected from cwd if omitted.</li>
+    <li><code>--command &lt;cmd&gt;</code> — a shell command to run after spawn.</li>
+    <li><code>--cwd &lt;dir&gt;</code> — working directory relative to the workspace root.</li>
+  </ul>
+
+  <h2>Send input</h2>
+
+  <p>
+    Send characters to a terminal's stdin. Use <code>\n</code> for a newline (i.e. press
+    Enter) and <code>\t</code> for tab.
+  </p>
+
+  <pre><code>band terminals send --data "echo hello\n"
+band terminals send t_abc --data "ls -la\n"</code></pre>
+
+  <h2>Read output</h2>
+
+  <pre><code># Last 50 lines from the cwd workspace's first terminal
+band terminals output --lines 20
+
+# Stream live output (Ctrl+C exits the stream, terminal keeps running)
+band terminals output --follow
+
+# Target a specific terminal
+band terminals output t_abc --lines 100</code></pre>
+
+  <h2>Attach interactively</h2>
+
+  <p>
+    Stream the terminal's output to your local TTY and forward your keystrokes back to
+    its stdin. Press <code>Ctrl+C</code> to detach (the terminal stays alive on the
+    server).
+  </p>
+
+  <pre><code>band terminals attach
+band terminals attach t_abc</code></pre>
+
+  <h2>Kill a terminal</h2>
+
+  <pre><code>band terminals kill                  # cwd workspace's first terminal
+band terminals kill t_abc</code></pre>
+
+  <h2>JSON output</h2>
+
+  <pre><code>band terminals list --output json
+band terminals create --command "npm run dev" --output json | jq -r .terminalId</code></pre>
+</DocsLayout>

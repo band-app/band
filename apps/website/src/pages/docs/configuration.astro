@@ -6,68 +6,64 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
 
   <p>
     Each Band project can include a <code>.band/config.json</code> file at the repository root.
-    This file defines shell scripts that run during workspace lifecycle events. Commit it to the
+    This file defines shell commands that run during workspace lifecycle events. Commit it to the
     repository so that all team members share the same workspace setup.
   </p>
 
   <h2>File Location</h2>
 
   <p>
-    The configuration file lives at <code>&lt;project-root&gt;/.band/config.json</code>.
+    The configuration file is read from
+    <code>&lt;worktree-root&gt;/.band/config.json</code> first, falling back to
+    <code>&lt;project-root&gt;/.band/config.json</code>. The fallback handles the common case
+    where the config file lives on the main branch but is <code>.gitignore</code>d, so new
+    worktrees don't contain it.
   </p>
 
   <h2>Schema</h2>
 
-  <p>The top-level structure of the configuration file:</p>
+  <p>
+    Both <code>setup</code> and <code>teardown</code> are <strong>single shell command strings</strong>
+    — not arrays. Each runs through <code>bash -c</code>, so use <code>&amp;&amp;</code>,
+    <code>;</code>, or a multi-line shell snippet to chain steps.
+  </p>
 
   <pre><code set:html={`{'{'}
-  "setup": ["npm install", "npm run db:migrate"],
-  "teardown": ["npm run db:reset"]
+  "setup": "npm install && npm run db:migrate",
+  "teardown": "npm run db:reset"
 {'}'}`}></code></pre>
 
-  <h2>Setup Scripts</h2>
+  <h2>Setup Command</h2>
 
   <p>
-    The <code>setup</code> array contains shell commands that run after a workspace is created
-    via <code>band workspaces create</code>. Commands execute sequentially in the new worktree
-    directory.
+    The <code>setup</code> command runs after a workspace is created via
+    <code>band workspaces create</code> (or the dashboard equivalent). It executes inside the
+    new worktree directory with <code>/opt/homebrew/bin</code> and <code>/usr/local/bin</code>
+    prepended to <code>PATH</code> so Homebrew tools are reachable. A failed setup is reported
+    in the dashboard but does not delete the workspace.
   </p>
 
-  <pre><code>"setup": [
-  "npm install",
-  "npm run db:migrate",
-  "cp .env.example .env"
-]</code></pre>
+  <pre><code>"setup": "npm install &amp;&amp; npm run db:migrate &amp;&amp; cp .env.example .env"</code></pre>
 
   <p>
-    Use setup scripts for dependency installation, database migrations, environment file
-    creation, or any other initialization your project needs. Setup failures are non-fatal —
-    the workspace is still created.
+    Use the setup command for dependency installation, database migrations, environment file
+    creation, or any other initialization your project needs.
   </p>
 
-  <h2>Teardown Scripts</h2>
+  <h2>Teardown Command</h2>
 
   <p>
-    The <code>teardown</code> array contains shell commands that run before a workspace is
-    removed via <code>band workspaces remove</code>. Use these for cleanup tasks like stopping
-    background services or resetting databases.
+    The <code>teardown</code> command runs before a workspace is removed via
+    <code>band workspaces remove</code>. It runs inside the worktree (which still exists at this
+    point) and is non-fatal — a teardown failure is logged and the workspace is removed anyway.
   </p>
 
-  <pre><code>"teardown": [
-  "docker compose down",
-  "npm run db:reset"
-]</code></pre>
+  <pre><code>"teardown": "docker compose down -v"</code></pre>
 
   <h2>Full Example</h2>
 
   <pre><code set:html={`{'{'}
-  "setup": [
-    "npm install",
-    "npx prisma db push",
-    "cp .env.example .env.local"
-  ],
-  "teardown": [
-    "docker compose down -v"
-  ]
+  "setup": "npm install && npx prisma db push && cp .env.example .env.local",
+  "teardown": "docker compose down -v"
 {'}'}`}></code></pre>
 </DocsLayout>

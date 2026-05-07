@@ -8,7 +8,7 @@ const faqs = [
   },
   {
     q: "What coding agents work with Band?",
-    a: "Band currently supports Claude Code, Cursor CLI, and Gemini CLI. The agent adapter pattern makes it straightforward to add new agents. You can select your preferred agent globally or per-workspace.",
+    a: "Band currently ships adapters for six coding agents: Claude Code, Cursor CLI, OpenAI Codex (via the Node SDK), Codex (via the standalone CLI), Gemini CLI, and OpenCode. The agent adapter pattern makes it straightforward to add new ones. You can configure which agents are available and pick a default in Settings, then override per chat pane.",
   },
   {
     q: "Is Band open source?",
@@ -40,7 +40,7 @@ const faqs = [
   },
   {
     q: "How much does Band cost?",
-    a: "Band is free and open source. You'll need your own API keys or subscriptions for the coding agents you use (Claude Code, Cursor, Gemini), but Band itself has no cost.",
+    a: "Band is free and open source. You'll need your own API keys or subscriptions for the coding agents you use (Claude Code, Cursor, OpenAI Codex, Gemini, OpenCode), but Band itself has no cost.",
   },
 ];
 ---
@@ -72,7 +72,7 @@ const faqs = [
           </p>
           <div class="mt-4 flex items-center justify-center gap-3">
             <a
-              href="https://github.com/topdev1de/band/issues"
+              href="https://github.com/band-app/band/issues"
               target="_blank"
               rel="noopener noreferrer"
               class="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium text-text transition-colors hover:bg-accent"

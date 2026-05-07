@@ -50,80 +50,92 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   </ul>
 
   <p>
-    Worktrees are stored in the Band home directory at
-    <code>~/.band/worktrees/&lt;project&gt;/&lt;workspace&gt;</code>.
+    Worktrees are stored in the configured worktrees directory (default
+    <code>~/.band/worktrees/&lt;project&gt;/&lt;branch&gt;</code>).
   </p>
 
   <h2>SQLite for State</h2>
 
   <p>
     All application state is stored in a local SQLite database at <code>~/.band/band.db</code>.
-    This includes projects, workspaces, tasks, cron jobs, and tunnel configuration. SQLite was
-    chosen for its simplicity, reliability, and zero-configuration nature — no external database
-    server is needed.
+    This includes projects, worktrees, chat panes, cronjobs, and panel layout state. The server
+    uses Node's built-in <code>node:sqlite</code> module via Drizzle ORM — no native module ships
+    in the bundle, and the binary always matches the runtime Node version.
   </p>
 
-  <h2>tRPC API (HTTP + WebSocket)</h2>
+  <h2>tRPC API (HTTP + SSE + WebSocket)</h2>
 
   <p>
-    The web server exposes a tRPC API that supports both HTTP (for request/response operations)
-    and WebSocket (for real-time streaming). The API is used by:
+    The web server exposes a tRPC API used by:
   </p>
 
   <ul>
     <li>The web dashboard (browser client).</li>
-    <li>The desktop app (Electron frontend).</li>
+    <li>The desktop app (Electron renderer).</li>
     <li>The CLI (via HTTP requests).</li>
-    <li>IDE extensions (for status reporting).</li>
+  </ul>
+
+  <p>
+    Most procedures are HTTP request/response. Long-lived streams use a few different transports
+    depending on the data:
+  </p>
+
+  <ul>
+    <li><strong>Server-Sent Events</strong> — Chat task output streams over SSE
+      (<code>/api/tasks/&lt;chatId&gt;/stream</code>).</li>
+    <li><strong>WebSockets</strong> — Terminals (<code>/terminal</code>) and language servers
+      (<code>/lsp</code>) use raw WebSockets so the renderer can pipe them directly into xterm
+      and the LSP client.</li>
+    <li><strong>tRPC subscriptions</strong> — Lower-volume realtime events (workspace status,
+      cronjob ticks, tunnel state) ride a tRPC WebSocket subscription.</li>
   </ul>
 
   <p>
     tRPC provides end-to-end type safety between the server and TypeScript clients, ensuring the
-    API contract is enforced at compile time.
+    API contract is enforced at compile time. The same router is exposed as an OpenAPI spec
+    (generated from the router definitions) for non-TypeScript consumers.
   </p>
 
   <h2>Agent Adapter Pattern</h2>
 
   <p>
-    Band uses an adapter pattern to support different AI agents. Each agent implementation (e.g.,
-    Claude Code) is wrapped in an adapter that translates between Band's task model and the
-    agent's specific interface. This allows Band to:
+    Band uses an adapter pattern to support different coding agents. Each agent implementation
+    (Claude Code, Cursor CLI, OpenAI Codex, Codex CLI, Gemini CLI, OpenCode) is wrapped in an
+    adapter that translates between Band's chat-pane model and the agent's specific interface.
+    This allows Band to:
   </p>
 
   <ul>
     <li>Start and stop agent processes.</li>
-    <li>Stream agent output to the dashboard in a uniform format.</li>
+    <li>Stream agent output to the dashboard in a uniform format
+      (<code>session-start</code>, <code>text-delta</code>, <code>tool-use</code>,
+      <code>tool-result</code>, <code>session-result</code>, <code>error</code>).</li>
     <li>Support multiple agent backends without changing the core system.</li>
   </ul>
 
-  <h2>Status Protocol</h2>
-
   <p>
-    Communication between IDE extensions and the Band dashboard uses a file-based status protocol.
-    Each workspace has a <code>.band/status.json</code> file that the IDE extension writes to and
-    the server watches.
+    See <a href="/docs/coding-agents">Coding Agents</a> for the full feature matrix.
   </p>
 
-  <pre><code set:html={`{'{'}
-  "agent": "claude-code",
-  "status": "working",
-  "task": "Implementing dark mode toggle",
-  "updatedAt": "2025-12-01T10:30:00Z"
-{'}'}`}></code></pre>
+  <h2>Agent Status</h2>
 
   <p>
-    This file-based approach was chosen for its simplicity and compatibility — any IDE extension or
-    agent wrapper can write a JSON file, regardless of the programming language or runtime.
+    Agent status (working / waiting / completed / failed) is reported by the agent process itself
+    via the events listed above, plus — for Claude Code specifically — out-of-process hooks. On
+    first launch the server installs <code>PreToolUse</code>, <code>PermissionRequest</code>,
+    <code>UserPromptSubmit</code>, <code>PostToolUse</code>, and <code>Stop</code> hooks that pipe
+    JSON to <code>band notify</code>, which forwards it to the running server via the local tRPC
+    endpoint. See <a href="/docs/agent-status">Agent Status</a> for details.
   </p>
 
   <h2>Data Flow</h2>
 
   <ol>
-    <li>User creates a task via dashboard, CLI, or cron job.</li>
-    <li>Server stores the task in SQLite and spawns an agent process in the workspace.</li>
+    <li>User sends a message to a chat pane via the dashboard, CLI, or cronjob.</li>
+    <li>Server stores the message in SQLite and spawns / resumes the agent in the chat pane's workspace.</li>
     <li>Agent works in the Git worktree, making file changes and running commands.</li>
-    <li>Agent output is streamed via WebSocket to connected dashboard clients.</li>
-    <li>IDE extension updates <code>.band/status.json</code>; server detects changes and broadcasts status.</li>
+    <li>Agent events stream via SSE to the dashboard (and via stdout to <code>band chats watch</code>).</li>
+    <li>Claude Code hooks publish status updates through <code>band notify</code> as the agent runs.</li>
     <li>Desktop app handles window focus and positioning when the user switches workspaces.</li>
   </ol>
 </DocsLayout>

@@ -22,15 +22,19 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <p>
     Band uses Claude Code's hook system to receive automatic status updates. When you
     set up Band, it installs hooks into your Claude Code settings file at
-    <code>~/.claude/settings.json</code>. Three hook events are registered:
+    <code>~/.claude/settings.json</code>. Five hook events are registered (see
+    <code>apps/web/src/lib/hooks.ts</code>):
   </p>
   <ul>
-    <li><strong>UserPromptSubmit</strong> — Fires when a user submits a prompt, letting Band track that a session is active.</li>
-    <li><strong>PostToolUse</strong> — Fires after each tool call completes, providing real-time progress updates.</li>
-    <li><strong>Stop</strong> — Fires when the agent finishes, allowing Band to update the session status.</li>
+    <li><strong>UserPromptSubmit</strong> — Fires when the user submits a prompt. Band marks the workspace as <em>working</em>.</li>
+    <li><strong>PreToolUse</strong> — Fires before each tool call. Band keeps the workspace <em>working</em> in the general case but flips it to <em>needs attention</em> when the tool is <code>AskUserQuestion</code> or <code>ExitPlanMode</code>.</li>
+    <li><strong>PermissionRequest</strong> — Fires when the agent requests permission to use an unapproved tool.</li>
+    <li><strong>PostToolUse</strong> — Fires after each tool call, providing real-time progress updates.</li>
+    <li><strong>Stop</strong> — Fires when the agent finishes. Band marks the workspace as <em>needs attention</em>.</li>
   </ul>
   <p>
-    Each hook runs the command <code>band notify</code>, which sends a lightweight
+    Each hook runs the command <code>band notify</code>, which reads the JSON payload
+    from stdin, resolves the workspace from the hook's <code>cwd</code>, and posts a
     status update to the Band server. This is how Band detects agent activity in
     workspaces where Claude Code is running independently (outside of Band-submitted tasks).
   </p>
@@ -47,6 +51,12 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <pre><code set:html={`{
   "hooks": {
     "UserPromptSubmit": [
+      { "hooks": [{ "type": "command", "command": "/usr/local/bin/band notify" }] }
+    ],
+    "PreToolUse": [
+      { "hooks": [{ "type": "command", "command": "/usr/local/bin/band notify" }] }
+    ],
+    "PermissionRequest": [
       { "hooks": [{ "type": "command", "command": "/usr/local/bin/band notify" }] }
     ],
     "PostToolUse": [

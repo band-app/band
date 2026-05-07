@@ -5,83 +5,97 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <h1>band workspaces</h1>
 
   <p>
-    The <code>band workspaces</code> command group manages workspaces within projects. A workspace is
-    an isolated working environment backed by a Git worktree. Each workspace gets its own branch,
-    its own working directory, and its own agent session.
+    The <code>band workspaces</code> command group manages workspaces within projects. A
+    workspace is an isolated working environment backed by a Git worktree. Each workspace
+    gets its own branch and working directory, and acts as the scope for chat panes,
+    terminals, browser tabs, and cronjobs.
   </p>
 
-  <h2>List Workspaces</h2>
+  <h2>List workspaces</h2>
 
-  <p>Display all workspaces across all projects, or filter by project.</p>
+  <p>Display all workspaces across all projects, or filter to a single project.</p>
 
-  <pre><code>band workspaces list</code></pre>
+  <pre><code>band workspaces list
+band workspaces list my-app</code></pre>
 
   <p>Example output:</p>
 
-  <pre><code>ID   Project    Name             Branch                    Status
-1    my-app     fix-auth-bug     ws/fix-auth-bug           active
-2    my-app     add-dark-mode    ws/add-dark-mode          active
-3    my-app     refactor-api     ws/refactor-api           idle
-4    api-server update-deps      ws/update-deps            active</code></pre>
+  <pre><code>PROJECT     BRANCH            WORKSPACE ID    PATH
+my-app      fix-auth-bug      ws_abc123       /Users/dev/.band/worktrees/my-app/fix-auth-bug
+my-app      add-dark-mode     ws_def456       /Users/dev/.band/worktrees/my-app/add-dark-mode
+api-server  update-deps       ws_ghi789       /Users/dev/.band/worktrees/api-server/update-deps</code></pre>
 
-  <h2>Create a Workspace</h2>
+  <h2>Create a workspace</h2>
 
   <p>
-    Create a new workspace in a project. Band will create a Git worktree with a new branch and set
-    up the isolated environment.
+    Create a new workspace in a project. Band will create a Git worktree with a new branch
+    and (if the project has a <code>setup</code> command in <code>.band/config.json</code>)
+    run setup automatically.
   </p>
 
-  <pre><code>band workspaces create --project my-app --name fix-auth-bug</code></pre>
+  <pre><code>band workspaces create &lt;project&gt; &lt;branch&gt;</code></pre>
+
+  <p>Both arguments are positional. Examples:</p>
+
+  <pre><code>band workspaces create my-app fix-auth-bug
+band workspaces create my-app add-dark-mode --base main
+band workspaces create my-app review --prompt "Review this PR" --agent claude-code</code></pre>
 
   <p>
-    The workspace directory is created at <code>.band/worktrees/&lt;project&gt;/&lt;name&gt;</code>
-    inside the Band home directory. A new Git branch is created from the project's current HEAD.
+    The worktree is created at <code>~/.band/worktrees/&lt;project&gt;/&lt;branch&gt;</code>
+    by default (the parent directory is the configurable
+    <a href="/docs/settings"><code>worktreesDir</code></a> setting). The new branch is
+    created from the project's default branch unless you pass <code>--base</code>.
   </p>
 
   <p>Options:</p>
 
   <ul>
-    <li><code>--project &lt;name&gt;</code> — The project to create the workspace in (required).</li>
-    <li><code>--name &lt;ws-name&gt;</code> — A descriptive name for the workspace (required).</li>
+    <li><code>project</code> (positional, required) — name of a registered project.</li>
+    <li><code>branch</code> (positional, required) — name of the branch to create.</li>
+    <li><code>--base &lt;branch&gt;</code> — base branch (defaults to the project's default branch).</li>
+    <li><code>--prompt &lt;text&gt;</code> — kick off a chat in the new workspace with this initial prompt.</li>
+    <li><code>--agent &lt;id&gt;</code>, <code>--model &lt;name&gt;</code>, <code>--mode &lt;mode&gt;</code>, <code>--max-turns &lt;n&gt;</code> — agent overrides for the initial prompt.</li>
   </ul>
 
-  <h2>Remove a Workspace</h2>
+  <h2>Remove a workspace</h2>
 
   <p>
-    Remove a workspace by its ID. This deletes the Git worktree directory and removes the workspace
-    record from Band's database.
+    Remove a workspace by <code>&lt;project&gt; &lt;branch&gt;</code>. This deletes the Git
+    worktree directory, removes the workspace record from Band's database, and runs the
+    project's <code>teardown</code> command if one is configured.
   </p>
 
-  <pre><code>band workspaces remove 2</code></pre>
+  <pre><code>band workspaces remove my-app fix-auth-bug</code></pre>
 
   <p>
-    Active tasks in the workspace will be cancelled before removal. The Git branch created for the
-    workspace is not deleted automatically — you can still merge or reference it.
+    Running tasks in the workspace are aborted before removal. The Git branch itself is
+    <em>not</em> deleted from the project repository — you can still merge or reference it.
   </p>
 
-  <h2>JSON Output</h2>
+  <h2>JSON output</h2>
 
   <pre><code>band workspaces list --output json</code></pre>
 
   <p>Example JSON output:</p>
 
-  <pre><code set:html={`[
-  {'{'}
-    "id": 1,
-    "project": "my-app",
-    "name": "fix-auth-bug",
-    "branch": "ws/fix-auth-bug",
-    "path": "/Users/dev/.band/worktrees/my-app/fix-auth-bug",
-    "status": "active"
-  {'}'}
-]`}></code></pre>
+  <pre><code set:html={`{'{'}
+  "workspaces": [
+    {'{'}
+      "project": "my-app",
+      "branch": "fix-auth-bug",
+      "workspaceId": "ws_abc123",
+      "path": "/Users/dev/.band/worktrees/my-app/fix-auth-bug"
+    {'}'}
+  ]
+{'}'}`}></code></pre>
 
   <h2>Notes</h2>
 
   <ul>
-    <li>Workspace names must be unique within a project.</li>
-    <li>Each workspace has its own isolated file system via Git worktrees.</li>
+    <li>Branch names must be unique within a project.</li>
+    <li>Each workspace has its own isolated file system via Git worktrees, so concurrent agents on different branches don't conflict.</li>
     <li>Workspaces persist across restarts — they are stored in SQLite and the worktree stays on disk.</li>
-    <li>Use the dashboard or <code>band tasks</code> to assign work to a workspace.</li>
+    <li>Use <a href="/docs/cli-chats"><code>band chats send</code></a> from inside the workspace directory to drive an agent.</li>
   </ul>
 </DocsLayout>

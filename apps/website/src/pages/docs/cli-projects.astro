@@ -5,12 +5,12 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <h1>band projects</h1>
 
   <p>
-    The <code>band projects</code> command group manages the projects registered with Band. A project
-    is a directory on your filesystem that contains a codebase — typically a Git repository with
-    a <code>.band/config.json</code> file.
+    The <code>band projects</code> command group manages the projects registered with Band. A
+    project is a directory on your filesystem — typically a Git repository — that you've
+    registered with Band so it can create worktrees inside it.
   </p>
 
-  <h2>List Projects</h2>
+  <h2>List projects</h2>
 
   <p>Display all registered projects.</p>
 
@@ -18,40 +18,36 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
 
   <p>Example output:</p>
 
-  <pre><code>ID   Name        Path                          Workspaces
-1    my-app      /Users/dev/projects/my-app     3
-2    api-server  /Users/dev/projects/api        1
-3    docs-site   /Users/dev/projects/docs       0</code></pre>
+  <pre><code>NAME        PATH                         WORKTREES
+my-app      /Users/dev/projects/my-app   3 worktrees
+api-server  /Users/dev/projects/api      1 worktree
+docs-site   /Users/dev/projects/docs     0 worktrees</code></pre>
 
-  <h2>Add a Project</h2>
-
-  <p>Register a directory as a Band project. The path must point to an existing directory.</p>
-
-  <pre><code>band projects add /Users/dev/projects/my-app</code></pre>
+  <h2>Add a project</h2>
 
   <p>
-    Band will read the <code>.band/config.json</code> file from the project directory if it exists.
-    If the config file is not present, the project is still registered and can be configured later.
+    Register a directory as a Band project. The path must point to an existing Git repository.
+    The project name is derived from the directory name unless you pass <code>--label</code>.
   </p>
 
-  <pre><code>band projects add .
-# Adds the current directory as a project</code></pre>
-
-  <h2>Remove a Project</h2>
+  <pre><code>band projects add /Users/dev/projects/my-app
+band projects add . --label "Frontend"</code></pre>
 
   <p>
-    Unregister a project by its ID. This does not delete the directory or any files — it only
-    removes the project from Band's database.
+    Band reads <code>.band/config.json</code> from the project directory if it exists. If the
+    config file is missing, the project is still registered and you can add the file later.
   </p>
 
-  <pre><code>band projects remove 1</code></pre>
+  <h2>Remove a project</h2>
 
   <p>
-    Any workspaces associated with the project will also be removed from Band. The underlying
-    Git worktrees on disk are not deleted automatically.
+    Unregister a project <strong>by name</strong>. This does not delete the directory on disk —
+    it only removes the project (and any tracked worktrees) from Band's database.
   </p>
 
-  <h2>JSON Output</h2>
+  <pre><code>band projects remove my-app</code></pre>
+
+  <h2>JSON output</h2>
 
   <p>All subcommands support <code>--output json</code> for machine-readable output.</p>
 
@@ -59,27 +55,27 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
 
   <p>Example JSON output:</p>
 
-  <pre><code set:html={`[
-  {'{'}
-    "id": 1,
-    "name": "my-app",
-    "path": "/Users/dev/projects/my-app",
-    "workspaceCount": 3
-  {'}'},
-  {'{'}
-    "id": 2,
-    "name": "api-server",
-    "path": "/Users/dev/projects/api",
-    "workspaceCount": 1
-  {'}'}
-]`}></code></pre>
+  <pre><code set:html={`{'{'}
+  "projects": [
+    {'{'}
+      "name": "my-app",
+      "path": "/Users/dev/projects/my-app",
+      "worktreeCount": 3
+    {'}'},
+    {'{'}
+      "name": "api-server",
+      "path": "/Users/dev/projects/api",
+      "worktreeCount": 1
+    {'}'}
+  ]
+{'}'}`}></code></pre>
 
   <h2>Notes</h2>
 
   <ul>
-    <li>Project names are derived from the directory name by default.</li>
-    <li>Each project path must be unique — you cannot register the same directory twice.</li>
-    <li>Projects are stored in Band's local SQLite database.</li>
-    <li>The project directory should be a Git repository for workspace features to work properly.</li>
+    <li>Project names default to the basename of the directory; pass <code>--label</code> to override.</li>
+    <li>Project names must be unique. Adding a directory whose name conflicts with an existing project will fail.</li>
+    <li>Projects are stored in Band's local SQLite database (<code>~/.band/band.db</code>).</li>
+    <li>The project directory should be a Git repository for workspace features (worktrees, diff, branch status) to work.</li>
   </ul>
 </DocsLayout>

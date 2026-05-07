@@ -11,7 +11,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
 
   <h2>Status Types</h2>
   <p>
-    Each workspace's coding agent can be in one of three states:
+    Each workspace's coding agent can be in one of these states:
   </p>
   <ul>
     <li>
@@ -26,9 +26,10 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
     </li>
     <li>
       <strong>Needs attention (static dot)</strong> &mdash; The agent has finished its current
-      task or requires human input. The indicator uses the <code>bg-status-needs-attention</code>
-      color, typically amber or orange. This state means you should review the agent's output
-      and either provide input, approve changes, or start a new task.
+      task or requires human input (for example, it called <code>AskUserQuestion</code> or
+      <code>ExitPlanMode</code>). The indicator uses the
+      <code>bg-status-needs-attention</code> color, typically amber or orange. Review the
+      agent's output and either provide input, approve changes, or start a new task.
     </li>
   </ul>
 
@@ -50,11 +51,15 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
 
   <h3>Hook Events</h3>
   <p>
-    The following Claude Code hook events are monitored:
+    Five Claude Code hook events are wired up on first launch (see
+    <code>apps/web/src/lib/hooks.ts</code>):
   </p>
   <ul>
-    <li><strong>Start</strong> &mdash; The agent has begun working. Transitions the workspace to the <em>working</em> state.</li>
-    <li><strong>Stop</strong> &mdash; The agent has stopped (task completed or exited). Transitions to the <em>needs attention</em> state.</li>
+    <li><strong>UserPromptSubmit</strong> &mdash; A new prompt has been sent. Transitions to <em>working</em>.</li>
+    <li><strong>PreToolUse</strong> &mdash; A tool call is about to run. Stays <em>working</em> in general; switches to <em>needs attention</em> when the tool is <code>AskUserQuestion</code> or <code>ExitPlanMode</code>, since both require a human reply.</li>
+    <li><strong>PermissionRequest</strong> &mdash; The agent needs permission to proceed (e.g. an unapproved tool). Stays <em>working</em>; the dashboard surfaces the request inline.</li>
+    <li><strong>PostToolUse</strong> &mdash; A tool call has finished. Stays <em>working</em>.</li>
+    <li><strong>Stop</strong> &mdash; The agent has stopped (task completed or exited). Transitions to <em>needs attention</em>.</li>
   </ul>
 
   <h2>Status Display</h2>

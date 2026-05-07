@@ -55,19 +55,31 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
     with a specific label.
   </p>
 
-  <h2>Coding Agent</h2>
+  <h2>Coding Agents</h2>
   <p>
-    Configure the coding agent used for background tasks:
+    Configure the coding agents available on your machine. The list is auto-populated
+    on first launch by detecting installed CLIs (currently <code>claude</code>,
+    <code>codex</code>, and <code>opencode</code>). You can add or remove entries
+    at any time, and pick which one is the default for new chat panes.
   </p>
   <ul>
     <li>
-      <strong>Agent type</strong> &mdash; Select the coding agent. Currently supports
-      <strong>Claude Code</strong>. Set to "None" to disable agent task submission.
+      <strong>Coding agents list</strong> &mdash; Each entry has an <code>id</code>,
+      a <code>type</code> (one of <code>claude-code</code>, <code>cursor-cli</code>,
+      <code>openai-codex</code>, <code>codex</code>, <code>gemini-cli</code>,
+      <code>opencode</code>), a display <code>label</code>, and optional
+      <code>command</code> and <code>model</code> overrides.
     </li>
     <li>
-      <strong>Command</strong> (optional) &mdash; A custom command to launch the agent.
-      For example, <code>claude --dangerously-skip-permissions</code>. Leave empty to use
-      the default command for the selected agent type.
+      <strong>Default coding agent</strong> &mdash; The <code>id</code> of the entry
+      used for new chat panes when no per-pane override is set. Each chat pane can
+      override the agent, model, or mode at creation time.
+    </li>
+    <li>
+      <strong>Command</strong> (optional, per agent) &mdash; A custom executable path
+      or command for that agent, e.g.
+      <code>claude --dangerously-skip-permissions</code>. Leave empty to use the
+      default binary the adapter detects on <code>PATH</code>.
     </li>
   </ul>
 
@@ -94,8 +106,8 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
     All settings are persisted in <code>~/.band/settings.json</code>. You can view the current
     settings via the CLI:
   </p>
-  <pre><code>band settings
-band settings --output json</code></pre>
+  <pre><code>band settings              # pretty-printed JSON
+band settings --output json # machine-readable JSON (no trailing newline)</code></pre>
   <p>
     While you can edit the file directly, it is recommended to use the Settings UI to avoid
     malformed JSON or invalid values.
