@@ -1424,10 +1424,11 @@ export function DiffView({
   if (!summary || summary.stats.filesChanged === 0) {
     return (
       <div className="flex h-full flex-col overflow-hidden">
-        <div className="flex h-8 shrink-0 items-center gap-3 border-b border-border pl-2 pr-3">
-          {renderSidebarToggle()}
-          <span className="text-sm text-muted-foreground">No changes</span>
+        <div className="flex h-8 shrink-0 items-center gap-3 border-b border-border pl-3 pr-3">
           {renderBranchIndicator(summary?.headBranch)}
+        </div>
+        <div className="flex min-h-0 flex-1 items-center justify-center">
+          <span className="text-sm text-muted-foreground">No changes</span>
         </div>
       </div>
     );
