@@ -64,10 +64,12 @@ import {
   clearQueuedMessages,
   getQueuedMessages,
   pushQueuedMessage,
+  type QueuedMessage,
   removeQueuedMessage,
   setQueuedMessages,
   shiftQueuedMessage,
   subscribeQueue,
+  updateQueuedMessage,
 } from "../lib/queued-message-store";
 import { getSessionEventsBefore, getSessionEventsTail } from "../lib/session-store";
 import { runSetup } from "../lib/setup-runner";
@@ -2485,13 +2487,26 @@ const browsersRouter = t.router({
 // Queue (persisted queued messages)
 // ---------------------------------------------------------------------------
 
+const queuedFileSchema = z.object({
+  mediaType: z.string(),
+  url: z.string(),
+  filename: z.string().optional(),
+});
+
 const queueRouter = t.router({
   push: publicProcedure
-    .input(z.object({ workspaceId: z.string(), chatId: z.string().optional(), text: z.string() }))
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        chatId: z.string().optional(),
+        text: z.string(),
+        files: z.array(queuedFileSchema).optional(),
+      }),
+    )
     .mutation(({ input }) => {
       const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
-      pushQueuedMessage(chatId, input.text);
-      return { ok: true, messages: getQueuedMessages(chatId) };
+      const message = pushQueuedMessage(chatId, { text: input.text, files: input.files });
+      return { ok: true, message, messages: getQueuedMessages(chatId) };
     }),
 
   set: publicProcedure
@@ -2499,13 +2514,19 @@ const queueRouter = t.router({
       z.object({
         workspaceId: z.string(),
         chatId: z.string().optional(),
-        messages: z.array(z.string()),
+        messages: z.array(
+          z.object({
+            id: z.string().optional(),
+            text: z.string(),
+            files: z.array(queuedFileSchema).optional(),
+          }),
+        ),
       }),
     )
     .mutation(({ input }) => {
       const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
       setQueuedMessages(chatId, input.messages);
-      return { ok: true };
+      return { ok: true, messages: getQueuedMessages(chatId) };
     }),
 
   get: publicProcedure
@@ -2517,19 +2538,34 @@ const queueRouter = t.router({
     }),
 
   remove: publicProcedure
-    .input(z.object({ workspaceId: z.string(), chatId: z.string().optional(), text: z.string() }))
+    .input(z.object({ workspaceId: z.string(), chatId: z.string().optional(), id: z.string() }))
     .mutation(({ input }) => {
       const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
-      removeQueuedMessage(chatId, input.text);
-      return { ok: true, messages: getQueuedMessages(chatId) };
+      const removed = removeQueuedMessage(chatId, input.id);
+      return { ok: true, removed, messages: getQueuedMessages(chatId) };
+    }),
+
+  update: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        chatId: z.string().optional(),
+        id: z.string(),
+        text: z.string(),
+      }),
+    )
+    .mutation(({ input }) => {
+      const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
+      const updated = updateQueuedMessage(chatId, input.id, input.text);
+      return { ok: true, updated, messages: getQueuedMessages(chatId) };
     }),
 
   shift: publicProcedure
     .input(z.object({ workspaceId: z.string(), chatId: z.string().optional() }))
     .mutation(({ input }) => {
       const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
-      const text = shiftQueuedMessage(chatId);
-      return { text };
+      const message = shiftQueuedMessage(chatId);
+      return { message };
     }),
 
   clear: publicProcedure
@@ -2545,7 +2581,7 @@ const queueRouter = t.router({
     .subscription(async function* (opts) {
       const chatId = opts.input.chatId ?? getOrCreateDefaultChat(opts.input.workspaceId).id;
 
-      type Update = { messages: string[] };
+      type Update = { messages: QueuedMessage[] };
       const queue: Update[] = [];
       let resolve: (() => void) | null = null;
 

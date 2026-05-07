@@ -9,6 +9,7 @@ import { createPendingInput, rejectAllPendingInputs } from "./pending-inputs";
 import { shiftQueuedMessage } from "./queued-message-store";
 import { bandHome, upsertWorkspaceStatus } from "./state";
 import { generateTaskId, markTaskFailed, saveTask } from "./task-store";
+import { saveUploadedFilesDetailed } from "./upload-utils";
 import { emit as emitStatusEvent } from "./watcher";
 import { resolveWorkspace } from "./workspace";
 
@@ -57,12 +58,32 @@ export interface TaskInfo {
   firstEventId?: number;
 }
 
+/**
+ * File attachment metadata to display alongside the user prompt. Stored
+ * on the task so the initial `user-message` broadcast can carry the file
+ * parts — without these, the session JSONL (and any future reload from
+ * it) would render the user's bubble as text-only and lose the images.
+ */
+export interface DisplayFile {
+  mediaType: string;
+  url: string;
+  filename?: string;
+}
+
 export interface SubmitTaskOptions {
   workspaceId: string;
   chatId: string;
   prompt: string;
   sessionId?: string;
   agentPrompt?: string;
+  /**
+   * Optional file attachments to broadcast as part of the user-message
+   * chunk so direct (non-queued) messages survive a session reload with
+   * their attached files intact. Each url should already be a stable
+   * server-served URL (e.g. /api/uploads/{name}); embedding raw data
+   * URLs here is allowed but bloats the persisted JSONL.
+   */
+  displayFiles?: DisplayFile[];
   maxTurns?: number;
   mode?: string;
   model?: string;
@@ -85,6 +106,7 @@ const MAX_BUFFER_SIZE = 2000;
 interface InternalTask extends TaskInfo {
   taskRecordId: string;
   agentPrompt: string;
+  displayFiles?: DisplayFile[];
 }
 
 // Use globalThis to ensure a single shared state across multiple bundles
@@ -209,6 +231,7 @@ export function submitTask(options: SubmitTaskOptions): TaskInfo {
     prompt,
     sessionId,
     agentPrompt,
+    displayFiles,
     maxTurns,
     mode,
     model,
@@ -236,6 +259,7 @@ export function submitTask(options: SubmitTaskOptions): TaskInfo {
     prompt,
     taskRecordId,
     agentPrompt: agentPrompt ?? prompt,
+    displayFiles: displayFiles && displayFiles.length > 0 ? displayFiles : undefined,
     maxTurns,
     mode,
     model,
@@ -467,9 +491,15 @@ async function runTask(chatId: string, task: InternalTask) {
           // is set and broadcast() stores it in the session buffer.
           // Uses "user-message" (not "data-prompt") so the live stream ignores
           // it — useChat already has the user message in its state.
+          // Include any uploaded file metadata so reloading the session
+          // from the JSONL re-renders the user bubble with its images.
           broadcast(chatId, {
             type: "user-message",
             text: task.prompt,
+            ...(task.displayFiles &&
+              task.displayFiles.length > 0 && {
+                files: task.displayFiles,
+              }),
           } as unknown as UIMessageChunk);
           break;
         }
@@ -729,16 +759,42 @@ async function runTask(chatId: string, task: InternalTask) {
     const queued = shiftQueuedMessage(chatId);
     if (queued) {
       try {
+        // Upload any attached files to disk so the agent can read them.
+        // Mirrors the immediate-submit path in api/task-stream.ts.
+        let agentPrompt: string | undefined;
+        let displayFiles: DisplayFile[] | undefined;
+        if (queued.files && queued.files.length > 0) {
+          const saved = await saveUploadedFilesDetailed(queued.files);
+          if (saved.length > 0) {
+            const fileList = saved.map((s) => `- ${s.path}`).join("\n");
+            agentPrompt = `I'm sharing these files with you:\n${fileList}\n\n${queued.text}`;
+            // Replace the bulky base64 data URLs with stable
+            // /api/uploads/* references for the persisted bubble — the
+            // bytes already live on disk, no need to embed them again
+            // in the SSE event / session JSONL.
+            displayFiles = saved.map((s) => ({
+              mediaType: s.mediaType,
+              url: `/api/uploads/${s.storedName}`,
+              filename: s.originalName,
+            }));
+          }
+        }
+
         // Emit the queued user prompt so the client can render it as a
-        // user message bubble between assistant responses.
+        // user message bubble between assistant responses. Include any
+        // file attachments so they show up in the bubble too.
         broadcast(chatId, {
           type: "data-prompt" as UIMessageChunk["type"],
-          data: { text: queued },
+          data: {
+            text: queued.text,
+            ...(displayFiles && displayFiles.length > 0 && { files: displayFiles }),
+          },
         } as UIMessageChunk);
         submitTask({
           workspaceId: task.workspaceId,
           chatId,
-          prompt: queued,
+          prompt: queued.text,
+          agentPrompt,
           sessionId: task.sessionId,
         });
         autoStarted = true;

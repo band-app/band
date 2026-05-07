@@ -104,25 +104,57 @@ export function convertEventsToUIMessages(events: SessionEventRecord[]): UIMessa
       case "user-message": {
         // Initial user prompt — broadcast at task start so the buffer
         // includes the user message (not just assistant chunks).
+        // Files attached at submit time are reconstructed as `file`
+        // parts so the bubble re-renders with images on reload.
         flushText();
         currentAssistant = null;
+        const userParts: UIMessageParts = [{ type: "text", text: chunk.text as string }];
+        const userFiles = chunk.files as
+          | { mediaType: string; url: string; filename?: string }[]
+          | undefined;
+        if (Array.isArray(userFiles)) {
+          for (const f of userFiles) {
+            userParts.push({
+              type: "file",
+              mediaType: f.mediaType,
+              url: f.url,
+              ...(f.filename && { filename: f.filename }),
+            } as UIMessageParts[number]);
+          }
+        }
         messages.push({
           id: crypto.randomUUID(),
           role: "user",
-          parts: [{ type: "text", text: chunk.text as string }],
+          parts: userParts,
         });
         break;
       }
 
       case "data-prompt": {
-        // Queue boundary: finalize current assistant, insert user message
+        // Queue boundary: finalize current assistant, insert user message.
+        // The chunk may carry file metadata for attachments uploaded with
+        // the queued message; reconstruct them as `file` parts.
         flushText();
         currentAssistant = null;
-        const data = chunk.data as { text: string };
+        const data = chunk.data as {
+          text: string;
+          files?: { mediaType: string; url: string; filename?: string }[];
+        };
+        const promptParts: UIMessageParts = [{ type: "text", text: data.text }];
+        if (Array.isArray(data.files)) {
+          for (const f of data.files) {
+            promptParts.push({
+              type: "file",
+              mediaType: f.mediaType,
+              url: f.url,
+              ...(f.filename && { filename: f.filename }),
+            } as UIMessageParts[number]);
+          }
+        }
         messages.push({
           id: crypto.randomUUID(),
           role: "user",
-          parts: [{ type: "text", text: data.text }],
+          parts: promptParts,
         });
         break;
       }
