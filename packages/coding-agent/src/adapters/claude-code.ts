@@ -957,6 +957,20 @@ function* mapClaudeCodeEvent(
   }
 }
 
+/**
+ * Where freshly-shipped skills (e.g. the band CLI's bundled SKILL.md files,
+ * synced by apps/web/src/lib/cli-skills.ts on every server boot) should be
+ * written. This is the *highest-priority* global directory the discovery
+ * tier above scans, matching the personal-scope path documented at
+ * https://code.claude.com/docs/en/skills.
+ *
+ * Defaults to `homedir()` to mirror `discoverClaudeSkills`. Tests pass an
+ * explicit `home` so they can sandbox the destination.
+ */
+export function getClaudeCodeInstallSkillsDir(home: string = homedir()): string {
+  return join(home, ".claude", "skills");
+}
+
 function discoverClaudeSkills(workspaceDir: string): SkillInfo[] {
   const globalSkillsDir = join(homedir(), ".claude", "skills");
   const projectSkillsDir = join(workspaceDir, ".claude", "skills");

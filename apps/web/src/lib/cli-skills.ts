@@ -31,6 +31,7 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { getInstallSkillsDir } from "@band-app/coding-agent";
 import { findCliBinary } from "./cli";
 import { whichBinary } from "./process-utils";
 
@@ -58,69 +59,31 @@ export interface SkillAgent {
 }
 
 /**
- * Map a coding agent type to the global skills directory we ship into. Each
- * destination matches the *highest-priority global* directory the agent's
- * adapter scans in `packages/coding-agent/src/adapters/<agent>.ts`, so that
- * shipped skills override anything else the user has at the system level.
- *
- *   - `claude-code` → `~/.claude/skills/`
- *     (claude-code.ts::discoverClaudeSkills)
- *   - `codex` / `openai-codex` → `${CODEX_HOME}/skills/` (default
- *     `~/.codex/skills/`; `CODEX_HOME` env override honored to match the
- *     adapter)
- *   - `gemini-cli` → `~/.gemini/skills/`
- *   - `opencode` → `~/.config/opencode/skills/` — OpenCode reads from a
- *     6-tier list and `.config/opencode/skills` is the *highest-priority*
- *     global entry (project-level dirs aside). It also reads from
- *     `~/.claude/skills/` (lower priority), so a user with both Claude Code
- *     and OpenCode enabled will see the skills via either path.
- *
- * Returns `null` for agent types that have no defined global skills
- * directory (e.g. `cursor-cli`, which doesn't expose a `listSkills` method).
- */
-export function resolveSkillTarget(
-  agentType: string,
-  home: string = homedir(),
-): SkillTarget | null {
-  switch (agentType) {
-    case "claude-code":
-      return { agentType, skillsDir: join(home, ".claude", "skills") };
-    case "codex":
-    case "openai-codex": {
-      const codexHome = process.env.CODEX_HOME ?? join(home, ".codex");
-      return { agentType, skillsDir: join(codexHome, "skills") };
-    }
-    case "gemini-cli":
-      return { agentType, skillsDir: join(home, ".gemini", "skills") };
-    case "opencode":
-      return { agentType, skillsDir: join(home, ".config", "opencode", "skills") };
-    default:
-      // `cursor-cli` and any unknown future type fall through to null —
-      // callers treat that as "no destination" rather than a hard error.
-      return null;
-  }
-}
-
-/**
  * Resolve write targets for a list of agents, deduplicating destinations.
+ *
+ * Each agent's skills directory comes from its adapter (see
+ * `packages/coding-agent/src/install-skills.ts` and the
+ * `get<Agent>InstallSkillsDir` exports next to each adapter's discovery
+ * logic) — this layer only orchestrates the lookup and dedupe pass.
  *
  * Two configured agents can resolve to the same directory (e.g. two
  * claude-code agents with different IDs but the same `type` both map to
  * `~/.claude/skills/`). We dedupe so the (skill, target) loop doesn't write
- * the same file twice on each boot.
+ * the same file twice on each boot. Agent types without a documented global
+ * skills directory (e.g. `cursor-cli`) are silently skipped.
  */
-export function resolveSkillTargets(
+export async function resolveSkillTargets(
   agents: readonly SkillAgent[],
   home: string = homedir(),
-): SkillTarget[] {
+): Promise<SkillTarget[]> {
   const seen = new Set<string>();
   const out: SkillTarget[] = [];
   for (const agent of agents) {
-    const target = resolveSkillTarget(agent.type, home);
-    if (!target) continue;
-    if (seen.has(target.skillsDir)) continue;
-    seen.add(target.skillsDir);
-    out.push(target);
+    const skillsDir = await getInstallSkillsDir(agent.type, home);
+    if (!skillsDir) continue;
+    if (seen.has(skillsDir)) continue;
+    seen.add(skillsDir);
+    out.push({ agentType: agent.type, skillsDir });
   }
   return out;
 }
@@ -235,7 +198,7 @@ export async function installSkills(opts: InstallSkillsOptions): Promise<Install
   };
 
   const home = opts.home ?? homedir();
-  const targets = resolveSkillTargets(opts.agents, home);
+  const targets = await resolveSkillTargets(opts.agents, home);
 
   if (targets.length === 0) {
     return result;

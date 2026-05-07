@@ -214,6 +214,19 @@ export class GeminiCliAdapter implements CodingAgent {
   }
 }
 
+/**
+ * Where freshly-shipped skills should be written. Gemini CLI's user-scope
+ * skills live at `~/.gemini/skills/` (not affected by workspace trust),
+ * with `~/.agents/skills/` documented as a tool-agnostic alias. We pick
+ * the canonical Gemini path so other tools (like band) sync into the
+ * place Gemini actually scans first.
+ *
+ * See https://geminicli.com/docs/cli/skills/.
+ */
+export function getGeminiCliInstallSkillsDir(home: string = homedir()): string {
+  return join(home, ".gemini", "skills");
+}
+
 function discoverGeminiSkills(workspaceDir: string): SkillInfo[] {
   const globalSkillsDir = join(homedir(), ".gemini", "skills");
   const projectSkillsDir = join(workspaceDir, ".gemini", "skills");

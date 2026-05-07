@@ -196,6 +196,18 @@ interface CodexThread {
 
 const CODEX_HOME = process.env.CODEX_HOME || join(homedir(), ".codex");
 
+/**
+ * Where freshly-shipped skills should be written. The OpenAI-Codex SDK
+ * shares Codex CLI's skill home (`~/.codex/skills/`); `CODEX_HOME` is read
+ * at call time so test overrides take effect.
+ *
+ * See https://developers.openai.com/codex/skills.
+ */
+export function getOpenAICodexInstallSkillsDir(home: string = homedir()): string {
+  const codexHome = process.env.CODEX_HOME ?? join(home, ".codex");
+  return join(codexHome, "skills");
+}
+
 function discoverCodexSkills(workspaceDir: string): SkillInfo[] {
   const globalSkillsDir = join(CODEX_HOME, "skills");
   const systemSkillsDir = join(CODEX_HOME, "skills", ".system");
