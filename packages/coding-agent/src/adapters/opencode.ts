@@ -574,6 +574,30 @@ async function fetchOpenCodeSessionMessages(
   return { messages: slice, hasMore, firstOffset: offset };
 }
 
+/** Default executable name for OpenCode. See `setup.ts::AGENT_CHECKS`. */
+export const OPENCODE_DEFAULT_BINARY = "opencode";
+
+/**
+ * Where freshly-shipped skills should be written. OpenCode's documented
+ * resolution order is:
+ *
+ *   <project>/.opencode/skills (highest)
+ *   <project>/.claude/skills
+ *   <project>/.agents/skills
+ *   ~/.config/opencode/skills    ← highest *global* priority
+ *   ~/.claude/skills             (fallback for migrators from Claude Code)
+ *   ~/.agents/skills             (lowest, tool-agnostic alias)
+ *
+ * We install into `~/.config/opencode/skills/` so the skill is OpenCode-
+ * primary and so we don't pollute `~/.claude/skills/` (which the Claude Code
+ * adapter owns separately).
+ *
+ * See https://opencode.ai/docs/skills/.
+ */
+export function getOpenCodeInstallSkillsDir(home: string = homedir()): string {
+  return join(home, ".config", "opencode", "skills");
+}
+
 /**
  * Discover skills using OpenCode's 6-directory resolution order.
  *

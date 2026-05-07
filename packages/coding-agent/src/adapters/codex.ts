@@ -501,6 +501,24 @@ const CODEX_MODELS: AgentModel[] = [
  *
  * Project-level skills override global ones with the same name.
  */
+/** Default executable name for the Codex CLI. See `setup.ts::AGENT_CHECKS`. */
+export const CODEX_DEFAULT_BINARY = "codex";
+
+/**
+ * Where freshly-shipped skills should be written. Codex documents its
+ * user-scope skill home as `~/.codex/skills/` (the `.system/` subfolder is
+ * reserved for OpenAI-shipped skills shipped with the CLI), with `CODEX_HOME`
+ * env override honored for users who have relocated their Codex config.
+ *
+ * Reads `CODEX_HOME` at call time rather than reusing the module-level
+ * `CODEX_HOME` constant so tests that override the env var get the new
+ * value. See https://developers.openai.com/codex/skills.
+ */
+export function getCodexInstallSkillsDir(home: string = homedir()): string {
+  const codexHome = process.env.CODEX_HOME ?? join(home, ".codex");
+  return join(codexHome, "skills");
+}
+
 function discoverCodexSkills(workspaceDir: string): SkillInfo[] {
   const globalSkillsDir = join(CODEX_HOME, "skills");
   const systemSkillsDir = join(CODEX_HOME, "skills", ".system");

@@ -11,6 +11,18 @@ const PROJECT_ROOT = join(import.meta.dirname, "..");
 const FAKE_AGENT_PATH = join(import.meta.dirname, "fake-agent.mjs");
 const DEFAULT_TOKEN = "slash-test-token";
 
+/**
+ * Skills the server's `ensureSkillsInstalled` step (apps/web/src/lib/cli-skills.ts)
+ * lays down on every boot for any HOME that has Claude Code in its codingAgents
+ * settings. We filter these out of the slash-commands assertions so the tests
+ * remain focused on the skills *they* seed.
+ */
+const AUTO_INSTALLED_SKILL_NAMES = new Set(["band", "band-chat", "band-terminal", "band-browser"]);
+
+function withoutAutoInstalled<T extends { name: string }>(skills: T[]): T[] {
+  return skills.filter((s) => !AUTO_INSTALLED_SKILL_NAMES.has(s.name));
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -248,14 +260,15 @@ describe("skills.list — with seeded global skills", () => {
     }>(res);
 
     expect(data.skills).toBeInstanceOf(Array);
-    expect(data.skills.length).toBe(2); // no-description skill is excluded
+    const seeded = withoutAutoInstalled(data.skills);
+    expect(seeded.length).toBe(2); // no-description skill is excluded
 
-    const commit = data.skills.find((s) => s.name === "commit");
+    const commit = seeded.find((s) => s.name === "commit");
     expect(commit).toBeDefined();
     expect(commit!.description).toBe("Create a git commit with a message.");
     expect(commit!.argumentHint).toBe("-m <message>");
 
-    const reviewPr = data.skills.find((s) => s.name === "review-pr");
+    const reviewPr = seeded.find((s) => s.name === "review-pr");
     expect(reviewPr).toBeDefined();
     expect(reviewPr!.description).toBe("Review a GitHub pull request.");
     expect(reviewPr!.argumentHint).toBe("<pr-url>");
@@ -269,7 +282,7 @@ describe("skills.list — with seeded global skills", () => {
       skills: Array<{ name: string }>;
     }>(res);
 
-    const names = data.skills.map((s) => s.name);
+    const names = withoutAutoInstalled(data.skills).map((s) => s.name);
     expect(names).toEqual(["commit", "review-pr"]);
   });
 });
@@ -295,7 +308,7 @@ describe("skills.list — no skills directory", () => {
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  it("returns empty array when skills directory does not exist", async () => {
+  it("returns empty array (ignoring auto-installed band skills) when no skills are seeded", async () => {
     const res = await trpcQuery(server.url, "skills.list", {
       workspaceId: "testproject-main",
     });
@@ -305,7 +318,9 @@ describe("skills.list — no skills directory", () => {
       skills: Array<{ name: string; description: string; argumentHint?: string }>;
     }>(res);
 
-    expect(data.skills).toEqual([]);
+    // ensureSkillsInstalled will have populated the four band-* skills here;
+    // for this test we only care that no *other* skills are present.
+    expect(withoutAutoInstalled(data.skills)).toEqual([]);
   });
 });
 
@@ -382,7 +397,7 @@ describe("skills.list — project-level skills", () => {
       skills: Array<{ name: string }>;
     }>(res);
 
-    const names = data.skills.map((s) => s.name);
+    const names = withoutAutoInstalled(data.skills).map((s) => s.name);
     expect(names).toEqual(["deploy", "lint"]);
   });
 });

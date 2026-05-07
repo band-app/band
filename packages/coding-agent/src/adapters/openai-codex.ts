@@ -196,6 +196,25 @@ interface CodexThread {
 
 const CODEX_HOME = process.env.CODEX_HOME || join(homedir(), ".codex");
 
+/**
+ * Default executable name for the OpenAI-Codex SDK adapter. Same `codex`
+ * binary as the CodexAdapter — the difference is which TS-side adapter
+ * speaks to it.
+ */
+export const OPENAI_CODEX_DEFAULT_BINARY = "codex";
+
+/**
+ * Where freshly-shipped skills should be written. The OpenAI-Codex SDK
+ * shares Codex CLI's skill home (`~/.codex/skills/`); `CODEX_HOME` is read
+ * at call time so test overrides take effect.
+ *
+ * See https://developers.openai.com/codex/skills.
+ */
+export function getOpenAICodexInstallSkillsDir(home: string = homedir()): string {
+  const codexHome = process.env.CODEX_HOME ?? join(home, ".codex");
+  return join(codexHome, "skills");
+}
+
 function discoverCodexSkills(workspaceDir: string): SkillInfo[] {
   const globalSkillsDir = join(CODEX_HOME, "skills");
   const systemSkillsDir = join(CODEX_HOME, "skills", ".system");
