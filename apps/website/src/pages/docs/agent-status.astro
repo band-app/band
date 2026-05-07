@@ -20,18 +20,47 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
     </li>
     <li>
       <strong>Working (animated dot)</strong> &mdash; The agent is actively executing a task.
-      The indicator uses the <code>bg-status-working</code> color, typically a pulsing blue or
-      green dot. This means the agent is reading files, writing code, running commands, or
-      otherwise making progress on its assigned task.
+      The indicator uses the <code>bg-status-working</code> color and pulses while the agent
+      is making progress &mdash; reading files, writing code, or running commands.
     </li>
     <li>
       <strong>Needs attention (static dot)</strong> &mdash; The agent has finished its current
       task or requires human input (for example, it called <code>AskUserQuestion</code> or
       <code>ExitPlanMode</code>). The indicator uses the
-      <code>bg-status-needs-attention</code> color, typically amber or orange. Review the
-      agent's output and either provide input, approve changes, or start a new task.
+      <code>bg-status-needs-attention</code> color. Review the agent's output and either
+      provide input, approve changes, or start a new task.
     </li>
   </ul>
+
+  <figure class="my-6 mx-auto max-w-sm overflow-hidden rounded-xl border border-border shadow-lg">
+    <img
+      src="/screenshot-agent-working.png"
+      alt="A workspace row labelled main with a pulsing dot indicator showing the agent is currently working."
+      width="252"
+      height="44"
+      loading="lazy"
+      decoding="async"
+      class="block h-auto w-full"
+    />
+    <figcaption class="border-t border-border bg-card/50 px-4 py-2 text-center text-sm text-muted-foreground">
+      Working &mdash; the agent is actively making progress on a task.
+    </figcaption>
+  </figure>
+
+  <figure class="my-6 mx-auto max-w-sm overflow-hidden rounded-xl border border-border shadow-lg">
+    <img
+      src="/screenshot-agent-needs-attention.png"
+      alt="A workspace row labelled main with a static dot indicator showing the agent needs attention."
+      width="256"
+      height="40"
+      loading="lazy"
+      decoding="async"
+      class="block h-auto w-full"
+    />
+    <figcaption class="border-t border-border bg-card/50 px-4 py-2 text-center text-sm text-muted-foreground">
+      Needs attention &mdash; the agent has stopped or is asking for input.
+    </figcaption>
+  </figure>
 
   <h2>How Status Is Detected</h2>
   <p>

@@ -24,14 +24,33 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <ol>
     <li>Open the Band dashboard.</li>
     <li>Click the <strong>"Add Project"</strong> button in the sidebar.</li>
-    <li>Select the folder containing your git repository in the file picker.</li>
-    <li>Band detects the project name from the repository's directory name and registers it.</li>
+    <li>
+      In the <strong>Register Project</strong> dialog, type the path to your
+      git repository, or click the folder icon to browse for it.
+    </li>
+    <li>Click <strong>Add Project</strong>.</li>
   </ol>
 
+  <figure class="my-8 mx-auto max-w-md overflow-hidden rounded-xl border border-border shadow-lg">
+    <img
+      src="/screenshot-register-project.png"
+      alt="The Register Project dialog in the Band dashboard, with a Repository path field and a folder-picker icon."
+      width="430"
+      height="239"
+      loading="lazy"
+      decoding="async"
+      class="block h-auto w-full"
+    />
+    <figcaption class="border-t border-border bg-card/50 px-4 py-2 text-center text-sm text-muted-foreground">
+      The Register Project dialog &mdash; type the repository path or click the folder icon to browse.
+    </figcaption>
+  </figure>
+
   <p>
-    The project appears in the sidebar immediately. Band automatically detects the default
-    branch (usually <code>main</code> or <code>master</code>) and displays the number of
-    existing worktrees.
+    The project appears in the sidebar immediately. Band detects the project
+    name from the repository's directory name, picks up the default branch
+    (usually <code>main</code> or <code>master</code>), and displays the number
+    of existing worktrees.
   </p>
 
   <h2>Add a project via the CLI</h2>

@@ -4,9 +4,9 @@ const currentYear = new Date().getFullYear();
 const links = {
   product: [
     { href: "/docs/getting-started", label: "Getting Started" },
-    { href: "/docs/desktop-app", label: "Desktop App" },
+    { href: "/docs/projects", label: "Project Management" },
     { href: "/docs/cli-reference", label: "CLI Reference" },
-    { href: "/docs/changelog", label: "Changelog" },
+    { href: "https://github.com/band-app/band/releases", label: "Changelog" },
   ],
   resources: [
     { href: "/docs/getting-started", label: "Documentation" },
@@ -31,7 +31,7 @@ const links = {
           <span>Band</span>
         </a>
         <p class="mt-3 text-sm leading-relaxed text-muted-foreground">
-          IDE-agnostic agent orchestrator. Manage AI coding agents across any editor from one dashboard.
+          The agent-first IDE. A desktop app designed from the ground up for working with AI coding agents in parallel.
         </p>
       </div>
 
@@ -40,7 +40,12 @@ const links = {
         <ul class="space-y-2">
           {links.product.map((link) => (
             <li>
-              <a href={link.href} class="text-sm text-muted-foreground transition-colors hover:text-foreground">
+              <a
+                href={link.href}
+                target={link.href.startsWith("http") ? "_blank" : undefined}
+                rel={link.href.startsWith("http") ? "noopener noreferrer" : undefined}
+                class="text-sm text-muted-foreground transition-colors hover:text-foreground"
+              >
                 {link.label}
               </a>
             </li>
@@ -53,7 +58,12 @@ const links = {
         <ul class="space-y-2">
           {links.resources.map((link) => (
             <li>
-              <a href={link.href} class="text-sm text-muted-foreground transition-colors hover:text-foreground">
+              <a
+                href={link.href}
+                target={link.href.startsWith("http") ? "_blank" : undefined}
+                rel={link.href.startsWith("http") ? "noopener noreferrer" : undefined}
+                class="text-sm text-muted-foreground transition-colors hover:text-foreground"
+              >
                 {link.label}
               </a>
             </li>

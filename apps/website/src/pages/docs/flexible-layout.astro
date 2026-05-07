@@ -1,0 +1,264 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+---
+<DocsLayout title="Flexible layout — Band Docs">
+  <h1>Flexible layout</h1>
+
+  <p>
+    Band's window is built from a grid of <strong>resizable, reorderable panes</strong>.
+    Split it horizontally or vertically, drop any pane type into any slot, and
+    rearrange the layout however suits the task &mdash; there is no fixed
+    sidebar-and-main pattern. Layouts are persisted, so the arrangement you
+    settled on comes back the next time you open Band.
+  </p>
+
+  <p>
+    The same interface runs as the desktop app and as a browser-based dashboard
+    over a Cloudflare tunnel, so the layout you arrange on your Mac is exactly
+    what shows up on your phone or another device.
+  </p>
+
+  <h2>Pane types</h2>
+
+  <p>The pane types you can mix in:</p>
+
+  <ul>
+    <li><strong>Workspaces</strong> &mdash; project and workspace navigation tree.</li>
+    <li><strong>Chat</strong> &mdash; conversation with a coding agent in the active workspace.</li>
+    <li><strong>Code editor</strong> &mdash; open files from the worktree for review and navigation.</li>
+    <li><strong>File tree</strong> &mdash; browse the worktree's directory structure.</li>
+    <li><strong>Terminal</strong> &mdash; an interactive shell rooted in the worktree.</li>
+    <li><strong>Browser</strong> &mdash; an in-app browser tab for verifying running services.</li>
+    <li><strong>Diff viewer</strong> &mdash; review the worktree's changes against its base branch.</li>
+    <li><strong>Search</strong> &mdash; file and content search across the workspace.</li>
+  </ul>
+
+  <figure class="my-8 overflow-hidden rounded-xl border border-border shadow-lg">
+    <img
+      src="/screenshot-custom-layout.png"
+      alt="A custom Band layout with the workspace sidebar on the left, a chat pane, file tree, and code editor across the top, and a terminal and an in-app browser tab arranged underneath."
+      width="3552"
+      height="1527"
+      loading="lazy"
+      decoding="async"
+      class="block h-auto w-full"
+    />
+    <figcaption class="border-t border-border bg-card/50 px-4 py-2 text-center text-sm text-muted-foreground">
+      An example custom layout &mdash; workspace tree, chat, file tree, and editor across the top; terminal and browser below.
+    </figcaption>
+  </figure>
+
+  <h3>Show or hide individual panes</h3>
+
+  <p>
+    Any pane can be turned off completely. Open the panel-visibility menu in the
+    top-right of the window to toggle individual panes on or off, or use the
+    keyboard shortcut next to each entry to flip a pane in or out without
+    leaving the keyboard.
+  </p>
+
+  <figure class="my-8 mx-auto max-w-xs overflow-hidden rounded-xl border border-border shadow-lg">
+    <img
+      src="/screenshot-panel-toggles.png"
+      alt="The Band panel-visibility menu showing toggles for Chat, Changes (cmd-E), Files (cmd-G), Terminal (cmd-J), and Browser (cmd-B), each with a checkmark indicating the pane is currently visible."
+      width="187"
+      height="221"
+      loading="lazy"
+      decoding="async"
+      class="block h-auto w-full"
+    />
+    <figcaption class="border-t border-border bg-card/50 px-4 py-2 text-center text-sm text-muted-foreground">
+      The panel-visibility menu &mdash; toggle Chat, Changes, Files, Terminal, and Browser panes on or off.
+    </figcaption>
+  </figure>
+
+  <p>The default keyboard shortcuts are:</p>
+
+  <ul>
+    <li><kbd>⌘E</kbd> &mdash; toggle <strong>Changes</strong>.</li>
+    <li><kbd>⌘G</kbd> &mdash; toggle <strong>Files</strong>.</li>
+    <li><kbd>⌘J</kbd> &mdash; toggle <strong>Terminal</strong>.</li>
+    <li><kbd>⌘B</kbd> &mdash; toggle <strong>Browser</strong>.</li>
+  </ul>
+
+  <p>
+    Hiding a pane does not destroy its state &mdash; turning it back on returns
+    you to the same scroll position, terminal session, or browser tab as before.
+  </p>
+
+  <h2>Mobile Layout</h2>
+
+  <p>
+    On smaller screens (phones and tablets), the interface adapts to a mobile-friendly layout. The
+    sidebar collapses into a navigation menu, and content panels stack vertically. This makes it
+    easy to monitor and manage agents from your phone, especially when combined with
+    <a href="/docs/remote-access">remote access</a>.
+  </p>
+
+  <h2>Chat</h2>
+
+  <p>
+    The chat pane is where you talk to a coding agent. Send a prompt, watch the
+    agent's response stream back in real time, see every tool call it makes, and
+    approve or reject pending permission requests inline. Each pane is scoped to
+    a single workspace.
+  </p>
+
+  <p>
+    You can run <strong>multiple chat panes in the same workspace</strong>, each
+    driving a <strong>different coding agent</strong> (or the same agent on a
+    different model). Open a Claude Code pane on Opus, a Codex pane on GPT-5,
+    and an OpenCode pane on a custom subagent &mdash; ask all three the same
+    question to compare answers, split the work between them, or use one to
+    review what another is doing.
+  </p>
+
+  <figure class="my-8 overflow-hidden rounded-xl border border-border shadow-lg">
+    <img
+      src="/screenshot-chat-multi-agent.png"
+      alt="Three chat panes open side-by-side in the same Band workspace: Claude Code on Opus 4.7, Codex on GPT-5.4, and OpenCode using a Big Pickle subagent."
+      width="1313"
+      height="1338"
+      loading="lazy"
+      decoding="async"
+      class="block h-auto w-full"
+    />
+    <figcaption class="border-t border-border bg-card/50 px-4 py-2 text-center text-sm text-muted-foreground">
+      Three chat panes in one workspace &mdash; Claude Code (Opus), Codex (GPT-5), and OpenCode &mdash; all live at once.
+    </figcaption>
+  </figure>
+
+  <h3>Streaming and tool calls</h3>
+
+  <p>Each chat pane shows a live stream of agent activity. Messages include:</p>
+
+  <ul>
+    <li><strong>Agent responses</strong> &mdash; text output from the AI agent.</li>
+    <li><strong>Tool calls</strong> &mdash; file edits, terminal commands, and search operations.</li>
+    <li><strong>File changes</strong> &mdash; inline diffs showing what the agent modified.</li>
+    <li><strong>Status updates</strong> &mdash; task progress, completion, and error messages.</li>
+  </ul>
+
+  <p>
+    Chat output is streamed in real time over Server-Sent Events
+    (<code>/api/tasks/&lt;chatId&gt;/stream</code>), so you see agent output as
+    soon as it is generated. You can also send messages to the agent directly
+    from the chat input. (Terminals and language servers use raw WebSockets
+    &mdash; see <a href="/docs/architecture">Architecture</a>.)
+  </p>
+
+  <h2>Code Viewer</h2>
+
+  <p>
+    The built-in code viewer displays files from the workspace with syntax highlighting. You can
+    browse files directly in the dashboard without switching to your editor.
+  </p>
+
+  <ul>
+    <li>Syntax highlighting for common languages.</li>
+    <li>Line numbers and code folding.</li>
+    <li>Direct links from agent tool calls to the relevant file and line.</li>
+  </ul>
+
+  <h2>File Browser</h2>
+
+  <p>
+    The file browser shows the workspace directory tree. Navigate through directories, open files
+    in the code viewer, and see which files were recently modified by the agent.
+  </p>
+
+  <h2>Terminal</h2>
+
+  <p>
+    The terminal pane is a full interactive shell rooted in the active
+    workspace's worktree &mdash; run builds, watch logs, exec into containers,
+    or drive a TUI like Claude Code or OpenCode, anything you would do in
+    iTerm or Warp.
+  </p>
+
+  <p>
+    You can open <strong>as many terminals at once as you want</strong>, each
+    with its own session. Stack them as tabs inside one pane, split a single
+    pane into rows or columns, or drop additional terminal panes anywhere in
+    the layout &mdash; horizontal, vertical, or a grid. The arrangement is
+    yours, using the same drag-and-drop primitives as the rest of Band.
+  </p>
+
+  <figure class="my-8 overflow-hidden rounded-xl border border-border shadow-lg">
+    <img
+      src="/screenshot-terminals.png"
+      alt="Three terminals open in a Band terminal pane: a Claude Code CLI session at top-left, an OpenCode TUI at top-right, and a pnpm/astro dev-server running the docs site across the bottom."
+      width="1326"
+      height="1379"
+      loading="lazy"
+      decoding="async"
+      class="block h-auto w-full"
+    />
+    <figcaption class="border-t border-border bg-card/50 px-4 py-2 text-center text-sm text-muted-foreground">
+      Three terminals running side by side &mdash; Claude Code, OpenCode, and a dev server &mdash; in a custom grid.
+    </figcaption>
+  </figure>
+
+  <h2>Browser</h2>
+
+  <p>
+    The browser pane is a full in-app web browser scoped to the active
+    workspace. Use it to verify a running service, scan an issue tracker, read
+    documentation, or eyeball a UI change &mdash; without leaving Band.
+  </p>
+
+  <p>
+    The same flexible layout applies: open <strong>as many browser tabs as you
+    want</strong>, stack them as tabs in one pane, split a pane into rows or
+    columns, or drop additional browser panes anywhere in the dashboard. Pull
+    up the localhost dev server next to the agent's chat, your project's GitHub
+    issues next to the diff viewer, or your design tool next to the editor
+    &mdash; whatever the task needs.
+  </p>
+
+  <figure class="my-8 overflow-hidden rounded-xl border border-border shadow-lg">
+    <img
+      src="/screenshot-browser-split.png"
+      alt="Two browser tabs open side-by-side in Band: the localhost dev server on the left showing the Band website, and the GitHub issues page for the band-app/band repo on the right."
+      width="1774"
+      height="1377"
+      loading="lazy"
+      decoding="async"
+      class="block h-auto w-full"
+    />
+    <figcaption class="border-t border-border bg-card/50 px-4 py-2 text-center text-sm text-muted-foreground">
+      Two browser tabs side-by-side &mdash; the localhost dev server next to the project's GitHub issues.
+    </figcaption>
+  </figure>
+
+  <h2>Git Diff Viewer</h2>
+
+  <p>
+    The diff viewer shows all changes made in the current workspace compared to the base branch.
+    This gives you a clear picture of what the agent has done and makes it easy to review before
+    merging.
+  </p>
+
+  <ul>
+    <li>Side-by-side or unified diff view.</li>
+    <li>File-by-file change navigation.</li>
+    <li>Summary of added, modified, and deleted files.</li>
+  </ul>
+
+  <h2>File Search and Content Search</h2>
+
+  <p>
+    The dashboard includes two search modes:
+  </p>
+
+  <ul>
+    <li>
+      <strong>File search</strong> — Find files by name using fuzzy matching. Type a partial
+      filename to quickly navigate to the right file.
+    </li>
+    <li>
+      <strong>Content search</strong> — Search for text within files across the workspace. Results
+      show matching lines with context, similar to grep or ripgrep output.
+    </li>
+  </ul>
+</DocsLayout>

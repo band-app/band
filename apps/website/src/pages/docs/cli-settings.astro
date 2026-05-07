@@ -18,25 +18,25 @@ band settings --output json # JSON without the trailing newline (for piping)</co
 
   <p>Example output:</p>
 
-  <pre><code set:html={`{'{'}
+  <pre><code set:html={`{
   "worktreesDir": "/Users/dev/.band/worktrees",
   "codingAgents": [
-    {'{'}
+    {
       "id": "claude-code",
       "type": "claude-code",
       "label": "Claude Code",
       "command": "claude"
-    {'}'}
+    }
   ],
   "defaultCodingAgent": "claude-code",
   "webServerPort": 3456,
-  "notifications": {'{'}
+  "notifications": {
     "soundOnNeedsAttention": true
-  {'}'},
+  },
   "labels": [],
   "tokenSecret": "…",
   "autoStartTunnel": false
-{'}'}`}></code></pre>
+}`}></code></pre>
 
   <h2>CLI configuration vs. server settings</h2>
 

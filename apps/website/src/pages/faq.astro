@@ -3,8 +3,8 @@ import BaseLayout from "../layouts/BaseLayout.astro";
 
 const faqs = [
   {
-    q: "What IDEs are supported?",
-    a: "Band works with VS Code, Cursor, Zed, Windsurf, Kiro, all JetBrains IDEs (IntelliJ IDEA, WebStorm, PyCharm, GoLand, Rider, CLion, RustRover, PhpStorm, Android Studio), Xcode, and terminals like iTerm2, Warp, and Ghostty. It also supports launching browsers (Chrome, Safari, Firefox) as part of your workspace layout.",
+    q: "How is Band different from Cursor or VS Code with AI built in?",
+    a: "Cursor and VS Code are general-purpose editors that bolt agent features onto an interface designed for human keystrokes. Band flips that — it's an IDE designed for agent-driven work first, with hands-on editing as a secondary mode. You can run multiple agents in parallel (each in its own git worktree), schedule recurring agent tasks via cron, swap between Claude Code, Codex, and OpenCode per workspace, and check on long-running tasks from your phone. When you do want to edit by hand, one click opens the active worktree in Cursor, VS Code, JetBrains, Zed, or Xcode — pick whichever you prefer.",
   },
   {
     q: "What coding agents work with Band?",
@@ -19,8 +19,8 @@ const faqs = [
     a: "The desktop app is macOS-only for now. However, the web interface works on any platform with a browser. If you're running the Band server on a Mac, you can access the dashboard from a Linux or Windows machine via the built-in Cloudflare tunnel or by pointing your browser to the server URL.",
   },
   {
-    q: "How does Band relate to Claude Code, Cursor, or other agents?",
-    a: "Band is not a coding agent itself — it's an orchestrator. It manages the agents you already use. Think of it as a control plane: you register your projects, create isolated workspaces, and dispatch tasks to coding agents. Band handles the workspace lifecycle, task queuing, and monitoring while the agents do the actual coding.",
+    q: "How does Band relate to Claude Code, Codex, or OpenCode?",
+    a: "Those are coding agents — they write the code. Band is the IDE you watch them in. Band doesn't ship a model or an agent of its own; it dispatches your prompts to whichever agent CLI you have installed (claude, codex, opencode) and shows you the chat, the file changes, and the worktree state in one window. You can mix and match: Claude Code in one workspace, Codex in another, OpenCode in a third.",
   },
   {
     q: "Can I use Band without a coding agent?",
@@ -45,7 +45,7 @@ const faqs = [
 ];
 ---
 
-<BaseLayout title="FAQ — Band" description="Frequently asked questions about Band, the IDE-agnostic agent orchestrator.">
+<BaseLayout title="FAQ — Band" description="Frequently asked questions about Band, the agent-first IDE for AI coding.">
   <main class="pt-16">
     <section class="py-20 md:py-28">
       <div class="mx-auto max-w-3xl px-6">
@@ -53,7 +53,7 @@ const faqs = [
           Frequently Asked Questions
         </h1>
         <p class="mt-4 text-lg text-muted-foreground">
-          Common questions about Band, supported tools, and how it works.
+          Common questions about Band, the agents and editors it works with, and how it differs from a traditional IDE.
         </p>
 
         <div class="mt-12 space-y-8">

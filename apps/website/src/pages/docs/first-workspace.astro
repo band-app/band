@@ -31,10 +31,26 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <ol>
     <li>Open the Band dashboard and find your project in the sidebar.</li>
     <li>Click the <strong>"+ New"</strong> button next to the project name.</li>
-    <li>Enter a name for the workspace. This becomes the branch name (e.g., <code>feat/auth</code>).</li>
-    <li>Optionally select a base branch to branch from (defaults to the project's main branch).</li>
+    <li>Enter a <strong>branch name</strong> for the workspace (e.g., <code>feat/auth</code>).</li>
+    <li>Optionally pick a <strong>base branch</strong> to branch from (defaults to the project's main branch).</li>
+    <li>Optionally type an <strong>initial prompt</strong> &mdash; this will be sent to the coding agent as soon as the workspace is ready.</li>
     <li>Click <strong>Create</strong>.</li>
   </ol>
+
+  <figure class="my-8 mx-auto max-w-md overflow-hidden rounded-xl border border-border shadow-lg">
+    <img
+      src="/screenshot-add-workspace.png"
+      alt="The Add Workspace dialog in the Band dashboard, with fields for branch name, base branch, and an optional initial prompt."
+      width="430"
+      height="426"
+      loading="lazy"
+      decoding="async"
+      class="block h-auto w-full"
+    />
+    <figcaption class="border-t border-border bg-card/50 px-4 py-2 text-center text-sm text-muted-foreground">
+      The Add Workspace dialog &mdash; branch name, base branch, and an optional initial prompt.
+    </figcaption>
+  </figure>
 
   <p>
     The workspace appears under the project in the sidebar. You can click on it to view its

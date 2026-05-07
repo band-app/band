@@ -26,6 +26,21 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
     <li><strong>Initial prompt</strong> (optional) &mdash; A task prompt for the coding agent. If provided, the agent starts working immediately after workspace creation.</li>
   </ul>
 
+  <figure class="my-8 mx-auto max-w-md overflow-hidden rounded-xl border border-border shadow-lg">
+    <img
+      src="/screenshot-add-workspace.png"
+      alt="The Add Workspace dialog in the Band dashboard, with fields for branch name, base branch, and an optional initial prompt."
+      width="430"
+      height="426"
+      loading="lazy"
+      decoding="async"
+      class="block h-auto w-full"
+    />
+    <figcaption class="border-t border-border bg-card/50 px-4 py-2 text-center text-sm text-muted-foreground">
+      The Add Workspace dialog &mdash; branch name, base branch, and an optional initial prompt.
+    </figcaption>
+  </figure>
+
   <h3>From the CLI</h3>
   <pre><code># Create workspace and start an agent task immediately
 band workspaces create my-app feat/login --prompt "Implement login page"
@@ -51,6 +66,80 @@ band workspaces create my-app feat/api --base develop</code></pre>
     <li><strong>Setup status</strong> &mdash; Shows whether the setup script is running, completed, or failed.</li>
     <li><strong>Git status</strong> &mdash; Indicates dirty files, unpushed commits, and sync state (ahead, behind, diverged).</li>
     <li><strong>CI status</strong> &mdash; Shows the current CI pipeline state (pending, running, success, failure, cancelled, merged).</li>
+  </ul>
+
+  <h2>CI Status</h2>
+  <p>
+    Each workspace card shows a small icon next to the branch name reflecting
+    the current GitHub Actions state for that branch. Hovering reveals a
+    tooltip describing the state ("CI passed", "CI failed", and so on); clicking
+    the icon opens the relevant pull request, workflow run, or check page on
+    GitHub.
+  </p>
+
+  <figure class="my-8 mx-auto max-w-sm overflow-hidden rounded-xl border border-border shadow-lg">
+    <img
+      src="/screenshot-ci-passed.png"
+      alt="A workspace row in the Band dashboard showing a green CI status icon next to the branch name, with a 'CI passed' tooltip displayed."
+      width="272"
+      height="83"
+      loading="lazy"
+      decoding="async"
+      class="block h-auto w-full"
+    />
+    <figcaption class="border-t border-border bg-card/50 px-4 py-2 text-center text-sm text-muted-foreground">
+      Hover the CI icon to see the current state &mdash; click it to open the workflow run on GitHub.
+    </figcaption>
+  </figure>
+
+  <h3>How CI status is resolved</h3>
+  <p>
+    Band reads CI state from <strong>GitHub Actions</strong> by calling
+    GitHub's GraphQL API through the <code>gh</code> CLI. For each registered
+    workspace branch it asks GitHub for:
+  </p>
+  <ul>
+    <li>The most recent open or merged pull request on that branch.</li>
+    <li>The check suites and workflow runs attached to the head commit.</li>
+  </ul>
+  <p>
+    If a branch has multiple workflows running, Band aggregates them and shows
+    the most significant state &mdash; <em>failure</em> beats <em>running</em>
+    beats <em>pending</em> beats <em>cancelled</em> beats <em>success</em>.
+  </p>
+  <p>
+    Only GitHub Actions workflows are surfaced. Third-party check providers
+    (CircleCI, Buildkite, and so on) that report through the GitHub Checks API
+    are filtered out.
+  </p>
+
+  <h3>Authentication</h3>
+  <p>
+    Band uses whatever credentials your <code>gh</code> CLI is configured with
+    &mdash; there is no separate token to configure inside Band. To enable CI
+    status, run:
+  </p>
+  <pre><code>gh auth login</code></pre>
+  <p>
+    Once <code>gh auth status</code> reports a successful login, Band starts
+    resolving CI state for branches in repositories you have access to. GitHub
+    Enterprise hosts work too &mdash; authenticate the matching hostname with
+    <code>gh auth login --hostname &lt;your-enterprise-host&gt;</code>.
+  </p>
+  <p>
+    If <code>gh</code> is not installed or not authenticated, Band leaves the
+    CI column empty rather than throwing an error.
+  </p>
+
+  <h3>States</h3>
+  <ul>
+    <li><strong>Pending</strong> &mdash; A workflow is queued but has not started yet.</li>
+    <li><strong>Running</strong> &mdash; A workflow is currently executing for the head commit.</li>
+    <li><strong>Success</strong> &mdash; All workflows for the head commit passed.</li>
+    <li><strong>Failure</strong> &mdash; At least one workflow failed.</li>
+    <li><strong>Cancelled</strong> &mdash; The most recent workflow run was cancelled.</li>
+    <li><strong>Merged</strong> &mdash; The branch's pull request has been merged. Not shown on the project's default branch.</li>
+    <li><strong>None</strong> &mdash; No workflows are configured, no commits have been pushed yet, or <code>gh</code> is unavailable.</li>
   </ul>
 
   <h2>Opening a Workspace</h2>

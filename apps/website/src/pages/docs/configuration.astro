@@ -28,10 +28,10 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
     <code>;</code>, or a multi-line shell snippet to chain steps.
   </p>
 
-  <pre><code set:html={`{'{'}
+  <pre><code set:html={`{
   "setup": "npm install && npm run db:migrate",
   "teardown": "npm run db:reset"
-{'}'}`}></code></pre>
+}`}></code></pre>
 
   <h2>Setup Command</h2>
 
@@ -62,8 +62,8 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
 
   <h2>Full Example</h2>
 
-  <pre><code set:html={`{'{'}
+  <pre><code set:html={`{
   "setup": "npm install && npx prisma db push && cp .env.example .env.local",
   "teardown": "docker compose down -v"
-{'}'}`}></code></pre>
+}`}></code></pre>
 </DocsLayout>

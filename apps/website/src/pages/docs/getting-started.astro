@@ -2,101 +2,174 @@
 import DocsLayout from "../../layouts/DocsLayout.astro";
 ---
 
-<DocsLayout title="Getting Started — Band Docs">
-  <h1>Getting Started</h1>
+<DocsLayout title="Introduction — Band Docs">
+  <h1>Introduction</h1>
 
   <p>
-    Band is an <strong>agent orchestrator</strong> that helps developers manage AI coding
-    agents across multiple projects and workspaces. It bundles a dashboard, code viewer,
-    terminal panes, chat panes, browser tabs, and a CLI so you can drive coding agents,
-    monitor progress, and manage the git worktrees that keep your work organized — all
-    from one app.
+    You started using an AI coding agent on one project. Then a second agent. Now
+    you've got Claude Code running in a Cursor terminal, Codex in a VS Code
+    window, OpenCode in a Zed split, three half-finished branches, and no idea
+    which one was actually working on the bug. Your IDE wasn't designed for
+    this &mdash; you're using it to babysit code an agent wrote, not to write code
+    yourself.
+  </p>
+
+  <p>
+    <strong>Band is the agent-first IDE.</strong> It's a desktop app built from
+    the ground up around AI coding agents: chat panes for talking to them, a
+    code editor and file tree to review what they've done, terminals and
+    browsers to verify it works, and git worktree workspaces to keep parallel
+    agents from stepping on each other &mdash; all in one window.
   </p>
 
   <figure class="my-8 overflow-hidden rounded-xl border border-border shadow-lg">
     <img
       src="/screenshot-dashboard.png"
-      alt="The Band dashboard: workspace sidebar on the left, chat pane in the middle showing a coding-agent conversation, and a side-by-side code diff on the right."
-      width="2004"
-      height="1413"
+      alt="The Band desktop app: workspace sidebar on the far left, chat pane next to it, project file tree in the middle, and a code editor on the right showing the active worktree."
+      width="1946"
+      height="1187"
       loading="lazy"
       decoding="async"
       class="block h-auto w-full"
     />
     <figcaption class="border-t border-border bg-card/50 px-4 py-2 text-center text-sm text-muted-foreground">
-      The Band desktop app — workspace sidebar, chat pane, and a side-by-side diff for the active worktree.
+      Workspaces, chat, file tree, and code editor &mdash; one window for the whole agent stack.
     </figcaption>
   </figure>
 
-  <h2>Who is Band for?</h2>
+  <h2>The problem Band solves</h2>
 
   <p>
-    Band is built for developers who work with AI coding agents and want a better way to
-    manage them. If you find yourself juggling multiple agent sessions, switching between
-    terminal windows to check on task progress, or manually creating git branches for each
-    piece of work, Band is for you.
+    If you work with AI coding agents long enough, the same problems show up:
   </p>
 
   <ul>
-    <li><strong>Solo developers</strong> running multiple agents in parallel across different features</li>
-    <li><strong>Teams</strong> that want a shared view of what agents are working on</li>
-    <li><strong>Anyone</strong> who wants to keep their main branch clean while agents work in isolated worktrees</li>
+    <li>
+      <strong>No central view.</strong> Each agent lives in its own terminal, in
+      its own IDE window. Finding the one you care about is a scavenger hunt.
+    </li>
+    <li>
+      <strong>Agents step on each other.</strong> Two agents editing the same
+      branch is a guaranteed conflict. Stashing and resetting between sessions
+      eats your day.
+    </li>
+    <li>
+      <strong>Context dies on close.</strong> Quit your IDE and the chat history,
+      the in-flight task, and the "what was I doing" all go with it.
+    </li>
+    <li>
+      <strong>Nothing is automatable.</strong> You can't put <em>"review every
+      open PR every morning"</em> or <em>"regenerate types after the schema
+      migrates"</em> on a schedule.
+    </li>
   </ul>
 
-  <h2>What can you do with Band?</h2>
+  <h2>How Band fits in</h2>
 
-  <p>Band gives you four core capabilities:</p>
+  <p>
+    Band runs as a macOS desktop app plus a local web server
+    (<code>http://localhost:3456</code>) and a <code>band</code> CLI. For
+    agent-driven work it's the only window you need; when you want to do hands-on
+    editing, one click opens the active worktree in VS Code, Cursor, Zed,
+    JetBrains, or Xcode.
+  </p>
+
+  <p>A normal day looks like this:</p>
+
+  <ol>
+    <li>
+      <strong>Register a project</strong> by pointing Band at a git repo you
+      already have checked out.
+    </li>
+    <li>
+      <strong>Create a workspace.</strong> Band creates a fresh git worktree on a
+      new branch in <code>.band/worktrees/&hellip;</code>. Your main checkout is
+      never touched.
+    </li>
+    <li>
+      <strong>Dispatch a task</strong> to any coding agent installed on your
+      machine &mdash; Claude Code, Codex, or OpenCode. The agent runs against the
+      worktree, in its own chat pane.
+    </li>
+    <li>
+      <strong>Watch it work</strong> from the dashboard, the CLI, or your phone
+      (via the built-in tunnel). When it's done, review the diff, merge or throw
+      away the worktree, and move on.
+    </li>
+  </ol>
+
+  <p>
+    You can run as many workspaces in parallel as your machine will tolerate,
+    each with its own agent, branch, and chat history.
+  </p>
+
+  <h2>What you can do with it</h2>
 
   <ul>
     <li>
-      <strong>Manage projects</strong> &mdash; Register your git repositories with Band so it
-      can track them and create workspaces from them.
+      <strong>Run multiple agents at once</strong>, each isolated to its own
+      worktree. No more "did I commit before letting the next agent start?"
     </li>
     <li>
-      <strong>Create workspaces</strong> &mdash; Each workspace is a git worktree with its own
-      branch, giving your agent an isolated environment to work in without affecting your main code.
+      <strong>Dispatch from anywhere</strong> &mdash; the dashboard, the CLI, or
+      your own scripts (<code>band chats create &hellip;</code>).
     </li>
     <li>
-      <strong>Dispatch tasks</strong> &mdash; Send prompts to coding agents and have them execute
-      in a specific workspace. You can submit tasks from the dashboard UI or the CLI.
+      <strong>Schedule recurring agent work</strong> with cronjobs: daily PR
+      reviews, dependency bumps, type regeneration after a schema change.
     </li>
     <li>
-      <strong>Monitor agents</strong> &mdash; Watch task output in real time, see which agents are
-      running, check whether tasks completed or failed, and re-run tasks if needed.
+      <strong>Reach your dashboard remotely</strong> through a built-in
+      Cloudflare tunnel, so you can check on a long-running task from your phone
+      or another machine.
+    </li>
+    <li>
+      <strong>Keep state across restarts.</strong> Workspaces, chat history, task
+      output, and worktree metadata all live in <code>~/.band</code> and survive
+      reboots.
     </li>
   </ul>
 
-  <h2>How it works</h2>
+  <h2>What Band is not</h2>
 
-  <p>
-    Band runs a local web server on your machine (port 3456 by default) that manages all state,
-    git operations, and agent processes. You interact with it through either the
-    <strong>dashboard UI</strong> (a desktop app with a web interface) or the
-    <strong>Band CLI</strong> from your terminal.
-  </p>
-
-  <p>
-    The web interface is accessible from any browser, which means you can monitor your agents
-    from your phone or another device on the same network.
-  </p>
+  <ul>
+    <li>
+      <strong>Not a traditional IDE.</strong> Band's editor is built for
+      previewing and collaborating on what agents do &mdash; reviewing changes,
+      navigating code, scanning the file tree. It's not built for hands-on
+      typing: there's no IntelliSense, no code completion, no snippet library.
+      For deep manual edits, hand off the active worktree to VS Code, Cursor,
+      Zed, JetBrains, or Xcode.
+    </li>
+    <li>
+      <strong>Not a hosted service.</strong> Everything runs locally on your
+      machine. There is no Band cloud, and your code never leaves your laptop
+      because of Band.
+    </li>
+    <li>
+      <strong>Not bundled with a coding agent.</strong> You install
+      <code>claude</code>, <code>codex</code>, or <code>opencode</code> yourself;
+      Band drives whichever ones you have.
+    </li>
+  </ul>
 
   <h2>Platform support</h2>
 
   <p>
-    Band is currently available for <strong>macOS</strong> only (macOS 11 Big Sur or
-    later). The desktop app is an Electron application, and the CLI is a standalone Rust
-    binary that ships alongside it. Both Apple Silicon and Intel Macs are supported.
-    Windows and Linux support is planned for a future release.
+    Band is currently available for <strong>macOS 11 (Big Sur) or later</strong>,
+    on both Apple Silicon and Intel Macs. The desktop app is an Electron app, and
+    the CLI is a standalone Rust binary that ships alongside it. Windows and
+    Linux support is planned for a future release.
   </p>
 
   <h2>Next steps</h2>
 
-  <p>Follow these guides in order to get up and running:</p>
+  <p>Get up and running in about five minutes:</p>
 
   <ol>
-    <li><a href="/docs/installation">Installation</a> &mdash; Download and install Band on your Mac</li>
-    <li><a href="/docs/first-project">Adding your first project</a> &mdash; Register a git repository</li>
-    <li><a href="/docs/first-workspace">Creating your first workspace</a> &mdash; Set up an isolated worktree</li>
-    <li><a href="/docs/first-task">Running your first task</a> &mdash; Dispatch a prompt to a coding agent</li>
+    <li><a href="/docs/installation">Installation</a> &mdash; download the signed <code>.dmg</code> and install the CLI.</li>
+    <li><a href="/docs/first-project">Adding your first project</a> &mdash; register a repo with Band.</li>
+    <li><a href="/docs/first-workspace">Creating your first workspace</a> &mdash; spin up an isolated worktree.</li>
+    <li><a href="/docs/first-task">Running your first task</a> &mdash; dispatch a prompt to a coding agent.</li>
   </ol>
 </DocsLayout>

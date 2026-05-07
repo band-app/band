@@ -2,12 +2,12 @@
 import BaseLayout from "../layouts/BaseLayout.astro";
 ---
 
-<BaseLayout title="Band — IDE-agnostic agent orchestrator">
+<BaseLayout title="Band — The agent-first IDE for AI coding">
   <main class="pt-14">
     <!-- Hero Section -->
     <section class="relative overflow-hidden">
       <div class="absolute inset-0 bg-[radial-gradient(ellipse_at_top,oklch(0.922 0 0 / 0.04),transparent_60%)]"></div>
-      <div class="relative mx-auto max-w-6xl px-6 pb-20 pt-24 md:pb-28 md:pt-32">
+      <div class="relative mx-auto max-w-6xl px-6 pt-24 md:pt-32">
         <div class="mx-auto max-w-3xl text-center">
           <div class="mb-6 inline-flex items-center gap-2 rounded-full border border-border bg-card px-4 py-1.5 text-sm text-muted-foreground">
             <span class="inline-block h-2 w-2 rounded-full bg-success animate-pulse"></span>
@@ -15,13 +15,15 @@ import BaseLayout from "../layouts/BaseLayout.astro";
           </div>
 
           <h1 class="text-4xl font-bold leading-tight tracking-tight text-text md:text-6xl">
-            IDE-agnostic<br />
-            <span class="bg-gradient-to-r from-primary to-primary-hover bg-clip-text text-transparent">agent orchestrator</span>
+            The agent-first<br />
+            <span class="bg-gradient-to-r from-primary to-primary-hover bg-clip-text text-transparent">IDE</span>
           </h1>
 
           <p class="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-muted-foreground md:text-xl">
-            Manage AI coding agents across any editor from one dashboard.
-            One place to create workspaces, dispatch tasks, and monitor agent activity.
+            A desktop IDE designed from the ground up for AI coding agents.
+            Chat panes, terminals, browsers, and a code editor &mdash; all wired up
+            to dispatch tasks to Claude Code, Codex, or OpenCode and run them in
+            parallel against isolated git worktrees.
           </p>
 
           <div class="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
@@ -52,105 +54,37 @@ import BaseLayout from "../layouts/BaseLayout.astro";
           <!-- Value props -->
           <div class="mt-14 grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div class="rounded-xl border border-border bg-card/50 px-5 py-4 text-left">
-              <div class="mb-1 text-sm font-medium text-text">One dashboard for all agents</div>
-              <div class="text-sm text-muted-foreground">Unified view of every workspace, task, and agent across all your projects.</div>
+              <div class="mb-1 text-sm font-medium text-text">Designed for agents from day one</div>
+              <div class="text-sm text-muted-foreground">Chat panes, editor, terminal, and browser tabs &mdash; every pane scoped to a workspace and an agent.</div>
             </div>
             <div class="rounded-xl border border-border bg-card/50 px-5 py-4 text-left">
-              <div class="mb-1 text-sm font-medium text-text">Works with any IDE</div>
-              <div class="text-sm text-muted-foreground">VS Code, Cursor, Zed, JetBrains, Xcode, and more &mdash; all from one place.</div>
+              <div class="mb-1 text-sm font-medium text-text">Bring your own coding agent</div>
+              <div class="text-sm text-muted-foreground">Claude Code, Codex, OpenCode &mdash; swappable per chat pane, no workflow changes.</div>
             </div>
             <div class="rounded-xl border border-border bg-card/50 px-5 py-4 text-left">
-              <div class="mb-1 text-sm font-medium text-text">Works with any coding agent</div>
-              <div class="text-sm text-muted-foreground">Claude Code, Codex, OpenCode &mdash; swap agents without changing your workflow.</div>
+              <div class="mb-1 text-sm font-medium text-text">Git worktree isolation by default</div>
+              <div class="text-sm text-muted-foreground">Every workspace is its own branch and worktree. Run agents in parallel without stepping on each other.</div>
             </div>
             <div class="rounded-xl border border-border bg-card/50 px-5 py-4 text-left">
-              <div class="mb-1 text-sm font-medium text-text">Git worktree isolation</div>
-              <div class="text-sm text-muted-foreground">Every task gets its own branch and workspace. No conflicts, no stashing.</div>
+              <div class="mb-1 text-sm font-medium text-text">Drop into your editor when you need to</div>
+              <div class="text-sm text-muted-foreground">One click opens the active worktree in VS Code, Cursor, Zed, JetBrains, or Xcode for hands-on edits.</div>
             </div>
           </div>
         </div>
 
-        <!-- Dashboard mockup -->
-        <div class="mx-auto mt-16 max-w-4xl">
-          <div class="overflow-hidden rounded-xl border border-border bg-card shadow-2xl shadow-black/40">
-            <!-- Window chrome -->
-            <div class="flex items-center gap-2 border-b border-border px-4 py-3">
-              <div class="h-3 w-3 rounded-full bg-[#ff5f57]"></div>
-              <div class="h-3 w-3 rounded-full bg-[#febc2e]"></div>
-              <div class="h-3 w-3 rounded-full bg-[#28c840]"></div>
-              <span class="ml-3 text-xs text-muted-foreground">Band Dashboard</span>
-            </div>
-            <!-- Dashboard content mockup -->
-            <div class="flex min-h-[340px]">
-              <!-- Sidebar -->
-              <div class="w-56 shrink-0 border-r border-border bg-bg p-3">
-                <div class="mb-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Projects</div>
-                <div class="space-y-1">
-                  <div class="flex items-center gap-2 rounded-lg bg-primary-muted px-3 py-2">
-                    <div class="h-2 w-2 rounded-full bg-primary"></div>
-                    <span class="text-sm font-medium text-primary">band</span>
-                    <span class="ml-auto text-xs text-primary/60">3</span>
-                  </div>
-                  <div class="flex items-center gap-2 rounded-lg px-3 py-2 text-muted-foreground">
-                    <div class="h-2 w-2 rounded-full bg-muted-foreground"></div>
-                    <span class="text-sm">my-saas-app</span>
-                    <span class="ml-auto text-xs text-muted-foreground">1</span>
-                  </div>
-                  <div class="flex items-center gap-2 rounded-lg px-3 py-2 text-muted-foreground">
-                    <div class="h-2 w-2 rounded-full bg-muted-foreground"></div>
-                    <span class="text-sm">api-service</span>
-                    <span class="ml-auto text-xs text-muted-foreground">2</span>
-                  </div>
-                </div>
-              </div>
-              <!-- Main content -->
-              <div class="flex-1 p-4">
-                <div class="mb-4 flex items-center justify-between">
-                  <h3 class="text-sm font-semibold text-text">Workspaces</h3>
-                  <div class="rounded-md bg-primary/10 px-2 py-1 text-xs font-medium text-primary">+ New</div>
-                </div>
-                <div class="space-y-2">
-                  <div class="flex items-center justify-between rounded-lg border border-border bg-bg px-4 py-3">
-                    <div class="flex items-center gap-3">
-                      <div class="flex h-7 w-7 items-center justify-center rounded-md bg-success/10 text-success">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-                      </div>
-                      <div>
-                        <div class="text-sm font-medium text-text">feat/add-dark-mode</div>
-                        <div class="text-xs text-muted-foreground">Claude Code &middot; completed 2m ago</div>
-                      </div>
-                    </div>
-                    <span class="rounded-full bg-success/10 px-2 py-0.5 text-xs font-medium text-success">done</span>
-                  </div>
-                  <div class="flex items-center justify-between rounded-lg border border-primary/30 bg-primary-muted px-4 py-3">
-                    <div class="flex items-center gap-3">
-                      <div class="flex h-7 w-7 items-center justify-center rounded-md bg-primary/10 text-primary">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="animate-spin" style="animation-duration: 2s"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
-                      </div>
-                      <div>
-                        <div class="text-sm font-medium text-text">fix/api-auth-bug</div>
-                        <div class="text-xs text-muted-foreground">Claude Code &middot; working...</div>
-                      </div>
-                    </div>
-                    <span class="rounded-full bg-primary/20 px-2 py-0.5 text-xs font-medium text-primary">working</span>
-                  </div>
-                  <div class="flex items-center justify-between rounded-lg border border-border bg-bg px-4 py-3">
-                    <div class="flex items-center gap-3">
-                      <div class="flex h-7 w-7 items-center justify-center rounded-md bg-warning/10 text-warning">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                      </div>
-                      <div>
-                        <div class="text-sm font-medium text-text">refactor/db-layer</div>
-                        <div class="text-xs text-muted-foreground">Cursor &middot; needs input</div>
-                      </div>
-                    </div>
-                    <span class="rounded-full bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning">needs input</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+      </div>
+
+      <!-- Dashboard screenshot (breaks out of the max-w-6xl hero container so it can be wider) -->
+      <div class="relative mx-auto mt-16 max-w-[100rem] px-6 pb-20 md:pb-28">
+        <img
+          src="/screenshot-dashboard.png"
+          alt="The Band desktop app: workspace sidebar on the far left, chat pane next to it, project file tree in the middle, and a code editor on the right showing the active worktree."
+          width="1946"
+          height="1187"
+          loading="eager"
+          decoding="async"
+          class="block h-auto w-full rounded-xl shadow-2xl shadow-black/40"
+        />
       </div>
     </section>
 
@@ -159,10 +93,10 @@ import BaseLayout from "../layouts/BaseLayout.astro";
       <div class="mx-auto max-w-6xl px-6">
         <div class="mx-auto max-w-2xl text-center">
           <h2 class="text-3xl font-bold tracking-tight text-text md:text-4xl">
-            Managing agents is chaos
+            Your IDE wasn't built for this
           </h2>
           <p class="mt-4 text-lg text-muted-foreground">
-            As AI coding agents become essential, keeping track of them across projects and editors is a growing pain.
+            Traditional editors were designed for one human at a keyboard &mdash; not a fleet of AI agents working in parallel.
           </p>
         </div>
 
@@ -173,9 +107,9 @@ import BaseLayout from "../layouts/BaseLayout.astro";
                 <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
               </svg>
             </div>
-            <h3 class="text-lg font-semibold text-text">No unified view</h3>
+            <h3 class="text-lg font-semibold text-text">No place built to watch agents</h3>
             <p class="mt-2 text-sm leading-relaxed text-muted-foreground">
-              Agents run in scattered terminal windows across different IDEs. You have no central place to see what each one is doing.
+              Agents get crammed into terminal panes that were designed for shells, not for streaming chats, file diffs, and tool-call output side by side.
             </p>
           </div>
 
@@ -185,9 +119,9 @@ import BaseLayout from "../layouts/BaseLayout.astro";
                 <polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>
               </svg>
             </div>
-            <h3 class="text-lg font-semibold text-text">Constant context switching</h3>
+            <h3 class="text-lg font-semibold text-text">Agents step on each other</h3>
             <p class="mt-2 text-sm leading-relaxed text-muted-foreground">
-              Jumping between IDE windows to check on agents wastes time and breaks your focus.
+              Two agents in the same checkout is a guaranteed conflict. Without per-task isolation, running them in parallel is dangerous.
             </p>
           </div>
 
@@ -226,7 +160,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
             How it works
           </h2>
           <p class="mt-4 text-lg text-muted-foreground">
-            Four steps from zero to orchestrated agents.
+            Four steps from install to your first agent-driven task.
           </p>
         </div>
 
@@ -282,21 +216,21 @@ import BaseLayout from "../layouts/BaseLayout.astro";
             Everything you need
           </h2>
           <p class="mt-4 text-lg text-muted-foreground">
-            A complete toolkit for managing AI coding agents at scale.
+            Workspaces, agents, automation, and remote access &mdash; all built into the IDE.
           </p>
         </div>
 
         <div class="mt-14 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {[
             {
-              icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>`,
-              title: "Multi-IDE support",
-              desc: "VS Code, Cursor, Zed, JetBrains (all IDEs), Xcode, iTerm, Warp, Ghostty, Chrome, Safari, Firefox.",
-            },
-            {
               icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>`,
               title: "Multi-agent support",
               desc: "Claude Code, Codex, OpenCode. Swap coding agents per chat pane.",
+            },
+            {
+              icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>`,
+              title: "Real-time status",
+              desc: "Live agent status, git dirty/ahead/behind indicators, and CI pass/fail at a glance.",
             },
             {
               icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>`,
@@ -324,19 +258,14 @@ import BaseLayout from "../layouts/BaseLayout.astro";
               desc: "Clean branch-per-task workflow. Every workspace is isolated from the main branch.",
             },
             {
-              icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>`,
-              title: "Real-time status",
-              desc: "Live agent status, git dirty/ahead/behind indicators, and CI pass/fail at a glance.",
-            },
-            {
-              icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>`,
-              title: "Window management",
-              desc: "Auto-position IDE windows. One-click workspace focus to jump right into any agent's context.",
-            },
-            {
               icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>`,
               title: "Setup & teardown scripts",
               desc: "Per-project .band/config.json for automation. Run scripts on workspace creation and removal.",
+            },
+            {
+              icon: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>`,
+              title: "Editor & app integrations",
+              desc: "One click opens the active worktree in VS Code, Cursor, Zed, all JetBrains IDEs, Xcode, iTerm2, Warp, Ghostty, Chrome, Safari, or Firefox.",
             },
           ].map(({ icon, title, desc }) => (
             <div class="group rounded-xl border border-border bg-card/30 p-5 transition-colors hover:bg-card/60">
@@ -351,64 +280,15 @@ import BaseLayout from "../layouts/BaseLayout.astro";
       </div>
     </section>
 
-    <!-- Supported IDEs Section -->
+    <!-- CTA Section -->
     <section class="border-t border-border bg-card py-20 md:py-28">
       <div class="mx-auto max-w-6xl px-6">
         <div class="mx-auto max-w-2xl text-center">
           <h2 class="text-3xl font-bold tracking-tight text-text md:text-4xl">
-            Works with your tools
+            Try the agent-first IDE
           </h2>
           <p class="mt-4 text-lg text-muted-foreground">
-            Band integrates with the editors, terminals, and browsers you already use.
-          </p>
-        </div>
-
-        <div class="mt-14 space-y-10">
-          <div>
-            <h3 class="mb-4 text-center text-sm font-semibold uppercase tracking-wider text-muted-foreground">Code Editors</h3>
-            <div class="flex flex-wrap justify-center gap-3">
-              {["VS Code", "Cursor", "Zed", "Windsurf", "Kiro"].map((name) => (
-                <span class="rounded-lg border border-border bg-card px-4 py-2.5 text-sm font-medium text-muted-foreground">
-                  {name}
-                </span>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <h3 class="mb-4 text-center text-sm font-semibold uppercase tracking-wider text-muted-foreground">JetBrains</h3>
-            <div class="flex flex-wrap justify-center gap-3">
-              {["IntelliJ IDEA", "WebStorm", "PyCharm", "GoLand", "Rider", "CLion", "RustRover", "PhpStorm", "Android Studio"].map((name) => (
-                <span class="rounded-lg border border-border bg-card px-4 py-2.5 text-sm font-medium text-muted-foreground">
-                  {name}
-                </span>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <h3 class="mb-4 text-center text-sm font-semibold uppercase tracking-wider text-muted-foreground">Other Apps</h3>
-            <div class="flex flex-wrap justify-center gap-3">
-              {["Xcode", "iTerm2", "Warp", "Ghostty", "Chrome", "Safari", "Firefox"].map((name) => (
-                <span class="rounded-lg border border-border bg-card px-4 py-2.5 text-sm font-medium text-muted-foreground">
-                  {name}
-                </span>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- CTA Section -->
-    <section class="border-t border-border py-20 md:py-28">
-      <div class="mx-auto max-w-6xl px-6">
-        <div class="mx-auto max-w-2xl text-center">
-          <h2 class="text-3xl font-bold tracking-tight text-text md:text-4xl">
-            Ready to orchestrate?
-          </h2>
-          <p class="mt-4 text-lg text-muted-foreground">
-            Download Band and start managing your coding agents from one place.
+            Download Band and start running coding agents in parallel today.
           </p>
           <div class="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <a

@@ -10,6 +10,25 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
     device — including your phone — without opening ports or configuring a VPN.
   </p>
 
+  <h2>The local web server</h2>
+
+  <p>
+    When the Band desktop app launches it boots a local web server on
+    <code>http://localhost:3456</code> (the port is configurable via the
+    <code>webServerPort</code> setting). This server hosts the dashboard UI,
+    the tRPC API the CLI talks to, and the streaming endpoints for chat,
+    terminals, and language servers.
+  </p>
+
+  <p>
+    The window you see in the Band app is just a wrapper around that web
+    server. You can open <code>http://localhost:3456</code> in any browser on
+    the same machine and get the same dashboard &mdash; useful for opening the
+    UI in a second window, on another monitor, or from a sibling laptop on the
+    same network. Remote access works by exposing this same server through a
+    Cloudflare tunnel.
+  </p>
+
   <h2>How It Works</h2>
 
   <p>
@@ -46,13 +65,56 @@ sudo apt install cloudflared
 
   <h2>Starting the Tunnel</h2>
 
-  <p>Start the tunnel from the CLI or the desktop app:</p>
+  <p>
+    From the desktop app, open the hamburger menu in the top-left of the window
+    and click <strong>Start tunnel</strong>. The dashboard begins displaying
+    the public URL and a QR code as soon as the tunnel is up.
+  </p>
+
+  <figure class="my-8 mx-auto max-w-[12rem] overflow-hidden rounded-xl border border-border shadow-lg">
+    <img
+      src="/screenshot-tunnel-menu.png"
+      alt="The Band desktop app's hamburger menu showing Edit list, Tasks, Cronjobs, Start tunnel, and Settings options."
+      width="130"
+      height="207"
+      loading="lazy"
+      decoding="async"
+      class="block h-auto w-full"
+    />
+    <figcaption class="border-t border-border bg-card/50 px-4 py-2 text-center text-sm text-muted-foreground">
+      Hamburger menu &rarr; <strong>Start tunnel</strong>.
+    </figcaption>
+  </figure>
+
+  <p>
+    Once the tunnel is up the dashboard opens a <strong>Mobile Access</strong>
+    panel with a QR code, the public URL, and a <strong>Stop Tunnel</strong>
+    button. Scan the QR code with your phone's camera to open the dashboard on
+    mobile, or copy the URL directly to share it with another device.
+  </p>
+
+  <figure class="my-8 mx-auto max-w-xs overflow-hidden rounded-xl border border-border shadow-lg">
+    <img
+      src="/screenshot-tunnel-qr.png"
+      alt="The Mobile Access panel after starting a Band tunnel: a large QR code at the top, the trycloudflare.com public URL underneath, and a Stop Tunnel button at the bottom right."
+      width="327"
+      height="433"
+      loading="lazy"
+      decoding="async"
+      class="block h-auto w-full"
+    />
+    <figcaption class="border-t border-border bg-card/50 px-4 py-2 text-center text-sm text-muted-foreground">
+      The Mobile Access panel &mdash; QR code, public URL, and a one-click Stop Tunnel button.
+    </figcaption>
+  </figure>
+
+  <p>You can also start it from the CLI:</p>
 
   <pre><code>band tunnel start</code></pre>
 
   <p>
     The command prints the public URL on stdout. The auth token is the
-    <code>tokenSecret</code> stored in <code>~/.band/settings.json</code> — it's the
+    <code>tokenSecret</code> stored in <code>~/.band/settings.json</code> &mdash; it's the
     same token used for local API access.
   </p>
 
@@ -63,6 +125,11 @@ $ jq -r .tokenSecret ~/.band/settings.json
 0123456789abcdef…   # 64-character hex token</code></pre>
 
   <h2>Stopping the Tunnel</h2>
+
+  <p>
+    Click <strong>Stop Tunnel</strong> in the Mobile Access panel, or run the
+    CLI equivalent:
+  </p>
 
   <pre><code>band tunnel stop</code></pre>
 
@@ -111,6 +178,30 @@ $ jq -r .tokenSecret ~/.band/settings.json
     This is the fastest way to set up mobile access: start the tunnel, scan the QR code, and you
     are connected.
   </p>
+
+  <p>
+    On phones the dashboard collapses to a single-pane layout with a tab bar
+    for the most-used panes &mdash; <strong>Chat</strong>, <strong>Changes</strong>,
+    and <strong>Files</strong> &mdash; plus a back button to return to the
+    workspace list. Sending a message, watching streamed agent output, reviewing
+    a diff, and opening files all work the same as on desktop; only the
+    arrangement changes.
+  </p>
+
+  <figure class="my-8 mx-auto max-w-xs overflow-hidden rounded-xl border border-border shadow-lg">
+    <img
+      src="/screenshot-mobile-chat.png"
+      alt="The Band dashboard on a phone, showing the band-main workspace with a Chat / Changes / Files tab bar at the top, an empty chat state in the middle, and a message input at the bottom with the Claude Opus agent selected."
+      width="393"
+      height="849"
+      loading="lazy"
+      decoding="async"
+      class="block h-auto w-full"
+    />
+    <figcaption class="border-t border-border bg-card/50 px-4 py-2 text-center text-sm text-muted-foreground">
+      The mobile view &mdash; tab bar across the top, chat input pinned to the bottom.
+    </figcaption>
+  </figure>
 
   <h2>Security Considerations</h2>
 

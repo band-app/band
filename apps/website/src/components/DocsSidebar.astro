@@ -19,18 +19,12 @@ const sections = [
   {
     title: "Desktop App",
     links: [
-      { href: "/docs/desktop-app", label: "Dashboard Overview" },
+      { href: "/docs/flexible-layout", label: "Flexible Layout" },
       { href: "/docs/projects", label: "Project Management" },
       { href: "/docs/workspaces", label: "Workspace Management" },
       { href: "/docs/agent-status", label: "Agent Status" },
-      { href: "/docs/settings", label: "Settings" },
-    ],
-  },
-  {
-    title: "Web Interface",
-    links: [
-      { href: "/docs/web-interface", label: "Overview" },
       { href: "/docs/remote-access", label: "Remote Access" },
+      { href: "/docs/settings", label: "Settings" },
     ],
   },
   {
@@ -63,7 +57,6 @@ const sections = [
   {
     title: "Guides",
     links: [
-      { href: "/docs/task-management", label: "Task Management" },
       { href: "/docs/cronjobs", label: "Cronjobs & Automation" },
       { href: "/docs/recipes", label: "Recipes & Workflows" },
       { href: "/docs/architecture", label: "Architecture" },
@@ -72,7 +65,7 @@ const sections = [
   {
     title: "More",
     links: [
-      { href: "/docs/changelog", label: "Changelog" },
+      { href: "https://github.com/band-app/band/releases", label: "Changelog" },
       { href: "/faq", label: "FAQ" },
       { href: "/comparison", label: "Comparison" },
     ],
@@ -98,6 +91,8 @@ function isActive(href: string, currentPath: string): boolean {
             <li>
               <a
                 href={link.href}
+                target={link.href.startsWith("http") ? "_blank" : undefined}
+                rel={link.href.startsWith("http") ? "noopener noreferrer" : undefined}
                 class:list={[
                   "block rounded-md px-3 py-1.5 text-sm transition-colors",
                   isActive(link.href, currentPath)

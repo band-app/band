@@ -1,7 +1,7 @@
 ---
 const navLinks = [
   { href: "/docs/getting-started", label: "Docs" },
-  { href: "/docs/changelog", label: "Changelog" },
+  { href: "https://github.com/band-app/band/releases", label: "Changelog" },
   { href: "/faq", label: "FAQ" },
 ];
 ---
@@ -17,6 +17,8 @@ const navLinks = [
       {navLinks.map((link) => (
         <a
           href={link.href}
+          target={link.href.startsWith("http") ? "_blank" : undefined}
+          rel={link.href.startsWith("http") ? "noopener noreferrer" : undefined}
           class="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
         >
           {link.label}
