@@ -159,14 +159,14 @@ async function ensureClaudeHooks(): Promise<void> {
 async function ensureSkillsInstalled(): Promise<void> {
   try {
     const settings = loadSettings();
-    const agentIds = (settings.codingAgents ?? []).map((a) => a.id);
-    if (agentIds.length === 0) {
+    const agents = settings.codingAgents ?? [];
+    if (agents.length === 0) {
       // Nothing detected → nothing to sync. The next boot after an agent is
       // installed will pick it up.
       return;
     }
 
-    const result = await installSkills({ agentIds, log });
+    const result = await installSkills({ agents, log });
     const wrote = result.written.length + result.updated.length;
     if (wrote > 0) {
       log.info(

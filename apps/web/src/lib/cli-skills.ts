@@ -41,34 +41,88 @@ const SKILL_FILE = "SKILL.md";
 
 /** A single coding agent's global skills folder. */
 export interface SkillTarget {
-  /** Coding agent ID (matches AGENT_CHECKS in setup.ts). */
-  agentId: string;
+  /** Coding agent type (matches `CodingAgentConfig.type`). */
+  agentType: string;
   /** Absolute path to the agent's global skills directory. */
   skillsDir: string;
 }
 
 /**
- * Map a detected coding agent to the global skills directory we ship into.
- *
- * Returns `null` when the agent has no stable global skills convention we're
- * comfortable writing to yet — those land as a TODO so the install/update
- * sync stays Claude-only for now (per the open question in the issue spec).
- *
- *   - `claude-code` → `~/.claude/skills/` (matches discoverClaudeSkills in
- *     packages/coding-agent/src/adapters/claude-code.ts).
- *   - `codex` / `opencode` → TODO. Both adapters scan multiple directories
- *     (`~/.codex/skills/` for Codex; a 6-tier resolution order including
- *     `~/.config/opencode/skills/` for OpenCode), and we'd rather wait until
- *     someone validates an end-to-end flow than guess at the canonical
- *     "shipped skills" home for those agents.
+ * Coding agent identity — just the bits `resolveSkillTargets` needs. Mirrors
+ * the relevant fields of `CodingAgentDefinition` from state.ts so callers can
+ * pass `loadSettings().codingAgents` directly without re-shaping it.
  */
-export function resolveSkillTarget(agentId: string, home: string = homedir()): SkillTarget | null {
-  switch (agentId) {
+export interface SkillAgent {
+  /** Stable type discriminator (e.g. `claude-code`, `codex`, `opencode`). */
+  type: string;
+}
+
+/**
+ * Map a coding agent type to the global skills directory we ship into. Each
+ * destination matches the *highest-priority global* directory the agent's
+ * adapter scans in `packages/coding-agent/src/adapters/<agent>.ts`, so that
+ * shipped skills override anything else the user has at the system level.
+ *
+ *   - `claude-code` → `~/.claude/skills/`
+ *     (claude-code.ts::discoverClaudeSkills)
+ *   - `codex` / `openai-codex` → `${CODEX_HOME}/skills/` (default
+ *     `~/.codex/skills/`; `CODEX_HOME` env override honored to match the
+ *     adapter)
+ *   - `gemini-cli` → `~/.gemini/skills/`
+ *   - `opencode` → `~/.config/opencode/skills/` — OpenCode reads from a
+ *     6-tier list and `.config/opencode/skills` is the *highest-priority*
+ *     global entry (project-level dirs aside). It also reads from
+ *     `~/.claude/skills/` (lower priority), so a user with both Claude Code
+ *     and OpenCode enabled will see the skills via either path.
+ *
+ * Returns `null` for agent types that have no defined global skills
+ * directory (e.g. `cursor-cli`, which doesn't expose a `listSkills` method).
+ */
+export function resolveSkillTarget(
+  agentType: string,
+  home: string = homedir(),
+): SkillTarget | null {
+  switch (agentType) {
     case "claude-code":
-      return { agentId, skillsDir: join(home, ".claude", "skills") };
+      return { agentType, skillsDir: join(home, ".claude", "skills") };
+    case "codex":
+    case "openai-codex": {
+      const codexHome = process.env.CODEX_HOME ?? join(home, ".codex");
+      return { agentType, skillsDir: join(codexHome, "skills") };
+    }
+    case "gemini-cli":
+      return { agentType, skillsDir: join(home, ".gemini", "skills") };
+    case "opencode":
+      return { agentType, skillsDir: join(home, ".config", "opencode", "skills") };
     default:
+      // `cursor-cli` and any unknown future type fall through to null —
+      // callers treat that as "no destination" rather than a hard error.
       return null;
   }
+}
+
+/**
+ * Resolve write targets for a list of agents, deduplicating destinations.
+ *
+ * Two configured agents can resolve to the same directory (e.g. two
+ * claude-code agents with different IDs but the same `type` both map to
+ * `~/.claude/skills/`). We dedupe so the (skill, target) loop doesn't write
+ * the same file twice on each boot.
+ */
+export function resolveSkillTargets(
+  agents: readonly SkillAgent[],
+  home: string = homedir(),
+): SkillTarget[] {
+  const seen = new Set<string>();
+  const out: SkillTarget[] = [];
+  for (const agent of agents) {
+    const target = resolveSkillTarget(agent.type, home);
+    if (!target) continue;
+    if (seen.has(target.skillsDir)) continue;
+    seen.add(target.skillsDir);
+    out.push(target);
+  }
+  return out;
 }
 
 /**
@@ -141,8 +195,13 @@ export interface InstallSkillsResult {
 interface InstallSkillsOptions {
   /** Override $HOME (test-only — production callers should leave unset). */
   home?: string;
-  /** Detected coding agent IDs. Filters which target dirs we write to. */
-  agentIds: readonly string[];
+  /**
+   * Enabled coding agents from `loadSettings().codingAgents`. We dispatch on
+   * `type`, not `id`, because users can configure several agents of the
+   * same type (e.g. two `claude-code` agents with different labels) and a
+   * custom `id` doesn't change the on-disk skills directory layout.
+   */
+  agents: readonly SkillAgent[];
   /**
    * Optional logger for visibility into write/update/skip decisions. Pino-
    * compatible signature so we can pass `createLogger(...)` from setup.ts
@@ -155,18 +214,17 @@ interface InstallSkillsOptions {
 }
 
 /**
- * Sync the CLI-shipped skills into each detected agent's global skills dir.
+ * Sync the CLI-shipped skills into each enabled agent's global skills dir.
  *
  * Steps:
  *   1. Resolve a band binary — abort cleanly if none is available.
- *   2. Build the list of write targets from the detected agents.
+ *   2. Build the list of (deduplicated) write targets from `opts.agents`.
  *   3. Run `band generate-skills` into a temp dir.
  *   4. For each (skill, target), compare against the destination and write
  *      only when content differs.
  *
- * No-op (returns an empty-ish result) when no targets resolve — that's the
- * intended behavior when only Codex / OpenCode are installed today, since
- * we haven't wired their destinations yet.
+ * No-op (returns an empty-ish result) when no targets resolve — e.g. only
+ * agents without a known global skills directory are enabled.
  */
 export async function installSkills(opts: InstallSkillsOptions): Promise<InstallSkillsResult> {
   const result: InstallSkillsResult = {
@@ -177,9 +235,7 @@ export async function installSkills(opts: InstallSkillsOptions): Promise<Install
   };
 
   const home = opts.home ?? homedir();
-  const targets = opts.agentIds
-    .map((id) => resolveSkillTarget(id, home))
-    .filter((t): t is SkillTarget => t !== null);
+  const targets = resolveSkillTargets(opts.agents, home);
 
   if (targets.length === 0) {
     return result;

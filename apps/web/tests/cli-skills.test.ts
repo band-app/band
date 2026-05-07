@@ -215,4 +215,92 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
     const path = join(process.env.HOME!, ".claude", "skills", "band", "SKILL.md");
     expect(existsSync(path)).toBe(true);
   });
+
+  it("installs into every enabled agent's global skills dir (claude, codex, opencode, gemini)", async () => {
+    // Re-seed settings with all four agent types enabled. We bypass
+    // runFirstTimeSetup's CLI / hooks side-effects here and call installSkills
+    // directly so the test focuses on the multi-target fan-out — those side
+    // effects are exercised by the suite's other cases.
+    const { installSkills } = await import("../src/lib/cli-skills");
+    const result = await installSkills({
+      home: process.env.HOME!,
+      agents: [
+        { type: "claude-code" },
+        { type: "codex" },
+        { type: "opencode" },
+        { type: "gemini-cli" },
+      ],
+    });
+
+    const home = process.env.HOME!;
+    const expectedDirs = [
+      join(home, ".claude", "skills"),
+      join(home, ".codex", "skills"),
+      join(home, ".config", "opencode", "skills"),
+      join(home, ".gemini", "skills"),
+    ];
+    for (const dir of expectedDirs) {
+      for (const name of SKILL_NAMES) {
+        const path = join(dir, name, "SKILL.md");
+        expect(existsSync(path), `expected ${path} to exist`).toBe(true);
+        expect(readFileSync(path).equals(expectedSkills!.get(name)!)).toBe(true);
+      }
+    }
+
+    // 4 agents × 4 skills = 16 freshly written files (each test gets a new
+    // tmp HOME via beforeEach, so nothing should already exist).
+    expect(result.written.length).toBe(16);
+    expect(result.unchanged.length).toBe(0);
+  });
+
+  it("dedupes destinations when multiple agents resolve to the same dir", async () => {
+    const { installSkills } = await import("../src/lib/cli-skills");
+    const result = await installSkills({
+      home: process.env.HOME!,
+      // Two claude-code agents (e.g. user has personal + work setups) both
+      // point at ~/.claude/skills — we should only write once per skill, not
+      // twice.
+      agents: [{ type: "claude-code" }, { type: "claude-code" }],
+    });
+
+    expect(result.written.length).toBe(SKILL_NAMES.length);
+  });
+
+  it("honours $CODEX_HOME when set so codex skills follow the override", async () => {
+    const customCodexHome = join(tmp, "custom-codex");
+    const originalCodexHome = process.env.CODEX_HOME;
+    process.env.CODEX_HOME = customCodexHome;
+    try {
+      const { installSkills } = await import("../src/lib/cli-skills");
+      await installSkills({
+        home: process.env.HOME!,
+        agents: [{ type: "codex" }],
+      });
+
+      for (const name of SKILL_NAMES) {
+        const path = join(customCodexHome, "skills", name, "SKILL.md");
+        expect(existsSync(path), `expected ${path} to exist under $CODEX_HOME`).toBe(true);
+      }
+      // And nothing should have landed under the default ~/.codex/skills/.
+      expect(existsSync(join(process.env.HOME!, ".codex", "skills", "band", "SKILL.md"))).toBe(
+        false,
+      );
+    } finally {
+      if (originalCodexHome !== undefined) process.env.CODEX_HOME = originalCodexHome;
+      else delete process.env.CODEX_HOME;
+    }
+  });
+
+  it("returns no targets for agent types without a known skills dir (cursor-cli)", async () => {
+    const { installSkills } = await import("../src/lib/cli-skills");
+    const result = await installSkills({
+      home: process.env.HOME!,
+      agents: [{ type: "cursor-cli" }],
+    });
+
+    expect(result.written).toEqual([]);
+    expect(result.updated).toEqual([]);
+    expect(result.unchanged).toEqual([]);
+    expect(result.skipped).toEqual([]);
+  });
 });
