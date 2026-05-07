@@ -137,11 +137,22 @@ const projectsRouter = t.router({
 
     const projects = await Promise.all(
       state.projects.map(async (project) => {
+        // state.json is the canonical "tracked workspaces" set — git's view
+        // is just used to enrich each entry with current path/head. We
+        // intersect the two so a workspace removed from state.json (e.g.
+        // by workspaces.remove, which updates state.json synchronously and
+        // defers the slow `git worktree remove` / `git branch -D` to a
+        // background task) disappears from the list immediately, even
+        // before the async cleanup has finished pruning the on-disk
+        // worktree. Without this filter, `projects.list` reads stale data
+        // from `git worktree list` and shows just-deleted workspaces until
+        // the background cleanup completes.
+        const trackedBranches = new Set(project.worktrees.map((wt) => wt.branch));
         let worktrees = project.worktrees;
         try {
           const gitWorktrees = await listWorktrees(project.path);
           worktrees = gitWorktrees
-            .filter((wt) => !wt.isBare)
+            .filter((wt) => !wt.isBare && trackedBranches.has(wt.branch))
             .map((wt) => ({
               branch: wt.branch,
               path: wt.path,
