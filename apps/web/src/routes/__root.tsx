@@ -6,9 +6,9 @@ import {
   useUpdateSettings,
 } from "@band-app/dashboard-core";
 import {
+  DesktopDashboardAdapter,
   NativeShellCapabilities,
-  TauriDashboardAdapter,
-} from "@band-app/dashboard-core/adapters/tauri";
+} from "@band-app/dashboard-core/adapters/desktop";
 import { WebCapabilities, WebDashboardAdapter } from "@band-app/dashboard-core/adapters/web";
 import { TooltipProvider } from "@band-app/ui";
 import {
@@ -29,13 +29,13 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Group, Panel, Separator, usePanelRef } from "react-resizable-panels";
+import { DesktopTitleBar, type PanelItem } from "../components/DesktopTitleBar";
 import { DockviewInstanceManager } from "../components/DockviewInstanceManager";
-import { type PanelItem, TauriTitleBar } from "../components/TauriTitleBar";
 import { ToolbarOverflowMenuItems, ToolbarOverflowProvider } from "../components/ToolbarButtons";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useNavigationHistory } from "../hooks/useNavigationHistory";
 import { useZoom } from "../hooks/useZoom";
-import { isDesktop } from "../lib/is-tauri";
+import { isDesktop } from "../lib/is-desktop";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
 import {
   loadSidebarWidth,
@@ -46,7 +46,7 @@ import {
 import { applyZoomLevel, loadZoomLevel, zoomIn, zoomOut, zoomReset } from "../lib/zoom";
 import "../styles/globals.css";
 
-const adapter = isDesktop ? new TauriDashboardAdapter() : new WebDashboardAdapter();
+const adapter = isDesktop ? new DesktopDashboardAdapter() : new WebDashboardAdapter();
 const capabilities = isDesktop ? new NativeShellCapabilities() : new WebCapabilities();
 
 export { adapter, capabilities };
@@ -107,7 +107,7 @@ function applyTheme(theme: string) {
 }
 
 /** Syncs the "dark" class on <html> with the persisted theme setting.
- *  Runs for ALL pages (including standalone Tauri windows like tasks/cronjobs).
+ *  Runs for ALL pages (including standalone desktop windows like tasks/cronjobs).
  *  Also caches the theme in localStorage so the blocking script can use it. */
 function ThemeSync() {
   const { settings } = useSettingsQuery();
@@ -145,7 +145,7 @@ function ThemeSync() {
 }
 
 /** Syncs the zoom level across windows and exposes a global function
- *  for the Tauri menu handler to call via window.eval(). */
+ *  for the Electron menu handler to call via webContents.executeJavaScript(). */
 function ZoomSync() {
   useEffect(() => {
     // Safety net: apply the persisted zoom level on mount.
@@ -153,8 +153,8 @@ function ZoomSync() {
     // handles edge cases (e.g., new secondary window created later).
     applyZoomLevel(loadZoomLevel());
 
-    // Expose a global function that the Rust menu event handler can call
-    // via webview.eval("if(window.__bandZoom)window.__bandZoom('in')").
+    // Expose a global function the Electron menu event handler can call via
+    // webContents.executeJavaScript("if(window.__bandZoom)window.__bandZoom('in')").
     (window as unknown as Record<string, unknown>).__bandZoom = (action: string) => {
       if (action === "in") zoomIn();
       else if (action === "out") zoomOut();
@@ -216,7 +216,7 @@ function AppShell() {
   useNavigationHistory(routerNavigate, capabilities);
 
   // Cmd+= / Cmd+- / Cmd+0 — zoom in/out/reset (browser mode only;
-  // in Tauri the View menu accelerators handle these keys)
+  // in the desktop shell the View menu accelerators handle these keys)
   useZoom();
 
   // Resizable sidebar: load persisted width and skip the first layout callback
@@ -235,7 +235,7 @@ function AppShell() {
     }
   }, []);
 
-  // Collapsible sidebar (Tauri title bar toggle)
+  // Collapsible sidebar (desktop title bar toggle)
   const sidebarPanelRef = usePanelRef();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const toggleSidebar = useCallback(() => {
@@ -307,7 +307,7 @@ function AppShell() {
     <ToolbarOverflowProvider>
       <div className="flex flex-col h-dvh w-full overflow-hidden bg-background text-foreground">
         {isDesktop && (
-          <TauriTitleBar
+          <DesktopTitleBar
             onToggleSidebar={toggleSidebar}
             sidebarCollapsed={sidebarCollapsed}
             workspaceName={activeWorkspaceId ?? undefined}

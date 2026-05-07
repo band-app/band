@@ -9,26 +9,18 @@ import {
   TooltipTrigger,
 } from "@band-app/ui";
 import { PanelLeft, PanelTop } from "lucide-react";
-import { type RefObject, useEffect, useRef, useState } from "react";
-import { invoke as desktopInvoke, startDragging as desktopStartDragging } from "../lib/desktop-ipc";
-import { isDesktop } from "../lib/is-tauri";
+import { useEffect, useState } from "react";
+import { invoke as desktopInvoke } from "../lib/desktop-ipc";
+import { isDesktop } from "../lib/is-desktop";
 import { EditorPicker } from "./EditorPicker";
 
-/** Attaches a native mousedown → startDragging listener to a ref. */
-function useDesktopDrag(ref: RefObject<HTMLElement | null>) {
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    if (!isDesktop) return;
-
-    const onMouseDown = (e: MouseEvent) => {
-      if (e.buttons !== 1) return;
-      desktopStartDragging().catch(() => {});
-    };
-    el.addEventListener("mousedown", onMouseDown);
-    return () => el.removeEventListener("mousedown", onMouseDown);
-  }, [ref]);
-}
+// Native window dragging is wired via CSS `-webkit-app-region: drag` on the
+// title-bar root, with `no-drag` reapplied to the interactive children
+// (buttons, dropdown triggers) so clicks aren't swallowed by the drag region.
+// This is Electron's recommended pattern and replaces the JS
+// `mousedown → startDragging` listener used during the Tauri era.
+const DRAG_STYLE: React.CSSProperties = { WebkitAppRegion: "drag" } as React.CSSProperties;
+const NO_DRAG_STYLE: React.CSSProperties = { WebkitAppRegion: "no-drag" } as React.CSSProperties;
 
 export interface PanelItem {
   id: string;
@@ -37,8 +29,8 @@ export interface PanelItem {
   shortcut?: string;
 }
 
-interface TauriTitleBarProps {
-  /** Static title. If omitted, fetches the app title from Tauri. */
+interface DesktopTitleBarProps {
+  /** Static title. If omitted, fetches the app title from the desktop shell. */
   title?: string;
   /** Callback to toggle the sidebar. When provided, a toggle button is shown. */
   onToggleSidebar?: () => void;
@@ -58,8 +50,8 @@ interface TauriTitleBarProps {
   onTogglePanelVisibility?: (panelId: string) => void;
 }
 
-/** Draggable Tauri title bar that works with external-URL webviews. */
-export function TauriTitleBar({
+/** Draggable desktop title bar that works with external-URL Electron webviews. */
+export function DesktopTitleBar({
   title,
   onToggleSidebar,
   sidebarCollapsed,
@@ -69,9 +61,8 @@ export function TauriTitleBar({
   panelItems,
   hiddenPanels,
   onTogglePanelVisibility,
-}: TauriTitleBarProps) {
+}: DesktopTitleBarProps) {
   const [appTitle, setAppTitle] = useState(title ?? "Band");
-  const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (title) return;
@@ -81,22 +72,19 @@ export function TauriTitleBar({
       .catch(() => {});
   }, [title]);
 
-  useDesktopDrag(ref);
-
   const hasEditorPicker = workspaceName && workspacePath;
   const hasPanels = workspaceName && panelItems && panelItems.length > 0 && onTogglePanelVisibility;
 
   return (
     <div
-      ref={ref}
-      data-tauri-drag-region
       className="h-[38px] shrink-0 flex items-center justify-center relative border-b border-border"
+      style={DRAG_STYLE}
     >
       {onToggleSidebar && (
         <button
           type="button"
           onClick={onToggleSidebar}
-          onMouseDown={(e) => e.stopPropagation()}
+          style={NO_DRAG_STYLE}
           className="absolute left-[80px] top-1/2 -translate-y-1/2 flex items-center justify-center rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors pointer-events-auto"
           title={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
         >
@@ -117,7 +105,7 @@ export function TauriTitleBar({
       {(hasEditorPicker || hasPanels) && (
         <div
           className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 pointer-events-auto"
-          onMouseDown={(e) => e.stopPropagation()}
+          style={NO_DRAG_STYLE}
         >
           {hasEditorPicker && (
             <EditorPicker workspacePath={workspacePath} onCopyPath={onCopyPath} />
@@ -170,10 +158,7 @@ export function TauriTitleBar({
   );
 }
 
-/** Invisible draggable region for Tauri windows (no title text). */
-export function TauriDragRegion() {
-  const ref = useRef<HTMLDivElement>(null);
-  useDesktopDrag(ref);
-
-  return <div ref={ref} data-tauri-drag-region className="h-[38px] shrink-0" />;
+/** Invisible draggable region for desktop windows (no title text). */
+export function DesktopDragRegion() {
+  return <div className="h-[38px] shrink-0" style={DRAG_STYLE} />;
 }

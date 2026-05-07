@@ -17,8 +17,7 @@
  *
  *   4. The vite port is auto-detected from its stdout (vite falls back to
  *      the next free port if 3456 is taken) and forwarded to Electron via
- *      the `BAND_DEV_WEB_URL` env var. Same trick the Tauri equivalent
- *      script uses.
+ *      the `BAND_DEV_WEB_URL` env var.
  *
  * Cleanup: SIGTERM all children on exit (via process-group kill on Unix).
  */

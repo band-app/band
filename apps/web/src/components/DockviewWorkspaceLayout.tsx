@@ -28,7 +28,7 @@ import {
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRecentFiles } from "../hooks/useRecentFiles";
 import { invoke as desktopInvoke } from "../lib/desktop-ipc";
-import { isDesktop } from "../lib/is-tauri";
+import { isDesktop } from "../lib/is-desktop";
 import { trpc } from "../lib/trpc-client";
 import { useWsActive } from "../lib/workspace-visibility-store";
 import { CodeBrowserView } from "./CodeBrowserView";

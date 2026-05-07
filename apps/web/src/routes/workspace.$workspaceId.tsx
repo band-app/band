@@ -16,11 +16,11 @@ import {
   useRef,
   useState,
 } from "react";
-import { TauriDragRegion } from "../components/TauriTitleBar";
+import { DesktopDragRegion } from "../components/DesktopTitleBar";
 import { AgentSwitcherContext } from "../hooks/useAgentSwitcherContext";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { SessionListContext } from "../hooks/useSessionListContext";
-import { isDesktop } from "../lib/is-tauri";
+import { isDesktop } from "../lib/is-desktop";
 import { trpc } from "../lib/trpc-client";
 
 export const Route = createFileRoute("/workspace/$workspaceId")({
@@ -346,7 +346,7 @@ function MobileWorkspaceLayout({
             transform: appOffsetTop ? `translateY(${appOffsetTop}px)` : undefined,
           }}
         >
-          {isDesktop && <TauriDragRegion />}
+          {isDesktop && <DesktopDragRegion />}
           <header className="flex shrink-0 items-center gap-3 border-b border-border/50 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
             <button
               type="button"

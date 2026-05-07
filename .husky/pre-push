@@ -1,7 +1,5 @@
 pnpm exec biome check .
 cargo fmt --manifest-path apps/cli/Cargo.toml -- --check
-cargo fmt --manifest-path apps/dashboard/src-tauri/Cargo.toml -- --check
 cargo clippy --manifest-path apps/cli/Cargo.toml -- -D warnings
-cargo clippy --manifest-path apps/dashboard/src-tauri/Cargo.toml -- -D warnings
 pnpm knip
 pnpm jscpd

@@ -13,7 +13,7 @@ import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SERVER_RUNTIME } from "./helpers/server-runtime";
 
-// The real built server entry point — same binary the Tauri app spawns.
+// The real built server entry point — same binary the Electron app spawns.
 const serverScript = join(import.meta.dirname, "../dist/start-server.mjs");
 
 // ---------------------------------------------------------------------------

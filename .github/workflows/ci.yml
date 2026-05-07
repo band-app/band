@@ -54,18 +54,6 @@ jobs:
           key: cargo-cli-${{ runner.os }}-${{ hashFiles('apps/cli/Cargo.lock') }}
           restore-keys: cargo-cli-${{ runner.os }}-
 
-      - name: Cache Dashboard target
-        uses: actions/cache@v5
-        with:
-          path: apps/dashboard/src-tauri/target
-          key: cargo-dashboard-${{ runner.os }}-${{ hashFiles('apps/dashboard/src-tauri/Cargo.lock') }}
-          restore-keys: cargo-dashboard-${{ runner.os }}-
-
-      - name: Install Tauri system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
@@ -99,20 +87,10 @@ jobs:
         run: pnpm jscpd
 
       - name: Lint (cargo fmt)
-        run: |
-          cargo fmt --manifest-path apps/cli/Cargo.toml -- --check
-          cargo fmt --manifest-path apps/dashboard/src-tauri/Cargo.toml -- --check
+        run: cargo fmt --manifest-path apps/cli/Cargo.toml -- --check
 
       - name: Lint (cargo clippy — CLI)
         run: cargo clippy --manifest-path apps/cli/Cargo.toml -- -D warnings
-
-      - name: Lint (cargo clippy — Dashboard)
-        run: |
-          mkdir -p apps/web/dist apps/dashboard/src-tauri/binaries
-          touch apps/web/dist/start-server.mjs
-          TRIPLE="$(rustc -vV | sed -n 's/host: //p')"
-          cp apps/cli/target/release/band "apps/dashboard/src-tauri/binaries/band-$TRIPLE"
-          cargo clippy --manifest-path apps/dashboard/src-tauri/Cargo.toml -- -D warnings
 
       - name: Build web (needed by tests)
         run: pnpm build:web
@@ -129,11 +107,11 @@ jobs:
       - name: Test (CLI)
         run: cargo test --manifest-path apps/cli/Cargo.toml -- --test-threads=4
 
-      - name: Test (Dashboard)
-        run: cargo test --manifest-path apps/dashboard/src-tauri/Cargo.toml
+      - name: Build desktop (TypeScript main + preload)
+        run: pnpm --filter @band-app/desktop build
 
-      - name: Build frontend
-        run: pnpm --filter @band-app/dashboard build
+      - name: Test (desktop)
+        run: pnpm --filter @band-app/desktop test
 
   deploy-docs:
     name: Deploy Docs

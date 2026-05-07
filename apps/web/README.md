@@ -1,6 +1,6 @@
 # @band-app/server
 
-Web server + dashboard frontend for Band. Provides the tRPC API, WebSocket layer, and bundled UI consumed by the Tauri desktop app and (optionally) standalone npm consumers.
+Web server + dashboard frontend for Band. Provides the tRPC API, WebSocket layer, and bundled UI consumed by the Electron desktop app and (optionally) standalone npm consumers.
 
 ## Runtime: Node.js 22.5+
 

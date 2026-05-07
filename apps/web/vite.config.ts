@@ -19,7 +19,7 @@ function trpcDevPlugin(): Plugin {
   return {
     name: "trpc-dev-server",
     configureServer(server) {
-      // Ensure a tokenSecret exists in settings.json so the Tauri app can
+      // Ensure a tokenSecret exists in settings.json so the Electron app can
       // authenticate to the dev server (same behavior as start-server.ts).
       server.ssrLoadModule("./src/lib/state").then(({ getOrCreateToken }) => {
         getOrCreateToken();
@@ -359,7 +359,7 @@ export default defineConfig(({ command }) => ({
   ssr:
     command === "build"
       ? {
-          // Bundle all dependencies into server.js so the Tauri DMG
+          // Bundle all dependencies into server.js so the Electron DMG
           // doesn't need node_modules at runtime.
           noExternal: true,
           // node-pty is a native addon that cannot be bundled

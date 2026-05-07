@@ -67,7 +67,6 @@
       "!**/.vinxi",
       "!**/.output",
       "!**/*.gen.ts",
-      "!**/apps/dashboard/src-tauri/gen",
       "!**/.astro",
       "!**/test-results",
       "!**/playwright-report",

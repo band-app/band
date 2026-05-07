@@ -5,7 +5,7 @@
  * using React Context, so changing visibility doesn't cascade re-renders
  * through the entire component tree. Only components that subscribe via
  * `useSyncExternalStore` re-render — typically just the leaf components
- * with Tauri side effects (browser_hide/show, terminal attach/detach).
+ * with desktop side effects (browser_hide/show, terminal attach/detach).
  */
 
 import { useCallback, useSyncExternalStore } from "react";

@@ -2,7 +2,7 @@ import type { IDockviewPanelProps } from "dockview";
 import { ArrowLeft, ArrowRight, RotateCw, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { invoke as desktopInvoke, listen as desktopListen } from "../lib/desktop-ipc";
-import { isDesktop } from "../lib/is-tauri";
+import { isDesktop } from "../lib/is-desktop";
 import { trpc } from "../lib/trpc-client";
 
 const DEFAULT_URL = "";
@@ -28,7 +28,7 @@ function loadUrl(workspaceId: string): string | null {
 }
 
 // ---------------------------------------------------------------------------
-// Favicon store — tracks per-browser favicon URLs emitted by Tauri.
+// Favicon store — tracks per-browser favicon URLs emitted by the desktop shell.
 // ---------------------------------------------------------------------------
 
 const faviconMap = new Map<string, string>();
@@ -66,7 +66,7 @@ export interface BrowserPaneParams {
 
 // ---------------------------------------------------------------------------
 // Browser panel component – renders an address bar and a placeholder div.
-// A native Tauri child webview is positioned over the placeholder area.
+// A native Electron BrowserView is positioned over the placeholder area.
 // Each workspace gets its own persistent webview (hidden/shown on switch).
 // ---------------------------------------------------------------------------
 
@@ -378,7 +378,7 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
   // recreates panels with empty params before injectParams runs a tick later.
   if (!workspaceId) return null;
 
-  // ------- non-Tauri fallback -------
+  // ------- non-desktop fallback -------
 
   if (!isDesktop) {
     return (

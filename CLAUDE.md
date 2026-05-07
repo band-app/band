@@ -32,9 +32,9 @@ This repo has a pre-push hook (`.husky/pre-push`) that runs linting, formatting,
 
 All issues are created in the `band-app/band` GitHub repo.
 
-## Architecture: Web Server vs Tauri App
+## Architecture: Web Server vs Desktop App
 
-The web server (`apps/web`) handles **data, state, and background processes** only. It must never invoke macOS-only shell helpers (folder pickers, Finder reveal, opening apps, installing the CLI symlink with administrator privileges). Those bridges live in the Tauri desktop app (`apps/dashboard/src-tauri/src/commands/macos_shell.rs`) and are invoked from the React webview via `@tauri-apps/api`.
+The web server (`apps/web`) handles **data, state, and background processes** only. It must never invoke macOS-only shell helpers (folder pickers, Finder reveal, opening apps, installing the CLI symlink with administrator privileges). Those bridges live in the Electron desktop app (`apps/desktop/src/main/ipc/macos-shell.ts`) and are invoked from the React webview via the IPC bridge in `apps/web/src/lib/desktop-ipc.ts`, which talks to the preload script at `apps/desktop/src/preload/index.cts`.
 
 ## Band CLI Skills
 

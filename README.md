@@ -4,7 +4,7 @@ IDE-agnostic agent orchestrator. A desktop app for managing AI coding agents acr
 
 ```
 ┌──────────────────────────────────────────┐
-│  Dashboard (Tauri v2 + React 19)         │
+│  Desktop App (Electron + React 19)       │
 │  - Project & workspace management        │
 │  - Code editor (CodeMirror 6 + LSP)      │
 │  - Integrated terminal & chat            │
@@ -31,7 +31,7 @@ IDE-agnostic agent orchestrator. A desktop app for managing AI coding agents acr
 
 Download the latest signed `.dmg` from [GitHub Releases](https://github.com/band-app/band/releases/latest), open it, and drag **Band** to `/Applications`. First launch should open without Gatekeeper warnings — releases are signed and notarized with an Apple Developer ID.
 
-Auto-update is built in: the app checks daily and prompts before installing.
+Auto-update is built in (via `electron-updater`): the app checks daily and prompts before installing.
 
 ### Nightly
 
@@ -45,8 +45,8 @@ Bleeding-edge builds from the `main` branch are published to a single rolling [`
 
 ```bash
 pnpm install
-pnpm build:dashboard
-open apps/dashboard/src-tauri/target/release/bundle/dmg/*.dmg
+pnpm build:desktop
+open apps/desktop/dist-builder/*.dmg
 ```
 
 Local builds are unsigned — see [CONTRIBUTING.md](CONTRIBUTING.md#building-locally-vs-signed-releases) for how macOS handles them.
@@ -55,8 +55,8 @@ Local builds are unsigned — see [CONTRIBUTING.md](CONTRIBUTING.md#building-loc
 
 ```
 apps/
-  dashboard/          Tauri v2 desktop app (Rust backend + React frontend)
-  web/                Node.js web server (tRPC, git ops, LSP, coding agents)
+  desktop/            Electron desktop shell (main + preload + electron-builder)
+  web/                Node.js web server (tRPC, git ops, LSP, coding agents) + React renderer
   cli/                Band CLI (Rust) — programmatic workspace management
   website/            Marketing website (Astro)
 packages/
@@ -70,7 +70,7 @@ packages/
 
 - [Node.js](https://nodejs.org) v22.5+ (we use the built-in `node:sqlite` module)
 - [pnpm](https://pnpm.io) v10+
-- [Rust](https://rustup.rs) (for Tauri dashboard and CLI)
+- [Rust](https://rustup.rs) (for the CLI)
 - macOS
 
 ### Install Rust (if not already installed)
@@ -88,28 +88,24 @@ cd band
 pnpm install
 ```
 
-## Running the Dashboard
+## Running the Desktop App
 
 ### Development
 
 ```bash
 # From the repo root:
-pnpm dev:dashboard
-
-# Or from the dashboard directory:
-cd apps/dashboard
-pnpm tauri dev
+pnpm dev:desktop
 ```
 
-This builds the CLI and web server, then starts the Tauri app. Hot-reloading is enabled for the React frontend and Rust backend.
+This builds the CLI and web server, then starts the Electron app. Hot-reloading is enabled for the React frontend (via Vite); the main and preload bundles are watched by `tsc --watch` and Electron is restarted whenever they change.
 
 ### Production Build
 
 ```bash
-pnpm build:dashboard
+pnpm build:desktop
 ```
 
-This produces a `.dmg` installer at `apps/dashboard/src-tauri/target/release/bundle/dmg/`.
+Produces a `.dmg` (and `.zip` for `electron-updater` diff downloads) at `apps/desktop/dist-builder/`.
 
 ## Web Server
 
@@ -128,7 +124,7 @@ pnpm dev:web
 pnpm build:web
 ```
 
-The server runs on `http://localhost:3456` by default (configurable via `PORT` env var). It is started automatically by the Tauri dashboard in production.
+The server runs on `http://localhost:3456` by default (configurable via `PORT` env var). It is started automatically by the Electron desktop app in production.
 
 ## Band CLI
 
@@ -166,14 +162,14 @@ pnpm test
 
 This project uses integration tests as the primary testing approach — see `CLAUDE.md` for the testing strategy.
 
-### Dashboard (Tauri + React)
+### Desktop Shell (Electron + TypeScript)
 
 ```bash
-cd apps/dashboard
+cd apps/desktop
 
-# Full Tauri dev (frontend + Rust backend + native window):
-pnpm tauri dev
+# Compile main + preload bundles:
+pnpm build
 
-# Check Rust compilation:
-cd src-tauri && cargo check
+# Run the Electron app against an already-running web server:
+pnpm dev
 ```

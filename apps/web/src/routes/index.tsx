@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { MessageSquare } from "lucide-react";
 import { DashboardView } from "../components/DashboardView";
 import { useIsDesktop } from "../hooks/useIsDesktop";
-import { isDesktop } from "../lib/is-tauri";
+import { isDesktop } from "../lib/is-desktop";
 
 export const Route = createFileRoute("/")({
   component: DashboardPage,

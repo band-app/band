@@ -29,7 +29,7 @@ describe("build output", () => {
     // node-pty ships prebuilt binaries for macOS/Windows but compiles from
     // source on Linux. On CI (Linux), no native binary may be available if
     // the package manager didn't run lifecycle scripts or build tools are
-    // missing. The Tauri desktop app targets macOS, so this check only
+    // missing. The Electron desktop app targets macOS, so this check only
     // matters there.
     if (process.platform !== "darwin") return;
     const prebuildsDir = join(dist, "node_modules/node-pty/prebuilds");
@@ -48,7 +48,7 @@ describe("build output", () => {
     // We deliberately do NOT bundle the ~206MB platform binary shipped by
     // @anthropic-ai/claude-agent-sdk-<platform>-<arch>. Band users have
     // `claude` installed already, and the SDK resolves it from PATH at
-    // runtime. Keeping it out shrinks the Tauri DMG by ~200MB.
+    // runtime. Keeping it out shrinks the Electron DMG by ~200MB.
     const platform = process.platform;
     const arch = process.arch;
     const candidates =

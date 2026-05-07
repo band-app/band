@@ -9,7 +9,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./adapters/web": "./src/adapters/web.ts",
-    "./adapters/tauri": "./src/adapters/tauri.ts"
+    "./adapters/desktop": "./src/adapters/desktop.ts"
   },
   "dependencies": {
     "@babel/runtime": "^7.29.2",
@@ -54,17 +54,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
-  "peerDependenciesMeta": {
-    "@tauri-apps/api": {
-      "optional": true
-    },
-    "@tauri-apps/plugin-shell": {
-      "optional": true
-    }
-  },
   "devDependencies": {
-    "@tauri-apps/api": "^2.0.0",
-    "@tauri-apps/plugin-shell": "^2.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "typescript": "^5.7.0"

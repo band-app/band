@@ -6,7 +6,7 @@ import { ChatView } from "../components/ChatView";
 import { useAgentSwitcherContext } from "../hooks/useAgentSwitcherContext";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useSessionListContext } from "../hooks/useSessionListContext";
-import { isDesktop } from "../lib/is-tauri";
+import { isDesktop } from "../lib/is-desktop";
 import { trpc } from "../lib/trpc-client";
 
 export const Route = createFileRoute("/workspace/$workspaceId/")({

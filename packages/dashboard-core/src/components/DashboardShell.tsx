@@ -17,7 +17,7 @@ import {
   TooltipTrigger,
 } from "@band-app/ui";
 import { Check, FolderPlus, Menu, Pencil, Plus, Settings, Tag, X } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { useCliSetup } from "../hooks/use-cli-setup";
 import { useHooksSetup } from "../hooks/use-hooks-setup";
 import { useProjects } from "../hooks/use-projects";
@@ -36,19 +36,17 @@ interface DashboardShellProps {
   /** Extra menu items rendered inside the toolbar's overflow ("3 dots") dropdown,
    *  appended after the built-in Edit/Settings entries. */
   toolbarMenuItems?: ReactNode;
-  /** Hide the Tauri title bar (e.g. when the parent renders a full-width one). */
+  /** Hide the desktop title bar (e.g. when the parent renders a full-width one). */
   hideTitleBar?: boolean;
 }
 
-// Desktop-shell detection. Both Tauri and Electron expose a global for this;
-// Electron's `__BAND_DESKTOP__` is set by `apps/desktop/src/preload/index.ts`.
-const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+// Desktop-shell detection. The Electron preload
+// (`apps/desktop/src/preload/index.cts`) exposes `window.__BAND_DESKTOP__`.
 const isElectron = typeof window !== "undefined" && "__BAND_DESKTOP__" in window;
-const isDesktop = isTauri || isElectron;
+const isDesktop = isElectron;
 
 interface ElectronBridge {
   invoke(channel: string, args?: unknown): Promise<unknown>;
-  startDragging(): Promise<void>;
 }
 
 function electronBridge(): ElectronBridge | null {
@@ -60,23 +58,7 @@ function electronBridge(): ElectronBridge | null {
 async function desktopInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   const bridge = electronBridge();
   if (bridge) return (await bridge.invoke(cmd, args)) as T;
-  if (isTauri) {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<T>(cmd, args);
-  }
-  throw new Error(`desktopInvoke('${cmd}') called outside a desktop shell`);
-}
-
-async function desktopStartDragging(): Promise<void> {
-  const bridge = electronBridge();
-  if (bridge) {
-    await bridge.startDragging();
-    return;
-  }
-  if (isTauri) {
-    const { getCurrentWindow } = await import("@tauri-apps/api/window");
-    await getCurrentWindow().startDragging();
-  }
+  throw new Error(`desktopInvoke('${cmd}') called outside the desktop shell`);
 }
 
 export function DashboardShell({ toolbarMenuItems, hideTitleBar }: DashboardShellProps) {
@@ -94,28 +76,12 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar }: DashboardShel
   const { state: cliState, install: installCli } = useCliSetup();
 
   const [appTitle, setAppTitle] = useState("Band");
-  const titleBarRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!isDesktop) return;
     desktopInvoke<string>("get_app_title")
       .then(setAppTitle)
       .catch(() => {});
-  }, []);
-
-  // Attach native mousedown listener for window dragging — primary button press
-  // forwards to the shell's startDragging verb (Tauri's getCurrentWindow or
-  // Electron's preload bridge).
-  useEffect(() => {
-    const el = titleBarRef.current;
-    if (!isDesktop || !el) return;
-
-    const onMouseDown = (e: MouseEvent) => {
-      if (e.buttons !== 1) return;
-      desktopStartDragging().catch(() => {});
-    };
-    el.addEventListener("mousedown", onMouseDown);
-    return () => el.removeEventListener("mousedown", onMouseDown);
   }, []);
 
   useStatusWatcher();
@@ -179,9 +145,8 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar }: DashboardShel
     >
       {isDesktop && !hideTitleBar && (
         <div
-          ref={titleBarRef}
-          data-tauri-drag-region
           className="h-[38px] shrink-0 flex items-center justify-center border-b border-border"
+          style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
         >
           <span className="text-xs font-medium text-muted-foreground select-none pointer-events-none">
             {appTitle}
