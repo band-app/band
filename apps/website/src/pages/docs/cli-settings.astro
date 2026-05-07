@@ -61,7 +61,7 @@ band settings --output json # JSON without the trailing newline (for piping)</co
 
   <ul>
     <li><strong>worktreesDir</strong> — directory where new worktrees are created. Defaults to <code>~/.band/worktrees</code>.</li>
-    <li><strong>codingAgents</strong> — array of agent definitions. Each entry has <code>id</code>, <code>type</code> (<code>claude-code</code>, <code>cursor-cli</code>, <code>openai-codex</code>, <code>codex</code>, <code>gemini-cli</code>, or <code>opencode</code>), <code>label</code>, and optional <code>command</code> / <code>model</code> overrides.</li>
+    <li><strong>codingAgents</strong> — array of agent definitions. Each entry has <code>id</code>, <code>type</code> (<code>claude-code</code>, <code>codex</code>, or <code>opencode</code>), <code>label</code>, and optional <code>command</code> / <code>model</code> overrides.</li>
     <li><strong>defaultCodingAgent</strong> — id of the entry used for new chat panes by default.</li>
     <li><strong>webServerPort</strong> — port the web server listens on (default: <code>3456</code>).</li>
     <li><strong>notifications.soundOnNeedsAttention</strong> — play a sound when an agent transitions to <em>needs attention</em>.</li>

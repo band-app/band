@@ -5,16 +5,19 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
   <h1>Coding Agents</h1>
   <p>
     Band is an agent orchestrator that works with multiple coding agents through a
-    unified adapter pattern. You choose which agent powers your workspaces, and Band
-    handles task submission, output streaming, session management, and lifecycle tracking
-    regardless of which agent is running underneath.
+    unified adapter pattern. You choose which agent powers your chat panes, and Band
+    handles message dispatch, output streaming, session management, and lifecycle
+    tracking regardless of which agent is running underneath.
   </p>
 
   <h2>Supported Agents</h2>
   <p>
-    Band currently ships adapters for six coding agents. Each adapter implements the
-    same <code>CodingAgent</code> interface, so switching between agents requires only a
-    settings change — no workflow modifications.
+    Band currently supports three coding agents. They are auto-detected on first launch
+    by looking for their binaries (<code>claude</code>, <code>codex</code>,
+    <code>opencode</code>) on your <code>PATH</code> and added to the
+    <code>codingAgents</code> setting. Each adapter implements the same
+    <code>CodingAgent</code> interface, so switching between them only takes a settings
+    change — no workflow modifications.
   </p>
 
   <table>
@@ -22,10 +25,7 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
       <tr>
         <th>Feature</th>
         <th>Claude Code</th>
-        <th>Cursor CLI</th>
-        <th>OpenAI Codex (SDK)</th>
-        <th>Codex (CLI)</th>
-        <th>Gemini CLI</th>
+        <th>Codex</th>
         <th>OpenCode</th>
       </tr>
     </thead>
@@ -33,26 +33,17 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
       <tr>
         <td>Cost tracking</td>
         <td>Yes</td>
-        <td>No</td>
         <td>Yes</td>
-        <td>Yes</td>
-        <td>No</td>
         <td>No</td>
       </tr>
       <tr>
         <td>Session listing</td>
         <td>Yes</td>
-        <td>No</td>
-        <td>No</td>
         <td>Yes</td>
-        <td>No</td>
         <td>Yes</td>
       </tr>
       <tr>
         <td>Real-time streaming</td>
-        <td>Yes</td>
-        <td>Yes</td>
-        <td>Yes</td>
         <td>Yes</td>
         <td>Yes</td>
         <td>Yes</td>
@@ -62,15 +53,9 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
         <td>Yes</td>
         <td>Yes</td>
         <td>Yes</td>
-        <td>Yes</td>
-        <td>Yes</td>
-        <td>Yes</td>
       </tr>
       <tr>
         <td>Custom model selection</td>
-        <td>Yes</td>
-        <td>Yes</td>
-        <td>Yes</td>
         <td>Yes</td>
         <td>Yes</td>
         <td>Yes</td>
@@ -80,19 +65,9 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
         <td>Yes</td>
         <td>No</td>
         <td>No</td>
-        <td>No</td>
-        <td>Yes</td>
-        <td>No</td>
       </tr>
     </tbody>
   </table>
-
-  <p>
-    The two Codex adapters cover different runtimes:
-    <code>openai-codex</code> uses the <code>@openai/codex-sdk</code> Node SDK
-    in-process, while <code>codex</code> shells out to the standalone
-    <code>codex</code> CLI binary.
-  </p>
 
   <h2>The Adapter Pattern</h2>
   <p>
@@ -125,12 +100,9 @@ import DocsLayout from "../../layouts/DocsLayout.astro";
     machine and pick a default. The agent <code>type</code> values are:
   </p>
   <ul>
-    <li><code>claude-code</code> — Claude Code (auto-detected from <code>claude</code> on PATH)</li>
-    <li><code>cursor-cli</code> — Cursor CLI</li>
-    <li><code>openai-codex</code> — OpenAI Codex via the Node SDK</li>
-    <li><code>codex</code> — Codex CLI binary (auto-detected from <code>codex</code> on PATH)</li>
-    <li><code>gemini-cli</code> — Gemini CLI</li>
-    <li><code>opencode</code> — OpenCode (auto-detected from <code>opencode</code> on PATH)</li>
+    <li><code>claude-code</code> — Claude Code (auto-detected from <code>claude</code> on <code>PATH</code>)</li>
+    <li><code>codex</code> — Codex CLI (auto-detected from <code>codex</code> on <code>PATH</code>)</li>
+    <li><code>opencode</code> — OpenCode (auto-detected from <code>opencode</code> on <code>PATH</code>)</li>
   </ul>
   <p>
     Each agent entry can specify its own <code>command</code> (custom executable path)

@@ -8,7 +8,7 @@ const faqs = [
   },
   {
     q: "What coding agents work with Band?",
-    a: "Band currently ships adapters for six coding agents: Claude Code, Cursor CLI, OpenAI Codex (via the Node SDK), Codex (via the standalone CLI), Gemini CLI, and OpenCode. The agent adapter pattern makes it straightforward to add new ones. You can configure which agents are available and pick a default in Settings, then override per chat pane.",
+    a: "Band currently supports three coding agents: Claude Code, Codex (via the standalone CLI), and OpenCode. They are auto-detected on first launch from the binaries on your PATH (claude, codex, opencode). The agent adapter pattern makes it straightforward to add new ones. You can configure which agents are available and pick a default in Settings, then override per chat pane.",
   },
   {
     q: "Is Band open source?",
@@ -40,7 +40,7 @@ const faqs = [
   },
   {
     q: "How much does Band cost?",
-    a: "Band is free and open source. You'll need your own API keys or subscriptions for the coding agents you use (Claude Code, Cursor, OpenAI Codex, Gemini, OpenCode), but Band itself has no cost.",
+    a: "Band is free and open source. You'll need your own API keys or subscriptions for the coding agents you use (Claude Code, Codex, OpenCode), but Band itself has no cost.",
   },
 ];
 ---

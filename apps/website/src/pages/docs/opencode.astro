@@ -1,0 +1,61 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+---
+<DocsLayout title="OpenCode — Band Docs">
+  <h1>OpenCode</h1>
+  <p>
+    OpenCode is one of the three coding agents Band ships out of the box. Band runs
+    the <code>opencode</code> CLI binary as a child process and reads JSONL events
+    line-by-line from stdout. The adapter supports session listing, model discovery,
+    and skill discovery, but does not surface per-turn cost tracking.
+  </p>
+
+  <h2>Prerequisites</h2>
+  <ol>
+    <li>Install OpenCode so the <code>opencode</code> binary is on your <code>PATH</code>.</li>
+    <li>Authenticate via the OpenCode CLI's normal flow.</li>
+    <li>Verify the binary works: <code>opencode --version</code>.</li>
+  </ol>
+  <p>
+    On first launch Band detects <code>opencode</code> automatically and adds an entry
+    to the <code>codingAgents</code> setting. You can override the executable path or
+    the model from Settings.
+  </p>
+
+  <h2>Models</h2>
+  <p>
+    The adapter caches the model list returned by OpenCode and uses it to validate
+    per-message overrides. If a chat pane requests a model that OpenCode doesn't
+    advertise (for example, a Claude model passed through from a switched agent),
+    Band drops the override and lets OpenCode use its own default.
+  </p>
+
+  <h2>Session Listing &amp; Resume</h2>
+  <p>
+    OpenCode persists session transcripts under <code>~/.opencode/sessions/</code>
+    (or wherever your OpenCode install configures them). Band reads this directory to
+    populate the session list per workspace, and resumes threads by passing the
+    session ID through to a follow-up <code>runSession</code> call.
+  </p>
+
+  <h2>Skills</h2>
+  <p>
+    Band discovers OpenCode skills via the standard
+    <code>readSkillsFromDir</code> helper, looking under
+    <code>~/.opencode/skills/</code> and <code>&lt;workspace&gt;/.opencode/skills/</code>.
+  </p>
+
+  <h2>Configuration Options</h2>
+  <ul>
+    <li><strong>model</strong> &mdash; Default model id (validated against the cached OpenCode model list).</li>
+    <li><strong>executablePath</strong> &mdash; Path to the <code>opencode</code> binary if it isn't on <code>PATH</code>.</li>
+    <li><strong>maxTurns</strong> &mdash; Maximum number of agentic turns per session.</li>
+  </ul>
+
+  <h2>Differences vs Claude Code</h2>
+  <ul>
+    <li><strong>No cost tracking.</strong> The adapter's <code>supportedFeatures.costTracking</code> is <code>false</code>; Band's session-result event reports zero cost.</li>
+    <li><strong>No interactive tool prompts.</strong> All tool calls are auto-approved.</li>
+    <li><strong>No status hooks.</strong> Agent status comes from Band's own session events, not from out-of-process hooks.</li>
+  </ul>
+</DocsLayout>

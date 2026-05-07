@@ -1,0 +1,84 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+---
+<DocsLayout title="Codex — Band Docs">
+  <h1>Codex</h1>
+  <p>
+    Codex is one of the three coding agents Band ships out of the box. Band uses the
+    <code>@openai/codex-sdk</code> Node SDK, which wraps the standalone <code>codex</code>
+    CLI binary and exchanges JSONL events over stdin/stdout. The adapter exposes
+    cost tracking, session listing, mode switching, and model selection.
+  </p>
+
+  <h2>Prerequisites</h2>
+  <ol>
+    <li>Install the Codex CLI binary so <code>codex</code> is on your <code>PATH</code> (Band runs <code>which codex</code> at construction time to resolve it).</li>
+    <li>Authenticate with your OpenAI account using the Codex CLI's normal sign-in flow.</li>
+    <li>Verify the binary works: <code>codex --version</code>.</li>
+  </ol>
+  <p>
+    On first launch Band detects <code>codex</code> automatically and adds an entry to
+    the <code>codingAgents</code> setting. You can override the path or the model from
+    Settings if you have a custom build.
+  </p>
+
+  <h2>Modes</h2>
+  <p>The Codex adapter exposes two modes that map onto the SDK's sandbox setting:</p>
+  <ul>
+    <li><strong>edit</strong> &mdash; <code>sandbox: workspace-write</code>. The agent can read, edit files, and run commands in the worktree.</li>
+    <li><strong>plan</strong> &mdash; <code>sandbox: read-only</code>. The agent browses files in read-only mode for planning passes.</li>
+  </ul>
+
+  <h2>Models</h2>
+  <p>
+    Band ships a hardcoded list of GPT-5-family models that the Codex CLI supports
+    (<code>gpt-5.5</code>, <code>gpt-5.4</code>, <code>gpt-5.4-mini</code>,
+    <code>gpt-5.3-codex</code>, <code>gpt-5.2-codex</code>). All of these cap at a
+    400k-token context window inside the Codex CLI tier. Selecting a model from
+    another provider (e.g. a Claude model) is silently ignored — the adapter falls
+    back to Codex's default.
+  </p>
+
+  <h2>Session Listing &amp; Resume</h2>
+  <p>
+    Codex stores session transcripts under <code>~/.codex/sessions/</code>. Band reads
+    that directory to populate the session list per workspace and exposes
+    <code>getSessionMessages</code> for paging through history. Sending a message with
+    an existing <code>sessionId</code> resumes the thread via
+    <code>codex.resumeThread()</code>, so Band continues the conversation in context.
+  </p>
+
+  <h2>Skills</h2>
+  <p>
+    The adapter discovers skills in three locations and merges the lists, with
+    later sources overriding earlier ones:
+  </p>
+  <ul>
+    <li><code>~/.codex/skills/.system/</code> &mdash; built-in skills shipped with Codex.</li>
+    <li><code>~/.codex/skills/</code> &mdash; user-global skills.</li>
+    <li><code>&lt;workspace&gt;/.codex/skills/</code> &mdash; project-local skills.</li>
+  </ul>
+
+  <h2>Cost Tracking</h2>
+  <p>
+    Codex emits per-turn token usage on the <code>turn.completed</code> event. Band
+    accumulates input, output, and reasoning-output tokens per session into a process-
+    local LRU map (capped at 500 sessions) so <code>totalProcessedTokens</code> stays
+    monotonic across multiple <code>runSession</code> calls in the same Codex thread.
+    The cumulative counts are reset when the server restarts.
+  </p>
+
+  <h2>Configuration Options</h2>
+  <ul>
+    <li><strong>model</strong> &mdash; Default model id. Per-message overrides are accepted but ignored if the value isn't a known Codex model.</li>
+    <li><strong>executablePath</strong> &mdash; Path to the <code>codex</code> binary if it isn't on <code>PATH</code>.</li>
+    <li><strong>maxTurns</strong> &mdash; Maximum number of agentic turns per session.</li>
+  </ul>
+
+  <h2>Differences vs Claude Code</h2>
+  <ul>
+    <li><strong>No interactive tool prompts.</strong> The Codex SDK does not surface user-input requests, so all tool calls are auto-approved within the chosen sandbox.</li>
+    <li><strong>No <code>PreToolUse</code> hooks.</strong> Codex doesn't have a hook system, so the "needs attention" status flip that Claude Code uses for <code>AskUserQuestion</code> / <code>ExitPlanMode</code> doesn't apply here.</li>
+    <li><strong>Process-local cumulative cost.</strong> Token totals are per-process and not durable across server restarts.</li>
+  </ul>
+</DocsLayout>
