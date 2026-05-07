@@ -27,7 +27,7 @@ import {
   SquareArrowOutUpRight,
   Undo2,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useAdapter } from "../context";
 import { useIsDark } from "../hooks/use-is-dark";
 import { useSearch } from "../hooks/use-search";
@@ -1003,6 +1003,22 @@ export function DiffView({
   // Track which file diff is currently in view for tree sidebar highlighting
   const [activeFile, setActiveFile] = useState<string | null>(null);
 
+  // Track the scroll container's visible height so we can size the trailing
+  // spacer that lets the last file be scrolled to the top of the viewport
+  // even when its content is shorter than the visible area.
+  const [scrollContainerHeight, setScrollContainerHeight] = useState<number>(0);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-attach when summary changes so the observer is set up after the scroll container mounts (it lives behind a loading/empty-state guard)
+  useLayoutEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const update = () => setScrollContainerHeight(container.clientHeight);
+    update();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(update);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [summary]);
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-attach when summary changes so the listener is set up after the scroll container mounts
   useEffect(() => {
     const container = scrollContainerRef.current;
@@ -1016,34 +1032,24 @@ export function DiffView({
         const names = filenamesRef.current;
         if (names.length === 0) return;
         const rect = container.getBoundingClientRect();
-        const EDGE_BUFFER = 40;
 
-        // If scrolled near the top, always select the first file
-        if (container.scrollTop <= EDGE_BUFFER) {
-          setActiveFile((prev) => (prev === names[0] ? prev : names[0]));
-          return;
-        }
-        // If scrolled near the bottom, always select the last file
-        if (container.scrollHeight - container.scrollTop - container.clientHeight <= EDGE_BUFFER) {
-          const last = names[names.length - 1];
-          setActiveFile((prev) => (prev === last ? prev : last));
-          return;
-        }
-
-        const center = rect.top + rect.height / 2;
+        // Pick the file whose top is closest to the top of the scroll viewport.
+        // If a file spans the viewport top, prefer it. Otherwise pick the file
+        // whose top edge is nearest to the viewport top (above or below).
+        const top = rect.top;
         let closest: string | null = null;
         let closestDist = Infinity;
         for (const name of names) {
           const el = document.getElementById(`diff-file-${encodeURIComponent(name)}`);
           if (!el) continue;
           const elRect = el.getBoundingClientRect();
-          // If the element spans the center, it's the active file
-          if (elRect.top <= center && elRect.bottom >= center) {
+          // If the element spans the viewport top, it's the active file
+          if (elRect.top <= top && elRect.bottom > top) {
             closest = name;
             break;
           }
-          // Otherwise, pick the one whose edge is closest to center
-          const dist = Math.min(Math.abs(elRect.top - center), Math.abs(elRect.bottom - center));
+          // Otherwise, pick the one whose top edge is closest to the viewport top
+          const dist = Math.abs(elRect.top - top);
           if (dist < closestDist) {
             closestDist = dist;
             closest = name;
@@ -1548,25 +1554,47 @@ export function DiffView({
         )}
         <div ref={scrollContainerRef} className="min-h-0 flex-1 overflow-y-auto">
           <div className="flex flex-col gap-3 p-3">
-            {filenames.map((filename) => (
-              <LazyFileRow
-                key={filename}
-                filename={filename}
-                status={fileStatuses[filename]}
-                cacheEntry={diffCache.get(filename)}
-                viewMode={viewMode}
-                expandAll={expandAll}
-                focusedFile={focusedFile}
-                isActive={activeFile === filename}
-                scrollContainerRef={scrollContainerRef}
-                onToggleFile={handleToggleFile}
-                onLoadMoreContext={handleLoadMoreContext}
-                onShowFullFile={handleShowFullFile}
-                onOpenFile={onOpenFile}
-                onRevertFile={adapter.revertFile ? handleRevertFile : undefined}
-                onEditorViews={handleEditorViews}
-              />
-            ))}
+            {filenames.map((filename, index) => {
+              const isLast = index === filenames.length - 1;
+              const row = (
+                <LazyFileRow
+                  key={filename}
+                  filename={filename}
+                  status={fileStatuses[filename]}
+                  cacheEntry={diffCache.get(filename)}
+                  viewMode={viewMode}
+                  expandAll={expandAll}
+                  focusedFile={focusedFile}
+                  isActive={activeFile === filename}
+                  scrollContainerRef={scrollContainerRef}
+                  onToggleFile={handleToggleFile}
+                  onLoadMoreContext={handleLoadMoreContext}
+                  onShowFullFile={handleShowFullFile}
+                  onOpenFile={onOpenFile}
+                  onRevertFile={adapter.revertFile ? handleRevertFile : undefined}
+                  onEditorViews={handleEditorViews}
+                />
+              );
+              if (!isLast) return row;
+              // The last row is wrapped in a fake container that owns the
+              // trailing spacer. The wrapper's min-height keeps the bottom of
+              // the scroll content stable so the last row can always be
+              // scrolled to the top of the viewport. Toggling the row's
+              // accordion only resizes the spacer — the LazyFileRow itself
+              // keeps its natural size, so the bordered card hugs its content.
+              return (
+                <div
+                  key={`${filename}-last-wrapper`}
+                  className="flex flex-col"
+                  style={
+                    scrollContainerHeight > 0 ? { minHeight: scrollContainerHeight } : undefined
+                  }
+                >
+                  {row}
+                  <div aria-hidden className="flex-1" />
+                </div>
+              );
+            })}
           </div>
         </div>
         {/* Bottom status bar — totals for the current diff */}
