@@ -673,6 +673,123 @@ const LANG_MAP: Record<string, string> = {
   ".diff": "diff",
 };
 
+// ---------------------------------------------------------------------------
+// Workspace diff helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Branch names accepted by diff/revert procedures. Forbids leading `-` so the
+ * value can't be interpreted by git as a flag (e.g. `--upload-pack=`, `--exec=`)
+ * when it lands in `git merge-base <branch> HEAD` or `git checkout <branch> -- file`.
+ * The trpc server is local-only, but `execFile` doesn't pass through a shell, so
+ * a leading-dash check is enough to close the only realistic injection vector.
+ */
+const compareBranchSchema = z
+  .string()
+  .min(1)
+  .regex(/^[^-]/, "branch name must not start with '-'")
+  .optional();
+
+const EMPTY_TREE_ARGS = ["hash-object", "-t", "tree", "/dev/null"];
+
+interface DiffContext {
+  /** Resolved compare branch — defaults to project default. */
+  compareBranch: string;
+  /** Current branch name, or `defaultBranch` if HEAD is detached / unborn. */
+  headBranch: string;
+  /** Commit/tree to diff against. */
+  mergeBase: string;
+}
+
+/**
+ * Resolves the `(headBranch, mergeBase, compareBranch)` triple shared by
+ * `getDiff`, `getDiffSummary`, and `revertFile`. Falls back to the empty tree
+ * when the workspace has no commits yet (so brand-new repos don't 500).
+ */
+async function resolveDiffContext(
+  cwd: string,
+  defaultBranch: string,
+  diffMode: "uncommitted" | "branch",
+  compareBranchInput: string | undefined,
+): Promise<DiffContext> {
+  const compareBranch =
+    diffMode === "uncommitted" ? defaultBranch : (compareBranchInput ?? defaultBranch);
+
+  let headBranch: string;
+  try {
+    headBranch = (await execGit(["rev-parse", "--abbrev-ref", "HEAD"], cwd)).trim();
+  } catch {
+    headBranch = defaultBranch;
+  }
+
+  let mergeBase: string;
+  if (diffMode === "uncommitted") {
+    try {
+      mergeBase = (await execGit(["rev-parse", "HEAD"], cwd)).trim();
+    } catch {
+      mergeBase = (await execGit(EMPTY_TREE_ARGS, cwd)).trim();
+    }
+  } else {
+    try {
+      mergeBase = (await execGit(["merge-base", compareBranch, "HEAD"], cwd)).trim();
+    } catch {
+      mergeBase = (await execGit(EMPTY_TREE_ARGS, cwd)).trim();
+    }
+  }
+
+  return { compareBranch, headBranch, mergeBase };
+}
+
+/** Parses the trailing summary line of `git diff --stat`. */
+function parseDiffStatSummary(statOutput: string): {
+  filesChanged: number;
+  insertions: number;
+  deletions: number;
+} {
+  const statLines = statOutput.trim().split("\n");
+  const summaryLine = statLines[statLines.length - 1] || "";
+
+  const filesMatch = summaryLine.match(/(\d+)\s+files?\s+changed/);
+  const insertMatch = summaryLine.match(/(\d+)\s+insertions?\(\+\)/);
+  const deleteMatch = summaryLine.match(/(\d+)\s+deletions?\(-\)/);
+
+  return {
+    filesChanged: filesMatch ? Number.parseInt(filesMatch[1], 10) : 0,
+    insertions: insertMatch ? Number.parseInt(insertMatch[1], 10) : 0,
+    deletions: deleteMatch ? Number.parseInt(deleteMatch[1], 10) : 0,
+  };
+}
+
+/** Builds the `path -> status code` map from `git diff --name-status`. */
+function parseFileStatuses(nameStatusOutput: string): Record<string, string> {
+  const fileStatuses: Record<string, string> = {};
+  for (const line of nameStatusOutput.trim().split("\n").filter(Boolean)) {
+    const parts = line.split("\t");
+    const statusCode = parts[0][0];
+    if (statusCode === "R" && parts[2]) {
+      fileStatuses[parts[2]] = "R";
+    } else if (parts[1]) {
+      fileStatuses[parts[1]] = statusCode;
+    }
+  }
+  return fileStatuses;
+}
+
+/** Reads an untracked file as the lines that would appear in a synthesized diff. */
+async function readUntrackedFileLines(cwd: string, file: string): Promise<string[] | null> {
+  try {
+    const content = await readFile(join(cwd, file), "utf-8");
+    const lines = content.split("\n");
+    if (lines.length > 0 && lines[lines.length - 1] === "") {
+      lines.pop();
+    }
+    return lines;
+  } catch {
+    // Skip binary or unreadable files
+    return null;
+  }
+}
+
 const workspaceRouter = t.router({
   getTerminalConfig: publicProcedure
     .input(z.object({ workspaceId: z.string() }))
@@ -683,12 +800,67 @@ const workspaceRouter = t.router({
       return { config };
     }),
 
+  listBranches: publicProcedure
+    .input(z.object({ workspaceId: z.string() }))
+    .query(async ({ input }) => {
+      const workspace = resolveWorkspace(input.workspaceId);
+      if (!workspace) {
+        throw new Error("Workspace not found");
+      }
+
+      const cwd = workspace.worktree.path;
+      const defaultBranch = workspace.project.defaultBranch;
+
+      let headBranch: string | null = null;
+      try {
+        headBranch = (await execGit(["rev-parse", "--abbrev-ref", "HEAD"], cwd)).trim();
+      } catch {
+        // No commits yet — leave headBranch null
+      }
+
+      let branches: string[] = [];
+      try {
+        const output = await execGit(
+          ["for-each-ref", "--format=%(refname:short)", "refs/heads/"],
+          cwd,
+        );
+        branches = output
+          .trim()
+          .split("\n")
+          .map((b) => b.trim())
+          .filter(Boolean);
+      } catch (err) {
+        log.error(
+          `listBranches: for-each-ref failed for ${cwd}: ${err instanceof Error ? err.message : err}`,
+        );
+      }
+
+      // Drop the current branch (you don't compare against yourself) and pin
+      // the default branch to the front. When you're on the default branch,
+      // skip the re-add — comparing main↔main is a no-op and confusing.
+      const filtered = branches.filter((b) => b !== headBranch);
+      if (defaultBranch !== headBranch) {
+        const idx = filtered.indexOf(defaultBranch);
+        if (idx >= 0) {
+          filtered.splice(idx, 1);
+        }
+        filtered.unshift(defaultBranch);
+      }
+
+      return {
+        branches: filtered,
+        defaultBranch,
+        headBranch: headBranch ?? defaultBranch,
+      };
+    }),
+
   getDiff: publicProcedure
     .input(
       z.object({
         workspaceId: z.string(),
         contextLines: z.number().int().min(0).max(99999).optional(),
         diffMode: z.enum(["uncommitted", "branch"]).optional(),
+        compareBranch: compareBranchSchema,
       }),
     )
     .query(async ({ input }) => {
@@ -699,30 +871,12 @@ const workspaceRouter = t.router({
 
       const cwd = workspace.worktree.path;
       const defaultBranch = workspace.project.defaultBranch;
-
-      let headBranch: string;
-      try {
-        headBranch = (await execGit(["rev-parse", "--abbrev-ref", "HEAD"], cwd)).trim();
-      } catch {
-        // No commits yet — HEAD doesn't exist
-        headBranch = defaultBranch;
-      }
-
-      let mergeBase: string;
-      if (input.diffMode === "uncommitted") {
-        try {
-          mergeBase = (await execGit(["rev-parse", "HEAD"], cwd)).trim();
-        } catch {
-          // No commits yet — diff against the empty tree so all staged files appear as new
-          mergeBase = (await execGit(["hash-object", "-t", "tree", "/dev/null"], cwd)).trim();
-        }
-      } else {
-        try {
-          mergeBase = (await execGit(["merge-base", defaultBranch, "HEAD"], cwd)).trim();
-        } catch {
-          mergeBase = (await execGit(["hash-object", "-t", "tree", "/dev/null"], cwd)).trim();
-        }
-      }
+      const { compareBranch, headBranch, mergeBase } = await resolveDiffContext(
+        cwd,
+        defaultBranch,
+        input.diffMode ?? "branch",
+        input.compareBranch,
+      );
 
       const diffArgs = ["diff"];
       if (input.contextLines !== undefined) {
@@ -732,62 +886,37 @@ const workspaceRouter = t.router({
       let diff = await execGit(diffArgs, cwd);
 
       const statOutput = await execGit(["diff", "--stat", mergeBase], cwd);
-      const statLines = statOutput.trim().split("\n");
-      const summaryLine = statLines[statLines.length - 1] || "";
+      const stats = parseDiffStatSummary(statOutput);
 
-      let filesChanged = 0;
-      let insertions = 0;
-      let deletions = 0;
-
-      const filesMatch = summaryLine.match(/(\d+)\s+files?\s+changed/);
-      const insertMatch = summaryLine.match(/(\d+)\s+insertions?\(\+\)/);
-      const deleteMatch = summaryLine.match(/(\d+)\s+deletions?\(-\)/);
-
-      if (filesMatch) filesChanged = Number.parseInt(filesMatch[1], 10);
-      if (insertMatch) insertions = Number.parseInt(insertMatch[1], 10);
-      if (deleteMatch) deletions = Number.parseInt(deleteMatch[1], 10);
-
-      const fileStatuses: Record<string, string> = {};
       const nameStatusOutput = await execGit(["diff", "--name-status", mergeBase], cwd);
-      for (const line of nameStatusOutput.trim().split("\n").filter(Boolean)) {
-        const parts = line.split("\t");
-        const statusCode = parts[0][0];
-        if (statusCode === "R" && parts[2]) {
-          fileStatuses[parts[2]] = "R";
-        } else if (parts[1]) {
-          fileStatuses[parts[1]] = statusCode;
-        }
-      }
+      const fileStatuses = parseFileStatuses(nameStatusOutput);
 
       const untrackedOutput = await execGit(["ls-files", "--others", "--exclude-standard"], cwd);
       const untrackedFiles = untrackedOutput.trim().split("\n").filter(Boolean);
 
       for (const file of untrackedFiles) {
-        try {
-          const content = await readFile(join(cwd, file), "utf-8");
-          const lines = content.split("\n");
-          if (lines.length > 0 && lines[lines.length - 1] === "") {
-            lines.pop();
-          }
-          diff += `diff --git a/${file} b/${file}\n`;
-          diff += "new file mode 100644\n";
-          diff += "--- /dev/null\n";
-          diff += `+++ b/${file}\n`;
-          diff += `@@ -0,0 +1,${lines.length} @@\n`;
-          diff += lines.map((l) => `+${l}`).join("\n");
-          diff += "\n";
-          filesChanged++;
-          insertions += lines.length;
-          fileStatuses[file] = "U";
-        } catch {
-          // Skip binary or unreadable files
-        }
+        const lines = await readUntrackedFileLines(cwd, file);
+        if (lines === null) continue;
+        diff += `diff --git a/${file} b/${file}\n`;
+        diff += "new file mode 100644\n";
+        diff += "--- /dev/null\n";
+        diff += `+++ b/${file}\n`;
+        diff += `@@ -0,0 +1,${lines.length} @@\n`;
+        diff += lines.map((l) => `+${l}`).join("\n");
+        diff += "\n";
+        stats.filesChanged++;
+        stats.insertions += lines.length;
+        fileStatuses[file] = "U";
       }
 
       return {
         diff,
-        stats: { filesChanged, insertions, deletions },
-        baseBranch: defaultBranch,
+        stats,
+        // `compareBranch` is the branch we diffed against (the user's pick, or
+        // the project default). `defaultBranch` is the project default. They
+        // diverge once a non-default branch is picked.
+        compareBranch,
+        defaultBranch,
         headBranch,
         fileStatuses,
       };
@@ -798,6 +927,7 @@ const workspaceRouter = t.router({
       z.object({
         workspaceId: z.string(),
         diffMode: z.enum(["uncommitted", "branch"]).optional(),
+        compareBranch: compareBranchSchema,
       }),
     )
     .query(async ({ input }) => {
@@ -808,80 +938,34 @@ const workspaceRouter = t.router({
 
       const cwd = workspace.worktree.path;
       const defaultBranch = workspace.project.defaultBranch;
-
-      let headBranch: string;
-      try {
-        headBranch = (await execGit(["rev-parse", "--abbrev-ref", "HEAD"], cwd)).trim();
-      } catch {
-        // No commits yet — HEAD doesn't exist
-        headBranch = defaultBranch;
-      }
-
-      let mergeBase: string;
-      if (input.diffMode === "uncommitted") {
-        try {
-          mergeBase = (await execGit(["rev-parse", "HEAD"], cwd)).trim();
-        } catch {
-          // No commits yet — diff against the empty tree so all staged files appear as new
-          mergeBase = (await execGit(["hash-object", "-t", "tree", "/dev/null"], cwd)).trim();
-        }
-      } else {
-        try {
-          mergeBase = (await execGit(["merge-base", defaultBranch, "HEAD"], cwd)).trim();
-        } catch {
-          mergeBase = (await execGit(["hash-object", "-t", "tree", "/dev/null"], cwd)).trim();
-        }
-      }
+      const { compareBranch, headBranch, mergeBase } = await resolveDiffContext(
+        cwd,
+        defaultBranch,
+        input.diffMode ?? "branch",
+        input.compareBranch,
+      );
 
       const statOutput = await execGit(["diff", "--stat", mergeBase], cwd);
-      const statLines = statOutput.trim().split("\n");
-      const summaryLine = statLines[statLines.length - 1] || "";
+      const stats = parseDiffStatSummary(statOutput);
 
-      let filesChanged = 0;
-      let insertions = 0;
-      let deletions = 0;
-
-      const filesMatch = summaryLine.match(/(\d+)\s+files?\s+changed/);
-      const insertMatch = summaryLine.match(/(\d+)\s+insertions?\(\+\)/);
-      const deleteMatch = summaryLine.match(/(\d+)\s+deletions?\(-\)/);
-
-      if (filesMatch) filesChanged = Number.parseInt(filesMatch[1], 10);
-      if (insertMatch) insertions = Number.parseInt(insertMatch[1], 10);
-      if (deleteMatch) deletions = Number.parseInt(deleteMatch[1], 10);
-
-      const fileStatuses: Record<string, string> = {};
       const nameStatusOutput = await execGit(["diff", "--name-status", mergeBase], cwd);
-      for (const line of nameStatusOutput.trim().split("\n").filter(Boolean)) {
-        const parts = line.split("\t");
-        const statusCode = parts[0][0];
-        if (statusCode === "R" && parts[2]) {
-          fileStatuses[parts[2]] = "R";
-        } else if (parts[1]) {
-          fileStatuses[parts[1]] = statusCode;
-        }
-      }
+      const fileStatuses = parseFileStatuses(nameStatusOutput);
 
       const untrackedOutput = await execGit(["ls-files", "--others", "--exclude-standard"], cwd);
       const untrackedFiles = untrackedOutput.trim().split("\n").filter(Boolean);
 
       for (const file of untrackedFiles) {
-        try {
-          const content = await readFile(join(cwd, file), "utf-8");
-          const lines = content.split("\n");
-          if (lines.length > 0 && lines[lines.length - 1] === "") {
-            lines.pop();
-          }
-          filesChanged++;
-          insertions += lines.length;
-          fileStatuses[file] = "U";
-        } catch {
-          // Skip binary or unreadable files
-        }
+        const lines = await readUntrackedFileLines(cwd, file);
+        if (lines === null) continue;
+        stats.filesChanged++;
+        stats.insertions += lines.length;
+        fileStatuses[file] = "U";
       }
 
       return {
-        stats: { filesChanged, insertions, deletions },
-        baseBranch: defaultBranch,
+        stats,
+        compareBranch,
+        defaultBranch,
         headBranch,
         fileStatuses,
         mergeBase,
@@ -946,6 +1030,7 @@ const workspaceRouter = t.router({
         workspaceId: z.string(),
         filePath: z.string(),
         diffMode: z.enum(["uncommitted", "branch"]),
+        compareBranch: compareBranchSchema,
       }),
     )
     .mutation(async ({ input }) => {
@@ -967,22 +1052,14 @@ const workspaceRouter = t.router({
         return { ok: true };
       }
 
-      // Resolve the reference commit for the diff mode
-      let ref: string;
-      if (diffMode === "uncommitted") {
-        try {
-          ref = (await execGit(["rev-parse", "HEAD"], cwd)).trim();
-        } catch {
-          ref = (await execGit(["hash-object", "-t", "tree", "/dev/null"], cwd)).trim();
-        }
-      } else {
-        const defaultBranch = workspace.project.defaultBranch;
-        try {
-          ref = (await execGit(["merge-base", defaultBranch, "HEAD"], cwd)).trim();
-        } catch {
-          ref = (await execGit(["hash-object", "-t", "tree", "/dev/null"], cwd)).trim();
-        }
-      }
+      // Reuse the shared resolver so the reference commit matches what
+      // getDiff/getDiffSummary computed — otherwise revert can drift.
+      const { mergeBase: ref } = await resolveDiffContext(
+        cwd,
+        workspace.project.defaultBranch,
+        diffMode,
+        input.compareBranch,
+      );
 
       // Determine the tracked file status from the diff
       const nameStatusOutput = await execGit(["diff", "--name-status", ref, "--", filePath], cwd);

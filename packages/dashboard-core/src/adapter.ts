@@ -74,20 +74,33 @@ export interface DashboardAdapter {
     workspaceId: string,
     contextLines?: number,
     diffMode?: DiffMode,
+    compareBranch?: string,
   ): Promise<WorkspaceDiff>;
-  getWorkspaceDiffSummary?(workspaceId: string, diffMode?: DiffMode): Promise<WorkspaceDiffSummary>;
+  getWorkspaceDiffSummary?(
+    workspaceId: string,
+    diffMode?: DiffMode,
+    compareBranch?: string,
+  ): Promise<WorkspaceDiffSummary>;
   getFileDiff?(
     workspaceId: string,
     filePath: string,
     mergeBase: string,
     contextLines?: number,
   ): Promise<FileDiffResult>;
+  listWorkspaceBranches?(
+    workspaceId: string,
+  ): Promise<{ branches: string[]; defaultBranch: string; headBranch: string }>;
   listWorkspaceFiles?(workspaceId: string, path: string): Promise<FileListResult>;
   getWorkspaceFile?(workspaceId: string, path: string): Promise<FileContentResult>;
   saveWorkspaceFile?(workspaceId: string, path: string, content: string): Promise<void>;
 
   /** Revert a single file to its original state, discarding all changes. */
-  revertFile?(workspaceId: string, filePath: string, diffMode: string): Promise<void>;
+  revertFile?(
+    workspaceId: string,
+    filePath: string,
+    diffMode: DiffMode,
+    compareBranch?: string,
+  ): Promise<void>;
 
   /** Get a URL for raw file content (images, PDFs, etc.) */
   getWorkspaceFileUrl?(workspaceId: string, path: string): string;

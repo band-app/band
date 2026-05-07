@@ -648,11 +648,13 @@ describe("tRPC — workspace operations", () => {
     const data = await trpcData<{
       diff: string;
       stats: { filesChanged: number; insertions: number; deletions: number };
-      baseBranch: string;
+      compareBranch: string;
+      defaultBranch: string;
       headBranch: string;
       fileStatuses: Record<string, string>;
     }>(res);
-    expect(data.baseBranch).toBe("main");
+    expect(data.compareBranch).toBe("main");
+    expect(data.defaultBranch).toBe("main");
     expect(data.headBranch).toBe("main");
   });
 
@@ -690,6 +692,152 @@ describe("tRPC — workspace operations", () => {
       workspaceId: "nonexistent-main",
     });
     expect(res.status).toBe(500);
+  });
+
+  // -- workspace.listBranches --
+
+  it("workspace.listBranches returns branches with default first and current excluded", async () => {
+    // feature-1 worktree should already exist from earlier tests in this describe block.
+    const res = await trpcQuery(server.url, "workspace.listBranches", {
+      workspaceId: "repo-feature-1",
+    });
+    expect(res.status).toBe(200);
+    const data = await trpcData<{
+      branches: string[];
+      defaultBranch: string;
+      headBranch: string;
+    }>(res);
+
+    expect(data.defaultBranch).toBe("main");
+    expect(data.headBranch).toBe("feature-1");
+    expect(data.branches).toContain("main");
+    expect(data.branches[0]).toBe("main");
+    // Current branch should not appear in the list (you don't compare against yourself).
+    expect(data.branches).not.toContain("feature-1");
+  });
+
+  it("workspace.listBranches omits default when on the default branch", async () => {
+    // On the default branch, comparing against `main` is a no-op, so the
+    // server skips re-adding it to the list.
+    const res = await trpcQuery(server.url, "workspace.listBranches", {
+      workspaceId: "repo-main",
+    });
+    expect(res.status).toBe(200);
+    const data = await trpcData<{
+      branches: string[];
+      defaultBranch: string;
+      headBranch: string;
+    }>(res);
+
+    expect(data.defaultBranch).toBe("main");
+    expect(data.headBranch).toBe("main");
+    expect(data.branches).not.toContain("main");
+  });
+
+  // -- workspace.getDiff with compareBranch --
+
+  it("workspace.getDiff with non-default compareBranch uses merge-base of that branch", async () => {
+    // Set up: create `develop` from main, add a commit on develop, switch back
+    // to main, add a commit there. Then on a feature branch off main, the diff
+    // against `develop` should NOT include the main-only commit (because the
+    // merge-base of develop and HEAD is the original main tip).
+    git(repoPath, ["branch", "develop"]);
+    writeFileSync(join(repoPath, "develop-only.txt"), "develop\n");
+    git(repoPath, ["add", "develop-only.txt"]);
+    git(repoPath, ["commit", "-m", "develop commit"]);
+    git(repoPath, ["branch", "-f", "develop", "HEAD"]);
+    git(repoPath, ["reset", "--hard", "HEAD~1"]);
+
+    // Create a fresh feature workspace off main.
+    const createRes = await trpcMutate(server.url, "workspaces.create", {
+      project: "repo",
+      branch: "feature-cmp",
+    });
+    expect(createRes.status).toBe(200);
+    const createData = await trpcData<{ path: string }>(createRes);
+    const featurePath = createData.path;
+
+    // Add a commit on the feature branch.
+    writeFileSync(join(featurePath, "feature-only.txt"), "feature\n");
+    git(featurePath, ["add", "feature-only.txt"]);
+    git(featurePath, ["commit", "-m", "feature commit"]);
+
+    // Diff against `develop` — should include feature-only.txt and develop-only.txt.
+    const developRes = await trpcQuery(server.url, "workspace.getDiff", {
+      workspaceId: "repo-feature-cmp",
+      diffMode: "branch",
+      compareBranch: "develop",
+    });
+    expect(developRes.status).toBe(200);
+    const developData = await trpcData<{
+      compareBranch: string;
+      defaultBranch: string;
+      fileStatuses: Record<string, string>;
+    }>(developRes);
+    expect(developData.compareBranch).toBe("develop");
+    expect(developData.defaultBranch).toBe("main");
+    // develop has a file main doesn't have, so diffing HEAD against merge-base(develop, HEAD)
+    // shows feature-only.txt as added (relative to the common ancestor).
+    expect(developData.fileStatuses["feature-only.txt"]).toBe("A");
+
+    // Diff against `main` — same merge-base in this setup, so the result matches.
+    const mainRes = await trpcQuery(server.url, "workspace.getDiff", {
+      workspaceId: "repo-feature-cmp",
+      diffMode: "branch",
+      compareBranch: "main",
+    });
+    expect(mainRes.status).toBe(200);
+    const mainData = await trpcData<{ compareBranch: string }>(mainRes);
+    expect(mainData.compareBranch).toBe("main");
+  });
+
+  it("workspace.getDiff rejects compareBranch starting with '-'", async () => {
+    // Defense-in-depth against branch names that git would treat as flags
+    // (e.g. `--upload-pack=`, `--exec=`).
+    const res = await trpcQuery(server.url, "workspace.getDiff", {
+      workspaceId: "repo-feature-cmp",
+      diffMode: "branch",
+      compareBranch: "--exec=bad",
+    });
+    expect(res.status).toBe(400);
+  });
+
+  // -- workspace.revertFile with compareBranch --
+
+  it("workspace.revertFile uses compareBranch when in branch mode", async () => {
+    // Use the feature-cmp workspace from the previous test. Modify a file
+    // that exists on the merge-base of `develop`/HEAD, then revert in
+    // branch mode against `develop` — it should restore the file.
+    const listRes = await trpcQuery(server.url, "projects.list");
+    const listData = await trpcData<{
+      projects: Array<{ worktrees: Array<{ branch: string; path: string }> }>;
+    }>(listRes);
+    const featureCmp = listData.projects[0].worktrees.find((wt) => wt.branch === "feature-cmp");
+    expect(featureCmp).toBeDefined();
+
+    // Modify README.md (which exists at the merge-base).
+    writeFileSync(join(featureCmp!.path, "README.md"), "# Modified\n");
+    git(featureCmp!.path, ["add", "README.md"]);
+    git(featureCmp!.path, ["commit", "-m", "modify readme"]);
+
+    const revertRes = await trpcMutate(server.url, "workspace.revertFile", {
+      workspaceId: "repo-feature-cmp",
+      filePath: "README.md",
+      diffMode: "branch",
+      compareBranch: "develop",
+    });
+    expect(revertRes.status).toBe(200);
+    const revertData = await trpcData<{ ok: boolean }>(revertRes);
+    expect(revertData.ok).toBe(true);
+
+    // After revert, the working tree should match the merge-base content.
+    const fileRes = await trpcQuery(server.url, "workspace.getFile", {
+      workspaceId: "repo-feature-cmp",
+      path: "README.md",
+    });
+    expect(fileRes.status).toBe(200);
+    const fileData = await trpcData<{ content: string }>(fileRes);
+    expect(fileData.content).toBe("# My Project\n");
   });
 
   // -- workspaces.runScript --
