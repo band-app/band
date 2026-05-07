@@ -1,7 +1,29 @@
-<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect width="32" height="32" rx="8" fill="#18181b"/>
-  <path d="M8 8h6v6H8V8Z" fill="#f97316"/>
-  <path d="M18 8h6v6h-6V8Z" fill="#f97316" fill-opacity="0.6"/>
-  <path d="M8 18h6v6H8v-6Z" fill="#f97316" fill-opacity="0.6"/>
-  <path d="M18 18h6v6h-6v-6Z" fill="#f97316" fill-opacity="0.3"/>
+<svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <!-- Rounded black square — matches Band brand mark (logo-64.png / icon.icns) -->
+  <rect width="32" height="32" rx="7" fill="#0a0a0a"/>
+
+  <!-- Drumsticks crossing above the drum -->
+  <g stroke="#ffffff" stroke-width="1.6" stroke-linecap="round">
+    <line x1="9" y1="6" x2="17.5" y2="14.5"/>
+    <line x1="23" y1="6" x2="14.5" y2="14.5"/>
+  </g>
+
+  <!-- Drum body (with rim) -->
+  <path
+    d="M16 12 c-4.7 0 -8.5 1.2 -8.5 2.6 v6.4 c0 1.6 3.8 3 8.5 3 s8.5 -1.4 8.5 -3 v-6.4 c0 -1.4 -3.8 -2.6 -8.5 -2.6 z"
+    fill="#ffffff"
+  />
+
+  <!-- Drum head shadow ellipse (interior of the rim) -->
+  <ellipse cx="16" cy="14.6" rx="8.5" ry="2.4" fill="#0a0a0a"/>
+  <ellipse cx="16" cy="14.6" rx="7.2" ry="1.7" fill="#ffffff"/>
+
+  <!-- Vertical lugs cut into the drum body -->
+  <g fill="#0a0a0a">
+    <rect x="10" y="16" width="0.9" height="6.5"/>
+    <rect x="13" y="16.4" width="0.9" height="7"/>
+    <rect x="15.6" y="16.6" width="0.9" height="7.2"/>
+    <rect x="18.2" y="16.4" width="0.9" height="7"/>
+    <rect x="21.1" y="16" width="0.9" height="6.5"/>
+  </g>
 </svg>
