@@ -42,6 +42,9 @@
 }
 
 :root {
+  /* Tells the browser to render native UI (scrollbars, form controls, the
+     resizer) in light mode by default. The .dark class below flips it. */
+  color-scheme: light;
   --radius: 0.625rem;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
@@ -69,6 +72,13 @@
 }
 
 .dark {
+  /* Switch native UI (scrollbars, form controls) to dark mode so the
+     Chromium overlay scrollbar uses a dark track + light thumb instead of
+     the default light track that looks washed-out on dark backgrounds.
+     `scrollbar-color` then darkens the thumb beyond Chromium's default
+     translucent-white so it sits more flush with the dark theme. */
+  color-scheme: dark;
+  scrollbar-color: oklch(0.32 0 0) transparent;
   --background: #181818;
   --foreground: oklch(0.922 0 0);
   --card: oklch(0.17 0 0);
