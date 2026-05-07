@@ -1,5 +1,6 @@
 import { createLogger } from "@band-app/logger";
 import { checkCli, installCli } from "./cli";
+import { installSkills } from "./cli-skills";
 import { checkHooks, installHooks } from "./hooks";
 import { whichBinary } from "./process-utils";
 import { type CodingAgentDefinition, loadSettings, saveSettings } from "./state";
@@ -25,12 +26,16 @@ const AGENT_CHECKS: { id: string; type: string; label: string; binary: string }[
  * 2. Ensure `codingAgents` is populated with detected agent CLIs.
  * 3. Ensure `notifications.soundOnNeedsAttention` defaults to `true`.
  * 4. Ensure Claude Code hooks are installed.
+ * 5. Sync the CLI-shipped skills into each detected agent's global skills
+ *    directory so a fresh install / auto-update lands the latest SKILL.md
+ *    files automatically (issue: sync-cli-skills).
  */
 export async function runFirstTimeSetup(): Promise<void> {
   await ensureCliInstalled();
   await ensureDefaultCodingAgents();
   ensureNotificationDefaults();
   await ensureClaudeHooks();
+  await ensureSkillsInstalled();
 }
 
 /**
@@ -138,5 +143,41 @@ async function ensureClaudeHooks(): Promise<void> {
       "Failed to install Claude Code hooks: %s",
       err instanceof Error ? err.message : String(err),
     );
+  }
+}
+
+/**
+ * Sync the bundled CLI skills into each detected agent's global skills dir.
+ *
+ * `installSkills` is idempotent: it only writes when the destination is
+ * missing or has different content. After an electron-updater install, the
+ * app relaunches → bootstrap → web server boot → `runFirstTimeSetup`, so
+ * this same step also handles the post-update refresh — no separate update
+ * hook is needed. Failures are logged but don't block boot, matching the
+ * rest of the setup pipeline.
+ */
+async function ensureSkillsInstalled(): Promise<void> {
+  try {
+    const settings = loadSettings();
+    const agentIds = (settings.codingAgents ?? []).map((a) => a.id);
+    if (agentIds.length === 0) {
+      // Nothing detected → nothing to sync. The next boot after an agent is
+      // installed will pick it up.
+      return;
+    }
+
+    const result = await installSkills({ agentIds, log });
+    const wrote = result.written.length + result.updated.length;
+    if (wrote > 0) {
+      log.info(
+        "Synced CLI skills (%d written, %d updated, %d unchanged, %d skipped)",
+        result.written.length,
+        result.updated.length,
+        result.unchanged.length,
+        result.skipped.length,
+      );
+    }
+  } catch (err) {
+    log.warn("Failed to sync CLI skills: %s", err instanceof Error ? err.message : String(err));
   }
 }
