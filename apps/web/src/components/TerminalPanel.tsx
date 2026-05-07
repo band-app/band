@@ -6,7 +6,7 @@ import { openExternalUrl } from "../lib/open-external-url";
 /** xterm.js theme that follows the app's dark mode. Background/foreground use the
  *  same neutrals as the rest of the UI so the terminal blends into the panel. */
 const DARK_TERMINAL_THEME: ITheme = {
-  background: "#181818",
+  background: "#1e1e1e",
   foreground: "#e8e8e8",
   cursor: "#e8e8e8",
   selectionBackground: "rgba(255, 255, 255, 0.2)",

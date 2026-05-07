@@ -329,7 +329,7 @@ function TaskCard({
   }, [task.id, onAction]);
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border/50 bg-card p-4 transition-colors hover:border-border">
+    <div className="flex flex-col gap-2 rounded-lg border-2 border-border/50 p-4 transition-colors hover:border-border">
       <div className="flex items-start justify-between gap-3">
         <p className="line-clamp-2 min-w-0 flex-1 text-sm font-medium text-foreground">
           {task.prompt}

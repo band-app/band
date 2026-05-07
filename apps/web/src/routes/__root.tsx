@@ -63,7 +63,7 @@ export const Route = createRootRoute({
       { title: "Band" },
       { name: "apple-mobile-web-app-capable", content: "yes" },
       { name: "apple-mobile-web-app-status-bar-style", content: "black-translucent" },
-      { name: "theme-color", content: "#181818" },
+      { name: "theme-color", content: "#1e1e1e" },
     ],
   }),
   component: RootLayout,

@@ -37,7 +37,9 @@ export function SettingsSection({
       <div
         data-slot="settings-section-card"
         className={cn(
-          "overflow-hidden rounded-xl border border-border bg-card",
+          // Group rows share the page background; only the outer border and
+          // 1px row dividers separate them visually.
+          "overflow-hidden rounded-xl border border-border",
           // Auto-divider between direct children (rows). Skips border-bottom of last child.
           "[&>*+*]:border-t [&>*+*]:border-border",
         )}

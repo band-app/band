@@ -292,7 +292,7 @@ function CronjobCard({
 
   return (
     <div
-      className={`flex flex-col gap-2 rounded-lg border border-border/50 bg-card p-4 transition-colors hover:border-border ${
+      className={`flex flex-col gap-2 rounded-lg border-2 border-border/50 p-4 transition-colors hover:border-border ${
         !job.enabled ? "opacity-60" : ""
       }`}
     >
