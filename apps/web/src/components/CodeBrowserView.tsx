@@ -195,6 +195,17 @@ export function CodeBrowserView({
   const isDesktop = useIsDesktop();
   const fileTabs = useFileTabs(workspaceId);
   const tabState = useTabState(workspaceId);
+
+  // Mirror tab state for synchronous reads inside callbacks. Lets the
+  // preview-open helper stay stable across tab changes, so callbacks
+  // built on top (handleSelectFile, navigateToEntry) don't churn deps
+  // and re-trigger downstream LSP/keyboard effects.
+  const openTabsRef = useRef(fileTabs.openTabs);
+  openTabsRef.current = fileTabs.openTabs;
+  const isDirtyRef = useRef(tabState.isDirty);
+  isDirtyRef.current = tabState.isDirty;
+  const removeFileRef = useRef(tabState.removeFile);
+  removeFileRef.current = tabState.removeFile;
   const { settings } = useSettingsQuery();
   const { projects } = useProjects();
   const workspacePath = (() => {
@@ -569,36 +580,40 @@ export function CodeBrowserView({
     search.handleCloseSearch();
   }, [viewFilePath]);
 
-  const handleSelectFile = useCallback(
+  // Open a file in the preview slot, pinning any dirty preview tab first
+  // (so unsaved edits are never silently dropped) and releasing editor
+  // state for the evicted preview to keep memory bounded. Reads tab state
+  // through refs so the callback identity stays stable across tab changes.
+  const openPreviewWithGuard = useCallback(
     (filePath: string) => {
-      pushDepartureAndArrival({ filePath });
-      // Pin any dirty preview tab before replacing it — never silently drop unsaved edits.
-      const previewTab = fileTabs.openTabs.find((t) => t.isPreview);
-      if (previewTab && previewTab.filePath !== filePath && tabState.isDirty(previewTab.filePath)) {
+      const previewTab = openTabsRef.current.find((t) => t.isPreview);
+      if (
+        previewTab &&
+        previewTab.filePath !== filePath &&
+        isDirtyRef.current(previewTab.filePath)
+      ) {
         fileTabs.pinTab(previewTab.filePath);
       }
       const evicted = fileTabs.openTabPreview(filePath);
-      // Release editor state for the evicted preview tab so memory and
-      // localStorage don't grow unbounded as the user clicks through files.
       if (evicted && evicted !== filePath) {
         delete savedEditorStatesRef.current[evicted];
-        tabState.removeFile(evicted);
+        removeFileRef.current(evicted);
       }
+    },
+    [fileTabs.pinTab, fileTabs.openTabPreview],
+  );
+
+  const handleSelectFile = useCallback(
+    (filePath: string) => {
+      pushDepartureAndArrival({ filePath });
+      openPreviewWithGuard(filePath);
       setViewFilePath(filePath);
       setViewLine(undefined);
       setViewLineEnd(undefined);
       setViewColumn(undefined);
       onSelectFile?.(filePath);
     },
-    [
-      onSelectFile,
-      pushDepartureAndArrival,
-      fileTabs.openTabPreview,
-      fileTabs.pinTab,
-      fileTabs.openTabs,
-      tabState.isDirty,
-      tabState.removeFile,
-    ],
+    [onSelectFile, pushDepartureAndArrival, openPreviewWithGuard],
   );
 
   const handleSelectFilePinned = useCallback(
@@ -717,20 +732,7 @@ export function CodeBrowserView({
       // Clear saved editor state so the explicit line takes precedence
       delete savedEditorStatesRef.current[entry.filePath];
       // History navigation reuses the preview slot — same as single-click in tree.
-      // Pin any dirty preview first to avoid silently dropping unsaved edits.
-      const previewTab = fileTabs.openTabs.find((t) => t.isPreview);
-      if (
-        previewTab &&
-        previewTab.filePath !== entry.filePath &&
-        tabState.isDirty(previewTab.filePath)
-      ) {
-        fileTabs.pinTab(previewTab.filePath);
-      }
-      const evicted = fileTabs.openTabPreview(entry.filePath);
-      if (evicted && evicted !== entry.filePath) {
-        delete savedEditorStatesRef.current[evicted];
-        tabState.removeFile(evicted);
-      }
+      openPreviewWithGuard(entry.filePath);
       setViewFilePath(entry.filePath);
       setViewLine(entry.line);
       setViewLineEnd(undefined);
@@ -749,15 +751,7 @@ export function CodeBrowserView({
         focusOnViewReadyRef.current = true;
       }
     },
-    [
-      viewFilePath,
-      onSelectFile,
-      fileTabs.openTabPreview,
-      fileTabs.pinTab,
-      fileTabs.openTabs,
-      tabState.isDirty,
-      tabState.removeFile,
-    ],
+    [viewFilePath, onSelectFile, openPreviewWithGuard],
   );
 
   const handleEditorGoBack = useCallback(() => {

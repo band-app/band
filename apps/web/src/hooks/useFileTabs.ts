@@ -95,6 +95,12 @@ export function useFileTabs(workspaceId: string): UseFileTabsReturn {
     return saved?.active ?? null;
   });
 
+  // Mirror of openTabs for synchronous reads inside callbacks. Lets us avoid
+  // mutating closure variables from inside setState updaters (which React
+  // documents as unsafe under StrictMode / future concurrent rendering).
+  const openTabsRef = useRef(openTabs);
+  openTabsRef.current = openTabs;
+
   // Persist to localStorage whenever tabs or active tab changes.
   // Skip the first mount to avoid redundant write of the just-loaded state.
   const skipFirstPersist = useRef(true);
@@ -145,21 +151,25 @@ export function useFileTabs(workspaceId: string): UseFileTabsReturn {
   }, []);
 
   const openTabPreview = useCallback((filePath: string): string | null => {
+    const prev = openTabsRef.current;
+    const existingIdx = prev.findIndex((t) => t.filePath === filePath);
+    // If file already open (preview or pinned), just activate it.
+    if (existingIdx !== -1) {
+      setActiveTabPathState(filePath);
+      return null;
+    }
+    // Replace the existing preview tab if any, otherwise append.
+    const previewIdx = prev.findIndex((t) => t.isPreview);
     let evicted: string | null = null;
-    setOpenTabs((prev) => {
-      const existingIdx = prev.findIndex((t) => t.filePath === filePath);
-      // If file already open (preview or pinned), just activate it.
-      if (existingIdx !== -1) return prev;
-      // Replace the existing preview tab if any, otherwise append.
-      const previewIdx = prev.findIndex((t) => t.isPreview);
-      if (previewIdx !== -1) {
-        evicted = prev[previewIdx].filePath;
-        const next = prev.slice();
-        next[previewIdx] = { filePath, isPreview: true };
-        return next;
-      }
-      return [...prev, { filePath, isPreview: true }];
-    });
+    let next: FileTab[];
+    if (previewIdx !== -1) {
+      evicted = prev[previewIdx].filePath;
+      next = prev.slice();
+      next[previewIdx] = { filePath, isPreview: true };
+    } else {
+      next = [...prev, { filePath, isPreview: true }];
+    }
+    setOpenTabs(next);
     setActiveTabPathState(filePath);
     return evicted;
   }, []);
