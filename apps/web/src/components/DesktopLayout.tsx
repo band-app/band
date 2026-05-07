@@ -28,7 +28,7 @@ export function DesktopLayout({ toolbarMenuItems }: DesktopLayoutProps) {
   }, []);
 
   return (
-    <div className="flex h-dvh w-full overflow-hidden bg-background text-foreground">
+    <div className="flex h-full w-full overflow-hidden bg-background text-foreground">
       <Group
         orientation="horizontal"
         defaultLayout={defaultLayout}

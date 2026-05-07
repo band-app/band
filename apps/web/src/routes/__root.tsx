@@ -72,7 +72,7 @@ export const Route = createRootRoute({
 
 function NotFound() {
   return (
-    <div className="flex h-dvh flex-col items-center justify-center gap-4 p-8 text-center">
+    <div className="flex h-full flex-col items-center justify-center gap-4 p-8 text-center">
       <p className="text-4xl font-bold">404</p>
       <p className="text-sm text-muted-foreground">Page not found</p>
       <Link to="/" className="text-sm text-primary underline">
@@ -305,7 +305,7 @@ function AppShell() {
 
   return (
     <ToolbarOverflowProvider>
-      <div className="flex flex-col h-dvh w-full overflow-hidden bg-background text-foreground">
+      <div className="flex flex-col h-full w-full overflow-hidden bg-background text-foreground">
         {isDesktop && (
           <DesktopTitleBar
             onToggleSidebar={toggleSidebar}
