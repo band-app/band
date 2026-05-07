@@ -826,7 +826,6 @@ export function DiffView({
   const adapter = useAdapter();
   const [summary, setSummary] = useState<WorkspaceDiffSummary | null>(null);
   const summaryRef = useRef<WorkspaceDiffSummary | null>(null);
-  const [baseBranch, setBaseBranch] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const fetchSummaryRef = useRef<((force?: boolean) => void) | null>(null);
@@ -844,7 +843,15 @@ export function DiffView({
   const [compareBranch, setCompareBranchState] = useState<string | null>(() =>
     getStoredCompareBranch(workspaceId),
   );
-  const [availableBranches, setAvailableBranches] = useState<string[]>([]);
+  // Seed `availableBranches` with the persisted selection so the picker shows
+  // the stored branch immediately on mount, instead of flashing empty until
+  // listWorkspaceBranches resolves.
+  const [availableBranches, setAvailableBranches] = useState<string[]>(() => {
+    const stored = getStoredCompareBranch(workspaceId);
+    return stored ? [stored] : [];
+  });
+  const compareBranchRef = useRef(compareBranch);
+  compareBranchRef.current = compareBranch;
   const setViewMode = useCallback((mode: ViewMode) => {
     setViewModeState(mode);
     storeViewMode(mode);
@@ -861,37 +868,58 @@ export function DiffView({
     [workspaceId],
   );
 
-  // Reload stored compareBranch when workspace changes
+  // Reload stored compareBranch + reseed availableBranches when workspace changes
   useEffect(() => {
-    setCompareBranchState(getStoredCompareBranch(workspaceId));
+    const stored = getStoredCompareBranch(workspaceId);
+    setCompareBranchState(stored);
+    setAvailableBranches(stored ? [stored] : []);
   }, [workspaceId]);
 
-  // Fetch list of branches for the workspace
+  // Fetch the list of branches and refresh on branch-status SSE events so a
+  // `git checkout -b` from another tool (terminal, IDE) is reflected without
+  // a full reload.
   useEffect(() => {
     const listWorkspaceBranches = adapter.listWorkspaceBranches;
     if (!listWorkspaceBranches) return;
     let cancelled = false;
-    listWorkspaceBranches
-      .call(adapter, workspaceId)
-      .then((result) => {
-        if (cancelled) return;
-        setAvailableBranches(result.branches);
-        // Drop the stored selection if it no longer exists in the workspace
-        setCompareBranchState((current) => {
+
+    const fetchBranches = () => {
+      listWorkspaceBranches
+        .call(adapter, workspaceId)
+        .then((result) => {
+          if (cancelled) return;
+          setAvailableBranches(result.branches);
+          // Drop the stored selection if it no longer exists. Read the latest
+          // value from a ref so this stays a pure check (no side effects in
+          // the setState updater) and avoids stale-closure issues.
+          const current = compareBranchRef.current;
           if (current && !result.branches.includes(current)) {
-            storeCompareBranch(workspaceId, null);
-            return null;
+            setCompareBranch(null);
           }
-          return current;
+        })
+        .catch(() => {
+          // Leave existing availableBranches in place on error — the server
+          // logs the underlying failure in listBranches.
         });
-      })
-      .catch(() => {
-        if (!cancelled) setAvailableBranches([]);
+    };
+
+    fetchBranches();
+
+    let unsubscribe: (() => void) | undefined;
+    if (active) {
+      unsubscribe = adapter.subscribeStatusEvents((event) => {
+        const data = event as SSEEvent;
+        if (data.kind === "branch-status" && data.workspaceId === workspaceId) {
+          fetchBranches();
+        }
       });
+    }
+
     return () => {
       cancelled = true;
+      unsubscribe?.();
     };
-  }, [adapter, workspaceId]);
+  }, [adapter, workspaceId, active, setCompareBranch]);
   const setExpandAll = useCallback((v: boolean) => {
     setExpandAllState(v);
     storeExpandAll(v);
@@ -1207,7 +1235,6 @@ export function DiffView({
             // re-rendering the entire file list with identical content.
             if (dataChanged) {
               setSummary(result);
-              setBaseBranch(result.baseBranch);
             }
             setError(null);
 
@@ -1275,9 +1302,14 @@ export function DiffView({
   // ---------------------------------------------------------------------------
   // Diff target dropdown — combines diff mode + branch selection into one menu
   // ---------------------------------------------------------------------------
+  const summaryCompareBranch = summary?.compareBranch ?? null;
   const branchOptions =
-    availableBranches.length > 0 ? availableBranches : baseBranch ? [baseBranch] : [];
-  const selectedBranch = compareBranch ?? branchOptions[0] ?? baseBranch ?? null;
+    availableBranches.length > 0
+      ? availableBranches
+      : summaryCompareBranch
+        ? [summaryCompareBranch]
+        : [];
+  const selectedBranch = compareBranch ?? branchOptions[0] ?? summaryCompareBranch;
   const diffSelectValue =
     diffMode === "uncommitted" ? UNCOMMITTED_VALUE : (selectedBranch ?? UNCOMMITTED_VALUE);
 
@@ -1408,7 +1440,7 @@ export function DiffView({
                 )}
               </div>
               <div className="mt-0.5 text-xs text-muted-foreground">
-                {summary.baseBranch} &larr; {summary.headBranch}
+                {summary.compareBranch} &larr; {summary.headBranch}
               </div>
             </div>
           </div>

@@ -166,7 +166,10 @@ export type DiffMode = "uncommitted" | "branch";
 export interface WorkspaceDiff {
   diff: string;
   stats: { filesChanged: number; insertions: number; deletions: number };
-  baseBranch: string;
+  /** Branch the diff was computed against — user's pick, or defaults to `defaultBranch`. */
+  compareBranch: string;
+  /** The project's default branch (e.g. `main`). Always present, regardless of `compareBranch`. */
+  defaultBranch: string;
   headBranch: string;
   fileStatuses: Record<string, FileStatus>;
 }
@@ -192,7 +195,10 @@ export interface FileContentResult {
 
 export interface WorkspaceDiffSummary {
   stats: { filesChanged: number; insertions: number; deletions: number };
-  baseBranch: string;
+  /** Branch the diff was computed against — user's pick, or defaults to `defaultBranch`. */
+  compareBranch: string;
+  /** The project's default branch (e.g. `main`). Always present, regardless of `compareBranch`. */
+  defaultBranch: string;
   headBranch: string;
   fileStatuses: Record<string, FileStatus>;
   mergeBase: string;

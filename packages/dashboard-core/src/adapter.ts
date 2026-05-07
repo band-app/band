@@ -98,7 +98,7 @@ export interface DashboardAdapter {
   revertFile?(
     workspaceId: string,
     filePath: string,
-    diffMode: string,
+    diffMode: DiffMode,
     compareBranch?: string,
   ): Promise<void>;
 

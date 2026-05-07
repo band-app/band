@@ -286,13 +286,13 @@ export class WebDashboardAdapter implements DashboardAdapter {
   async revertFile(
     workspaceId: string,
     filePath: string,
-    diffMode: string,
+    diffMode: DiffMode,
     compareBranch?: string,
   ): Promise<void> {
     await this.trpc.workspace.revertFile.mutate({
       workspaceId,
       filePath,
-      diffMode: diffMode as "uncommitted" | "branch",
+      diffMode,
       compareBranch,
     });
   }
