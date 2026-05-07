@@ -9,7 +9,7 @@ import {
   useSettingsQuery,
   WorkspacePickerDialog,
 } from "@band-app/dashboard-core";
-import { cn, Tooltip, TooltipContent, TooltipTrigger } from "@band-app/ui";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@band-app/ui";
 import {
   type DockviewApi,
   DockviewReact,
@@ -262,17 +262,11 @@ function BadgeTab(props: IDockviewPanelHeaderProps) {
           <span className="inline-block size-4 shrink-0" aria-hidden />
         )}
         <span className="truncate">{title}</span>
-        {/* Reserve badge slot — invisible when count is 0 so width stays
-            stable when diff stats load asynchronously after a workspace switch. */}
-        <span
-          aria-hidden={!hasBadge}
-          className={cn(
-            "inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-500/20 px-1.5 text-xs font-medium text-blue-600 dark:text-blue-400 transition-opacity",
-            hasBadge ? "opacity-100" : "opacity-0",
-          )}
-        >
-          {hasBadge ? badge : 0}
-        </span>
+        {hasBadge && (
+          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-500/20 px-1.5 text-xs font-medium text-blue-600 dark:text-blue-400">
+            {badge}
+          </span>
+        )}
       </div>
     </div>
   );
