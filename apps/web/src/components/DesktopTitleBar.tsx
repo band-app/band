@@ -129,15 +129,12 @@ export function DesktopTitleBar({
               <DropdownMenuContent align="end">
                 {panelItems?.map((item) => {
                   const Icon = item.icon;
-                  const isChat = item.id === "chat";
-                  const isVisible = isChat || !hiddenPanels?.includes(item.id);
+                  const isVisible = !hiddenPanels?.includes(item.id);
                   return (
                     <DropdownMenuCheckboxItem
                       key={item.id}
                       checked={isVisible}
-                      disabled={isChat}
                       onCheckedChange={() => {
-                        if (isChat) return;
                         onTogglePanelVisibility?.(item.id);
                       }}
                     >
