@@ -342,6 +342,43 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
     }
   });
 
+  it("reads settings.codingAgents itself when no agents arg is passed", async () => {
+    // The default settings.json seeded by beforeEach has a single
+    // claude-code agent with `command: /bin/sh`. Calling installSkills
+    // with no `agents` override should still write the four skills into
+    // ~/.claude/skills/ — proving the lib reads settings on its own.
+    const { installSkills } = await import("../src/lib/cli-skills");
+    const result = await installSkills({ home: process.env.HOME! });
+
+    const skillsDir = join(process.env.HOME!, ".claude", "skills");
+    for (const name of SKILL_NAMES) {
+      expect(existsSync(join(skillsDir, name, "SKILL.md")), `${name} written`).toBe(true);
+    }
+    expect(result.written.length).toBe(SKILL_NAMES.length);
+  });
+
+  it("writes nothing when settings.codingAgents is empty (no enabled agents)", async () => {
+    // Overwrite settings.json with an empty codingAgents array, then
+    // call installSkills with no override. The lib should treat
+    // "no enabled agents" as "no work" — even though a band binary IS
+    // reachable.
+    const bandDir = process.env.BAND_HOME!;
+    writeFileSync(
+      join(bandDir, "settings.json"),
+      JSON.stringify({ codingAgents: [] }, null, 2),
+      "utf-8",
+    );
+
+    const { installSkills } = await import("../src/lib/cli-skills");
+    const result = await installSkills({ home: process.env.HOME! });
+
+    expect(result.written).toEqual([]);
+    expect(result.updated).toEqual([]);
+    expect(existsSync(join(process.env.HOME!, ".claude", "skills", "band", "SKILL.md"))).toBe(
+      false,
+    );
+  });
+
   it("returns no targets for agent types without a known skills dir (cursor-cli)", async () => {
     const { installSkills } = await import("../src/lib/cli-skills");
     const result = await installSkills({

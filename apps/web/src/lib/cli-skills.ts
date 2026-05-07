@@ -36,6 +36,7 @@ import { dirname, join } from "node:path";
 import { getDefaultAgentBinary, getInstallSkillsDir } from "@band-app/coding-agent";
 import { findCliBinary } from "./cli";
 import { whichBinary } from "./process-utils";
+import { loadSettings } from "./state";
 
 /** The four skills `band generate-skills` emits. */
 export const BAND_SKILL_NAMES = ["band", "band-chat", "band-terminal", "band-browser"] as const;
@@ -212,12 +213,17 @@ interface InstallSkillsOptions {
   /** Override $HOME (test-only — production callers should leave unset). */
   home?: string;
   /**
-   * Enabled coding agents from `loadSettings().codingAgents`. We dispatch on
-   * `type`, not `id`, because users can configure several agents of the
-   * same type (e.g. two `claude-code` agents with different labels) and a
-   * custom `id` doesn't change the on-disk skills directory layout.
+   * Override the enabled-agents list (test-only). When omitted (the
+   * production path) we read `loadSettings().codingAgents` ourselves so the
+   * function is a self-contained "sync skills for the user's enabled
+   * agents" — callers can't accidentally pass a stale or unfiltered list.
+   *
+   * We dispatch on each agent's `type`, not `id`, because users can
+   * configure several agents of the same type (e.g. two `claude-code`
+   * agents with different labels) and a custom `id` doesn't change the
+   * on-disk skills directory layout.
    */
-  agents: readonly SkillAgent[];
+  agents?: readonly SkillAgent[];
   /**
    * Optional logger for visibility into write/update/skip decisions. Pino-
    * compatible signature so we can pass `createLogger(...)` from setup.ts
@@ -232,17 +238,27 @@ interface InstallSkillsOptions {
 /**
  * Sync the CLI-shipped skills into each enabled agent's global skills dir.
  *
+ * "Enabled" is sourced from `loadSettings().codingAgents` by default — that
+ * array is the canonical "agents the user has turned on", populated by
+ * `ensureDefaultCodingAgents` on first run and edited via the dashboard
+ * settings UI. Tests can pass `opts.agents` to override.
+ *
  * Steps:
- *   1. Resolve a band binary — abort cleanly if none is available.
- *   2. Build the list of (deduplicated) write targets from `opts.agents`.
- *   3. Run `band generate-skills` into a temp dir.
- *   4. For each (skill, target), compare against the destination and write
+ *   1. Read enabled agents from settings (or from `opts.agents`).
+ *   2. Filter to those whose binary is actually reachable on this host
+ *      (`isAgentInstalled` — handles stale `command` paths and missing
+ *      PATH entries).
+ *   3. Resolve a deduplicated list of skills directories from each
+ *      remaining agent's adapter.
+ *   4. Resolve a band binary — abort cleanly if none is available.
+ *   5. Run `band generate-skills` into a temp dir.
+ *   6. For each (skill, target), compare against the destination and write
  *      only when content differs.
  *
- * No-op (returns an empty-ish result) when no targets resolve — e.g. only
- * agents without a known global skills directory are enabled.
+ * No-op (returns an empty-ish result) when no targets resolve — e.g. the
+ * user has no agents enabled, or all enabled agents have been uninstalled.
  */
-export async function installSkills(opts: InstallSkillsOptions): Promise<InstallSkillsResult> {
+export async function installSkills(opts: InstallSkillsOptions = {}): Promise<InstallSkillsResult> {
   const result: InstallSkillsResult = {
     written: [],
     updated: [],
@@ -251,7 +267,8 @@ export async function installSkills(opts: InstallSkillsOptions): Promise<Install
   };
 
   const home = opts.home ?? homedir();
-  const targets = await resolveSkillTargets(opts.agents, home);
+  const agents = opts.agents ?? loadSettings().codingAgents ?? [];
+  const targets = await resolveSkillTargets(agents, home);
 
   if (targets.length === 0) {
     return result;

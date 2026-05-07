@@ -158,15 +158,11 @@ async function ensureClaudeHooks(): Promise<void> {
  */
 async function ensureSkillsInstalled(): Promise<void> {
   try {
-    const settings = loadSettings();
-    const agents = settings.codingAgents ?? [];
-    if (agents.length === 0) {
-      // Nothing detected → nothing to sync. The next boot after an agent is
-      // installed will pick it up.
-      return;
-    }
-
-    const result = await installSkills({ agents, log });
+    // installSkills reads `settings.codingAgents` itself and filters to
+    // agents whose binary is actually reachable, so we don't repeat that
+    // logic here. Keeping the trampoline so the boot pipeline stays
+    // uniform with the other `ensureXxx` steps.
+    const result = await installSkills({ log });
     const wrote = result.written.length + result.updated.length;
     if (wrote > 0) {
       log.info(
