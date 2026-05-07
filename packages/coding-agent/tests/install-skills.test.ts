@@ -12,7 +12,7 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 
-import { getInstallSkillsDir } from "../src/install-skills.ts";
+import { getDefaultAgentBinary, getInstallSkillsDir } from "../src/install-skills.ts";
 
 const HOME = "/tmp/band-test-home";
 
@@ -72,5 +72,35 @@ describe("getInstallSkillsDir", () => {
   it("returns null for an unknown agent type without throwing", async () => {
     const dir = await getInstallSkillsDir("future-agent-9000", HOME);
     assert.equal(dir, null);
+  });
+});
+
+describe("getDefaultAgentBinary", () => {
+  it("resolves claude-code to 'claude'", async () => {
+    assert.equal(await getDefaultAgentBinary("claude-code"), "claude");
+  });
+
+  it("resolves codex to 'codex'", async () => {
+    assert.equal(await getDefaultAgentBinary("codex"), "codex");
+  });
+
+  it("resolves openai-codex to 'codex' (same binary as the CLI Codex adapter)", async () => {
+    assert.equal(await getDefaultAgentBinary("openai-codex"), "codex");
+  });
+
+  it("resolves gemini-cli to 'gemini'", async () => {
+    assert.equal(await getDefaultAgentBinary("gemini-cli"), "gemini");
+  });
+
+  it("resolves opencode to 'opencode'", async () => {
+    assert.equal(await getDefaultAgentBinary("opencode"), "opencode");
+  });
+
+  it("returns null for cursor-cli (no defined binary in this dispatcher yet)", async () => {
+    assert.equal(await getDefaultAgentBinary("cursor-cli"), null);
+  });
+
+  it("returns null for an unknown agent type without throwing", async () => {
+    assert.equal(await getDefaultAgentBinary("future-agent-9000"), null);
   });
 });

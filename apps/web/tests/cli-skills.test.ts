@@ -113,12 +113,16 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
     // Pre-seed settings.json with `claude-code` already in `codingAgents`
     // so `ensureDefaultCodingAgents` doesn't try to detect via `whichBinary`
     // (which would depend on the host) and so `ensureSkillsInstalled` has a
-    // target agent to write to.
+    // target agent to write to. We pin `command: /bin/sh` so the new
+    // "binary actually reachable" check passes regardless of whether the
+    // real `claude` CLI is installed on the test host (CI may not have it).
     writeFileSync(
       join(bandDir, "settings.json"),
       JSON.stringify(
         {
-          codingAgents: [{ id: "claude-code", type: "claude-code", label: "Claude Code" }],
+          codingAgents: [
+            { id: "claude-code", type: "claude-code", label: "Claude Code", command: "/bin/sh" },
+          ],
           defaultCodingAgent: "claude-code",
           // Pre-set notifications so ensureNotificationDefaults is a no-op.
           notifications: { soundOnNeedsAttention: true },
@@ -217,18 +221,18 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
   });
 
   it("installs into every enabled agent's global skills dir (claude, codex, opencode, gemini)", async () => {
-    // Re-seed settings with all four agent types enabled. We bypass
-    // runFirstTimeSetup's CLI / hooks side-effects here and call installSkills
-    // directly so the test focuses on the multi-target fan-out — those side
-    // effects are exercised by the suite's other cases.
+    // Re-seed settings with all four agent types enabled. We pin
+    // `command: /bin/sh` so the install-check passes on CI nodes that
+    // don't have the real agent binaries installed. The agent's *type*
+    // is what drives skill-dir resolution, not the binary.
     const { installSkills } = await import("../src/lib/cli-skills");
     const result = await installSkills({
       home: process.env.HOME!,
       agents: [
-        { type: "claude-code" },
-        { type: "codex" },
-        { type: "opencode" },
-        { type: "gemini-cli" },
+        { type: "claude-code", command: "/bin/sh" },
+        { type: "codex", command: "/bin/sh" },
+        { type: "opencode", command: "/bin/sh" },
+        { type: "gemini-cli", command: "/bin/sh" },
       ],
     });
 
@@ -260,7 +264,10 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
       // Two claude-code agents (e.g. user has personal + work setups) both
       // point at ~/.claude/skills — we should only write once per skill, not
       // twice.
-      agents: [{ type: "claude-code" }, { type: "claude-code" }],
+      agents: [
+        { type: "claude-code", command: "/bin/sh" },
+        { type: "claude-code", command: "/bin/sh" },
+      ],
     });
 
     expect(result.written.length).toBe(SKILL_NAMES.length);
@@ -274,7 +281,7 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
       const { installSkills } = await import("../src/lib/cli-skills");
       await installSkills({
         home: process.env.HOME!,
-        agents: [{ type: "codex" }],
+        agents: [{ type: "codex", command: "/bin/sh" }],
       });
 
       for (const name of SKILL_NAMES) {
@@ -291,11 +298,55 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
     }
   });
 
+  it("skips agents whose configured command no longer exists on disk", async () => {
+    // Simulates a stale entry in settings.codingAgents: the user uninstalled
+    // their Codex CLI, but its definition (with a now-broken `command` path)
+    // is still in settings.json. We must not touch ~/.codex/skills/.
+    const { installSkills } = await import("../src/lib/cli-skills");
+    const result = await installSkills({
+      home: process.env.HOME!,
+      agents: [
+        { type: "claude-code", command: "/bin/sh" },
+        { type: "codex", command: "/this/path/does/not/exist/codex" },
+      ],
+    });
+
+    expect(existsSync(join(process.env.HOME!, ".claude", "skills", "band", "SKILL.md"))).toBe(true);
+    expect(existsSync(join(process.env.HOME!, ".codex", "skills", "band", "SKILL.md"))).toBe(false);
+    expect(result.written.length).toBe(SKILL_NAMES.length); // 4 — only claude-code wrote
+  });
+
+  it("skips agents with no command override when the default binary isn't on PATH", async () => {
+    // Empty PATH guarantees `whichBinary` can't find anything, mirroring a
+    // host where the user genuinely doesn't have the agent installed.
+    const originalPath = process.env.PATH;
+    process.env.PATH = "";
+    try {
+      const { installSkills } = await import("../src/lib/cli-skills");
+      const result = await installSkills({
+        home: process.env.HOME!,
+        // No `command` set — install-check must fall back to PATH lookup.
+        // With PATH empty, `whichBinary("gemini")` should return null and
+        // we should write zero skills.
+        agents: [{ type: "gemini-cli" }],
+      });
+
+      expect(result.written).toEqual([]);
+      expect(result.updated).toEqual([]);
+      expect(existsSync(join(process.env.HOME!, ".gemini", "skills", "band", "SKILL.md"))).toBe(
+        false,
+      );
+    } finally {
+      if (originalPath !== undefined) process.env.PATH = originalPath;
+      else delete process.env.PATH;
+    }
+  });
+
   it("returns no targets for agent types without a known skills dir (cursor-cli)", async () => {
     const { installSkills } = await import("../src/lib/cli-skills");
     const result = await installSkills({
       home: process.env.HOME!,
-      agents: [{ type: "cursor-cli" }],
+      agents: [{ type: "cursor-cli", command: "/bin/sh" }],
     });
 
     expect(result.written).toEqual([]);

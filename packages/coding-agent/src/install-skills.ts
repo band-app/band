@@ -49,3 +49,42 @@ export async function getInstallSkillsDir(
       return null;
   }
 }
+
+/**
+ * Resolve the default executable name (looked up via PATH) for a coding-agent
+ * `type`. Used by callers to verify an agent listed in
+ * `settings.codingAgents` is *actually installed* on the host before
+ * touching its skills directory — an agent whose binary has been
+ * uninstalled is effectively no longer enabled, even if it hasn't been
+ * removed from settings yet.
+ *
+ * Returns `null` for agent types whose default binary name we don't know
+ * (e.g. `cursor-cli`). Callers should treat that as "skip" rather than
+ * fail-closed, matching the behavior of `getInstallSkillsDir`.
+ */
+export async function getDefaultAgentBinary(type: string): Promise<string | null> {
+  switch (type) {
+    case "claude-code": {
+      const { CLAUDE_CODE_DEFAULT_BINARY } = await import("./adapters/claude-code.js");
+      return CLAUDE_CODE_DEFAULT_BINARY;
+    }
+    case "codex": {
+      const { CODEX_DEFAULT_BINARY } = await import("./adapters/codex.js");
+      return CODEX_DEFAULT_BINARY;
+    }
+    case "openai-codex": {
+      const { OPENAI_CODEX_DEFAULT_BINARY } = await import("./adapters/openai-codex.js");
+      return OPENAI_CODEX_DEFAULT_BINARY;
+    }
+    case "gemini-cli": {
+      const { GEMINI_CLI_DEFAULT_BINARY } = await import("./adapters/gemini-cli.js");
+      return GEMINI_CLI_DEFAULT_BINARY;
+    }
+    case "opencode": {
+      const { OPENCODE_DEFAULT_BINARY } = await import("./adapters/opencode.js");
+      return OPENCODE_DEFAULT_BINARY;
+    }
+    default:
+      return null;
+  }
+}

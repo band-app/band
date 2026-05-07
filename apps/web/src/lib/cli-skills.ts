@@ -21,7 +21,9 @@
 
 import { execFile } from "node:child_process";
 import {
+  accessSync,
   existsSync,
+  constants as fsConstants,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -31,7 +33,7 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { getInstallSkillsDir } from "@band-app/coding-agent";
+import { getDefaultAgentBinary, getInstallSkillsDir } from "@band-app/coding-agent";
 import { findCliBinary } from "./cli";
 import { whichBinary } from "./process-utils";
 
@@ -56,15 +58,65 @@ export interface SkillTarget {
 export interface SkillAgent {
   /** Stable type discriminator (e.g. `claude-code`, `codex`, `opencode`). */
   type: string;
+  /**
+   * Optional explicit path to the agent's executable, mirroring
+   * `CodingAgentDefinition.command`. When set we trust this over the
+   * adapter's default binary name — letting users with custom installs
+   * (Homebrew Cellar, NixOS profiles, npm prefix overrides) keep
+   * skills syncing without us re-implementing every package manager's
+   * resolution rules.
+   */
+  command?: string;
 }
 
 /**
- * Resolve write targets for a list of agents, deduplicating destinations.
+ * Verify a coding agent is *actually installed* on this host. Presence in
+ * `settings.codingAgents` only proves the agent was detected at some past
+ * setup run — the user may have uninstalled the binary since (e.g. removed
+ * `claude` while keeping the entry around). Writing skills to that agent's
+ * global directory after the fact would just litter the user's home dir.
+ *
+ *   1. If the agent definition carries an explicit `command`, check the
+ *      file is executable.
+ *   2. Otherwise look up the adapter's default binary name (owned by each
+ *      adapter — see `packages/coding-agent/src/install-skills.ts`) and
+ *      probe PATH via `whichBinary`.
+ *
+ * Returns `false` when neither path resolves, so callers can skip the
+ * agent. Adapter types without a default binary (e.g. `cursor-cli`) also
+ * return `false` — we'd have nothing to install for them anyway.
+ */
+export async function isAgentInstalled(agent: SkillAgent): Promise<boolean> {
+  if (agent.command) {
+    try {
+      accessSync(agent.command, fsConstants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  const binaryName = await getDefaultAgentBinary(agent.type);
+  if (!binaryName) return false;
+
+  const found = await whichBinary(binaryName);
+  return found !== null;
+}
+
+/**
+ * Resolve write targets for the *enabled* agents in the input list,
+ * deduplicating destinations.
+ *
+ * "Enabled" here means: present in `settings.codingAgents` AND the agent's
+ * binary is actually reachable on this host (see `isAgentInstalled`).
+ * Stale entries — those whose binary has been uninstalled since detection
+ * but whose record lingers in settings.json — are skipped so we don't
+ * keep refreshing skills for a coding agent the user no longer uses.
  *
  * Each agent's skills directory comes from its adapter (see
  * `packages/coding-agent/src/install-skills.ts` and the
  * `get<Agent>InstallSkillsDir` exports next to each adapter's discovery
- * logic) — this layer only orchestrates the lookup and dedupe pass.
+ * logic) — this layer only orchestrates lookup, install-check, and dedupe.
  *
  * Two configured agents can resolve to the same directory (e.g. two
  * claude-code agents with different IDs but the same `type` both map to
@@ -79,6 +131,7 @@ export async function resolveSkillTargets(
   const seen = new Set<string>();
   const out: SkillTarget[] = [];
   for (const agent of agents) {
+    if (!(await isAgentInstalled(agent))) continue;
     const skillsDir = await getInstallSkillsDir(agent.type, home);
     if (!skillsDir) continue;
     if (seen.has(skillsDir)) continue;

@@ -574,6 +574,9 @@ async function fetchOpenCodeSessionMessages(
   return { messages: slice, hasMore, firstOffset: offset };
 }
 
+/** Default executable name for OpenCode. See `setup.ts::AGENT_CHECKS`. */
+export const OPENCODE_DEFAULT_BINARY = "opencode";
+
 /**
  * Where freshly-shipped skills should be written. OpenCode's documented
  * resolution order is:

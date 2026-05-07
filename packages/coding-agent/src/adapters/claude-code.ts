@@ -958,6 +958,15 @@ function* mapClaudeCodeEvent(
 }
 
 /**
+ * Default executable name for Claude Code. Used by callers (e.g. the
+ * Band web server's first-time setup) to probe whether the agent is
+ * actually reachable on the host before assuming a `claude-code` entry
+ * in `settings.codingAgents` corresponds to a working install. Mirrors
+ * the binary the SDK shells out to (`claude` on PATH).
+ */
+export const CLAUDE_CODE_DEFAULT_BINARY = "claude";
+
+/**
  * Where freshly-shipped skills (e.g. the band CLI's bundled SKILL.md files,
  * synced by apps/web/src/lib/cli-skills.ts on every server boot) should be
  * written. This is the *highest-priority* global directory the discovery

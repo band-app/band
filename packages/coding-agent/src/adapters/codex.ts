@@ -501,6 +501,9 @@ const CODEX_MODELS: AgentModel[] = [
  *
  * Project-level skills override global ones with the same name.
  */
+/** Default executable name for the Codex CLI. See `setup.ts::AGENT_CHECKS`. */
+export const CODEX_DEFAULT_BINARY = "codex";
+
 /**
  * Where freshly-shipped skills should be written. Codex documents its
  * user-scope skill home as `~/.codex/skills/` (the `.system/` subfolder is

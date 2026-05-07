@@ -214,6 +214,9 @@ export class GeminiCliAdapter implements CodingAgent {
   }
 }
 
+/** Default executable name for the Gemini CLI. */
+export const GEMINI_CLI_DEFAULT_BINARY = "gemini";
+
 /**
  * Where freshly-shipped skills should be written. Gemini CLI's user-scope
  * skills live at `~/.gemini/skills/` (not affected by workspace trust),

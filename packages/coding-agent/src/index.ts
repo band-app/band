@@ -19,7 +19,7 @@ export type {
   ToolUseEvent,
 } from "./events.js";
 export { createCodingAgent } from "./factory.js";
-export { getInstallSkillsDir } from "./install-skills.js";
+export { getDefaultAgentBinary, getInstallSkillsDir } from "./install-skills.js";
 export type {
   AgentMode,
   AgentModel,
