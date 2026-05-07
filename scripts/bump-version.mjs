@@ -72,8 +72,13 @@ function getCurrentVersion() {
   // bumps package.json files only on the runner and never commits them back
   // to main, so the in-repo package.json versions can lag behind the actual
   // released versions. Fall back to package.json only when no tags exist.
+  //
+  // `--match 'v[0-9]*'` filters out non-version tags like the rolling
+  // `nightly` tag created by .github/workflows/nightly.yml — without it
+  // `git describe` happily returns `nightly` and bumpVersion produces
+  // `NaN.undefined.NaN` (see run 25483248796 for the exact failure).
   try {
-    const tag = execSync("git describe --tags --abbrev=0", {
+    const tag = execSync("git describe --tags --abbrev=0 --match 'v[0-9]*'", {
       cwd: ROOT,
       encoding: "utf8",
     }).trim();
