@@ -166,8 +166,10 @@ test("tasks dialog renders and shows seeded tasks", async ({ page }) => {
 test("tasks dialog shows status badges", async ({ page }) => {
   const dialog = await openTasksDialog(page);
 
-  // Scope badge checks to task cards to avoid matching select dropdown options
-  const cards = dialog.locator(".rounded-lg.border");
+  // Scope badge checks to task cards to avoid matching select dropdown options.
+  // The card outline is `rounded-lg border-2` — match either width so this
+  // doesn't break the next time we re-tune the border thickness.
+  const cards = dialog.locator(".rounded-lg.border-2, .rounded-lg.border");
   await expect(cards.getByText("Completed")).toBeVisible();
   await expect(cards.getByText("Failed")).toBeVisible();
   await expect(cards.getByText("Running")).toBeVisible();
