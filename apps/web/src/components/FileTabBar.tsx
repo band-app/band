@@ -17,7 +17,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@band-app/ui";
-import { ChevronLeft, ChevronRight, Clipboard, Copy, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Clipboard, Copy, PanelLeft, X } from "lucide-react";
 import type React from "react";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { FileTab } from "../hooks/useFileTabs";
@@ -51,6 +51,11 @@ interface FileTabBarProps {
   isDirty?: (filePath: string) => boolean;
   /** Action buttons rendered at the right end of the tab bar (e.g. markdown toggle) */
   actions?: React.ReactNode;
+  /** Whether the file-tree sidebar is collapsed (used to flip the toggle icon's tooltip). */
+  treeCollapsed?: boolean;
+  /** When provided, renders a leading button that toggles the file-tree sidebar.
+   *  The button auto-hides when the tab bar's container becomes too narrow. */
+  onToggleTree?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -69,6 +74,8 @@ export function FileTabBar({
   canGoForward,
   isDirty: isDirtyFn,
   actions,
+  treeCollapsed,
+  onToggleTree,
 }: FileTabBarProps) {
   const activeRef = useRef<HTMLButtonElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -144,7 +151,26 @@ export function FileTabBar({
 
   return (
     <>
-      <div className="flex h-8 shrink-0 items-center border-b border-border/50 bg-background">
+      <div className="@container flex h-9 shrink-0 items-center border-b border-border/50 bg-background">
+        {/* File-tree toggle — always visible except when the parent
+            container is too narrow to fit it alongside tabs. */}
+        {onToggleTree && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={onToggleTree}
+                className="ml-1 hidden size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors @[16rem]:inline-flex"
+              >
+                <PanelLeft className="size-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-xs">
+              {treeCollapsed ? "Show" : "Hide"} File Explorer
+            </TooltipContent>
+          </Tooltip>
+        )}
+
         {/* Navigation arrows */}
         {(onGoBack || onGoForward) && (
           <div className="flex shrink-0 items-center gap-0.5 px-1">

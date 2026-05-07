@@ -213,7 +213,7 @@ function AppShell() {
 
   // Cmd+[ / Cmd+] — back/forward through workspace history
   const routerNavigate = useCallback((href: string) => router.navigate({ to: href }), [router]);
-  useNavigationHistory(routerNavigate, capabilities);
+  const navigationHistory = useNavigationHistory(routerNavigate, capabilities);
 
   // Cmd+= / Cmd+- / Cmd+0 — zoom in/out/reset (browser mode only;
   // in the desktop shell the View menu accelerators handle these keys)
@@ -306,18 +306,20 @@ function AppShell() {
   return (
     <ToolbarOverflowProvider>
       <div className="flex flex-col h-full w-full overflow-hidden bg-background text-foreground">
-        {isDesktop && (
-          <DesktopTitleBar
-            onToggleSidebar={toggleSidebar}
-            sidebarCollapsed={sidebarCollapsed}
-            workspaceName={activeWorkspaceId ?? undefined}
-            workspacePath={activeWorkspaceId ? workspacePath : undefined}
-            onCopyPath={activeWorkspaceId ? handleCopyPath : undefined}
-            panelItems={activeWorkspaceId ? panelItems : undefined}
-            hiddenPanels={activeWorkspaceId ? hiddenPanels : undefined}
-            onTogglePanelVisibility={activeWorkspaceId ? handleTogglePanelVisibility : undefined}
-          />
-        )}
+        <DesktopTitleBar
+          onToggleSidebar={toggleSidebar}
+          sidebarCollapsed={sidebarCollapsed}
+          workspaceName={activeWorkspaceId ?? undefined}
+          workspacePath={activeWorkspaceId ? workspacePath : undefined}
+          onCopyPath={activeWorkspaceId ? handleCopyPath : undefined}
+          panelItems={activeWorkspaceId ? panelItems : undefined}
+          hiddenPanels={activeWorkspaceId ? hiddenPanels : undefined}
+          onTogglePanelVisibility={activeWorkspaceId ? handleTogglePanelVisibility : undefined}
+          onGoBack={navigationHistory.goBack}
+          onGoForward={navigationHistory.goForward}
+          canGoBack={navigationHistory.canGoBack}
+          canGoForward={navigationHistory.canGoForward}
+        />
         <div className="flex-1 min-h-0 overflow-hidden">
           <Group
             orientation="horizontal"

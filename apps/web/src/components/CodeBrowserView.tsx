@@ -26,16 +26,7 @@ import { cjk } from "@streamdown/cjk";
 import { code } from "@streamdown/code";
 import { math } from "@streamdown/math";
 import { mermaid } from "@streamdown/mermaid";
-import {
-  ChevronLeft,
-  ChevronRight,
-  Code,
-  Eye,
-  File,
-  PanelLeft,
-  Search,
-  TextSearch,
-} from "lucide-react";
+import { ChevronLeft, ChevronRight, Code, Eye, File, Search, TextSearch } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Group, Panel, Separator, usePanelRef } from "react-resizable-panels";
 import { Streamdown } from "streamdown";
@@ -141,39 +132,13 @@ interface CodeBrowserViewProps {
 interface FileTreeToolbarProps {
   onQuickOpen?: () => void;
   onSearchFiles?: () => void;
-  treeCollapsed: boolean;
-  onToggleTree: () => void;
 }
 
-function FileTreeToolbar({
-  onQuickOpen,
-  onSearchFiles,
-  treeCollapsed,
-  onToggleTree,
-}: FileTreeToolbarProps) {
+function FileTreeToolbar({ onQuickOpen, onSearchFiles }: FileTreeToolbarProps) {
   return (
-    <div className="flex h-8 shrink-0 items-center gap-0.5 border-b border-border/50 px-1.5">
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            onClick={onToggleTree}
-            className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-          >
-            {treeCollapsed ? (
-              <PanelLeft className="size-3.5" />
-            ) : (
-              <PanelLeft className="size-3.5" />
-            )}
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom" className="text-xs">
-          {treeCollapsed ? "Show" : "Hide"} File Explorer
-        </TooltipContent>
-      </Tooltip>
-
+    <div className="flex h-9 shrink-0 items-center gap-0.5 border-b border-border/50 pl-3 pr-1.5">
+      <span className="text-xs font-medium text-muted-foreground">Files</span>
       <div className="flex-1" />
-
       <Tooltip>
         <TooltipTrigger asChild>
           <button
@@ -935,12 +900,7 @@ export function CodeBrowserView({
             }}
           >
             <div className="flex h-full flex-col overflow-hidden border-r border-border">
-              <FileTreeToolbar
-                onQuickOpen={onQuickOpen}
-                onSearchFiles={onSearchFiles}
-                treeCollapsed={treeCollapsed}
-                onToggleTree={toggleTree}
-              />
+              <FileTreeToolbar onQuickOpen={onQuickOpen} onSearchFiles={onSearchFiles} />
               <div className="min-h-0 flex-1 overflow-hidden">
                 <FileBrowser
                   workspaceId={workspaceId}
@@ -969,80 +929,63 @@ export function CodeBrowserView({
           {/* Right panel — file tabs + content */}
           <Panel id="file-viewer" minSize="20%">
             <div className="relative flex h-full flex-col overflow-hidden">
-              {treeCollapsed && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      onClick={toggleTree}
-                      className="absolute left-1 top-0 z-10 inline-flex h-9 w-7 items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
-                    >
-                      <PanelLeft className="size-4" />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom" className="text-xs">
-                    Show File Explorer
-                  </TooltipContent>
-                </Tooltip>
-              )}
-
-              {/* Tab bar */}
-              <div className={treeCollapsed ? "[&>div]:pl-7" : ""}>
-                <FileTabBar
-                  workspacePath={workspacePath}
-                  tabs={fileTabs.openTabs}
-                  activeTabPath={fileTabs.activeTabPath}
-                  onSelectTab={handleTabSelect}
-                  onCloseTab={handleTabClose}
-                  onGoBack={handleEditorGoBack}
-                  onGoForward={handleEditorGoForward}
-                  canGoBack={editorHistory.canGoBack}
-                  canGoForward={editorHistory.canGoForward}
-                  isDirty={tabState.isDirty}
-                  actions={
-                    isMarkdown ? (
-                      <div className="flex items-center gap-0.5">
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <button
-                              type="button"
-                              onClick={() => setMdViewMode("preview")}
-                              className={`inline-flex size-6 items-center justify-center rounded-md transition-colors ${
-                                mdViewMode === "preview"
-                                  ? "bg-accent text-accent-foreground"
-                                  : "text-muted-foreground hover:bg-accent hover:text-foreground"
-                              }`}
-                            >
-                              <Eye className="size-3.5" />
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent side="bottom" className="text-xs">
-                            Preview
-                          </TooltipContent>
-                        </Tooltip>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <button
-                              type="button"
-                              onClick={() => setMdViewMode("source")}
-                              className={`inline-flex size-6 items-center justify-center rounded-md transition-colors ${
-                                mdViewMode === "source"
-                                  ? "bg-accent text-accent-foreground"
-                                  : "text-muted-foreground hover:bg-accent hover:text-foreground"
-                              }`}
-                            >
-                              <Code className="size-3.5" />
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent side="bottom" className="text-xs">
-                            Source
-                          </TooltipContent>
-                        </Tooltip>
-                      </div>
-                    ) : undefined
-                  }
-                />
-              </div>
+              {/* Tab bar — owns the file-tree toggle now (auto-hides when narrow) */}
+              <FileTabBar
+                workspacePath={workspacePath}
+                tabs={fileTabs.openTabs}
+                activeTabPath={fileTabs.activeTabPath}
+                onSelectTab={handleTabSelect}
+                onCloseTab={handleTabClose}
+                onGoBack={handleEditorGoBack}
+                onGoForward={handleEditorGoForward}
+                canGoBack={editorHistory.canGoBack}
+                canGoForward={editorHistory.canGoForward}
+                isDirty={tabState.isDirty}
+                treeCollapsed={treeCollapsed}
+                onToggleTree={toggleTree}
+                actions={
+                  isMarkdown ? (
+                    <div className="flex items-center gap-0.5">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            onClick={() => setMdViewMode("preview")}
+                            className={`inline-flex size-6 items-center justify-center rounded-md transition-colors ${
+                              mdViewMode === "preview"
+                                ? "bg-accent text-accent-foreground"
+                                : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                            }`}
+                          >
+                            <Eye className="size-3.5" />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" className="text-xs">
+                          Preview
+                        </TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button
+                            type="button"
+                            onClick={() => setMdViewMode("source")}
+                            className={`inline-flex size-6 items-center justify-center rounded-md transition-colors ${
+                              mdViewMode === "source"
+                                ? "bg-accent text-accent-foreground"
+                                : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                            }`}
+                          >
+                            <Code className="size-3.5" />
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" className="text-xs">
+                          Source
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
+                  ) : undefined
+                }
+              />
 
               {/* File content */}
               <div className="min-h-0 flex-1">

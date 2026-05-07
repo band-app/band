@@ -8,7 +8,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@band-app/ui";
-import { PanelLeft, PanelTop } from "lucide-react";
+import { ChevronLeft, ChevronRight, PanelLeft, PanelTop } from "lucide-react";
 import { useEffect, useState } from "react";
 import { invoke as desktopInvoke } from "../lib/desktop-ipc";
 import { isDesktop } from "../lib/is-desktop";
@@ -48,6 +48,14 @@ interface DesktopTitleBarProps {
   hiddenPanels?: string[];
   /** Callback to toggle a panel's visibility on/off. */
   onTogglePanelVisibility?: (panelId: string) => void;
+  /** Navigate to the previous workspace in the history stack (⌘[). */
+  onGoBack?: () => void;
+  /** Navigate to the next workspace in the history stack (⌘]). */
+  onGoForward?: () => void;
+  /** Whether back navigation is currently available (enables/disables the button). */
+  canGoBack?: boolean;
+  /** Whether forward navigation is currently available (enables/disables the button). */
+  canGoForward?: boolean;
 }
 
 /** Draggable desktop title bar that works with external-URL Electron webviews. */
@@ -61,6 +69,10 @@ export function DesktopTitleBar({
   panelItems,
   hiddenPanels,
   onTogglePanelVisibility,
+  onGoBack,
+  onGoForward,
+  canGoBack,
+  canGoForward,
 }: DesktopTitleBarProps) {
   const [appTitle, setAppTitle] = useState(title ?? "Band");
 
@@ -72,7 +84,9 @@ export function DesktopTitleBar({
       .catch(() => {});
   }, [title]);
 
-  const hasEditorPicker = workspaceName && workspacePath;
+  // EditorPicker invokes native IPC (open in VS Code/Finder/etc.) — keep it
+  // desktop-only so it doesn't render a non-functional button in the web app.
+  const hasEditorPicker = isDesktop && workspaceName && workspacePath;
   const hasPanels = workspaceName && panelItems && panelItems.length > 0 && onTogglePanelVisibility;
 
   return (
@@ -80,16 +94,64 @@ export function DesktopTitleBar({
       className="h-[38px] shrink-0 flex items-center justify-center relative border-b border-border"
       style={DRAG_STYLE}
     >
-      {onToggleSidebar && (
-        <button
-          type="button"
-          onClick={onToggleSidebar}
+      {(onToggleSidebar || onGoBack || onGoForward) && (
+        <div
+          // Desktop: leave 80px clear for the macOS traffic lights.
+          // Web: no traffic lights exist, so park the controls near the edge.
+          className={`absolute ${isDesktop ? "left-[80px]" : "left-2"} top-1/2 -translate-y-1/2 flex items-center gap-0.5 pointer-events-auto`}
           style={NO_DRAG_STYLE}
-          className="absolute left-[80px] top-1/2 -translate-y-1/2 flex items-center justify-center rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors pointer-events-auto"
-          title={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
         >
-          <PanelLeft className="size-5" />
-        </button>
+          {onToggleSidebar && (
+            <button
+              type="button"
+              onClick={onToggleSidebar}
+              className="flex items-center justify-center rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
+              title={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
+            >
+              <PanelLeft className="size-5" />
+            </button>
+          )}
+          {(onGoBack || onGoForward) && (
+            <>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={onGoBack}
+                    disabled={!canGoBack}
+                    className="flex items-center justify-center rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+                  >
+                    <ChevronLeft className="size-5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="text-xs">
+                  Back{" "}
+                  <kbd className="ml-1.5 rounded border border-popover-foreground/25 bg-popover-foreground/10 px-1 py-0.5 font-mono text-[14px]">
+                    ⌘[
+                  </kbd>
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={onGoForward}
+                    disabled={!canGoForward}
+                    className="flex items-center justify-center rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+                  >
+                    <ChevronRight className="size-5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="text-xs">
+                  Forward{" "}
+                  <kbd className="ml-1.5 rounded border border-popover-foreground/25 bg-popover-foreground/10 px-1 py-0.5 font-mono text-[14px]">
+                    ⌘]
+                  </kbd>
+                </TooltipContent>
+              </Tooltip>
+            </>
+          )}
+        </div>
       )}
 
       {workspaceName ? (

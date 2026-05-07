@@ -1,6 +1,6 @@
 import type { PlatformCapabilities } from "@band-app/dashboard-core";
 import { useRouterState } from "@tanstack/react-router";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
  * Browser-like workspace history for Cmd+[ (back) and Cmd+] (forward).
@@ -12,6 +12,9 @@ import { useCallback, useEffect, useRef } from "react";
  *
  * Uses `capabilities.getWorkspaceHref()` when navigating so the user
  * lands on the last-viewed tab inside each workspace.
+ *
+ * Returns the same `goBack`/`goForward` actions plus `canGoBack`/`canGoForward`
+ * flags so callers can render UI controls (e.g. arrow buttons in the title bar).
  */
 
 const WS_PREFIX = "/workspace/";
@@ -27,14 +30,29 @@ function extractWorkspaceId(pathname: string): string | null {
   return decodeURIComponent(encoded);
 }
 
+export interface NavigationHistoryReturn {
+  goBack: () => void;
+  goForward: () => void;
+  canGoBack: boolean;
+  canGoForward: boolean;
+}
+
+interface HistoryState {
+  stack: string[];
+  cursor: number;
+}
+
+const INITIAL_HISTORY: HistoryState = { stack: [], cursor: -1 };
+
 export function useNavigationHistory(
   routerNavigate: (href: string) => void,
   capabilities: PlatformCapabilities,
-) {
+): NavigationHistoryReturn {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
 
-  const stackRef = useRef<string[]>([]);
-  const cursorRef = useRef(-1);
+  // Stack and cursor live in a single state object so consumers re-render
+  // when canGoBack/canGoForward flip (used to enable/disable UI buttons).
+  const [history, setHistory] = useState<HistoryState>(INITIAL_HISTORY);
   const navigatingRef = useRef(false);
 
   // Track workspace changes → push onto the history stack (unless we caused it).
@@ -47,33 +65,47 @@ export function useNavigationHistory(
       return;
     }
 
-    const stack = stackRef.current;
-    const cursor = cursorRef.current;
-
-    // Don't push if we're already looking at this workspace.
-    if (cursor >= 0 && stack[cursor] === wsId) return;
-
-    // Truncate any forward entries and push.
-    stackRef.current = [...stack.slice(0, cursor + 1), wsId];
-    cursorRef.current = stackRef.current.length - 1;
+    setHistory((prev) => {
+      // Don't push if we're already looking at this workspace.
+      if (prev.cursor >= 0 && prev.stack[prev.cursor] === wsId) return prev;
+      // Truncate any forward entries and push.
+      const stack = [...prev.stack.slice(0, prev.cursor + 1), wsId];
+      return { stack, cursor: stack.length - 1 };
+    });
   }, [pathname]);
 
   const goBack = useCallback(() => {
-    if (cursorRef.current <= 0) return;
-    cursorRef.current -= 1;
-    navigatingRef.current = true;
-    const wsId = stackRef.current[cursorRef.current];
-    const href = capabilities.getWorkspaceHref?.(wsId);
-    if (href) routerNavigate(href);
+    let didMove = false;
+    let targetWsId: string | undefined;
+    setHistory((prev) => {
+      if (prev.cursor <= 0) return prev;
+      didMove = true;
+      const cursor = prev.cursor - 1;
+      targetWsId = prev.stack[cursor];
+      return { stack: prev.stack, cursor };
+    });
+    if (didMove && targetWsId) {
+      navigatingRef.current = true;
+      const href = capabilities.getWorkspaceHref?.(targetWsId);
+      if (href) routerNavigate(href);
+    }
   }, [routerNavigate, capabilities]);
 
   const goForward = useCallback(() => {
-    if (cursorRef.current >= stackRef.current.length - 1) return;
-    cursorRef.current += 1;
-    navigatingRef.current = true;
-    const wsId = stackRef.current[cursorRef.current];
-    const href = capabilities.getWorkspaceHref?.(wsId);
-    if (href) routerNavigate(href);
+    let didMove = false;
+    let targetWsId: string | undefined;
+    setHistory((prev) => {
+      if (prev.cursor >= prev.stack.length - 1) return prev;
+      didMove = true;
+      const cursor = prev.cursor + 1;
+      targetWsId = prev.stack[cursor];
+      return { stack: prev.stack, cursor };
+    });
+    if (didMove && targetWsId) {
+      navigatingRef.current = true;
+      const href = capabilities.getWorkspaceHref?.(targetWsId);
+      if (href) routerNavigate(href);
+    }
   }, [routerNavigate, capabilities]);
 
   // Global Cmd+[ / Cmd+] listener (capture phase).
@@ -92,4 +124,11 @@ export function useNavigationHistory(
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
   }, [goBack, goForward]);
+
+  return {
+    goBack,
+    goForward,
+    canGoBack: history.cursor > 0,
+    canGoForward: history.cursor >= 0 && history.cursor < history.stack.length - 1,
+  };
 }

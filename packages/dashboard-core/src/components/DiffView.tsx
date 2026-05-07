@@ -1,4 +1,9 @@
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
   Select,
   SelectContent,
   SelectItem,
@@ -20,6 +25,7 @@ import {
   ChevronsUpDown,
   Columns2,
   Copy,
+  MoreVertical,
   PanelLeft,
   RefreshCw,
   Rows2,
@@ -1003,21 +1009,34 @@ export function DiffView({
   // Track which file diff is currently in view for tree sidebar highlighting
   const [activeFile, setActiveFile] = useState<string | null>(null);
 
-  // Track the scroll container's visible height so we can size the trailing
-  // spacer that lets the last file be scrolled to the top of the viewport
-  // even when its content is shorter than the visible area.
+  // Track the scroll container's visible height + width:
+  // - height sizes the trailing spacer so the last file can be scrolled to
+  //   the top of the viewport even when its content is shorter than the
+  //   visible area;
+  // - width is used to force unified diff mode below SPLIT_VIEW_MIN_WIDTH —
+  //   side-by-side splits are unreadable in narrow panels (mobile-style).
   const [scrollContainerHeight, setScrollContainerHeight] = useState<number>(0);
+  const [scrollContainerWidth, setScrollContainerWidth] = useState<number>(0);
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-attach when summary changes so the observer is set up after the scroll container mounts (it lives behind a loading/empty-state guard)
   useLayoutEffect(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
-    const update = () => setScrollContainerHeight(container.clientHeight);
+    const update = () => {
+      setScrollContainerHeight(container.clientHeight);
+      setScrollContainerWidth(container.clientWidth);
+    };
     update();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(update);
     observer.observe(container);
     return () => observer.disconnect();
   }, [summary]);
+
+  // Below this width (in CSS px) the diff renders as unified regardless of the
+  // user's selected viewMode — split would just produce two unreadable columns.
+  const SPLIT_VIEW_MIN_WIDTH = 640;
+  const effectiveViewMode: ViewMode =
+    scrollContainerWidth > 0 && scrollContainerWidth < SPLIT_VIEW_MIN_WIDTH ? "unified" : viewMode;
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-attach when summary changes so the listener is set up after the scroll container mounts
   useEffect(() => {
@@ -1356,7 +1375,7 @@ export function DiffView({
 
   const renderDiffSelect = () => (
     <Select value={diffSelectValue} onValueChange={handleDiffSelectChange}>
-      <SelectTrigger className="h-6 w-auto gap-1 rounded-md border-0 bg-transparent px-1.5 text-xs font-medium text-foreground shadow-none hover:bg-accent">
+      <SelectTrigger className="h-6 w-auto max-w-[300px] gap-1 rounded-md border-0 bg-transparent px-1.5 text-xs font-medium text-foreground shadow-none hover:bg-accent [&>[data-slot=select-value]]:truncate [&>[data-slot=select-value]]:block">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
@@ -1395,8 +1414,11 @@ export function DiffView({
   // Ghost-style classes shared across every toolbar action button. Variants
   // for the segmented view-mode toggle differ slightly because the active
   // segment uses `bg-accent` on its own, without the hover transition.
+  // The auto-shown variant uses a container query against the @container/diff
+  // wrapper below — when the DiffView's parent container drops below 40rem,
+  // the sidebar auto-hides so the toggle would be a no-op too.
   const ghostBtnClass =
-    "hidden size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:inline-flex";
+    "hidden size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground @[40rem]/diff:inline-flex";
   const ghostBtnAlwaysClass =
     "inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground";
 
@@ -1414,14 +1436,16 @@ export function DiffView({
     </button>
   );
 
-  /** Inline branch indicator: `<head> → <dropdown>` rendered next to the stats. */
+  /** Inline branch indicator: `<head> → <dropdown>` rendered next to the stats.
+   *  When the DiffView container narrows, the head branch label and arrow drop
+   *  out so only the compare dropdown remains. */
   const renderBranchIndicator = (headBranchLabel: string | null | undefined) => (
-    <div className="hidden items-center gap-1.5 text-xs text-muted-foreground sm:flex">
+    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
       {headBranchLabel && (
-        <>
+        <div className="hidden items-center gap-1.5 @[32rem]/diff:flex">
           <span className="font-medium text-foreground">{headBranchLabel}</span>
           <ArrowRight className="size-3" aria-hidden />
-        </>
+        </div>
       )}
       {renderDiffSelect()}
     </div>
@@ -1430,7 +1454,7 @@ export function DiffView({
   if (!summary || summary.stats.filesChanged === 0) {
     return (
       <div className="flex h-full flex-col overflow-hidden">
-        <div className="flex h-8 shrink-0 items-center gap-3 border-b border-border pl-3 pr-3">
+        <div className="flex h-9 shrink-0 items-center gap-3 border-b border-border pl-3 pr-3">
           {renderBranchIndicator(summary?.headBranch)}
         </div>
         <div className="flex min-h-0 flex-1 items-center justify-center">
@@ -1445,15 +1469,16 @@ export function DiffView({
   filenamesRef.current = filenames;
 
   return (
-    <div className="flex h-full overflow-hidden">
-      {/* LEFT: File tree sidebar — desktop only */}
+    <div className="@container/diff flex h-full overflow-hidden">
+      {/* LEFT: File tree sidebar — auto-hides when this view's container
+          becomes too narrow to fit both the tree and useful diff content. */}
       {sidebarOpen && (
         <div
           data-diff-sidebar
-          className="hidden shrink-0 flex-col md:flex"
+          className="hidden shrink-0 flex-col @[40rem]/diff:flex"
           style={{ width: sidebarWidth }}
         >
-          <div className="flex h-8 shrink-0 items-center border-b border-border px-3">
+          <div className="flex h-9 shrink-0 items-center border-b border-border px-3">
             <span className="text-xs font-medium text-muted-foreground">Files</span>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto py-1">
@@ -1470,18 +1495,19 @@ export function DiffView({
       {sidebarOpen && (
         <div
           onMouseDown={handleResizeStart}
-          className="hidden w-[3px] shrink-0 cursor-col-resize bg-border/50 transition-colors hover:bg-accent-foreground/20 active:bg-accent-foreground/30 md:block"
+          className="hidden w-[3px] shrink-0 cursor-col-resize bg-border/50 transition-colors hover:bg-accent-foreground/20 active:bg-accent-foreground/30 @[40rem]/diff:block"
         />
       )}
 
       {/* RIGHT: Main content (toolbar + file list) */}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <div className="flex h-8 shrink-0 items-center justify-between gap-3 border-b border-border pl-2 pr-3">
+        <div className="flex h-9 shrink-0 items-center justify-between gap-3 border-b border-border pl-2 pr-3">
           <div className="flex min-w-0 items-center gap-1.5">
             {renderSidebarToggle()}
             {renderBranchIndicator(summary.headBranch)}
           </div>
-          <div className="flex items-center gap-1">
+          {/* Inline action icons — collapsed into the kebab menu below 32rem. */}
+          <div className="hidden items-center gap-1 @[32rem]/diff:flex">
             <button
               type="button"
               onClick={() => fetchSummaryRef.current?.(true)}
@@ -1514,28 +1540,73 @@ export function DiffView({
                 <ChevronsUpDown className="size-3.5" />
               )}
             </button>
-            <div className="hidden items-center md:flex">
+            <div className="hidden items-center @[40rem]/diff:flex">
               <button
                 type="button"
                 onClick={() => setViewMode("unified")}
-                className={`${ghostBtnAlwaysClass} ${viewMode === "unified" ? "bg-accent text-foreground" : ""}`}
+                className={`${ghostBtnAlwaysClass} ${effectiveViewMode === "unified" ? "bg-accent text-foreground" : ""}`}
                 title="Unified view"
                 aria-label="Unified view"
-                aria-pressed={viewMode === "unified"}
+                aria-pressed={effectiveViewMode === "unified"}
               >
                 <Rows2 className="size-3.5" />
               </button>
               <button
                 type="button"
                 onClick={() => setViewMode("split")}
-                className={`${ghostBtnAlwaysClass} ${viewMode === "split" ? "bg-accent text-foreground" : ""}`}
+                className={`${ghostBtnAlwaysClass} ${effectiveViewMode === "split" ? "bg-accent text-foreground" : ""}`}
                 title="Split view"
                 aria-label="Split view"
-                aria-pressed={viewMode === "split"}
+                aria-pressed={effectiveViewMode === "split"}
               >
                 <Columns2 className="size-3.5" />
               </button>
             </div>
+          </div>
+
+          {/* Compact "more actions" kebab menu — visible at narrow widths only. */}
+          <div className="flex items-center @[32rem]/diff:hidden">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className={ghostBtnAlwaysClass}
+                  title="More actions"
+                  aria-label="More actions"
+                >
+                  <MoreVertical className="size-3.5" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={() => fetchSummaryRef.current?.(true)}>
+                  <RefreshCw className="size-4" />
+                  Reload changes
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={search.handleOpenSearch}>
+                  <Search className="size-4" />
+                  Find in changes
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setExpandAll(!expandAll)}>
+                  {expandAll ? (
+                    <ChevronsDownUp className="size-4" />
+                  ) : (
+                    <ChevronsUpDown className="size-4" />
+                  )}
+                  {expandAll ? "Collapse all files" : "Expand all files"}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => setViewMode("unified")}>
+                  <Rows2 className="size-4" />
+                  Unified view
+                  {effectiveViewMode === "unified" && <Check className="ml-auto size-4" />}
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setViewMode("split")}>
+                  <Columns2 className="size-4" />
+                  Split view
+                  {effectiveViewMode === "split" && <Check className="ml-auto size-4" />}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
         {search.searchOpen && (
@@ -1562,7 +1633,7 @@ export function DiffView({
                   filename={filename}
                   status={fileStatuses[filename]}
                   cacheEntry={diffCache.get(filename)}
-                  viewMode={viewMode}
+                  viewMode={effectiveViewMode}
                   expandAll={expandAll}
                   focusedFile={focusedFile}
                   isActive={activeFile === filename}
@@ -1598,7 +1669,7 @@ export function DiffView({
           </div>
         </div>
         {/* Bottom status bar — totals for the current diff */}
-        <div className="flex h-8 shrink-0 items-center border-t border-border px-3 text-sm text-muted-foreground">
+        <div className="flex h-9 shrink-0 items-center border-t border-border px-3 text-sm text-muted-foreground">
           <span className="font-medium text-foreground">{summary.stats.filesChanged}</span>
           <span className="ml-1">
             {summary.stats.filesChanged === 1 ? "file" : "files"} changed

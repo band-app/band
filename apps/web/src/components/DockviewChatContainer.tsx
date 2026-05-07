@@ -366,7 +366,7 @@ const RightHeaderActions = React.memo(function RightHeaderActions(
   const { onAdd, onSplit } = addTabRef.current;
   const groupId = props.group.id;
   return (
-    <div className="flex items-center">
+    <div className="flex h-full items-center">
       <button
         type="button"
         className="inline-flex size-8 items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent rounded transition-colors"
