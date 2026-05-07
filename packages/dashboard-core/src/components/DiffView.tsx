@@ -2,6 +2,7 @@ import {
   Select,
   SelectContent,
   SelectItem,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
   Tooltip,
@@ -13,6 +14,7 @@ import { SearchQuery } from "@codemirror/search";
 import { EditorState, RangeSetBuilder, Text } from "@codemirror/state";
 import { Decoration, EditorView, lineNumbers, WidgetType } from "@codemirror/view";
 import {
+  ArrowRight,
   Check,
   ChevronsDownUp,
   ChevronsUpDown,
@@ -850,6 +852,10 @@ export function DiffView({
     const stored = getStoredCompareBranch(workspaceId);
     return stored ? [stored] : [];
   });
+  // The project's default branch, fetched via listWorkspaceBranches. We track
+  // it independently of the diff summary so the dropdown can pin the default
+  // (e.g. `main`) to the top section even before the summary loads.
+  const [availableDefaultBranch, setAvailableDefaultBranch] = useState<string | null>(null);
   const compareBranchRef = useRef(compareBranch);
   compareBranchRef.current = compareBranch;
   const setViewMode = useCallback((mode: ViewMode) => {
@@ -873,6 +879,7 @@ export function DiffView({
     const stored = getStoredCompareBranch(workspaceId);
     setCompareBranchState(stored);
     setAvailableBranches(stored ? [stored] : []);
+    setAvailableDefaultBranch(null);
   }, [workspaceId]);
 
   // Fetch the list of branches and refresh on branch-status SSE events so a
@@ -889,6 +896,7 @@ export function DiffView({
         .then((result) => {
           if (cancelled) return;
           setAvailableBranches(result.branches);
+          setAvailableDefaultBranch(result.defaultBranch);
           // Drop the stored selection if it no longer exists. Read the latest
           // value from a ref so this stays a pure check (no side effects in
           // the setState updater) and avoids stale-closure issues.
@@ -1300,18 +1308,36 @@ export function DiffView({
   }, [adapter, workspaceId, active, onStatsChange, diffMode, compareBranch, fetchFileDiff]);
 
   // ---------------------------------------------------------------------------
-  // Diff target dropdown — combines diff mode + branch selection into one menu
+  // Diff target dropdown — combines diff mode + branch selection into one menu.
+  // Top section: target branch (current pick), then the project's default
+  // branch (if different from target), then Uncommitted. Below the separator
+  // we list every other branch alphabetically. Pinning both target + default
+  // to the top keeps the two most common compare targets one click away.
   // ---------------------------------------------------------------------------
   const summaryCompareBranch = summary?.compareBranch ?? null;
+  const defaultBranch = summary?.defaultBranch ?? availableDefaultBranch ?? null;
   const branchOptions =
     availableBranches.length > 0
       ? availableBranches
       : summaryCompareBranch
         ? [summaryCompareBranch]
         : [];
-  const selectedBranch = compareBranch ?? branchOptions[0] ?? summaryCompareBranch;
+  const targetBranch = compareBranch ?? branchOptions[0] ?? summaryCompareBranch;
+
+  // Branches pinned above the separator. Order matters in the rendered list.
+  const topSectionBranches: string[] = [];
+  if (targetBranch) {
+    topSectionBranches.push(targetBranch);
+  }
+  if (defaultBranch && defaultBranch !== targetBranch && branchOptions.includes(defaultBranch)) {
+    topSectionBranches.push(defaultBranch);
+  }
+  const otherBranches = branchOptions
+    .filter((b) => !topSectionBranches.includes(b))
+    .sort((a, b) => a.localeCompare(b));
+
   const diffSelectValue =
-    diffMode === "uncommitted" ? UNCOMMITTED_VALUE : (selectedBranch ?? UNCOMMITTED_VALUE);
+    diffMode === "uncommitted" ? UNCOMMITTED_VALUE : (targetBranch ?? UNCOMMITTED_VALUE);
 
   const handleDiffSelectChange = (value: string) => {
     if (value === UNCOMMITTED_VALUE) {
@@ -1324,12 +1350,18 @@ export function DiffView({
 
   const renderDiffSelect = () => (
     <Select value={diffSelectValue} onValueChange={handleDiffSelectChange}>
-      <SelectTrigger className="h-7 w-auto gap-1 rounded-md border-border/50 bg-muted/50 px-2.5 text-xs">
+      <SelectTrigger className="h-6 w-auto gap-1 rounded-md border-0 bg-transparent px-1.5 text-xs font-medium text-foreground shadow-none hover:bg-accent">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
+        {topSectionBranches.map((branch) => (
+          <SelectItem key={branch} value={branch}>
+            {branch}
+          </SelectItem>
+        ))}
         <SelectItem value={UNCOMMITTED_VALUE}>Uncommitted</SelectItem>
-        {branchOptions.map((branch) => (
+        {otherBranches.length > 0 && <SelectSeparator />}
+        {otherBranches.map((branch) => (
           <SelectItem key={branch} value={branch}>
             {branch}
           </SelectItem>
@@ -1354,14 +1386,48 @@ export function DiffView({
     );
   }
 
+  // Ghost-style classes shared across every toolbar action button. Variants
+  // for the segmented view-mode toggle differ slightly because the active
+  // segment uses `bg-accent` on its own, without the hover transition.
+  const ghostBtnClass =
+    "hidden size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:inline-flex";
+  const ghostBtnAlwaysClass =
+    "inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground";
+
+  /** File-tree toggle — always visible on desktop, hidden on mobile. */
+  const renderSidebarToggle = () => (
+    <button
+      type="button"
+      onClick={() => setSidebarOpen(!sidebarOpen)}
+      className={ghostBtnClass}
+      title={sidebarOpen ? "Hide file tree" : "Show file tree"}
+      aria-label={sidebarOpen ? "Hide file tree" : "Show file tree"}
+      aria-pressed={sidebarOpen}
+    >
+      <PanelLeft className="size-3.5" />
+    </button>
+  );
+
+  /** Inline branch indicator: `<head> → <dropdown>` rendered next to the stats. */
+  const renderBranchIndicator = (headBranchLabel: string | null | undefined) => (
+    <div className="hidden items-center gap-1.5 text-xs text-muted-foreground sm:flex">
+      {headBranchLabel && (
+        <>
+          <span className="font-medium text-foreground">{headBranchLabel}</span>
+          <ArrowRight className="size-3" aria-hidden />
+        </>
+      )}
+      {renderDiffSelect()}
+    </div>
+  );
+
   if (!summary || summary.stats.filesChanged === 0) {
     return (
       <div className="flex h-full flex-col overflow-hidden">
-        <div className="flex shrink-0 items-center justify-end border-b border-border px-4 py-2">
-          {renderDiffSelect()}
-        </div>
-        <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-          No changes
+        <div className="flex h-8 shrink-0 items-center gap-3 border-b border-border pl-2 pr-3">
+          {renderSidebarToggle()}
+          <span className="text-sm text-muted-foreground">No changes</span>
+          {renderBranchIndicator(summary?.headBranch)}
         </div>
       </div>
     );
@@ -1380,16 +1446,8 @@ export function DiffView({
           className="hidden shrink-0 flex-col md:flex"
           style={{ width: sidebarWidth }}
         >
-          <div className="flex h-8 shrink-0 items-center justify-between border-b border-border px-3">
+          <div className="flex h-8 shrink-0 items-center border-b border-border px-3">
             <span className="text-xs font-medium text-muted-foreground">Files</span>
-            <button
-              type="button"
-              onClick={() => setSidebarOpen(false)}
-              className="rounded p-0.5 text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-              title="Hide file tree"
-            >
-              <PanelLeft className="size-3.5" />
-            </button>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto py-1">
             <ChangesFileTree
@@ -1411,65 +1469,37 @@ export function DiffView({
 
       {/* RIGHT: Main content (toolbar + file list) */}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-2">
-          <div className="flex items-center gap-3">
-            {/* Sidebar toggle — only visible on desktop when sidebar is closed */}
-            {!sidebarOpen && (
-              <button
-                type="button"
-                onClick={() => setSidebarOpen(true)}
-                className="hidden items-center rounded-md border border-border/50 bg-muted/50 px-2 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground md:inline-flex"
-                title="Show file tree"
-              >
-                <PanelLeft className="size-3.5" />
-              </button>
-            )}
-            <div>
-              <div className="text-sm text-muted-foreground">
-                <span className="font-medium text-foreground">{summary.stats.filesChanged}</span>{" "}
-                {summary.stats.filesChanged === 1 ? "file" : "files"} changed
-                {summary.stats.insertions > 0 && (
-                  <span className="ml-2 text-green-600 dark:text-green-400">
-                    +{summary.stats.insertions}
-                  </span>
-                )}
-                {summary.stats.deletions > 0 && (
-                  <span className="ml-1 text-red-600 dark:text-red-400">
-                    -{summary.stats.deletions}
-                  </span>
-                )}
-              </div>
-              <div className="mt-0.5 text-xs text-muted-foreground">
-                {summary.compareBranch} &larr; {summary.headBranch}
-              </div>
-            </div>
+        <div className="flex h-8 shrink-0 items-center justify-between gap-3 border-b border-border pl-2 pr-3">
+          <div className="flex min-w-0 items-center gap-1.5">
+            {renderSidebarToggle()}
+            {renderBranchIndicator(summary.headBranch)}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
             <button
               type="button"
               onClick={() => fetchSummaryRef.current?.(true)}
-              className="inline-flex items-center rounded-md border border-border/50 bg-muted/50 px-2 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+              className={ghostBtnAlwaysClass}
               title="Reload changes"
+              aria-label="Reload changes"
             >
               <RefreshCw className="size-3.5" />
             </button>
             <button
               type="button"
               onClick={search.handleOpenSearch}
-              className="inline-flex items-center rounded-md border border-border/50 bg-muted/50 px-2 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+              className={ghostBtnAlwaysClass}
               title="Find in changes (⌘F)"
+              aria-label="Find in changes"
             >
               <Search className="size-3.5" />
             </button>
             <button
               type="button"
               onClick={() => setExpandAll(!expandAll)}
-              className={`inline-flex items-center rounded-md border border-border/50 px-2 py-1 text-xs transition-colors ${
-                expandAll
-                  ? "bg-accent text-foreground"
-                  : "bg-muted/50 text-muted-foreground hover:text-foreground"
-              }`}
+              className={`${ghostBtnAlwaysClass} ${expandAll ? "bg-accent text-foreground" : ""}`}
               title={expandAll ? "Collapse all files" : "Expand all files"}
+              aria-label={expandAll ? "Collapse all files" : "Expand all files"}
+              aria-pressed={expandAll}
             >
               {expandAll ? (
                 <ChevronsDownUp className="size-3.5" />
@@ -1477,29 +1507,24 @@ export function DiffView({
                 <ChevronsUpDown className="size-3.5" />
               )}
             </button>
-            {renderDiffSelect()}
-            <div className="hidden items-center rounded-md border border-border/50 bg-muted/50 md:flex">
+            <div className="hidden items-center md:flex">
               <button
                 type="button"
                 onClick={() => setViewMode("unified")}
-                className={`inline-flex items-center gap-1 rounded-l-md px-2 py-1 text-xs transition-colors ${
-                  viewMode === "unified"
-                    ? "bg-accent text-foreground"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
+                className={`${ghostBtnAlwaysClass} ${viewMode === "unified" ? "bg-accent text-foreground" : ""}`}
                 title="Unified view"
+                aria-label="Unified view"
+                aria-pressed={viewMode === "unified"}
               >
                 <Rows2 className="size-3.5" />
               </button>
               <button
                 type="button"
                 onClick={() => setViewMode("split")}
-                className={`inline-flex items-center gap-1 rounded-r-md px-2 py-1 text-xs transition-colors ${
-                  viewMode === "split"
-                    ? "bg-accent text-foreground"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
+                className={`${ghostBtnAlwaysClass} ${viewMode === "split" ? "bg-accent text-foreground" : ""}`}
                 title="Split view"
+                aria-label="Split view"
+                aria-pressed={viewMode === "split"}
               >
                 <Columns2 className="size-3.5" />
               </button>
@@ -1542,6 +1567,21 @@ export function DiffView({
               />
             ))}
           </div>
+        </div>
+        {/* Bottom status bar — totals for the current diff */}
+        <div className="flex h-8 shrink-0 items-center border-t border-border px-3 text-sm text-muted-foreground">
+          <span className="font-medium text-foreground">{summary.stats.filesChanged}</span>
+          <span className="ml-1">
+            {summary.stats.filesChanged === 1 ? "file" : "files"} changed
+          </span>
+          {summary.stats.insertions > 0 && (
+            <span className="ml-2 text-green-600 dark:text-green-400">
+              +{summary.stats.insertions}
+            </span>
+          )}
+          {summary.stats.deletions > 0 && (
+            <span className="ml-1 text-red-600 dark:text-red-400">-{summary.stats.deletions}</span>
+          )}
         </div>
       </div>
     </div>
