@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -617,5 +617,158 @@ describe("Task stream — Write to workspace does NOT emit file event", () => {
     expect(eventTypes).toContain("tool-input-available");
     expect(eventTypes).toContain("tool-output-available");
     expect(eventTypes).not.toContain("file");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Direct submit — multiple file attachments in one message
+// ---------------------------------------------------------------------------
+
+/**
+ * 1×1 pixel PNGs with distinct payloads so we can verify each one was
+ * written to disk separately (and the "same filename → same path"
+ * collision in saveUploadedFiles doesn't lose data).
+ */
+const PNG_RED_DATA_URL =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==";
+const PNG_BLUE_DATA_URL =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPj/HwADAgH/eL9GtQAAAABJRU5ErkJggg==";
+
+function decodeDataUrlBytes(url: string): Buffer {
+  const m = url.match(/^data:[^;]+;base64,(.+)$/);
+  if (!m) throw new Error("not a base64 data URL");
+  return Buffer.from(m[1], "base64");
+}
+
+describe("Task stream — multiple files in a single direct message", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+  const WORKSPACE_ID = "testproject-main";
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    seedState(tmpHome, createDefaultState(tmpHome));
+
+    // Quick scenario — we don't care about the agent output, only that
+    // the SSE pipeline ran end-to-end (file uploads + user-message).
+    const scenarioPath = writeScenario(tmpHome, [
+      { type: "system", subtype: "init", session_id: "multi-file-session" },
+      { type: "assistant", message: { content: [{ type: "text", text: "ok" }] } },
+      {
+        type: "result",
+        subtype: "success",
+        session_id: "multi-file-session",
+        duration_ms: 50,
+        num_turns: 1,
+        total_cost_usd: 0,
+      },
+    ]);
+
+    seedSettings(tmpHome, {
+      tokenSecret: DEFAULT_TOKEN,
+      codingAgents: [
+        { id: "claude-code", type: "claude-code", label: "Claude Code", command: FAKE_AGENT_PATH },
+      ],
+    });
+
+    server = await startServer({ tmpHome, scenarioPath });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("writes each file to a distinct path even when filenames collide", async () => {
+    const chatId = `direct-multifile-${Date.now()}`;
+    const response = await fetch(`${server.url}/api/tasks/${encodeURIComponent(chatId)}/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...defaultHeaders },
+      body: JSON.stringify({
+        workspaceId: WORKSPACE_ID,
+        prompt: "compare these screenshots",
+        files: [
+          { mediaType: "image/png", url: PNG_RED_DATA_URL, filename: "screenshot.png" },
+          // Intentionally same filename to exercise the collision path.
+          { mediaType: "image/png", url: PNG_BLUE_DATA_URL, filename: "screenshot.png" },
+        ],
+      }),
+    });
+    expect(response.status).toBe(200);
+    await parseSSEStream(response); // drain to completion
+
+    // Both files must land on disk as distinct entries with their
+    // original payloads preserved — no overwrite.
+    const uploadsDir = join(tmpHome, ".band", "uploads");
+    const written = readdirSync(uploadsDir).filter((f) => f.endsWith("screenshot.png"));
+    expect(written.length).toBe(2);
+
+    const payloads = written.map((name) => readFileSync(join(uploadsDir, name)));
+    const expectedRed = decodeDataUrlBytes(PNG_RED_DATA_URL);
+    const expectedBlue = decodeDataUrlBytes(PNG_BLUE_DATA_URL);
+    const matchesRed = payloads.some((p) => p.equals(expectedRed));
+    const matchesBlue = payloads.some((p) => p.equals(expectedBlue));
+    expect(matchesRed).toBe(true);
+    expect(matchesBlue).toBe(true);
+  });
+
+  it("user-message SSE chunk carries every attached file for replay", async () => {
+    const chatId = `direct-userfiles-${Date.now()}`;
+    const response = await fetch(`${server.url}/api/tasks/${encodeURIComponent(chatId)}/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...defaultHeaders },
+      body: JSON.stringify({
+        workspaceId: WORKSPACE_ID,
+        prompt: "look at these",
+        files: [
+          { mediaType: "image/png", url: PNG_RED_DATA_URL, filename: "a.png" },
+          { mediaType: "image/png", url: PNG_BLUE_DATA_URL, filename: "b.png" },
+        ],
+      }),
+    });
+    expect(response.status).toBe(200);
+    const events = await parseSSEStream(response);
+
+    // user-message is filtered out by task-stream's UI chunk projection
+    // before the SSE response, so we instead verify it round-trips by
+    // reading session events back via the tRPC sessions.messages endpoint.
+    const sessionId = "multi-file-session";
+    const msgsRes = await fetch(
+      `${server.url}/trpc/sessions.messages?input=${encodeURIComponent(
+        JSON.stringify({ workspaceId: WORKSPACE_ID, chatId, sessionId }),
+      )}`,
+      { headers: defaultHeaders },
+    );
+    expect(msgsRes.status).toBe(200);
+    const msgsBody = (await msgsRes.json()) as {
+      result: {
+        data: {
+          messages: {
+            role: string;
+            parts: { type: string; mediaType?: string; url?: string; filename?: string }[];
+          }[];
+        };
+      };
+    };
+    const userMessages = msgsBody.result.data.messages.filter((m) => m.role === "user");
+    expect(userMessages.length).toBeGreaterThanOrEqual(1);
+    // The previous test in this describe shares the same session_id (the
+    // fake-agent scenario uses a fixed value), so multiple user messages
+    // accumulate in the buffer — the one we just submitted is the last.
+    const lastUser = userMessages[userMessages.length - 1];
+    // The replayed user message should have both file parts in addition
+    // to the text — this is the regression we're guarding against.
+    const fileParts = lastUser.parts.filter((p) => p.type === "file");
+    expect(fileParts.length).toBe(2);
+    const filenames = fileParts.map((p) => p.filename).sort();
+    expect(filenames).toEqual(["a.png", "b.png"]);
+    // URLs should reference /api/uploads/* (server-served), not raw
+    // base64 — that's how reload-time rendering finds the bytes.
+    for (const part of fileParts) {
+      expect(part.url).toMatch(/^\/api\/uploads\//);
+    }
+
+    // Also sanity-check that finish was emitted on the SSE stream.
+    expect(events.some((e) => e.event === "finish")).toBe(true);
   });
 });

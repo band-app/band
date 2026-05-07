@@ -12,7 +12,7 @@ import {
   subscribe as subscribeTask,
   TaskConflictError,
 } from "../lib/task-runner";
-import { saveUploadedFiles } from "../lib/upload-utils";
+import { saveUploadedFilesDetailed } from "../lib/upload-utils";
 
 const log = createLogger("task-stream");
 
@@ -232,13 +232,25 @@ async function handlePost(
     createChat(workspaceId, { id: chatId, name: "Chat", agent: codingAgentId });
   }
 
-  // Handle file uploads
+  // Handle file uploads — write each attachment to ~/.band/uploads/
+  // and build (a) a path list to inject into the agent prompt and
+  // (b) a display-only metadata array, with /api/uploads/{name} URLs,
+  // that we hand to submitTask so the user-message broadcast (and
+  // therefore the persisted session JSONL) carries the file parts.
+  // Without (b), reloading the session would re-render the user
+  // bubble as text-only and lose any attached images.
   let agentPrompt: string | undefined;
+  let displayFiles: { mediaType: string; url: string; filename?: string }[] | undefined;
   if (files && files.length > 0) {
-    const savedPaths = await saveUploadedFiles(files);
-    if (savedPaths.length > 0) {
-      const fileList = savedPaths.map((p) => `- ${p}`).join("\n");
+    const saved = await saveUploadedFilesDetailed(files);
+    if (saved.length > 0) {
+      const fileList = saved.map((s) => `- ${s.path}`).join("\n");
       agentPrompt = `I'm sharing these files with you:\n${fileList}\n\n${prompt}`;
+      displayFiles = saved.map((s) => ({
+        mediaType: s.mediaType,
+        url: `/api/uploads/${s.storedName}`,
+        filename: s.originalName,
+      }));
     }
   }
 
@@ -250,6 +262,7 @@ async function handlePost(
       prompt,
       sessionId,
       agentPrompt,
+      displayFiles,
       maxTurns,
       mode,
       model,

@@ -2,7 +2,13 @@ import { useChat } from "@ai-sdk/react";
 import { AgentIcon, useExperimentalContextMeter } from "@band-app/dashboard-core";
 import {
   Badge,
+  Button,
   cn,
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuGroup,
@@ -14,10 +20,26 @@ import {
   Popover,
   PopoverContent,
   PopoverTrigger,
+  Textarea,
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@band-app/ui";
+import {
+  closestCenter,
+  DndContext,
+  type DragEndEvent,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import type { UIMessage } from "ai";
 import { getToolName, isToolUIPart } from "ai";
 import {
@@ -26,6 +48,7 @@ import {
   Clock,
   CodeXml,
   GitBranch,
+  GripHorizontal,
   Loader2,
   Plus,
   ScrollText,
@@ -173,8 +196,15 @@ type UIMessageParts = ReturnType<
   typeof import("@ai-sdk/react").useChat
 >["messages"][number]["parts"];
 
+interface QueuedFilePart {
+  mediaType: string;
+  url: string;
+  filename?: string;
+}
+
 type QueueSegment = {
   userPrompt: string | null;
+  userFiles?: QueuedFilePart[];
   parts: UIMessageParts;
 };
 
@@ -194,8 +224,11 @@ function splitMessageAtQueueBoundaries(parts: UIMessageParts): QueueSegment[] {
     if (part.type === "data-prompt") {
       // Finish current segment and start a new one
       segments.push(current);
+      const data = (part as { type: string; data: { text: string; files?: QueuedFilePart[] } })
+        .data;
       current = {
-        userPrompt: (part as { type: string; data: { text: string } }).data.text,
+        userPrompt: data.text,
+        userFiles: data.files,
         parts: [],
       };
       continue;
@@ -483,7 +516,12 @@ export function ChatView({
     [chatId],
   );
 
-  const [queuedMessages, setQueuedMessages] = useState<string[]>([]);
+  interface QueuedMessageView {
+    id: string;
+    text: string;
+    files?: QueuedFilePart[];
+  }
+  const [queuedMessages, setQueuedMessages] = useState<QueuedMessageView[]>([]);
 
   // Subscribe to queue state changes via a dedicated tRPC subscription.
   // The backend pushes the full queue array on every change (push, shift,
@@ -492,7 +530,7 @@ export function ChatView({
     const subscription = trpc.queue.stream.subscribe(
       { workspaceId, chatId },
       {
-        onData(data: { messages: string[] }) {
+        onData(data: { messages: QueuedMessageView[] }) {
           setQueuedMessages(data.messages);
         },
       },
@@ -1009,9 +1047,43 @@ export function ChatView({
   }, [visible, wsActive, handleNewSession]);
 
   const queueMessage = useCallback(
-    (text: string) => {
-      setQueuedMessages((prev) => [...prev, text]);
-      trpc.queue.push.mutate({ workspaceId, chatId, text }).catch(() => {});
+    async (message: PromptInputMessage) => {
+      // Convert browser File[] to base64 data URLs so they can be
+      // serialized through tRPC. Files are uploaded to disk only when
+      // the queued message is drained (server-side).
+      const files = await Promise.all(
+        (message.files ?? []).map(
+          (file): Promise<QueuedFilePart> =>
+            new Promise((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => {
+                resolve({
+                  mediaType: file.type,
+                  url: reader.result as string,
+                  filename: file.name,
+                });
+              };
+              reader.onerror = () => reject(reader.error);
+              reader.readAsDataURL(file);
+            }),
+        ),
+      );
+
+      // Optimistic update with a temporary id; subscription corrects when
+      // the server's response arrives.
+      const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      setQueuedMessages((prev) => [
+        ...prev,
+        { id: tempId, text: message.text, files: files.length > 0 ? files : undefined },
+      ]);
+      trpc.queue.push
+        .mutate({
+          workspaceId,
+          chatId,
+          text: message.text,
+          ...(files.length > 0 && { files }),
+        })
+        .catch(() => {});
     },
     [workspaceId, chatId],
   );
@@ -1023,7 +1095,7 @@ export function ChatView({
       if (isStreaming) {
         // Agent is busy — queue the message on the backend.
         // Optimistic update for instant feedback; subscription corrects if needed.
-        queueMessage(message.text);
+        await queueMessage(message);
         return;
       }
 
@@ -1032,7 +1104,7 @@ export function ChatView({
       try {
         const { task } = await trpc.tasks.get.query({ workspaceId, chatId });
         if (task && task.status === "running") {
-          queueMessage(message.text);
+          await queueMessage(message);
           return;
         }
       } catch {
@@ -1046,16 +1118,55 @@ export function ChatView({
   );
 
   const handleCancelQueued = useCallback(
-    (text: string) => {
+    (id: string) => {
       // Optimistic update for instant feedback; subscription corrects if needed.
-      setQueuedMessages((prev) => {
-        const idx = prev.indexOf(text);
-        if (idx === -1) return prev;
-        const messages = [...prev.slice(0, idx), ...prev.slice(idx + 1)];
+      setQueuedMessages((prev) => prev.filter((m) => m.id !== id));
+      trpc.queue.remove.mutate({ workspaceId, chatId, id }).catch(() => {});
+    },
+    [workspaceId, chatId],
+  );
 
-        return messages;
+  const handleEditQueued = useCallback(
+    (id: string, text: string) => {
+      // Optimistic update for instant feedback; subscription corrects if needed.
+      setQueuedMessages((prev) => prev.map((m) => (m.id === id ? { ...m, text } : m)));
+      trpc.queue.update.mutate({ workspaceId, chatId, id, text }).catch(() => {});
+    },
+    [workspaceId, chatId],
+  );
+
+  // Pointer sensor with a small activation distance so a click on the
+  // drag handle (or anywhere) doesn't accidentally start a drag —
+  // the user has to actually move a few pixels first.
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+  );
+
+  const handleReorderQueued = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+      setQueuedMessages((prev) => {
+        const oldIdx = prev.findIndex((m) => m.id === active.id);
+        const newIdx = prev.findIndex((m) => m.id === over.id);
+        if (oldIdx === -1 || newIdx === -1) return prev;
+        const reordered = arrayMove(prev, oldIdx, newIdx);
+        // Persist the new order. queue.set replaces the whole queue;
+        // the subscription will broadcast the same shape back so the
+        // optimistic state and the server stay in sync.
+        trpc.queue.set
+          .mutate({
+            workspaceId,
+            chatId,
+            messages: reordered.map((m) => ({
+              id: m.id,
+              text: m.text,
+              ...(m.files && m.files.length > 0 && { files: m.files }),
+            })),
+          })
+          .catch(() => {});
+        return reordered;
       });
-      trpc.queue.remove.mutate({ workspaceId, chatId, text }).catch(() => {});
     },
     [workspaceId, chatId],
   );
@@ -1251,6 +1362,12 @@ export function ChatView({
                     {segment.userPrompt && (
                       <Message from="user">
                         <MessageContent>
+                          {segment.userFiles?.map((file, fileIdx) => (
+                            <MessageFilePart
+                              key={`${message.id}-${segKey}-userfile-${fileIdx}`}
+                              part={{ type: "file", ...file }}
+                            />
+                          ))}
                           <MessageResponse>{segment.userPrompt}</MessageResponse>
                         </MessageContent>
                       </Message>
@@ -1305,9 +1422,29 @@ export function ChatView({
               </MessageContent>
             </Message>
           )}
-          {queuedMessages.map((text) => (
-            <QueuedMessageBubble key={text} text={text} onCancel={() => handleCancelQueued(text)} />
-          ))}
+          {queuedMessages.length > 0 && (
+            <DndContext
+              sensors={dndSensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleReorderQueued}
+            >
+              <SortableContext
+                items={queuedMessages.map((m) => m.id)}
+                strategy={verticalListSortingStrategy}
+              >
+                {queuedMessages.map((m) => (
+                  <QueuedMessageBubble
+                    key={m.id}
+                    id={m.id}
+                    text={m.text}
+                    files={m.files}
+                    onCancel={() => handleCancelQueued(m.id)}
+                    onEdit={(newText) => handleEditQueued(m.id, newText)}
+                  />
+                ))}
+              </SortableContext>
+            </DndContext>
+          )}
         </ConversationContent>
         <ConversationScrollButton />
       </Conversation>
@@ -1882,26 +2019,123 @@ function SessionHistoryMenu({
   );
 }
 
-function QueuedMessageBubble({ text, onCancel }: { text: string; onCancel: () => void }) {
+function QueuedMessageBubble({
+  id,
+  text,
+  files,
+  onCancel,
+  onEdit,
+}: {
+  id: string;
+  text: string;
+  files?: QueuedFilePart[];
+  onCancel: () => void;
+  onEdit: (text: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(text);
+
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id,
+  });
+  const sortableStyle = {
+    transform: CSS.Translate.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : undefined,
+  };
+
+  // When the dialog opens, reset the draft to the latest text. We don't
+  // sync continuously so the user's in-progress edits aren't clobbered
+  // if the queue subscription pushes an unchanged update mid-edit.
+  const openEditor = useCallback(() => {
+    setDraft(text);
+    setEditing(true);
+  }, [text]);
+
+  const handleSave = useCallback(() => {
+    const next = draft.trim();
+    if (!next) return;
+    if (next !== text) onEdit(next);
+    setEditing(false);
+  }, [draft, text, onEdit]);
+
   return (
-    <div className="group is-user flex w-full max-w-[90%] flex-col gap-2 ml-auto justify-end opacity-60">
-      <div className="flex min-w-0 max-w-full flex-col gap-2 break-words text-base ml-auto w-fit rounded-md bg-secondary px-4 py-3 text-foreground">
-        <MessageResponse>{text}</MessageResponse>
-        <div className="flex items-center justify-end gap-2 mt-1">
-          <Badge variant="outline" className="text-xs text-muted-foreground">
-            <Clock className="size-3" />
-            Queued
-          </Badge>
+    <>
+      <div
+        ref={setNodeRef}
+        style={sortableStyle}
+        className="group is-user flex w-full max-w-[90%] flex-col items-end ml-auto justify-end opacity-60"
+      >
+        <div className="flex min-w-0 max-w-full w-fit flex-col overflow-hidden rounded-md bg-secondary text-foreground">
+          {/* Drag handle pinned to the top border — separate from the
+              bubble body so click-to-edit doesn't conflict with reorder
+              gestures. Acts as a visual "grip" rail across the top. */}
           <button
             type="button"
-            onClick={onCancel}
-            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+            {...attributes}
+            {...listeners}
+            aria-label="Reorder queued message"
+            className="flex w-full items-center justify-center border-b border-border/30 bg-muted/30 py-0.5 text-muted-foreground/60 cursor-grab touch-none transition-colors hover:bg-muted/50 hover:text-muted-foreground active:cursor-grabbing"
           >
-            <X className="size-3" />
-            Cancel
+            <GripHorizontal className="size-3.5" />
           </button>
+          <div className="flex flex-col gap-2 break-words text-sm px-3 py-2">
+            {files?.map((file, idx) => (
+              <MessageFilePart key={`queued-file-${idx}`} part={{ type: "file", ...file }} />
+            ))}
+            <button
+              type="button"
+              onClick={openEditor}
+              className="-mx-1 cursor-pointer rounded px-1 text-left transition-colors hover:bg-foreground/5"
+              title="Click to edit"
+            >
+              <MessageResponse className="text-sm">{text}</MessageResponse>
+            </button>
+            <div className="flex items-center justify-end gap-2 mt-1">
+              <Badge variant="outline" className="text-xs text-muted-foreground">
+                <Clock className="size-3" />
+                Queued
+              </Badge>
+              <button
+                type="button"
+                onClick={onCancel}
+                className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+              >
+                <X className="size-3" />
+                Cancel
+              </button>
+            </div>
+          </div>
         </div>
       </div>
-    </div>
+
+      <Dialog open={editing} onOpenChange={setEditing}>
+        <DialogContent className="sm:max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle>Edit queued message</DialogTitle>
+          </DialogHeader>
+          <Textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            className="min-h-[120px] text-sm"
+            autoFocus
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                handleSave();
+              }
+            }}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditing(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSave} disabled={!draft.trim()}>
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

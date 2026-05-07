@@ -146,12 +146,15 @@ export class TaskChatTransport implements ChatTransport<UIMessage> {
       signal: controller.signal,
     });
 
-    // Handle conflict — task is already running, queue the message instead
+    // Handle conflict — task is already running, queue the message instead.
+    // Files are queued as base64 data URLs (same shape sent above) so the
+    // task-runner can upload them when the queued message is drained.
     if (response.status === 409) {
       await trpc.queue.push.mutate({
         workspaceId: this.workspaceId,
         chatId: this.chatId,
         text: userText,
+        ...(files.length > 0 && { files }),
       });
       return new ReadableStream<UIMessageChunk>({
         start(controller) {

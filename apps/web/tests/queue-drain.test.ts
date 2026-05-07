@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -283,7 +283,7 @@ describe("queue auto-drain — single queued message", () => {
 
     // 4. Verify the queue is now empty (message was consumed)
     const queueRes = await trpcQuery(server.url, "queue.get", { workspaceId });
-    const queueData = await trpcData<{ messages: string[] }>(queueRes);
+    const queueData = await trpcData<{ messages: { id: string; text: string }[] }>(queueRes);
     expect(queueData.messages).toEqual([]);
 
     // 5. Verify the last task that ran was the queued one
@@ -409,8 +409,8 @@ describe("queue auto-drain — failed task does not drain queue", () => {
 
     // 5. Verify queue still has the message (it was NOT consumed)
     const queueRes = await trpcQuery(server.url, "queue.get", { workspaceId });
-    const queueData = await trpcData<{ messages: string[] }>(queueRes);
-    expect(queueData.messages).toEqual(["should stay queued"]);
+    const queueData = await trpcData<{ messages: { id: string; text: string }[] }>(queueRes);
+    expect(queueData.messages.map((m) => m.text)).toEqual(["should stay queued"]);
 
     // Cleanup
     await trpcMutate(server.url, "queue.clear", { workspaceId });
@@ -505,7 +505,7 @@ describe("stream stays alive across auto-drained tasks (SSE)", () => {
 
     // 5. Queue should be empty
     const queueRes = await trpcQuery(server.url, "queue.get", { workspaceId });
-    const queueData = await trpcData<{ messages: string[] }>(queueRes);
+    const queueData = await trpcData<{ messages: { id: string; text: string }[] }>(queueRes);
     expect(queueData.messages).toEqual([]);
   });
 });
@@ -581,8 +581,8 @@ describe("queue.shift — pops the first message", () => {
   it("returns null when queue is empty", async () => {
     const res = await trpcMutate(server.url, "queue.shift", { workspaceId: "testproject-main" });
     expect(res.status).toBe(200);
-    const data = await trpcData<{ text: string | null }>(res);
-    expect(data.text).toBeNull();
+    const data = await trpcData<{ message: { text: string } | null }>(res);
+    expect(data.message).toBeNull();
   });
 
   it("pops the first message and leaves the rest", async () => {
@@ -595,13 +595,13 @@ describe("queue.shift — pops the first message", () => {
 
     // Shift the first
     const shiftRes = await trpcMutate(server.url, "queue.shift", { workspaceId });
-    const shiftData = await trpcData<{ text: string | null }>(shiftRes);
-    expect(shiftData.text).toBe("first");
+    const shiftData = await trpcData<{ message: { id: string; text: string } | null }>(shiftRes);
+    expect(shiftData.message?.text).toBe("first");
 
     // Verify remaining
     const getRes = await trpcQuery(server.url, "queue.get", { workspaceId });
-    const getData = await trpcData<{ messages: string[] }>(getRes);
-    expect(getData.messages).toEqual(["second", "third"]);
+    const getData = await trpcData<{ messages: { id: string; text: string }[] }>(getRes);
+    expect(getData.messages.map((m) => m.text)).toEqual(["second", "third"]);
 
     // Cleanup
     await trpcMutate(server.url, "queue.clear", { workspaceId });
@@ -711,7 +711,98 @@ describe("queue auto-drain — late queue push", () => {
 
     // 4. Queue is drained
     const queueRes = await trpcQuery(server.url, "queue.get", { workspaceId });
-    const queueData = await trpcData<{ messages: string[] }>(queueRes);
+    const queueData = await trpcData<{ messages: { id: string; text: string }[] }>(queueRes);
     expect(queueData.messages).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Queue auto-drain — queued message with image attachment
+// ---------------------------------------------------------------------------
+
+describe("queue auto-drain — queued message with images", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    seedState(tmpHome, createDefaultState(tmpHome));
+
+    const scenarioPath = writeScenario(tmpHome, quickSuccessScenario());
+    seedSettings(tmpHome, defaultSettings());
+
+    server = await startServer({ tmpHome, scenarioPath });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("preserves files when queueing and uploads them on drain", async () => {
+    const workspaceId = "testproject-main";
+    const chatId = `test-queue-files-${Date.now()}`;
+
+    // 1×1 transparent PNG as base64 data URL (the same shape the
+    // browser would produce after FileReader.readAsDataURL).
+    const dataUrl =
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+
+    // 1. Pre-load the queue with a message that has a file attachment
+    await trpcMutate(server.url, "queue.push", {
+      workspaceId,
+      chatId,
+      text: "describe this image",
+      files: [
+        {
+          mediaType: "image/png",
+          url: dataUrl,
+          filename: "pixel.png",
+        },
+      ],
+    });
+
+    // Sanity check: the queued message round-trips with its file metadata
+    const queueBefore = await trpcQuery(server.url, "queue.get", { workspaceId, chatId });
+    const queueBeforeData = await trpcData<{
+      messages: { id: string; text: string; files?: { filename?: string; url: string }[] }[];
+    }>(queueBefore);
+    expect(queueBeforeData.messages).toHaveLength(1);
+    expect(queueBeforeData.messages[0].files).toHaveLength(1);
+    expect(queueBeforeData.messages[0].files![0].filename).toBe("pixel.png");
+
+    // 2. Submit the first task — its completion should drain the queued one
+    const response = await fetch(`${server.url}/api/tasks/${encodeURIComponent(chatId)}/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...defaultHeaders },
+      body: JSON.stringify({ workspaceId, prompt: "first task" }),
+    });
+    expect(response.status).toBe(200);
+    const events = await parseSSEStream(response);
+
+    // 3. The data-prompt event for the queued message includes the file payload
+    const promptEvents = events.filter((e) => e.event === "data-prompt");
+    expect(promptEvents.length).toBe(1);
+    const promptData = (
+      promptEvents[0].data as {
+        data: { text: string; files?: { mediaType: string; filename?: string; url: string }[] };
+      }
+    ).data;
+    expect(promptData.text).toBe("describe this image");
+    expect(promptData.files).toHaveLength(1);
+    expect(promptData.files![0].filename).toBe("pixel.png");
+    expect(promptData.files![0].mediaType).toBe("image/png");
+
+    // 4. The queue should be drained
+    const queueRes = await trpcQuery(server.url, "queue.get", { workspaceId, chatId });
+    const queueData = await trpcData<{ messages: { id: string; text: string }[] }>(queueRes);
+    expect(queueData.messages).toEqual([]);
+
+    // 5. The attached image should be saved to ~/.band/uploads/
+    //    (mirrors the immediate-submit code path in api/task-stream.ts)
+    const uploadsDir = join(tmpHome, ".band", "uploads");
+    const files = readdirSync(uploadsDir);
+    const matching = files.filter((f) => f.endsWith("pixel.png"));
+    expect(matching.length).toBeGreaterThanOrEqual(1);
   });
 });
