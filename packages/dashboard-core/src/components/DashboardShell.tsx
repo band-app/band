@@ -15,8 +15,20 @@ import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
+  VerticalLabel,
 } from "@band-app/ui";
-import { Check, FolderPlus, Menu, Pencil, Plus, Settings, Tag, X } from "lucide-react";
+import {
+  Check,
+  FolderPlus,
+  Folders,
+  Menu,
+  PanelLeft,
+  Pencil,
+  Plus,
+  Settings,
+  Tag,
+  X,
+} from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { useCliSetup } from "../hooks/use-cli-setup";
 import { useHooksSetup } from "../hooks/use-hooks-setup";
@@ -38,6 +50,11 @@ interface DashboardShellProps {
   toolbarMenuItems?: ReactNode;
   /** Hide the desktop title bar (e.g. when the parent renders a full-width one). */
   hideTitleBar?: boolean;
+  /** Toggle the sidebar collapsed state. When provided, a PanelLeft button is
+   *  shown in the sidebar header (expanded) and at the top of the collapsed strip. */
+  onToggleSidebar?: () => void;
+  /** When true, render a 40px collapsed strip instead of the full shell. */
+  sidebarCollapsed?: boolean;
 }
 
 // Desktop-shell detection. The Electron preload
@@ -61,7 +78,12 @@ async function desktopInvoke<T>(cmd: string, args?: Record<string, unknown>): Pr
   throw new Error(`desktopInvoke('${cmd}') called outside the desktop shell`);
 }
 
-export function DashboardShell({ toolbarMenuItems, hideTitleBar }: DashboardShellProps) {
+export function DashboardShell({
+  toolbarMenuItems,
+  hideTitleBar,
+  onToggleSidebar,
+  sidebarCollapsed,
+}: DashboardShellProps) {
   const { projects, isLoading: loading } = useProjects();
   const { settings } = useSettingsQuery();
   const labels = settings.labels ?? [];
@@ -139,6 +161,40 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar }: DashboardShel
     return () => window.removeEventListener("keydown", handler);
   }, [labels]);
 
+  if (sidebarCollapsed) {
+    return (
+      <div className="h-full w-full overflow-hidden flex flex-col bg-background text-foreground select-none">
+        <div className="flex h-10 shrink-0 items-center justify-center border-b border-border">
+          {onToggleSidebar && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  className="text-muted-foreground"
+                  onClick={onToggleSidebar}
+                  aria-label="Show sidebar"
+                >
+                  <PanelLeft className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="right">Show sidebar</TooltipContent>
+            </Tooltip>
+          )}
+        </div>
+        <div className="flex-1 flex flex-col items-center pt-3">
+          <VerticalLabel
+            icon={<Folders className="size-4 text-muted-foreground" />}
+            indicatorColor={activeLabel?.color}
+            indicatorAriaLabel={activeLabel ? `Filter: ${activeLabel.name}` : undefined}
+          >
+            {activeLabel?.name ?? "Projects"}
+          </VerticalLabel>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className={`${hideTitleBar ? "h-full" : "h-dvh"} w-full overflow-hidden flex flex-col bg-background text-foreground p-0 ${isDesktop ? "" : "pt-[env(safe-area-inset-top)]"}`}
@@ -154,89 +210,129 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar }: DashboardShel
         </div>
       )}
 
-      <div className="flex h-10 shrink-0 items-center justify-between border-b border-border px-2">
-        <div className="flex min-w-0 items-center gap-1">
-          <DropdownMenu>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <DropdownMenuTrigger asChild>
+      <div className="flex h-10 shrink-0 items-center justify-between border-b border-border">
+        <div className="flex min-w-0 items-center">
+          {onToggleSidebar && (
+            <div className="w-10 flex items-center justify-center shrink-0">
+              <Tooltip>
+                <TooltipTrigger asChild>
                   <Button
                     size="icon-sm"
                     variant="ghost"
                     className="text-muted-foreground"
-                    aria-label="Menu"
+                    onClick={onToggleSidebar}
+                    aria-label="Hide sidebar"
                   >
-                    <Menu className="size-5" />
+                    <PanelLeft className="size-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Hide sidebar</TooltipContent>
+              </Tooltip>
+            </div>
+          )}
+          <div className={`flex items-center gap-1 ${onToggleSidebar ? "" : "pl-2"}`}>
+            {!onToggleSidebar && (
+              <DropdownMenu>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        className="text-muted-foreground"
+                        aria-label="Menu"
+                      >
+                        <Menu className="size-5" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">More</TooltipContent>
+                </Tooltip>
+                <DropdownMenuContent align="start">
+                  <DropdownMenuItem onClick={() => setEditMode((v) => !v)}>
+                    <Pencil className="size-4" />
+                    {editMode ? "Done editing" : "Edit list"}
+                  </DropdownMenuItem>
+                  {toolbarMenuItems}
+                  <DropdownMenuItem onClick={handleSettingsClick}>
+                    <Settings className="size-4" />
+                    Settings
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+            {onToggleSidebar && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    className={`text-muted-foreground ${editMode ? "bg-accent text-accent-foreground" : ""}`}
+                    onClick={() => setEditMode((v) => !v)}
+                    aria-label={editMode ? "Done editing" : "Edit list"}
+                  >
+                    <Pencil className="size-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  {editMode ? "Done editing" : "Edit list"}
+                </TooltipContent>
+              </Tooltip>
+            )}
+            {labels.length > 0 && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className={`min-w-0 text-sm h-8 px-2 gap-1.5 ${labelFilter ? "bg-accent text-accent-foreground" : "text-muted-foreground"}`}
+                  >
+                    {activeLabel ? (
+                      <>
+                        <span
+                          className="size-2.5 rounded-full shrink-0"
+                          style={{ backgroundColor: activeLabel.color }}
+                        />
+                        <span className="truncate">{activeLabel.name}</span>
+                      </>
+                    ) : (
+                      <>
+                        <Tag className="size-5 shrink-0" />
+                        <span className="truncate">All</span>
+                      </>
+                    )}
                   </Button>
                 </DropdownMenuTrigger>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">More</TooltipContent>
-            </Tooltip>
-            <DropdownMenuContent align="start">
-              <DropdownMenuItem onClick={() => setEditMode((v) => !v)}>
-                <Pencil className="size-4" />
-                {editMode ? "Done editing" : "Edit list"}
-              </DropdownMenuItem>
-              {toolbarMenuItems}
-              <DropdownMenuItem onClick={handleSettingsClick}>
-                <Settings className="size-4" />
-                Settings
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          {labels.length > 0 && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className={`min-w-0 text-sm h-8 px-2 gap-1.5 ${labelFilter ? "bg-accent text-accent-foreground" : "text-muted-foreground"}`}
-                >
-                  {activeLabel ? (
-                    <>
-                      <span
-                        className="size-2.5 rounded-full shrink-0"
-                        style={{ backgroundColor: activeLabel.color }}
-                      />
-                      <span className="truncate">{activeLabel.name}</span>
-                    </>
-                  ) : (
-                    <>
-                      <Tag className="size-5 shrink-0" />
-                      <span className="truncate">All</span>
-                    </>
-                  )}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start">
-                <DropdownMenuItem onClick={() => setLabelFilter(null)}>
-                  <Tag className="size-3.5 shrink-0 mr-2 text-muted-foreground" />
-                  <span className="truncate">All</span>
-                  {!labelFilter && <Check className="size-3 ml-2 shrink-0" />}
-                  <span className="ml-auto pl-3 text-xs text-muted-foreground tracking-widest">
-                    ⌘0
-                  </span>
-                </DropdownMenuItem>
-                {labels.map((lbl, idx) => (
-                  <DropdownMenuItem key={lbl.id} onClick={() => setLabelFilter(lbl.id)}>
-                    <span
-                      className="size-2.5 rounded-full shrink-0 mr-2"
-                      style={{ backgroundColor: lbl.color }}
-                    />
-                    <span className="truncate">{lbl.name}</span>
-                    {labelFilter === lbl.id && <Check className="size-3 ml-2 shrink-0" />}
-                    {idx < 9 && (
-                      <span className="ml-auto pl-3 text-xs text-muted-foreground tracking-widest">
-                        ⌘{idx + 1}
-                      </span>
-                    )}
+                <DropdownMenuContent align="start">
+                  <DropdownMenuItem onClick={() => setLabelFilter(null)}>
+                    <Tag className="size-3.5 shrink-0 mr-2 text-muted-foreground" />
+                    <span className="truncate">All</span>
+                    {!labelFilter && <Check className="size-3 ml-2 shrink-0" />}
+                    <span className="ml-auto pl-3 text-xs text-muted-foreground tracking-widest">
+                      ⌘0
+                    </span>
                   </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
+                  {labels.map((lbl, idx) => (
+                    <DropdownMenuItem key={lbl.id} onClick={() => setLabelFilter(lbl.id)}>
+                      <span
+                        className="size-2.5 rounded-full shrink-0 mr-2"
+                        style={{ backgroundColor: lbl.color }}
+                      />
+                      <span className="truncate">{lbl.name}</span>
+                      {labelFilter === lbl.id && <Check className="size-3 ml-2 shrink-0" />}
+                      {idx < 9 && (
+                        <span className="ml-auto pl-3 text-xs text-muted-foreground tracking-widest">
+                          ⌘{idx + 1}
+                        </span>
+                      )}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </div>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 pr-2">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button

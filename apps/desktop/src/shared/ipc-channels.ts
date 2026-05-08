@@ -12,6 +12,7 @@ export const Channels = {
   webserverStart: "webserver_start",
   webserverStop: "webserver_stop",
   getAppTitle: "get_app_title",
+  getWindowFullscreen: "get_window_fullscreen",
 
   // macOS shell bridges + open_external
   pickFolder: "pick_folder",
@@ -41,6 +42,7 @@ export type ChannelName = (typeof Channels)[keyof typeof Channels];
 export const Events = {
   browserUrlChanged: "browser-url-changed",
   browserTitleChanged: "browser-title-changed",
+  windowFullscreenChanged: "window-fullscreen-changed",
 } as const;
 
 export type EventName = (typeof Events)[keyof typeof Events];

@@ -9,12 +9,13 @@ import {
   useSettingsQuery,
   WorkspacePickerDialog,
 } from "@band-app/dashboard-core";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@band-app/ui";
+import { cn, Tooltip, TooltipContent, TooltipTrigger } from "@band-app/ui";
 import {
   type DockviewApi,
   DockviewReact,
   type DockviewReadyEvent,
   type DockviewTheme,
+  type IDockviewHeaderActionsProps,
   type IDockviewPanelHeaderProps,
   type IDockviewPanelProps,
 } from "dockview";
@@ -23,9 +24,20 @@ import {
   GitCompare,
   Globe,
   MessageSquare,
+  PanelLeft,
   Terminal as TerminalIcon,
 } from "lucide-react";
-import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  memo,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 import { useRecentFiles } from "../hooks/useRecentFiles";
 import { invoke as desktopInvoke } from "../lib/desktop-ipc";
 import { isDesktop } from "../lib/is-desktop";
@@ -34,6 +46,7 @@ import { useWsActive } from "../lib/workspace-visibility-store";
 import { CodeBrowserView } from "./CodeBrowserView";
 import { DockviewBrowserContainer } from "./DockviewBrowserContainer";
 import { DockviewChatContainer } from "./DockviewChatContainer";
+import { useAnyToolbarDialogOpen } from "./ToolbarButtons";
 
 // ---------------------------------------------------------------------------
 // Custom dockview theme – prevents the default themeAbyss from being applied
@@ -109,6 +122,217 @@ interface TerminalParams {
 // Panel wrapper components
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Per-group collapse system — any group can be collapsed to a 40px strip.
+// State is keyed by dockview groupId (regenerated on layout changes; survives
+// reloads as long as the layout structure does).
+// ---------------------------------------------------------------------------
+
+const COLLAPSED_GROUPS_KEY = "band:collapsed-groups";
+const GROUP_EXPANDED_WIDTHS_KEY = "band:group-expanded-widths";
+const GROUP_COLLAPSED_WIDTH = 40;
+const GROUP_MIN_EXPANDED_WIDTH = 240;
+const GROUP_DEFAULT_EXPANDED_WIDTH = 480;
+const GROUP_UNLOCKED_MAX_WIDTH = 99_999;
+
+const GROUP_COLLAPSED_EVENT = "band:group-collapsed-changed";
+
+interface GroupCollapsedDetail {
+  groupId: string;
+  collapsed: boolean;
+}
+
+function readCollapsedGroups(): Record<string, true> {
+  try {
+    const raw = localStorage.getItem(COLLAPSED_GROUPS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, true>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function readGroupCollapsed(groupId: string): boolean {
+  return readCollapsedGroups()[groupId] === true;
+}
+
+function readGroupExpandedWidth(groupId: string): number {
+  try {
+    const raw = localStorage.getItem(GROUP_EXPANDED_WIDTHS_KEY);
+    if (!raw) return GROUP_DEFAULT_EXPANDED_WIDTH;
+    const map = JSON.parse(raw) as Record<string, number>;
+    const n = map?.[groupId];
+    return typeof n === "number" && Number.isFinite(n) && n > GROUP_COLLAPSED_WIDTH + 40
+      ? n
+      : GROUP_DEFAULT_EXPANDED_WIDTH;
+  } catch {
+    return GROUP_DEFAULT_EXPANDED_WIDTH;
+  }
+}
+
+function writeGroupCollapsed(groupId: string, collapsed: boolean): void {
+  try {
+    const map = readCollapsedGroups();
+    if (collapsed) map[groupId] = true;
+    else delete map[groupId];
+    localStorage.setItem(COLLAPSED_GROUPS_KEY, JSON.stringify(map));
+  } catch {}
+}
+
+function writeGroupExpandedWidth(groupId: string, width: number): void {
+  try {
+    const raw = localStorage.getItem(GROUP_EXPANDED_WIDTHS_KEY);
+    const map = (raw ? (JSON.parse(raw) as Record<string, number>) : {}) ?? {};
+    map[groupId] = Math.round(width);
+    localStorage.setItem(GROUP_EXPANDED_WIDTHS_KEY, JSON.stringify(map));
+  } catch {}
+}
+
+function dispatchGroupCollapsed(detail: GroupCollapsedDetail): void {
+  window.dispatchEvent(new CustomEvent(GROUP_COLLAPSED_EVENT, { detail }));
+}
+
+/** Split width equally across all currently-expanded groups in the layout. */
+function redistributeExpandedGroups(api: DockviewApi): void {
+  const seen = new Map<string, { panel: (typeof api.panels)[number]; width: number }>();
+  for (const p of api.panels) {
+    if (!seen.has(p.group.id)) {
+      seen.set(p.group.id, { panel: p, width: p.group.width });
+    }
+  }
+  const expanded = [...seen.entries()].filter(([gid]) => !readGroupCollapsed(gid));
+  if (expanded.length < 2) return;
+  const total = expanded.reduce((sum, [, g]) => sum + g.width, 0);
+  const equal = Math.floor(total / expanded.length);
+  for (const [, g] of expanded) {
+    try {
+      g.panel.api.setSize({ width: equal });
+    } catch {}
+  }
+}
+
+/** Toggle collapsed state of the dockview group containing the given panel. */
+function toggleGroupCollapsed(api: DockviewApi, groupId: string): void {
+  // Find any panel in the group so we can access group.api for sizing.
+  const panel = api.panels.find((p) => p.group.id === groupId);
+  if (!panel) return;
+  const next = !readGroupCollapsed(groupId);
+  try {
+    if (next) {
+      const w = panel.group.width;
+      if (w > GROUP_COLLAPSED_WIDTH + 40) writeGroupExpandedWidth(groupId, w);
+      panel.group.api.setConstraints({
+        minimumWidth: GROUP_COLLAPSED_WIDTH,
+        maximumWidth: GROUP_COLLAPSED_WIDTH,
+      });
+      panel.api.setSize({ width: GROUP_COLLAPSED_WIDTH });
+    } else {
+      panel.group.api.setConstraints({
+        minimumWidth: GROUP_MIN_EXPANDED_WIDTH,
+        maximumWidth: GROUP_UNLOCKED_MAX_WIDTH,
+      });
+      panel.api.setSize({ width: readGroupExpandedWidth(groupId) });
+    }
+    writeGroupCollapsed(groupId, next);
+  } catch {}
+  dispatchGroupCollapsed({ groupId, collapsed: next });
+  if (!next) {
+    // After expand, even out widths across all expanded groups so siblings
+    // share the available space equally instead of one fixed-width column.
+    requestAnimationFrame(() => redistributeExpandedGroups(api));
+  }
+}
+
+/** Find the group containing the chat panel and toggle it (for ⌘⇧B shortcut). */
+function toggleChatGroupCollapsed(api: DockviewApi): void {
+  const chat = api.getPanel("chat");
+  if (chat) toggleGroupCollapsed(api, chat.group.id);
+}
+
+function useGroupCollapsed(groupId: string | undefined): boolean {
+  const [collapsed, setCollapsed] = useState<boolean>(() =>
+    groupId ? readGroupCollapsed(groupId) : false,
+  );
+  useEffect(() => {
+    if (!groupId) return;
+    setCollapsed(readGroupCollapsed(groupId));
+    const onChange = (e: Event) => {
+      const detail = (e as CustomEvent<GroupCollapsedDetail>).detail;
+      if (detail?.groupId === groupId) setCollapsed(detail.collapsed);
+    };
+    window.addEventListener(GROUP_COLLAPSED_EVENT, onChange);
+    return () => window.removeEventListener(GROUP_COLLAPSED_EVENT, onChange);
+  }, [groupId]);
+  return collapsed;
+}
+
+// biome-ignore lint/suspicious/noExplicitAny: dockview panel api type is internal
+type DockviewPanelApi = IDockviewPanelProps<any>["api"];
+
+interface CollapsibleShellProps {
+  api: DockviewPanelApi;
+  Icon: React.FC<{ className?: string }>;
+  label: string;
+  /** When true, callers may use this to skip background work in their content. */
+  onCollapsedChange?: (collapsed: boolean) => void;
+  children: React.ReactNode;
+}
+
+/**
+ * Wraps a panel's content. When the panel's group is collapsed:
+ * - locks group width to GROUP_COLLAPSED_WIDTH
+ * - hides the children
+ * - renders a vertical icon + rotated label strip
+ */
+function CollapsibleShell({
+  api,
+  Icon,
+  label,
+  onCollapsedChange,
+  children,
+}: CollapsibleShellProps) {
+  const groupId = api.group.id;
+  const collapsed = useGroupCollapsed(groupId);
+
+  // Re-apply width constraints on mount (fromJSON drops them) and whenever
+  // the collapsed state changes.
+  useEffect(() => {
+    try {
+      api.group.api.setConstraints({
+        minimumWidth: collapsed ? GROUP_COLLAPSED_WIDTH : GROUP_MIN_EXPANDED_WIDTH,
+        maximumWidth: collapsed ? GROUP_COLLAPSED_WIDTH : GROUP_UNLOCKED_MAX_WIDTH,
+      });
+    } catch {}
+    if (collapsed) {
+      try {
+        api.setSize({ width: GROUP_COLLAPSED_WIDTH });
+      } catch {}
+    }
+  }, [api, collapsed]);
+
+  useEffect(() => {
+    onCollapsedChange?.(collapsed);
+  }, [collapsed, onCollapsedChange]);
+
+  return (
+    <div className="relative h-full w-full overflow-hidden">
+      <div className={cn("h-full w-full", collapsed && "hidden")}>{children}</div>
+      {collapsed && (
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center gap-2 pt-3 select-none">
+          <Icon className="size-4 text-muted-foreground" />
+          <span
+            className="text-xs font-medium tracking-wide text-muted-foreground"
+            style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}
+          >
+            {label}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ChatPanelComponent({ params, api }: IDockviewPanelProps<ChatParams>) {
   // Track physical visibility (not focus/active state).
   // In a split layout, the Chat panel remains visible when another panel
@@ -116,13 +340,14 @@ function ChatPanelComponent({ params, api }: IDockviewPanelProps<ChatParams>) {
   // the panel is behind another tab in a tabbed group.
   const [isVisible, setIsVisible] = useState(api.isVisible);
   const wsActive = useWsActive(params.workspaceId ?? "");
+  const collapsed = useGroupCollapsed(api.group.id);
 
   useEffect(() => {
     const d = api.onDidVisibilityChange((e) => setIsVisible(e.isVisible));
     return () => d.dispose();
   }, [api]);
 
-  const visible = wsActive && isVisible;
+  const visible = wsActive && isVisible && !collapsed;
 
   // Don't render until workspaceId is injected — during layout sync fromJSON
   // recreates panels with empty params before injectParams runs a tick later.
@@ -130,36 +355,46 @@ function ChatPanelComponent({ params, api }: IDockviewPanelProps<ChatParams>) {
   if (!params.workspaceId) return null;
 
   return (
-    <DockviewChatContainer workspaceId={params.workspaceId} visible={visible} wsActive={wsActive} />
+    <CollapsibleShell api={api} Icon={MessageSquare} label="Chat">
+      <DockviewChatContainer
+        workspaceId={params.workspaceId}
+        visible={visible}
+        wsActive={wsActive}
+      />
+    </CollapsibleShell>
   );
 }
 
-function ChangesPanelComponent({ params }: IDockviewPanelProps<ChangesParams>) {
+function ChangesPanelComponent({ params, api }: IDockviewPanelProps<ChangesParams>) {
   if (!params.workspaceId) return null;
   return (
-    <DiffView
-      workspaceId={params.workspaceId}
-      active
-      onStatsChange={params.onStatsChange}
-      onOpenFile={params.onOpenFile}
-      onFindInFile={params.onFindInFile}
-    />
+    <CollapsibleShell api={api} Icon={GitCompare} label="Changes">
+      <DiffView
+        workspaceId={params.workspaceId}
+        active
+        onStatsChange={params.onStatsChange}
+        onOpenFile={params.onOpenFile}
+        onFindInFile={params.onFindInFile}
+      />
+    </CollapsibleShell>
   );
 }
 
-function FilesPanelComponent({ params }: IDockviewPanelProps<FilesParams>) {
+function FilesPanelComponent({ params, api }: IDockviewPanelProps<FilesParams>) {
   if (!params.workspaceId) return null;
   return (
-    <CodeBrowserView
-      workspaceId={params.workspaceId}
-      file={params.file}
-      onSelectFile={params.onSelectFile}
-      openFilePath={params.openFilePath}
-      onFileOpened={params.onFileOpened}
-      onFindInFile={params.onFindInFile}
-      onQuickOpen={params.onQuickOpen}
-      onSearchFiles={params.onSearchFiles}
-    />
+    <CollapsibleShell api={api} Icon={FolderOpen} label="Files">
+      <CodeBrowserView
+        workspaceId={params.workspaceId}
+        file={params.file}
+        onSelectFile={params.onSelectFile}
+        openFilePath={params.openFilePath}
+        onFileOpened={params.onFileOpened}
+        onFindInFile={params.onFindInFile}
+        onQuickOpen={params.onQuickOpen}
+        onSearchFiles={params.onSearchFiles}
+      />
+    </CollapsibleShell>
   );
 }
 
@@ -167,24 +402,27 @@ function TerminalPanelComponent({ params, api }: IDockviewPanelProps<TerminalPar
   // Track physical visibility — same approach as ChatPanelComponent.
   const [isVisible, setIsVisible] = useState(api.isVisible);
   const wsActive = useWsActive(params.workspaceId ?? "");
+  const collapsed = useGroupCollapsed(api.group.id);
 
   useEffect(() => {
     const d = api.onDidVisibilityChange((e) => setIsVisible(e.isVisible));
     return () => d.dispose();
   }, [api]);
 
-  const visible = wsActive && isVisible;
+  const visible = wsActive && isVisible && !collapsed;
 
   if (!params.workspaceId) return null;
 
   return (
-    <Suspense fallback={null}>
-      <DockviewTerminalContainer
-        workspaceId={params.workspaceId}
-        visible={visible}
-        wsActive={wsActive}
-      />
-    </Suspense>
+    <CollapsibleShell api={api} Icon={TerminalIcon} label="Terminal">
+      <Suspense fallback={null}>
+        <DockviewTerminalContainer
+          workspaceId={params.workspaceId}
+          visible={visible}
+          wsActive={wsActive}
+        />
+      </Suspense>
+    </CollapsibleShell>
   );
 }
 
@@ -196,11 +434,17 @@ function DefaultTab(props: IDockviewPanelHeaderProps) {
   const Icon = PANEL_ICONS[props.api.component];
   const shortcut = PANEL_SHORTCUTS[props.api.component];
   const [title, setTitle] = useState(props.api.title ?? "");
+  const collapsed = useGroupCollapsed(props.api.group.id);
 
   useEffect(() => {
     const d = props.api.onDidTitleChange(() => setTitle(props.api.title ?? ""));
     return () => d.dispose();
   }, [props.api]);
+
+  // Hide tab content when its group is collapsed so the strip is clean.
+  if (collapsed) {
+    return <div className="dv-default-tab" style={{ display: "none" }} />;
+  }
 
   const tab = (
     <div className="dv-default-tab">
@@ -235,6 +479,7 @@ function BadgeTab(props: IDockviewPanelHeaderProps) {
   const shortcut = PANEL_SHORTCUTS[props.api.component];
   const [title, setTitle] = useState(props.api.title ?? "");
   const [badge, setBadge] = useState<number | undefined>(props.params?.badge as number | undefined);
+  const collapsed = useGroupCollapsed(props.api.group.id);
 
   useEffect(() => {
     const d = props.api.onDidTitleChange(() => setTitle(props.api.title ?? ""));
@@ -247,6 +492,10 @@ function BadgeTab(props: IDockviewPanelHeaderProps) {
     });
     return () => d.dispose();
   }, [props.api]);
+
+  if (collapsed) {
+    return <div className="dv-default-tab" style={{ display: "none" }} />;
+  }
 
   const hasBadge = badge != null && badge > 0;
 
@@ -284,6 +533,53 @@ function BadgeTab(props: IDockviewPanelHeaderProps) {
 }
 
 // ---------------------------------------------------------------------------
+// Prefix header actions — collapse toggle for ANY group with at least one panel
+// ---------------------------------------------------------------------------
+
+const GroupHeaderActions = memo(function GroupHeaderActions(props: IDockviewHeaderActionsProps) {
+  const [, forceUpdate] = useReducer((x: number) => x + 1, 0);
+  const groupId = props.group.id;
+  const collapsed = useGroupCollapsed(groupId);
+
+  // Re-render when panels move between groups so the toggle disappears with empty groups.
+  useEffect(() => {
+    const d1 = props.containerApi.onDidAddPanel(forceUpdate);
+    const d2 = props.containerApi.onDidRemovePanel(forceUpdate);
+    const d3 = props.containerApi.onDidLayoutChange(forceUpdate);
+    return () => {
+      d1.dispose();
+      d2.dispose();
+      d3.dispose();
+    };
+  }, [props.containerApi]);
+
+  if (props.group.panels.length === 0) return null;
+
+  const hasChat = props.group.panels.some((p) => p.id === "chat");
+  const toggle = () => toggleGroupCollapsed(props.containerApi, groupId);
+
+  const label = collapsed ? "Show Panel" : "Hide Panel";
+  const tooltip = hasChat ? `${label} (⌘⇧B)` : label;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          onClick={toggle}
+          className="inline-flex h-full w-8 items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+        >
+          <PanelLeft className="size-4" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" className="text-xs">
+        {tooltip}
+      </TooltipContent>
+    </Tooltip>
+  );
+});
+
+// ---------------------------------------------------------------------------
 // Browser panel wrapper — renders DockviewBrowserContainer (multi-tab)
 // Same pattern as ChatPanelComponent → DockviewChatContainer.
 // ---------------------------------------------------------------------------
@@ -296,22 +592,25 @@ function BrowserPanelComponent({ params, api }: IDockviewPanelProps<BrowserParam
   // Track physical visibility — same approach as ChatPanelComponent.
   const [isVisible, setIsVisible] = useState(api.isVisible);
   const wsActive = useWsActive(params.workspaceId ?? "");
+  const collapsed = useGroupCollapsed(api.group.id);
 
   useEffect(() => {
     const d = api.onDidVisibilityChange((e) => setIsVisible(e.isVisible));
     return () => d.dispose();
   }, [api]);
 
-  const visible = wsActive && isVisible;
+  const visible = wsActive && isVisible && !collapsed;
 
   if (!params.workspaceId) return null;
 
   return (
-    <DockviewBrowserContainer
-      workspaceId={params.workspaceId}
-      visible={visible}
-      wsActive={wsActive}
-    />
+    <CollapsibleShell api={api} Icon={Globe} label="Browser">
+      <DockviewBrowserContainer
+        workspaceId={params.workspaceId}
+        visible={visible}
+        wsActive={wsActive}
+      />
+    </CollapsibleShell>
   );
 }
 
@@ -375,7 +674,7 @@ const REQUIRED_PANEL_IDS = ["chat", "changes", "files", "terminal", "browser"] a
 // each group) is stored per-workspace so that switching workspaces doesn't
 // clobber the user's tab focus.
 
-const GLOBAL_LAYOUT_KEY = "band:dockview-layout";
+const GLOBAL_LAYOUT_KEY = "band:dockview-layout-v3";
 const ACTIVE_STATE_KEY_PREFIX = "band:dockview-active:";
 
 /** Per-workspace active-tab state: which group is focused and which tab is
@@ -776,6 +1075,9 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
       } else if (key === "b" && !e.shiftKey && api) {
         e.preventDefault();
         if (!hiddenPanelsRef.current.includes("browser")) api.getPanel("browser")?.api.setActive();
+      } else if (key === "b" && e.shiftKey && api) {
+        e.preventDefault();
+        toggleChatGroupCollapsed(api);
       } else if (key === "-") {
         e.preventDefault();
         window.dispatchEvent(new CustomEvent("band:editor-go-back"));
@@ -1165,10 +1467,16 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
   // Hide all browser webviews when a dialog is open (z-ordering: native
   // webviews render on top of the React DOM, so they would cover dialogs).
   // With multi-tab browsers, we hide/show ALL webviews for this workspace.
+  // Also reacts to global toolbar dialogs (Tasks, Cronjobs, Tunnel, Prereq).
+  const toolbarDialogOpen = useAnyToolbarDialogOpen();
   useEffect(() => {
     if (!isDesktop) return;
     const isDialogOpen =
-      quickOpenOpen || searchFilesOpen || workspacePickerOpen || commandPaletteOpen;
+      quickOpenOpen ||
+      searchFilesOpen ||
+      workspacePickerOpen ||
+      commandPaletteOpen ||
+      toolbarDialogOpen;
 
     if (isDialogOpen) {
       desktopInvoke("browser_hide_all_for_workspace", { workspaceId }).catch(() => {});
@@ -1179,7 +1487,14 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
         desktopInvoke("browser_show_all_for_workspace", { workspaceId }).catch(() => {});
       }
     }
-  }, [quickOpenOpen, searchFilesOpen, workspacePickerOpen, commandPaletteOpen, workspaceId]);
+  }, [
+    quickOpenOpen,
+    searchFilesOpen,
+    workspacePickerOpen,
+    commandPaletteOpen,
+    toolbarDialogOpen,
+    workspaceId,
+  ]);
 
   return (
     <>
@@ -1190,6 +1505,7 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
           components={components}
           tabComponents={tabComponents}
           defaultTabComponent={DefaultTab}
+          prefixHeaderActionsComponent={GroupHeaderActions}
           onReady={onReady}
         />
       </div>

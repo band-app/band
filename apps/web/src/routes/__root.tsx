@@ -10,7 +10,7 @@ import {
   NativeShellCapabilities,
 } from "@band-app/dashboard-core/adapters/desktop";
 import { WebCapabilities, WebDashboardAdapter } from "@band-app/dashboard-core/adapters/web";
-import { TooltipProvider } from "@band-app/ui";
+import { DropdownMenuItem, TooltipProvider } from "@band-app/ui";
 import {
   createRootRoute,
   HeadContent,
@@ -25,6 +25,7 @@ import {
   GitCompare,
   Globe,
   MessageSquare,
+  Settings as SettingsIcon,
   Terminal as TerminalIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -247,8 +248,14 @@ function AppShell() {
       panel.collapse();
     }
   }, [sidebarPanelRef]);
-  const handleSidebarCollapse = useCallback(() => setSidebarCollapsed(true), []);
-  const handleSidebarExpand = useCallback(() => setSidebarCollapsed(false), []);
+  // onResize fires per drag tick — guard so the setter only runs on edges,
+  // not every pixel during drag.
+  const handleSidebarResizeCollapse = useCallback((px: number) => {
+    setSidebarCollapsed((prev) => {
+      const next = px <= 40;
+      return next === prev ? prev : next;
+    });
+  }, []);
 
   // Derive active workspace from pathname for title bar display
   const activeWorkspaceId = parseWorkspaceFromPath(pathname);
@@ -307,8 +314,21 @@ function AppShell() {
     <ToolbarOverflowProvider>
       <div className="flex flex-col h-full w-full overflow-hidden bg-background text-foreground">
         <DesktopTitleBar
-          onToggleSidebar={toggleSidebar}
-          sidebarCollapsed={sidebarCollapsed}
+          menuItems={
+            <>
+              <ToolbarOverflowMenuItems />
+              <DropdownMenuItem
+                onClick={() => {
+                  const fn = (window as unknown as { __bandOpenSettings?: () => void })
+                    .__bandOpenSettings;
+                  fn?.();
+                }}
+              >
+                <SettingsIcon className="size-4" />
+                Settings
+              </DropdownMenuItem>
+            </>
+          }
           workspaceName={activeWorkspaceId ?? undefined}
           workspacePath={activeWorkspaceId ? workspacePath : undefined}
           onCopyPath={activeWorkspaceId ? handleCopyPath : undefined}
@@ -332,17 +352,16 @@ function AppShell() {
               minSize={SIDEBAR_MIN_SIZE}
               maxSize={SIDEBAR_MAX_SIZE}
               collapsible
-              collapsedSize="0%"
+              collapsedSize="40px"
               panelRef={sidebarPanelRef}
-              onResize={(size) => {
-                if (size.asPercentage === 0) handleSidebarCollapse();
-                else handleSidebarExpand();
-              }}
+              onResize={(size) => handleSidebarResizeCollapse(size.inPixels)}
             >
               <div className="h-full border-r border-border overflow-hidden">
                 <DashboardShell
                   toolbarMenuItems={<ToolbarOverflowMenuItems />}
                   hideTitleBar={isDesktop}
+                  onToggleSidebar={toggleSidebar}
+                  sidebarCollapsed={sidebarCollapsed}
                 />
               </div>
             </Panel>
