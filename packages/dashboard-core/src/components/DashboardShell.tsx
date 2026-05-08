@@ -1,5 +1,6 @@
 import {
   Button,
+  cn,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -161,43 +162,14 @@ export function DashboardShell({
     return () => window.removeEventListener("keydown", handler);
   }, [labels]);
 
-  if (sidebarCollapsed) {
-    return (
-      <div className="h-full w-full overflow-hidden flex flex-col bg-background text-foreground select-none">
-        <div className="flex h-10 shrink-0 items-center justify-center border-b border-border">
-          {onToggleSidebar && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  className="text-muted-foreground"
-                  onClick={onToggleSidebar}
-                  aria-label="Show sidebar"
-                >
-                  <PanelLeft className="size-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="right">Show sidebar</TooltipContent>
-            </Tooltip>
-          )}
-        </div>
-        <div className="flex-1 flex flex-col items-center pt-3">
-          <VerticalLabel
-            icon={<Folders className="size-4 text-muted-foreground" />}
-            indicatorColor={activeLabel?.color}
-            indicatorAriaLabel={activeLabel ? `Filter: ${activeLabel.name}` : undefined}
-          >
-            {activeLabel?.name ?? "Projects"}
-          </VerticalLabel>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div
-      className={`${hideTitleBar ? "h-full" : "h-dvh"} w-full overflow-hidden flex flex-col bg-background text-foreground p-0 ${isDesktop ? "" : "pt-[env(safe-area-inset-top)]"}`}
+      className={cn(
+        "w-full overflow-hidden flex flex-col bg-background text-foreground p-0",
+        sidebarCollapsed || hideTitleBar ? "h-full" : "h-dvh",
+        !sidebarCollapsed && !isDesktop && "pt-[env(safe-area-inset-top)]",
+        sidebarCollapsed && "select-none",
+      )}
     >
       {isDesktop && !hideTitleBar && (
         <div
@@ -210,7 +182,12 @@ export function DashboardShell({
         </div>
       )}
 
-      <div className="flex h-10 shrink-0 items-center justify-between border-b border-border">
+      <div
+        className={cn(
+          "flex h-10 shrink-0 items-center border-b border-border",
+          sidebarCollapsed ? "justify-center" : "justify-between",
+        )}
+      >
         <div className="flex min-w-0 items-center">
           {onToggleSidebar && (
             <div className="w-10 flex items-center justify-center shrink-0">
@@ -221,212 +198,239 @@ export function DashboardShell({
                     variant="ghost"
                     className="text-muted-foreground"
                     onClick={onToggleSidebar}
-                    aria-label="Hide sidebar"
+                    aria-label={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
                   >
                     <PanelLeft className="size-4" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent side="bottom">Hide sidebar</TooltipContent>
-              </Tooltip>
-            </div>
-          )}
-          <div className={`flex items-center gap-1 ${onToggleSidebar ? "" : "pl-2"}`}>
-            {!onToggleSidebar && (
-              <DropdownMenu>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        size="icon-sm"
-                        variant="ghost"
-                        className="text-muted-foreground"
-                        aria-label="Menu"
-                      >
-                        <Menu className="size-5" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">More</TooltipContent>
-                </Tooltip>
-                <DropdownMenuContent align="start">
-                  <DropdownMenuItem onClick={() => setEditMode((v) => !v)}>
-                    <Pencil className="size-4" />
-                    {editMode ? "Done editing" : "Edit list"}
-                  </DropdownMenuItem>
-                  {toolbarMenuItems}
-                  <DropdownMenuItem onClick={handleSettingsClick}>
-                    <Settings className="size-4" />
-                    Settings
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-            {onToggleSidebar && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    size="icon-sm"
-                    variant="ghost"
-                    className={`text-muted-foreground ${editMode ? "bg-accent text-accent-foreground" : ""}`}
-                    onClick={() => setEditMode((v) => !v)}
-                    aria-label={editMode ? "Done editing" : "Edit list"}
-                  >
-                    <Pencil className="size-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">
-                  {editMode ? "Done editing" : "Edit list"}
+                <TooltipContent side={sidebarCollapsed ? "right" : "bottom"}>
+                  {sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}
                 </TooltipContent>
               </Tooltip>
-            )}
-            {labels.length > 0 && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className={`min-w-0 text-sm h-8 px-2 gap-1.5 ${labelFilter ? "bg-accent text-accent-foreground" : "text-muted-foreground"}`}
-                  >
-                    {activeLabel ? (
-                      <>
-                        <span
-                          className="size-2.5 rounded-full shrink-0"
-                          style={{ backgroundColor: activeLabel.color }}
-                        />
-                        <span className="truncate">{activeLabel.name}</span>
-                      </>
-                    ) : (
-                      <>
-                        <Tag className="size-5 shrink-0" />
-                        <span className="truncate">All</span>
-                      </>
-                    )}
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start">
-                  <DropdownMenuItem onClick={() => setLabelFilter(null)}>
-                    <Tag className="size-3.5 shrink-0 mr-2 text-muted-foreground" />
-                    <span className="truncate">All</span>
-                    {!labelFilter && <Check className="size-3 ml-2 shrink-0" />}
-                    <span className="ml-auto pl-3 text-xs text-muted-foreground tracking-widest">
-                      ⌘0
-                    </span>
-                  </DropdownMenuItem>
-                  {labels.map((lbl, idx) => (
-                    <DropdownMenuItem key={lbl.id} onClick={() => setLabelFilter(lbl.id)}>
-                      <span
-                        className="size-2.5 rounded-full shrink-0 mr-2"
-                        style={{ backgroundColor: lbl.color }}
-                      />
-                      <span className="truncate">{lbl.name}</span>
-                      {labelFilter === lbl.id && <Check className="size-3 ml-2 shrink-0" />}
-                      {idx < 9 && (
-                        <span className="ml-auto pl-3 text-xs text-muted-foreground tracking-widest">
-                          ⌘{idx + 1}
-                        </span>
-                      )}
+            </div>
+          )}
+          {!sidebarCollapsed && (
+            <div className={`flex items-center gap-1 ${onToggleSidebar ? "" : "pl-2"}`}>
+              {!onToggleSidebar && (
+                <DropdownMenu>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          size="icon-sm"
+                          variant="ghost"
+                          className="text-muted-foreground"
+                          aria-label="Menu"
+                        >
+                          <Menu className="size-5" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">More</TooltipContent>
+                  </Tooltip>
+                  <DropdownMenuContent align="start">
+                    <DropdownMenuItem onClick={() => setEditMode((v) => !v)}>
+                      <Pencil className="size-4" />
+                      {editMode ? "Done editing" : "Edit list"}
                     </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
+                    {toolbarMenuItems}
+                    <DropdownMenuItem onClick={handleSettingsClick}>
+                      <Settings className="size-4" />
+                      Settings
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+              {onToggleSidebar && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      className={`text-muted-foreground ${editMode ? "bg-accent text-accent-foreground" : ""}`}
+                      onClick={() => setEditMode((v) => !v)}
+                      aria-label={editMode ? "Done editing" : "Edit list"}
+                    >
+                      <Pencil className="size-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    {editMode ? "Done editing" : "Edit list"}
+                  </TooltipContent>
+                </Tooltip>
+              )}
+              {labels.length > 0 && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className={`min-w-0 text-sm h-8 px-2 gap-1.5 ${labelFilter ? "bg-accent text-accent-foreground" : "text-muted-foreground"}`}
+                    >
+                      {activeLabel ? (
+                        <>
+                          <span
+                            className="size-2.5 rounded-full shrink-0"
+                            style={{ backgroundColor: activeLabel.color }}
+                          />
+                          <span className="truncate">{activeLabel.name}</span>
+                        </>
+                      ) : (
+                        <>
+                          <Tag className="size-5 shrink-0" />
+                          <span className="truncate">All</span>
+                        </>
+                      )}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start">
+                    <DropdownMenuItem onClick={() => setLabelFilter(null)}>
+                      <Tag className="size-3.5 shrink-0 mr-2 text-muted-foreground" />
+                      <span className="truncate">All</span>
+                      {!labelFilter && <Check className="size-3 ml-2 shrink-0" />}
+                      <span className="ml-auto pl-3 text-xs text-muted-foreground tracking-widest">
+                        ⌘0
+                      </span>
+                    </DropdownMenuItem>
+                    {labels.map((lbl, idx) => (
+                      <DropdownMenuItem key={lbl.id} onClick={() => setLabelFilter(lbl.id)}>
+                        <span
+                          className="size-2.5 rounded-full shrink-0 mr-2"
+                          style={{ backgroundColor: lbl.color }}
+                        />
+                        <span className="truncate">{lbl.name}</span>
+                        {labelFilter === lbl.id && <Check className="size-3 ml-2 shrink-0" />}
+                        {idx < 9 && (
+                          <span className="ml-auto pl-3 text-xs text-muted-foreground tracking-widest">
+                            ⌘{idx + 1}
+                          </span>
+                        )}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+            </div>
+          )}
+        </div>
+        {!sidebarCollapsed && (
+          <div className="flex items-center gap-1 pr-2">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  className="text-muted-foreground"
+                  onClick={() => setShowAddDialog(true)}
+                >
+                  <Plus className="size-5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Add project</TooltipContent>
+            </Tooltip>
           </div>
-        </div>
-        <div className="flex items-center gap-1 pr-2">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                className="text-muted-foreground"
-                onClick={() => setShowAddDialog(true)}
-              >
-                <Plus className="size-5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">Add project</TooltipContent>
-          </Tooltip>
-        </div>
+        )}
       </div>
 
-      <ScrollArea
-        className="flex-1 overflow-hidden"
-        onClick={(e: React.MouseEvent<HTMLDivElement>) => {
-          const target = e.target as HTMLElement;
-          if (target.closest("button, a, input, select, textarea, [tabindex]")) return;
-          const list = (e.currentTarget as HTMLElement).querySelector<HTMLElement>(
-            '[tabindex="-1"]',
-          );
-          list?.focus({ preventScroll: true });
-        }}
-      >
-        <main className="overflow-hidden">
-          {loading ? (
-            <div className="flex items-center justify-center py-12">
-              <Spinner className="size-5 text-muted-foreground" />
-            </div>
-          ) : projects.length === 0 ? (
-            <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
-              <FolderPlus className="size-8 text-muted-foreground/50" />
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">No projects yet</p>
-                <p className="text-xs text-muted-foreground/70 mt-1">
-                  Add a project to get started
-                </p>
+      {sidebarCollapsed ? (
+        <div className="flex-1 flex flex-col items-center pt-3">
+          <VerticalLabel
+            icon={<Folders className="size-4 text-muted-foreground" />}
+            indicatorColor={activeLabel?.color}
+            indicatorAriaLabel={activeLabel ? `Filter: ${activeLabel.name}` : undefined}
+          >
+            {activeLabel?.name ?? "Projects"}
+          </VerticalLabel>
+        </div>
+      ) : (
+        <ScrollArea
+          className="flex-1 overflow-hidden"
+          onClick={(e: React.MouseEvent<HTMLDivElement>) => {
+            const target = e.target as HTMLElement;
+            if (target.closest("button, a, input, select, textarea, [tabindex]")) return;
+            const list = (e.currentTarget as HTMLElement).querySelector<HTMLElement>(
+              '[tabindex="-1"]',
+            );
+            list?.focus({ preventScroll: true });
+          }}
+        >
+          <main className="overflow-hidden">
+            {loading ? (
+              <div className="flex items-center justify-center py-12">
+                <Spinner className="size-5 text-muted-foreground" />
               </div>
-              <Button variant="outline" size="sm" onClick={() => setShowAddDialog(true)}>
-                <Plus className="size-3 mr-1" />
-                Add project
+            ) : projects.length === 0 ? (
+              <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+                <FolderPlus className="size-8 text-muted-foreground/50" />
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">No projects yet</p>
+                  <p className="text-xs text-muted-foreground/70 mt-1">
+                    Add a project to get started
+                  </p>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => setShowAddDialog(true)}>
+                  <Plus className="size-3 mr-1" />
+                  Add project
+                </Button>
+              </div>
+            ) : (
+              <ProjectList labelFilter={labelFilter} editMode={editMode} />
+            )}
+          </main>
+        </ScrollArea>
+      )}
+
+      {!sidebarCollapsed && (
+        <>
+          {(cliState.status === "manual" || cliState.status === "conflict") && (
+            <div className="mx-4 mb-2 px-4 py-2 bg-blue-500/10 border border-blue-500/30 rounded-lg text-sm flex items-center justify-between gap-2">
+              <span className="text-blue-700 dark:text-blue-200">
+                {cliState.status === "conflict"
+                  ? "A different `band` binary exists — replace it to use the bundled CLI"
+                  : `Install band CLI${cliState.status === "manual" && cliState.reason ? ` — ${cliState.reason}` : ""}`}
+              </span>
+              <Button variant="outline" size="sm" className="shrink-0 text-xs" onClick={installCli}>
+                Install
               </Button>
             </div>
-          ) : (
-            <ProjectList labelFilter={labelFilter} editMode={editMode} />
           )}
-        </main>
-      </ScrollArea>
 
-      {(cliState.status === "manual" || cliState.status === "conflict") && (
-        <div className="mx-4 mb-2 px-4 py-2 bg-blue-500/10 border border-blue-500/30 rounded-lg text-sm flex items-center justify-between gap-2">
-          <span className="text-blue-700 dark:text-blue-200">
-            {cliState.status === "conflict"
-              ? "A different `band` binary exists — replace it to use the bundled CLI"
-              : `Install band CLI${cliState.status === "manual" && cliState.reason ? ` — ${cliState.reason}` : ""}`}
-          </span>
-          <Button variant="outline" size="sm" className="shrink-0 text-xs" onClick={installCli}>
-            Install
-          </Button>
-        </div>
-      )}
+          {hooksState.status === "needs_install" && (
+            <div className="mx-4 mb-2 px-4 py-2 bg-blue-500/10 border border-blue-500/30 rounded-lg text-sm flex items-center justify-between gap-2">
+              <span className="text-blue-700 dark:text-blue-200">
+                Install Claude Code hooks for agent status detection
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                className="shrink-0 text-xs"
+                onClick={installHooks}
+              >
+                Install
+              </Button>
+            </div>
+          )}
 
-      {hooksState.status === "needs_install" && (
-        <div className="mx-4 mb-2 px-4 py-2 bg-blue-500/10 border border-blue-500/30 rounded-lg text-sm flex items-center justify-between gap-2">
-          <span className="text-blue-700 dark:text-blue-200">
-            Install Claude Code hooks for agent status detection
-          </span>
-          <Button variant="outline" size="sm" className="shrink-0 text-xs" onClick={installHooks}>
-            Install
-          </Button>
-        </div>
-      )}
-
-      {error && (
-        <div className="mx-4 mb-2 px-4 py-2 bg-destructive/10 border border-destructive/30 rounded-lg text-sm text-destructive flex items-center justify-between gap-2">
-          <button
-            type="button"
-            className="truncate text-left cursor-pointer hover:underline"
-            onClick={() => setShowErrorDialog(true)}
-          >
-            {error}
-          </button>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            className="text-destructive shrink-0"
-            onClick={clearError}
-          >
-            <X />
-          </Button>
-        </div>
+          {error && (
+            <div className="mx-4 mb-2 px-4 py-2 bg-destructive/10 border border-destructive/30 rounded-lg text-sm text-destructive flex items-center justify-between gap-2">
+              <button
+                type="button"
+                className="truncate text-left cursor-pointer hover:underline"
+                onClick={() => setShowErrorDialog(true)}
+              >
+                {error}
+              </button>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="text-destructive shrink-0"
+                onClick={clearError}
+              >
+                <X />
+              </Button>
+            </div>
+          )}
+        </>
       )}
 
       <Dialog open={showErrorDialog} onOpenChange={setShowErrorDialog}>

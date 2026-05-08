@@ -295,21 +295,22 @@ function CollapsibleShell({
   const groupId = api.group.id;
   const collapsed = useGroupCollapsed(groupId);
 
-  // Re-apply width constraints on mount (fromJSON drops them) and whenever
-  // the collapsed state changes.
+  // Apply on mount and on group-id change. Toggle is handled imperatively
+  // by toggleGroupCollapsed.
   useEffect(() => {
+    const isCollapsed = readGroupCollapsed(groupId);
     try {
       api.group.api.setConstraints({
-        minimumWidth: collapsed ? GROUP_COLLAPSED_WIDTH : GROUP_MIN_EXPANDED_WIDTH,
-        maximumWidth: collapsed ? GROUP_COLLAPSED_WIDTH : GROUP_UNLOCKED_MAX_WIDTH,
+        minimumWidth: isCollapsed ? GROUP_COLLAPSED_WIDTH : GROUP_MIN_EXPANDED_WIDTH,
+        maximumWidth: isCollapsed ? GROUP_COLLAPSED_WIDTH : GROUP_UNLOCKED_MAX_WIDTH,
       });
     } catch {}
-    if (collapsed) {
+    if (isCollapsed) {
       try {
         api.setSize({ width: GROUP_COLLAPSED_WIDTH });
       } catch {}
     }
-  }, [api, collapsed]);
+  }, [api, groupId]);
 
   useEffect(() => {
     onCollapsedChange?.(collapsed);
@@ -541,15 +542,15 @@ const GroupHeaderActions = memo(function GroupHeaderActions(props: IDockviewHead
   const groupId = props.group.id;
   const collapsed = useGroupCollapsed(groupId);
 
-  // Re-render when panels move between groups so the toggle disappears with empty groups.
+  // Don't subscribe to onDidLayoutChange — fires per-pixel during drag and
+  // flickers the toolbar. Add/remove are enough to hide the toggle for
+  // empty groups.
   useEffect(() => {
     const d1 = props.containerApi.onDidAddPanel(forceUpdate);
     const d2 = props.containerApi.onDidRemovePanel(forceUpdate);
-    const d3 = props.containerApi.onDidLayoutChange(forceUpdate);
     return () => {
       d1.dispose();
       d2.dispose();
-      d3.dispose();
     };
   }, [props.containerApi]);
 

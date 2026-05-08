@@ -242,11 +242,11 @@ function AppShell() {
   const toggleSidebar = useCallback(() => {
     const panel = sidebarPanelRef.current;
     if (!panel) return;
-    if (panel.isCollapsed()) {
-      panel.expand();
-    } else {
-      panel.collapse();
-    }
+    const willCollapse = !panel.isCollapsed();
+    // Batch state with panel API call to avoid one-frame squash.
+    setSidebarCollapsed(willCollapse);
+    if (willCollapse) panel.collapse();
+    else panel.expand();
   }, [sidebarPanelRef]);
   // onResize fires per drag tick — guard so the setter only runs on edges,
   // not every pixel during drag.
