@@ -165,6 +165,14 @@ async function bootstrap(): Promise<void> {
   state.mainWindow.on("close", () => {
     void cleanupOnce();
   });
+
+  // Forward macOS native fullscreen state to the renderer so the title bar
+  // can drop the 80px traffic-light offset when the controls are hidden.
+  const sendFullscreen = (fs: boolean) => {
+    state.mainWindow?.webContents.send("window-fullscreen-changed", fs);
+  };
+  state.mainWindow.on("enter-full-screen", () => sendFullscreen(true));
+  state.mainWindow.on("leave-full-screen", () => sendFullscreen(false));
 }
 
 app.on("window-all-closed", () => {

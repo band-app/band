@@ -38,6 +38,7 @@ const ALLOWED_INVOKE_CHANNELS = new Set<string>([
   "webserver_start",
   "webserver_stop",
   "get_app_title",
+  "get_window_fullscreen",
   // Phase 2 — macOS shell + open_external
   "pick_folder",
   "reveal_in_finder",
@@ -60,7 +61,11 @@ const ALLOWED_INVOKE_CHANNELS = new Set<string>([
   "browser_show_all_for_workspace",
 ]);
 
-const ALLOWED_EVENT_NAMES = new Set<string>(["browser-url-changed", "browser-title-changed"]);
+const ALLOWED_EVENT_NAMES = new Set<string>([
+  "browser-url-changed",
+  "browser-title-changed",
+  "window-fullscreen-changed",
+]);
 
 type Unlisten = () => void;
 

@@ -1,6 +1,5 @@
 import {
   DashboardProvider,
-  DashboardShell,
   useDashboardStore,
   useSettingsQuery,
   useUpdateSettings,
@@ -10,7 +9,7 @@ import {
   NativeShellCapabilities,
 } from "@band-app/dashboard-core/adapters/desktop";
 import { WebCapabilities, WebDashboardAdapter } from "@band-app/dashboard-core/adapters/web";
-import { TooltipProvider } from "@band-app/ui";
+import { DropdownMenuItem, TooltipProvider } from "@band-app/ui";
 import {
   createRootRoute,
   HeadContent,
@@ -25,10 +24,10 @@ import {
   GitCompare,
   Globe,
   MessageSquare,
+  Settings as SettingsIcon,
   Terminal as TerminalIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Group, Panel, Separator, usePanelRef } from "react-resizable-panels";
+import { useCallback, useEffect, useMemo } from "react";
 import { DesktopTitleBar, type PanelItem } from "../components/DesktopTitleBar";
 import { DockviewInstanceManager } from "../components/DockviewInstanceManager";
 import { ToolbarOverflowMenuItems, ToolbarOverflowProvider } from "../components/ToolbarButtons";
@@ -37,12 +36,6 @@ import { useNavigationHistory } from "../hooks/useNavigationHistory";
 import { useZoom } from "../hooks/useZoom";
 import { isDesktop } from "../lib/is-desktop";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
-import {
-  loadSidebarWidth,
-  SIDEBAR_MAX_SIZE,
-  SIDEBAR_MIN_SIZE,
-  saveSidebarWidth,
-} from "../lib/sidebar-width";
 import { applyZoomLevel, loadZoomLevel, zoomIn, zoomOut, zoomReset } from "../lib/zoom";
 import "../styles/globals.css";
 
@@ -219,37 +212,6 @@ function AppShell() {
   // in the desktop shell the View menu accelerators handle these keys)
   useZoom();
 
-  // Resizable sidebar: load persisted width and skip the first layout callback
-  // (react-resizable-panels fires it on mount with a computed layout that may
-  // differ from the default before the container has its final CSS dimensions).
-  const savedWidth = loadSidebarWidth();
-  const defaultLayout = savedWidth ? { sidebar: savedWidth, main: 100 - savedWidth } : undefined;
-  const skipFirstLayoutCallback = useRef(true);
-  const handleSidebarResize = useCallback((layout: Record<string, number>) => {
-    if (skipFirstLayoutCallback.current) {
-      skipFirstLayoutCallback.current = false;
-      return;
-    }
-    if (layout.sidebar != null) {
-      saveSidebarWidth(layout.sidebar);
-    }
-  }, []);
-
-  // Collapsible sidebar (desktop title bar toggle)
-  const sidebarPanelRef = usePanelRef();
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const toggleSidebar = useCallback(() => {
-    const panel = sidebarPanelRef.current;
-    if (!panel) return;
-    if (panel.isCollapsed()) {
-      panel.expand();
-    } else {
-      panel.collapse();
-    }
-  }, [sidebarPanelRef]);
-  const handleSidebarCollapse = useCallback(() => setSidebarCollapsed(true), []);
-  const handleSidebarExpand = useCallback(() => setSidebarCollapsed(false), []);
-
   // Derive active workspace from pathname for title bar display
   const activeWorkspaceId = parseWorkspaceFromPath(pathname);
 
@@ -307,8 +269,21 @@ function AppShell() {
     <ToolbarOverflowProvider>
       <div className="flex flex-col h-full w-full overflow-hidden bg-background text-foreground">
         <DesktopTitleBar
-          onToggleSidebar={toggleSidebar}
-          sidebarCollapsed={sidebarCollapsed}
+          menuItems={
+            <>
+              <ToolbarOverflowMenuItems />
+              <DropdownMenuItem
+                onClick={() => {
+                  const fn = (window as unknown as { __bandOpenSettings?: () => void })
+                    .__bandOpenSettings;
+                  fn?.();
+                }}
+              >
+                <SettingsIcon className="size-4" />
+                Settings
+              </DropdownMenuItem>
+            </>
+          }
           workspaceName={activeWorkspaceId ?? undefined}
           workspacePath={activeWorkspaceId ? workspacePath : undefined}
           onCopyPath={activeWorkspaceId ? handleCopyPath : undefined}
@@ -321,39 +296,10 @@ function AppShell() {
           canGoForward={navigationHistory.canGoForward}
         />
         <div className="flex-1 min-h-0 overflow-hidden">
-          <Group
-            orientation="horizontal"
-            defaultLayout={defaultLayout}
-            onLayoutChanged={handleSidebarResize}
-          >
-            <Panel
-              id="sidebar"
-              defaultSize={SIDEBAR_MIN_SIZE}
-              minSize={SIDEBAR_MIN_SIZE}
-              maxSize={SIDEBAR_MAX_SIZE}
-              collapsible
-              collapsedSize="0%"
-              panelRef={sidebarPanelRef}
-              onResize={(size) => {
-                if (size.asPercentage === 0) handleSidebarCollapse();
-                else handleSidebarExpand();
-              }}
-            >
-              <div className="h-full border-r border-border overflow-hidden">
-                <DashboardShell
-                  toolbarMenuItems={<ToolbarOverflowMenuItems />}
-                  hideTitleBar={isDesktop}
-                />
-              </div>
-            </Panel>
-            <Separator className="w-[3px] bg-transparent hover:bg-accent-foreground/20 active:bg-accent-foreground/30 transition-colors cursor-col-resize" />
-            <Panel id="main" minSize="20%">
-              <div className="h-full min-w-0 overflow-hidden relative">
-                <Outlet />
-                <DockviewInstanceManager />
-              </div>
-            </Panel>
-          </Group>
+          <div className="h-full min-w-0 overflow-hidden relative">
+            <Outlet />
+            <DockviewInstanceManager />
+          </div>
         </div>
       </div>
     </ToolbarOverflowProvider>

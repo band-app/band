@@ -289,7 +289,11 @@ export function FileViewer({
   }, [isDirty, onBack]);
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
+    // min-w-0 prevents intrinsic-width content (CodeMirror's long unwrapped
+    // lines, in particular) from forcing this box wider than its allocated
+    // flex slot, which would propagate up and shove neighbouring layout
+    // (e.g. the right-edge tab strip) off-screen.
+    <div className="flex h-full min-w-0 flex-col overflow-hidden">
       {/* Title bar — full version (mobile / non-tab views) */}
       {!hideTitleBar && (
         <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border/50 px-3">
@@ -400,7 +404,7 @@ export function FileViewer({
       {toolbar}
 
       {/* Content area */}
-      <div className="min-h-0 flex-1 overflow-hidden">
+      <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
         {loading && (
           <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
             Loading...

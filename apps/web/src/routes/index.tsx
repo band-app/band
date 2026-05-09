@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { MessageSquare } from "lucide-react";
 import { DashboardView } from "../components/DashboardView";
+import { DockviewWorkspaceLayout } from "../components/DockviewWorkspaceLayout";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { isDesktop } from "../lib/is-desktop";
 
@@ -13,16 +13,17 @@ function DashboardPage() {
   // Desktop split layout is active inside the desktop shell or in a wide browser window.
   const useDesktopLayout = isWideScreen || isDesktop;
 
-  // Desktop: sidebar is rendered by root layout, just show empty state
+  // Desktop: render the SAME dockview shell as the workspace route, just with
+  // no active workspace. The Projects panel (workspace-agnostic — it's the
+  // global project list) renders in the left edge group. The center panels
+  // (Chat / Changes / Files / Terminal / Browser) all short-circuit to null
+  // when params.workspaceId is empty, so the center groups exist
+  // structurally (matching the workspace layout) but render no content
+  // until the user picks a project. Workspace-id "" gates saveLayout via
+  // isActiveRef.current = useWsActive("") = false, so layout edits made
+  // on this route don't pollute the shared band:dockview-layout-v6 key.
   if (useDesktopLayout) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <div className="flex flex-col items-center gap-3 text-center px-8">
-          <MessageSquare className="size-8 text-muted-foreground/30" />
-          <p className="text-sm text-muted-foreground">Select a workspace to get started</p>
-        </div>
-      </div>
-    );
+    return <DockviewWorkspaceLayout workspaceId="" />;
   }
 
   // Mobile / narrow browser: full-screen dashboard shell

@@ -840,7 +840,13 @@ export function CodeBrowserView({
   // -------------------------------------------------------------------------
   // Wrapped in a measured container so the ResizeObserver can track width.
   return (
-    <div ref={containerRef} className="h-full">
+    // h-full + w-full + overflow-hidden + min-w-0 is required so that
+    // CodeMirror's wide intrinsic content (long unwrapped lines, scrollable
+    // horizontally) doesn't propagate up through the flex chain into
+    // dockview's content container, which has min-height:0 but not
+    // min-width:0 and would otherwise be pushed wider than its allocated
+    // group slot — visibly shoving the right-edge tab strip off-screen.
+    <div ref={containerRef} className="h-full w-full min-w-0 overflow-hidden">
       {useMobileLayout ? (
         // Mobile / narrow container: toggle between file browser and viewer
         viewFilePath ? (
@@ -928,7 +934,7 @@ export function CodeBrowserView({
 
           {/* Right panel — file tabs + content */}
           <Panel id="file-viewer" minSize="20%">
-            <div className="relative flex h-full flex-col overflow-hidden">
+            <div className="relative flex h-full min-w-0 flex-col overflow-hidden">
               {/* Tab bar — owns the file-tree toggle now (auto-hides when narrow) */}
               <FileTabBar
                 workspacePath={workspacePath}
@@ -988,7 +994,7 @@ export function CodeBrowserView({
               />
 
               {/* File content */}
-              <div className="min-h-0 flex-1">
+              <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
                 {viewFilePath ? (
                   <FileViewer
                     workspaceId={workspaceId}
