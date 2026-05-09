@@ -1362,9 +1362,9 @@ export function ChatView({
                     {segment.userPrompt && (
                       <Message from="user">
                         <MessageContent>
-                          {segment.userFiles?.map((file, fileIdx) => (
+                          {segment.userFiles?.map((file) => (
                             <MessageFilePart
-                              key={`${message.id}-${segKey}-userfile-${fileIdx}`}
+                              key={`${message.id}-${segKey}-userfile-${file.url}`}
                               part={{ type: "file", ...file }}
                             />
                           ))}
@@ -2080,8 +2080,8 @@ function QueuedMessageBubble({
             <GripHorizontal className="size-3.5" />
           </button>
           <div className="flex flex-col gap-2 break-words text-sm px-3 py-2">
-            {files?.map((file, idx) => (
-              <MessageFilePart key={`queued-file-${idx}`} part={{ type: "file", ...file }} />
+            {files?.map((file) => (
+              <MessageFilePart key={`queued-file-${file.url}`} part={{ type: "file", ...file }} />
             ))}
             <button
               type="button"

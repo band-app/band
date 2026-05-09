@@ -62,8 +62,7 @@ export function ToolbarOverflowProvider({ children }: { children: ReactNode }) {
       ? "running"
       : "idle";
 
-  const anyDialogOpen =
-    showTasksDialog || showCronjobsDialog || showTunnelDialog || showPrereq;
+  const anyDialogOpen = showTasksDialog || showCronjobsDialog || showTunnelDialog || showPrereq;
 
   const value = useMemo(
     () => ({ openTasks, openCronjobs, openTunnel, tunnelStatus, anyDialogOpen }),
