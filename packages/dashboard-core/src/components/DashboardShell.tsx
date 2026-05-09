@@ -111,12 +111,12 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar, hideMenu }: Das
     [labelFilter, labels],
   );
 
-  // The desktop shell's native menu (Cmd+,) calls `window.__bandOpenSettings()`
-  // via webview.eval / executeJavaScript — same pattern as the zoom menu.
-  // Register the global so the menu can pop the in-app dialog instead of
-  // spawning a separate window.
+  // The desktop shell's native menu (Cmd+,) and the in-app DesktopTitleBar
+  // hamburger both call `window.__bandOpenSettings()` to pop this dialog.
+  // The native-menu path goes via webview.eval / executeJavaScript — same
+  // pattern as the zoom menu. Register the global unconditionally so the
+  // hamburger works in the browser too (E2E + web shell).
   useEffect(() => {
-    if (!isDesktop) return;
     const globalKey = "__bandOpenSettings";
     (window as unknown as Record<string, unknown>)[globalKey] = () => setShowSettingsDialog(true);
     return () => {
