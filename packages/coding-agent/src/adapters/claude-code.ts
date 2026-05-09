@@ -294,6 +294,15 @@ export class ClaudeCodeAdapter implements CodingAgent {
         pathToClaudeCodeExecutable: this.executablePath,
         settingSources: ["user", "project"],
         permissionMode,
+        // Stream raw API events (`stream_event` messages wrapping
+        // BetaRawMessageStreamEvent) alongside the canonical `assistant`
+        // messages. Costs nothing extra — same API call, same tokens — and
+        // lets the adapter forward `content_block_delta`/`text_delta` deltas
+        // to the chat UI so bubbles type in token-by-token. The eventual
+        // `assistant` message still arrives and remains the canonical truth;
+        // the adapter dedupes via state.streamedTextBlocks.
+        // See docs/experiments/partial-messages.md.
+        includePartialMessages: true,
         stderr: (data) => log.warn({ data }, "claude-code stderr"),
       },
     });
@@ -318,6 +327,8 @@ export class ClaudeCodeAdapter implements CodingAgent {
       assistantContentIndex: 0,
       toolNames: new Map(),
       hasEmittedTextSinceLastUser: false,
+      streamedTextBlocks: new Set(),
+      currentStreamBlockType: null,
     };
 
     // Cumulative session totals — persisted in `cumulativeUsageBySession`
@@ -768,6 +779,23 @@ interface ProcessedState {
   assistantContentIndex: number;
   toolNames: Map<string, string>;
   hasEmittedTextSinceLastUser: boolean;
+  /**
+   * Set of content-block indices for which we already streamed text via
+   * partial `stream_event` deltas during the current API call. When the
+   * canonical `assistant` SDK message arrives later, the assistant-case
+   * iterator skips these indices so the text is not double-emitted.
+   * Cleared on `message_start` (new API call) and on user-turn boundaries.
+   */
+  streamedTextBlocks: Set<number>;
+  /**
+   * Type of the most recent content block opened by a partial `stream_event`
+   * (`content_block_start`). Used to know whether we owe a `text-end` agent
+   * event when the next block starts — e.g. transitioning from a streaming
+   * text block into a tool_use block needs to close the bubble before the
+   * tool card renders, otherwise the post-tool text would glue back into
+   * the same bubble.
+   */
+  currentStreamBlockType: "text" | "other" | null;
 }
 
 function* mapClaudeCodeEvent(
@@ -785,6 +813,60 @@ function* mapClaudeCodeEvent(
           sessionId: String(message.session_id),
         };
       }
+      break;
+    }
+
+    case "stream_event": {
+      // Partial-message stream emitted by the SDK when `includePartialMessages`
+      // is on. Wraps a raw API streaming event (BetaRawMessageStreamEvent).
+      // We forward `text_delta`s as fine-grained `text-delta` agent events
+      // and use `content_block_start` transitions to emit `text-end` when a
+      // text block ends and a non-text block (tool_use, etc.) begins.
+      const streamEvent = (message as { event?: Record<string, unknown> }).event;
+      if (!streamEvent || typeof streamEvent !== "object") break;
+      const evtType = streamEvent.type as string | undefined;
+
+      if (evtType === "message_start") {
+        // New API call inside the same runSession (e.g. continuing after a
+        // tool_result). Reset per-message stream state. The existing
+        // `assistantContentIndex` reset-on-shrink in the assistant case
+        // continues to handle the assistant-message side.
+        state.streamedTextBlocks.clear();
+        state.currentStreamBlockType = null;
+        break;
+      }
+
+      if (evtType === "content_block_start") {
+        const cb = streamEvent.content_block as { type?: string } | undefined;
+        const newType: "text" | "other" = cb?.type === "text" ? "text" : "other";
+        // Closing transition: streaming text → non-text. Emit a text-end so
+        // the task-runner closes the current bubble before the next block
+        // (typically a tool_use) renders. Without this, post-tool text would
+        // glue back into the pre-tool bubble.
+        if (state.currentStreamBlockType === "text" && newType !== "text") {
+          yield { type: "text-end" };
+        }
+        state.currentStreamBlockType = newType;
+        break;
+      }
+
+      if (evtType === "content_block_delta") {
+        const idx = streamEvent.index as number | undefined;
+        const delta = streamEvent.delta as { type?: string; text?: string } | undefined;
+        if (delta?.type === "text_delta" && typeof delta.text === "string") {
+          if (typeof idx === "number") state.streamedTextBlocks.add(idx);
+          state.hasEmittedTextSinceLastUser = true;
+          state.currentStreamBlockType = "text";
+          yield { type: "text-delta", text: delta.text };
+        }
+        // TODO: stream `input_json_delta` (partial tool args) — out of scope
+        // for round 1; partial-JSON rendering needs a UI story. See
+        // docs/experiments/partial-messages.md.
+        break;
+      }
+
+      // content_block_stop / message_delta / message_stop / other delta
+      // types (citations, thinking, signature, compaction): ignore for now.
       break;
     }
 
@@ -824,7 +906,12 @@ function* mapClaudeCodeEvent(
 
         let startIdx = state.assistantContentIndex;
         if (content.length < startIdx) {
+          // New API call inside the same runSession — content_array reset
+          // to 0. Belt-and-suspenders alongside the `message_start` reset:
+          // if a stream_event wasn't seen first (older SDK, race, etc.) we
+          // still drop stale block-index tracking.
           startIdx = 0;
+          state.streamedTextBlocks.clear();
         }
 
         let processedUpTo = startIdx;
@@ -836,10 +923,25 @@ function* mapClaudeCodeEvent(
               // don't advance past it so we re-process on the next event.
               break;
             }
-            yield { type: "text-delta", text: block.text };
+            // If partial deltas already streamed this block via stream_event,
+            // skip emitting the full text — it's already in the bubble.
+            // Still advance the cursor + flag so downstream logic sees this
+            // block as processed.
+            if (!state.streamedTextBlocks.has(i)) {
+              yield { type: "text-delta", text: block.text };
+            }
             state.hasEmittedTextSinceLastUser = true;
             processedUpTo = i + 1;
           } else if (block.type === "tool_use") {
+            // Defensive: if a stream_event content_block_start for this
+            // tool_use never reached us (or arrived after the assistant
+            // message), the previous text bubble is still open. Close it
+            // here so the tool card renders below the bubble, not glued
+            // into it.
+            if (state.currentStreamBlockType === "text") {
+              yield { type: "text-end" };
+              state.currentStreamBlockType = "other";
+            }
             const toolCallId = block.id ?? crypto.randomUUID();
             const toolName = block.name ?? "unknown";
             const input = (block.input ?? {}) as Record<string, unknown>;
@@ -865,6 +967,11 @@ function* mapClaudeCodeEvent(
     case "user": {
       state.assistantContentIndex = 0;
       state.hasEmittedTextSinceLastUser = false;
+      // New user-turn boundary — drop any stream-block tracking from the
+      // previous assistant turn so the next API call's indices don't
+      // collide with stale entries.
+      state.streamedTextBlocks.clear();
+      state.currentStreamBlockType = null;
       const msg = message.message as
         | {
             content?: Array<{
