@@ -489,6 +489,22 @@ export const PromptInputTextarea = ({
     el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT)}px`;
   }, [inputValue, textareaRef]);
 
+  // Listen for the workspace-level ⌃⌘I "focus Chat" event. Multiple
+  // PromptInputTextarea instances may be mounted (one per chat session
+  // across one or more workspaces) — only the visible one's
+  // offsetParent is non-null, so only that instance's focus() call has
+  // any visible effect. The others are no-ops.
+  useEffect(() => {
+    const handler = () => {
+      const el = textareaRef.current;
+      if (el && el.offsetParent !== null) {
+        el.focus({ preventScroll: true });
+      }
+    };
+    window.addEventListener("band:focus-chat", handler);
+    return () => window.removeEventListener("band:focus-chat", handler);
+  }, [textareaRef]);
+
   return (
     <div className="relative">
       <textarea

@@ -256,6 +256,25 @@ export function CodeBrowserView({
     return () => ro.disconnect();
   }, []);
 
+  // Listen for the workspace-level ⇧⌘E "focus Files" event. Scope the
+  // focus to this CodeBrowserView's subtree (containerRef), so multi-
+  // workspace setups don't fight — only the visible instance's focus
+  // actually applies (offsetParent === null on hidden ones is a no-op).
+  // Prefer the currently-active file row (data-band-active); fall back
+  // to the first focusable button in the tree if nothing is selected.
+  useEffect(() => {
+    const handler = () => {
+      const root = containerRef.current;
+      if (!root || root.offsetParent === null) return;
+      const target =
+        root.querySelector<HTMLElement>("[data-band-active]") ??
+        root.querySelector<HTMLElement>("button");
+      target?.focus({ preventScroll: true });
+    };
+    window.addEventListener("band:focus-files", handler);
+    return () => window.removeEventListener("band:focus-files", handler);
+  }, []);
+
   // Use the mobile toggle layout when EITHER the viewport is narrow (real
   // mobile) OR the container is narrower than 600px (narrow dockview panel).
   const useMobileLayout = !isDesktop || (containerWidth !== null && containerWidth < 600);

@@ -980,6 +980,31 @@ export function DiffView({
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // -------------------------------------------------------------------------
+  // Root ref — used for the workspace-level ⇧⌘G "focus Changes" handler
+  // to scope its querySelector to this DiffView instance.
+  // -------------------------------------------------------------------------
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  // Listen for ⇧⌘G "focus Changes". Multiple workspaces' DiffViews
+  // are mounted simultaneously; the offsetParent check filters down
+  // to the visible instance. Prefer the active file row
+  // (data-band-active marked in ChangesFileTree); fall back to the
+  // first focusable button inside the [data-diff-sidebar] tree.
+  useEffect(() => {
+    const handler = () => {
+      const root = rootRef.current;
+      if (!root || root.offsetParent === null) return;
+      const sidebar = root.querySelector<HTMLElement>("[data-diff-sidebar]") ?? root;
+      const target =
+        sidebar.querySelector<HTMLElement>("[data-band-active]") ??
+        sidebar.querySelector<HTMLElement>("button");
+      target?.focus({ preventScroll: true });
+    };
+    window.addEventListener("band:focus-changes", handler);
+    return () => window.removeEventListener("band:focus-changes", handler);
+  }, []);
+
+  // -------------------------------------------------------------------------
   // Find-in-diff state
   // -------------------------------------------------------------------------
   const editorViewsRef = useRef<Map<string, EditorView[]>>(new Map());
@@ -1469,7 +1494,7 @@ export function DiffView({
   filenamesRef.current = filenames;
 
   return (
-    <div className="@container/diff flex h-full overflow-hidden">
+    <div ref={rootRef} className="@container/diff flex h-full overflow-hidden">
       {/* LEFT: File tree sidebar — auto-hides when this view's container
           becomes too narrow to fit both the tree and useful diff content. */}
       {sidebarOpen && (

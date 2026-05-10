@@ -832,6 +832,9 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
         e.stopPropagation();
         if (!hiddenPanelsRef.current.includes("terminal")) {
           apiRef.current?.getPanel("terminal")?.api.setActive();
+          queueMicrotask(() => {
+            window.dispatchEvent(new CustomEvent("band:focus-terminal"));
+          });
         }
         return;
       }
@@ -839,14 +842,10 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
       // Ctrl+0 (not Cmd+0) → focus Projects in the left edge group.
       // Matches VS Code's "Focus Side Bar" binding. Like ⌃`, handled in
       // an early branch so it hijacks even when xterm has focus.
-      // Three-step flow:
-      //   1. Expand the left edge group if collapsed (so there's
-      //      something visible to focus).
-      //   2. Activate the projects panel (in case the left edge
-      //      hosts other tabs in the future).
-      //   3. Dispatch band:focus-projects on the next microtask;
-      //      DashboardShell listens and moves keyboard focus into
-      //      its [tabindex=-1] project-list root.
+      // Three-step flow: expand left edge if collapsed, activate the
+      // projects panel, dispatch band:focus-projects on the next
+      // microtask so DashboardShell's listener focuses [tabindex=-1]
+      // after React commits the setActive change.
       if (e.ctrlKey && !e.metaKey && e.key === "0") {
         e.preventDefault();
         e.stopPropagation();
@@ -910,19 +909,39 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
         // Both Ctrl AND Cmd held — distinguished from any plain ⌘I /
         // ⌃I combo (neither of which we currently bind).
         e.preventDefault();
-        if (!hiddenPanelsRef.current.includes("chat")) api.getPanel("chat")?.api.setActive();
+        if (!hiddenPanelsRef.current.includes("chat")) {
+          api.getPanel("chat")?.api.setActive();
+          queueMicrotask(() => {
+            window.dispatchEvent(new CustomEvent("band:focus-chat"));
+          });
+        }
       } else if (key === "g" && e.shiftKey && api) {
         // ⇧⌘G → Changes (matches VS Code "Show Source Control")
         e.preventDefault();
-        if (!hiddenPanelsRef.current.includes("changes")) api.getPanel("changes")?.api.setActive();
+        if (!hiddenPanelsRef.current.includes("changes")) {
+          api.getPanel("changes")?.api.setActive();
+          queueMicrotask(() => {
+            window.dispatchEvent(new CustomEvent("band:focus-changes"));
+          });
+        }
       } else if (key === "e" && e.shiftKey && api) {
         // ⇧⌘E → Files (matches VS Code "Show Explorer")
         e.preventDefault();
-        if (!hiddenPanelsRef.current.includes("files")) api.getPanel("files")?.api.setActive();
+        if (!hiddenPanelsRef.current.includes("files")) {
+          api.getPanel("files")?.api.setActive();
+          queueMicrotask(() => {
+            window.dispatchEvent(new CustomEvent("band:focus-files"));
+          });
+        }
       } else if (key === "b" && e.shiftKey && api) {
         // ⇧⌘B → Browser
         e.preventDefault();
-        if (!hiddenPanelsRef.current.includes("browser")) api.getPanel("browser")?.api.setActive();
+        if (!hiddenPanelsRef.current.includes("browser")) {
+          api.getPanel("browser")?.api.setActive();
+          queueMicrotask(() => {
+            window.dispatchEvent(new CustomEvent("band:focus-browser"));
+          });
+        }
       } else if (key === "b" && !e.shiftKey && api) {
         // ⌘B → toggle Projects sidebar (matches VS Code "Toggle Primary Side Bar")
         e.preventDefault();

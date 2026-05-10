@@ -266,6 +266,19 @@ export function TerminalPanel({
     }
   }, [visible]);
 
+  // Listen for the workspace-level ⌃` "focus Terminal" event. Many
+  // TerminalPanel instances may exist (one per terminal session × one
+  // per workspace) — the visibility gate ensures only the active
+  // session in the active workspace actually grabs focus.
+  useEffect(() => {
+    const handler = () => {
+      if (!visible) return;
+      terminalRef.current?.focus();
+    };
+    window.addEventListener("band:focus-terminal", handler);
+    return () => window.removeEventListener("band:focus-terminal", handler);
+  }, [visible]);
+
   return (
     <div className="relative h-full w-full">
       <div ref={containerRef} className="absolute inset-2 overflow-hidden" />

@@ -561,6 +561,30 @@ export function DockviewBrowserContainer({
     return () => window.removeEventListener("keydown", handler, true);
   }, [visible, closeTab, handleSplit, handleAddTab]);
 
+  // Listen for the workspace-level ⇧⌘B "focus Browser" event. Scoped
+  // to this container's subtree via containerRef. The native webview
+  // can't be focused from React, so we focus the URL input instead —
+  // which matches what users typically want (start typing → type a
+  // new URL or search query). The visibility gate (offsetParent on
+  // the container ref) means inactive workspaces' calls are no-ops.
+  useEffect(() => {
+    const handler = () => {
+      const root = containerRef.current;
+      if (!root || root.offsetParent === null) return;
+      // Prefer the visible address bar (multiple are mounted while
+      // the user has multiple browser tabs open inside the panel).
+      const inputs = root.querySelectorAll<HTMLInputElement>('input[placeholder^="Enter URL"]');
+      for (const input of inputs) {
+        if (input.offsetParent !== null) {
+          input.focus({ preventScroll: true });
+          return;
+        }
+      }
+    };
+    window.addEventListener("band:focus-browser", handler);
+    return () => window.removeEventListener("band:focus-browser", handler);
+  }, []);
+
   // Sync dockview panels when browsers are created/removed externally (e.g. CLI).
   useEffect(() => {
     return adapter.subscribeStatusEvents((event) => {
