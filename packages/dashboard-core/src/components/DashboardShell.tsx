@@ -17,19 +17,15 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@band-app/ui";
-import {
-  Check,
-  FolderPlus,
-  Menu,
-  MoreVertical,
-  Pencil,
-  Plus,
-  Settings,
-  Tag,
-  X,
-} from "lucide-react";
+import { Check, ChevronsDownUp, FolderPlus, Menu, Plus, Settings, Tag, X } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCliSetup } from "../hooks/use-cli-setup";
+import {
+  LABELS_COLLAPSE_KEY,
+  PROJECTS_COLLAPSE_KEY,
+  UNLABELED_KEY,
+  useCollapseState,
+} from "../hooks/use-collapse-state";
 import { useHooksSetup } from "../hooks/use-hooks-setup";
 import { useProjects } from "../hooks/use-projects";
 import { useSettingsQuery } from "../hooks/use-settings-query";
@@ -44,15 +40,14 @@ import { ProjectList } from "./ProjectList";
 import { SettingsPage } from "./SettingsPage";
 
 interface DashboardShellProps {
-  /** Extra menu items rendered inside the toolbar's overflow ("3 dots") dropdown,
-   *  appended after the built-in Edit/Settings entries. */
+  /** Extra menu items rendered inside the toolbar's overflow dropdown,
+   *  appended after the built-in Settings entry. */
   toolbarMenuItems?: ReactNode;
   /** Hide the desktop title bar (e.g. when the parent renders a full-width one). */
   hideTitleBar?: boolean;
   /** Suppress the in-shell hamburger overflow menu. Used when this shell is
    *  embedded under a global title bar that already exposes the same items
-   *  (Tasks / Cronjobs / Settings / …). Edit-list moves to a 3-dot menu next
-   *  to the Add-project button. */
+   *  (Tasks / Cronjobs / Settings / …). */
   hideMenu?: boolean;
 }
 
@@ -86,7 +81,6 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar, hideMenu }: Das
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [showErrorDialog, setShowErrorDialog] = useState(false);
   const [showSettingsDialog, setShowSettingsDialog] = useState(false);
-  const [editMode, setEditMode] = useState(false);
   const [labelFilter, setLabelFilter] = useState<string | null>(null);
   const { state: hooksState, install: installHooks } = useHooksSetup();
   const { state: cliState, install: installCli } = useCliSetup();
@@ -105,6 +99,17 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar, hideMenu }: Das
   useSetupStatusWatcher();
 
   const handleSettingsClick = useCallback(() => setShowSettingsDialog(true), []);
+
+  // Collapse-all toolbar action: write every project name into the
+  // collapsed-projects set and every label id (plus the unlabeled sentinel)
+  // into the collapsed-labels set. The custom event dispatched by `setAll`
+  // pings every useCollapseState consumer so the list re-renders instantly.
+  const projectCollapse = useCollapseState(PROJECTS_COLLAPSE_KEY);
+  const labelCollapse = useCollapseState(LABELS_COLLAPSE_KEY);
+  const collapseAll = useCallback(() => {
+    projectCollapse.setAll(projects.map((p) => p.name));
+    labelCollapse.setAll([...labels.map((l) => l.id), UNLABELED_KEY]);
+  }, [projectCollapse, labelCollapse, projects, labels]);
 
   const activeLabel = useMemo(
     () => (labelFilter ? labels.find((l) => l.id === labelFilter) : null),
@@ -213,10 +218,6 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar, hideMenu }: Das
                   <TooltipContent side="bottom">More</TooltipContent>
                 </Tooltip>
                 <DropdownMenuContent align="start">
-                  <DropdownMenuItem onClick={() => setEditMode((v) => !v)}>
-                    <Pencil className="size-4" />
-                    {editMode ? "Done editing" : "Edit list"}
-                  </DropdownMenuItem>
                   {toolbarMenuItems}
                   <DropdownMenuItem onClick={handleSettingsClick}>
                     <Settings className="size-4" />
@@ -292,30 +293,21 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar, hideMenu }: Das
             </TooltipTrigger>
             <TooltipContent side="bottom">Add project</TooltipContent>
           </Tooltip>
-          {hideMenu && (
-            <DropdownMenu>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      size="icon-xs"
-                      variant="ghost"
-                      className="text-muted-foreground"
-                      aria-label="More actions"
-                    >
-                      <MoreVertical className="size-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                </TooltipTrigger>
-                <TooltipContent side="bottom">More</TooltipContent>
-              </Tooltip>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => setEditMode((v) => !v)}>
-                  <Pencil className="size-4" />
-                  {editMode ? "Done editing" : "Edit list"}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+          {projects.length > 0 && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  className="text-muted-foreground"
+                  aria-label="Collapse all"
+                  onClick={collapseAll}
+                >
+                  <ChevronsDownUp className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Collapse all</TooltipContent>
+            </Tooltip>
           )}
         </div>
       </div>
@@ -331,7 +323,12 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar, hideMenu }: Das
           list?.focus({ preventScroll: true });
         }}
       >
-        <main className="overflow-hidden">
+        {/* No overflow-hidden here: when the project list grows past the
+            viewport, clipping main makes Radix's ScrollArea miss the
+            overflowing content and stop scroll-max early. The list still
+            keeps horizontal text truncation via min-w-0 + truncate on its
+            children. pb-3 gives the last row breathing room. */}
+        <main className="pb-3">
           {loading ? (
             <div className="flex items-center justify-center py-12">
               <Spinner className="size-5 text-muted-foreground" />
@@ -351,7 +348,7 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar, hideMenu }: Das
               </Button>
             </div>
           ) : (
-            <ProjectList labelFilter={labelFilter} editMode={editMode} />
+            <ProjectList labelFilter={labelFilter} />
           )}
         </main>
       </ScrollArea>
