@@ -19,6 +19,7 @@ import { BrowserViewManager } from "../browser/view-manager.js";
 import { resolveAppIcon } from "./icon.js";
 import { registerIpc } from "./ipc/register.js";
 import { installAppMenu } from "./menu.js";
+import { type ActivityMonitorHandle, startActivityMonitor } from "./services/activity-monitor.js";
 import { dashLog, logToFile } from "./services/log.js";
 import { killPort } from "./services/port.js";
 import { getConfiguredPort } from "./services/settings.js";
@@ -33,6 +34,7 @@ interface AppState {
   browserManager: BrowserViewManager | null;
   unregisterIpc: (() => void) | null;
   cancelStartupUpdateCheck: (() => void) | null;
+  activityMonitor: ActivityMonitorHandle | null;
   cleanedUp: boolean;
   port: number;
   /** Empty string in dev mode where we don't own the server. */
@@ -45,6 +47,7 @@ const state: AppState = {
   browserManager: null,
   unregisterIpc: null,
   cancelStartupUpdateCheck: null,
+  activityMonitor: null,
   cleanedUp: false,
   port: getConfiguredPort(),
   webDir: "",
@@ -95,6 +98,7 @@ async function cleanupOnce(): Promise<void> {
   // Cancel any pending startup update check so its dialog doesn't pop up
   // mid-shutdown (the 10s delay can outlive Cmd+Q on a quick quit).
   state.cancelStartupUpdateCheck?.();
+  state.activityMonitor?.stop();
   state.unregisterIpc?.();
   state.browserManager?.destroyAll();
   await state.managed.kill();
@@ -160,6 +164,14 @@ async function bootstrap(): Promise<void> {
   // in unpacked dev runs (`!app.isPackaged`) — see updater.ts.
   state.cancelStartupUpdateCheck = scheduleStartupCheck(app.isPackaged, {
     parentWindow: state.mainWindow,
+  });
+
+  // Watch focus + AC/battery state and tell the web server to widen the
+  // branch-status poller interval whenever the user isn't actively using
+  // Band. Best-effort; failures are logged but don't block startup.
+  state.activityMonitor = startActivityMonitor({
+    mainWindow: state.mainWindow,
+    port: state.port,
   });
 
   state.mainWindow.on("close", () => {

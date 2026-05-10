@@ -130,6 +130,10 @@ function attachSession(
 
   // Poll the PTY foreground process name and send title updates (text/JSON frames).
   // This mimics how iTerm detects the running command without relying on OSC sequences.
+  // 3 s is a deliberate trade-off: a 1 s poll picked up `cd`/`vim` transitions
+  // ~2 s sooner but kept the event loop awake at 1 Hz for every open terminal,
+  // which compounds when several PTYs are open. 3 s is fast enough that title
+  // updates still feel near-instant to a user reading the change.
   let lastProcess = "";
   const processInterval = setInterval(() => {
     try {
@@ -143,7 +147,7 @@ function attachSession(
     } catch {
       // pty.process can throw if the process has exited
     }
-  }, 1000);
+  }, 3000);
 
   // PTY exit -> close WebSocket
   const exitDisposable = session.pty.onExit(({ exitCode }) => {

@@ -11,6 +11,7 @@ import type { UIMessage } from "ai";
 import { Cron } from "croner";
 import { z } from "zod";
 import { createMetadataAgent, getOrCreateAgent, replaceAgent } from "../lib/agent-pool";
+import { getPollerActivity, setPollerActivity } from "../lib/branch-status-poller";
 import {
   deleteBrowserLayout,
   getBrowserLayout,
@@ -1816,6 +1817,16 @@ const servicesRouter = t.router({
     log.debug({ result }, "services.health result");
     return result;
   }),
+  // Activity level controls how often the branch-status poller fires.
+  // Driven by the Electron main process based on window focus + power state.
+  // See `apps/desktop/src/main/services/activity-monitor.ts`.
+  setActivity: publicProcedure
+    .input(z.object({ activity: z.enum(["active", "idle", "background"]) }))
+    .mutation(({ input }) => {
+      setPollerActivity(input.activity);
+      return { activity: input.activity };
+    }),
+  getActivity: publicProcedure.query(() => ({ activity: getPollerActivity() })),
 });
 
 // ---------------------------------------------------------------------------
