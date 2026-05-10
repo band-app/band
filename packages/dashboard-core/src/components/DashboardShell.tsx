@@ -280,19 +280,6 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar, hideMenu }: Das
           </div>
         </div>
         <div className="flex items-center gap-1 pr-2">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                size="icon-xs"
-                variant="ghost"
-                className="text-muted-foreground"
-                onClick={() => setShowAddDialog(true)}
-              >
-                <Plus className="size-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">Add project</TooltipContent>
-          </Tooltip>
           {projects.length > 0 && (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -309,6 +296,19 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar, hideMenu }: Das
               <TooltipContent side="bottom">Collapse all</TooltipContent>
             </Tooltip>
           )}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                className="text-muted-foreground"
+                onClick={() => setShowAddDialog(true)}
+              >
+                <Plus className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Add project</TooltipContent>
+          </Tooltip>
         </div>
       </div>
 

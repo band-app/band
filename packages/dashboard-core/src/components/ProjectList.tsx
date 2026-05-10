@@ -138,7 +138,7 @@ function SortableProject({
             // touch-pan-y lets touch devices scroll the list vertically with
             // a finger over the project header — the TouchSensor still gets
             // long-presses (delay activation) but stops blocking page scroll.
-            className="group flex items-center justify-between mb-0.5 px-1 select-none touch-pan-y"
+            className="group flex items-center justify-between mb-0.5 pl-1 pr-0 select-none touch-pan-y"
             onClick={() => onToggleCollapse(project.name)}
           >
             {/* Drag listeners live on the title (folder icon + project name)
@@ -282,7 +282,7 @@ function DroppableLabelHeader({ labelId, label, collapsed, onToggle }: Droppable
       ref={setNodeRef}
       onClick={onToggle}
       aria-expanded={!collapsed}
-      className={`flex h-9 w-full items-center gap-2 px-3 mb-0.5 text-left transition-colors hover:bg-primary/10 ${
+      className={`flex h-9 w-full items-center gap-2 pl-3 pr-4 mb-0.5 text-left transition-colors hover:bg-primary/10 ${
         isOver ? "bg-primary/20" : "bg-accent"
       }`}
     >
@@ -310,7 +310,7 @@ function DroppableUnlabeledHeader({ collapsed, onToggle }: DroppableUnlabeledHea
       ref={setNodeRef}
       onClick={onToggle}
       aria-expanded={!collapsed}
-      className={`flex h-9 w-full items-center gap-2 px-3 mb-0.5 text-left transition-colors hover:bg-primary/10 ${
+      className={`flex h-9 w-full items-center gap-2 pl-3 pr-4 mb-0.5 text-left transition-colors hover:bg-primary/10 ${
         isOver ? "bg-primary/20" : "bg-accent"
       }`}
     >
@@ -590,9 +590,6 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
               const groupCollapsed = headerVisible && labelCollapse.isCollapsed(groupKey);
               return (
                 <div key={groupKey}>
-                  {groupIndex > 0 && !labels.length && (
-                    <hr className="border-border mt-1 mb-0.5 mx-2" />
-                  )}
                   {headerVisible &&
                     (group.label ? (
                       <DroppableLabelHeader
@@ -608,9 +605,8 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
                       />
                     ))}
                   {!groupCollapsed &&
-                    group.projects.map((project, index) => (
+                    group.projects.map((project) => (
                       <div key={project.name}>
-                        {index > 0 && <hr className="border-border mt-1 mb-0.5 mx-2" />}
                         <SortableProject
                           project={project}
                           statuses={statuses}
