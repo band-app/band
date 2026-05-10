@@ -149,6 +149,42 @@ export function TerminalPanel({
       terminalRef.current = terminal;
       fitAddonRef.current = fitAddon;
 
+      // Mobile touch scrolling. xterm renders `.xterm-screen` (canvas/dom) on top
+      // of the scrollable `.xterm-viewport`, so touches on the visible terminal
+      // never reach the scroll layer in iOS Safari and native finger-scroll fails.
+      // Translate vertical touch drags into `terminal.scrollLines()` calls so the
+      // user can pull up/down to scroll back through history.
+      const containerEl = containerRef.current!;
+      let lastTouchY: number | null = null;
+      const onTouchStart = (e: TouchEvent) => {
+        lastTouchY = e.touches.length === 1 ? e.touches[0].clientY : null;
+      };
+      const onTouchMove = (e: TouchEvent) => {
+        if (e.touches.length !== 1 || lastTouchY === null) return;
+        const currentY = e.touches[0].clientY;
+        const deltaY = lastTouchY - currentY;
+        // Estimate the cell height from the rendered viewport so the scroll
+        // speed matches finger movement at any font size / DPR.
+        const viewport = containerEl.querySelector(".xterm-viewport") as HTMLElement | null;
+        const cellHeight =
+          viewport && terminal.rows > 0 ? viewport.clientHeight / terminal.rows : 17;
+        const lineDelta = Math.trunc(deltaY / cellHeight);
+        if (lineDelta !== 0) {
+          terminal.scrollLines(lineDelta);
+          // Carry the unconsumed sub-line remainder into the next move so
+          // slow drags still accumulate instead of being rounded away.
+          lastTouchY = currentY + (deltaY - lineDelta * cellHeight);
+          e.preventDefault();
+        }
+      };
+      const onTouchEnd = () => {
+        lastTouchY = null;
+      };
+      containerEl.addEventListener("touchstart", onTouchStart, { passive: true });
+      containerEl.addEventListener("touchmove", onTouchMove, { passive: false });
+      containerEl.addEventListener("touchend", onTouchEnd, { passive: true });
+      containerEl.addEventListener("touchcancel", onTouchEnd, { passive: true });
+
       // Connect WebSocket
       const proto = location.protocol === "https:" ? "wss:" : "ws:";
       const ws = new WebSocket(
@@ -238,6 +274,10 @@ export function TerminalPanel({
       cleanup = () => {
         themeObserver.disconnect();
         resizeObserver.disconnect();
+        containerEl.removeEventListener("touchstart", onTouchStart);
+        containerEl.removeEventListener("touchmove", onTouchMove);
+        containerEl.removeEventListener("touchend", onTouchEnd);
+        containerEl.removeEventListener("touchcancel", onTouchEnd);
         ws.close();
         terminal.dispose();
         terminalRef.current = null;
