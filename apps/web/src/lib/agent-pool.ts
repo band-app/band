@@ -56,6 +56,14 @@ function getAgentConfig(worktreePath: string, agentId?: string): CodingAgentConf
     model = loadClaudeSettingsModel();
   }
 
+  // Claude-Code-specific settings flow through `options`. Other adapters
+  // strip unknown keys via Zod, so leaking these here is harmless if the
+  // type isn't claude-code, but we keep the conditional for clarity.
+  const claudeOnly =
+    agentDef.type === "claude-code"
+      ? { partialMessages: settings.claudeCodePartialMessages === true }
+      : {};
+
   return {
     type: agentDef.type,
     workspaceDir: worktreePath,
@@ -64,6 +72,7 @@ function getAgentConfig(worktreePath: string, agentId?: string): CodingAgentConf
     options: {
       executablePath: agentDef.command,
       model,
+      ...claudeOnly,
     },
   } as CodingAgentConfig;
 }

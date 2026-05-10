@@ -12,10 +12,10 @@ messages to materialise as one big block.
 
 ## What changed
 
-Two-commit experiment landing in `experiment(claude-code): …`:
+Three commits in this branch:
 
 1. **SDK opt-in + adapter forwarding** — `packages/coding-agent/src/adapters/claude-code.ts`
-   sets `includePartialMessages: true` on `query()`. The adapter's message
+   forwards the SDK's partial-message stream events. The adapter's message
    loop gains a `case "stream_event"` that forwards `content_block_delta`
    text deltas as fine-grained `text-delta` agent events and emits
    `text-end` on text→non-text block-start transitions.
@@ -24,6 +24,13 @@ Two-commit experiment landing in `experiment(claude-code): …`:
    into its existing `endText()` side effect, so a `text → tool_use →
    text` turn renders as two distinct bubbles around the tool card
    instead of one glued bubble.
+3. **Settings toggle** — gated behind `claudeCodePartialMessages` in
+   `~/.band/settings.json` (off by default). The Settings dialog renders a
+   "Stream Claude Code text (experimental)" Switch under Coding Agents.
+   Plumbed: `SettingsPage` → settings.json → `agent-pool.getAgentConfig`
+   → `ClaudeCodeConfig.options.partialMessages` → adapter's
+   `includePartialMessages`. Toggle takes effect on the next prompt;
+   no agent restart required.
 
 The frontend is **unchanged**. The SSE pipeline already speaks AI-SDK
 `text-delta` chunks with arbitrary granularity (verified by reading
@@ -91,11 +98,16 @@ text into a separate UI affordance (collapsible nested transcript).
 Manual reproduction:
 
 1. Run `pnpm dev:web` and open a workspace.
-2. Start a Claude Code chat.
-3. Send a long prompt: `"write a 500-word essay about the history of
+2. Open Settings → Coding Agents → toggle on "Stream Claude Code text
+   (experimental)" → Save. (Off by default; flip explicitly.)
+3. Start a Claude Code chat.
+4. Send a long prompt: `"write a 500-word essay about the history of
    pasta, stop occasionally to think out loud"`.
-4. The assistant bubble fills in token-by-token instead of arriving in
+5. The assistant bubble fills in token-by-token instead of arriving in
    one block. Watch the cursor move.
+
+To compare: flip the toggle off and resend — back to chunky per-block
+bursts.
 
 Multi-block check: `"read README.md and then summarise it in two
 paragraphs"`. Expect: a streaming text bubble explaining what you'll
@@ -140,8 +152,18 @@ lands at the end — the dedupe is clean.
 ## Files touched
 
 - `packages/coding-agent/src/events.ts` — +`TextEndEvent`.
-- `packages/coding-agent/src/adapters/claude-code.ts` — +`includePartialMessages`,
-  +`case "stream_event"`, +`streamedTextBlocks`/`currentStreamBlockType`
-  on `ProcessedState`, defensive `text-end` in assistant-case `tool_use`.
+- `packages/coding-agent/src/adapters/claude-code.ts` — +`includePartialMessages`
+  (gated by config), +`case "stream_event"`, +`streamedTextBlocks` /
+  `currentStreamBlockType` on `ProcessedState`, defensive `text-end` in
+  assistant-case `tool_use`.
+- `packages/coding-agent/src/config.ts` — +`partialMessages` on
+  `claudeCodeConfigSchema.options`.
+- `apps/web/src/lib/state.ts` — +`claudeCodePartialMessages` on `Settings`.
+- `apps/web/src/lib/agent-pool.ts` — read setting, plumb to adapter
+  config.
 - `apps/web/src/lib/task-runner.ts` — +`case "text-end"`.
+- `packages/dashboard-core/src/types.ts` — +`claudeCodePartialMessages`
+  on `Settings`.
+- `packages/dashboard-core/src/components/SettingsPage.tsx` — new Switch
+  under "Coding Agents" section.
 - `docs/experiments/partial-messages.md` — this writeup.

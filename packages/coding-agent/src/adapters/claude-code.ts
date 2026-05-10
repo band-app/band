@@ -204,6 +204,8 @@ export class ClaudeCodeAdapter implements CodingAgent {
   private readonly model: string | undefined;
   private readonly executablePath: string | undefined;
   private readonly additionalDirectories: string[] | undefined;
+  /** See `claudeCodeConfigSchema.options.partialMessages`. */
+  private readonly partialMessages: boolean;
   private activeConversation: ReturnType<typeof query> | null = null;
   private cachedModels: AgentModel[] | null = null;
 
@@ -213,6 +215,7 @@ export class ClaudeCodeAdapter implements CodingAgent {
     this.model = config.options.model;
     this.executablePath = config.options.executablePath;
     this.additionalDirectories = config.additionalDirectories;
+    this.partialMessages = config.options.partialMessages ?? false;
   }
 
   abort(): void {
@@ -301,8 +304,12 @@ export class ClaudeCodeAdapter implements CodingAgent {
         // to the chat UI so bubbles type in token-by-token. The eventual
         // `assistant` message still arrives and remains the canonical truth;
         // the adapter dedupes via state.streamedTextBlocks.
+        //
+        // Gated behind a Settings toggle (off by default). Wired through:
+        // SettingsPage → settings.json → agent-pool.getAgentConfig →
+        // ClaudeCodeConfig.options.partialMessages → here.
         // See docs/experiments/partial-messages.md.
-        includePartialMessages: true,
+        includePartialMessages: this.partialMessages,
         stderr: (data) => log.warn({ data }, "claude-code stderr"),
       },
     });

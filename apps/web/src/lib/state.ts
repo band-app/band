@@ -80,6 +80,13 @@ export interface Settings {
    * cost of memory and background work. Defaults to 3 in the client.
    */
   maxCachedWorkspaces?: number;
+  /**
+   * Experimental: forward Claude Code's partial-message stream events
+   * (SDK's `includePartialMessages`) so the chat bubble types in
+   * token-by-token instead of in per-block bursts. Off by default.
+   * See `docs/experiments/partial-messages.md`.
+   */
+  claudeCodePartialMessages?: boolean;
   /** Extra fields not explicitly modeled. Preserved across read/write. */
   [key: string]: unknown;
 }
