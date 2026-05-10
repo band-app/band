@@ -1,6 +1,7 @@
 import {
   buildCommands,
   CommandPaletteDialog,
+  DashboardShell,
   type DiffStats,
   DiffView,
   parseFileLocation,
@@ -15,14 +16,18 @@ import {
   DockviewReact,
   type DockviewReadyEvent,
   type DockviewTheme,
+  type IDockviewHeaderActionsProps,
   type IDockviewPanelHeaderProps,
   type IDockviewPanelProps,
 } from "dockview";
 import {
   FolderOpen,
+  Folders,
   GitCompare,
   Globe,
+  Maximize2,
   MessageSquare,
+  Minimize2,
   Terminal as TerminalIcon,
 } from "lucide-react";
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -34,6 +39,7 @@ import { useWsActive } from "../lib/workspace-visibility-store";
 import { CodeBrowserView } from "./CodeBrowserView";
 import { DockviewBrowserContainer } from "./DockviewBrowserContainer";
 import { DockviewChatContainer } from "./DockviewChatContainer";
+import { useAnyToolbarDialogOpen } from "./ToolbarButtons";
 
 // ---------------------------------------------------------------------------
 // Custom dockview theme – prevents the default themeAbyss from being applied
@@ -49,6 +55,7 @@ const bandTheme: DockviewTheme = {
 // ---------------------------------------------------------------------------
 
 const PANEL_ICONS: Record<string, React.FC<{ className?: string }>> = {
+  projects: Folders,
   chat: MessageSquare,
   changes: GitCompare,
   files: FolderOpen,
@@ -57,10 +64,11 @@ const PANEL_ICONS: Record<string, React.FC<{ className?: string }>> = {
 };
 
 const PANEL_SHORTCUTS: Record<string, string> = {
-  changes: "⌘E",
-  files: "⌘G",
-  terminal: "⌘J",
-  browser: "⌘B",
+  chat: "⌃⌘I",
+  changes: "⇧⌘G",
+  files: "⇧⌘E",
+  terminal: "⌃`",
+  browser: "⇧⌘B",
 };
 
 // ---------------------------------------------------------------------------
@@ -109,11 +117,42 @@ interface TerminalParams {
 // Panel wrapper components
 // ---------------------------------------------------------------------------
 
+/** Empty-state shown by every workspace-scoped panel when no workspace is
+ *  selected (i.e. the index route mounts DockviewWorkspaceLayout with
+ *  workspaceId="" so the layout shape matches /workspace/$id). */
+function NoWorkspaceMessage({ Icon }: { Icon: React.FC<{ className?: string }> }) {
+  return (
+    <div className="flex h-full items-center justify-center">
+      <div className="flex flex-col items-center gap-3 text-center px-8">
+        <Icon className="size-8 text-muted-foreground/30" />
+        <p className="text-sm text-muted-foreground">Select a workspace to get started</p>
+      </div>
+    </div>
+  );
+}
+
+function ProjectsPanelComponent() {
+  // DashboardShell is workspace-agnostic — it shows the global project list.
+  // We mount one instance per workspace's dockview (via DockviewInstanceManager),
+  // which is wasteful: useStatusWatcher / useBranchStatusWatcher /
+  // useSetupStatusWatcher each open a parallel subscription per copy. They
+  // funnel into the same Zustand store so it's idempotent, but a follow-up
+  // should hoist those watchers to <AppShell> and let DashboardShell read
+  // from the store.
+  // hideMenu suppresses DashboardShell's in-shell hamburger overflow menu —
+  // the global DesktopTitleBar in __root.tsx already exposes the same
+  // Tasks / Cronjobs / Settings entries via its own dropdown, so the
+  // duplicate menu inside the panel is just noise. ToolbarOverflowMenuItems
+  // is no longer needed here since the only consumer was that menu.
+  return <DashboardShell hideTitleBar={isDesktop} hideMenu />;
+}
+
 function ChatPanelComponent({ params, api }: IDockviewPanelProps<ChatParams>) {
   // Track physical visibility (not focus/active state).
   // In a split layout, the Chat panel remains visible when another panel
   // (Changes, Files, Terminal) is focused.  `isVisible` is only false when
-  // the panel is behind another tab in a tabbed group.
+  // the panel is behind another tab in a tabbed group, or when its edge
+  // group is collapsed (dockview reports !isVisible in both cases).
   const [isVisible, setIsVisible] = useState(api.isVisible);
   const wsActive = useWsActive(params.workspaceId ?? "");
 
@@ -124,10 +163,9 @@ function ChatPanelComponent({ params, api }: IDockviewPanelProps<ChatParams>) {
 
   const visible = wsActive && isVisible;
 
-  // Don't render until workspaceId is injected — during layout sync fromJSON
-  // recreates panels with empty params before injectParams runs a tick later.
-  // Rendering with undefined workspaceId would cause draft/session state issues.
-  if (!params.workspaceId) return null;
+  // No workspace selected (index route mounts the layout with workspaceId="")
+  // — show a hint that prompts the user to pick a project.
+  if (!params.workspaceId) return <NoWorkspaceMessage Icon={MessageSquare} />;
 
   return (
     <DockviewChatContainer workspaceId={params.workspaceId} visible={visible} wsActive={wsActive} />
@@ -135,7 +173,7 @@ function ChatPanelComponent({ params, api }: IDockviewPanelProps<ChatParams>) {
 }
 
 function ChangesPanelComponent({ params }: IDockviewPanelProps<ChangesParams>) {
-  if (!params.workspaceId) return null;
+  if (!params.workspaceId) return <NoWorkspaceMessage Icon={GitCompare} />;
   return (
     <DiffView
       workspaceId={params.workspaceId}
@@ -148,7 +186,7 @@ function ChangesPanelComponent({ params }: IDockviewPanelProps<ChangesParams>) {
 }
 
 function FilesPanelComponent({ params }: IDockviewPanelProps<FilesParams>) {
-  if (!params.workspaceId) return null;
+  if (!params.workspaceId) return <NoWorkspaceMessage Icon={FolderOpen} />;
   return (
     <CodeBrowserView
       workspaceId={params.workspaceId}
@@ -175,7 +213,7 @@ function TerminalPanelComponent({ params, api }: IDockviewPanelProps<TerminalPar
 
   const visible = wsActive && isVisible;
 
-  if (!params.workspaceId) return null;
+  if (!params.workspaceId) return <NoWorkspaceMessage Icon={TerminalIcon} />;
 
   return (
     <Suspense fallback={null}>
@@ -304,7 +342,7 @@ function BrowserPanelComponent({ params, api }: IDockviewPanelProps<BrowserParam
 
   const visible = wsActive && isVisible;
 
-  if (!params.workspaceId) return null;
+  if (!params.workspaceId) return <NoWorkspaceMessage Icon={Globe} />;
 
   return (
     <DockviewBrowserContainer
@@ -321,6 +359,7 @@ function BrowserPanelComponent({ params, api }: IDockviewPanelProps<BrowserParam
 
 // biome-ignore lint/suspicious/noExplicitAny: dockview requires generic panel props
 const components: Record<string, React.FunctionComponent<IDockviewPanelProps<any>>> = {
+  projects: ProjectsPanelComponent,
   chat: ChatPanelComponent,
   changes: ChangesPanelComponent,
   files: FilesPanelComponent,
@@ -331,6 +370,65 @@ const components: Record<string, React.FunctionComponent<IDockviewPanelProps<any
 const tabComponents: Record<string, React.FunctionComponent<IDockviewPanelHeaderProps>> = {
   badge: BadgeTab,
 };
+
+// ---------------------------------------------------------------------------
+// Right-side header actions — adds a maximize/restore toggle to the tab strip
+// of every center (grid) group. Hidden on edge groups (projects / future
+// right + bottom edges) where maximize doesn't make sense.
+// ---------------------------------------------------------------------------
+
+const MainGroupRightActions = memo(function MainGroupRightActions(
+  props: IDockviewHeaderActionsProps,
+) {
+  // location.type === "grid" means a real center group; "edge" / "floating" /
+  // "popout" are all skipped. Default to "grid" if dockview omits the field
+  // (older builds) so the button still shows on the main layout.
+  const isGridGroup = (props.location?.type ?? "grid") === "grid";
+
+  // Track maximize state via the container event so the icon flips when the
+  // user toggles via another path (e.g. drag-restore, future keyboard shortcut).
+  // group.api.isMaximized() returns true only when *this* group is the
+  // maximized one — global enough that we don't need a separate
+  // hasMaximizedGroup() check.
+  const [isMaximized, setIsMaximized] = useState(() => props.api.isMaximized());
+  useEffect(() => {
+    const refresh = () => setIsMaximized(props.api.isMaximized());
+    refresh();
+    const d = props.containerApi.onDidMaximizedGroupChange(refresh);
+    return () => d.dispose();
+  }, [props.api, props.containerApi]);
+
+  if (!isGridGroup) return null;
+
+  const Icon = isMaximized ? Minimize2 : Maximize2;
+  const label = isMaximized ? "Restore" : "Maximize";
+
+  return (
+    <div className="flex h-full items-center px-1">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            aria-label={label}
+            onClick={() => {
+              if (props.api.isMaximized()) props.api.exitMaximized();
+              else props.api.maximize();
+            }}
+            className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <Icon className="size-3.5" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" className="text-xs">
+          {label}{" "}
+          <kbd className="ml-1.5 rounded border border-popover-foreground/25 bg-popover-foreground/10 px-1 py-0.5 font-mono text-[14px]">
+            ⇧⌘M
+          </kbd>
+        </TooltipContent>
+      </Tooltip>
+    </div>
+  );
+});
 
 // ---------------------------------------------------------------------------
 // Diff file count hook (polls every 15s)
@@ -364,7 +462,7 @@ function useDiffFileCount(workspaceId: string, isActive: boolean): number {
 // ---------------------------------------------------------------------------
 
 /** All panels that must always be present in the layout. */
-const REQUIRED_PANEL_IDS = ["chat", "changes", "files", "terminal", "browser"] as const;
+const REQUIRED_PANEL_IDS = ["projects", "chat", "changes", "files", "terminal", "browser"] as const;
 
 // ---------------------------------------------------------------------------
 // Layout persistence: shared structure + per-workspace active tabs
@@ -375,8 +473,17 @@ const REQUIRED_PANEL_IDS = ["chat", "changes", "files", "terminal", "browser"] a
 // each group) is stored per-workspace so that switching workspaces doesn't
 // clobber the user's tab focus.
 
-const GLOBAL_LAYOUT_KEY = "band:dockview-layout";
+const GLOBAL_LAYOUT_KEY = "band:dockview-layout-v6";
 const ACTIVE_STATE_KEY_PREFIX = "band:dockview-active:";
+
+// Edge group ids — pinned to the four sides of the layout. Empty edge groups
+// auto-collapse out of view; users drag panels onto a side to dock there.
+const EDGE_GROUP_IDS = {
+  left: "edge-left",
+  right: "edge-right",
+  bottom: "edge-bottom",
+} as const;
+type EdgeDirection = keyof typeof EDGE_GROUP_IDS;
 
 /** Per-workspace active-tab state: which group is focused and which tab is
  *  shown in each tabbed group. */
@@ -701,14 +808,11 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
       // handled at the app level when the terminal has focus.
       const terminalFocused = document.activeElement?.closest(".xterm") != null;
 
-      // Shift+Tab → toggle mode (Edit/Plan) — skip when terminal focused
-      if (e.key === "Tab" && e.shiftKey && !e.ctrlKey && !e.metaKey) {
-        if (terminalFocused) return;
-        e.preventDefault();
-        e.stopPropagation();
-        window.dispatchEvent(new CustomEvent("band:toggle-mode"));
-        return;
-      }
+      // Note: Shift+Tab toggles Edit/Plan mode only when the chat input
+      // (PromptInputTextarea) has focus — wired inside that component, not
+      // globally. A global handler would hijack the standard "focus
+      // previous element" Tab behaviour everywhere else (form fields,
+      // dialogs, the command palette), which broke accessibility flows.
 
       // Ctrl+R (not Cmd+R) → workspace picker — skip when terminal focused
       if (e.ctrlKey && !e.metaKey && e.key.toLowerCase() === "r" && !e.shiftKey) {
@@ -716,6 +820,43 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
         e.preventDefault();
         e.stopPropagation();
         setWorkspacePickerOpen(true);
+        return;
+      }
+
+      // Ctrl+` (not Cmd+`) → Terminal panel. Handled here, ahead of the
+      // mod gate, because we want to hijack even when xterm has focus
+      // (otherwise the backtick would be typed into the shell). Matches
+      // VS Code's "Toggle Terminal" binding.
+      if (e.ctrlKey && !e.metaKey && e.key === "`") {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!hiddenPanelsRef.current.includes("terminal")) {
+          apiRef.current?.getPanel("terminal")?.api.setActive();
+          queueMicrotask(() => {
+            window.dispatchEvent(new CustomEvent("band:focus-terminal"));
+          });
+        }
+        return;
+      }
+
+      // Ctrl+0 (not Cmd+0) → focus Projects in the left edge group.
+      // Matches VS Code's "Focus Side Bar" binding. Like ⌃`, handled in
+      // an early branch so it hijacks even when xterm has focus.
+      // Three-step flow: expand left edge if collapsed, activate the
+      // projects panel, dispatch band:focus-projects on the next
+      // microtask so DashboardShell's listener focuses [tabindex=-1]
+      // after React commits the setActive change.
+      if (e.ctrlKey && !e.metaKey && e.key === "0") {
+        e.preventDefault();
+        e.stopPropagation();
+        const dvApi = apiRef.current;
+        if (!dvApi) return;
+        const left = dvApi.groups.find((g) => g.id === EDGE_GROUP_IDS.left);
+        if (left?.api.isCollapsed()) left.api.expand();
+        dvApi.getPanel("projects")?.api.setActive();
+        queueMicrotask(() => {
+          window.dispatchEvent(new CustomEvent("band:focus-projects"));
+        });
         return;
       }
 
@@ -763,27 +904,75 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
         } else {
           window.dispatchEvent(new CustomEvent("band:find-in-file"));
         }
-      } else if (key === "e" && !e.shiftKey && api) {
+      } else if (key === "i" && e.ctrlKey && e.metaKey && api) {
+        // ⌃⌘I → Chat (matches VS Code "Toggle Chat")
+        // Both Ctrl AND Cmd held — distinguished from any plain ⌘I /
+        // ⌃I combo (neither of which we currently bind).
         e.preventDefault();
-        if (!hiddenPanelsRef.current.includes("changes")) api.getPanel("changes")?.api.setActive();
-      } else if (key === "j" && !e.shiftKey && api) {
+        if (!hiddenPanelsRef.current.includes("chat")) {
+          api.getPanel("chat")?.api.setActive();
+          queueMicrotask(() => {
+            window.dispatchEvent(new CustomEvent("band:focus-chat"));
+          });
+        }
+      } else if (key === "g" && e.shiftKey && api) {
+        // ⇧⌘G → Changes (matches VS Code "Show Source Control")
         e.preventDefault();
-        if (!hiddenPanelsRef.current.includes("terminal"))
-          api.getPanel("terminal")?.api.setActive();
-      } else if (key === "g" && !e.shiftKey && api) {
+        if (!hiddenPanelsRef.current.includes("changes")) {
+          api.getPanel("changes")?.api.setActive();
+          queueMicrotask(() => {
+            window.dispatchEvent(new CustomEvent("band:focus-changes"));
+          });
+        }
+      } else if (key === "e" && e.shiftKey && api) {
+        // ⇧⌘E → Files (matches VS Code "Show Explorer")
         e.preventDefault();
-        if (!hiddenPanelsRef.current.includes("files")) api.getPanel("files")?.api.setActive();
+        if (!hiddenPanelsRef.current.includes("files")) {
+          api.getPanel("files")?.api.setActive();
+          queueMicrotask(() => {
+            window.dispatchEvent(new CustomEvent("band:focus-files"));
+          });
+        }
+      } else if (key === "b" && e.shiftKey && api) {
+        // ⇧⌘B → Browser
+        e.preventDefault();
+        if (!hiddenPanelsRef.current.includes("browser")) {
+          api.getPanel("browser")?.api.setActive();
+          queueMicrotask(() => {
+            window.dispatchEvent(new CustomEvent("band:focus-browser"));
+          });
+        }
       } else if (key === "b" && !e.shiftKey && api) {
+        // ⌘B → toggle Projects sidebar (matches VS Code "Toggle Primary Side Bar")
         e.preventDefault();
-        if (!hiddenPanelsRef.current.includes("browser")) api.getPanel("browser")?.api.setActive();
-      } else if (key === "-") {
+        const left = api.groups.find((g) => g.id === EDGE_GROUP_IDS.left);
+        if (left) {
+          if (left.api.isCollapsed()) left.api.expand();
+          else left.api.collapse();
+        }
+      } else if (key === "m" && e.shiftKey && api) {
+        // Toggle maximize for the active group. Edge groups (Projects /
+        // future right+bottom edges) are skipped — maximize only makes
+        // sense for center grid groups. If a *different* group is already
+        // maximized, exit that first so the user can never get stuck.
         e.preventDefault();
-        window.dispatchEvent(new CustomEvent("band:editor-go-back"));
-      } else if (key === "_") {
-        // Ctrl+Shift+- produces key="_" (underscore) in the browser
-        e.preventDefault();
-        window.dispatchEvent(new CustomEvent("band:editor-go-forward"));
+        const active = api.activeGroup;
+        if (!active) return;
+        if (active.api.location.type !== "grid") {
+          if (api.hasMaximizedGroup()) api.exitMaximizedGroup();
+          return;
+        }
+        if (active.api.isMaximized()) active.api.exitMaximized();
+        else active.api.maximize();
       }
+      // Note: editor history navigation (band:editor-go-back / -forward) is
+      // not bound to a keyboard shortcut. The previous binding was Cmd+- /
+      // Cmd+Shift+-, but that key is permanently claimed by the desktop
+      // View menu's Zoom Out accelerator (apps/desktop/src/main/menu.ts),
+      // so the binding never fired. Workspace-level back/forward (Cmd+[ /
+      // Cmd+]) is wired separately in useNavigationHistory; in-Files-tab
+      // history can still be triggered from the back/forward arrow buttons
+      // in the FileViewer toolbar or via the Command Palette.
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
@@ -879,6 +1068,7 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
         api.getPanel("chat");
 
       const titleMap: Record<string, string> = {
+        projects: "Projects",
         chat: "Chat",
         changes: "Changes",
         files: "Files",
@@ -896,6 +1086,20 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
 
       if (panelId === "changes") {
         opts.tabComponent = "badge";
+      }
+
+      // Projects has its own home in the left edge group — make sure that
+      // edge exists, then dock the panel there.
+      if (panelId === "projects") {
+        try {
+          if (!api.groups.some((g) => g.id === "edge-left")) {
+            api.addEdgeGroup("left", { id: "edge-left" });
+          }
+        } catch {}
+        opts.position = { referenceGroup: "edge-left", direction: "within" };
+        // biome-ignore lint/suspicious/noExplicitAny: dynamic panel options
+        api.addPanel(opts as any);
+        return;
       }
 
       // Place chat to the left; everything else as a tab alongside an existing panel
@@ -916,6 +1120,14 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
     (api: DockviewApi) => {
       const hidden = hiddenPanelsRef.current;
 
+      // Center panels first. Chat is the very first panel — without it,
+      // every later addPanel that references chat would have no anchor,
+      // and dockview's `addPanel` without an explicit position falls back
+      // to `referenceGroup = activeGroup, target = 'within'`, so creating
+      // the left edge group + projects up front would make `edge-left`
+      // the active group and pull every subsequent center panel into it.
+      // Edge group + projects panel are added at the end (see below) once
+      // the center is built.
       api.addPanel({
         id: "chat",
         component: "chat",
@@ -1007,6 +1219,30 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
       try {
         api.getPanel("chat")?.api.setSize({ width: api.width * 0.5 });
       } catch {}
+
+      // Now that the center grid is built, drop projects into the left
+      // edge group as its default home. The edge starts expanded
+      // (no `collapsed` option) so projects is visible at first paint;
+      // empty right/bottom edges added later in onReady stay collapsed.
+      // initialSize matches SIDEBAR_MIN_SIZE ("15rem" = 240px) from
+      // apps/web/src/lib/sidebar-width.ts — the historical min width of
+      // the project list panel — so the project list opens with a
+      // legible width on first load instead of dockview's default 200px.
+      // addEdgeGroup is idempotent here via the existence guard —
+      // onReady's edge-group sweep below also ensures left/right/bottom
+      // exist (so this just gets us the slot for projects to dock into).
+      try {
+        if (!api.groups.some((g) => g.id === "edge-left")) {
+          api.addEdgeGroup("left", { id: "edge-left", initialSize: 240 });
+        }
+      } catch {}
+      api.addPanel({
+        id: "projects",
+        component: "projects",
+        title: "Projects",
+        params: { workspaceId },
+        position: { referenceGroup: "edge-left", direction: "within" },
+      });
     },
     [workspaceId],
   );
@@ -1016,6 +1252,13 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
   const onReady = useCallback(
     (event: DockviewReadyEvent) => {
       apiRef.current = event.api;
+
+      // Drop orphaned keys from the old custom-collapse system (replaced by
+      // dockview's built-in edge groups). Harmless if they're already absent.
+      try {
+        localStorage.removeItem("band:collapsed-groups");
+        localStorage.removeItem("band:group-expanded-widths");
+      } catch {}
 
       // Try to restore a saved layout
       let restored = false;
@@ -1048,6 +1291,43 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
         if (panel) {
           event.api.removePanel(panel);
         }
+      }
+
+      // Drop the legacy top edge group if it was persisted by an earlier
+      // build of this branch — there's no panel that wants to dock there
+      // and an always-present empty top strip eats vertical space.
+      try {
+        if (event.api.getEdgeGroup("top")) event.api.removeEdgeGroup("top");
+      } catch {}
+
+      // Ensure left / right / bottom edge groups exist as drop targets.
+      // Done AFTER buildDefaultLayout intentionally — addPanel without an
+      // explicit position falls back to `referenceGroup = activeGroup` plus
+      // `target = 'within'`. If we pre-created edge groups and then projects
+      // landed in edge-left (making it the active group), the next
+      // chat/changes/etc would all stack into edge-left. By adding edges
+      // last, the default layout builds in a clean grid and panels keep
+      // their intended positions.
+      // addEdgeGroup is not idempotent — id check guards re-runs after
+      // fromJSON which auto-creates edge groups it sees in saved JSON.
+      for (const direction of Object.keys(EDGE_GROUP_IDS) as EdgeDirection[]) {
+        const id = EDGE_GROUP_IDS[direction];
+        if (!event.api.groups.some((g) => g.id === id)) {
+          try {
+            event.api.addEdgeGroup(direction, { id, collapsed: true });
+          } catch {}
+        }
+      }
+
+      // Hide empty edge groups so the resting layout shows no edge strips
+      // at all. The drag-visibility effect below toggles them back on while
+      // a panel/group is being dragged so the user has somewhere to drop.
+      for (const direction of Object.keys(EDGE_GROUP_IDS) as EdgeDirection[]) {
+        const id = EDGE_GROUP_IDS[direction];
+        try {
+          const group = event.api.groups.find((g) => g.id === id);
+          event.api.setEdgeGroupVisible(direction, !!group && group.panels.length > 0);
+        } catch {}
       }
 
       // After restore, inject live callback references
@@ -1162,13 +1442,84 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
     });
   }, [isActive]);
 
+  // Show empty edge groups only while a panel/group drag is in progress.
+  // Resting state: empty edges are hidden so they don't take up space.
+  // During drag: empty edges become visible drop targets. Edges with
+  // panels are always visible regardless of drag state.
+  // Gate on isActive so only the foreground workspace responds to drags.
+  useEffect(() => {
+    if (!isActive) return;
+    const api = apiRef.current;
+    if (!api) return;
+
+    let isDragging = false;
+
+    const refresh = () => {
+      for (const direction of Object.keys(EDGE_GROUP_IDS) as EdgeDirection[]) {
+        const id = EDGE_GROUP_IDS[direction];
+        const group = api.groups.find((g) => g.id === id);
+        if (!group) continue;
+        const isEmpty = group.panels.length === 0;
+        try {
+          api.setEdgeGroupVisible(direction, isDragging || !isEmpty);
+        } catch {}
+      }
+    };
+
+    const startDrag = () => {
+      isDragging = true;
+      refresh();
+    };
+    const endDrag = () => {
+      isDragging = false;
+      refresh();
+    };
+
+    // Establish the resting state on activation.
+    refresh();
+
+    // Drag start — show all empty edges as drop targets.
+    const d1 = api.onWillDragPanel(startDrag);
+    const d2 = api.onWillDragGroup(startDrag);
+
+    // Drag end — needs multiple signals because HTML5 `dragend` does not
+    // dispatch when the drag source element is removed from the DOM during
+    // drop handling, which is exactly what dockview does for inter-group
+    // moves. Coverage:
+    //  - onDidMovePanel:   panel moved between groups (success drop into edge / center)
+    //  - onDidRemovePanel: source group lost a panel (panel pulled out of an edge)
+    //  - document `drop` in capture phase: any drop, fires before source removal
+    //  - document `dragend`: cancel cases (no panel moved, source still in DOM)
+    const d3 = api.onDidMovePanel(endDrag);
+    const d4 = api.onDidRemovePanel(endDrag);
+
+    const onDragEndNative = () => endDrag();
+    document.addEventListener("drop", onDragEndNative, true);
+    document.addEventListener("dragend", onDragEndNative, true);
+
+    return () => {
+      d1.dispose();
+      d2.dispose();
+      d3.dispose();
+      d4.dispose();
+      document.removeEventListener("drop", onDragEndNative, true);
+      document.removeEventListener("dragend", onDragEndNative, true);
+    };
+  }, [isActive]);
+
   // Hide all browser webviews when a dialog is open (z-ordering: native
   // webviews render on top of the React DOM, so they would cover dialogs).
   // With multi-tab browsers, we hide/show ALL webviews for this workspace.
+  // Also reacts to global toolbar dialogs (Tasks, Cronjobs, Tunnel, Prereq).
+  const toolbarDialogOpen = useAnyToolbarDialogOpen();
   useEffect(() => {
     if (!isDesktop) return;
     const isDialogOpen =
-      quickOpenOpen || searchFilesOpen || workspacePickerOpen || commandPaletteOpen;
+      quickOpenOpen ||
+      searchFilesOpen ||
+      workspacePickerOpen ||
+      commandPaletteOpen ||
+      toolbarDialogOpen;
 
     if (isDialogOpen) {
       desktopInvoke("browser_hide_all_for_workspace", { workspaceId }).catch(() => {});
@@ -1179,7 +1530,14 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
         desktopInvoke("browser_show_all_for_workspace", { workspaceId }).catch(() => {});
       }
     }
-  }, [quickOpenOpen, searchFilesOpen, workspacePickerOpen, commandPaletteOpen, workspaceId]);
+  }, [
+    quickOpenOpen,
+    searchFilesOpen,
+    workspacePickerOpen,
+    commandPaletteOpen,
+    toolbarDialogOpen,
+    workspaceId,
+  ]);
 
   return (
     <>
@@ -1190,6 +1548,7 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
           components={components}
           tabComponents={tabComponents}
           defaultTabComponent={DefaultTab}
+          rightHeaderActionsComponent={MainGroupRightActions}
           onReady={onReady}
         />
       </div>

@@ -176,8 +176,8 @@ importers:
         specifier: ^10.0.1
         version: 10.0.1
       dockview:
-        specifier: ^5.2.0
-        version: 5.2.0(react@19.2.4)
+        specifier: ^6.0.6
+        version: 6.0.6(react@19.2.4)
       drizzle-kit:
         specifier: 1.0.0-rc.1
         version: 1.0.0-rc.1
@@ -4182,11 +4182,11 @@ packages:
     os: [darwin]
     hasBin: true
 
-  dockview-core@5.2.0:
-    resolution: {integrity: sha512-Gib8yhK2Ng7w47ASvbUZ7GdhBYbeXEflbIDxf/vobdQBMrN/QXmPaouSsSSkEx5YH0N8ap8GYljfvqjug7h5Fg==}
+  dockview-core@6.0.6:
+    resolution: {integrity: sha512-d7MA42recquehve/52nC3yIbnFBHicRNbkHYX7bFepw3TlQF0XRHEOBnyYIT9OlVLkVRkv7aEOy5yIzZw5wyyA==}
 
-  dockview@5.2.0:
-    resolution: {integrity: sha512-Eh+SWt+AydcyeVmYkwP+Yxax0XpYSQfXsc4Rad9k+6QEddkSCn4hcjsdxp9lLsw/CaMy39jHawbDVxPMC4kvTg==}
+  dockview@6.0.6:
+    resolution: {integrity: sha512-NLhW6J7T5aUhNHAct9c67TmaLej7Tp4f6jY43Ke/Ibs7sNXEGGNtAncg2d/mSjX5uM92BIMXzqZxkkWAFxQI+w==}
     peerDependencies:
       react: ^16.8.0 || ^17.0.0 || ^18.0.0 || ^19.0.0
 
@@ -11500,11 +11500,11 @@ snapshots:
       verror: 1.10.1
     optional: true
 
-  dockview-core@5.2.0: {}
+  dockview-core@6.0.6: {}
 
-  dockview@5.2.0(react@19.2.4):
+  dockview@6.0.6(react@19.2.4):
     dependencies:
-      dockview-core: 5.2.0
+      dockview-core: 6.0.6
       react: 19.2.4
 
   doctypes@1.1.0: {}

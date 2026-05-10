@@ -34,8 +34,11 @@
   --dv-drag-over-background-color: oklch(0.5 0.1 250 / 0.25);
   --dv-drag-over-border-color: var(--ring);
 
-  /* Tab sizing */
-  --dv-tabs-and-actions-container-height: 40px;
+  /* Tab sizing — controls the main-axis dimension of every
+   *  .dv-tabs-and-actions-container in the band-themed dockview:
+   *  height for top/bottom-header (horizontal) strips, width for
+   *  left/right-header (vertical edge) strips. */
+  --dv-tabs-and-actions-container-height: 36px;
   --dv-tabs-and-actions-container-font-size: 13px;
 
   /* Sash (resize handle between panels) */
@@ -70,9 +73,52 @@
   box-shadow: none;
 }
 
-/* Border below the tabs container */
+/* Allow the panel content container to shrink below its intrinsic content
+ * width. Dockview-core sets min-height:0 on .dv-content-container (correct
+ * for top-header groups whose main axis is vertical) but not min-width:0.
+ * In edge groups with header on the left/right (flex-direction: row), the
+ * main axis is horizontal — without min-width:0 a flex item defaults to
+ * min-width:auto and refuses to shrink below intrinsic child width, which
+ * lets long project names / file paths push the panel wider than its
+ * allocated edge slot and clip past the right boundary. */
+.dockview-theme-band .dv-content-container {
+  min-width: 0;
+}
+
+/* Border between the tabs container and the panel content. The default
+ * rule below targets the most common case (header on top → border on the
+ * bottom of the strip). The three overrides below cover the other header
+ * positions used by edge groups (left edge → vertical strip on the left;
+ * right edge → vertical strip on the right; bottom edge → horizontal
+ * strip at the bottom). Without these the strip blurs into the content. */
 .dockview-theme-band .dv-tabs-and-actions-container {
   border-bottom: 1px solid var(--border);
+}
+.dockview-theme-band .dv-groupview.dv-groupview-header-bottom > .dv-tabs-and-actions-container {
+  border-bottom: none;
+  border-top: 1px solid var(--border);
+}
+.dockview-theme-band .dv-groupview.dv-groupview-header-left > .dv-tabs-and-actions-container {
+  border-bottom: none;
+  border-right: 1px solid var(--border);
+}
+.dockview-theme-band .dv-groupview.dv-groupview-header-right > .dv-tabs-and-actions-container {
+  border-bottom: none;
+  border-left: 1px solid var(--border);
+}
+
+/* Suppress the inter-view separator when the preceding view is hidden
+ * (e.g. an empty edge group with setEdgeGroupVisible(false)).
+ * Without this, the ::before pseudo-element on a non-first .dv-view
+ * still renders at left:0 of itself, and when the previous view has
+ * size 0 it lands at the very edge of the dockview component, producing
+ * a phantom 1px line that doubles up with neighbouring borders.
+ * The .visible class is toggled by splitview's setVisible() in
+ * dockview-core/.../splitview/viewItem.js. */
+.dv-split-view-container.dv-separator-border > .dv-view-container
+  > .dv-view:not(.visible)
+  + .dv-view::before {
+  content: none;
 }
 
 /* More horizontal padding in each tab */

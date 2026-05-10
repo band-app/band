@@ -72,7 +72,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "croner": "^10.0.1",
-    "dockview": "^5.2.0",
+    "dockview": "^6.0.6",
     "drizzle-kit": "1.0.0-rc.1",
     "drizzle-orm": "1.0.0-rc.1",
     "esbuild": "^0.25.0",

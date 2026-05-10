@@ -1463,6 +1463,10 @@ export function ChatView({
             placeholder="Type a message..."
             onEscape={handleEscape}
             onPreviousMessage={getLastUserMessage}
+            // Shift+Tab toggles Edit/Plan mode, but only while the chat
+            // input has focus — the same band:toggle-mode listener picks
+            // up palette invocations as well.
+            onShiftTab={() => window.dispatchEvent(new CustomEvent("band:toggle-mode"))}
           />
           <PromptInputActions>
             <div className="flex items-center gap-0.5">

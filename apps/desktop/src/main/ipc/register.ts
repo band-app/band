@@ -71,6 +71,7 @@ export function registerIpc(opts: RegisterOptions): () => void {
     webserverStop({ webDir: opts.webDir, managed: opts.managed }),
   );
   handle(Channels.getAppTitle, () => getAppTitle());
+  handle(Channels.getWindowFullscreen, () => opts.mainWindow.isFullScreen());
 
   // ---- macOS shell ----
   // Args are camelCase because they're forwarded to the handlers as typed

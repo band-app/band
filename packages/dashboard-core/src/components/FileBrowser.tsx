@@ -91,6 +91,11 @@ function TreeNode({
       <button
         ref={isSelected ? selectedRef : undefined}
         type="button"
+        // data-band-active marks this button so the workspace-level
+        // ⇧⌘E "focus Files" handler can target it from outside the
+        // FileBrowser without depending on the brittle Tailwind class
+        // pair below.
+        data-band-active={isSelected ? "true" : undefined}
         onClick={handleClick}
         className={`flex w-full items-center text-left hover:bg-accent/50 ${
           compact ? "h-[26px] gap-1 pr-3 text-xs" : "h-[30px] gap-1.5 pr-4 text-sm"

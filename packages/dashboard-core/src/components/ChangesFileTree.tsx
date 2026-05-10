@@ -53,6 +53,10 @@ function ChangesTreeNode({
       <button
         ref={isActive ? btnRef : undefined}
         type="button"
+        // data-band-active marks this button so the workspace-level
+        // ⇧⌘G "focus Changes" handler can target it from outside the
+        // file tree.
+        data-band-active={isActive ? "true" : undefined}
         onClick={handleClick}
         className={`flex h-[26px] w-full items-center gap-1 pr-3 text-left text-xs ${
           isActive ? "bg-accent text-accent-foreground" : "hover:bg-accent/50"

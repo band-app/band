@@ -15,11 +15,12 @@ export interface PaletteCommand {
   /** Human-readable label shown in the palette. */
   label: string;
   /**
-   * Canonical keyboard shortcut string.
+   * Canonical keyboard shortcut string. Optional — palette-only commands
+   * with no keybinding can omit it.
    * Use `Cmd+` for the platform modifier (⌘ on Mac, Ctrl elsewhere).
    * Examples: `"Cmd+P"`, `"Cmd+Shift+F"`, `"Shift+Tab"`.
    */
-  shortcut: string;
+  shortcut?: string;
   /** Callback executed when the command is selected. */
   action: () => void;
 }
@@ -68,10 +69,15 @@ export function formatShortcut(shortcut: string): string {
   if (mac) {
     return shortcut
       .replace(/Cmd\+/g, "⌘")
+      .replace(/Ctrl\+/g, "⌃")
       .replace(/Shift\+/g, "⇧")
       .replace(/Alt\+/g, "⌥");
   }
-  return shortcut.replace(/Cmd\+/g, "Ctrl+");
+  // Non-Mac: collapse "Ctrl+Cmd+X" → "Ctrl+X" first so we don't end up
+  // with the redundant "Ctrl+Ctrl+X" after the Cmd→Ctrl substitution.
+  // (No native Cmd-equivalent on Win/Linux; the binding falls through
+  // to plain Ctrl in those environments.)
+  return shortcut.replace(/Ctrl\+Cmd\+/g, "Ctrl+").replace(/Cmd\+/g, "Ctrl+");
 }
 
 // ---------------------------------------------------------------------------
@@ -104,45 +110,71 @@ export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
       action: () => deps.findInFile(),
     },
     {
+      id: "show-chat",
+      label: "Show Chat",
+      shortcut: "Ctrl+Cmd+I",
+      action: () => activatePanel(deps, "chat"),
+    },
+    {
       id: "show-changes",
       label: "Show Changes",
-      shortcut: "Cmd+E",
+      shortcut: "Cmd+Shift+G",
       action: () => activatePanel(deps, "changes"),
     },
     {
       id: "show-terminal",
       label: "Show Terminal",
-      shortcut: "Cmd+J",
+      shortcut: "Ctrl+`",
       action: () => activatePanel(deps, "terminal"),
     },
     {
       id: "show-files",
       label: "Show Files",
-      shortcut: "Cmd+G",
+      shortcut: "Cmd+Shift+E",
       action: () => activatePanel(deps, "files"),
     },
     {
       id: "show-browser",
       label: "Show Browser",
-      shortcut: "Cmd+B",
+      shortcut: "Cmd+Shift+B",
       action: () => activatePanel(deps, "browser"),
     },
     {
+      // ⌃0 — focuses keyboard into the Projects list. The direct
+      // keyboard handler in DockviewWorkspaceLayout also expands the
+      // left edge group if it's collapsed; this palette path just
+      // activates the panel and dispatches the focus event. If the
+      // sidebar happens to be collapsed when invoked from the palette,
+      // press ⌘B first.
+      id: "focus-projects",
+      label: "Focus Projects",
+      shortcut: "Ctrl+0",
+      action: () => {
+        activatePanel(deps, "projects");
+        queueMicrotask(() => {
+          window.dispatchEvent(new CustomEvent("band:focus-projects"));
+        });
+      },
+    },
+    {
+      // No keyboard shortcut: Cmd+- is reserved by the desktop View menu's
+      // Zoom Out accelerator. Reachable via the back/forward arrows in the
+      // FileViewer toolbar and via this palette entry.
       id: "editor-go-back",
       label: "Go Back",
-      shortcut: "Cmd+-",
       action: () => window.dispatchEvent(new CustomEvent("band:editor-go-back")),
     },
     {
       id: "editor-go-forward",
       label: "Go Forward",
-      shortcut: "Cmd+Shift+-",
       action: () => window.dispatchEvent(new CustomEvent("band:editor-go-forward")),
     },
     {
+      // No shortcut advertised: Shift+Tab is wired only inside the chat
+      // input (PromptInputTextarea), so it isn't a globally-applicable
+      // binding. The chat's mode dropdown shows the ⇧Tab hint in-context.
       id: "toggle-mode",
       label: "Toggle Edit/Plan Mode",
-      shortcut: "Shift+Tab",
       action: () => window.dispatchEvent(new CustomEvent("band:toggle-mode")),
     },
   ];
