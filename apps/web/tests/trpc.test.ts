@@ -1033,6 +1033,53 @@ describe("tRPC — system checks", () => {
 });
 
 // ---------------------------------------------------------------------------
+// services router — activity level
+// ---------------------------------------------------------------------------
+
+describe("tRPC — services activity", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    seedState(tmpHome, { projects: [] });
+    seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
+    server = await startServer({ tmpHome });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("services.getActivity defaults to 'active'", async () => {
+    const res = await trpcQuery(server.url, "services.getActivity");
+    expect(res.status).toBe(200);
+    const data = await trpcData<{ activity: string }>(res);
+    expect(data.activity).toBe("active");
+  });
+
+  it("services.setActivity accepts each valid level and getActivity reflects it", async () => {
+    for (const activity of ["idle", "background", "active"] as const) {
+      const setRes = await trpcMutate(server.url, "services.setActivity", { activity });
+      expect(setRes.status).toBe(200);
+      const setData = await trpcData<{ activity: string }>(setRes);
+      expect(setData.activity).toBe(activity);
+
+      const getRes = await trpcQuery(server.url, "services.getActivity");
+      expect(getRes.status).toBe(200);
+      const getData = await trpcData<{ activity: string }>(getRes);
+      expect(getData.activity).toBe(activity);
+    }
+  });
+
+  it("services.setActivity rejects an unknown activity", async () => {
+    const res = await trpcMutate(server.url, "services.setActivity", { activity: "asleep" });
+    expect(res.status).toBe(400);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Auth enforcement on tRPC endpoints
 // ---------------------------------------------------------------------------
 
