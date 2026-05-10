@@ -160,6 +160,23 @@ export async function createMetadataAgent(agentId?: string): Promise<CodingAgent
 }
 
 /**
+ * Create a short-lived agent rooted at a workspace's worktree, for one-shot
+ * tool-using tasks (e.g. summarising pending changes into a commit message).
+ *
+ * Unlike `createMetadataAgent`, this gives the agent a real codebase to
+ * explore — it can run `git diff` / `git log` / `Read` files itself rather
+ * than receiving a serialised diff in the prompt. Does NOT join the chat
+ * pool; the caller should discard the agent after a single `runSession`.
+ */
+export async function createWorkspaceAgent(
+  worktreePath: string,
+  agentId?: string,
+): Promise<CodingAgent> {
+  const config = getAgentConfig(worktreePath, agentId);
+  return createCodingAgent(config);
+}
+
+/**
  * Replace the current agent for a chat pane with one using a different config.
  * Aborts the existing agent (if any) before creating the new one.
  */

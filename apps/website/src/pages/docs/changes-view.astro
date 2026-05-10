@@ -1,0 +1,296 @@
+---
+import DocsLayout from "../../layouts/DocsLayout.astro";
+---
+<DocsLayout title="Changes view — Band Docs">
+  <h1>Changes view</h1>
+
+  <p>
+    The Changes view is Band's built-in diff reviewer for the active workspace.
+    It shows every modified, added, deleted, untracked, and renamed file in
+    the worktree, lets you read the changes inline with syntax highlighting,
+    and gives you the basic git actions you usually run from a terminal &mdash;
+    revert a single file, or stage and commit everything from a dialog.
+  </p>
+
+  <p>
+    Open it as its own pane (drag and drop a Changes pane anywhere in the
+    layout) or focus it from the keyboard with <kbd>⇧⌘G</kbd>. Like every
+    other pane in Band, it lives inside the
+    <a href="/docs/flexible-layout">flexible layout</a> &mdash; resize it,
+    split it next to the editor, or stack it as a tab.
+  </p>
+
+  <figure class="my-8 overflow-hidden rounded-xl border border-border shadow-lg">
+    <img
+      src="/screenshot-changes-view.png"
+      alt="The Band Changes view in a workspace. The file tree sidebar lists the modified files on the left. The toolbar at the top of the diff pane shows the head branch and compare-target dropdown next to action icons for commit, git pull, git push, reload, find, expand all, and the unified/split view toggle. Two files are expanded below in split view, each showing old code on the left and new code on the right with green and red highlights for additions and deletions."
+      width="1217"
+      height="1258"
+      loading="lazy"
+      decoding="async"
+      class="block h-auto w-full"
+    />
+    <figcaption class="border-t border-border bg-card/50 px-4 py-2 text-center text-sm text-muted-foreground">
+      The Changes view &mdash; file tree sidebar on the left, branch picker and toolbar actions up top, and split-view diffs underneath.
+    </figcaption>
+  </figure>
+
+  <h2>What it shows</h2>
+
+  <p>
+    Each entry in the file list reports its <strong>git status</strong> with
+    a short badge:
+  </p>
+
+  <ul>
+    <li><strong>M</strong> &mdash; modified.</li>
+    <li><strong>A</strong> &mdash; added (newly tracked).</li>
+    <li><strong>D</strong> &mdash; deleted.</li>
+    <li><strong>R</strong> &mdash; renamed.</li>
+    <li><strong>U</strong> &mdash; untracked (a new file that has not been added yet).</li>
+  </ul>
+
+  <p>
+    Clicking a file in the sidebar tree expands its diff and scrolls it to
+    the top of the viewport. Clicking the file again, or the chevron in its
+    header, collapses it. The active file in view is highlighted in the tree
+    so you always know where you are in a long change set.
+  </p>
+
+  <h2>Comparing against a branch</h2>
+
+  <p>
+    By default the Changes view shows the diff between the workspace's
+    <strong>HEAD</strong> and the project's default branch (e.g.
+    <code>main</code>). The branch picker in the toolbar lets you change
+    that target on the fly:
+  </p>
+
+  <ul>
+    <li>
+      <strong>Uncommitted</strong> &mdash; show only what has not been
+      committed yet (the working tree vs <code>HEAD</code>). Useful when
+      you've already made commits on the branch and only want to review
+      what is still pending.
+    </li>
+    <li>
+      <strong>Any branch</strong> &mdash; pick another branch to compare
+      against. Band uses <code>git merge-base</code> so you see only the
+      changes introduced by your branch, not unrelated commits that have
+      landed on the target.
+    </li>
+  </ul>
+
+  <p>
+    Your selection is remembered per workspace, so coming back to a
+    workspace later restores the same compare target.
+  </p>
+
+  <h2>Reading diffs</h2>
+
+  <ul>
+    <li>
+      <strong>Unified</strong> view stacks deletions on top of insertions in
+      a single column &mdash; the default in narrow panes.
+    </li>
+    <li>
+      <strong>Split</strong> view shows the old file on the left and the new
+      file on the right. Available when the pane is wide enough to be
+      readable; below that threshold the view falls back to unified
+      automatically.
+    </li>
+    <li>
+      <strong>Expand context</strong> &mdash; the dashed separators between
+      hunks expand more lines around the change. Click repeatedly to widen
+      the context, or use <strong>Show full file</strong> to load the
+      entire file at once.
+    </li>
+    <li>
+      <strong>Find in changes</strong> (<kbd>⌘F</kbd>) searches across every
+      open diff in the pane &mdash; case-sensitive, whole-word, and regex
+      modes are all supported.
+    </li>
+  </ul>
+
+  <p>
+    Line numbers reflect the <em>real</em> file line numbers (mapped through
+    the diff hunk headers), not the position in the trimmed diff &mdash;
+    so jumping to a line in the editor lines up with what the diff shows.
+  </p>
+
+  <h2>Per-file actions</h2>
+
+  <p>The header of each file row carries three quick actions:</p>
+
+  <ul>
+    <li>
+      <strong>Copy file path</strong> &mdash; puts the path on the
+      clipboard, handy for sharing or pasting into a terminal.
+    </li>
+    <li>
+      <strong>Open in code browser</strong> &mdash; jumps to the file in
+      Band's editor pane, scrolled to the first changed line.
+    </li>
+    <li>
+      <strong>Revert file</strong> &mdash; restores the file to its state
+      on the compare target. For added or untracked files this deletes the
+      file; for modified, deleted, or renamed files it runs
+      <code>git checkout</code> against the merge base. A confirmation
+      dialog explains exactly what will happen for the file's status before
+      anything is touched.
+    </li>
+  </ul>
+
+  <h2>Commit changes</h2>
+
+  <p>
+    The toolbar's <strong>Commit</strong> button (the git-commit icon next
+    to <em>Reload changes</em>) opens the commit dialog. From there you can
+    stage every change in the worktree &mdash; tracked and untracked &mdash;
+    and create a commit on the workspace's current branch without leaving
+    the Changes view.
+  </p>
+
+  <figure class="my-8 mx-auto max-w-md overflow-hidden rounded-xl border border-border shadow-lg">
+    <img
+      src="/screenshot-commit-dialog.png"
+      alt="The Band commit dialog. The header reads 'Commit changes / Stage and commit 8 changed files.' Two fields are shown: a Message input ('Short summary of the change') and a Details textarea ('Explain why this change is being made…'). The footer has an Auto-generate button on the left with a sparkles icon, and Cancel and Commit buttons on the right."
+      width="571"
+      height="364"
+      loading="lazy"
+      decoding="async"
+      class="block h-auto w-full"
+    />
+    <figcaption class="border-t border-border bg-card/50 px-4 py-2 text-center text-sm text-muted-foreground">
+      The commit dialog &mdash; subject, optional body, and an Auto-generate button that asks the default coding agent to write the message.
+    </figcaption>
+  </figure>
+
+  <p>The dialog has two fields:</p>
+
+  <ul>
+    <li>
+      <strong>Message</strong> &mdash; the commit subject. Capped at 200
+      characters in the input; the convention in most projects is to keep
+      it under 72.
+    </li>
+    <li>
+      <strong>Details</strong> (optional) &mdash; the commit body. Use it
+      to explain <em>why</em> the change is being made, link to issues, or
+      call out follow-up work. If you leave this empty Band sends only the
+      subject to git.
+    </li>
+  </ul>
+
+  <p>
+    When you click <strong>Commit</strong>, Band runs
+    <code>git add -A</code> followed by a single <code>git commit</code>
+    in the workspace's worktree. The Changes view refreshes immediately so
+    the diff reflects the new <code>HEAD</code>.
+  </p>
+
+  <h3>Auto-generate the message</h3>
+
+  <p>
+    The <strong>Auto-generate</strong> button asks your default
+    <a href="/docs/coding-agents">coding agent</a> &mdash; the one set in
+    <a href="/docs/settings">Settings</a> &mdash; to write the commit
+    message for you. The agent runs as a short-lived, one-shot session
+    rooted at the worktree, with its normal Bash and file-read tools
+    available, and is instructed to:
+  </p>
+
+  <ol>
+    <li>Run <code>git status</code> and <code>git diff HEAD</code> to see what changed.</li>
+    <li>Optionally peek at recent commits or surrounding files to match the project's commit style.</li>
+    <li>Output a single commit message in subject + body format.</li>
+  </ol>
+
+  <p>
+    Because the agent reads the diff itself with tools, the message stays
+    accurate even on large change sets &mdash; nothing has to be truncated
+    into the prompt. When the agent is done, the subject and body are
+    written into the dialog so you can edit them before committing. A small
+    note under the fields shows which agent produced the suggestion.
+  </p>
+
+  <p>
+    If you press <strong>Commit</strong> while the message field is empty,
+    Band will auto-generate <em>and</em> commit in one step &mdash; useful
+    when you trust the agent's summary and want to keep moving. If no
+    coding agent is configured at all, Band falls back to a built-in
+    Claude Code definition; if that fails too, the dialog surfaces the
+    error inline so you can fix it (or type the message yourself).
+  </p>
+
+  <h3>Pre-commit hooks</h3>
+
+  <p>
+    The commit runs in your worktree exactly the way it would from a
+    terminal, so any <code>pre-commit</code> hook configured in the
+    repository (Husky, lefthook, native git hooks, etc.) executes
+    normally. If a hook fails, the commit is aborted and the dialog shows
+    the hook's error output so you can fix the underlying issue and try
+    again. Band does not pass <code>--no-verify</code> &mdash; checks are
+    not skipped behind your back.
+  </p>
+
+  <h2>Git pull and push</h2>
+
+  <p>
+    The toolbar also exposes the two most common branch-sync actions:
+  </p>
+
+  <ul>
+    <li>
+      <strong>Git pull</strong> &mdash; runs <code>git pull --rebase</code>
+      in the workspace's worktree, then refreshes the diff so the change set
+      reflects the new <code>HEAD</code>.
+    </li>
+    <li>
+      <strong>Git push</strong> &mdash; runs <code>git push</code>; if the
+      branch has no upstream yet, Band falls back to
+      <code>git push --set-upstream origin &lt;branch&gt;</code> automatically.
+    </li>
+  </ul>
+
+  <p>
+    While a pull or push is in flight, the button shows a spinner and the
+    rest of the git actions are disabled to avoid concurrent operations on
+    the same worktree. Successes and failures appear briefly above the
+    bottom status bar &mdash; success messages auto-dismiss after a couple
+    of seconds, errors stick around with a × to close them so you can read
+    git's output (e.g. <em>rejected, non-fast-forward</em> or merge
+    conflicts).
+  </p>
+
+  <p>
+    Both actions are also available from the workspace context menu on the
+    project sidebar &mdash; the toolbar buttons are simply a convenience for
+    users who already have the diff open.
+  </p>
+
+  <h2>Auto-refresh</h2>
+
+  <p>
+    The Changes view stays in sync with the worktree without you having to
+    hit reload. Band runs a branch-status poller that watches the workspace
+    for git activity (commits made elsewhere, files written by the agent,
+    branch checkouts from a terminal) and pushes updates over the same
+    Server-Sent Events stream the rest of the dashboard uses. When something
+    changes, the file list refreshes; expanded files re-fetch their diffs
+    while preserving your context-expansion and scroll position.
+  </p>
+
+  <p>
+    There's also a manual <strong>Reload</strong> button in the toolbar for
+    the rare case you want to force a refresh.
+  </p>
+
+  <h2>Keyboard shortcuts</h2>
+
+  <ul>
+    <li><kbd>⇧⌘G</kbd> &mdash; show / focus the Changes pane.</li>
+    <li><kbd>⌘F</kbd> &mdash; open <em>Find in changes</em> within the active diff pane.</li>
+  </ul>
+</DocsLayout>

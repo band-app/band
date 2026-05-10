@@ -10,6 +10,7 @@ export { CIStatusIndicator } from "./components/CIStatusIndicator";
 export { CodeMirrorEditor } from "./components/CodeMirrorEditor";
 export { CodeMirrorViewer } from "./components/CodeMirrorViewer";
 export { CommandPaletteDialog } from "./components/CommandPaletteDialog";
+export { CommitDialog } from "./components/CommitDialog";
 export { DashboardShell } from "./components/DashboardShell";
 export { type DiffStats, DiffView } from "./components/DiffView";
 export { FileBrowser } from "./components/FileBrowser";

@@ -297,6 +297,28 @@ export class WebDashboardAdapter implements DashboardAdapter {
     });
   }
 
+  async gitPullWorkspace(workspaceId: string): Promise<void> {
+    await this.trpc.workspace.gitPull.mutate({ workspaceId });
+  }
+
+  async gitPushWorkspace(workspaceId: string): Promise<void> {
+    await this.trpc.workspace.gitPush.mutate({ workspaceId });
+  }
+
+  async gitCommitWorkspace(workspaceId: string, message: string, body?: string): Promise<void> {
+    await this.trpc.workspace.gitCommit.mutate({ workspaceId, message, body });
+  }
+
+  async generateCommitMessage(
+    workspaceId: string,
+  ): Promise<{ message: string; body: string; agentLabel: string }> {
+    return (await this.trpc.workspace.generateCommitMessage.mutate({ workspaceId })) as {
+      message: string;
+      body: string;
+      agentLabel: string;
+    };
+  }
+
   getWorkspaceFileUrl(workspaceId: string, path: string): string {
     return `/api/workspace-file/${encodeURIComponent(workspaceId)}/${path
       .split("/")
