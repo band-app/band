@@ -69,6 +69,7 @@ export function formatShortcut(shortcut: string): string {
   if (mac) {
     return shortcut
       .replace(/Cmd\+/g, "⌘")
+      .replace(/Ctrl\+/g, "⌃")
       .replace(/Shift\+/g, "⇧")
       .replace(/Alt\+/g, "⌥");
   }
@@ -107,25 +108,25 @@ export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
     {
       id: "show-changes",
       label: "Show Changes",
-      shortcut: "Cmd+E",
+      shortcut: "Cmd+Shift+G",
       action: () => activatePanel(deps, "changes"),
     },
     {
       id: "show-terminal",
       label: "Show Terminal",
-      shortcut: "Cmd+J",
+      shortcut: "Ctrl+`",
       action: () => activatePanel(deps, "terminal"),
     },
     {
       id: "show-files",
       label: "Show Files",
-      shortcut: "Cmd+G",
+      shortcut: "Cmd+Shift+E",
       action: () => activatePanel(deps, "files"),
     },
     {
       id: "show-browser",
       label: "Show Browser",
-      shortcut: "Cmd+B",
+      shortcut: "Cmd+Shift+B",
       action: () => activatePanel(deps, "browser"),
     },
     {

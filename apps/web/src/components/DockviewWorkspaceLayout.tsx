@@ -64,10 +64,10 @@ const PANEL_ICONS: Record<string, React.FC<{ className?: string }>> = {
 };
 
 const PANEL_SHORTCUTS: Record<string, string> = {
-  changes: "⌘E",
-  files: "⌘G",
-  terminal: "⌘J",
-  browser: "⌘B",
+  changes: "⇧⌘G",
+  files: "⇧⌘E",
+  terminal: "⌃`",
+  browser: "⇧⌘B",
 };
 
 // ---------------------------------------------------------------------------
@@ -822,6 +822,19 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
         return;
       }
 
+      // Ctrl+` (not Cmd+`) → Terminal panel. Handled here, ahead of the
+      // mod gate, because we want to hijack even when xterm has focus
+      // (otherwise the backtick would be typed into the shell). Matches
+      // VS Code's "Toggle Terminal" binding.
+      if (e.ctrlKey && !e.metaKey && e.key === "`") {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!hiddenPanelsRef.current.includes("terminal")) {
+          apiRef.current?.getPanel("terminal")?.api.setActive();
+        }
+        return;
+      }
+
       // Ctrl+Tab → next file tab
       if (e.key === "Tab" && e.ctrlKey && !e.shiftKey) {
         e.preventDefault();
@@ -866,20 +879,20 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
         } else {
           window.dispatchEvent(new CustomEvent("band:find-in-file"));
         }
-      } else if (key === "e" && !e.shiftKey && api) {
+      } else if (key === "g" && e.shiftKey && api) {
+        // ⇧⌘G → Changes (matches VS Code "Show Source Control")
         e.preventDefault();
         if (!hiddenPanelsRef.current.includes("changes")) api.getPanel("changes")?.api.setActive();
-      } else if (key === "j" && !e.shiftKey && api) {
-        e.preventDefault();
-        if (!hiddenPanelsRef.current.includes("terminal"))
-          api.getPanel("terminal")?.api.setActive();
-      } else if (key === "g" && !e.shiftKey && api) {
+      } else if (key === "e" && e.shiftKey && api) {
+        // ⇧⌘E → Files (matches VS Code "Show Explorer")
         e.preventDefault();
         if (!hiddenPanelsRef.current.includes("files")) api.getPanel("files")?.api.setActive();
-      } else if (key === "b" && !e.shiftKey && api) {
+      } else if (key === "b" && e.shiftKey && api) {
+        // ⇧⌘B → Browser
         e.preventDefault();
         if (!hiddenPanelsRef.current.includes("browser")) api.getPanel("browser")?.api.setActive();
-      } else if (key === "b" && e.shiftKey && api) {
+      } else if (key === "b" && !e.shiftKey && api) {
+        // ⌘B → toggle Projects sidebar (matches VS Code "Toggle Primary Side Bar")
         e.preventDefault();
         const left = api.groups.find((g) => g.id === EDGE_GROUP_IDS.left);
         if (left) {

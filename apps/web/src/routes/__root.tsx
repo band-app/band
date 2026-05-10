@@ -224,10 +224,10 @@ function AppShell() {
   const panelItems: PanelItem[] = useMemo(
     () => [
       { id: "chat", label: "Chat", icon: MessageSquare },
-      { id: "changes", label: "Changes", icon: GitCompare, shortcut: "⌘E" },
-      { id: "files", label: "Files", icon: FolderOpen, shortcut: "⌘G" },
-      { id: "terminal", label: "Terminal", icon: TerminalIcon, shortcut: "⌘J" },
-      ...(isDesktop ? [{ id: "browser", label: "Browser", icon: Globe, shortcut: "⌘B" }] : []),
+      { id: "changes", label: "Changes", icon: GitCompare, shortcut: "⇧⌘G" },
+      { id: "files", label: "Files", icon: FolderOpen, shortcut: "⇧⌘E" },
+      { id: "terminal", label: "Terminal", icon: TerminalIcon, shortcut: "⌃`" },
+      ...(isDesktop ? [{ id: "browser", label: "Browser", icon: Globe, shortcut: "⇧⌘B" }] : []),
     ],
     [],
   );
