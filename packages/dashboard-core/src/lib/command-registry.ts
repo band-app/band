@@ -142,9 +142,11 @@ export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
       action: () => window.dispatchEvent(new CustomEvent("band:editor-go-forward")),
     },
     {
+      // No shortcut advertised: Shift+Tab is wired only inside the chat
+      // input (PromptInputTextarea), so it isn't a globally-applicable
+      // binding. The chat's mode dropdown shows the ⇧Tab hint in-context.
       id: "toggle-mode",
       label: "Toggle Edit/Plan Mode",
-      shortcut: "Shift+Tab",
       action: () => window.dispatchEvent(new CustomEvent("band:toggle-mode")),
     },
   ];

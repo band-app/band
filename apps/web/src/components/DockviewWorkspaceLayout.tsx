@@ -807,14 +807,11 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
       // handled at the app level when the terminal has focus.
       const terminalFocused = document.activeElement?.closest(".xterm") != null;
 
-      // Shift+Tab → toggle mode (Edit/Plan) — skip when terminal focused
-      if (e.key === "Tab" && e.shiftKey && !e.ctrlKey && !e.metaKey) {
-        if (terminalFocused) return;
-        e.preventDefault();
-        e.stopPropagation();
-        window.dispatchEvent(new CustomEvent("band:toggle-mode"));
-        return;
-      }
+      // Note: Shift+Tab toggles Edit/Plan mode only when the chat input
+      // (PromptInputTextarea) has focus — wired inside that component, not
+      // globally. A global handler would hijack the standard "focus
+      // previous element" Tab behaviour everywhere else (form fields,
+      // dialogs, the command palette), which broke accessibility flows.
 
       // Ctrl+R (not Cmd+R) → workspace picker — skip when terminal focused
       if (e.ctrlKey && !e.metaKey && e.key.toLowerCase() === "r" && !e.shiftKey) {

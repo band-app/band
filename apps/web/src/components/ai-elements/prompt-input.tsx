@@ -427,6 +427,10 @@ export type PromptInputTextareaProps = HTMLAttributes<HTMLTextAreaElement> & {
   onEscape?: () => void;
   /** Called when ArrowUp is pressed on an empty input. Return the previous message text to load it, or undefined to do nothing. */
   onPreviousMessage?: () => string | undefined;
+  /** Called when Shift+Tab is pressed inside the textarea. When provided,
+   *  the default focus-previous behaviour is suppressed. Used by the host
+   *  to toggle Edit/Plan mode. */
+  onShiftTab?: () => void;
 };
 
 export const PromptInputTextarea = ({
@@ -434,6 +438,7 @@ export const PromptInputTextarea = ({
   placeholder = "Type a message...",
   onEscape,
   onPreviousMessage,
+  onShiftTab,
   ...props
 }: PromptInputTextareaProps) => {
   const [isComposing, setIsComposing] = useState(false);
@@ -451,6 +456,11 @@ export const PromptInputTextarea = ({
         if (isTouchDevice) return;
         e.preventDefault();
         e.currentTarget.form?.requestSubmit();
+      } else if (e.key === "Tab" && e.shiftKey && onShiftTab) {
+        // Suppress default focus-previous so the cursor stays in the
+        // textarea — host uses this to toggle a contextual mode picker.
+        e.preventDefault();
+        onShiftTab();
       } else if (e.key === "Escape") {
         onEscape?.();
       } else if (e.key === "ArrowUp" && onPreviousMessage) {
@@ -464,7 +474,7 @@ export const PromptInputTextarea = ({
         }
       }
     },
-    [isComposing, onEscape, onPreviousMessage, setTextareaValue],
+    [isComposing, onEscape, onPreviousMessage, onShiftTab, setTextareaValue],
   );
 
   // JS fallback for auto-resize when CSS field-sizing-content is not supported
