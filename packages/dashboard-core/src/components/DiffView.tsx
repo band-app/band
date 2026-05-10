@@ -10,6 +10,7 @@ import {
   SelectSeparator,
   SelectTrigger,
   SelectValue,
+  Spinner,
   Tooltip,
   TooltipContent,
   TooltipTrigger,
@@ -19,12 +20,15 @@ import { SearchQuery } from "@codemirror/search";
 import { EditorState, RangeSetBuilder, Text } from "@codemirror/state";
 import { Decoration, EditorView, lineNumbers, WidgetType } from "@codemirror/view";
 import {
+  ArrowDownToLine,
   ArrowRight,
+  ArrowUpFromLine,
   Check,
   ChevronsDownUp,
   ChevronsUpDown,
   Columns2,
   Copy,
+  GitCommit,
   MoreVertical,
   PanelLeft,
   RefreshCw,
@@ -45,6 +49,7 @@ import { selectionToChatExtension } from "../lib/selection-to-chat";
 import type { SSEEvent } from "../lib/sse";
 import type { DiffMode, FileStatus, WorkspaceDiffSummary } from "../types";
 import { ChangesFileTree } from "./ChangesFileTree";
+import { CommitDialog } from "./CommitDialog";
 import { FileStatusBadge } from "./FileStatusBadge";
 import { RevertFileDialog } from "./RevertFileDialog";
 import { SearchBar, type SearchOptions } from "./SearchBar";
@@ -618,23 +623,30 @@ function LazyFileRow({
     setIsOpen(expandAll);
   }, [expandAll]);
 
-  // Open and scroll into view when focused from the file tree sidebar
+  // Open and scroll into view when focused from the file tree sidebar.
+  // Note: the lookup is scoped to scrollContainerRef so it picks up THIS
+  // workspace's row even when several DiffViews are mounted simultaneously
+  // (dockview keeps recently-visited workspaces alive). A document-wide
+  // querySelector would return whichever instance happened to be earlier
+  // in DOM order, leading to the wrong scroll target.
   useEffect(() => {
     if (focusedFile && focusedFile.path === filename) {
       setIsOpen(true);
       // Double rAF: first lets React commit, second lets layout complete
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
-          const el = document.getElementById(`diff-file-${encodeURIComponent(filename)}`);
           const container = scrollContainerRef?.current;
-          if (el && container) {
-            const elTop = el.getBoundingClientRect().top;
-            const containerTop = container.getBoundingClientRect().top;
-            container.scrollTo({
-              top: container.scrollTop + (elTop - containerTop),
-              behavior: "instant",
-            });
-          }
+          if (!container) return;
+          const el = container.querySelector<HTMLElement>(
+            `[data-band-diff-file="${CSS.escape(filename)}"]`,
+          );
+          if (!el) return;
+          const elTop = el.getBoundingClientRect().top;
+          const containerTop = container.getBoundingClientRect().top;
+          container.scrollTo({
+            top: container.scrollTop + (elTop - containerTop),
+            behavior: "instant",
+          });
         });
       });
     }
@@ -649,7 +661,7 @@ function LazyFileRow({
 
   return (
     <div
-      id={`diff-file-${encodeURIComponent(filename)}`}
+      data-band-diff-file={filename}
       className={`overflow-clip rounded-lg border-2 ${isActive ? "border-blue-500/60" : "border-border"}`}
     >
       <button
@@ -1034,6 +1046,77 @@ export function DiffView({
   // Track which file diff is currently in view for tree sidebar highlighting
   const [activeFile, setActiveFile] = useState<string | null>(null);
 
+  // Commit dialog — only available when the adapter exposes the commit
+  // endpoint (web/desktop). Hidden behind a guard so embedded contexts can
+  // omit the action without breaking the toolbar layout.
+  const [commitDialogOpen, setCommitDialogOpen] = useState(false);
+  const canCommit = Boolean(adapter.gitCommitWorkspace);
+
+  // Pull / push status — surfaced inline as a small banner above the bottom
+  // status bar so the user gets feedback without an interrupting modal.
+  const canPull = Boolean(adapter.gitPullWorkspace);
+  const canPush = Boolean(adapter.gitPushWorkspace);
+  const [gitOpStatus, setGitOpStatus] = useState<
+    | { state: "running"; op: "pull" | "push" }
+    | { state: "success"; op: "pull" | "push" }
+    | { state: "error"; op: "pull" | "push"; message: string }
+    | null
+  >(null);
+
+  const handleGitPull = useCallback(async () => {
+    const pull = adapter.gitPullWorkspace;
+    if (!pull) return;
+    setGitOpStatus({ state: "running", op: "pull" });
+    try {
+      await pull.call(adapter, workspaceId);
+      setGitOpStatus({ state: "success", op: "pull" });
+      // Pull may have advanced HEAD — refresh the diff so the change set
+      // reflects the new merge base.
+      fetchSummaryRef.current?.(true);
+      // Auto-clear the success banner after a couple of seconds; errors
+      // stay until dismissed.
+      setTimeout(() => {
+        setGitOpStatus((prev) =>
+          prev && prev.state === "success" && prev.op === "pull" ? null : prev,
+        );
+      }, 2500);
+    } catch (e) {
+      setGitOpStatus({
+        state: "error",
+        op: "pull",
+        message: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }, [adapter, workspaceId]);
+
+  const handleGitPush = useCallback(async () => {
+    const push = adapter.gitPushWorkspace;
+    if (!push) return;
+    setGitOpStatus({ state: "running", op: "push" });
+    try {
+      await push.call(adapter, workspaceId);
+      setGitOpStatus({ state: "success", op: "push" });
+      // Push doesn't change the local diff, but the branch-status SSE poll
+      // will pick up the new ahead/behind state shortly. No forced refresh
+      // needed.
+      setTimeout(() => {
+        setGitOpStatus((prev) =>
+          prev && prev.state === "success" && prev.op === "push" ? null : prev,
+        );
+      }, 2500);
+    } catch (e) {
+      setGitOpStatus({
+        state: "error",
+        op: "push",
+        message: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }, [adapter, workspaceId]);
+
+  const gitOpBusy = gitOpStatus?.state === "running";
+  const isPulling = gitOpBusy && gitOpStatus.op === "pull";
+  const isPushing = gitOpBusy && gitOpStatus.op === "push";
+
   // Track the scroll container's visible height + width:
   // - height sizes the trailing spacer so the last file can be scrolled to
   //   the top of the viewport even when its content is shorter than the
@@ -1080,11 +1163,18 @@ export function DiffView({
         // Pick the file whose top is closest to the top of the scroll viewport.
         // If a file spans the viewport top, prefer it. Otherwise pick the file
         // whose top edge is nearest to the viewport top (above or below).
+        //
+        // Lookups are scoped to `container` (this DiffView's scroll area) —
+        // multiple workspaces' DiffViews can be mounted at once, so a
+        // document-wide query would return rows from another workspace and
+        // either freeze `activeFile` or update it from the wrong scroll.
         const top = rect.top;
         let closest: string | null = null;
         let closestDist = Infinity;
         for (const name of names) {
-          const el = document.getElementById(`diff-file-${encodeURIComponent(name)}`);
+          const el = container.querySelector<HTMLElement>(
+            `[data-band-diff-file="${CSS.escape(name)}"]`,
+          );
           if (!el) continue;
           const elRect = el.getBoundingClientRect();
           // If the element spans the viewport top, it's the active file
@@ -1476,15 +1566,89 @@ export function DiffView({
     </div>
   );
 
+  // Pull / push are useful even when there are no pending changes (the
+  // common "just fetch upstream" case). Render them on both the populated
+  // and empty branches.
+  const renderGitSyncButtons = () => (
+    <>
+      {canPull && (
+        <button
+          type="button"
+          onClick={handleGitPull}
+          className={ghostBtnAlwaysClass}
+          title="Git pull"
+          aria-label="Git pull"
+          disabled={gitOpBusy}
+        >
+          {isPulling ? <Spinner className="size-3.5" /> : <ArrowDownToLine className="size-3.5" />}
+        </button>
+      )}
+      {canPush && (
+        <button
+          type="button"
+          onClick={handleGitPush}
+          className={ghostBtnAlwaysClass}
+          title="Git push"
+          aria-label="Git push"
+          disabled={gitOpBusy}
+        >
+          {isPushing ? <Spinner className="size-3.5" /> : <ArrowUpFromLine className="size-3.5" />}
+        </button>
+      )}
+    </>
+  );
+
   if (!summary || summary.stats.filesChanged === 0) {
     return (
       <div className="flex h-full flex-col overflow-hidden">
-        <div className="flex h-9 shrink-0 items-center gap-3 border-b border-border pl-3 pr-3">
+        <div className="flex h-9 shrink-0 items-center justify-between gap-3 border-b border-border pl-3 pr-3">
           {renderBranchIndicator(summary?.headBranch)}
+          <div className="flex items-center gap-1">{renderGitSyncButtons()}</div>
         </div>
         <div className="flex min-h-0 flex-1 items-center justify-center">
           <span className="text-sm text-muted-foreground">No changes</span>
         </div>
+        {gitOpStatus && (
+          <div
+            role={gitOpStatus.state === "error" ? "alert" : "status"}
+            className={`flex shrink-0 items-center gap-2 border-t px-3 py-1.5 text-xs ${
+              gitOpStatus.state === "error"
+                ? "border-destructive/40 bg-destructive/10 text-destructive"
+                : "border-border bg-muted/50 text-muted-foreground"
+            }`}
+          >
+            {gitOpStatus.state === "running" && (
+              <>
+                <Spinner className="size-3.5" />
+                <span>{gitOpStatus.op === "pull" ? "Pulling…" : "Pushing…"}</span>
+              </>
+            )}
+            {gitOpStatus.state === "success" && (
+              <>
+                <Check className="size-3.5 text-green-600 dark:text-green-400" />
+                <span>{gitOpStatus.op === "pull" ? "Pulled" : "Pushed"}</span>
+              </>
+            )}
+            {gitOpStatus.state === "error" && (
+              <>
+                <span className="font-medium">
+                  {gitOpStatus.op === "pull" ? "Pull failed" : "Push failed"}:
+                </span>
+                <span className="min-w-0 flex-1 truncate" title={gitOpStatus.message}>
+                  {gitOpStatus.message}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setGitOpStatus(null)}
+                  className="shrink-0 rounded px-1 text-destructive hover:bg-destructive/20"
+                  aria-label="Dismiss error"
+                >
+                  ×
+                </button>
+              </>
+            )}
+          </div>
+        )}
       </div>
     );
   }
@@ -1531,8 +1695,57 @@ export function DiffView({
             {renderSidebarToggle()}
             {renderBranchIndicator(summary.headBranch)}
           </div>
-          {/* Inline action icons — collapsed into the kebab menu below 32rem. */}
-          <div className="hidden items-center gap-1 @[32rem]/diff:flex">
+          {/* Inline action icons — collapsed into the kebab menu below 44rem.
+              The threshold is wider than the branch-label one (32rem) because
+              the right-side cluster now carries up to eight icons (commit,
+              pull, push, reload, search, expand, unified, split) — squeezing
+              them into a narrower toolbar makes the buttons overlap the
+              branch indicator on the left. */}
+          <div className="hidden items-center gap-1 @[44rem]/diff:flex">
+            {canCommit && (
+              <button
+                type="button"
+                onClick={() => setCommitDialogOpen(true)}
+                className={ghostBtnAlwaysClass}
+                title="Commit changes"
+                aria-label="Commit changes"
+                disabled={gitOpBusy}
+              >
+                <GitCommit className="size-3.5" />
+              </button>
+            )}
+            {canPull && (
+              <button
+                type="button"
+                onClick={handleGitPull}
+                className={ghostBtnAlwaysClass}
+                title="Git pull"
+                aria-label="Git pull"
+                disabled={gitOpBusy}
+              >
+                {isPulling ? (
+                  <Spinner className="size-3.5" />
+                ) : (
+                  <ArrowDownToLine className="size-3.5" />
+                )}
+              </button>
+            )}
+            {canPush && (
+              <button
+                type="button"
+                onClick={handleGitPush}
+                className={ghostBtnAlwaysClass}
+                title="Git push"
+                aria-label="Git push"
+                disabled={gitOpBusy}
+              >
+                {isPushing ? (
+                  <Spinner className="size-3.5" />
+                ) : (
+                  <ArrowUpFromLine className="size-3.5" />
+                )}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => fetchSummaryRef.current?.(true)}
@@ -1589,8 +1802,10 @@ export function DiffView({
             </div>
           </div>
 
-          {/* Compact "more actions" kebab menu — visible at narrow widths only. */}
-          <div className="flex items-center @[32rem]/diff:hidden">
+          {/* Compact "more actions" kebab menu — visible at narrow widths only.
+              Mirrors the 44rem breakpoint above so exactly one of the inline
+              cluster / kebab is visible at any width. */}
+          <div className="flex items-center @[44rem]/diff:hidden">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
@@ -1603,6 +1818,32 @@ export function DiffView({
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
+                {canCommit && (
+                  <DropdownMenuItem onSelect={() => setCommitDialogOpen(true)} disabled={gitOpBusy}>
+                    <GitCommit className="size-4" />
+                    Commit changes
+                  </DropdownMenuItem>
+                )}
+                {canPull && (
+                  <DropdownMenuItem onSelect={() => handleGitPull()} disabled={gitOpBusy}>
+                    {isPulling ? (
+                      <Spinner className="size-4" />
+                    ) : (
+                      <ArrowDownToLine className="size-4" />
+                    )}
+                    Git pull
+                  </DropdownMenuItem>
+                )}
+                {canPush && (
+                  <DropdownMenuItem onSelect={() => handleGitPush()} disabled={gitOpBusy}>
+                    {isPushing ? (
+                      <Spinner className="size-4" />
+                    ) : (
+                      <ArrowUpFromLine className="size-4" />
+                    )}
+                    Git push
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem onSelect={() => fetchSummaryRef.current?.(true)}>
                   <RefreshCw className="size-4" />
                   Reload changes
@@ -1693,6 +1934,50 @@ export function DiffView({
             })}
           </div>
         </div>
+        {/* Inline status banner for one-shot git operations (pull / push).
+            Lives above the bottom status bar so it doesn't shift the diff
+            viewport. Errors stay until dismissed; success is auto-cleared. */}
+        {gitOpStatus && (
+          <div
+            role={gitOpStatus.state === "error" ? "alert" : "status"}
+            className={`flex shrink-0 items-center gap-2 border-t px-3 py-1.5 text-xs ${
+              gitOpStatus.state === "error"
+                ? "border-destructive/40 bg-destructive/10 text-destructive"
+                : "border-border bg-muted/50 text-muted-foreground"
+            }`}
+          >
+            {gitOpStatus.state === "running" && (
+              <>
+                <Spinner className="size-3.5" />
+                <span>{gitOpStatus.op === "pull" ? "Pulling…" : "Pushing…"}</span>
+              </>
+            )}
+            {gitOpStatus.state === "success" && (
+              <>
+                <Check className="size-3.5 text-green-600 dark:text-green-400" />
+                <span>{gitOpStatus.op === "pull" ? "Pulled" : "Pushed"}</span>
+              </>
+            )}
+            {gitOpStatus.state === "error" && (
+              <>
+                <span className="font-medium">
+                  {gitOpStatus.op === "pull" ? "Pull failed" : "Push failed"}:
+                </span>
+                <span className="min-w-0 flex-1 truncate" title={gitOpStatus.message}>
+                  {gitOpStatus.message}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setGitOpStatus(null)}
+                  className="shrink-0 rounded px-1 text-destructive hover:bg-destructive/20"
+                  aria-label="Dismiss error"
+                >
+                  ×
+                </button>
+              </>
+            )}
+          </div>
+        )}
         {/* Bottom status bar — totals for the current diff */}
         <div className="flex h-9 shrink-0 items-center border-t border-border px-3 text-sm text-muted-foreground">
           <span className="font-medium text-foreground">{summary.stats.filesChanged}</span>
@@ -1709,6 +1994,19 @@ export function DiffView({
           )}
         </div>
       </div>
+      {canCommit && (
+        <CommitDialog
+          open={commitDialogOpen}
+          onOpenChange={setCommitDialogOpen}
+          workspaceId={workspaceId}
+          filesChanged={summary.stats.filesChanged}
+          onCommitted={() => {
+            // Force a fresh diff fetch — after a commit the working-tree
+            // diff (uncommitted) is empty, but the branch diff updates too.
+            fetchSummaryRef.current?.(true);
+          }}
+        />
+      )}
     </div>
   );
 }

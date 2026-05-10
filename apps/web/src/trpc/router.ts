@@ -10,7 +10,12 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import type { UIMessage } from "ai";
 import { Cron } from "croner";
 import { z } from "zod";
-import { createMetadataAgent, getOrCreateAgent, replaceAgent } from "../lib/agent-pool";
+import {
+  createMetadataAgent,
+  createWorkspaceAgent,
+  getOrCreateAgent,
+  replaceAgent,
+} from "../lib/agent-pool";
 import { getPollerActivity, setPollerActivity } from "../lib/branch-status-poller";
 import {
   deleteBrowserLayout,
@@ -1089,6 +1094,200 @@ const workspaceRouter = t.router({
       }
 
       return { ok: true };
+    }),
+
+  gitPull: publicProcedure
+    .input(z.object({ workspaceId: z.string() }))
+    .mutation(async ({ input }) => {
+      const workspace = resolveWorkspace(input.workspaceId);
+      if (!workspace) {
+        throw new Error("Workspace not found");
+      }
+      const cwd = workspace.worktree.path;
+      try {
+        await execGit(["pull", "--rebase"], cwd);
+      } catch (e) {
+        // git pull --rebase can exit non-zero with "Cannot rebase onto multiple
+        // branches" when the fetch step already fast-forwarded the working
+        // tree. The pull effectively succeeded, so swallow that specific case
+        // — same behaviour as the project-keyed `workspaces.gitPull` endpoint.
+        const msg = String(e);
+        if (msg.includes("Cannot rebase onto multiple branches")) {
+          return { ok: true };
+        }
+        throw new Error(e instanceof Error ? e.message : msg);
+      }
+      return { ok: true };
+    }),
+
+  gitPush: publicProcedure
+    .input(z.object({ workspaceId: z.string() }))
+    .mutation(async ({ input }) => {
+      const workspace = resolveWorkspace(input.workspaceId);
+      if (!workspace) {
+        throw new Error("Workspace not found");
+      }
+      const cwd = workspace.worktree.path;
+      try {
+        await execGit(["push"], cwd);
+      } catch {
+        // First push may need to set upstream. Resolve the live HEAD branch
+        // rather than trusting a stale state.json entry — the worktree may
+        // have been renamed via `git branch -m` and the project record not
+        // yet refreshed.
+        let headBranch: string;
+        try {
+          headBranch = (await execGit(["rev-parse", "--abbrev-ref", "HEAD"], cwd)).trim();
+        } catch {
+          headBranch = workspace.worktree.branch;
+        }
+        try {
+          await execGit(["push", "--set-upstream", "origin", headBranch], cwd);
+        } catch (e2) {
+          throw new Error(e2 instanceof Error ? e2.message : String(e2));
+        }
+      }
+      return { ok: true };
+    }),
+
+  gitCommit: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        message: z.string().min(1, "commit message is required"),
+        body: z.string().optional(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const workspace = resolveWorkspace(input.workspaceId);
+      if (!workspace) {
+        throw new Error("Workspace not found");
+      }
+      const cwd = workspace.worktree.path;
+
+      // Stage everything (tracked + untracked) so the commit reflects the
+      // diff the user just reviewed in the Changes view.
+      await execGit(["add", "-A"], cwd);
+
+      // Pass title + body as separate `-m` args so git formats them with the
+      // standard blank-line separator between subject and body.
+      const args = ["commit", "-m", input.message];
+      const body = input.body?.trim();
+      if (body) {
+        args.push("-m", body);
+      }
+      try {
+        await execGit(args, cwd);
+      } catch (e) {
+        throw new Error(e instanceof Error ? e.message : String(e));
+      }
+      return { ok: true };
+    }),
+
+  generateCommitMessage: publicProcedure
+    .input(z.object({ workspaceId: z.string() }))
+    .mutation(async ({ input }) => {
+      const workspace = resolveWorkspace(input.workspaceId);
+      if (!workspace) {
+        throw new Error("Workspace not found");
+      }
+      const cwd = workspace.worktree.path;
+
+      // Cheap pre-flight: refuse early if there are no pending changes so we
+      // don't spin up an agent process just to have it report "nothing to
+      // commit". `git status --porcelain` covers staged, unstaged, and
+      // untracked files in one call.
+      try {
+        const status = await execGit(["status", "--porcelain"], cwd);
+        if (!status.trim()) {
+          throw new Error("No changes to summarise");
+        }
+      } catch (e) {
+        // Re-throw the explicit "no changes" error; swallow other status
+        // failures (e.g. unborn HEAD on a brand-new repo) and let the agent
+        // figure it out.
+        if (e instanceof Error && e.message === "No changes to summarise") {
+          throw e;
+        }
+      }
+
+      const settings = loadSettings();
+      const agentDef = getAgentDefinition(settings);
+
+      // The agent runs in the workspace's worktree and has Bash/Read tools,
+      // so it can explore the changes directly — `git diff HEAD`,
+      // `git status`, peek at related files, check recent commit style, etc.
+      // This produces better messages than feeding a (potentially truncated)
+      // serialised diff in the prompt.
+      const prompt = [
+        "You are running inside a git workspace. Write a commit message for the changes that are pending in this workspace right now.",
+        "",
+        "Steps:",
+        "  1. Run `git status` and `git diff HEAD` (and `git diff --stat` if the diff is large) to understand what changed.",
+        "  2. If helpful, read a few of the changed files or recent commits (`git log -5 --oneline`) to match the project's commit style.",
+        "  3. Write a single commit message.",
+        "",
+        "Format:",
+        "  - First line: a concise subject (≤ 72 chars), imperative mood, no trailing period.",
+        "  - Then a blank line.",
+        "  - Then a body that explains *why* the change is being made and any notable details.",
+        "",
+        "Output ONLY the final commit message as plain text — no markdown fences, no preamble, no commentary, no tool-call summaries. Do not modify any files.",
+      ].join("\n");
+
+      let agent: Awaited<ReturnType<typeof createWorkspaceAgent>>;
+      try {
+        agent = await createWorkspaceAgent(cwd, agentDef.id);
+      } catch (e) {
+        throw new Error(
+          `Failed to start coding agent "${agentDef.label}": ${
+            e instanceof Error ? e.message : String(e)
+          }`,
+        );
+      }
+
+      // Track only text emitted by the *final* assistant turn — earlier
+      // text deltas are usually narration around tool calls ("Let me check
+      // the diff…") that we don't want in the commit message. Each
+      // tool-result event resets the buffer so only post-tool prose
+      // survives. `maxTurns` is generous enough for git status + diff +
+      // optional log + final write-up.
+      let lastTurnText = "";
+      try {
+        for await (const event of agent.runSession(prompt, undefined, {
+          maxTurns: 8,
+        })) {
+          if (event.type === "text-delta") {
+            lastTurnText += event.text;
+          } else if (event.type === "tool-result") {
+            lastTurnText = "";
+          } else if (event.type === "error") {
+            throw new Error(event.message);
+          }
+        }
+      } finally {
+        agent.abort?.();
+      }
+
+      const cleaned = lastTurnText.trim();
+      if (!cleaned) {
+        throw new Error("Agent returned an empty response");
+      }
+
+      // Split into subject + body on the first blank line.
+      const lines = cleaned.split("\n");
+      const subject = (lines.shift() ?? "").trim();
+      // Drop a leading blank line if present so the body doesn't start empty.
+      while (lines.length > 0 && lines[0].trim() === "") {
+        lines.shift();
+      }
+      const body = lines.join("\n").trim();
+
+      return {
+        message: subject,
+        body,
+        agentLabel: agentDef.label,
+      };
     }),
 
   listFiles: publicProcedure
