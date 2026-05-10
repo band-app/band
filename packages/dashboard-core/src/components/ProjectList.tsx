@@ -18,7 +18,9 @@ import {
   type DragEndEvent,
   DragOverlay,
   type DragStartEvent,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
+  useDndContext,
   useDroppable,
   useSensor,
   useSensors,
@@ -32,16 +34,22 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import {
   Check,
+  ChevronRight,
   Clipboard,
+  Folder,
   FolderOpen,
-  GripVertical,
   ListMinus,
   Plus,
   Tag,
-  Trash2,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCapabilities } from "../context";
+import {
+  LABELS_COLLAPSE_KEY,
+  PROJECTS_COLLAPSE_KEY,
+  UNLABELED_KEY,
+  useCollapseState,
+} from "../hooks/use-collapse-state";
 import {
   useRemoveProject,
   useRemoveWorkspace,
@@ -76,7 +84,8 @@ interface SortableProjectProps {
   onShowDeleteDialog: (info: DeleteDialogInfo) => void;
   focusedIndex: number;
   workspaceIndexStart: number;
-  editMode: boolean;
+  collapsed: boolean;
+  onToggleCollapse: (name: string) => void;
 }
 
 function SortableProject({
@@ -91,17 +100,24 @@ function SortableProject({
   onShowDeleteDialog,
   focusedIndex,
   workspaceIndexStart,
-  editMode,
+  collapsed,
+  onToggleCollapse,
 }: SortableProjectProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: project.name,
-    disabled: !editMode,
   });
   const capabilities = useCapabilities();
+  // `active` is the currently-dragged item (or null when nothing is being
+  // dragged). We only honour dnd-kit's `transition` while a drag is in
+  // progress: that keeps the smooth slide-out-of-the-way animation while
+  // dragging, but on drop the transition disappears so items snap to their
+  // optimistic new positions instead of animating from old → new (which
+  // looks like the list "shifting" after the drop).
+  const { active } = useDndContext();
 
   const style = {
     transform: CSS.Translate.toString(transform),
-    transition,
+    transition: active ? transition : undefined,
     opacity: isDragging ? 0.5 : undefined,
   };
 
@@ -111,13 +127,35 @@ function SortableProject({
     <div ref={setNodeRef} style={style} className="min-w-0 px-2">
       <ContextMenu>
         <ContextMenuTrigger asChild>
-          <div className="flex items-center justify-between mb-0.5 px-1 select-none">
+          {/* The header is a click/tap-to-toggle target on both desktop and
+              mobile. We don't add tabIndex/keyboard handlers here because
+              keyboard navigation lives one level down (workspace cards).
+              Keyboard users can toggle collapse via the right-click context
+              menu's Collapse/Expand entry, which is reachable with Shift+F10
+              or the Menu key. */}
+          {/* biome-ignore lint/a11y/useKeyWithClickEvents: keyboard path is the context menu (see comment above) */}
+          <div
+            // touch-pan-y lets touch devices scroll the list vertically with
+            // a finger over the project header — the TouchSensor still gets
+            // long-presses (delay activation) but stops blocking page scroll.
+            className="group flex items-center justify-between mb-0.5 px-1 select-none touch-pan-y"
+            onClick={() => onToggleCollapse(project.name)}
+          >
+            {/* Drag listeners live on the title (folder icon + project name)
+                so the project name itself is the drag handle. The 8px
+                MouseSensor / 250ms TouchSensor thresholds mean a still
+                click/tap bubbles up to the outer onClick (which toggles
+                collapse) without starting a drag. */}
             <div
-              className={`flex items-center gap-2 min-w-0 ${editMode ? "cursor-grab touch-none" : ""}`}
-              {...(editMode ? { ...attributes, ...listeners } : {})}
+              className="flex items-center gap-2 min-w-0 cursor-grab"
+              {...attributes}
+              {...listeners}
             >
-              {editMode && <GripVertical className="size-4 shrink-0 text-muted-foreground" />}
-              <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
+              {collapsed ? (
+                <Folder className="size-4 shrink-0 text-muted-foreground" />
+              ) : (
+                <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
+              )}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <h2 className="text-sm font-semibold text-foreground/80 truncate">
@@ -128,38 +166,30 @@ function SortableProject({
               </Tooltip>
             </div>
             <div className="flex items-center gap-1">
-              {editMode ? (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      className="text-destructive hover:text-destructive"
-                      onClick={() => removeProject(project.name)}
-                    >
-                      <Trash2 />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Remove project</TooltipContent>
-                </Tooltip>
-              ) : (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      onClick={() => setWorkspaceDialog(project.name)}
-                    >
-                      <Plus />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Add workspace</TooltipContent>
-                </Tooltip>
-              )}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setWorkspaceDialog(project.name);
+                    }}
+                  >
+                    <Plus />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Add workspace</TooltipContent>
+              </Tooltip>
             </div>
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent>
+          <ContextMenuItem onClick={() => onToggleCollapse(project.name)}>
+            <ChevronRight className={collapsed ? "" : "rotate-90"} />
+            {collapsed ? "Expand" : "Collapse"}
+          </ContextMenuItem>
           {labels.length > 0 && (
             <ContextMenuSub>
               <ContextMenuSubTrigger>
@@ -208,65 +238,97 @@ function SortableProject({
         </ContextMenuContent>
       </ContextMenu>
 
-      <div className="flex flex-col gap-0.5 overflow-hidden">
-        {project.worktrees.length === 0 ? (
-          <p className="text-sm text-muted-foreground px-4 py-2">No workspaces yet</p>
-        ) : (
-          project.worktrees.map((wt) => {
-            const wsId = toWorkspaceId(project.name, wt.branch);
-            const currentIndex = workspaceIndex++;
-            return (
-              <WorkspaceCard
-                key={wt.branch}
-                worktree={wt}
-                projectName={project.name}
-                defaultBranch={project.defaultBranch}
-                status={statuses.get(wsId)}
-                branchStatus={branchStatuses.get(wsId)}
-                setupStatus={setupStatuses.get(wsId)}
-                isFocused={currentIndex === focusedIndex}
-                onShowDeleteDialog={onShowDeleteDialog}
-                editMode={editMode}
-              />
-            );
-          })
-        )}
-      </div>
+      {!collapsed && (
+        <div className="flex flex-col gap-0.5 overflow-hidden">
+          {project.worktrees.length === 0 ? (
+            <p className="text-sm text-muted-foreground px-4 py-2">No workspaces yet</p>
+          ) : (
+            project.worktrees.map((wt) => {
+              const wsId = toWorkspaceId(project.name, wt.branch);
+              const currentIndex = workspaceIndex++;
+              return (
+                <WorkspaceCard
+                  key={wt.branch}
+                  worktree={wt}
+                  projectName={project.name}
+                  defaultBranch={project.defaultBranch}
+                  status={statuses.get(wsId)}
+                  branchStatus={branchStatuses.get(wsId)}
+                  setupStatus={setupStatuses.get(wsId)}
+                  isFocused={currentIndex === focusedIndex}
+                  onShowDeleteDialog={onShowDeleteDialog}
+                />
+              );
+            })
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
-function DroppableLabelHeader({ labelId, label }: { labelId: string; label: LabelDefinition }) {
+interface DroppableLabelHeaderProps {
+  labelId: string;
+  label: LabelDefinition;
+  collapsed: boolean;
+  onToggle: () => void;
+}
+
+function DroppableLabelHeader({ labelId, label, collapsed, onToggle }: DroppableLabelHeaderProps) {
   const { setNodeRef, isOver } = useDroppable({ id: `group:${labelId}` });
   return (
-    <div
+    <button
+      type="button"
       ref={setNodeRef}
-      className={`flex h-9 items-center gap-2 px-3 mb-0.5 transition-colors ${isOver ? "bg-primary/20" : "bg-accent"}`}
+      onClick={onToggle}
+      aria-expanded={!collapsed}
+      className={`flex h-9 w-full items-center gap-2 px-3 mb-0.5 text-left transition-colors hover:bg-primary/10 ${
+        isOver ? "bg-primary/20" : "bg-accent"
+      }`}
     >
       <span className="size-2.5 rounded-full shrink-0" style={{ backgroundColor: label.color }} />
       <span className="text-sm font-semibold text-foreground/80">{label.name}</span>
-    </div>
+      <ChevronRight
+        className={`ml-auto size-3.5 shrink-0 text-muted-foreground transition-transform ${
+          collapsed ? "" : "rotate-90"
+        }`}
+      />
+    </button>
   );
 }
 
-function DroppableUnlabeledHeader() {
+interface DroppableUnlabeledHeaderProps {
+  collapsed: boolean;
+  onToggle: () => void;
+}
+
+function DroppableUnlabeledHeader({ collapsed, onToggle }: DroppableUnlabeledHeaderProps) {
   const { setNodeRef, isOver } = useDroppable({ id: "group:__unlabeled" });
   return (
-    <div
+    <button
+      type="button"
       ref={setNodeRef}
-      className={`flex h-9 items-center gap-2 px-3 mb-0.5 transition-colors ${isOver ? "bg-primary/20" : "bg-accent"}`}
+      onClick={onToggle}
+      aria-expanded={!collapsed}
+      className={`flex h-9 w-full items-center gap-2 px-3 mb-0.5 text-left transition-colors hover:bg-primary/10 ${
+        isOver ? "bg-primary/20" : "bg-accent"
+      }`}
     >
       <span className="text-sm font-semibold text-foreground/80">Unlabeled</span>
-    </div>
+      <ChevronRight
+        className={`ml-auto size-3.5 shrink-0 text-muted-foreground transition-transform ${
+          collapsed ? "" : "rotate-90"
+        }`}
+      />
+    </button>
   );
 }
 
 interface ProjectListProps {
   labelFilter: string | null;
-  editMode: boolean;
 }
 
-export function ProjectList({ labelFilter, editMode }: ProjectListProps) {
+export function ProjectList({ labelFilter }: ProjectListProps) {
   const { projects } = useProjects();
   const { settings } = useSettingsQuery();
   const labels = settings.labels ?? [];
@@ -288,7 +350,18 @@ export function ProjectList({ labelFilter, editMode }: ProjectListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const keyboardNavRef = useRef(false);
 
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+  const projectCollapse = useCollapseState(PROJECTS_COLLAPSE_KEY);
+  const labelCollapse = useCollapseState(LABELS_COLLAPSE_KEY);
+
+  // Two sensors so reorder works without an explicit "edit" toggle:
+  //  • MouseSensor — desktop pointers can drag immediately; an 8px distance
+  //    threshold avoids hijacking ordinary clicks on the project header.
+  //  • TouchSensor — touch devices require a long-press (250ms) before drag
+  //    activates so taps and scrolling still work normally on mobile.
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
+  );
 
   const groups = useMemo(() => {
     if (labels.length === 0)
@@ -324,25 +397,38 @@ export function ProjectList({ labelFilter, editMode }: ProjectListProps) {
     return groups.filter((g) => g.labelId === labelFilter);
   }, [groups, labelFilter]);
 
-  const allWorkspaceIds = useMemo(
-    () =>
-      visibleGroups.flatMap((g) =>
-        g.projects.flatMap((p) => p.worktrees.map((wt) => toWorkspaceId(p.name, wt.branch))),
-      ),
-    [visibleGroups],
-  );
+  // Only count workspaces that are actually rendered — collapsed
+  // projects/labels hide their workspaces entirely, and keyboard arrow
+  // navigation must skip over them so focus never lands on something the
+  // user can't see.
+  const allWorkspaceIds = useMemo(() => {
+    const headerVisible = labels.length > 0 && !labelFilter;
+    return visibleGroups.flatMap((g) => {
+      const groupKey = g.labelId ?? UNLABELED_KEY;
+      if (headerVisible && labelCollapse.isCollapsed(groupKey)) return [];
+      return g.projects.flatMap((p) => {
+        if (projectCollapse.isCollapsed(p.name)) return [];
+        return p.worktrees.map((wt) => toWorkspaceId(p.name, wt.branch));
+      });
+    });
+  }, [visibleGroups, labels.length, labelFilter, labelCollapse, projectCollapse]);
 
   const workspaceIndexMap = useMemo(() => {
     const map = new Map<string, number>();
     let index = 0;
+    const headerVisible = labels.length > 0 && !labelFilter;
     for (const group of visibleGroups) {
+      const groupKey = group.labelId ?? UNLABELED_KEY;
+      if (headerVisible && labelCollapse.isCollapsed(groupKey)) continue;
       for (const project of group.projects) {
         map.set(project.name, index);
-        index += project.worktrees.length;
+        if (!projectCollapse.isCollapsed(project.name)) {
+          index += project.worktrees.length;
+        }
       }
     }
     return map;
-  }, [visibleGroups]);
+  }, [visibleGroups, labels.length, labelFilter, labelCollapse, projectCollapse]);
 
   useEffect(() => {
     if (keyboardNavRef.current) return;
@@ -494,46 +580,69 @@ export function ProjectList({ labelFilter, editMode }: ProjectListProps) {
           onDragEnd={handleDragEnd}
         >
           <SortableContext items={allProjectNames} strategy={verticalListSortingStrategy}>
-            {visibleGroups.map((group, groupIndex) => (
-              <div key={group.labelId ?? "__unlabeled"}>
-                {groupIndex > 0 && !labels.length && (
-                  <hr className="border-border mt-1 mb-0.5 mx-2" />
-                )}
-                {labels.length > 0 &&
-                  !labelFilter &&
-                  (group.label ? (
-                    <DroppableLabelHeader labelId={group.labelId!} label={group.label} />
-                  ) : (
-                    <DroppableUnlabeledHeader />
-                  ))}
-                {group.projects.map((project, index) => (
-                  <div key={project.name}>
-                    {index > 0 && <hr className="border-border mt-1 mb-0.5 mx-2" />}
-                    <SortableProject
-                      project={project}
-                      statuses={statuses}
-                      branchStatuses={branchStatuses}
-                      setupStatuses={setupStatuses}
-                      removeProject={(name) => removeProjectMutation.mutate(name)}
-                      updateProjectLabel={(name, label) =>
-                        updateProjectLabelMutation.mutate({ name, label })
-                      }
-                      labels={labels}
-                      setWorkspaceDialog={setWorkspaceDialog}
-                      onShowDeleteDialog={setDeleteDialog}
-                      focusedIndex={focusedIndex}
-                      workspaceIndexStart={workspaceIndexMap.get(project.name) ?? 0}
-                      editMode={editMode}
-                    />
-                  </div>
-                ))}
-              </div>
-            ))}
+            {visibleGroups.map((group, groupIndex) => {
+              const groupKey = group.labelId ?? UNLABELED_KEY;
+              // When a label filter is active we render a single group without
+              // a header, so honour the group's collapsed state only when the
+              // header is visible (otherwise users would have no way to expand
+              // it again). Same for the no-labels mode.
+              const headerVisible = labels.length > 0 && !labelFilter;
+              const groupCollapsed = headerVisible && labelCollapse.isCollapsed(groupKey);
+              return (
+                <div key={groupKey}>
+                  {groupIndex > 0 && !labels.length && (
+                    <hr className="border-border mt-1 mb-0.5 mx-2" />
+                  )}
+                  {headerVisible &&
+                    (group.label ? (
+                      <DroppableLabelHeader
+                        labelId={group.labelId!}
+                        label={group.label}
+                        collapsed={groupCollapsed}
+                        onToggle={() => labelCollapse.toggle(groupKey)}
+                      />
+                    ) : (
+                      <DroppableUnlabeledHeader
+                        collapsed={groupCollapsed}
+                        onToggle={() => labelCollapse.toggle(groupKey)}
+                      />
+                    ))}
+                  {!groupCollapsed &&
+                    group.projects.map((project, index) => (
+                      <div key={project.name}>
+                        {index > 0 && <hr className="border-border mt-1 mb-0.5 mx-2" />}
+                        <SortableProject
+                          project={project}
+                          statuses={statuses}
+                          branchStatuses={branchStatuses}
+                          setupStatuses={setupStatuses}
+                          removeProject={(name) => removeProjectMutation.mutate(name)}
+                          updateProjectLabel={(name, label) =>
+                            updateProjectLabelMutation.mutate({ name, label })
+                          }
+                          labels={labels}
+                          setWorkspaceDialog={setWorkspaceDialog}
+                          onShowDeleteDialog={setDeleteDialog}
+                          focusedIndex={focusedIndex}
+                          workspaceIndexStart={workspaceIndexMap.get(project.name) ?? 0}
+                          collapsed={projectCollapse.isCollapsed(project.name)}
+                          onToggleCollapse={projectCollapse.toggle}
+                        />
+                      </div>
+                    ))}
+                </div>
+              );
+            })}
           </SortableContext>
-          <DragOverlay>
+          {/* dropAnimation={null} disables dnd-kit's default snap-back. The
+              reorder mutation runs an optimistic update in onMutate, so when
+              the user releases we want the overlay to disappear instantly
+              and the list to look like the new order — not animate back to
+              the original drop position before re-rendering. */}
+          <DragOverlay dropAnimation={null}>
             {activeDragId ? (
               <div className="flex items-center gap-2 px-1 py-1 bg-background rounded shadow-lg border">
-                <FolderOpen className="size-3.5 shrink-0 text-muted-foreground" />
+                <Folder className="size-3.5 shrink-0 text-muted-foreground" />
                 <span className="text-sm font-semibold text-foreground">{activeDragId}</span>
               </div>
             ) : null}
