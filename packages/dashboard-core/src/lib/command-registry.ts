@@ -15,11 +15,12 @@ export interface PaletteCommand {
   /** Human-readable label shown in the palette. */
   label: string;
   /**
-   * Canonical keyboard shortcut string.
+   * Canonical keyboard shortcut string. Optional — palette-only commands
+   * with no keybinding can omit it.
    * Use `Cmd+` for the platform modifier (⌘ on Mac, Ctrl elsewhere).
    * Examples: `"Cmd+P"`, `"Cmd+Shift+F"`, `"Shift+Tab"`.
    */
-  shortcut: string;
+  shortcut?: string;
   /** Callback executed when the command is selected. */
   action: () => void;
 }
@@ -128,15 +129,16 @@ export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
       action: () => activatePanel(deps, "browser"),
     },
     {
+      // No keyboard shortcut: Cmd+- is reserved by the desktop View menu's
+      // Zoom Out accelerator. Reachable via the back/forward arrows in the
+      // FileViewer toolbar and via this palette entry.
       id: "editor-go-back",
       label: "Go Back",
-      shortcut: "Cmd+-",
       action: () => window.dispatchEvent(new CustomEvent("band:editor-go-back")),
     },
     {
       id: "editor-go-forward",
       label: "Go Forward",
-      shortcut: "Cmd+Shift+-",
       action: () => window.dispatchEvent(new CustomEvent("band:editor-go-forward")),
     },
     {

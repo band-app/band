@@ -903,14 +903,15 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
         }
         if (active.api.isMaximized()) active.api.exitMaximized();
         else active.api.maximize();
-      } else if (key === "-") {
-        e.preventDefault();
-        window.dispatchEvent(new CustomEvent("band:editor-go-back"));
-      } else if (key === "_") {
-        // Ctrl+Shift+- produces key="_" (underscore) in the browser
-        e.preventDefault();
-        window.dispatchEvent(new CustomEvent("band:editor-go-forward"));
       }
+      // Note: editor history navigation (band:editor-go-back / -forward) is
+      // not bound to a keyboard shortcut. The previous binding was Cmd+- /
+      // Cmd+Shift+-, but that key is permanently claimed by the desktop
+      // View menu's Zoom Out accelerator (apps/desktop/src/main/menu.ts),
+      // so the binding never fired. Workspace-level back/forward (Cmd+[ /
+      // Cmd+]) is wired separately in useNavigationHistory; in-Files-tab
+      // history can still be triggered from the back/forward arrow buttons
+      // in the FileViewer toolbar or via the Command Palette.
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
