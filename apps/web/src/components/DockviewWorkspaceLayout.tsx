@@ -16,6 +16,7 @@ import {
   DockviewReact,
   type DockviewReadyEvent,
   type DockviewTheme,
+  type IDockviewHeaderActionsProps,
   type IDockviewPanelHeaderProps,
   type IDockviewPanelProps,
 } from "dockview";
@@ -24,7 +25,9 @@ import {
   Folders,
   GitCompare,
   Globe,
+  Maximize2,
   MessageSquare,
+  Minimize2,
   Terminal as TerminalIcon,
 } from "lucide-react";
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -366,6 +369,62 @@ const components: Record<string, React.FunctionComponent<IDockviewPanelProps<any
 const tabComponents: Record<string, React.FunctionComponent<IDockviewPanelHeaderProps>> = {
   badge: BadgeTab,
 };
+
+// ---------------------------------------------------------------------------
+// Right-side header actions — adds a maximize/restore toggle to the tab strip
+// of every center (grid) group. Hidden on edge groups (projects / future
+// right + bottom edges) where maximize doesn't make sense.
+// ---------------------------------------------------------------------------
+
+const MainGroupRightActions = memo(function MainGroupRightActions(
+  props: IDockviewHeaderActionsProps,
+) {
+  // location.type === "grid" means a real center group; "edge" / "floating" /
+  // "popout" are all skipped. Default to "grid" if dockview omits the field
+  // (older builds) so the button still shows on the main layout.
+  const isGridGroup = (props.location?.type ?? "grid") === "grid";
+
+  // Track maximize state via the container event so the icon flips when the
+  // user toggles via another path (e.g. drag-restore, future keyboard shortcut).
+  // group.api.isMaximized() returns true only when *this* group is the
+  // maximized one — global enough that we don't need a separate
+  // hasMaximizedGroup() check.
+  const [isMaximized, setIsMaximized] = useState(() => props.api.isMaximized());
+  useEffect(() => {
+    const refresh = () => setIsMaximized(props.api.isMaximized());
+    refresh();
+    const d = props.containerApi.onDidMaximizedGroupChange(refresh);
+    return () => d.dispose();
+  }, [props.api, props.containerApi]);
+
+  if (!isGridGroup) return null;
+
+  const Icon = isMaximized ? Minimize2 : Maximize2;
+  const label = isMaximized ? "Restore" : "Maximize";
+
+  return (
+    <div className="flex h-full items-center px-1">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            aria-label={label}
+            onClick={() => {
+              if (props.api.isMaximized()) props.api.exitMaximized();
+              else props.api.maximize();
+            }}
+            className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <Icon className="size-3.5" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" className="text-xs">
+          {label}
+        </TooltipContent>
+      </Tooltip>
+    </div>
+  );
+});
 
 // ---------------------------------------------------------------------------
 // Diff file count hook (polls every 15s)
@@ -1410,6 +1469,7 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
           components={components}
           tabComponents={tabComponents}
           defaultTabComponent={DefaultTab}
+          rightHeaderActionsComponent={MainGroupRightActions}
           onReady={onReady}
         />
       </div>
