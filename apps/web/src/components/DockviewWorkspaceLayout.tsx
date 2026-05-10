@@ -419,7 +419,10 @@ const MainGroupRightActions = memo(function MainGroupRightActions(
           </button>
         </TooltipTrigger>
         <TooltipContent side="bottom" className="text-xs">
-          {label}
+          {label}{" "}
+          <kbd className="ml-1.5 rounded border border-popover-foreground/25 bg-popover-foreground/10 px-1 py-0.5 font-mono text-[14px]">
+            ⇧⌘M
+          </kbd>
         </TooltipContent>
       </Tooltip>
     </div>
@@ -886,6 +889,20 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
           if (left.api.isCollapsed()) left.api.expand();
           else left.api.collapse();
         }
+      } else if (key === "m" && e.shiftKey && api) {
+        // Toggle maximize for the active group. Edge groups (Projects /
+        // future right+bottom edges) are skipped — maximize only makes
+        // sense for center grid groups. If a *different* group is already
+        // maximized, exit that first so the user can never get stuck.
+        e.preventDefault();
+        const active = api.activeGroup;
+        if (!active) return;
+        if (active.api.location.type !== "grid") {
+          if (api.hasMaximizedGroup()) api.exitMaximizedGroup();
+          return;
+        }
+        if (active.api.isMaximized()) active.api.exitMaximized();
+        else active.api.maximize();
       } else if (key === "-") {
         e.preventDefault();
         window.dispatchEvent(new CustomEvent("band:editor-go-back"));
