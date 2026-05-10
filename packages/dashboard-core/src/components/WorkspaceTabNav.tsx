@@ -1,6 +1,6 @@
-import { FolderOpen, GitCompare, MessageSquare } from "lucide-react";
+import { FolderOpen, GitCompare, MessageSquare, TerminalSquare } from "lucide-react";
 
-export type WorkspaceTab = "chat" | "diff" | "code";
+export type WorkspaceTab = "chat" | "diff" | "code" | "terminal";
 
 interface WorkspaceTabNavProps {
   activeTab: WorkspaceTab;
@@ -14,6 +14,7 @@ const tabs: { id: WorkspaceTab; label: string; icon: typeof MessageSquare }[] = 
   { id: "chat", label: "Chat", icon: MessageSquare },
   { id: "diff", label: "Changes", icon: GitCompare },
   { id: "code", label: "Files", icon: FolderOpen },
+  { id: "terminal", label: "Terminal", icon: TerminalSquare },
 ];
 
 export function WorkspaceTabNav({
@@ -30,7 +31,7 @@ export function WorkspaceTabNav({
         const badge = tab.id === "diff" && diffFileCount != null && diffFileCount > 0;
         const href = tabHrefs?.[tab.id];
 
-        const className = `flex flex-1 items-center justify-center gap-2 py-2.5 text-sm font-medium transition-colors ${
+        const className = `flex flex-1 items-center justify-center gap-1.5 py-2.5 text-sm font-medium transition-colors ${
           isActive
             ? "border-b-2 border-foreground text-foreground"
             : "text-muted-foreground hover:text-foreground"
@@ -39,7 +40,6 @@ export function WorkspaceTabNav({
         const content = (
           <>
             <Icon className="size-4" />
-            {tab.label}
             {badge && (
               <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-500/20 text-blue-600 dark:text-blue-400 px-1.5 text-xs font-medium">
                 {diffFileCount}
@@ -50,7 +50,13 @@ export function WorkspaceTabNav({
 
         if (href) {
           return (
-            <a key={tab.id} href={href} className={className}>
+            <a
+              key={tab.id}
+              href={href}
+              className={className}
+              aria-label={tab.label}
+              title={tab.label}
+            >
               {content}
             </a>
           );
@@ -62,6 +68,8 @@ export function WorkspaceTabNav({
             type="button"
             onClick={() => onTabChange?.(tab.id)}
             className={className}
+            aria-label={tab.label}
+            title={tab.label}
           >
             {content}
           </button>
