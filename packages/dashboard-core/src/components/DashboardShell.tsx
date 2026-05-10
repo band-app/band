@@ -28,7 +28,7 @@ import {
   Tag,
   X,
 } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCliSetup } from "../hooks/use-cli-setup";
 import { useHooksSetup } from "../hooks/use-hooks-setup";
 import { useProjects } from "../hooks/use-projects";
@@ -124,6 +124,23 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar, hideMenu }: Das
     };
   }, []);
 
+  // Listen for ⌃0 (Focus Side Bar) — the keyboard handler in the workspace
+  // layout expands the left edge group and dispatches this event; we move
+  // keyboard focus into the project list so arrow keys can navigate it.
+  // Multi-workspace note: every DashboardShell instance receives the
+  // event, but each focuses only its own subtree via rootRef. Inactive
+  // workspaces are display:none-hidden upstream, so focus() on their
+  // internal element is a no-op — only the visible instance wins.
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const handler = () => {
+      const list = rootRef.current?.querySelector<HTMLElement>('[tabindex="-1"]');
+      list?.focus({ preventScroll: true });
+    };
+    window.addEventListener("band:focus-projects", handler);
+    return () => window.removeEventListener("band:focus-projects", handler);
+  }, []);
+
   // Keyboard shortcuts: Cmd+0 → all projects, Cmd+1..9 → nth label.
   // Skips when focus is in an editable element so it doesn't hijack typing.
   useEffect(() => {
@@ -157,6 +174,7 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar, hideMenu }: Das
 
   return (
     <div
+      ref={rootRef}
       className={cn(
         "w-full overflow-hidden flex flex-col bg-background text-foreground p-0",
         hideTitleBar ? "h-full" : "h-dvh",

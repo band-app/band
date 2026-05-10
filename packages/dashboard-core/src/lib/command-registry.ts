@@ -73,7 +73,11 @@ export function formatShortcut(shortcut: string): string {
       .replace(/Shift\+/g, "⇧")
       .replace(/Alt\+/g, "⌥");
   }
-  return shortcut.replace(/Cmd\+/g, "Ctrl+");
+  // Non-Mac: collapse "Ctrl+Cmd+X" → "Ctrl+X" first so we don't end up
+  // with the redundant "Ctrl+Ctrl+X" after the Cmd→Ctrl substitution.
+  // (No native Cmd-equivalent on Win/Linux; the binding falls through
+  // to plain Ctrl in those environments.)
+  return shortcut.replace(/Ctrl\+Cmd\+/g, "Ctrl+").replace(/Cmd\+/g, "Ctrl+");
 }
 
 // ---------------------------------------------------------------------------
@@ -106,6 +110,12 @@ export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
       action: () => deps.findInFile(),
     },
     {
+      id: "show-chat",
+      label: "Show Chat",
+      shortcut: "Ctrl+Cmd+I",
+      action: () => activatePanel(deps, "chat"),
+    },
+    {
       id: "show-changes",
       label: "Show Changes",
       shortcut: "Cmd+Shift+G",
@@ -128,6 +138,23 @@ export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
       label: "Show Browser",
       shortcut: "Cmd+Shift+B",
       action: () => activatePanel(deps, "browser"),
+    },
+    {
+      // ⌃0 — focuses keyboard into the Projects list. The direct
+      // keyboard handler in DockviewWorkspaceLayout also expands the
+      // left edge group if it's collapsed; this palette path just
+      // activates the panel and dispatches the focus event. If the
+      // sidebar happens to be collapsed when invoked from the palette,
+      // press ⌘B first.
+      id: "focus-projects",
+      label: "Focus Projects",
+      shortcut: "Ctrl+0",
+      action: () => {
+        activatePanel(deps, "projects");
+        queueMicrotask(() => {
+          window.dispatchEvent(new CustomEvent("band:focus-projects"));
+        });
+      },
     },
     {
       // No keyboard shortcut: Cmd+- is reserved by the desktop View menu's
