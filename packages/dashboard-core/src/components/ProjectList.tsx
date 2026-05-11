@@ -580,7 +580,7 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
           onDragEnd={handleDragEnd}
         >
           <SortableContext items={allProjectNames} strategy={verticalListSortingStrategy}>
-            {visibleGroups.map((group, groupIndex) => {
+            {visibleGroups.map((group) => {
               const groupKey = group.labelId ?? UNLABELED_KEY;
               // When a label filter is active we render a single group without
               // a header, so honour the group's collapsed state only when the
