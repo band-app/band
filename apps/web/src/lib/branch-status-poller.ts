@@ -25,11 +25,34 @@ interface WorkspaceInfo {
   projectPath: string;
 }
 
-const POLL_INTERVAL_MS = 5000;
-const CI_POLL_TICKS = 6; // every 6th tick = 30s
+/**
+ * Activity level controls how aggressively we poll git/CI status. The Electron
+ * main process drives this via the `services.setActivity` tRPC mutation when
+ * the window gains/loses focus or the laptop transitions on/off battery —
+ * see `apps/desktop/src/main/services/activity-monitor.ts`. Other clients
+ * (CLI, web-only deployments) can leave it at the default `"active"`.
+ */
+export type ActivityLevel = "active" | "idle" | "background";
+
+interface IntervalConfig {
+  /** Base tick period in ms — fires `getGitStatus` for every workspace. */
+  pollMs: number;
+  /** Every Nth tick also runs `git fetch --all` + the batched CI query. */
+  ciTicks: number;
+}
+
+const INTERVALS: Record<ActivityLevel, IntervalConfig> = {
+  // 5 s git / 30 s CI — the original cadence, used when the user is actively looking at the UI on AC power.
+  active: { pollMs: 5_000, ciTicks: 6 },
+  // 30 s git / 3 min CI — window unfocused OR on battery (but not both).
+  idle: { pollMs: 30_000, ciTicks: 6 },
+  // 60 s git / 10 min CI — window unfocused AND on battery.
+  background: { pollMs: 60_000, ciTicks: 10 },
+};
 
 let pollerTimer: ReturnType<typeof setInterval> | null = null;
 let tickCount = 0;
+let currentActivity: ActivityLevel = "active";
 
 // Cache repo info per project path within a single CI poll tick.
 // Cleared on each CI tick so transferred repos or new remotes are picked up.
@@ -233,7 +256,7 @@ async function getBatchedCIStatuses(workspaces: WorkspaceInfo[]): Promise<Map<st
 
 async function pollTick() {
   tickCount++;
-  const isCITick = tickCount % CI_POLL_TICKS === 0;
+  const isCITick = tickCount % INTERVALS[currentActivity].ciTicks === 0;
 
   if (tickCount === 1 || isCITick) {
     await syncWorktrees().catch((err) => console.error("syncWorktrees error:", err));
@@ -330,7 +353,7 @@ export function startBranchStatusPoller() {
 
   pollerTimer = setInterval(() => {
     pollTick().catch((err) => console.error("Branch status poll error:", err));
-  }, POLL_INTERVAL_MS);
+  }, INTERVALS[currentActivity].pollMs);
 }
 
 export function stopBranchStatusPoller() {
@@ -338,4 +361,28 @@ export function stopBranchStatusPoller() {
     clearInterval(pollerTimer);
     pollerTimer = null;
   }
+}
+
+/**
+ * Update the activity level. If the poller is currently running it is
+ * rescheduled with the new base interval; `tickCount` is reset so the new CI
+ * cadence is honoured immediately rather than being dragged out by a stale
+ * counter from the previous level.
+ *
+ * No-op when the level is unchanged.
+ */
+export function setPollerActivity(activity: ActivityLevel): void {
+  if (activity === currentActivity) return;
+  currentActivity = activity;
+  if (pollerTimer) {
+    clearInterval(pollerTimer);
+    tickCount = 0;
+    pollerTimer = setInterval(() => {
+      pollTick().catch((err) => console.error("Branch status poll error:", err));
+    }, INTERVALS[activity].pollMs);
+  }
+}
+
+export function getPollerActivity(): ActivityLevel {
+  return currentActivity;
 }

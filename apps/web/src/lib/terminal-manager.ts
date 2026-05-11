@@ -63,6 +63,13 @@ export async function spawnTerminal(
   }
   env.PATH = resolvedPath;
   env.TERM = "xterm-256color";
+  // Advertise 24-bit colour support. xterm.js handles truecolor escapes
+  // natively, but many statusline tools (starship, claude-code, oh-my-posh,
+  // etc.) gate their RGB output on COLORTERM=truecolor — without it they
+  // fall back to plain text or basic 16-colour, which renders the Powerline
+  // segments as monochrome blocks. iTerm2/Alacritty/kitty/Ghostty all set
+  // this; node-pty does not, so we set it explicitly.
+  env.COLORTERM = "truecolor";
   // Hint foreground/background colors so CLI tools (vim, bat, etc.) don't send
   // OSC 11 queries whose responses leak as visible garbage in the terminal.
   env.COLORFGBG = "15;0";

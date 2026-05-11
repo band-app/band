@@ -143,8 +143,8 @@ export function SlashCommandSuggestions({ skills }: SlashCommandSuggestionsProps
             className={cn(
               "flex w-full cursor-pointer items-start gap-3 rounded-sm px-3 py-2 text-left text-sm outline-none transition-colors",
               index === selectedIndex
-                ? "bg-accent text-accent-foreground"
-                : "text-popover-foreground hover:bg-accent/50",
+                ? "bg-accent text-accent-foreground dark:bg-neutral-700"
+                : "text-popover-foreground hover:bg-accent/50 dark:hover:bg-neutral-700/50",
             )}
             onMouseEnter={() => setSelectedIndex(index)}
             onMouseDown={(e) => {

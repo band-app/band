@@ -56,6 +56,14 @@ function getAgentConfig(worktreePath: string, agentId?: string): CodingAgentConf
     model = loadClaudeSettingsModel();
   }
 
+  // Claude-Code-specific settings flow through `options`. Other adapters
+  // strip unknown keys via Zod, so leaking these here is harmless if the
+  // type isn't claude-code, but we keep the conditional for clarity.
+  const claudeOnly =
+    agentDef.type === "claude-code"
+      ? { partialMessages: settings.claudeCodePartialMessages === true }
+      : {};
+
   return {
     type: agentDef.type,
     workspaceDir: worktreePath,
@@ -64,6 +72,7 @@ function getAgentConfig(worktreePath: string, agentId?: string): CodingAgentConf
     options: {
       executablePath: agentDef.command,
       model,
+      ...claudeOnly,
     },
   } as CodingAgentConfig;
 }
@@ -156,6 +165,23 @@ export async function getOrCreateAgent(
  */
 export async function createMetadataAgent(agentId?: string): Promise<CodingAgent> {
   const config = getAgentConfig(bandHome(), agentId);
+  return createCodingAgent(config);
+}
+
+/**
+ * Create a short-lived agent rooted at a workspace's worktree, for one-shot
+ * tool-using tasks (e.g. summarising pending changes into a commit message).
+ *
+ * Unlike `createMetadataAgent`, this gives the agent a real codebase to
+ * explore — it can run `git diff` / `git log` / `Read` files itself rather
+ * than receiving a serialised diff in the prompt. Does NOT join the chat
+ * pool; the caller should discard the agent after a single `runSession`.
+ */
+export async function createWorkspaceAgent(
+  worktreePath: string,
+  agentId?: string,
+): Promise<CodingAgent> {
+  const config = getAgentConfig(worktreePath, agentId);
   return createCodingAgent(config);
 }
 

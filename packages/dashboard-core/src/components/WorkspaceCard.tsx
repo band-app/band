@@ -42,7 +42,6 @@ interface Props {
   setupStatus?: SetupStatus;
   isFocused?: boolean;
   onShowDeleteDialog: (info: DeleteDialogInfo) => void;
-  editMode?: boolean;
 }
 
 export const WorkspaceCard = memo(function WorkspaceCard({
@@ -54,7 +53,6 @@ export const WorkspaceCard = memo(function WorkspaceCard({
   setupStatus,
   isFocused,
   onShowDeleteDialog,
-  editMode,
 }: Props) {
   const cardRef = useRef<HTMLDivElement>(null);
   const capabilities = useCapabilities();
@@ -85,7 +83,7 @@ export const WorkspaceCard = memo(function WorkspaceCard({
     }
   };
 
-  const className = `@container group flex flex-row items-center justify-between px-3 py-1 min-w-0 overflow-hidden cursor-pointer select-none transition-colors hover:bg-accent/50 ${isActive ? "bg-accent/50 border-l-2 border-l-primary" : ""} ${isFocused ? "ring-2 ring-inset ring-ring" : ""} ${href ? "no-underline text-inherit" : ""}`;
+  const className = `@container group flex flex-row items-center justify-between pl-3 pr-2 py-1 min-w-0 overflow-hidden cursor-pointer select-none transition-colors hover:bg-accent/50 ${isActive ? "bg-accent/50 border-l-2 border-l-primary" : ""} ${isFocused ? "ring-2 ring-inset ring-ring" : ""} ${href ? "no-underline text-inherit" : ""}`;
 
   const containerProps = {
     ref: cardRef,
@@ -139,13 +137,11 @@ export const WorkspaceCard = memo(function WorkspaceCard({
             </TooltipTrigger>
             <TooltipContent side="top">{worktree.branch}</TooltipContent>
           </Tooltip>
-          {!editMode && (
-            <div className="hidden @[10rem]:flex group-hover:flex items-center gap-2 shrink-0 ml-auto pl-2">
-              <SetupStatusIndicator setup={setupStatus} />
-              {branchStatus && <GitStatusIndicator git={branchStatus.git} />}
-              {branchStatus && <CIStatusIndicator ci={branchStatus.ci} />}
-            </div>
-          )}
+          <div className="hidden @[10rem]:flex group-hover:flex items-center gap-2 shrink-0 ml-auto pl-2">
+            <SetupStatusIndicator setup={setupStatus} />
+            {branchStatus && <GitStatusIndicator git={branchStatus.git} />}
+            {branchStatus && <CIStatusIndicator ci={branchStatus.ci} />}
+          </div>
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>

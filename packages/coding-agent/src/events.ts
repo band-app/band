@@ -8,6 +8,20 @@ export interface TextDeltaEvent {
   text: string;
 }
 
+/**
+ * Emitted by adapters that stream individual tokens to mark a text-block
+ * boundary — for example when an assistant message is `text → tool_use → text`
+ * and the partial-message stream finishes the first text block before the
+ * tool_use begins.
+ *
+ * Adapters that don't stream tokens never emit this; the task-runner's
+ * existing side-effect endText() (called on tool-use / file / session-result)
+ * keeps closing bubbles in the legacy non-streaming flow.
+ */
+export interface TextEndEvent {
+  type: "text-end";
+}
+
 export interface ToolUseEvent {
   type: "tool-use";
   toolCallId: string;
@@ -131,6 +145,7 @@ export interface SessionIdResolvedEvent {
 export type AgentEvent =
   | SessionStartEvent
   | TextDeltaEvent
+  | TextEndEvent
   | ToolUseEvent
   | ToolResultEvent
   | FileEvent

@@ -27,6 +27,11 @@ import type { FileTab } from "../hooks/useFileTabs";
 // ---------------------------------------------------------------------------
 
 function getBasename(filePath: string): string {
+  // Defensive coerce: tab paths originate from localStorage, which can contain
+  // unexpected shapes from older builds. The primary fix is in useFileTabs
+  // (loadTabState filters non-strings), but a non-string slipping through here
+  // shouldn't crash the entire workspace.
+  if (typeof filePath !== "string") return String(filePath ?? "");
   return filePath.split("/").pop() || filePath;
 }
 

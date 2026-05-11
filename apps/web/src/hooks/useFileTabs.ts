@@ -67,12 +67,36 @@ function loadTabState(workspaceId: string): { tabs: FileTab[]; active: string | 
   try {
     const raw = localStorage.getItem(storageKey(workspaceId));
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as PersistedTabState;
+    // Don't trust the cast — older builds (or hand-edited localStorage) may
+    // have written a different shape, e.g. an array of `{ filePath }` objects
+    // instead of bare strings. Filter to strings so downstream code that
+    // calls `.split("/")` on a tab path can't crash the whole workspace.
+    const parsed = JSON.parse(raw) as { tabs?: unknown; active?: unknown };
     if (!Array.isArray(parsed.tabs)) return null;
-    const tabs: FileTab[] = parsed.tabs.map((t) =>
-      typeof t === "string" ? { filePath: t } : { filePath: t.filePath, isPreview: t.isPreview },
-    );
-    return { tabs, active: parsed.active ?? null };
+    // Accept either a bare string (legacy / pinned tab) or a
+    // `{ filePath: string, isPreview?: boolean }` object (preview tab).
+    // Anything else is dropped — `.split("/")` on a non-string path
+    // would crash the whole workspace.
+    const tabs: FileTab[] = [];
+    for (const t of parsed.tabs) {
+      if (typeof t === "string") {
+        tabs.push({ filePath: t });
+      } else if (
+        t !== null &&
+        typeof t === "object" &&
+        "filePath" in t &&
+        typeof (t as { filePath: unknown }).filePath === "string"
+      ) {
+        const obj = t as { filePath: string; isPreview?: unknown };
+        tabs.push(
+          obj.isPreview === true
+            ? { filePath: obj.filePath, isPreview: true }
+            : { filePath: obj.filePath },
+        );
+      }
+    }
+    const active = typeof parsed.active === "string" ? parsed.active : null;
+    return { tabs, active };
   } catch {
     return null;
   }

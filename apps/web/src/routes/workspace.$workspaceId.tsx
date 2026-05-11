@@ -90,6 +90,7 @@ function useActiveTab(workspaceId: string): WorkspaceTab {
   const prefix = `/workspace/${workspaceId}`;
   if (pathname.startsWith(`${prefix}/changes`)) return "diff";
   if (pathname.startsWith(`${prefix}/code`)) return "code";
+  if (pathname.startsWith(`${prefix}/terminal`)) return "terminal";
   return "chat";
 }
 
@@ -323,6 +324,7 @@ function MobileWorkspaceLayout({
     chat: `/workspace/${encodedId}`,
     diff: `/workspace/${encodedId}/changes`,
     code: `/workspace/${encodedId}/code`,
+    terminal: `/workspace/${encodedId}/terminal`,
   };
 
   return (
@@ -347,17 +349,18 @@ function MobileWorkspaceLayout({
           }}
         >
           {isDesktop && <DesktopDragRegion />}
-          <header className="flex shrink-0 items-center gap-3 border-b border-border/50 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
+          <header className="flex h-[calc(2.5rem+env(safe-area-inset-top))] shrink-0 items-center gap-2 border-b border-border/50 px-3 pt-[env(safe-area-inset-top)]">
             <button
               type="button"
               onClick={handleBack}
-              className="inline-flex size-8 items-center justify-center rounded-md hover:bg-accent"
+              className="inline-flex size-7 shrink-0 items-center justify-center rounded-md hover:bg-accent"
             >
               <ArrowLeft className="size-4" />
             </button>
             <div className="min-w-0 flex-1">
-              <h1 className="truncate text-sm font-semibold">{workspaceId}</h1>
+              <h1 className="truncate text-center text-sm font-semibold">{workspaceId}</h1>
             </div>
+            <div aria-hidden="true" className="size-7 shrink-0" />
           </header>
           <WorkspaceTabNav
             activeTab={activeTab}

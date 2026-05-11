@@ -102,6 +102,34 @@ export interface DashboardAdapter {
     compareBranch?: string,
   ): Promise<void>;
 
+  /**
+   * Run `git pull --rebase` inside the workspace's worktree. Throws on
+   * failure (network errors, merge conflicts, etc).
+   */
+  gitPullWorkspace?(workspaceId: string): Promise<void>;
+
+  /**
+   * Run `git push` inside the workspace's worktree, automatically setting
+   * upstream on first push. Throws on failure.
+   */
+  gitPushWorkspace?(workspaceId: string): Promise<void>;
+
+  /**
+   * Stage every change (tracked + untracked) and create a commit on the
+   * workspace's current branch. Throws on failure (e.g. nothing to commit,
+   * pre-commit hook rejection).
+   */
+  gitCommitWorkspace?(workspaceId: string, message: string, body?: string): Promise<void>;
+
+  /**
+   * Ask the user's default coding agent to summarise the workspace's pending
+   * changes into a commit message. Returns the proposed subject/body plus
+   * the human-readable agent label so the UI can attribute the suggestion.
+   */
+  generateCommitMessage?(
+    workspaceId: string,
+  ): Promise<{ message: string; body: string; agentLabel: string }>;
+
   /** Get a URL for raw file content (images, PDFs, etc.) */
   getWorkspaceFileUrl?(workspaceId: string, path: string): string;
 

@@ -144,9 +144,11 @@ export function buildAppMenu(): Menu {
       accelerator: "CmdOrCtrl+-",
       click: () => evalInFocused("if(window.__bandZoom)window.__bandZoom('out')"),
     },
+    // Zoom-reset deliberately has no accelerator: CmdOrCtrl+0 is owned by
+    // the dashboard's "All projects" label filter (see DashboardShell).
+    // Reset is still reachable here via menu click.
     {
       label: "Actual Size",
-      accelerator: "CmdOrCtrl+0",
       click: () => evalInFocused("if(window.__bandZoom)window.__bandZoom('reset')"),
     },
     { type: "separator" },

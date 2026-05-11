@@ -1,5 +1,6 @@
 import {
   Button,
+  cn,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -16,10 +17,17 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@band-app/ui";
-import { Check, FolderPlus, Menu, Pencil, Plus, Settings, Tag, X } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { Check, ChevronsDownUp, FolderPlus, Menu, Plus, Settings, Tag, X } from "lucide-react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCliSetup } from "../hooks/use-cli-setup";
+import {
+  LABELS_COLLAPSE_KEY,
+  PROJECTS_COLLAPSE_KEY,
+  UNLABELED_KEY,
+  useCollapseState,
+} from "../hooks/use-collapse-state";
 import { useHooksSetup } from "../hooks/use-hooks-setup";
+import { useLabelFilter } from "../hooks/use-label-filter";
 import { useProjects } from "../hooks/use-projects";
 import { useSettingsQuery } from "../hooks/use-settings-query";
 import {
@@ -33,11 +41,15 @@ import { ProjectList } from "./ProjectList";
 import { SettingsPage } from "./SettingsPage";
 
 interface DashboardShellProps {
-  /** Extra menu items rendered inside the toolbar's overflow ("3 dots") dropdown,
-   *  appended after the built-in Edit/Settings entries. */
+  /** Extra menu items rendered inside the toolbar's overflow dropdown,
+   *  appended after the built-in Settings entry. */
   toolbarMenuItems?: ReactNode;
   /** Hide the desktop title bar (e.g. when the parent renders a full-width one). */
   hideTitleBar?: boolean;
+  /** Suppress the in-shell hamburger overflow menu. Used when this shell is
+   *  embedded under a global title bar that already exposes the same items
+   *  (Tasks / Cronjobs / Settings / …). */
+  hideMenu?: boolean;
 }
 
 // Desktop-shell detection. The Electron preload
@@ -61,7 +73,7 @@ async function desktopInvoke<T>(cmd: string, args?: Record<string, unknown>): Pr
   throw new Error(`desktopInvoke('${cmd}') called outside the desktop shell`);
 }
 
-export function DashboardShell({ toolbarMenuItems, hideTitleBar }: DashboardShellProps) {
+export function DashboardShell({ toolbarMenuItems, hideTitleBar, hideMenu }: DashboardShellProps) {
   const { projects, isLoading: loading } = useProjects();
   const { settings } = useSettingsQuery();
   const labels = settings.labels ?? [];
@@ -70,8 +82,7 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar }: DashboardShel
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [showErrorDialog, setShowErrorDialog] = useState(false);
   const [showSettingsDialog, setShowSettingsDialog] = useState(false);
-  const [editMode, setEditMode] = useState(false);
-  const [labelFilter, setLabelFilter] = useState<string | null>(null);
+  const [labelFilter, setLabelFilter] = useLabelFilter();
   const { state: hooksState, install: installHooks } = useHooksSetup();
   const { state: cliState, install: installCli } = useCliSetup();
 
@@ -90,22 +101,62 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar }: DashboardShel
 
   const handleSettingsClick = useCallback(() => setShowSettingsDialog(true), []);
 
+  // Collapse-all toolbar action: write every project name into the
+  // collapsed-projects set and every label id (plus the unlabeled sentinel)
+  // into the collapsed-labels set. The custom event dispatched by `setAll`
+  // pings every useCollapseState consumer so the list re-renders instantly.
+  const projectCollapse = useCollapseState(PROJECTS_COLLAPSE_KEY);
+  const labelCollapse = useCollapseState(LABELS_COLLAPSE_KEY);
+  const collapseAll = useCallback(() => {
+    projectCollapse.setAll(projects.map((p) => p.name));
+    labelCollapse.setAll([...labels.map((l) => l.id), UNLABELED_KEY]);
+  }, [projectCollapse, labelCollapse, projects, labels]);
+
   const activeLabel = useMemo(
     () => (labelFilter ? labels.find((l) => l.id === labelFilter) : null),
     [labelFilter, labels],
   );
 
-  // The desktop shell's native menu (Cmd+,) calls `window.__bandOpenSettings()`
-  // via webview.eval / executeJavaScript — same pattern as the zoom menu.
-  // Register the global so the menu can pop the in-app dialog instead of
-  // spawning a separate window.
+  // The desktop shell's native menu (Cmd+,) and the in-app DesktopTitleBar
+  // hamburger both call `window.__bandOpenSettings()` to pop this dialog.
+  // The native-menu path goes via webview.eval / executeJavaScript — same
+  // pattern as the zoom menu. Register the global unconditionally so the
+  // hamburger works in the browser too (E2E + web shell).
+  //
+  // Multiple `DashboardShell` instances can be alive concurrently —
+  // DockviewInstanceManager keeps one per cached workspace. They all
+  // race to own the same window global: each mount overwrites the
+  // previous registration. The cleanup must only delete the key if
+  // we still own it; otherwise a stale unmount (LRU eviction or
+  // workspace switch) wipes a newer instance's registration and
+  // leaves the macOS Settings… menu silently broken until full reload.
   useEffect(() => {
-    if (!isDesktop) return;
     const globalKey = "__bandOpenSettings";
-    (window as unknown as Record<string, unknown>)[globalKey] = () => setShowSettingsDialog(true);
+    const win = window as unknown as Record<string, unknown>;
+    const handler = () => setShowSettingsDialog(true);
+    win[globalKey] = handler;
     return () => {
-      delete (window as unknown as Record<string, unknown>)[globalKey];
+      if (win[globalKey] === handler) {
+        delete win[globalKey];
+      }
     };
+  }, []);
+
+  // Listen for ⌃0 (Focus Side Bar) — the keyboard handler in the workspace
+  // layout expands the left edge group and dispatches this event; we move
+  // keyboard focus into the project list so arrow keys can navigate it.
+  // Multi-workspace note: every DashboardShell instance receives the
+  // event, but each focuses only its own subtree via rootRef. Inactive
+  // workspaces are display:none-hidden upstream, so focus() on their
+  // internal element is a no-op — only the visible instance wins.
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const handler = () => {
+      const list = rootRef.current?.querySelector<HTMLElement>('[tabindex="-1"]');
+      list?.focus({ preventScroll: true });
+    };
+    window.addEventListener("band:focus-projects", handler);
+    return () => window.removeEventListener("band:focus-projects", handler);
   }, []);
 
   // Keyboard shortcuts: Cmd+0 → all projects, Cmd+1..9 → nth label.
@@ -141,7 +192,12 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar }: DashboardShel
 
   return (
     <div
-      className={`${hideTitleBar ? "h-full" : "h-dvh"} w-full overflow-hidden flex flex-col bg-background text-foreground p-0 ${isDesktop ? "" : "pt-[env(safe-area-inset-top)]"}`}
+      ref={rootRef}
+      className={cn(
+        "w-full overflow-hidden flex flex-col bg-background text-foreground p-0",
+        hideTitleBar ? "h-full" : "h-dvh",
+        !isDesktop && "pt-[env(safe-area-inset-top)]",
+      )}
     >
       {isDesktop && !hideTitleBar && (
         <div
@@ -154,98 +210,114 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar }: DashboardShel
         </div>
       )}
 
-      <div className="flex h-10 shrink-0 items-center justify-between border-b border-border px-2">
-        <div className="flex min-w-0 items-center gap-1">
-          <DropdownMenu>
-            <Tooltip>
-              <TooltipTrigger asChild>
+      <div className="flex h-9 shrink-0 items-center justify-between border-b border-border">
+        <div className="flex min-w-0 items-center">
+          <div className="flex items-center gap-1 pl-2">
+            {!hideMenu && (
+              <DropdownMenu>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        className="text-muted-foreground"
+                        aria-label="Menu"
+                      >
+                        <Menu className="size-5" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">More</TooltipContent>
+                </Tooltip>
+                <DropdownMenuContent align="start">
+                  {toolbarMenuItems}
+                  <DropdownMenuItem onClick={handleSettingsClick}>
+                    <Settings className="size-4" />
+                    Settings
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+            {labels.length > 0 && (
+              <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
-                    size="icon-sm"
+                    size="sm"
                     variant="ghost"
-                    className="text-muted-foreground"
-                    aria-label="Menu"
+                    className={`min-w-0 text-sm h-7 px-2 gap-1.5 ${labelFilter ? "bg-accent text-accent-foreground" : "text-muted-foreground"}`}
                   >
-                    <Menu className="size-5" />
+                    {activeLabel ? (
+                      <>
+                        <span
+                          className="size-2.5 rounded-full shrink-0"
+                          style={{ backgroundColor: activeLabel.color }}
+                        />
+                        <span className="truncate">{activeLabel.name}</span>
+                      </>
+                    ) : (
+                      <>
+                        <Tag className="size-3.5 shrink-0" />
+                        <span className="truncate">All</span>
+                      </>
+                    )}
                   </Button>
                 </DropdownMenuTrigger>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">More</TooltipContent>
-            </Tooltip>
-            <DropdownMenuContent align="start">
-              <DropdownMenuItem onClick={() => setEditMode((v) => !v)}>
-                <Pencil className="size-4" />
-                {editMode ? "Done editing" : "Edit list"}
-              </DropdownMenuItem>
-              {toolbarMenuItems}
-              <DropdownMenuItem onClick={handleSettingsClick}>
-                <Settings className="size-4" />
-                Settings
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          {labels.length > 0 && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className={`min-w-0 text-sm h-8 px-2 gap-1.5 ${labelFilter ? "bg-accent text-accent-foreground" : "text-muted-foreground"}`}
-                >
-                  {activeLabel ? (
-                    <>
-                      <span
-                        className="size-2.5 rounded-full shrink-0"
-                        style={{ backgroundColor: activeLabel.color }}
-                      />
-                      <span className="truncate">{activeLabel.name}</span>
-                    </>
-                  ) : (
-                    <>
-                      <Tag className="size-5 shrink-0" />
-                      <span className="truncate">All</span>
-                    </>
-                  )}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start">
-                <DropdownMenuItem onClick={() => setLabelFilter(null)}>
-                  <Tag className="size-3.5 shrink-0 mr-2 text-muted-foreground" />
-                  <span className="truncate">All</span>
-                  {!labelFilter && <Check className="size-3 ml-2 shrink-0" />}
-                  <span className="ml-auto pl-3 text-xs text-muted-foreground tracking-widest">
-                    ⌘0
-                  </span>
-                </DropdownMenuItem>
-                {labels.map((lbl, idx) => (
-                  <DropdownMenuItem key={lbl.id} onClick={() => setLabelFilter(lbl.id)}>
-                    <span
-                      className="size-2.5 rounded-full shrink-0 mr-2"
-                      style={{ backgroundColor: lbl.color }}
-                    />
-                    <span className="truncate">{lbl.name}</span>
-                    {labelFilter === lbl.id && <Check className="size-3 ml-2 shrink-0" />}
-                    {idx < 9 && (
-                      <span className="ml-auto pl-3 text-xs text-muted-foreground tracking-widest">
-                        ⌘{idx + 1}
-                      </span>
-                    )}
+                <DropdownMenuContent align="start">
+                  <DropdownMenuItem onClick={() => setLabelFilter(null)}>
+                    <Tag className="size-3.5 shrink-0 mr-2 text-muted-foreground" />
+                    <span className="truncate">All</span>
+                    {!labelFilter && <Check className="size-3 ml-2 shrink-0" />}
+                    <span className="ml-auto pl-3 text-xs text-muted-foreground tracking-widest">
+                      ⌘0
+                    </span>
                   </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
+                  {labels.map((lbl, idx) => (
+                    <DropdownMenuItem key={lbl.id} onClick={() => setLabelFilter(lbl.id)}>
+                      <span
+                        className="size-2.5 rounded-full shrink-0 mr-2"
+                        style={{ backgroundColor: lbl.color }}
+                      />
+                      <span className="truncate">{lbl.name}</span>
+                      {labelFilter === lbl.id && <Check className="size-3 ml-2 shrink-0" />}
+                      {idx < 9 && (
+                        <span className="ml-auto pl-3 text-xs text-muted-foreground tracking-widest">
+                          ⌘{idx + 1}
+                        </span>
+                      )}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </div>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 pr-2">
+          {projects.length > 0 && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  className="text-muted-foreground"
+                  aria-label="Collapse all"
+                  onClick={collapseAll}
+                >
+                  <ChevronsDownUp className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Collapse all</TooltipContent>
+            </Tooltip>
+          )}
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
-                size="icon-sm"
+                size="icon-xs"
                 variant="ghost"
                 className="text-muted-foreground"
                 onClick={() => setShowAddDialog(true)}
               >
-                <Plus className="size-5" />
+                <Plus className="size-4" />
               </Button>
             </TooltipTrigger>
             <TooltipContent side="bottom">Add project</TooltipContent>
@@ -264,7 +336,12 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar }: DashboardShel
           list?.focus({ preventScroll: true });
         }}
       >
-        <main className="overflow-hidden">
+        {/* No overflow-hidden here: when the project list grows past the
+            viewport, clipping main makes Radix's ScrollArea miss the
+            overflowing content and stop scroll-max early. The list still
+            keeps horizontal text truncation via min-w-0 + truncate on its
+            children. pb-3 gives the last row breathing room. */}
+        <main className="pb-3">
           {loading ? (
             <div className="flex items-center justify-center py-12">
               <Spinner className="size-5 text-muted-foreground" />
@@ -284,7 +361,7 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar }: DashboardShel
               </Button>
             </div>
           ) : (
-            <ProjectList labelFilter={labelFilter} editMode={editMode} />
+            <ProjectList labelFilter={labelFilter} />
           )}
         </main>
       </ScrollArea>

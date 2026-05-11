@@ -9,6 +9,13 @@ const claudeCodeConfigSchema = z.object({
     .object({
       model: z.string().optional(),
       executablePath: z.string().optional(),
+      /**
+       * Experimental: forward the SDK's partial-message stream events
+       * (`includePartialMessages`) so the chat bubble types in token-by-token
+       * instead of arriving as one block. Off by default — see
+       * docs/experiments/partial-messages.md.
+       */
+      partialMessages: z.boolean().optional(),
     })
     .default({}),
 });

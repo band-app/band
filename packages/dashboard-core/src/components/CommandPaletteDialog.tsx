@@ -46,7 +46,9 @@ export function CommandPaletteDialog({ open, onOpenChange, commands }: CommandPa
               {commands.map((cmd) => (
                 <CommandItem key={cmd.id} value={cmd.label} onSelect={() => handleSelect(cmd)}>
                   <span className="text-sm">{cmd.label}</span>
-                  <CommandShortcut>{formatShortcut(cmd.shortcut)}</CommandShortcut>
+                  {cmd.shortcut && (
+                    <CommandShortcut>{formatShortcut(cmd.shortcut)}</CommandShortcut>
+                  )}
                 </CommandItem>
               ))}
             </CommandGroup>

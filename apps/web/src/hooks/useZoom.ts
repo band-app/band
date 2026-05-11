@@ -1,18 +1,22 @@
 import { useEffect } from "react";
 import { isDesktop } from "../lib/is-desktop";
-import { zoomIn, zoomOut, zoomReset } from "../lib/zoom";
+import { zoomIn, zoomOut } from "../lib/zoom";
 
 /**
  * Browser-mode keyboard shortcut handler for zoom.
  *
- * Registers Cmd+= (zoom in), Cmd+- (zoom out), and Cmd+0 (reset).
+ * Registers Cmd+= (zoom in) and Cmd+- (zoom out). Cmd+0 is intentionally
+ * NOT bound — that combo is owned by the dashboard's "All projects" label
+ * filter (see DashboardShell). Reset is still reachable via the desktop
+ * View menu's "Actual Size" item.
+ *
  * Only active outside the desktop shell — when running inside Electron the
  * native View menu accelerators intercept these keys before they reach the
  * webview (see `apps/desktop/src/main/menu.ts`).
  */
 export function useZoom(): void {
   useEffect(() => {
-    // In a desktop shell, the View menu accelerators handle Cmd+=/Cmd+-/Cmd+0
+    // In a desktop shell, the View menu accelerators handle Cmd+= / Cmd+-
     // before they reach the webview, so skip the JS listener.
     if (isDesktop) return;
 
@@ -33,14 +37,6 @@ export function useZoom(): void {
         e.preventDefault();
         e.stopPropagation();
         zoomOut();
-        return;
-      }
-
-      // Cmd+0 → reset zoom
-      if (e.key === "0") {
-        e.preventDefault();
-        e.stopPropagation();
-        zoomReset();
       }
     };
 

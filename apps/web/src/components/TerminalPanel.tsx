@@ -1,7 +1,42 @@
+import {
+  SearchBar,
+  type SearchBarHandle,
+  type SearchOptions,
+  useSettingsQuery,
+} from "@band-app/dashboard-core";
 import type { FitAddon } from "@xterm/addon-fit";
+import type { ISearchOptions, SearchAddon } from "@xterm/addon-search";
+import type { WebglAddon } from "@xterm/addon-webgl";
 import type { ITheme, Terminal } from "@xterm/xterm";
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { openExternalUrl } from "../lib/open-external-url";
+
+/** xterm.js search addon decoration colors. The addon requires decorations to be
+ *  set in order for `onDidChangeResults` to fire (which drives the "N of M"
+ *  counter), so we always pass these in. Same palette VS Code uses for its
+ *  terminal find: muted background highlight for all matches, brighter accent
+ *  for the active match. Hex must be `#RRGGBB` (no alpha) per the addon's API. */
+const SEARCH_DECORATIONS = {
+  matchBackground: "#515c6a",
+  activeMatchBackground: "#a9913680",
+  matchOverviewRuler: "#a9913680",
+  activeMatchColorOverviewRuler: "#a99136",
+} as const;
+
+const DEFAULT_SEARCH_OPTIONS: SearchOptions = {
+  caseSensitive: false,
+  wholeWord: false,
+  regex: false,
+};
+
+function toXtermSearchOptions(opts: SearchOptions): ISearchOptions {
+  return {
+    caseSensitive: opts.caseSensitive,
+    wholeWord: opts.wholeWord,
+    regex: opts.regex,
+    decorations: SEARCH_DECORATIONS,
+  };
+}
 
 /** xterm.js theme that follows the app's dark mode. Background/foreground use the
  *  same neutrals as the rest of the UI so the terminal blends into the panel. */
@@ -77,9 +112,38 @@ export function TerminalPanel({
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+  const searchAddonRef = useRef<SearchAddon | null>(null);
+  const webglAddonRef = useRef<WebglAddon | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const onTitleChangeRef = useRef(onTitleChange);
   onTitleChangeRef.current = onTitleChange;
+
+  // Read the renderer preference and stash it in a ref. We *snapshot* the
+  // value when the main mount effect runs — toggling the setting at runtime
+  // should not tear down a live terminal session. The settings description
+  // tells users to reopen the terminal for changes to take effect.
+  // The ref is kept in sync each render so that any *next* mount of this
+  // panel picks up the latest value (e.g. a tab close + reopen).
+  const { settings } = useSettingsQuery();
+  const useWebGLRenderer = settings.useWebGLTerminalRenderer ?? true;
+  const useWebGLRendererRef = useRef(useWebGLRenderer);
+  useWebGLRendererRef.current = useWebGLRenderer;
+
+  // ---- Find-in-terminal state (Cmd+F / Ctrl+F) ----
+  // Wires xterm.js's SearchAddon to the same SearchBar component used by
+  // DiffView and FileBrowser. Decorations are required for the addon's
+  // `onDidChangeResults` event to fire — that's what drives the "N of M"
+  // counter, so we always pass them via `toXtermSearchOptions`.
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchOptions, setSearchOptions] = useState<SearchOptions>(DEFAULT_SEARCH_OPTIONS);
+  const [matchInfo, setMatchInfo] = useState<{ total: number; current: number }>({
+    total: 0,
+    current: 0,
+  });
+  const searchBarRef = useRef<SearchBarHandle>(null);
+  // Stable ref for the xterm key-event closure (which is captured once at mount).
+  const openSearchRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -87,21 +151,49 @@ export function TerminalPanel({
     let cancelled = false;
     let cleanup: (() => void) | undefined;
 
-    // Dynamic import so @xterm (CJS) is never evaluated during SSR
+    // Dynamic import so @xterm (CJS) is never evaluated during SSR.
+    // WebGL addon is imported unconditionally — it's small and we want
+    // it available for the onContextLoss reload path.
     Promise.all([
       import("@xterm/xterm"),
       import("@xterm/addon-fit"),
       import("@xterm/addon-web-links"),
-    ]).then(([{ Terminal: XTerm }, { FitAddon: XFitAddon }, { WebLinksAddon: XWebLinksAddon }]) => {
+      import("@xterm/addon-search"),
+      import("@xterm/addon-webgl"),
+    ]).then(([xtermMod, fitMod, webLinksMod, searchMod, webglMod]) => {
+      const { Terminal: XTerm } = xtermMod;
+      const { FitAddon: XFitAddon } = fitMod;
+      const { WebLinksAddon: XWebLinksAddon } = webLinksMod;
+      const { SearchAddon: XSearchAddon } = searchMod;
+      const { WebglAddon: XWebglAddon } = webglMod;
       if (cancelled || !containerRef.current) return;
+      const wantsWebGL = useWebGLRendererRef.current;
 
       // CSS loaded on client only
       import("@xterm/xterm/css/xterm.css");
 
       const terminal = new XTerm({
+        // Opt in to addon-only APIs (decorations, markers, etc.) that
+        // xterm.js 6.1-beta gates behind this flag. Without it, the search
+        // addon's `findNext` throws "You must set the allowProposedApi
+        // option to true to use proposed API" the first time the user
+        // types in the find bar. The addons we ship (search, webgl) are
+        // first-party xterm.js addons that depend on these APIs.
+        allowProposedApi: true,
         cursorBlink: true,
         fontSize: 13,
         fontFamily: "'SF Mono', Menlo, Monaco, 'Courier New', monospace",
+        // iTerm-style row spacing — only safe with the WebGL renderer.
+        // The WebGL addon redraws box-drawing (U+2500-U+257F), block
+        // elements (U+2580-U+259F), powerline separators, and other
+        // continuous glyphs at the full cell rect (via its `customGlyphs`
+        // option, default true) so a 1.2 lineHeight doesn't slice horizontal
+        // gaps through the opencode banner, claude-code's powerline
+        // statusline, or other ASCII art. xterm.js's DOM renderer does
+        // NOT do this — falling back to it means we have to revert to
+        // lineHeight: 1.0 to keep block art continuous.
+        // See https://github.com/band-app/band/issues/391 for history.
+        lineHeight: wantsWebGL ? 1.2 : 1.0,
         macOptionIsMeta: true, // Alt+Left/Right → word navigation on macOS
         scrollback: 10000,
         theme: getTerminalTheme(),
@@ -122,11 +214,69 @@ export function TerminalPanel({
       terminal.loadAddon(new XWebLinksAddon((_event, uri) => openExternalUrl(uri)));
       terminal.open(containerRef.current!);
 
+      // Swap the default DOM renderer for the GPU-accelerated WebGL renderer
+      // (when the user setting allows it and a WebGL2 context is available).
+      // Must happen *after* `terminal.open()` because the addon needs the
+      // attached DOM node to size its <canvas>. devicePixelRatio is handled
+      // internally — retina displays render crisply.
+      //
+      // Browsers occasionally drop the WebGL context (tab discard, GPU process
+      // restart, etc.); xterm.js fires `onContextLoss` in that case and the
+      // recommended recovery is to dispose the addon and load a fresh one.
+      // If the initial `loadAddon` throws (no WebGL2, headless env, exotic
+      // hardware), we leave the DOM renderer in place rather than break the
+      // panel — the setting description warns users that fallback is silent.
+      let webglContextLossDisposable: { dispose(): void } | undefined;
+      const attachWebGL = (): boolean => {
+        try {
+          const addon = new XWebglAddon({ customGlyphs: true });
+          terminal.loadAddon(addon);
+          webglAddonRef.current = addon;
+          webglContextLossDisposable?.dispose();
+          webglContextLossDisposable = addon.onContextLoss(() => {
+            console.warn("[TerminalPanel] WebGL context lost, reattaching addon");
+            addon.dispose();
+            webglAddonRef.current = null;
+            // Try once to re-establish; if it also fails, stay on DOM renderer.
+            attachWebGL();
+          });
+          return true;
+        } catch (err) {
+          console.warn("[TerminalPanel] WebGL renderer unavailable, falling back to DOM", err);
+          return false;
+        }
+      };
+      if (wantsWebGL) attachWebGL();
+
+      // Find-in-terminal. The SearchAddon scans the entire scrollback buffer
+      // and uses xterm.js's decoration API to highlight matches — works with
+      // the canvas renderer because decorations are renderer-agnostic.
+      const searchAddon = new XSearchAddon();
+      terminal.loadAddon(searchAddon);
+      const searchResultsDisposable = searchAddon.onDidChangeResults((event) => {
+        // resultIndex is -1 when the match count exceeds the addon's
+        // highlightLimit (default 1000). Show "N matches" then.
+        setMatchInfo({
+          total: event.resultCount,
+          current: event.resultIndex >= 0 ? event.resultIndex + 1 : 0,
+        });
+      });
+
       // Custom key bindings:
+      // - Cmd/Ctrl+F  → open find bar (intercept before xterm and before the
+      //                 browser's native find-in-page in non-Electron contexts)
       // - Shift+Enter → CSI u sequence so shells/tools receive a distinct keycode
       // - Alt+Arrow   → word navigation (ESC+b / ESC+f)
       terminal.attachCustomKeyEventHandler((e) => {
         if (e.type === "keydown") {
+          // Cmd+F (macOS) / Ctrl+F (Linux/Windows) → open the find bar.
+          // Call preventDefault so the browser doesn't open native find-in-page
+          // alongside our overlay (no-op in Electron, important in the web app).
+          if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "f") {
+            e.preventDefault();
+            openSearchRef.current();
+            return false;
+          }
           // Shift+Enter → send CSI 13;2u (kitty/fixterms keyboard protocol)
           if (e.key === "Enter" && e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
             terminal.input("\x1b[13;2u");
@@ -148,6 +298,43 @@ export function TerminalPanel({
 
       terminalRef.current = terminal;
       fitAddonRef.current = fitAddon;
+      searchAddonRef.current = searchAddon;
+
+      // Mobile touch scrolling. xterm renders `.xterm-screen` (canvas/dom) on top
+      // of the scrollable `.xterm-viewport`, so touches on the visible terminal
+      // never reach the scroll layer in iOS Safari and native finger-scroll fails.
+      // Translate vertical touch drags into `terminal.scrollLines()` calls so the
+      // user can pull up/down to scroll back through history.
+      const containerEl = containerRef.current!;
+      let lastTouchY: number | null = null;
+      const onTouchStart = (e: TouchEvent) => {
+        lastTouchY = e.touches.length === 1 ? e.touches[0].clientY : null;
+      };
+      const onTouchMove = (e: TouchEvent) => {
+        if (e.touches.length !== 1 || lastTouchY === null) return;
+        const currentY = e.touches[0].clientY;
+        const deltaY = lastTouchY - currentY;
+        // Estimate the cell height from the rendered viewport so the scroll
+        // speed matches finger movement at any font size / DPR.
+        const viewport = containerEl.querySelector(".xterm-viewport") as HTMLElement | null;
+        const cellHeight =
+          viewport && terminal.rows > 0 ? viewport.clientHeight / terminal.rows : 17;
+        const lineDelta = Math.trunc(deltaY / cellHeight);
+        if (lineDelta !== 0) {
+          terminal.scrollLines(lineDelta);
+          // Carry the unconsumed sub-line remainder into the next move so
+          // slow drags still accumulate instead of being rounded away.
+          lastTouchY = currentY + (deltaY - lineDelta * cellHeight);
+          e.preventDefault();
+        }
+      };
+      const onTouchEnd = () => {
+        lastTouchY = null;
+      };
+      containerEl.addEventListener("touchstart", onTouchStart, { passive: true });
+      containerEl.addEventListener("touchmove", onTouchMove, { passive: false });
+      containerEl.addEventListener("touchend", onTouchEnd, { passive: true });
+      containerEl.addEventListener("touchcancel", onTouchEnd, { passive: true });
 
       // Connect WebSocket
       const proto = location.protocol === "https:" ? "wss:" : "ws:";
@@ -238,10 +425,20 @@ export function TerminalPanel({
       cleanup = () => {
         themeObserver.disconnect();
         resizeObserver.disconnect();
+        searchResultsDisposable.dispose();
+        webglContextLossDisposable?.dispose();
+        containerEl.removeEventListener("touchstart", onTouchStart);
+        containerEl.removeEventListener("touchmove", onTouchMove);
+        containerEl.removeEventListener("touchend", onTouchEnd);
+        containerEl.removeEventListener("touchcancel", onTouchEnd);
         ws.close();
+        // `terminal.dispose()` cascades to all loaded addons (including the
+        // WebGL addon if present), so we don't need to dispose it manually.
         terminal.dispose();
         terminalRef.current = null;
         fitAddonRef.current = null;
+        searchAddonRef.current = null;
+        webglAddonRef.current = null;
         wsRef.current = null;
       };
     });
@@ -266,9 +463,83 @@ export function TerminalPanel({
     }
   }, [visible]);
 
+  // Listen for the workspace-level ⌃` "focus Terminal" event. Many
+  // TerminalPanel instances may exist (one per terminal session × one
+  // per workspace) — the visibility gate ensures only the active
+  // session in the active workspace actually grabs focus.
+  useEffect(() => {
+    const handler = () => {
+      if (!visible) return;
+      terminalRef.current?.focus();
+    };
+    window.addEventListener("band:focus-terminal", handler);
+    return () => window.removeEventListener("band:focus-terminal", handler);
+  }, [visible]);
+
+  // ---- Find-in-terminal handlers ----
+  const handleOpenSearch = useCallback(() => {
+    setSearchOpen(true);
+    // Focus + select-all on next frame so re-pressing Cmd+F re-uses the prior query.
+    requestAnimationFrame(() => {
+      searchBarRef.current?.focus();
+      searchBarRef.current?.select();
+    });
+  }, []);
+  // Keep the xterm key-event closure pointed at the latest handler.
+  openSearchRef.current = handleOpenSearch;
+
+  const handleCloseSearch = useCallback(() => {
+    searchAddonRef.current?.clearDecorations();
+    setSearchOpen(false);
+    setSearchQuery("");
+    setMatchInfo({ total: 0, current: 0 });
+    terminalRef.current?.focus();
+  }, []);
+
+  const handleNext = useCallback(() => {
+    if (!searchQuery) return;
+    searchAddonRef.current?.findNext(searchQuery, toXtermSearchOptions(searchOptions));
+  }, [searchQuery, searchOptions]);
+
+  const handlePrevious = useCallback(() => {
+    if (!searchQuery) return;
+    searchAddonRef.current?.findPrevious(searchQuery, toXtermSearchOptions(searchOptions));
+  }, [searchQuery, searchOptions]);
+
+  // Re-run the search whenever the query or options change. xterm.js's search
+  // addon does its own debouncing internally for decoration rendering, but
+  // we don't add extra debounce here — typical scrollback (10k lines) scans
+  // in <5ms. Empty query clears decorations.
+  useEffect(() => {
+    const addon = searchAddonRef.current;
+    if (!addon) return;
+    if (!searchQuery) {
+      addon.clearDecorations();
+      setMatchInfo({ total: 0, current: 0 });
+      return;
+    }
+    addon.findNext(searchQuery, toXtermSearchOptions(searchOptions));
+  }, [searchQuery, searchOptions]);
+
   return (
-    <div className="relative h-full w-full">
-      <div ref={containerRef} className="absolute inset-2 overflow-hidden" />
+    <div className="relative flex h-full w-full flex-col">
+      {searchOpen && (
+        <SearchBar
+          ref={searchBarRef}
+          query={searchQuery}
+          onQueryChange={setSearchQuery}
+          options={searchOptions}
+          onOptionsChange={setSearchOptions}
+          placeholder="Find in terminal..."
+          matchInfo={matchInfo}
+          onNext={handleNext}
+          onPrevious={handlePrevious}
+          onClose={handleCloseSearch}
+        />
+      )}
+      <div className="relative min-h-0 flex-1">
+        <div ref={containerRef} className="absolute inset-2 overflow-hidden" />
+      </div>
     </div>
   );
 }

@@ -440,7 +440,7 @@ async function runTask(chatId: string, task: InternalTask) {
     const needsAttention = upsertWorkspaceStatus(task.workspaceId, { status: "needs_attention" });
     emitStatusEvent({ kind: "update", status: needsAttention });
 
-    const answers = await createPendingInput(request.approvalId);
+    const answers = await createPendingInput(request.approvalId, task.workspaceId);
 
     // Restore working status after user responds
     const restored = upsertWorkspaceStatus(task.workspaceId, { status: "working" });
@@ -515,6 +515,19 @@ async function runTask(chatId: string, task: InternalTask) {
             id: textPartId,
             delta: event.text,
           });
+          break;
+        }
+
+        case "text-end": {
+          // Adapter-driven block boundary. Used by the Claude Code adapter
+          // (with `includePartialMessages: true`) to close the current
+          // streaming text bubble when the SDK signals a content_block_start
+          // for a non-text block — so a `text → tool_use → text` turn renders
+          // as two distinct bubbles around the tool, not one glued bubble.
+          // Adapters that don't stream tokens never emit this and the
+          // existing side-effect endText() (on tool-use / file / etc.) keeps
+          // working unchanged.
+          endText();
           break;
         }
 
