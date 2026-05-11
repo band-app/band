@@ -6,12 +6,39 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 export interface FileTab {
   filePath: string;
+  /** Preview tab — italic, single shared slot, replaced by next preview open. */
+  isPreview?: boolean;
 }
 
 export interface UseFileTabsReturn {
   openTabs: FileTab[];
   activeTabPath: string | null;
+  /**
+   * Ensure a tab exists and activate it. Does NOT change an existing tab's
+   * preview state — used by route-restore, history nav, external open.
+   * New tabs are created as pinned.
+   */
   openTab: (filePath: string) => void;
+  /**
+   * Open as a preview tab — replaces any existing preview tab.
+   *
+   * If `isDirty` is provided and the current preview tab is dirty, the
+   * dirty preview is pinned in place (so unsaved edits are never lost)
+   * and the new file is appended as the new preview. Pinning and the
+   * new-preview append happen inside a single setState call so they are
+   * atomic with respect to React's batching — callers can rely on the
+   * returned `evicted` path being safe to discard.
+   *
+   * Returns the path of the evicted preview tab (if any) so the caller
+   * can release its associated editor state / localStorage entries.
+   * Returns null when the preview was pinned (dirty case), when the
+   * file is already open, or when no preview tab existed.
+   */
+  openTabPreview: (filePath: string, isDirty?: (path: string) => boolean) => string | null;
+  /** Force-open a pinned tab — creates if missing, pins if existing preview. */
+  openTabPinned: (filePath: string) => void;
+  /** Convert an existing preview tab into a pinned tab. */
+  pinTab: (filePath: string) => void;
   closeTab: (filePath: string) => void;
   setActiveTab: (filePath: string) => void;
   closeOtherTabs: (filePath: string) => void;
@@ -22,8 +49,13 @@ export interface UseFileTabsReturn {
 // localStorage persistence
 // ---------------------------------------------------------------------------
 
+interface PersistedTab {
+  filePath: string;
+  isPreview?: boolean;
+}
+
 interface PersistedTabState {
-  tabs: string[];
+  tabs: (string | PersistedTab)[];
   active: string | null;
 }
 
@@ -31,7 +63,7 @@ function storageKey(workspaceId: string): string {
   return `band-open-tabs:${workspaceId}`;
 }
 
-function loadTabState(workspaceId: string): PersistedTabState | null {
+function loadTabState(workspaceId: string): { tabs: FileTab[]; active: string | null } | null {
   try {
     const raw = localStorage.getItem(storageKey(workspaceId));
     if (!raw) return null;
@@ -41,7 +73,28 @@ function loadTabState(workspaceId: string): PersistedTabState | null {
     // calls `.split("/")` on a tab path can't crash the whole workspace.
     const parsed = JSON.parse(raw) as { tabs?: unknown; active?: unknown };
     if (!Array.isArray(parsed.tabs)) return null;
-    const tabs = parsed.tabs.filter((t): t is string => typeof t === "string");
+    // Accept either a bare string (legacy / pinned tab) or a
+    // `{ filePath: string, isPreview?: boolean }` object (preview tab).
+    // Anything else is dropped — `.split("/")` on a non-string path
+    // would crash the whole workspace.
+    const tabs: FileTab[] = [];
+    for (const t of parsed.tabs) {
+      if (typeof t === "string") {
+        tabs.push({ filePath: t });
+      } else if (
+        t !== null &&
+        typeof t === "object" &&
+        "filePath" in t &&
+        typeof (t as { filePath: unknown }).filePath === "string"
+      ) {
+        const obj = t as { filePath: string; isPreview?: unknown };
+        tabs.push(
+          obj.isPreview === true
+            ? { filePath: obj.filePath, isPreview: true }
+            : { filePath: obj.filePath },
+        );
+      }
+    }
     const active = typeof parsed.active === "string" ? parsed.active : null;
     return { tabs, active };
   } catch {
@@ -49,9 +102,12 @@ function loadTabState(workspaceId: string): PersistedTabState | null {
   }
 }
 
-function saveTabState(workspaceId: string, tabs: string[], active: string | null): void {
+function saveTabState(workspaceId: string, tabs: FileTab[], active: string | null): void {
   try {
-    const state: PersistedTabState = { tabs, active };
+    const state: PersistedTabState = {
+      tabs: tabs.map((t) => (t.isPreview ? { filePath: t.filePath, isPreview: true } : t.filePath)),
+      active,
+    };
     localStorage.setItem(storageKey(workspaceId), JSON.stringify(state));
   } catch {
     // storage unavailable
@@ -65,14 +121,26 @@ function saveTabState(workspaceId: string, tabs: string[], active: string | null
 export function useFileTabs(workspaceId: string): UseFileTabsReturn {
   const [openTabs, setOpenTabs] = useState<FileTab[]>(() => {
     const saved = loadTabState(workspaceId);
-    if (saved) return saved.tabs.map((filePath) => ({ filePath }));
-    return [];
+    return saved?.tabs ?? [];
   });
 
   const [activeTabPath, setActiveTabPathState] = useState<string | null>(() => {
     const saved = loadTabState(workspaceId);
     return saved?.active ?? null;
   });
+
+  // Mirror of the React-committed `openTabs` plus any direct-value update
+  // we've just dispatched in the same synchronous tick. Updating this ref
+  // immediately after a `setOpenTabs(next)` call lets consecutive calls in
+  // the same tick see the up-to-date state without waiting for a render.
+  //
+  // We only read this ref inside `openTabPreview`, the one operation that
+  // must atomically decide between "pin the dirty preview and append" vs
+  // "evict the clean preview and replace" — packaging both branches into a
+  // single direct-value setState avoids the original pin-vs-replace race
+  // that arose when those two transitions were issued as separate setStates.
+  const openTabsRef = useRef(openTabs);
+  openTabsRef.current = openTabs;
 
   // Persist to localStorage whenever tabs or active tab changes.
   // Skip the first mount to avoid redundant write of the just-loaded state.
@@ -82,11 +150,7 @@ export function useFileTabs(workspaceId: string): UseFileTabsReturn {
       skipFirstPersist.current = false;
       return;
     }
-    saveTabState(
-      workspaceId,
-      openTabs.map((t) => t.filePath),
-      activeTabPath,
-    );
+    saveTabState(workspaceId, openTabs, activeTabPath);
   }, [workspaceId, openTabs, activeTabPath]);
 
   // Reset state when workspace changes
@@ -97,7 +161,7 @@ export function useFileTabs(workspaceId: string): UseFileTabsReturn {
       skipFirstPersist.current = true;
       const saved = loadTabState(workspaceId);
       if (saved) {
-        setOpenTabs(saved.tabs.map((filePath) => ({ filePath })));
+        setOpenTabs(saved.tabs);
         setActiveTabPathState(saved.active);
       } else {
         setOpenTabs([]);
@@ -113,6 +177,75 @@ export function useFileTabs(workspaceId: string): UseFileTabsReturn {
       return [...prev, { filePath }];
     });
     setActiveTabPathState(filePath);
+  }, []);
+
+  const openTabPinned = useCallback((filePath: string) => {
+    setOpenTabs((prev) => {
+      const idx = prev.findIndex((t) => t.filePath === filePath);
+      if (idx === -1) return [...prev, { filePath }];
+      if (!prev[idx].isPreview) return prev;
+      const next = prev.slice();
+      next[idx] = { filePath };
+      return next;
+    });
+    setActiveTabPathState(filePath);
+  }, []);
+
+  const openTabPreview = useCallback(
+    (filePath: string, isDirty?: (path: string) => boolean): string | null => {
+      const prev = openTabsRef.current;
+
+      // Already open (preview or pinned) — just activate, no eviction.
+      if (prev.some((t) => t.filePath === filePath)) {
+        setActiveTabPathState(filePath);
+        return null;
+      }
+
+      const previewIdx = prev.findIndex((t) => t.isPreview);
+      let evicted: string | null = null;
+      let next: FileTab[];
+
+      if (previewIdx === -1) {
+        // No existing preview — append a new preview tab.
+        next = [...prev, { filePath, isPreview: true }];
+      } else {
+        const previewPath = prev[previewIdx].filePath;
+        const draft = prev.slice();
+        if (isDirty?.(previewPath)) {
+          // Dirty preview — pin it in place and append the new preview.
+          // Combining pin + append in ONE setState call (vs. the previous
+          // pinTab() + setOpenTabs() pair) is what makes the transition
+          // atomic with respect to React's batching: there's no longer
+          // any direct-value setState that can overwrite a queued pin
+          // updater. The dirty file's tab survives and its editedContent
+          // is never silently dropped by the eviction cleanup below.
+          draft[previewIdx] = { filePath: previewPath };
+          next = [...draft, { filePath, isPreview: true }];
+        } else {
+          // Clean preview — replace it. Caller may release editor state
+          // for the evicted path.
+          evicted = previewPath;
+          draft[previewIdx] = { filePath, isPreview: true };
+          next = draft;
+        }
+      }
+
+      openTabsRef.current = next;
+      setOpenTabs(next);
+      setActiveTabPathState(filePath);
+      return evicted;
+    },
+    [],
+  );
+
+  const pinTab = useCallback((filePath: string) => {
+    setOpenTabs((prev) => {
+      const idx = prev.findIndex((t) => t.filePath === filePath);
+      if (idx === -1 || !prev[idx].isPreview) return prev;
+      const next = prev.slice();
+      next[idx] = { filePath };
+      return next;
+    });
   }, []);
 
   const closeTab = useCallback((filePath: string) => {
@@ -162,6 +295,9 @@ export function useFileTabs(workspaceId: string): UseFileTabsReturn {
     openTabs,
     activeTabPath,
     openTab,
+    openTabPreview,
+    openTabPinned,
+    pinTab,
     closeTab,
     setActiveTab,
     closeOtherTabs,

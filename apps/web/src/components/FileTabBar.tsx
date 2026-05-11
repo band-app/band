@@ -17,7 +17,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@band-app/ui";
-import { ChevronLeft, ChevronRight, Clipboard, Copy, PanelLeft, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Clipboard, Copy, PanelLeft, Pin, X } from "lucide-react";
 import type React from "react";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { FileTab } from "../hooks/useFileTabs";
@@ -46,6 +46,8 @@ interface FileTabBarProps {
   activeTabPath: string | null;
   onSelectTab: (filePath: string) => void;
   onCloseTab: (filePath: string) => void;
+  /** Pin a preview tab — typically called on double-click of a preview tab. */
+  onPinTab?: (filePath: string) => void;
   /** Navigate back in editor history */
   onGoBack?: () => void;
   /** Navigate forward in editor history */
@@ -73,6 +75,7 @@ export function FileTabBar({
   activeTabPath,
   onSelectTab,
   onCloseTab,
+  onPinTab,
   onGoBack,
   onGoForward,
   canGoBack,
@@ -227,6 +230,7 @@ export function FileTabBar({
           {tabs.map((tab) => {
             const isActive = tab.filePath === activeTabPath;
             const isDirty = isDirtyFn?.(tab.filePath) ?? false;
+            const isPreview = tab.isPreview ?? false;
             const basename = getBasename(tab.filePath);
             const Icon = getFileIcon(basename);
             const absolutePath = workspacePath
@@ -241,8 +245,13 @@ export function FileTabBar({
                     type="button"
                     role="tab"
                     aria-selected={isActive}
-                    title={tab.filePath}
+                    title={
+                      isPreview
+                        ? `${tab.filePath} (preview — double-click to keep open)`
+                        : tab.filePath
+                    }
                     onClick={() => onSelectTab(tab.filePath)}
+                    onDoubleClick={() => isPreview && onPinTab?.(tab.filePath)}
                     onMouseDown={(e) => handleMouseDown(e, tab.filePath)}
                     className={cn(
                       "group relative flex h-full w-[160px] shrink-0 items-center gap-1.5 border-r border-border/30 px-3 text-xs transition-colors",
@@ -259,8 +268,10 @@ export function FileTabBar({
                     {/* File icon */}
                     <Icon className="size-3.5 shrink-0" />
 
-                    {/* File name */}
-                    <span className="min-w-0 flex-1 truncate">{basename}</span>
+                    {/* File name — italic when in preview mode */}
+                    <span className={cn("min-w-0 flex-1 truncate", isPreview && "italic")}>
+                      {basename}
+                    </span>
 
                     {/* Dirty indicator dot OR close button */}
                     <button
@@ -289,6 +300,15 @@ export function FileTabBar({
                 </ContextMenuTrigger>
 
                 <ContextMenuContent>
+                  {isPreview && onPinTab && (
+                    <>
+                      <ContextMenuItem onClick={() => onPinTab(tab.filePath)}>
+                        <Pin className="size-4" />
+                        Keep Open
+                      </ContextMenuItem>
+                      <ContextMenuSeparator />
+                    </>
+                  )}
                   <ContextMenuItem onClick={() => copyToClipboard(tab.filePath)}>
                     <Copy className="size-4" />
                     Copy Relative Path

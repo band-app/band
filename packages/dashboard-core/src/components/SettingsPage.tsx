@@ -83,6 +83,9 @@ export function SettingsPage({ open, onOpenChange }: Props) {
   const [labels, setLabels] = useState<LabelDefinition[]>(settings.labels ?? []);
   const [autoStartTunnel, setAutoStartTunnel] = useState(settings.autoStartTunnel ?? false);
   const [enableLSP, setEnableLSP] = useState(settings.enableLSP ?? false);
+  const [enableFilePreviewTabs, setEnableFilePreviewTabs] = useState(
+    settings.enableFilePreviewTabs ?? true,
+  );
   const [claudeCodePartialMessages, setClaudeCodePartialMessages] = useState(
     settings.claudeCodePartialMessages ?? false,
   );
@@ -133,6 +136,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     if (JSON.stringify(labels) !== JSON.stringify(settings.labels ?? [])) return true;
     if (autoStartTunnel !== (settings.autoStartTunnel ?? false)) return true;
     if (enableLSP !== (settings.enableLSP ?? false)) return true;
+    if (enableFilePreviewTabs !== (settings.enableFilePreviewTabs ?? true)) return true;
     if (claudeCodePartialMessages !== (settings.claudeCodePartialMessages ?? false)) return true;
     if (maxCachedWorkspaces !== (settings.maxCachedWorkspaces?.toString() ?? "")) return true;
     if (selectedTheme !== (settings.theme ?? "system")) return true;
@@ -148,6 +152,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     labels,
     autoStartTunnel,
     enableLSP,
+    enableFilePreviewTabs,
     claudeCodePartialMessages,
     maxCachedWorkspaces,
     selectedTheme,
@@ -165,6 +170,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     setLabels(settings.labels ?? []);
     setAutoStartTunnel(settings.autoStartTunnel ?? false);
     setEnableLSP(settings.enableLSP ?? false);
+    setEnableFilePreviewTabs(settings.enableFilePreviewTabs ?? true);
     setClaudeCodePartialMessages(settings.claudeCodePartialMessages ?? false);
     setMaxCachedWorkspaces(settings.maxCachedWorkspaces?.toString() ?? "");
     setSelectedTheme(settings.theme ?? "system");
@@ -178,6 +184,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     settings.labels,
     settings.autoStartTunnel,
     settings.enableLSP,
+    settings.enableFilePreviewTabs,
     settings.claudeCodePartialMessages,
     settings.maxCachedWorkspaces,
     settings.theme,
@@ -224,6 +231,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
       // unconditionally avoids that trap.
       autoStartTunnel,
       enableLSP,
+      enableFilePreviewTabs,
       claudeCodePartialMessages,
       maxCachedWorkspaces: parsedMaxCachedWorkspaces,
       theme: selectedTheme,
@@ -318,6 +326,17 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                 description="Enable hover type info and go-to-definition in the code browser. Currently supports TypeScript and JavaScript. Uses additional memory per workspace."
               >
                 <Switch id="enable-lsp" checked={enableLSP} onCheckedChange={setEnableLSP} />
+              </SettingsRow>
+              <SettingsRow
+                htmlFor="enable-file-preview-tabs"
+                label="Preview tabs (single-click open)"
+                description="Single-click a file in the tree to open it in a temporary preview tab. Double-click or edit to keep it open."
+              >
+                <Switch
+                  id="enable-file-preview-tabs"
+                  checked={enableFilePreviewTabs}
+                  onCheckedChange={setEnableFilePreviewTabs}
+                />
               </SettingsRow>
               <SettingsRow
                 variant="responsive"
