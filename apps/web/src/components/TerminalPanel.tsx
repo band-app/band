@@ -102,6 +102,12 @@ export function TerminalPanel({
         cursorBlink: true,
         fontSize: 13,
         fontFamily: "'SF Mono', Menlo, Monaco, 'Courier New', monospace",
+        // xterm.js's default lineHeight of 1.0 packs rows at exactly the
+        // font's em height, which makes SF Mono/Menlo look noticeably
+        // squashed vs. iTerm2 (where the font's natural metric leading
+        // produces ~1.2-1.3 row spacing). Bump to 1.2 so rows have the
+        // visual breathing room users expect from a native terminal.
+        lineHeight: 1.2,
         macOptionIsMeta: true, // Alt+Left/Right → word navigation on macOS
         scrollback: 10000,
         theme: getTerminalTheme(),
