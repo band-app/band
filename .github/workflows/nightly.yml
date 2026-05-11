@@ -111,6 +111,18 @@ jobs:
           cargo fmt --manifest-path apps/cli/Cargo.toml -- --check
           cargo clippy --manifest-path apps/cli/Cargo.toml -- -D warnings
 
+      # Build the CLI before running the JS tests. Some tests (e.g.
+      # `apps/web/tests/cli-skills.test.ts`) shell out to `band generate-skills`
+      # to verify the production sync path against the real binary. The cargo
+      # cache key only hashes `apps/cli/Cargo.lock`, so a source-only change
+      # (skill templates, command surface) restores a stale binary that
+      # produces output mismatched with the current test expectations and the
+      # cli-skills suite then fails because its skip guard misfires. ci.yml and
+      # release.yml both do this — mirror it here so nightly runs aren't
+      # tripped up by the same staleness.
+      - name: Build CLI
+        run: cargo build --release --manifest-path apps/cli/Cargo.toml
+
       - name: Test
         run: |
           pnpm --filter @band-app/server test
