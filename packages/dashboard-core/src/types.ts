@@ -148,6 +148,13 @@ export interface Settings {
    * @default true
    */
   useWebGLTerminalRenderer?: boolean;
+  /**
+   * Experimental: forward Claude Code's partial-message stream events
+   * (SDK's `includePartialMessages`) so the chat bubble types in
+   * token-by-token instead of in per-block bursts. Off by default.
+   * See `docs/experiments/partial-messages.md`.
+   */
+  claudeCodePartialMessages?: boolean;
 }
 
 export interface HooksStatus {

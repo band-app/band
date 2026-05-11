@@ -83,6 +83,9 @@ export function SettingsPage({ open, onOpenChange }: Props) {
   const [labels, setLabels] = useState<LabelDefinition[]>(settings.labels ?? []);
   const [autoStartTunnel, setAutoStartTunnel] = useState(settings.autoStartTunnel ?? false);
   const [enableLSP, setEnableLSP] = useState(settings.enableLSP ?? false);
+  const [claudeCodePartialMessages, setClaudeCodePartialMessages] = useState(
+    settings.claudeCodePartialMessages ?? false,
+  );
   const [maxCachedWorkspaces, setMaxCachedWorkspaces] = useState(
     settings.maxCachedWorkspaces?.toString() ?? "",
   );
@@ -130,6 +133,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     if (JSON.stringify(labels) !== JSON.stringify(settings.labels ?? [])) return true;
     if (autoStartTunnel !== (settings.autoStartTunnel ?? false)) return true;
     if (enableLSP !== (settings.enableLSP ?? false)) return true;
+    if (claudeCodePartialMessages !== (settings.claudeCodePartialMessages ?? false)) return true;
     if (maxCachedWorkspaces !== (settings.maxCachedWorkspaces?.toString() ?? "")) return true;
     if (selectedTheme !== (settings.theme ?? "system")) return true;
     if (useWebGLTerminalRenderer !== (settings.useWebGLTerminalRenderer ?? true)) return true;
@@ -144,6 +148,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     labels,
     autoStartTunnel,
     enableLSP,
+    claudeCodePartialMessages,
     maxCachedWorkspaces,
     selectedTheme,
     useWebGLTerminalRenderer,
@@ -160,6 +165,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     setLabels(settings.labels ?? []);
     setAutoStartTunnel(settings.autoStartTunnel ?? false);
     setEnableLSP(settings.enableLSP ?? false);
+    setClaudeCodePartialMessages(settings.claudeCodePartialMessages ?? false);
     setMaxCachedWorkspaces(settings.maxCachedWorkspaces?.toString() ?? "");
     setSelectedTheme(settings.theme ?? "system");
     setUseWebGLTerminalRenderer(settings.useWebGLTerminalRenderer ?? true);
@@ -172,6 +178,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     settings.labels,
     settings.autoStartTunnel,
     settings.enableLSP,
+    settings.claudeCodePartialMessages,
     settings.maxCachedWorkspaces,
     settings.theme,
     settings.useWebGLTerminalRenderer,
@@ -217,6 +224,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
       // unconditionally avoids that trap.
       autoStartTunnel,
       enableLSP,
+      claudeCodePartialMessages,
       maxCachedWorkspaces: parsedMaxCachedWorkspaces,
       theme: selectedTheme,
       useWebGLTerminalRenderer,
@@ -450,6 +458,17 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                   id="agents-context-meter"
                   checked={contextMeterEnabled}
                   onCheckedChange={setContextMeterEnabled}
+                />
+              </SettingsRow>
+              <SettingsRow
+                htmlFor="claude-code-partial-messages"
+                label="Stream Claude Code text (experimental)"
+                description="Forward the SDK's partial-message stream events so the chat bubble types in token-by-token instead of arriving in per-block bursts. Claude Code only; subagent text and partial tool args are not yet streamed. Off by default."
+              >
+                <Switch
+                  id="claude-code-partial-messages"
+                  checked={claudeCodePartialMessages}
+                  onCheckedChange={setClaudeCodePartialMessages}
                 />
               </SettingsRow>
               <Accordion type="multiple" className="w-full">
