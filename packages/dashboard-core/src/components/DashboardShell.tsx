@@ -27,6 +27,7 @@ import {
   useCollapseState,
 } from "../hooks/use-collapse-state";
 import { useHooksSetup } from "../hooks/use-hooks-setup";
+import { useLabelFilter } from "../hooks/use-label-filter";
 import { useProjects } from "../hooks/use-projects";
 import { useSettingsQuery } from "../hooks/use-settings-query";
 import {
@@ -81,7 +82,7 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar, hideMenu }: Das
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [showErrorDialog, setShowErrorDialog] = useState(false);
   const [showSettingsDialog, setShowSettingsDialog] = useState(false);
-  const [labelFilter, setLabelFilter] = useState<string | null>(null);
+  const [labelFilter, setLabelFilter] = useLabelFilter();
   const { state: hooksState, install: installHooks } = useHooksSetup();
   const { state: cliState, install: installCli } = useCliSetup();
 
