@@ -94,6 +94,10 @@ CI does not run automatically on fork PRs to keep costs under control. Here's ho
 3. The maintainer adds the `ci:approved` label to trigger CI.
 4. CI runs. If you push new commits, CI re-runs automatically while the label is present.
 
+## Automated Claude Reviews
+
+PRs opened by project collaborators (OWNER / MEMBER / COLLABORATOR on this repo) automatically receive an AI review from Anthropic's Claude via [`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action) — see [`.github/workflows/claude-review.yml`](.github/workflows/claude-review.yml). The review posts inline comments on findings plus a single top-level summary; it's advisory, not a required check, and a human reviewer is still expected to sign off. PRs from outside contributors / forks intentionally do **not** trigger the automated review (budget and noise control), and `pull_request` (rather than `pull_request_target`) is used so the `CLAUDE_CODE_OAUTH_TOKEN` secret is never exposed to fork code.
+
 ## What to Contribute
 
 - **Bug fixes** — check [open issues](https://github.com/band-app/band/issues) or report a new one.

@@ -1,0 +1,105 @@
+name: Claude PR Review
+
+# Automated review of pull requests by Anthropic's Claude.
+#
+# WHY pull_request (and NOT pull_request_target):
+#   - pull_request runs against the PR head, which is what we want to review.
+#   - pull_request from forks does NOT receive repository secrets (per GitHub
+#     policy), so even without our author check the ANTHROPIC_API_KEY would
+#     never be exposed to a fork's checked-out code. The author_association
+#     gate below is therefore a *budget / noise* control — not a credential
+#     boundary. Forks already cannot read the key.
+#   - pull_request_target would run against the base ref WITH secrets exposed.
+#     That is the well-known "pwn request" attack pattern. Don't switch to it.
+#
+# WHY the author_association gate:
+#   - Without it we would burn API credits on every drive-by fork PR. Costs
+#     and review noise are both unbounded. We only auto-review PRs from people
+#     already trusted with the repo (OWNER / MEMBER / COLLABORATOR).
+#   - Outside contributors come back as CONTRIBUTOR or NONE and are skipped.
+#     Dependabot reports as NONE; if you want Claude to review dependabot PRs,
+#     add `|| github.actor == 'dependabot[bot]'` to the gate.
+#   - DO NOT loosen this gate without team discussion. The check lives at the
+#     job level, not just the step level, so the runner never spins up for
+#     skipped PRs.
+#
+# OPTIONAL EXTENSION — issue_comment trigger:
+#   To let collaborators re-run the review by commenting `/claude review` on a
+#   PR, add `issue_comment: types: [created]` to `on:` and an `issues: write`
+#   permission, and extend the `if:` with a parallel branch that uses
+#   `github.event.comment.author_association` (different field) plus
+#   `startsWith(github.event.comment.body, '/claude review')`. The gate is
+#   *critical* there because issue_comment runs in the base repo context with
+#   secrets exposed.
+#
+# REQUIRED REPO SECRET:
+#   CLAUDE_CODE_OAUTH_TOKEN — generated locally by running `claude setup-token`
+#   while signed into a Claude Pro / Max account, then added at
+#   Settings → Secrets and variables → Actions → New repository secret.
+#   Usage bills against the token holder's Claude subscription quota (not a
+#   metered API account), so if PR volume grows, watch quota and consider
+#   switching to `anthropic_api_key` with a metered key instead.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+# Cancel an in-flight review when a new commit lands on the same PR so a
+# rapid re-push doesn't double-bill the API.
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+# Minimum permissions the action needs to read the diff and post a review.
+# Do NOT add id-token, actions: write, or other broad scopes unless the
+# action's docs explicitly require them for a feature you're using.
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    name: Claude review
+    runs-on: ubuntu-latest
+
+    # Budget gate — see header comment. OWNER / MEMBER / COLLABORATOR are the
+    # three "trusted" author_association values; everything else (CONTRIBUTOR,
+    # FIRST_TIME_CONTRIBUTOR, FIRST_TIMER, NONE, MANNEQUIN) is skipped.
+    if: >
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'),
+               github.event.pull_request.author_association)
+
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude review
+        # Pinned to the v1 stable tag of the official Anthropic action.
+        # See https://github.com/anthropics/claude-code-action/releases — bump
+        # this deliberately when reviewing release notes; do not pin to @main.
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            Please review this pull request. The PR branch is checked out in
+            the working directory; you can also use `gh pr diff` and
+            `gh pr view` for context.
+
+            Focus on:
+            - Correctness and obvious bugs.
+            - Security and credential handling.
+            - Test coverage. This repo prefers integration tests over mocked
+              unit tests — see CLAUDE.md and CONTRIBUTING.md for the rules.
+            - Adherence to existing patterns in the codebase.
+            - Performance regressions in hot paths.
+
+            Use inline review comments for specific findings (cite line
+            numbers). Use a single top-level comment for the overall summary.
+            Be specific and actionable; skip generic praise.
+          claude_args: |
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
