@@ -35,9 +35,15 @@ function loadTabState(workspaceId: string): PersistedTabState | null {
   try {
     const raw = localStorage.getItem(storageKey(workspaceId));
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as PersistedTabState;
+    // Don't trust the cast — older builds (or hand-edited localStorage) may
+    // have written a different shape, e.g. an array of `{ filePath }` objects
+    // instead of bare strings. Filter to strings so downstream code that
+    // calls `.split("/")` on a tab path can't crash the whole workspace.
+    const parsed = JSON.parse(raw) as { tabs?: unknown; active?: unknown };
     if (!Array.isArray(parsed.tabs)) return null;
-    return parsed;
+    const tabs = parsed.tabs.filter((t): t is string => typeof t === "string");
+    const active = typeof parsed.active === "string" ? parsed.active : null;
+    return { tabs, active };
   } catch {
     return null;
   }
