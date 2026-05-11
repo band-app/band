@@ -16,9 +16,11 @@ const DEFAULT_WEB_SERVER_PORT = 3456;
 interface RawSettings {
   webServerPort?: number;
   tokenSecret?: string;
+  /** CDP screencast experiment — see `packages/dashboard-core/src/types.ts`. */
+  webBrowserCdpEnabled?: boolean;
   // Other fields exist in settings.json (worktreesDir, defaults, codingAgent,
   // notifications, labels, autoStartTunnel, …) but the desktop shell only
-  // needs port and token.
+  // reads the few it needs.
   [key: string]: unknown;
 }
 
@@ -59,6 +61,22 @@ export function getConfiguredPort(): number {
  * into the loaded URL (`?token=<secret>`) so the renderer can authenticate
  * against the local API.
  */
+/**
+ * Whether the CDP screencast bridge should be wired up at desktop boot
+ * (chromium debug port, hidden BrowserWindow, IPC handlers). Defaults to
+ * false when the field is missing — the experiment ships off by default
+ * and users opt in via the Browser section in Settings.
+ */
+export function getWebBrowserCdpEnabled(): boolean {
+  try {
+    const settings = loadSettings();
+    if (settings.webBrowserCdpEnabled === true) return true;
+  } catch {
+    // fall through to default
+  }
+  return false;
+}
+
 export function tryGetToken(): string | null {
   try {
     const settings = loadSettings();

@@ -39,6 +39,7 @@ import { useWsActive } from "../lib/workspace-visibility-store";
 import { CodeBrowserView } from "./CodeBrowserView";
 import { DockviewBrowserContainer } from "./DockviewBrowserContainer";
 import { DockviewChatContainer } from "./DockviewChatContainer";
+import { ScreencastPanel } from "./ScreencastPanel";
 import { useAnyToolbarDialogOpen } from "./ToolbarButtons";
 
 // ---------------------------------------------------------------------------
@@ -334,6 +335,8 @@ function BrowserPanelComponent({ params, api }: IDockviewPanelProps<BrowserParam
   // Track physical visibility — same approach as ChatPanelComponent.
   const [isVisible, setIsVisible] = useState(api.isVisible);
   const wsActive = useWsActive(params.workspaceId ?? "");
+  const { settings } = useSettingsQuery();
+  const cdpEnabled = (settings as { webBrowserCdpEnabled?: boolean }).webBrowserCdpEnabled ?? false;
 
   useEffect(() => {
     const d = api.onDidVisibilityChange((e) => setIsVisible(e.isVisible));
@@ -343,6 +346,30 @@ function BrowserPanelComponent({ params, api }: IDockviewPanelProps<BrowserParam
   const visible = wsActive && isVisible;
 
   if (!params.workspaceId) return <NoWorkspaceMessage Icon={Globe} />;
+
+  // On the web build the native webview path doesn't exist (no Electron
+  // IPC). Two render modes depending on the CDP screencast experiment
+  // flag (Settings → Browser → "Stream desktop tabs to web"):
+  //   - enabled (opt-in): surface the desktop app's browser tabs as a
+  //     CDP screencast picker the user can drive remotely.
+  //   - disabled (default): show the original "desktop only" fallback so the
+  //     user understands why the pane is empty.
+  if (!isDesktop) {
+    if (cdpEnabled) {
+      return <ScreencastPanel workspaceId={params.workspaceId} visible={visible} />;
+    }
+    return (
+      <div className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground">
+        <div className="max-w-md text-center">
+          The Browser pane is only available in the desktop app. Enable{" "}
+          <span className="font-medium text-foreground">
+            Settings → Browser → Stream desktop tabs to web
+          </span>{" "}
+          to use it from a browser tab.
+        </div>
+      </div>
+    );
+  }
 
   return (
     <DockviewBrowserContainer
@@ -463,6 +490,15 @@ function useDiffFileCount(workspaceId: string, isActive: boolean): number {
 
 /** All panels that must always be present in the layout. */
 const REQUIRED_PANEL_IDS = ["projects", "chat", "changes", "files", "terminal", "browser"] as const;
+
+/**
+ * Panel ids that USED to be required and may live in saved layouts. We strip
+ * them on layout restore so old localStorage entries don't break dockview
+ * (which would throw when trying to instantiate a component that no longer
+ * exists). Currently: the standalone "screencast" pane, which folded into
+ * the Browser pane on web.
+ */
+const REMOVED_PANEL_IDS = ["screencast"] as const;
 
 // ---------------------------------------------------------------------------
 // Layout persistence: shared structure + per-workspace active tabs
@@ -639,12 +675,47 @@ function saveLayout(
   }
 }
 
+/**
+ * Strip panel ids that no longer have a registered component (REMOVED_PANEL_IDS)
+ * out of a saved layout JSON. dockview's `fromJSON` would otherwise throw
+ * when it tries to instantiate the missing component for a stale id.
+ *
+ * Mutates `layout` in place. Specifically:
+ *   - drops the entry from `layout.panels`
+ *   - removes the id from each grid leaf's `data.views`
+ *   - resets `data.activeView` to the first remaining view if it pointed at
+ *     a removed id, or deletes it if the leaf is now empty
+ */
+function stripRemovedPanels(layout: Record<string, unknown>): void {
+  const panels = layout.panels as Record<string, unknown> | undefined;
+  if (panels) {
+    for (const id of REMOVED_PANEL_IDS) {
+      delete panels[id];
+    }
+  }
+  const grid = layout.grid as Record<string, unknown> | undefined;
+  if (grid?.root) {
+    walkGridNode(grid.root, (leaf) => {
+      const data = leaf.data as { views?: string[]; activeView?: string } | undefined;
+      if (!data || !Array.isArray(data.views)) return;
+      data.views = data.views.filter((v) => !(REMOVED_PANEL_IDS as readonly string[]).includes(v));
+      if (data.activeView && (REMOVED_PANEL_IDS as readonly string[]).includes(data.activeView)) {
+        data.activeView = data.views[0];
+      }
+    });
+  }
+}
+
 /** Load layout: global structure + per-workspace active tabs merged. */
 function loadLayout(workspaceId: string): unknown | null {
   try {
     const raw = localStorage.getItem(GLOBAL_LAYOUT_KEY);
     if (!raw) return null;
     const layout = JSON.parse(raw);
+
+    // Strip panels whose components no longer exist (e.g. the standalone
+    // screencast pane that folded into the Browser pane).
+    stripRemovedPanels(layout);
 
     // Overlay this workspace's saved active tab state
     const activeRaw = localStorage.getItem(`${ACTIVE_STATE_KEY_PREFIX}${workspaceId}`);

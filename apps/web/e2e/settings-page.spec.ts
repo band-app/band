@@ -71,11 +71,11 @@ test("settings dialog renders every section in a single scrolling list", async (
   const dialog = await openSettingsDialog(page);
 
   // Every section is now rendered at once — there is no master/detail
-  // navigation. We expect seven SettingsSection cards to be present and
+  // navigation. We expect eight SettingsSection cards to be present and
   // every section's first row to be visible (after scrolling, if needed).
-  // The seven sections are: Appearance, General, Labels, Coding Agents,
-  // Notifications, Web Server, Terminal.
-  await expect(dialog.locator('[data-slot="settings-section-card"]')).toHaveCount(7);
+  // The eight sections are: Appearance, General, Browser, Labels, Coding
+  // Agents, Notifications, Web Server, Terminal.
+  await expect(dialog.locator('[data-slot="settings-section-card"]')).toHaveCount(8);
 
   // Appearance — Theme dropdown rendered by SettingsRow.
   await expect(dialog.getByText("Theme", { exact: true })).toBeVisible();
@@ -86,6 +86,7 @@ test("settings dialog renders every section in a single scrolling list", async (
   for (const label of [
     "Worktrees folder",
     "Code intelligence (LSP)",
+    "Stream desktop tabs to web (experimental)",
     "No labels yet",
     "Play sound on needs attention",
     "Port",

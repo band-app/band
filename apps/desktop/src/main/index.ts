@@ -16,13 +16,14 @@
 import { app, BrowserWindow } from "electron";
 
 import { BrowserViewManager } from "../browser/view-manager.js";
+import { createHiddenBrowserWindow } from "./hidden-browser-window.js";
 import { resolveAppIcon } from "./icon.js";
 import { registerIpc } from "./ipc/register.js";
 import { installAppMenu } from "./menu.js";
 import { type ActivityMonitorHandle, startActivityMonitor } from "./services/activity-monitor.js";
 import { dashLog, logToFile } from "./services/log.js";
 import { killPort } from "./services/port.js";
-import { getConfiguredPort } from "./services/settings.js";
+import { getConfiguredPort, getWebBrowserCdpEnabled } from "./services/settings.js";
 import { resolveWebDir } from "./services/web-paths.js";
 import { ensureWebserverRunning, ManagedProcess } from "./services/web-server.js";
 import { scheduleStartupCheck } from "./updater.js";
@@ -115,6 +116,22 @@ async function bootstrap(): Promise<void> {
   installCrashHandlers();
   logToFile("dashboard starting (electron)");
 
+  // CDP screencast experiment: when the user has the feature enabled
+  // (settings.webBrowserCdpEnabled, default false — opt-in), expose
+  // every webContents on a fixed CDP port so the web UI's `/cdp` proxy
+  // can attach. Must be set BEFORE app.whenReady(); afterwards chromium
+  // has already finished initializing the debugger. Leaving the setting
+  // off saves the port and the per-tab "always-on compositor" cost (see
+  // BrowserViewManager.hide() — without the hidden window, hide()
+  // parks the renderer like the original code did).
+  // Port intentionally !== 9222 so it doesn't collide with a Chrome a
+  // developer might have running. Keep in sync with
+  // `apps/web/src/lib/browser-host.ts::DESKTOP_CDP_PORT`.
+  const cdpEnabled = getWebBrowserCdpEnabled();
+  if (cdpEnabled) {
+    app.commandLine.appendSwitch("remote-debugging-port", "9223");
+  }
+
   await app.whenReady();
 
   // Install the application menu (Edit/View/Settings + accelerators) before
@@ -145,7 +162,18 @@ async function bootstrap(): Promise<void> {
     dashLog(`preload-error: ${preloadPath} → ${error.stack ?? error.message}`);
   });
 
-  state.browserManager = new BrowserViewManager({ mainWindow: state.mainWindow });
+  // Hidden BrowserWindow that hosts WebContentsViews ensure'd by the web
+  // bridge or hidden by the desktop UI — chromium needs a "visible" parent
+  // for child views to keep compositing, otherwise screencast and
+  // captureScreenshot both stall. See `hidden-browser-window.ts`. Skipped
+  // when the CDP screencast feature is off; BrowserViewManager falls back
+  // to the original setVisible(false)-on-hide model in that case.
+  const hiddenBrowserWindow = cdpEnabled ? createHiddenBrowserWindow() : undefined;
+
+  state.browserManager = new BrowserViewManager({
+    mainWindow: state.mainWindow,
+    hiddenWindow: hiddenBrowserWindow,
+  });
 
   state.unregisterIpc = registerIpc({
     mainWindow: state.mainWindow,

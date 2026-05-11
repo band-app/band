@@ -54,6 +54,15 @@ export interface BrowserEvalArgs extends BrowserKeyArg {
   js: string;
 }
 
+/**
+ * Create-or-return-existing without bounds. Used by the CDP screencast
+ * bridge so the web/agent can ask the desktop to materialise a tab whose
+ * dockview panel hasn't mounted yet.
+ */
+export interface BrowserEnsureArgs extends BrowserKeyArg {
+  url: string;
+}
+
 /** Resolve the LRU key from whichever id the renderer included. */
 export function browserKey(args: BrowserKeyArg): string {
   return args.browserId ?? args.workspaceId ?? "";
@@ -72,6 +81,17 @@ export interface BrowserTitleChangedPayload {
   browser_id: string;
   workspace_id: string;
   title: string;
+}
+
+/**
+ * Emitted by `BrowserViewManager.destroy()` (LRU eviction, explicit
+ * close, app quit). The renderer translates this into a
+ * `browserHost.viewDestroyed` tRPC mutation so the server can clear its
+ * bandTabId → cdpTargetId cache.
+ */
+export interface BrowserViewDestroyedPayload {
+  browser_id: string;
+  workspace_id: string;
 }
 
 // ---------- macOS shell (camelCase invoke args) ----------

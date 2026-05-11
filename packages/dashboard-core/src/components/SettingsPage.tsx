@@ -97,6 +97,9 @@ export function SettingsPage({ open, onOpenChange }: Props) {
   const [useWebGLTerminalRenderer, setUseWebGLTerminalRenderer] = useState(
     settings.useWebGLTerminalRenderer ?? true,
   );
+  const [webBrowserCdpEnabled, setWebBrowserCdpEnabled] = useState(
+    settings.webBrowserCdpEnabled ?? false,
+  );
   const [agentModels, setAgentModels] = useState<
     Record<string, { id: string; name: string; description?: string; contextWindow?: number }[]>
   >({});
@@ -141,6 +144,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     if (maxCachedWorkspaces !== (settings.maxCachedWorkspaces?.toString() ?? "")) return true;
     if (selectedTheme !== (settings.theme ?? "system")) return true;
     if (useWebGLTerminalRenderer !== (settings.useWebGLTerminalRenderer ?? true)) return true;
+    if (webBrowserCdpEnabled !== (settings.webBrowserCdpEnabled ?? false)) return true;
     return false;
   }, [
     worktreesDir,
@@ -157,6 +161,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     maxCachedWorkspaces,
     selectedTheme,
     useWebGLTerminalRenderer,
+    webBrowserCdpEnabled,
     settings,
   ]);
 
@@ -175,6 +180,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     setMaxCachedWorkspaces(settings.maxCachedWorkspaces?.toString() ?? "");
     setSelectedTheme(settings.theme ?? "system");
     setUseWebGLTerminalRenderer(settings.useWebGLTerminalRenderer ?? true);
+    setWebBrowserCdpEnabled(settings.webBrowserCdpEnabled ?? false);
   }, [
     settings.worktreesDir,
     settings.codingAgents,
@@ -189,6 +195,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     settings.maxCachedWorkspaces,
     settings.theme,
     settings.useWebGLTerminalRenderer,
+    settings.webBrowserCdpEnabled,
   ]);
 
   const handleBrowse = async () => {
@@ -236,6 +243,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
       maxCachedWorkspaces: parsedMaxCachedWorkspaces,
       theme: selectedTheme,
       useWebGLTerminalRenderer,
+      webBrowserCdpEnabled,
     });
   };
 
@@ -355,6 +363,21 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                   min={1}
                   max={20}
                   className="h-8 w-full text-sm sm:w-32"
+                />
+              </SettingsRow>
+            </SettingsSection>
+
+            {/* ── Browser ────────────────────────────────────── */}
+            <SettingsSection title="Browser">
+              <SettingsRow
+                htmlFor="web-browser-cdp"
+                label="Stream desktop tabs to web (experimental)"
+                description="When enabled, the desktop opens a chromium debug port and lets web clients view + drive your Browser-pane tabs over CDP. Disable to save CPU/memory if you don't use the web UI for browsing."
+              >
+                <Switch
+                  id="web-browser-cdp"
+                  checked={webBrowserCdpEnabled}
+                  onCheckedChange={setWebBrowserCdpEnabled}
                 />
               </SettingsRow>
             </SettingsSection>

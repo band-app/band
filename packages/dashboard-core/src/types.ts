@@ -163,6 +163,16 @@ export interface Settings {
    * See `docs/experiments/partial-messages.md`.
    */
   claudeCodePartialMessages?: boolean;
+  /**
+   * Web Browser pane CDP screencast (experimental). When enabled, the
+   * desktop opens a chromium debug port and exposes its browser tabs
+   * to web clients via JPEG screencast; when disabled, the web Browser
+   * pane shows a "desktop only" fallback and the desktop doesn't open
+   * the debug port (saving the per-tab compositor cost). Treat
+   * undefined as the default.
+   * @default false
+   */
+  webBrowserCdpEnabled?: boolean;
 }
 
 export interface HooksStatus {

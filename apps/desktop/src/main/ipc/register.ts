@@ -12,6 +12,7 @@ import { Channels } from "../../shared/ipc-channels.js";
 import type {
   BrowserBoundsArgs,
   BrowserCreateArgs,
+  BrowserEnsureArgs,
   BrowserEvalArgs,
   BrowserKeyArg,
   BrowserNavigateArgs,
@@ -103,6 +104,11 @@ export function registerIpc(opts: RegisterOptions): () => void {
   handle(Channels.browserDestroy, (args: BrowserKeyArg) => browserHandlers.destroy(bm, args));
   handle(Channels.browserHideAllForWorkspace, () => browserHandlers.hideAll(bm));
   handle(Channels.browserShowAllForWorkspace, () => browserHandlers.showAll(bm));
+  // CDP screencast experiment bridge
+  handle(Channels.browserEnsure, (args: BrowserEnsureArgs) => browserHandlers.ensure(bm, args));
+  handle(Channels.browserGetCdpTarget, (args: BrowserKeyArg) =>
+    browserHandlers.getCdpTarget(bm, args),
+  );
 
   return () => {
     for (const [channel] of handlers) {
