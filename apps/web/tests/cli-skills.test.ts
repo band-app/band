@@ -28,7 +28,14 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { findBandBinary } from "../src/lib/cli-skills";
 import { closeDb } from "../src/lib/db/connection";
 
-const SKILL_NAMES = ["band", "band-chat", "band-terminal", "band-browser"] as const;
+const SKILL_NAMES = [
+  "band",
+  "band-chat",
+  "band-terminal",
+  "band-browser",
+  "band-start",
+  "band-loop",
+] as const;
 
 /**
  * Reuse the same resolver the production code uses so we exercise the real
@@ -160,7 +167,7 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
     if (tmp) rmSync(tmp, { recursive: true, force: true });
   });
 
-  it("writes all four CLI skills into ~/.claude/skills/<name>/SKILL.md on first run", async () => {
+  it("writes every CLI skill into ~/.claude/skills/<name>/SKILL.md on first run", async () => {
     expect(bandBinary, "band binary must be resolvable for this suite").not.toBeNull();
     const { runFirstTimeSetup } = await import("../src/lib/setup");
     await runFirstTimeSetup();
@@ -263,9 +270,9 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
       }
     }
 
-    // 4 agents × 4 skills = 16 freshly written files (each test gets a new
+    // 4 agents × N skills freshly written files (each test gets a new
     // tmp HOME via beforeEach, so nothing should already exist).
-    expect(result.written.length).toBe(16);
+    expect(result.written.length).toBe(4 * SKILL_NAMES.length);
     expect(result.unchanged.length).toBe(0);
   });
 
@@ -325,7 +332,7 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
 
     expect(existsSync(join(process.env.HOME!, ".claude", "skills", "band", "SKILL.md"))).toBe(true);
     expect(existsSync(join(process.env.HOME!, ".codex", "skills", "band", "SKILL.md"))).toBe(false);
-    expect(result.written.length).toBe(SKILL_NAMES.length); // 4 — only claude-code wrote
+    expect(result.written.length).toBe(SKILL_NAMES.length); // only claude-code wrote
   });
 
   it("skips agents with no command override when the default binary isn't on PATH", async () => {
