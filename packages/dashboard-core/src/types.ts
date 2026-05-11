@@ -129,6 +129,14 @@ export interface Settings {
   tokenSecret?: string;
   autoStartTunnel?: boolean;
   enableLSP?: boolean;
+  /**
+   * When true (default), single-clicking a file in the tree opens it in a
+   * shared "preview" tab slot (italic title) that is replaced by the next
+   * single-click. Double-click or editing pins the tab. When false, every
+   * single-click opens the file as a pinned tab (pre-PR behavior).
+   * @default true
+   */
+  enableFilePreviewTabs?: boolean;
   theme?: Theme;
   /**
    * Maximum number of workspace dockview instances kept alive in memory at

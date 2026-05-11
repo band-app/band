@@ -21,10 +21,20 @@ export interface UseFileTabsReturn {
   openTab: (filePath: string) => void;
   /**
    * Open as a preview tab — replaces any existing preview tab.
-   * Returns the path of the evicted preview tab (if any) so caller can
-   * release its associated editor state / localStorage entries.
+   *
+   * If `isDirty` is provided and the current preview tab is dirty, the
+   * dirty preview is pinned in place (so unsaved edits are never lost)
+   * and the new file is appended as the new preview. Pinning and the
+   * new-preview append happen inside a single setState call so they are
+   * atomic with respect to React's batching — callers can rely on the
+   * returned `evicted` path being safe to discard.
+   *
+   * Returns the path of the evicted preview tab (if any) so the caller
+   * can release its associated editor state / localStorage entries.
+   * Returns null when the preview was pinned (dirty case), when the
+   * file is already open, or when no preview tab existed.
    */
-  openTabPreview: (filePath: string) => string | null;
+  openTabPreview: (filePath: string, isDirty?: (path: string) => boolean) => string | null;
   /** Force-open a pinned tab — creates if missing, pins if existing preview. */
   openTabPinned: (filePath: string) => void;
   /** Convert an existing preview tab into a pinned tab. */
@@ -95,9 +105,16 @@ export function useFileTabs(workspaceId: string): UseFileTabsReturn {
     return saved?.active ?? null;
   });
 
-  // Mirror of openTabs for synchronous reads inside callbacks. Lets us avoid
-  // mutating closure variables from inside setState updaters (which React
-  // documents as unsafe under StrictMode / future concurrent rendering).
+  // Mirror of the React-committed `openTabs` plus any direct-value update
+  // we've just dispatched in the same synchronous tick. Updating this ref
+  // immediately after a `setOpenTabs(next)` call lets consecutive calls in
+  // the same tick see the up-to-date state without waiting for a render.
+  //
+  // We only read this ref inside `openTabPreview`, the one operation that
+  // must atomically decide between "pin the dirty preview and append" vs
+  // "evict the clean preview and replace" — packaging both branches into a
+  // single direct-value setState avoids the original pin-vs-replace race
+  // that arose when those two transitions were issued as separate setStates.
   const openTabsRef = useRef(openTabs);
   openTabsRef.current = openTabs;
 
@@ -150,29 +167,52 @@ export function useFileTabs(workspaceId: string): UseFileTabsReturn {
     setActiveTabPathState(filePath);
   }, []);
 
-  const openTabPreview = useCallback((filePath: string): string | null => {
-    const prev = openTabsRef.current;
-    const existingIdx = prev.findIndex((t) => t.filePath === filePath);
-    // If file already open (preview or pinned), just activate it.
-    if (existingIdx !== -1) {
+  const openTabPreview = useCallback(
+    (filePath: string, isDirty?: (path: string) => boolean): string | null => {
+      const prev = openTabsRef.current;
+
+      // Already open (preview or pinned) — just activate, no eviction.
+      if (prev.some((t) => t.filePath === filePath)) {
+        setActiveTabPathState(filePath);
+        return null;
+      }
+
+      const previewIdx = prev.findIndex((t) => t.isPreview);
+      let evicted: string | null = null;
+      let next: FileTab[];
+
+      if (previewIdx === -1) {
+        // No existing preview — append a new preview tab.
+        next = [...prev, { filePath, isPreview: true }];
+      } else {
+        const previewPath = prev[previewIdx].filePath;
+        const draft = prev.slice();
+        if (isDirty?.(previewPath)) {
+          // Dirty preview — pin it in place and append the new preview.
+          // Combining pin + append in ONE setState call (vs. the previous
+          // pinTab() + setOpenTabs() pair) is what makes the transition
+          // atomic with respect to React's batching: there's no longer
+          // any direct-value setState that can overwrite a queued pin
+          // updater. The dirty file's tab survives and its editedContent
+          // is never silently dropped by the eviction cleanup below.
+          draft[previewIdx] = { filePath: previewPath };
+          next = [...draft, { filePath, isPreview: true }];
+        } else {
+          // Clean preview — replace it. Caller may release editor state
+          // for the evicted path.
+          evicted = previewPath;
+          draft[previewIdx] = { filePath, isPreview: true };
+          next = draft;
+        }
+      }
+
+      openTabsRef.current = next;
+      setOpenTabs(next);
       setActiveTabPathState(filePath);
-      return null;
-    }
-    // Replace the existing preview tab if any, otherwise append.
-    const previewIdx = prev.findIndex((t) => t.isPreview);
-    let evicted: string | null = null;
-    let next: FileTab[];
-    if (previewIdx !== -1) {
-      evicted = prev[previewIdx].filePath;
-      next = prev.slice();
-      next[previewIdx] = { filePath, isPreview: true };
-    } else {
-      next = [...prev, { filePath, isPreview: true }];
-    }
-    setOpenTabs(next);
-    setActiveTabPathState(filePath);
-    return evicted;
-  }, []);
+      return evicted;
+    },
+    [],
+  );
 
   const pinTab = useCallback((filePath: string) => {
     setOpenTabs((prev) => {

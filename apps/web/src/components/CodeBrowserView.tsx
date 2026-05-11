@@ -196,12 +196,10 @@ export function CodeBrowserView({
   const fileTabs = useFileTabs(workspaceId);
   const tabState = useTabState(workspaceId);
 
-  // Mirror tab state for synchronous reads inside callbacks. Lets the
-  // preview-open helper stay stable across tab changes, so callbacks
-  // built on top (handleSelectFile, navigateToEntry) don't churn deps
-  // and re-trigger downstream LSP/keyboard effects.
-  const openTabsRef = useRef(fileTabs.openTabs);
-  openTabsRef.current = fileTabs.openTabs;
+  // Mirror tab-state callbacks behind refs. `openPreviewWithGuard` is
+  // memoised on `fileTabs.openTabPreview` alone — these refs let it read
+  // the latest isDirty / removeFile without churning its dep array (which
+  // would re-trigger downstream LSP / keyboard effects every render).
   const isDirtyRef = useRef(tabState.isDirty);
   isDirtyRef.current = tabState.isDirty;
   const removeFileRef = useRef(tabState.removeFile);
@@ -513,7 +511,9 @@ export function CodeBrowserView({
     prevFileRef.current = file;
   }, [file]);
 
-  // Handle externally triggered file open (Quick Open, Search, chat links)
+  // Handle externally triggered file open (Quick Open, Search, chat links).
+  // These are explicit user intentions to open a file — pin the destination
+  // so it isn't silently replaced by the next single-click in the tree.
   // biome-ignore lint/correctness/useExhaustiveDependencies: editorHistory.push is stable (ref-based)
   useEffect(() => {
     if (openFilePath) {
@@ -523,7 +523,7 @@ export function CodeBrowserView({
         line: loc.line ?? 1,
         column: loc.column,
       });
-      fileTabs.openTab(loc.filePath);
+      fileTabs.openTabPinned(loc.filePath);
       setViewFilePath(loc.filePath);
       setViewLine(loc.line);
       setViewLineEnd(loc.lineEnd);
@@ -580,45 +580,64 @@ export function CodeBrowserView({
     search.handleCloseSearch();
   }, [viewFilePath]);
 
-  // Open a file in the preview slot, pinning any dirty preview tab first
-  // (so unsaved edits are never silently dropped) and releasing editor
-  // state for the evicted preview to keep memory bounded. Reads tab state
-  // through refs so the callback identity stays stable across tab changes.
+  // Open a file in the preview slot. `openTabPreview` pins a dirty preview
+  // in place before evicting (single atomic setState updater) so unsaved
+  // edits are never silently dropped. We release editor state for the
+  // evicted (clean) preview to keep memory bounded.
   const openPreviewWithGuard = useCallback(
     (filePath: string) => {
-      const previewTab = openTabsRef.current.find((t) => t.isPreview);
-      if (
-        previewTab &&
-        previewTab.filePath !== filePath &&
-        isDirtyRef.current(previewTab.filePath)
-      ) {
-        fileTabs.pinTab(previewTab.filePath);
-      }
-      const evicted = fileTabs.openTabPreview(filePath);
+      const evicted = fileTabs.openTabPreview(filePath, isDirtyRef.current);
       if (evicted && evicted !== filePath) {
         delete savedEditorStatesRef.current[evicted];
         removeFileRef.current(evicted);
       }
     },
-    [fileTabs.pinTab, fileTabs.openTabPreview],
+    [fileTabs.openTabPreview],
   );
 
+  // Preview-tab behavior is opt-out via the `enableFilePreviewTabs` setting.
+  // The setting defaults to true, matching the PR's new default; when the
+  // user disables it, single-click reverts to the pre-PR pinned-open
+  // behavior. Double-click and edit-auto-pin paths remain functional in
+  // either mode — they're no-ops when there's no preview slot to operate on.
+  const previewTabsEnabled = settings.enableFilePreviewTabs ?? true;
   const handleSelectFile = useCallback(
     (filePath: string) => {
-      pushDepartureAndArrival({ filePath });
-      openPreviewWithGuard(filePath);
+      // History push is deduped by useEditorHistory's proximity check
+      // (same file + close line), so skipping here when the target equals
+      // the current view file just keeps the call site simple — but the
+      // pin/preview branch still needs to run.
+      const isSameFile = filePath === viewFilePath;
+      if (!isSameFile) pushDepartureAndArrival({ filePath });
+      if (previewTabsEnabled) {
+        openPreviewWithGuard(filePath);
+      } else {
+        fileTabs.openTabPinned(filePath);
+      }
       setViewFilePath(filePath);
       setViewLine(undefined);
       setViewLineEnd(undefined);
       setViewColumn(undefined);
       onSelectFile?.(filePath);
     },
-    [onSelectFile, pushDepartureAndArrival, openPreviewWithGuard],
+    [
+      onSelectFile,
+      pushDepartureAndArrival,
+      openPreviewWithGuard,
+      fileTabs.openTabPinned,
+      previewTabsEnabled,
+      viewFilePath,
+    ],
   );
 
   const handleSelectFilePinned = useCallback(
     (filePath: string) => {
-      pushDepartureAndArrival({ filePath });
+      // A double-click on a file in the tree fires `onClick` twice plus
+      // `onDoubleClick` once — so handleSelectFile has already pushed the
+      // navigation and the file is now the current view. Skipping the
+      // push when the target is unchanged keeps history sane on
+      // double-click (and on rapid same-file re-clicks generally).
+      if (filePath !== viewFilePath) pushDepartureAndArrival({ filePath });
       fileTabs.openTabPinned(filePath);
       setViewFilePath(filePath);
       setViewLine(undefined);
@@ -626,7 +645,7 @@ export function CodeBrowserView({
       setViewColumn(undefined);
       onSelectFile?.(filePath);
     },
-    [onSelectFile, pushDepartureAndArrival, fileTabs.openTabPinned],
+    [onSelectFile, pushDepartureAndArrival, fileTabs.openTabPinned, viewFilePath],
   );
 
   const handleBack = useCallback(() => {
@@ -777,7 +796,10 @@ export function CodeBrowserView({
     };
   }, [handleEditorGoBack, handleEditorGoForward]);
 
-  // Listen for LSP cross-file navigation events (e.g., go-to-definition)
+  // Listen for LSP cross-file navigation events (e.g., go-to-definition).
+  // Go-to-definition is an explicit user intent to land on the target — pin
+  // the destination so the next single-click in the tree doesn't silently
+  // replace the file the user just navigated to.
   useEffect(() => {
     const handleLspNavigate = (e: Event) => {
       const detail = (e as CustomEvent).detail;
@@ -785,7 +807,7 @@ export function CodeBrowserView({
         pushDepartureAndArrival({ filePath: detail.filePath });
         // Use skipFileEffectRef to prevent the route change from clobbering nav
         skipFileEffectRef.current = true;
-        fileTabs.openTab(detail.filePath);
+        fileTabs.openTabPinned(detail.filePath);
         setViewFilePath(detail.filePath);
         setViewLine(undefined);
         setViewLineEnd(undefined);
@@ -798,7 +820,7 @@ export function CodeBrowserView({
 
     window.addEventListener("band:lsp-navigate", handleLspNavigate);
     return () => window.removeEventListener("band:lsp-navigate", handleLspNavigate);
-  }, [pushDepartureAndArrival, fileTabs.openTab, onSelectFile]);
+  }, [pushDepartureAndArrival, fileTabs.openTabPinned, onSelectFile]);
 
   // Ctrl+Tab / Ctrl+Shift+Tab to switch between file tabs
   useEffect(() => {

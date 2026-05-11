@@ -6,9 +6,16 @@ import type { FileEntry } from "../types";
 
 interface FileBrowserProps {
   workspaceId: string;
-  /** Single-click on a file. Defaults to a "preview" open if onOpenFilePinned is also provided. */
+  /**
+   * Called on single-click on a file. The caller decides whether this
+   * opens as a preview or pinned tab (this component just emits the
+   * event with the file path).
+   */
   onOpenFile: (path: string) => void;
-  /** Double-click on a file — opens as a pinned (persistent) tab. Optional. */
+  /**
+   * Called on double-click on a file. Optional — when provided, the
+   * caller typically opens the file as a pinned (persistent) tab.
+   */
   onOpenFilePinned?: (path: string) => void;
   /** Compact mode for sidebar use — smaller items */
   compact?: boolean;

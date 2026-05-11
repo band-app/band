@@ -83,6 +83,9 @@ export function SettingsPage({ open, onOpenChange }: Props) {
   const [labels, setLabels] = useState<LabelDefinition[]>(settings.labels ?? []);
   const [autoStartTunnel, setAutoStartTunnel] = useState(settings.autoStartTunnel ?? false);
   const [enableLSP, setEnableLSP] = useState(settings.enableLSP ?? false);
+  const [enableFilePreviewTabs, setEnableFilePreviewTabs] = useState(
+    settings.enableFilePreviewTabs ?? true,
+  );
   const [maxCachedWorkspaces, setMaxCachedWorkspaces] = useState(
     settings.maxCachedWorkspaces?.toString() ?? "",
   );
@@ -126,6 +129,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     if (JSON.stringify(labels) !== JSON.stringify(settings.labels ?? [])) return true;
     if (autoStartTunnel !== (settings.autoStartTunnel ?? false)) return true;
     if (enableLSP !== (settings.enableLSP ?? false)) return true;
+    if (enableFilePreviewTabs !== (settings.enableFilePreviewTabs ?? true)) return true;
     if (maxCachedWorkspaces !== (settings.maxCachedWorkspaces?.toString() ?? "")) return true;
     if (selectedTheme !== (settings.theme ?? "system")) return true;
     return false;
@@ -139,6 +143,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     labels,
     autoStartTunnel,
     enableLSP,
+    enableFilePreviewTabs,
     maxCachedWorkspaces,
     selectedTheme,
     settings,
@@ -154,6 +159,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     setLabels(settings.labels ?? []);
     setAutoStartTunnel(settings.autoStartTunnel ?? false);
     setEnableLSP(settings.enableLSP ?? false);
+    setEnableFilePreviewTabs(settings.enableFilePreviewTabs ?? true);
     setMaxCachedWorkspaces(settings.maxCachedWorkspaces?.toString() ?? "");
     setSelectedTheme(settings.theme ?? "system");
   }, [
@@ -165,6 +171,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     settings.labels,
     settings.autoStartTunnel,
     settings.enableLSP,
+    settings.enableFilePreviewTabs,
     settings.maxCachedWorkspaces,
     settings.theme,
   ]);
@@ -202,6 +209,10 @@ export function SettingsPage({ open, onOpenChange }: Props) {
       tokenSecret: settings.tokenSecret,
       autoStartTunnel: autoStartTunnel || undefined,
       enableLSP: enableLSP || undefined,
+      // Default is true — only persist when explicitly disabled so we
+      // never serialise the default and a future change of default still
+      // applies to users who haven't touched this setting.
+      enableFilePreviewTabs: enableFilePreviewTabs ? undefined : false,
       maxCachedWorkspaces: parsedMaxCachedWorkspaces,
       theme: selectedTheme,
     });
@@ -294,6 +305,17 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                 description="Enable hover type info and go-to-definition in the code browser. Currently supports TypeScript and JavaScript. Uses additional memory per workspace."
               >
                 <Switch id="enable-lsp" checked={enableLSP} onCheckedChange={setEnableLSP} />
+              </SettingsRow>
+              <SettingsRow
+                htmlFor="enable-file-preview-tabs"
+                label="Preview tabs (single-click open)"
+                description="Single-click a file in the tree to open it in a temporary preview tab. Double-click or edit to keep it open."
+              >
+                <Switch
+                  id="enable-file-preview-tabs"
+                  checked={enableFilePreviewTabs}
+                  onCheckedChange={setEnableFilePreviewTabs}
+                />
               </SettingsRow>
               <SettingsRow
                 variant="responsive"
