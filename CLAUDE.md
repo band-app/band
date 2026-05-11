@@ -38,13 +38,15 @@ The web server (`apps/web`) handles **data, state, and background processes** on
 
 ## Band CLI Skills
 
-The Band CLI ships **four domain-specific skills**, each generated from its own template in `apps/cli/skills/` plus the CLI schema:
+The Band CLI ships **six domain-specific skills**, each generated from its own template in `apps/cli/skills/` plus the CLI schema:
 
 - `band.md` → `band/SKILL.md` — workspaces, projects, cronjobs, tunnel, settings, schema, notify, generate-skills.
 - `band-chat.md` → `band-chat/SKILL.md` — chat panes (`band chats ...`).
 - `band-terminal.md` → `band-terminal/SKILL.md` — terminal sessions (`band terminals ...`).
 - `band-browser.md` → `band-browser/SKILL.md` — browser tabs (`band browsers ...`).
+- `band-start.md` → `band-start/SKILL.md` — kickoff flow: create a workspace and submit the first agent task (`band workspaces create --prompt ...`) with Jira/GitHub ticket auto-detection and branch-name generation.
+- `band-loop.md` → `band-loop/SKILL.md` — schedule a recurring agent prompt against a workspace via `band cronjobs`, with an optional self-deleting "stop when criteria is met" wrapper. Native answer for users who would otherwise reach for Claude Code's `/loop`.
 
-Each template's frontmatter has a `commands:` field listing comma-separated CLI command-name prefixes; the generator filters the schema by those prefixes so each skill ships only its domain's commands. The split improves trigger precision and keeps each generated SKILL.md scoped to one task type (issue #331).
+Reference-shaped templates (e.g. `band`, `band-chat`, `band-terminal`, `band-browser`) have a `commands:` frontmatter field listing comma-separated CLI command-name prefixes, plus a `<!-- COMMANDS -->` placeholder in the body; the generator filters the schema by those prefixes and splices the rendered Commands section into the placeholder. Workflow-shaped templates (e.g. `band-start`, `band-loop`) are self-contained recipes — they omit both `commands:` and the placeholder, and the generator emits the template body verbatim. The split improves trigger precision and keeps each generated SKILL.md scoped to one task type (issue #331).
 
-Run `band generate-skills --output-dir apps/cli/skills` to regenerate all four skills, then copy each `<name>/SKILL.md` to `~/.claude/skills/<name>/SKILL.md`.
+Run `band generate-skills --output-dir apps/cli/skills` to regenerate all six skills, then copy each `<name>/SKILL.md` to `~/.claude/skills/<name>/SKILL.md`.

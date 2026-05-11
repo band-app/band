@@ -3,18 +3,30 @@ use std::fmt::Write;
 use std::fs;
 use std::path::Path;
 
-/// Domain-specific skill templates with `<!-- COMMANDS -->` placeholders.
+/// Skill templates rendered by `band generate-skills`.
 ///
-/// Each template has a `commands:` frontmatter field that lists the
-/// space-separated command-name prefixes from the CLI schema that should be
-/// embedded into that skill's COMMANDS section. Splitting the monolithic
-/// skill into focused per-domain skills improves trigger precision and keeps
-/// each generated SKILL.md scoped to one task type (issue #331).
+/// Two shapes are supported:
+///
+/// 1. **Reference-shaped** (e.g. `band`, `band-chat`) — the template body
+///    contains a `<!-- COMMANDS -->` placeholder, and the `commands:`
+///    frontmatter field lists the comma-separated command-name prefixes from
+///    the CLI schema that should be embedded into that skill's auto-generated
+///    Commands section.
+/// 2. **Workflow-shaped** (e.g. `band-start`, `band-loop`) — the template
+///    body contains no `<!-- COMMANDS -->` placeholder; the skill is a
+///    self-contained recipe rather than a command reference. Such templates
+///    may omit the `commands:` frontmatter field entirely.
+///
+/// Splitting the monolithic skill into focused per-domain skills improves
+/// trigger precision and keeps each generated SKILL.md scoped to one task
+/// type (issue #331).
 const SKILL_TEMPLATES: &[(&str, &str)] = &[
     ("band", include_str!("../skills/band.md")),
     ("band-chat", include_str!("../skills/band-chat.md")),
     ("band-terminal", include_str!("../skills/band-terminal.md")),
     ("band-browser", include_str!("../skills/band-browser.md")),
+    ("band-start", include_str!("../skills/band-start.md")),
+    ("band-loop", include_str!("../skills/band-loop.md")),
 ];
 
 pub fn generate_skills(output_dir: &str, filter: Option<&str>) -> Result<CommandResult, String> {
@@ -34,27 +46,44 @@ pub fn generate_skills(output_dir: &str, filter: Option<&str>) -> Result<Command
             .unwrap_or_else(|| (*default_name).to_string());
         let description = parse_frontmatter_field(template, "description").unwrap_or_default();
         let prefixes = parse_command_prefixes(template);
+        let has_placeholder = template.contains(COMMANDS_PLACEHOLDER);
 
         if !matches_filter(&name, filter) {
             continue;
         }
 
-        if prefixes.is_empty() {
-            return Err(format!(
-                "Skill template '{name}' is missing a non-empty 'commands:' frontmatter field"
-            ));
+        // `commands:` frontmatter and the `<!-- COMMANDS -->` placeholder are
+        // a pair: reference-shaped skills need both, workflow-shaped skills
+        // need neither. Reject mismatches so a template can't silently lose
+        // its rendered Commands section through a typo.
+        match (has_placeholder, prefixes.is_empty()) {
+            (true, true) => {
+                return Err(format!(
+                    "Skill template '{name}' has '<!-- COMMANDS -->' placeholder but is missing a non-empty 'commands:' frontmatter field"
+                ));
+            }
+            (false, false) => {
+                return Err(format!(
+                    "Skill template '{name}' declares 'commands:' frontmatter ({prefixes:?}) but has no '<!-- COMMANDS -->' placeholder in the body"
+                ));
+            }
+            _ => {}
         }
 
-        let matched: Vec<&serde_json::Value> = commands
-            .iter()
-            .filter(|c| {
-                c["name"]
-                    .as_str()
-                    .is_some_and(|cn| matches_any_prefix(cn, &prefixes))
-            })
-            .collect();
+        let matched: Vec<&serde_json::Value> = if prefixes.is_empty() {
+            Vec::new()
+        } else {
+            commands
+                .iter()
+                .filter(|c| {
+                    c["name"]
+                        .as_str()
+                        .is_some_and(|cn| matches_any_prefix(cn, &prefixes))
+                })
+                .collect()
+        };
 
-        if matched.is_empty() {
+        if has_placeholder && matched.is_empty() {
             return Err(format!(
                 "Skill template '{name}' matched no commands from the schema (prefixes: {prefixes:?})"
             ));

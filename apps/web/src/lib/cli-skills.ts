@@ -1,8 +1,9 @@
 /**
  * Sync the CLI-shipped skills (`band`, `band-chat`, `band-terminal`,
- * `band-browser`) into the user's global coding-agent skill directory so the
- * skills become discoverable to the agent right after install / auto-update,
- * without the user having to manually `cp` each SKILL.md after every release.
+ * `band-browser`, `band-start`, `band-loop`) into the user's global
+ * coding-agent skill directory so the skills become discoverable to the agent
+ * right after install / auto-update, without the user having to manually `cp`
+ * each SKILL.md after every release.
  *
  * The skills are not shipped as loose files in the packaged Electron build —
  * they're baked into the Rust `band` binary via `include_str!` (see
@@ -38,8 +39,15 @@ import { findCliBinary } from "./cli";
 import { whichBinary } from "./process-utils";
 import { loadSettings } from "./state";
 
-/** The four skills `band generate-skills` emits. */
-export const BAND_SKILL_NAMES = ["band", "band-chat", "band-terminal", "band-browser"] as const;
+/** The six skills `band generate-skills` emits. */
+export const BAND_SKILL_NAMES = [
+  "band",
+  "band-chat",
+  "band-terminal",
+  "band-browser",
+  "band-start",
+  "band-loop",
+] as const;
 
 const SKILL_FILE = "SKILL.md";
 

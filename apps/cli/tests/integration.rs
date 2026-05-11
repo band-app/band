@@ -2417,14 +2417,21 @@ fn frontmatter_field<'a>(skill: &'a str, key: &'a str) -> Option<&'a str> {
 }
 
 #[test]
-fn generate_skills_emits_all_four_domain_skills() {
+fn generate_skills_emits_all_domain_skills() {
     let tmp = tempfile::tempdir().expect("create tempdir");
     let out = tmp.path();
 
     let output = band_offline(&["generate-skills", "--output-dir", out.to_str().unwrap()]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
-    for name in ["band", "band-chat", "band-terminal", "band-browser"] {
+    for name in [
+        "band",
+        "band-chat",
+        "band-terminal",
+        "band-browser",
+        "band-start",
+        "band-loop",
+    ] {
         let path = out.join(name).join("SKILL.md");
         assert!(
             path.exists(),
@@ -2442,7 +2449,14 @@ fn generate_skills_each_skill_has_non_empty_description() {
     let output = band_offline(&["generate-skills", "--output-dir", out.to_str().unwrap()]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
 
-    for name in ["band", "band-chat", "band-terminal", "band-browser"] {
+    for name in [
+        "band",
+        "band-chat",
+        "band-terminal",
+        "band-browser",
+        "band-start",
+        "band-loop",
+    ] {
         let skill = read_skill(out, name);
         let desc = frontmatter_field(&skill, "description")
             .unwrap_or_else(|| panic!("{name} has no description"));
@@ -2471,6 +2485,20 @@ fn generate_skills_each_skill_has_non_empty_description() {
                 assert!(
                     !lower.contains(" chat ") && !lower.contains("terminal"),
                     "{name} description leaks other domains: {desc}"
+                );
+            }
+            "band-start" => {
+                // band-start's trigger keywords cover kickoff/workspace creation.
+                assert!(
+                    lower.contains("workspace") || lower.contains("kick off"),
+                    "{name}: {desc}"
+                );
+            }
+            "band-loop" => {
+                // band-loop's trigger keywords cover recurring scheduling.
+                assert!(
+                    lower.contains("recurring") || lower.contains("cronjob"),
+                    "{name}: {desc}"
                 );
             }
             _ => {}
@@ -2666,6 +2694,8 @@ fn generate_skills_filter_limits_to_one_skill() {
     assert!(!out.join("band").join("SKILL.md").exists());
     assert!(!out.join("band-terminal").join("SKILL.md").exists());
     assert!(!out.join("band-browser").join("SKILL.md").exists());
+    assert!(!out.join("band-start").join("SKILL.md").exists());
+    assert!(!out.join("band-loop").join("SKILL.md").exists());
 }
 
 #[test]
@@ -2686,19 +2716,30 @@ fn generate_skills_json_output_lists_generated_skills() {
     let skills = json["skills"].as_array().expect("skills array");
     let names: Vec<&str> = skills.iter().map(|s| s["name"].as_str().unwrap()).collect();
 
-    assert_eq!(names.len(), 4, "expected 4 skills, got {names:?}");
-    assert!(names.contains(&"band"));
-    assert!(names.contains(&"band-chat"));
-    assert!(names.contains(&"band-terminal"));
-    assert!(names.contains(&"band-browser"));
+    // Reference-shaped skills must report at least one command. Workflow-
+    // shaped skills (band-start, band-loop) are self-contained recipes that
+    // omit the `commands:` frontmatter, so their commandCount is 0 by design.
+    let workflow_skills: &[&str] = &["band-start", "band-loop"];
 
-    // Every skill must report at least one command.
+    assert_eq!(names.len(), 6, "expected 6 skills, got {names:?}");
+    for expected in [
+        "band",
+        "band-chat",
+        "band-terminal",
+        "band-browser",
+        "band-start",
+        "band-loop",
+    ] {
+        assert!(names.contains(&expected), "missing skill: {expected}");
+    }
+
     for skill in skills {
+        let name = skill["name"].as_str().unwrap_or("?");
         let count = skill["commandCount"].as_u64().unwrap_or(0);
-        assert!(
-            count > 0,
-            "skill {} has no commands",
-            skill["name"].as_str().unwrap_or("?")
-        );
+        if workflow_skills.contains(&name) {
+            assert_eq!(count, 0, "workflow skill {name} unexpectedly has commands");
+        } else {
+            assert!(count > 0, "reference skill {name} has no commands");
+        }
     }
 }
