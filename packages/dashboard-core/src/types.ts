@@ -137,6 +137,17 @@ export interface Settings {
    * @default 3
    */
   maxCachedWorkspaces?: number;
+  /**
+   * Use the GPU-accelerated WebGL renderer for terminal panels. Enables
+   * `customGlyphs` (continuous box-drawing / powerline / block art) and
+   * lets the panel use iTerm-style row spacing (`lineHeight: 1.2`). When
+   * disabled, falls back to xterm.js's DOM renderer with default spacing.
+   * The WebGL renderer requires a working WebGL2 context — on systems
+   * where the context fails to initialize, the terminal silently falls
+   * back to DOM regardless of this setting.
+   * @default true
+   */
+  useWebGLTerminalRenderer?: boolean;
 }
 
 export interface HooksStatus {

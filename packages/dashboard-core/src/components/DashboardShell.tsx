@@ -122,11 +122,23 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar, hideMenu }: Das
   // The native-menu path goes via webview.eval / executeJavaScript — same
   // pattern as the zoom menu. Register the global unconditionally so the
   // hamburger works in the browser too (E2E + web shell).
+  //
+  // Multiple `DashboardShell` instances can be alive concurrently —
+  // DockviewInstanceManager keeps one per cached workspace. They all
+  // race to own the same window global: each mount overwrites the
+  // previous registration. The cleanup must only delete the key if
+  // we still own it; otherwise a stale unmount (LRU eviction or
+  // workspace switch) wipes a newer instance's registration and
+  // leaves the macOS Settings… menu silently broken until full reload.
   useEffect(() => {
     const globalKey = "__bandOpenSettings";
-    (window as unknown as Record<string, unknown>)[globalKey] = () => setShowSettingsDialog(true);
+    const win = window as unknown as Record<string, unknown>;
+    const handler = () => setShowSettingsDialog(true);
+    win[globalKey] = handler;
     return () => {
-      delete (window as unknown as Record<string, unknown>)[globalKey];
+      if (win[globalKey] === handler) {
+        delete win[globalKey];
+      }
     };
   }, []);
 
