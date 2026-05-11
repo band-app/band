@@ -8,6 +8,7 @@ import type { BrowserViewManager } from "../../browser/view-manager.js";
 import type {
   BrowserBoundsArgs,
   BrowserCreateArgs,
+  BrowserEnsureArgs,
   BrowserEvalArgs,
   BrowserKeyArg,
   BrowserNavigateArgs,
@@ -31,4 +32,7 @@ export const browserHandlers = {
   destroy: (ctx: BrowserIpcContext, args: BrowserKeyArg): void => ctx.manager.destroy(args),
   hideAll: (ctx: BrowserIpcContext): void => ctx.manager.hideAll(),
   showAll: (ctx: BrowserIpcContext): void => ctx.manager.showAll(),
+  ensure: (ctx: BrowserIpcContext, args: BrowserEnsureArgs): void => ctx.manager.ensure(args),
+  getCdpTarget: (ctx: BrowserIpcContext, args: BrowserKeyArg): Promise<string> =>
+    ctx.manager.getCdpTargetId(args),
 };

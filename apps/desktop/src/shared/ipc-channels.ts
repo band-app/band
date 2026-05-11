@@ -35,6 +35,11 @@ export const Channels = {
   browserDestroy: "browser_destroy",
   browserHideAllForWorkspace: "browser_hide_all_for_workspace",
   browserShowAllForWorkspace: "browser_show_all_for_workspace",
+  // CDP screencast experiment: bridge for the web/agent to materialise
+  // a Band browser tab as a real WebContentsView and read its
+  // chromium-side targetId.
+  browserEnsure: "browser_ensure",
+  browserGetCdpTarget: "browser_get_cdp_target",
 } as const;
 
 export type ChannelName = (typeof Channels)[keyof typeof Channels];
@@ -42,6 +47,11 @@ export type ChannelName = (typeof Channels)[keyof typeof Channels];
 export const Events = {
   browserUrlChanged: "browser-url-changed",
   browserTitleChanged: "browser-title-changed",
+  /** Emitted when a `WebContentsView` is destroyed (LRU eviction,
+   *  explicit close, or `destroyAll` on app quit). The renderer uses
+   *  this to invalidate the server's bandTabId → cdpTargetId cache via
+   *  the `browserHost.viewDestroyed` tRPC mutation. */
+  browserViewDestroyed: "browser-view-destroyed",
   windowFullscreenChanged: "window-fullscreen-changed",
 } as const;
 

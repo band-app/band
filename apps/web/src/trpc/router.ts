@@ -18,6 +18,12 @@ import {
 } from "../lib/agent-pool";
 import { getPollerActivity, setPollerActivity } from "../lib/branch-status-poller";
 import {
+  type EnsureViewEvent,
+  markTargetDestroyed,
+  onEnsureView,
+  resolveTargetReady,
+} from "../lib/browser-host";
+import {
   deleteBrowserLayout,
   getBrowserLayout,
   removeBrowserFromLayout,
@@ -2704,6 +2710,75 @@ const browsersRouter = t.router({
 });
 
 // ---------------------------------------------------------------------------
+// Browser Host (CDP screencast experiment)
+//
+// The bridge between the web server and the desktop's BrowserViewManager.
+// Workflow:
+//   1. Web client opens /cdp?bandTabId=X (or hits /api/cdp/tabs/X/snapshot).
+//   2. Server calls `ensureCdpTargetId(X)`. Cache miss → `onEnsureView`
+//      listeners fire.
+//   3. Desktop's React (subscribed to `browserHost.ensureView` below)
+//      calls `browser_ensure` IPC, then `browser_get_cdp_target`, then
+//      reports the cdpTargetId back via the `targetReady` mutation.
+//   4. Server resolves the in-flight ensure promise, opens the upstream WS.
+//   5. When the desktop later destroys the view (LRU, explicit close), it
+//      reports via the `viewDestroyed` mutation, clearing the cache.
+// ---------------------------------------------------------------------------
+
+const browserHostRouter = t.router({
+  // Diagnostic: the desktop's BrowserHostBridge calls this on mount so we
+  // can confirm in the server log that the bridge component actually
+  // executed. Drop once the experiment is stable.
+  ping: publicProcedure.input(z.object({ where: z.string() })).mutation(({ input }) => {
+    log.info("browserHost.ping from %s", input.where);
+    return { ok: true };
+  }),
+
+  ensureView: publicProcedure.subscription(async function* (opts) {
+    const queue: EnsureViewEvent[] = [];
+    let resolve: (() => void) | null = null;
+
+    const unsubscribe = onEnsureView((event) => {
+      queue.push(event);
+      resolve?.();
+    });
+
+    opts.signal?.addEventListener("abort", () => {
+      unsubscribe();
+      resolve?.();
+    });
+
+    try {
+      while (!opts.signal?.aborted) {
+        while (queue.length > 0) {
+          yield queue.shift()!;
+        }
+        await new Promise<void>((r) => {
+          resolve = r;
+        });
+        resolve = null;
+      }
+    } finally {
+      unsubscribe();
+    }
+  }),
+
+  targetReady: publicProcedure
+    .input(z.object({ bandTabId: z.string(), cdpTargetId: z.string() }))
+    .mutation(({ input }) => {
+      resolveTargetReady(input.bandTabId, input.cdpTargetId);
+      return { ok: true };
+    }),
+
+  viewDestroyed: publicProcedure
+    .input(z.object({ bandTabId: z.string() }))
+    .mutation(({ input }) => {
+      markTargetDestroyed(input.bandTabId);
+      return { ok: true };
+    }),
+});
+
+// ---------------------------------------------------------------------------
 // Queue (persisted queued messages)
 // ---------------------------------------------------------------------------
 
@@ -3006,6 +3081,7 @@ export const appRouter = t.router({
   chats: chatsRouter,
   browserLayout: browserLayoutRouter,
   browsers: browsersRouter,
+  browserHost: browserHostRouter,
   statuses: statusesRouter,
   status: statusRouter,
   cronjobs: cronjobsRouter,

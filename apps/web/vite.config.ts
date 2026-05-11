@@ -184,6 +184,67 @@ function trpcDevPlugin(): Plugin {
         handleTaskStream(req, res, chatId);
       });
 
+      // CDP screencast experiment: /api/cdp/tabs (DB-backed list per workspace)
+      // + /api/cdp/snapshot/:bandTabId (JPEG via short-lived CDP WS).
+      // Mirrors the routes registered in start-server.ts so dev and prod behave identically.
+      server.middlewares.use(async (req, res, next) => {
+        const url = req.url ?? "";
+
+        const cdpSnapshotMatch = url.match(/^\/api\/cdp\/snapshot\/([^/?]+)/);
+        if (cdpSnapshotMatch) {
+          const bandTabId = decodeURIComponent(cdpSnapshotMatch[1]);
+          const { captureSnapshot } = await server.ssrLoadModule("./src/lib/cdp-targets");
+          try {
+            const jpeg = await captureSnapshot(bandTabId);
+            res.writeHead(200, {
+              "Content-Type": "image/jpeg",
+              "Content-Length": jpeg.length.toString(),
+              "Cache-Control": "no-cache",
+            });
+            res.end(jpeg);
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            res.writeHead(502, { "Content-Type": "text/plain", "Cache-Control": "no-cache" });
+            res.end(message);
+          }
+          return;
+        }
+
+        if (url.startsWith("/api/cdp/tabs")) {
+          const parsed = new URL(url, `http://${req.headers.host}`);
+          const workspaceId = parsed.searchParams.get("workspaceId");
+          if (!workspaceId) {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ tabs: [], error: "Missing workspaceId" }));
+            return;
+          }
+          const { listBrowsers } = await server.ssrLoadModule("./src/lib/browser-manager");
+          const { isDesktopHostConnected } = await server.ssrLoadModule("./src/lib/browser-host");
+          const tabs = listBrowsers(workspaceId).map(
+            (b: { id: string; url: string; name: string }) => ({
+              id: b.id,
+              url: b.url,
+              title: b.name,
+            }),
+          );
+          res.writeHead(200, {
+            "Content-Type": "application/json",
+            "Cache-Control": "no-cache",
+          });
+          res.end(
+            JSON.stringify({
+              tabs,
+              error: isDesktopHostConnected()
+                ? null
+                : "Open the Band desktop app on this machine to use the Browser pane.",
+            }),
+          );
+          return;
+        }
+
+        next();
+      });
+
       server.middlewares.use("/trpc", async (req, res) => {
         // Use ssrLoadModule so Vite handles TS resolution at dev time
         const [{ nodeHTTPRequestHandler }, { createContext }, { appRouter }] = (await Promise.all([
@@ -212,6 +273,7 @@ function trpcDevPlugin(): Plugin {
       const wss = new WebSocketServer({ noServer: true });
       const terminalWss = new WebSocketServer({ noServer: true });
       const lspWss = new WebSocketServer({ noServer: true });
+      const cdpWss = new WebSocketServer({ noServer: true });
       let wssHandlerInitialized = false;
 
       server.httpServer?.on("upgrade", async (req, socket, head) => {
@@ -255,6 +317,21 @@ function trpcDevPlugin(): Plugin {
           return;
         }
 
+        // CDP screencast WebSocket (experiment)
+        if (url.pathname === "/cdp") {
+          try {
+            const { handleCdpConnection } = await server.ssrLoadModule("./src/lib/cdp-proxy");
+            // biome-ignore lint/suspicious/noExplicitAny: ssrLoadModule returns untyped modules
+            cdpWss.handleUpgrade(req, socket, head, (ws: any) => {
+              handleCdpConnection(ws, req);
+            });
+          } catch (err) {
+            log.error("Failed to load CDP proxy module: %s", err);
+            socket.destroy();
+          }
+          return;
+        }
+
         // tRPC WebSocket
         if (!wssHandlerInitialized) {
           const [{ applyWSSHandler }, { createContext }, { appRouter }] = (await Promise.all([
@@ -293,6 +370,7 @@ function trpcDevPlugin(): Plugin {
         wss.close();
         terminalWss.close();
         lspWss.close();
+        cdpWss.close();
         server.ssrLoadModule("./src/lib/terminal-manager").then(({ killAllTerminals }) => {
           killAllTerminals();
         });

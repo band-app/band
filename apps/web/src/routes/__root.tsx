@@ -28,6 +28,7 @@ import {
   Terminal as TerminalIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo } from "react";
+import { BrowserHostBridge } from "../components/BrowserHostBridge";
 import { DesktopTitleBar, type PanelItem } from "../components/DesktopTitleBar";
 import { DockviewInstanceManager } from "../components/DockviewInstanceManager";
 import { ToolbarOverflowMenuItems, ToolbarOverflowProvider } from "../components/ToolbarButtons";
@@ -227,7 +228,9 @@ function AppShell() {
       { id: "changes", label: "Changes", icon: GitCompare, shortcut: "⇧⌘G" },
       { id: "files", label: "Files", icon: FolderOpen, shortcut: "⇧⌘E" },
       { id: "terminal", label: "Terminal", icon: TerminalIcon, shortcut: "⌃`" },
-      ...(isDesktop ? [{ id: "browser", label: "Browser", icon: Globe, shortcut: "⇧⌘B" }] : []),
+      // Browser pane works on both desktop (native webviews) and web (CDP
+      // screencast of the desktop app's tabs — see ScreencastPanel).
+      { id: "browser", label: "Browser", icon: Globe, shortcut: "⇧⌘B" },
     ],
     [],
   );
@@ -299,6 +302,7 @@ function AppShell() {
           <div className="h-full min-w-0 overflow-hidden relative">
             <Outlet />
             <DockviewInstanceManager />
+            <BrowserHostBridge />
           </div>
         </div>
       </div>

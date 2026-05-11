@@ -8,6 +8,10 @@ import { WebSocketServer } from "ws";
 import { createAuthMiddleware, parseCookies, tokensEqual } from "./auth.ts";
 import { handleTaskStream } from "./src/api/task-stream.ts";
 import { stopBranchStatusPoller } from "./src/lib/branch-status-poller.ts";
+import { isDesktopHostConnected } from "./src/lib/browser-host.ts";
+import { listBrowsers } from "./src/lib/browser-manager.ts";
+import { handleCdpConnection } from "./src/lib/cdp-proxy.ts";
+import { captureSnapshot } from "./src/lib/cdp-targets.ts";
 import { loadChatsFromDb } from "./src/lib/chat-manager.ts";
 import { startCronjobScheduler, stopCronjobScheduler } from "./src/lib/cronjob-scheduler.ts";
 import { closeDb } from "./src/lib/db/connection.ts";
@@ -235,6 +239,63 @@ async function main() {
       return;
     }
 
+    // CDP screencast experiment: list Band browser tabs (DB-backed) for
+    // a workspace. The web client renders one dockview panel per tab and
+    // streams via /cdp?bandTabId=<id> when the user picks one.
+    if (req.url?.startsWith("/api/cdp/tabs")) {
+      const url = new URL(req.url, `http://${req.headers.host}`);
+      const workspaceId = url.searchParams.get("workspaceId");
+      if (!workspaceId) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ tabs: [], error: "Missing workspaceId" }));
+        return;
+      }
+      const tabs = listBrowsers(workspaceId).map((b) => ({
+        id: b.id,
+        url: b.url,
+        title: b.name,
+      }));
+      const desktopConnected = isDesktopHostConnected();
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-cache",
+      });
+      res.end(
+        JSON.stringify({
+          tabs,
+          // Surface "open the desktop app" UX when no desktop is subscribed.
+          error: desktopConnected
+            ? null
+            : "Open the Band desktop app on this machine to use the Browser pane.",
+        }),
+      );
+      return;
+    }
+
+    // CDP screencast experiment: snapshot a single Band browser tab as JPEG.
+    // URL: /api/cdp/snapshot/<bandTabId>
+    const cdpSnapshotMatch = req.url?.match(/^\/api\/cdp\/snapshot\/([^/?]+)/);
+    if (cdpSnapshotMatch) {
+      const bandTabId = decodeURIComponent(cdpSnapshotMatch[1]);
+      try {
+        const jpeg = await captureSnapshot(bandTabId);
+        res.writeHead(200, {
+          "Content-Type": "image/jpeg",
+          "Content-Length": jpeg.length.toString(),
+          "Cache-Control": "no-cache",
+        });
+        res.end(jpeg);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        res.writeHead(502, {
+          "Content-Type": "text/plain",
+          "Cache-Control": "no-cache",
+        });
+        res.end(message);
+      }
+      return;
+    }
+
     // Serve OpenAPI spec
     if (req.url === "/api/openapi.json") {
       res.writeHead(200, {
@@ -372,6 +433,11 @@ async function main() {
   // ---------------------------------------------------------------------------
   const lspWss = new WebSocketServer({ noServer: true });
 
+  // ---------------------------------------------------------------------------
+  // WebSocket server for CDP screencast proxy (experiment)
+  // ---------------------------------------------------------------------------
+  const cdpWss = new WebSocketServer({ noServer: true });
+
   httpServer.on("upgrade", (req, socket, head) => {
     // Auth check: validate band_token cookie (skip if no token configured)
     if (expectedToken) {
@@ -394,6 +460,13 @@ async function main() {
     if (url.pathname === "/terminal") {
       terminalWss.handleUpgrade(req, socket, head, (ws) => {
         handleTerminalConnection(ws, req);
+      });
+      return;
+    }
+
+    if (url.pathname === "/cdp") {
+      cdpWss.handleUpgrade(req, socket, head, (ws) => {
+        handleCdpConnection(ws, req);
       });
       return;
     }
@@ -435,6 +508,7 @@ async function main() {
     wss.close();
     terminalWss.close();
     lspWss.close();
+    cdpWss.close();
     httpServer.close();
     closeDb();
     process.exit(0);

@@ -59,11 +59,15 @@ const ALLOWED_INVOKE_CHANNELS = new Set<string>([
   "browser_destroy",
   "browser_hide_all_for_workspace",
   "browser_show_all_for_workspace",
+  // CDP screencast experiment bridge
+  "browser_ensure",
+  "browser_get_cdp_target",
 ]);
 
 const ALLOWED_EVENT_NAMES = new Set<string>([
   "browser-url-changed",
   "browser-title-changed",
+  "browser-view-destroyed",
   "window-fullscreen-changed",
 ]);
 
