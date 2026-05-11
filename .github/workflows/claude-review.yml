@@ -51,17 +51,22 @@ concurrency:
   cancel-in-progress: true
 
 # Minimum permissions the action needs.
-#   contents: read         — to fetch the PR head.
-#   pull-requests: write   — to post review comments.
-#   id-token: write        — claude-code-action@v1 mints its own GitHub App
-#                            token via OIDC at runtime; without this the
-#                            action fails with "Could not fetch an OIDC token".
-# Do NOT add `actions: write` or anything broader unless a future version of
-# the action's docs explicitly requires it.
+#   contents: read       — to fetch the PR head.
+#   pull-requests: write — to post review comments via the workflow's
+#                          auto-provisioned GITHUB_TOKEN (passed explicitly
+#                          to the action below). With github_token supplied,
+#                          the action does NOT require the Claude Code
+#                          GitHub App to be installed on the repo and does
+#                          not need id-token: write for an App-token OIDC
+#                          exchange. Trade-off: review comments are posted
+#                          as `github-actions[bot]` instead of `claude[bot]`.
+#                          If you'd rather have the claude[bot] identity,
+#                          install https://github.com/apps/claude on the
+#                          repo, drop the github_token input below, and
+#                          add `id-token: write` here.
 permissions:
   contents: read
   pull-requests: write
-  id-token: write
 
 jobs:
   review:
@@ -88,6 +93,10 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Use the workflow's auto-provisioned token instead of the
+          # claude[bot] GitHub App. Avoids the App-install requirement;
+          # comments post as github-actions[bot]. See permissions comment.
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
