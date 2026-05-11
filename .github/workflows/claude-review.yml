@@ -5,8 +5,8 @@ name: Claude PR Review
 # WHY pull_request (and NOT pull_request_target):
 #   - pull_request runs against the PR head, which is what we want to review.
 #   - pull_request from forks does NOT receive repository secrets (per GitHub
-#     policy), so even without our author check the ANTHROPIC_API_KEY would
-#     never be exposed to a fork's checked-out code. The author_association
+#     policy), so even without our author check the CLAUDE_CODE_OAUTH_TOKEN
+#     would never be exposed to a fork's checked-out code. The author_association
 #     gate below is therefore a *budget / noise* control — not a credential
 #     boundary. Forks already cannot read the key.
 #   - pull_request_target would run against the base ref WITH secrets exposed.
@@ -51,7 +51,7 @@ concurrency:
   cancel-in-progress: true
 
 # Minimum permissions the action needs.
-#   contents: read       — to fetch the PR head.
+#   contents: read       — read repo metadata via the GitHub API.
 #   pull-requests: write — to post review comments via the workflow's
 #                          auto-provisioned GITHUB_TOKEN (passed explicitly
 #                          to the action below). With github_token supplied,
@@ -72,6 +72,9 @@ jobs:
   review:
     name: Claude review
     runs-on: ubuntu-latest
+    # Hard cap so a runaway action doesn't hold the concurrency slot for
+    # hours or drain subscription quota. Reviews usually finish in <5 min.
+    timeout-minutes: 15
 
     # Budget gate — see header comment. OWNER / MEMBER / COLLABORATOR are the
     # three "trusted" author_association values; everything else (CONTRIBUTOR,
@@ -80,12 +83,13 @@ jobs:
       contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'),
                github.event.pull_request.author_association)
 
+    # No checkout step: Claude only has the `gh pr diff` / `gh pr view`
+    # subcommands (see claude_args below) plus the GitHub inline-comment
+    # tool — no `Read` or general `Bash` — so a checked-out working
+    # directory would be inert. The action fetches PR context over the
+    # GitHub API using github_token. If you later grant Claude file-system
+    # access, add `actions/checkout@v6` back here.
     steps:
-      - name: Checkout PR head
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 1
-
       - name: Run Claude review
         # Pinned to the v1 stable tag of the official Anthropic action.
         # See https://github.com/anthropics/claude-code-action/releases — bump
@@ -101,9 +105,8 @@ jobs:
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
 
-            Please review this pull request. The PR branch is checked out in
-            the working directory; you can also use `gh pr diff` and
-            `gh pr view` for context.
+            Please review this pull request. Use `gh pr diff` and `gh pr view`
+            for the changes and PR metadata.
 
             Focus on:
             - Correctness and obvious bugs.
@@ -116,5 +119,5 @@ jobs:
             Use inline review comments for specific findings (cite line
             numbers). Use a single top-level comment for the overall summary.
             Be specific and actionable; skip generic praise.
-          claude_args: |
+          claude_args: |-
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
