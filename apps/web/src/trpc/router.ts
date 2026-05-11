@@ -63,7 +63,7 @@ import { fuzzyScore } from "../lib/fuzzy-score";
 import { execGit, gitCmd, listWorktrees } from "../lib/git";
 import { checkHooks, installHooks } from "../lib/hooks";
 import { killWorkspaceServers } from "../lib/lsp-manager";
-import { resolvePendingInput } from "../lib/pending-inputs";
+import { hasPendingInputForWorkspace, resolvePendingInput } from "../lib/pending-inputs";
 import { checkPrereqs, shellPath } from "../lib/process-utils";
 import { loadProjectConfig } from "../lib/project-config";
 import {
@@ -2083,6 +2083,16 @@ const statusesRouter = t.router({
         if (existing) {
           emit({ kind: "update", status: existing });
         }
+        return { ok: true };
+      }
+      // The agent is still blocked on an AskUserQuestion / ExitPlanMode
+      // prompt — the user hasn't answered yet. Don't clear the indicator
+      // just because they navigated to the workspace; the indicator must
+      // stay on until the user actually answers (which calls
+      // resolvePendingInput, and onUserInputNeeded then flips the status
+      // back to "working").
+      if (hasPendingInputForWorkspace(input.workspaceId)) {
+        emit({ kind: "update", status: existing });
         return { ok: true };
       }
       const status = upsertWorkspaceStatus(input.workspaceId, { status: "waiting" });

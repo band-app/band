@@ -440,7 +440,7 @@ async function runTask(chatId: string, task: InternalTask) {
     const needsAttention = upsertWorkspaceStatus(task.workspaceId, { status: "needs_attention" });
     emitStatusEvent({ kind: "update", status: needsAttention });
 
-    const answers = await createPendingInput(request.approvalId);
+    const answers = await createPendingInput(request.approvalId, task.workspaceId);
 
     // Restore working status after user responds
     const restored = upsertWorkspaceStatus(task.workspaceId, { status: "working" });
