@@ -50,12 +50,18 @@ concurrency:
   group: claude-review-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
-# Minimum permissions the action needs to read the diff and post a review.
-# Do NOT add id-token, actions: write, or other broad scopes unless the
-# action's docs explicitly require them for a feature you're using.
+# Minimum permissions the action needs.
+#   contents: read         — to fetch the PR head.
+#   pull-requests: write   — to post review comments.
+#   id-token: write        — claude-code-action@v1 mints its own GitHub App
+#                            token via OIDC at runtime; without this the
+#                            action fails with "Could not fetch an OIDC token".
+# Do NOT add `actions: write` or anything broader unless a future version of
+# the action's docs explicitly requires it.
 permissions:
   contents: read
   pull-requests: write
+  id-token: write
 
 jobs:
   review:
