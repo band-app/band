@@ -51,7 +51,7 @@ concurrency:
   cancel-in-progress: true
 
 # Minimum permissions the action needs.
-#   contents: read       — read repo metadata via the GitHub API.
+#   contents: read       — to clone the PR head and fetch base for diff.
 #   pull-requests: write — to post review comments via the workflow's
 #                          auto-provisioned GITHUB_TOKEN (passed explicitly
 #                          to the action below). With github_token supplied,
@@ -83,13 +83,17 @@ jobs:
       contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'),
                github.event.pull_request.author_association)
 
-    # No checkout step: Claude only has the `gh pr diff` / `gh pr view`
-    # subcommands (see claude_args below) plus the GitHub inline-comment
-    # tool — no `Read` or general `Bash` — so a checked-out working
-    # directory would be inert. The action fetches PR context over the
-    # GitHub API using github_token. If you later grant Claude file-system
-    # access, add `actions/checkout@v6` back here.
+    # Checkout is required by the action itself — it runs
+    # `git fetch origin main` internally to compute diff context — even
+    # though Claude's tool palette (see claude_args below) is restricted
+    # to `gh pr diff` / `gh pr view` and the inline-comment MCP tool, with
+    # no `Read` or general `Bash` access to the checked-out tree.
     steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
       - name: Run Claude review
         # Pinned to the v1 stable tag of the official Anthropic action.
         # See https://github.com/anthropics/claude-code-action/releases — bump
@@ -105,8 +109,10 @@ jobs:
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
 
-            Please review this pull request. Use `gh pr diff` and `gh pr view`
-            for the changes and PR metadata.
+            Please review this pull request. The repository is checked out
+            for the action's internal use, but your tool palette is
+            restricted to `gh pr diff` and `gh pr view` — use those for the
+            changes and PR metadata.
 
             Focus on:
             - Correctness and obvious bugs.
