@@ -87,6 +87,10 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     settings.maxCachedWorkspaces?.toString() ?? "",
   );
   const [selectedTheme, setSelectedTheme] = useState<Theme>(settings.theme ?? "system");
+  // Default true — see Settings.useWebGLTerminalRenderer JSDoc.
+  const [useWebGLTerminalRenderer, setUseWebGLTerminalRenderer] = useState(
+    settings.useWebGLTerminalRenderer ?? true,
+  );
   const [agentModels, setAgentModels] = useState<
     Record<string, { id: string; name: string; description?: string; contextWindow?: number }[]>
   >({});
@@ -128,6 +132,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     if (enableLSP !== (settings.enableLSP ?? false)) return true;
     if (maxCachedWorkspaces !== (settings.maxCachedWorkspaces?.toString() ?? "")) return true;
     if (selectedTheme !== (settings.theme ?? "system")) return true;
+    if (useWebGLTerminalRenderer !== (settings.useWebGLTerminalRenderer ?? true)) return true;
     return false;
   }, [
     worktreesDir,
@@ -141,6 +146,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     enableLSP,
     maxCachedWorkspaces,
     selectedTheme,
+    useWebGLTerminalRenderer,
     settings,
   ]);
 
@@ -156,6 +162,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     setEnableLSP(settings.enableLSP ?? false);
     setMaxCachedWorkspaces(settings.maxCachedWorkspaces?.toString() ?? "");
     setSelectedTheme(settings.theme ?? "system");
+    setUseWebGLTerminalRenderer(settings.useWebGLTerminalRenderer ?? true);
   }, [
     settings.worktreesDir,
     settings.codingAgents,
@@ -167,6 +174,7 @@ export function SettingsPage({ open, onOpenChange }: Props) {
     settings.enableLSP,
     settings.maxCachedWorkspaces,
     settings.theme,
+    settings.useWebGLTerminalRenderer,
   ]);
 
   const handleBrowse = async () => {
@@ -200,10 +208,18 @@ export function SettingsPage({ open, onOpenChange }: Props) {
       notifications: { soundOnNeedsAttention, sound: selectedSound },
       labels: labels.length > 0 ? labels : undefined,
       tokenSecret: settings.tokenSecret,
-      autoStartTunnel: autoStartTunnel || undefined,
-      enableLSP: enableLSP || undefined,
+      // Always send explicit booleans rather than `value || undefined`.
+      // `saveSettings` does a shallow merge with the on-disk file, so
+      // sending `undefined` (or omitting the key) keeps whatever value
+      // was there before — meaning once a user ever turned a toggle on,
+      // they could never turn it back off through the UI (and vice
+      // versa, depending on the default). Sending the value
+      // unconditionally avoids that trap.
+      autoStartTunnel,
+      enableLSP,
       maxCachedWorkspaces: parsedMaxCachedWorkspaces,
       theme: selectedTheme,
+      useWebGLTerminalRenderer,
     });
   };
 
@@ -634,6 +650,21 @@ export function SettingsPage({ open, onOpenChange }: Props) {
                   id="auto-start-tunnel"
                   checked={autoStartTunnel}
                   onCheckedChange={setAutoStartTunnel}
+                />
+              </SettingsRow>
+            </SettingsSection>
+
+            {/* ── Terminal ───────────────────────────────────── */}
+            <SettingsSection title="Terminal">
+              <SettingsRow
+                htmlFor="use-webgl-terminal-renderer"
+                label="GPU-accelerated rendering"
+                description="Render terminal panels with WebGL. Enables continuous box-drawing, powerline, and block-element glyphs, and iTerm-style row spacing. Falls back to the DOM renderer automatically if WebGL is unavailable. Reopen the terminal for changes to take effect."
+              >
+                <Switch
+                  id="use-webgl-terminal-renderer"
+                  checked={useWebGLTerminalRenderer}
+                  onCheckedChange={setUseWebGLTerminalRenderer}
                 />
               </SettingsRow>
             </SettingsSection>
