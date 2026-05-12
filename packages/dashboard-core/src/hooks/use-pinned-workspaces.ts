@@ -86,10 +86,13 @@ export function usePinnedWorkspaces() {
     },
   });
 
+  // Depend on `mutation.mutate` (stable across renders) rather than the
+  // `mutation` object itself, which `useMutation` re-creates every render
+  // and would defeat the memoisation here.
   const toggle = useCallback(
     (project: string, branch: string, currentlyPinned: boolean) =>
       mutation.mutate({ project, branch, pinned: !currentlyPinned }),
-    [mutation],
+    [mutation.mutate],
   );
 
   return { pinned, isPinned, toggle };

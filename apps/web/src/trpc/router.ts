@@ -174,9 +174,7 @@ const projectsRouter = t.router({
               branch: wt.branch,
               path: wt.path,
               head: wt.head,
-              // `trackedBranches.has(...)` guarantees `trackedByBranch.get(...)`
-              // returns a value, so the `!` non-null assertion is safe here.
-              pinned: trackedByBranch.get(wt.branch)!.pinned,
+              pinned: trackedByBranch.get(wt.branch)?.pinned ?? false,
             }));
         } catch {
           // Fall back to state.json worktrees
