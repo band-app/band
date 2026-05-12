@@ -231,6 +231,27 @@ export function TerminalPanel({
         try {
           const addon = new XWebglAddon({ customGlyphs: true });
           terminal.loadAddon(addon);
+          // The WebGL addon appends a <canvas> to `.xterm-screen` and only sets
+          // width/height — no `pointer-events` or `touch-action`. That canvas
+          // sits on top of `.xterm-helper-textarea`, the hidden element xterm.js
+          // uses to receive keyboard focus and synthesize taps. On iOS Safari
+          // the opaque canvas swallows every touch: taps never reach the helper
+          // textarea (so the soft keyboard never appears), our drag-to-scroll
+          // handler doesn't fire reliably, and long-press selection is dead.
+          // The canvas is purely a render target — it never needs DOM events —
+          // so disable pointer/touch handling on it. We re-run this on every
+          // `attachWebGL()` invocation so the `onContextLoss` recovery path
+          // (which appends a fresh canvas) doesn't reintroduce the regression.
+          const screenEl = containerRef.current?.querySelector(
+            ".xterm-screen",
+          ) as HTMLElement | null;
+          const webglCanvas = screenEl?.querySelector(
+            ":scope > canvas:last-of-type",
+          ) as HTMLCanvasElement | null;
+          if (webglCanvas) {
+            webglCanvas.style.pointerEvents = "none";
+            webglCanvas.style.touchAction = "none";
+          }
           webglAddonRef.current = addon;
           webglContextLossDisposable?.dispose();
           webglContextLossDisposable = addon.onContextLoss(() => {
@@ -336,6 +357,53 @@ export function TerminalPanel({
       containerEl.addEventListener("touchend", onTouchEnd, { passive: true });
       containerEl.addEventListener("touchcancel", onTouchEnd, { passive: true });
 
+      // Mobile focus-on-tap. Disabling `pointer-events` on the WebGL canvas
+      // (see `attachWebGL` above) lets touches reach `.xterm-screen`, but
+      // xterm.js's built-in click→focus path doesn't reliably re-engage the
+      // iOS soft keyboard in two scenarios:
+      //   1. Split terminals — tapping another panel needs to move focus to
+      //      that panel's `.xterm-helper-textarea`, but the synthesized click
+      //      via the canvas+pointer-events-none layout doesn't always trigger
+      //      xterm's internal focus call.
+      //   2. After the user taps "Done" on the soft keyboard, the textarea is
+      //      blurred. iOS only re-opens the keyboard when `.focus()` is called
+      //      synchronously inside a user gesture.
+      // Bind our own touchstart/touchend that explicitly calls
+      // `terminal.focus()` on taps (touches that release within ~10px of where
+      // they started). Larger movements are scroll drags handled by the scroll
+      // handler above — we deliberately skip focus there so a flick-to-scroll
+      // doesn't accidentally pop the keyboard.
+      let tapStartX: number | null = null;
+      let tapStartY: number | null = null;
+      const onTapStart = (e: TouchEvent) => {
+        if (e.touches.length === 1) {
+          tapStartX = e.touches[0].clientX;
+          tapStartY = e.touches[0].clientY;
+        } else {
+          tapStartX = null;
+          tapStartY = null;
+        }
+      };
+      const onTapEnd = (e: TouchEvent) => {
+        const startX = tapStartX;
+        const startY = tapStartY;
+        tapStartX = null;
+        tapStartY = null;
+        if (startX === null || startY === null || e.changedTouches.length !== 1) return;
+        const dx = Math.abs(e.changedTouches[0].clientX - startX);
+        const dy = Math.abs(e.changedTouches[0].clientY - startY);
+        if (dx < 10 && dy < 10) {
+          terminal.focus();
+        }
+      };
+      const onTapCancel = () => {
+        tapStartX = null;
+        tapStartY = null;
+      };
+      containerEl.addEventListener("touchstart", onTapStart, { passive: true });
+      containerEl.addEventListener("touchend", onTapEnd, { passive: true });
+      containerEl.addEventListener("touchcancel", onTapCancel, { passive: true });
+
       // Connect WebSocket
       const proto = location.protocol === "https:" ? "wss:" : "ws:";
       const ws = new WebSocket(
@@ -431,6 +499,9 @@ export function TerminalPanel({
         containerEl.removeEventListener("touchmove", onTouchMove);
         containerEl.removeEventListener("touchend", onTouchEnd);
         containerEl.removeEventListener("touchcancel", onTouchEnd);
+        containerEl.removeEventListener("touchstart", onTapStart);
+        containerEl.removeEventListener("touchend", onTapEnd);
+        containerEl.removeEventListener("touchcancel", onTapCancel);
         ws.close();
         // `terminal.dispose()` cascades to all loaded addons (including the
         // WebGL addon if present), so we don't need to dispose it manually.
