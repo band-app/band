@@ -187,9 +187,19 @@ jobs:
             ~/.cargo/git
           key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
 
+      # NOTE on placement: save steps land here, after `Test (CLI)` and
+      # before `Build desktop`. That's fine today because no Cargo step
+      # runs after this point — TypeScript/Node desktop build doesn't
+      # touch apps/cli/target. If a future Rust step is added later in
+      # the job, move both save steps to the very end so its output
+      # gets cached.
       - name: Save CLI target cache
+        # No `success()` — GitHub Actions applies it implicitly when no
+        # status function is present in the expression. Mirroring that
+        # default keeps the contrast with the registry-save `always()`
+        # explicit: registry saves even on failure/cancel, CLI target
+        # only on a clean run (so we don't cache broken incremental state).
         if: |
-          success() &&
           steps.cache-cargo-cli.outputs.cache-hit != 'true' &&
           ((github.event_name != 'pull_request' &&
             github.event_name != 'pull_request_target') ||
