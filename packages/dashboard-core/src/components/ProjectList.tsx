@@ -39,6 +39,7 @@ import {
   Folder,
   FolderOpen,
   ListMinus,
+  Pin,
   Plus,
   Tag,
 } from "lucide-react";
@@ -46,10 +47,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useCapabilities } from "../context";
 import {
   LABELS_COLLAPSE_KEY,
+  PINNED_COLLAPSE_KEY,
+  PINNED_SECTION_ID,
   PROJECTS_COLLAPSE_KEY,
   UNLABELED_KEY,
   useCollapseState,
 } from "../hooks/use-collapse-state";
+import { usePinnedWorkspaces } from "../hooks/use-pinned-workspaces";
 import {
   useRemoveProject,
   useRemoveWorkspace,
@@ -86,6 +90,12 @@ interface SortableProjectProps {
   workspaceIndexStart: number;
   collapsed: boolean;
   onToggleCollapse: (name: string) => void;
+  /**
+   * True when the project had at least one worktree before pinned ones were
+   * filtered out. Used to suppress the misleading "No workspaces yet" message
+   * when all worktrees are pinned and shown in the Pinned section instead.
+   */
+  hasPinnedSiblings?: boolean;
 }
 
 function SortableProject({
@@ -102,6 +112,7 @@ function SortableProject({
   workspaceIndexStart,
   collapsed,
   onToggleCollapse,
+  hasPinnedSiblings,
 }: SortableProjectProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: project.name,
@@ -241,7 +252,9 @@ function SortableProject({
       {!collapsed && (
         <div className="flex flex-col gap-0.5 overflow-hidden">
           {project.worktrees.length === 0 ? (
-            <p className="text-sm text-muted-foreground px-4 py-2">No workspaces yet</p>
+            hasPinnedSiblings ? null : (
+              <p className="text-sm text-muted-foreground px-4 py-2">No workspaces yet</p>
+            )
           ) : (
             project.worktrees.map((wt) => {
               const wsId = toWorkspaceId(project.name, wt.branch);
@@ -352,6 +365,8 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
 
   const projectCollapse = useCollapseState(PROJECTS_COLLAPSE_KEY);
   const labelCollapse = useCollapseState(LABELS_COLLAPSE_KEY);
+  const pinnedCollapse = useCollapseState(PINNED_COLLAPSE_KEY);
+  const { pinned: pinnedEntries } = usePinnedWorkspaces();
 
   // Two sensors so reorder works without an explicit "edit" toggle:
   //  • MouseSensor — desktop pointers can drag immediately; an 8px distance
@@ -363,12 +378,37 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
     useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
   );
 
+  // Each pinned workspace is rendered exclusively in the Pinned section, so
+  // we strip pinned worktrees out of the regular tree. Track which projects
+  // had any pinned worktrees so SortableProject can hide the misleading
+  // "No workspaces yet" copy when the only reason a project looks empty is
+  // that everything got pinned.
+  const { displayProjects, projectsWithPinned } = useMemo(() => {
+    const withPinned = new Set<string>();
+    const display = projects.map((p) => {
+      const filtered = p.worktrees.filter((w) => !w.pinned);
+      if (filtered.length !== p.worktrees.length) withPinned.add(p.name);
+      return { ...p, worktrees: filtered };
+    });
+    return { displayProjects: display, projectsWithPinned: withPinned };
+  }, [projects]);
+
+  const pinnedSectionCollapsed = pinnedCollapse.isCollapsed(PINNED_SECTION_ID);
+  const showPinnedSection = pinnedEntries.length > 0;
+  const pinnedNavCount = showPinnedSection && !pinnedSectionCollapsed ? pinnedEntries.length : 0;
+
   const groups = useMemo(() => {
     if (labels.length === 0)
-      return [{ labelId: null as string | null, label: null as LabelDefinition | null, projects }];
+      return [
+        {
+          labelId: null as string | null,
+          label: null as LabelDefinition | null,
+          projects: displayProjects,
+        },
+      ];
 
     const byLabel = new Map<string | null, ProjectInfo[]>();
-    for (const p of projects) {
+    for (const p of displayProjects) {
       const key = p.label ?? null;
       if (!byLabel.has(key)) byLabel.set(key, []);
       byLabel.get(key)!.push(p);
@@ -390,7 +430,7 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
       result.push({ labelId: null, label: null, projects: unlabeled });
     }
     return result;
-  }, [projects, labels]);
+  }, [displayProjects, labels]);
 
   const visibleGroups = useMemo(() => {
     if (!labelFilter) return groups;
@@ -400,10 +440,12 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
   // Only count workspaces that are actually rendered — collapsed
   // projects/labels hide their workspaces entirely, and keyboard arrow
   // navigation must skip over them so focus never lands on something the
-  // user can't see.
+  // user can't see. Pinned workspaces are always at the top of the list
+  // (independent of label filter), then the regular tree follows.
   const allWorkspaceIds = useMemo(() => {
     const headerVisible = labels.length > 0 && !labelFilter;
-    return visibleGroups.flatMap((g) => {
+    const pinnedPart = pinnedNavCount > 0 ? pinnedEntries.map((e) => e.workspaceId) : [];
+    const rest = visibleGroups.flatMap((g) => {
       const groupKey = g.labelId ?? UNLABELED_KEY;
       if (headerVisible && labelCollapse.isCollapsed(groupKey)) return [];
       return g.projects.flatMap((p) => {
@@ -411,11 +453,22 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
         return p.worktrees.map((wt) => toWorkspaceId(p.name, wt.branch));
       });
     });
-  }, [visibleGroups, labels.length, labelFilter, labelCollapse, projectCollapse]);
+    return [...pinnedPart, ...rest];
+  }, [
+    visibleGroups,
+    labels.length,
+    labelFilter,
+    labelCollapse,
+    projectCollapse,
+    pinnedEntries,
+    pinnedNavCount,
+  ]);
 
   const workspaceIndexMap = useMemo(() => {
     const map = new Map<string, number>();
-    let index = 0;
+    // Reserve slots [0..pinnedNavCount) for pinned workspaces so per-project
+    // workspaceIndexStart values align with allWorkspaceIds.
+    let index = pinnedNavCount;
     const headerVisible = labels.length > 0 && !labelFilter;
     for (const group of visibleGroups) {
       const groupKey = group.labelId ?? UNLABELED_KEY;
@@ -428,7 +481,7 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
       }
     }
     return map;
-  }, [visibleGroups, labels.length, labelFilter, labelCollapse, projectCollapse]);
+  }, [visibleGroups, labels.length, labelFilter, labelCollapse, projectCollapse, pinnedNavCount]);
 
   useEffect(() => {
     if (keyboardNavRef.current) return;
@@ -441,23 +494,49 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
   }, [activeWorkspaceId, allWorkspaceIds]);
 
   // Reveal the active workspace in the tree by auto-expanding the project
-  // and label group it belongs to. This runs when activeWorkspaceId changes
-  // — typically from the Ctrl+R workspace switcher (WorkspacePickerDialog),
-  // but also for any other external activation (URL nav, notifications,
-  // etc.). It deliberately depends only on activeWorkspaceId (plus the
-  // structural inputs needed to locate the workspace) so a user who
-  // manually re-collapses a project doesn't get fought by this effect on
-  // every render.
+  // and label group it belongs to. This should run ONLY when
+  // activeWorkspaceId changes — i.e. when the user switches workspaces via
+  // the Ctrl+R picker, URL nav, notifications, etc. After the initial
+  // reveal we deliberately leave the collapse state alone so the user can
+  // collapse the ancestors of the active workspace (via the "Collapse all"
+  // toolbar button or by clicking a header) without this effect fighting
+  // back on the very next render.
+  //
+  // The naive implementation would include only `activeWorkspaceId` in the
+  // deps, but we also reference `labelCollapse`/`projectCollapse` inside
+  // (their references change on every state update), `groups` (which we
+  // walk), and `pinnedEntries` (for the pinned-workspace early-exit).
+  // Including all of those in the deps makes the effect re-fire on every
+  // collapse-state change and undo the user's collapse. To preserve the
+  // "once per activeWorkspaceId" semantics while keeping the deps list
+  // exhaustive, we gate the body behind a ref that remembers the last
+  // revealed id — subsequent runs no-op until activeWorkspaceId actually
+  // changes.
   //
   // We also clear keyboardNavRef so the focusedIndex effect above can
   // re-run and move the highlight ring to the freshly-revealed workspace.
   // Without that reset, arrow-key navigation followed by a Ctrl+R switch
   // would leave the highlight stuck on the old position.
   //
-  // If the active workspace falls outside the current label filter we
-  // don't bother expanding anything — it won't be rendered regardless.
+  // Pinned workspaces are rendered exclusively in the Pinned section at
+  // the top of the tree (and are filtered out of `groups` via
+  // `displayProjects`). They have no presence inside their project's
+  // worktree list, so for a pinned active workspace we reveal it by
+  // expanding the Pinned section header — not the project or label group
+  // that contains its (now hidden) original entry.
+  const revealedWorkspaceRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!activeWorkspaceId) return;
+    if (!activeWorkspaceId) {
+      revealedWorkspaceRef.current = null;
+      return;
+    }
+    if (revealedWorkspaceRef.current === activeWorkspaceId) return;
+    revealedWorkspaceRef.current = activeWorkspaceId;
+    if (pinnedEntries.some((e) => e.workspaceId === activeWorkspaceId)) {
+      pinnedCollapse.expand(PINNED_SECTION_ID);
+      keyboardNavRef.current = false;
+      return;
+    }
     for (const group of groups) {
       for (const project of group.projects) {
         const containsActive = project.worktrees.some(
@@ -474,7 +553,16 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
         return;
       }
     }
-  }, [activeWorkspaceId, groups, labelFilter, labels.length, labelCollapse, projectCollapse]);
+  }, [
+    activeWorkspaceId,
+    groups,
+    labelFilter,
+    labels.length,
+    labelCollapse,
+    projectCollapse,
+    pinnedCollapse,
+    pinnedEntries,
+  ]);
 
   // Focus the container so keyboard navigation works immediately.
   // Depends on hasProjects because the container div only renders when
@@ -609,6 +697,47 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
         }}
         className="flex flex-col gap-0.5 outline-none min-w-0"
       >
+        {/* Pinned section — rendered outside DndContext/SortableContext so
+            pinned workspaces cannot be touched by project drag-and-drop. It
+            also ignores the label filter (pinned ws should always be
+            visible) and is the *only* place pinned workspaces render. */}
+        {showPinnedSection && (
+          <div key="__pinned">
+            <button
+              type="button"
+              onClick={() => pinnedCollapse.toggle(PINNED_SECTION_ID)}
+              aria-expanded={!pinnedSectionCollapsed}
+              className="flex h-9 w-full items-center gap-2 pl-3 pr-4 mb-0.5 text-left transition-colors hover:bg-primary/10 bg-accent"
+            >
+              <Pin className="size-3.5 -rotate-45 text-muted-foreground" />
+              <span className="text-sm font-semibold text-foreground/80">Pinned</span>
+              <ChevronRight
+                className={`ml-auto size-3.5 shrink-0 text-muted-foreground transition-transform ${
+                  pinnedSectionCollapsed ? "" : "rotate-90"
+                }`}
+              />
+            </button>
+            {!pinnedSectionCollapsed && (
+              <div className="flex flex-col gap-0.5 px-2">
+                {pinnedEntries.map(({ project, worktree, workspaceId }, i) => (
+                  <WorkspaceCard
+                    key={workspaceId}
+                    worktree={worktree}
+                    projectName={project.name}
+                    defaultBranch={project.defaultBranch}
+                    status={statuses.get(workspaceId)}
+                    branchStatus={branchStatuses.get(workspaceId)}
+                    setupStatus={setupStatuses.get(workspaceId)}
+                    isFocused={i === focusedIndex}
+                    onShowDeleteDialog={setDeleteDialog}
+                    showProjectName
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}
@@ -659,6 +788,7 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
                           workspaceIndexStart={workspaceIndexMap.get(project.name) ?? 0}
                           collapsed={projectCollapse.isCollapsed(project.name)}
                           onToggleCollapse={projectCollapse.toggle}
+                          hasPinnedSiblings={projectsWithPinned.has(project.name)}
                         />
                       </div>
                     ))}

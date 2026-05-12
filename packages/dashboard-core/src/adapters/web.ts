@@ -81,6 +81,10 @@ export class WebDashboardAdapter implements DashboardAdapter {
     await this.trpc.workspaces.remove.mutate({ project, branch });
   }
 
+  async setWorkspacePinned(project: string, branch: string, pinned: boolean): Promise<void> {
+    await this.trpc.workspaces.setPinned.mutate({ project, branch, pinned });
+  }
+
   async clearNeedsAttention(workspaceId: string): Promise<void> {
     await this.trpc.statuses.clearNeedsAttention.mutate({ workspaceId });
   }

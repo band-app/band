@@ -2,6 +2,7 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuSeparator,
   ContextMenuTrigger,
   Tooltip,
   TooltipContent,
@@ -12,12 +13,15 @@ import {
   ArrowUpFromLine,
   Clipboard,
   FolderOpen,
+  Pin,
+  PinOff,
   Play,
   Square,
   Trash2,
 } from "lucide-react";
 import { memo, useEffect, useRef } from "react";
 import { useCapabilities } from "../context";
+import { usePinnedWorkspaces } from "../hooks/use-pinned-workspaces";
 import { useRemoveWorkspace } from "../hooks/use-project-mutations";
 import { toWorkspaceId } from "../lib/workspace-id";
 import { useDashboardStore } from "../stores/index";
@@ -42,6 +46,12 @@ interface Props {
   setupStatus?: SetupStatus;
   isFocused?: boolean;
   onShowDeleteDialog: (info: DeleteDialogInfo) => void;
+  /**
+   * When true (e.g. inside the Pinned section), render the branch label as
+   * `{project}/{branch}` instead of just `{branch}` so the user can tell
+   * cards apart when they're mixed across projects.
+   */
+  showProjectName?: boolean;
 }
 
 export const WorkspaceCard = memo(function WorkspaceCard({
@@ -53,6 +63,7 @@ export const WorkspaceCard = memo(function WorkspaceCard({
   setupStatus,
   isFocused,
   onShowDeleteDialog,
+  showProjectName,
 }: Props) {
   const cardRef = useRef<HTMLDivElement>(null);
   const capabilities = useCapabilities();
@@ -69,6 +80,8 @@ export const WorkspaceCard = memo(function WorkspaceCard({
   const gitPull = useDashboardStore((s) => s.gitPull);
   const gitPush = useDashboardStore((s) => s.gitPush);
   const removeWorkspaceMutation = useRemoveWorkspace();
+  const { toggle: togglePinned } = usePinnedWorkspaces();
+  const isPinned = worktree.pinned ?? false;
 
   const workspaceId = toWorkspaceId(projectName, worktree.branch);
   const isActive = useDashboardStore((s) => s.activeWorkspaceId === workspaceId);
@@ -131,11 +144,13 @@ export const WorkspaceCard = memo(function WorkspaceCard({
                 <span
                   className={`text-sm truncate ${isActive ? "font-semibold text-foreground" : "font-medium text-muted-foreground"}`}
                 >
-                  {worktree.branch}
+                  {showProjectName ? `${projectName}/${worktree.branch}` : worktree.branch}
                 </span>
               </div>
             </TooltipTrigger>
-            <TooltipContent side="top">{worktree.branch}</TooltipContent>
+            <TooltipContent side="top">
+              {showProjectName ? `${projectName}/${worktree.branch}` : worktree.branch}
+            </TooltipContent>
           </Tooltip>
           <div className="hidden @[10rem]:flex group-hover:flex items-center gap-2 shrink-0 ml-auto pl-2">
             <SetupStatusIndicator setup={setupStatus} />
@@ -145,6 +160,11 @@ export const WorkspaceCard = memo(function WorkspaceCard({
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
+        <ContextMenuItem onClick={() => togglePinned(projectName, worktree.branch, isPinned)}>
+          {isPinned ? <PinOff /> : <Pin />}
+          {isPinned ? "Unpin workspace" : "Pin workspace"}
+        </ContextMenuItem>
+        <ContextMenuSeparator />
         {capabilities.copyPath && (
           <ContextMenuItem onClick={() => navigator.clipboard.writeText(worktree.path)}>
             <Clipboard />

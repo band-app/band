@@ -162,6 +162,9 @@ const projectsRouter = t.router({
         // from `git worktree list` and shows just-deleted workspaces until
         // the background cleanup completes.
         const trackedBranches = new Set(project.worktrees.map((wt) => wt.branch));
+        // Map by branch so we can preserve metadata (e.g. `pinned`) that git
+        // doesn't know about when merging git's view with our tracked state.
+        const trackedByBranch = new Map(project.worktrees.map((wt) => [wt.branch, wt]));
         let worktrees = project.worktrees;
         try {
           const gitWorktrees = await listWorktrees(project.path);
@@ -171,6 +174,7 @@ const projectsRouter = t.router({
               branch: wt.branch,
               path: wt.path,
               head: wt.head,
+              pinned: trackedByBranch.get(wt.branch)?.pinned ?? false,
             }));
         } catch {
           // Fall back to state.json worktrees
@@ -187,6 +191,7 @@ const projectsRouter = t.router({
             return {
               ...wt,
               workspaceId,
+              pinned: trackedByBranch.get(wt.branch)?.pinned ?? false,
               agent: status?.agent ?? null,
             };
           }),
@@ -537,6 +542,23 @@ const workspacesRouter = t.router({
       }
 
       throw new Error(`Workspace "${input.branch}" not found`);
+    }),
+
+  setPinned: publicProcedure
+    .input(z.object({ project: z.string(), branch: z.string(), pinned: z.boolean() }))
+    .mutation(({ input }) => {
+      const state = loadState();
+      const proj = state.projects.find((p) => p.name === input.project);
+      if (!proj) {
+        throw new Error(`Project "${input.project}" not found`);
+      }
+      const wt = proj.worktrees.find((w) => w.branch === input.branch);
+      if (!wt) {
+        throw new Error(`Workspace "${input.branch}" not found`);
+      }
+      wt.pinned = input.pinned;
+      saveState(state);
+      return { ok: true };
     }),
 
   gitPull: publicProcedure

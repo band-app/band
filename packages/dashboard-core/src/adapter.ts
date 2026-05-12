@@ -30,6 +30,7 @@ export interface DashboardAdapter {
   // Workspaces
   createWorkspace(project: string, branch: string, base?: string, prompt?: string): Promise<void>;
   removeWorkspace(project: string, branch: string): Promise<void>;
+  setWorkspacePinned(project: string, branch: string, pinned: boolean): Promise<void>;
   runScript(path: string, scriptType: string): Promise<void>;
   gitPull(project: string, branch: string): Promise<void>;
   gitPush(project: string, branch: string): Promise<void>;

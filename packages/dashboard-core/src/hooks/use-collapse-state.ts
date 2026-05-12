@@ -13,8 +13,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 export const PROJECTS_COLLAPSE_KEY = "band.projects-list.collapsed-projects";
 /** localStorage key for the collapsed-label-groups set (label ids + UNLABELED_KEY). */
 export const LABELS_COLLAPSE_KEY = "band.projects-list.collapsed-labels";
+/** localStorage key for the collapsed Pinned section. The section only has a
+ *  single id (PINNED_SECTION_ID) but we reuse the same Set<string> hook for
+ *  consistency with the labels/projects collapse state. */
+export const PINNED_COLLAPSE_KEY = "band.projects-list.collapsed-pinned";
 /** Sentinel id for the "Unlabeled" group — it has no real label.id. */
 export const UNLABELED_KEY = "__unlabeled";
+/** Sentinel id for the "Pinned" section — used with PINNED_COLLAPSE_KEY. */
+export const PINNED_SECTION_ID = "__pinned";
 
 /** Custom event used to broadcast same-tab updates. The native `storage`
  *  event only fires across tabs, so we dispatch this on every write. */

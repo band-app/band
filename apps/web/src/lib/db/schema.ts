@@ -41,6 +41,7 @@ export const worktrees = sqliteTable("worktrees", {
   branch: text("branch").notNull(),
   path: text("path").notNull(),
   head: text("head"),
+  pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
 });
 
 export const tasks = sqliteTable("tasks", {

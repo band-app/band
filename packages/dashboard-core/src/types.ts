@@ -29,6 +29,8 @@ export interface WorktreeInfo {
   head?: string;
   hasSetup?: boolean;
   hasTeardown?: boolean;
+  /** True when the user has pinned this workspace to the top of the tree. */
+  pinned?: boolean;
 }
 
 export type GitSyncState = "synced" | "ahead" | "behind" | "diverged";

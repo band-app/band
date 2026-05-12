@@ -23,6 +23,8 @@ import { useAppUpdate } from "../hooks/use-app-update";
 import { useCliSetup } from "../hooks/use-cli-setup";
 import {
   LABELS_COLLAPSE_KEY,
+  PINNED_COLLAPSE_KEY,
+  PINNED_SECTION_ID,
   PROJECTS_COLLAPSE_KEY,
   UNLABELED_KEY,
   useCollapseState,
@@ -107,12 +109,17 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar, hideMenu }: Das
   // collapsed-projects set and every label id (plus the unlabeled sentinel)
   // into the collapsed-labels set. The custom event dispatched by `setAll`
   // pings every useCollapseState consumer so the list re-renders instantly.
+  // The Pinned section header lives outside the labels/projects tree, so
+  // we also fold it into the collapsed state explicitly — "Collapse all"
+  // is meant to collapse everything visible, including the pinned group.
   const projectCollapse = useCollapseState(PROJECTS_COLLAPSE_KEY);
   const labelCollapse = useCollapseState(LABELS_COLLAPSE_KEY);
+  const pinnedCollapse = useCollapseState(PINNED_COLLAPSE_KEY);
   const collapseAll = useCallback(() => {
     projectCollapse.setAll(projects.map((p) => p.name));
     labelCollapse.setAll([...labels.map((l) => l.id), UNLABELED_KEY]);
-  }, [projectCollapse, labelCollapse, projects, labels]);
+    pinnedCollapse.setAll([PINNED_SECTION_ID]);
+  }, [projectCollapse, labelCollapse, pinnedCollapse, projects, labels]);
 
   const activeLabel = useMemo(
     () => (labelFilter ? labels.find((l) => l.id === labelFilter) : null),
