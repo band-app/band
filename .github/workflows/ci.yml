@@ -30,6 +30,11 @@ jobs:
     # The label gate is now a cost filter (don't burn CI minutes on every
     # drive-by fork PR), NOT a security barrier — the trigger above already
     # isolates fork PRs from secrets and shared cache writes.
+    # Note: under `pull_request`, fork PRs run the fork's own ci.yml, so this
+    # gate is also unreliable as a cost control — a malicious or zealous fork
+    # can simply remove the `if:` and burn minutes. Stricter cost controls
+    # (e.g. paused-by-default workflows, billing limits) belong at the
+    # GitHub Actions account/org level, not in YAML the fork can edit.
     if: >
       github.event_name == 'push' ||
       github.event.pull_request.head.repo.full_name == github.repository ||
