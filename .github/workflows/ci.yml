@@ -3,7 +3,15 @@ name: CI
 on:
   push:
     branches: [main]
-  pull_request_target:
+  # Use `pull_request` (NOT `pull_request_target`). The latter runs in the base
+  # repo's context with secret access and shared-cache write privilege, while
+  # checking out the fork's untrusted code — the exact "pwn request" + cache
+  # poisoning chain described in the TanStack npm supply-chain compromise
+  # postmortem (https://tanstack.com/blog/npm-supply-chain-compromise-postmortem).
+  # `pull_request` runs fork PR code in an isolated context with no secrets and
+  # PR-scoped cache writes, so a malicious PR cannot poison main's caches or
+  # exfiltrate NPM_TOKEN / signing creds.
+  pull_request:
     types: [opened, reopened, labeled, synchronize]
     branches: [main]
 
@@ -19,6 +27,9 @@ jobs:
     # Always run on push to main.
     # For same-repo PRs (collaborators): run automatically.
     # For fork PRs: only run when a maintainer adds the 'ci:approved' label.
+    # The label gate is now a cost filter (don't burn CI minutes on every
+    # drive-by fork PR), NOT a security barrier — the trigger above already
+    # isolates fork PRs from secrets and shared cache writes.
     if: >
       github.event_name == 'push' ||
       github.event.pull_request.head.repo.full_name == github.repository ||
