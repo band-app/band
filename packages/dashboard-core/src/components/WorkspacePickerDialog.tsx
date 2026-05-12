@@ -143,9 +143,20 @@ export function WorkspacePickerDialog({ open, onOpenChange }: WorkspacePickerDia
                       aria-label={pinnedNow ? "Unpin workspace" : "Pin workspace"}
                       className="opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
                       // onMouseDown + preventDefault + stopPropagation keeps
-                      // cmdk's onSelect from firing (which would navigate and
-                      // close the dialog).
+                      // cmdk's onSelect from firing on pointer activation
+                      // (which would navigate and close the dialog). Keyboard
+                      // activation (Tab to the button + Enter/Space) goes
+                      // through `click`, not `mousedown`, so we mirror the
+                      // toggle here and stop propagation so the focused
+                      // CommandItem doesn't also fire onSelect.
                       onMouseDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        togglePinned(entry.projectName, entry.branch, pinnedNow);
+                      }}
+                      onClick={(e) => {
+                        // Skip when the mousedown handler already toggled.
+                        if (e.detail !== 0) return;
                         e.preventDefault();
                         e.stopPropagation();
                         togglePinned(entry.projectName, entry.branch, pinnedNow);
