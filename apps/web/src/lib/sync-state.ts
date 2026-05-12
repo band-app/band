@@ -37,9 +37,19 @@ export async function syncWorktrees(): Promise<void> {
     let diskWorktrees: WorktreeState[];
     try {
       const gitWorktrees = await listWorktrees(project.path);
+      // Preserve the `pinned` flag for branches that still exist —
+      // syncWorktrees runs on a timer, and replacing the tracked
+      // worktrees with git's view would otherwise wipe pin state on
+      // every sync that adds/removes a worktree.
+      const pinnedByBranch = new Map(project.worktrees.map((wt) => [wt.branch, wt.pinned]));
       diskWorktrees = gitWorktrees
         .filter((wt) => !wt.isBare)
-        .map((wt) => ({ branch: wt.branch, path: wt.path, head: wt.head }));
+        .map((wt) => ({
+          branch: wt.branch,
+          path: wt.path,
+          head: wt.head,
+          pinned: pinnedByBranch.get(wt.branch) ?? false,
+        }));
     } catch {
       // If git fails for this project (e.g. path doesn't exist), skip it
       continue;

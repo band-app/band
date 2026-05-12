@@ -21,7 +21,6 @@ import {
 } from "lucide-react";
 import { memo, useEffect, useRef } from "react";
 import { useCapabilities } from "../context";
-import { usePinnedWorkspaces } from "../hooks/use-pinned-workspaces";
 import { useRemoveWorkspace } from "../hooks/use-project-mutations";
 import { toWorkspaceId } from "../lib/workspace-id";
 import { useDashboardStore } from "../stores/index";
@@ -52,6 +51,13 @@ interface Props {
    * cards apart when they're mixed across projects.
    */
   showProjectName?: boolean;
+  /**
+   * Toggle the pinned state for this card's workspace. Passed as a prop
+   * (rather than reading from `usePinnedWorkspaces()` inside the card) so
+   * each card stays inert to changes in the projects-query cache —
+   * otherwise every pin/unpin re-renders every WorkspaceCard on the page.
+   */
+  onTogglePinned: (project: string, branch: string, currentlyPinned: boolean) => void;
 }
 
 export const WorkspaceCard = memo(function WorkspaceCard({
@@ -64,6 +70,7 @@ export const WorkspaceCard = memo(function WorkspaceCard({
   isFocused,
   onShowDeleteDialog,
   showProjectName,
+  onTogglePinned,
 }: Props) {
   const cardRef = useRef<HTMLDivElement>(null);
   const capabilities = useCapabilities();
@@ -80,8 +87,7 @@ export const WorkspaceCard = memo(function WorkspaceCard({
   const gitPull = useDashboardStore((s) => s.gitPull);
   const gitPush = useDashboardStore((s) => s.gitPush);
   const removeWorkspaceMutation = useRemoveWorkspace();
-  const { toggle: togglePinned } = usePinnedWorkspaces();
-  const isPinned = worktree.pinned ?? false;
+  const isPinned = worktree.pinned;
 
   const workspaceId = toWorkspaceId(projectName, worktree.branch);
   const isActive = useDashboardStore((s) => s.activeWorkspaceId === workspaceId);
@@ -160,7 +166,7 @@ export const WorkspaceCard = memo(function WorkspaceCard({
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
-        <ContextMenuItem onClick={() => togglePinned(projectName, worktree.branch, isPinned)}>
+        <ContextMenuItem onClick={() => onTogglePinned(projectName, worktree.branch, isPinned)}>
           {isPinned ? <PinOff /> : <Pin />}
           {isPinned ? "Unpin workspace" : "Pin workspace"}
         </ContextMenuItem>

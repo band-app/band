@@ -96,6 +96,7 @@ interface SortableProjectProps {
    * when all worktrees are pinned and shown in the Pinned section instead.
    */
   hasPinnedSiblings?: boolean;
+  onTogglePinned: (project: string, branch: string, currentlyPinned: boolean) => void;
 }
 
 function SortableProject({
@@ -113,6 +114,7 @@ function SortableProject({
   collapsed,
   onToggleCollapse,
   hasPinnedSiblings,
+  onTogglePinned,
 }: SortableProjectProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: project.name,
@@ -270,6 +272,7 @@ function SortableProject({
                   setupStatus={setupStatuses.get(wsId)}
                   isFocused={currentIndex === focusedIndex}
                   onShowDeleteDialog={onShowDeleteDialog}
+                  onTogglePinned={onTogglePinned}
                 />
               );
             })
@@ -366,7 +369,7 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
   const projectCollapse = useCollapseState(PROJECTS_COLLAPSE_KEY);
   const labelCollapse = useCollapseState(LABELS_COLLAPSE_KEY);
   const pinnedCollapse = useCollapseState(PINNED_COLLAPSE_KEY);
-  const { pinned: pinnedEntries } = usePinnedWorkspaces();
+  const { pinned: pinnedEntries, toggle: togglePinned } = usePinnedWorkspaces();
 
   // Two sensors so reorder works without an explicit "edit" toggle:
   //  • MouseSensor — desktop pointers can drag immediately; an 8px distance
@@ -731,6 +734,7 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
                     isFocused={i === focusedIndex}
                     onShowDeleteDialog={setDeleteDialog}
                     showProjectName
+                    onTogglePinned={togglePinned}
                   />
                 ))}
               </div>
@@ -789,6 +793,7 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
                           collapsed={projectCollapse.isCollapsed(project.name)}
                           onToggleCollapse={projectCollapse.toggle}
                           hasPinnedSiblings={projectsWithPinned.has(project.name)}
+                          onTogglePinned={togglePinned}
                         />
                       </div>
                     ))}

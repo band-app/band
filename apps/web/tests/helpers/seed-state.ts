@@ -11,6 +11,7 @@ interface WorktreeData {
   branch: string;
   path: string;
   head?: string;
+  pinned?: boolean;
 }
 
 interface ProjectData {
@@ -56,6 +57,7 @@ export function seedState(tmpHome: string, state: StateData): void {
             branch: wt.branch,
             path: wt.path,
             head: wt.head ?? null,
+            pinned: wt.pinned ?? false,
           })
           .run();
       }

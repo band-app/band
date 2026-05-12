@@ -86,19 +86,11 @@ export function usePinnedWorkspaces() {
     },
   });
 
-  const pin = useCallback(
-    (project: string, branch: string) => mutation.mutate({ project, branch, pinned: true }),
-    [mutation],
-  );
-  const unpin = useCallback(
-    (project: string, branch: string) => mutation.mutate({ project, branch, pinned: false }),
-    [mutation],
-  );
   const toggle = useCallback(
     (project: string, branch: string, currentlyPinned: boolean) =>
       mutation.mutate({ project, branch, pinned: !currentlyPinned }),
     [mutation],
   );
 
-  return { pinned, isPinned, pin, unpin, toggle };
+  return { pinned, isPinned, toggle };
 }

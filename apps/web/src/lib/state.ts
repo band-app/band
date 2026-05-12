@@ -24,7 +24,7 @@ export interface WorktreeState {
   branch: string;
   path: string;
   head?: string;
-  pinned?: boolean;
+  pinned: boolean;
 }
 
 export interface AppState {
@@ -110,7 +110,7 @@ export function loadState(): AppState {
       branch: row.branch,
       path: row.path,
       head: row.head ?? undefined,
-      pinned: row.pinned ?? false,
+      pinned: row.pinned,
     });
     wtByProject.set(row.projectName, list);
   }
@@ -152,7 +152,7 @@ export function saveState(state: AppState): void {
             branch: wt.branch,
             path: wt.path,
             head: wt.head ?? null,
-            pinned: wt.pinned ?? false,
+            pinned: wt.pinned,
           })
           .run();
       }

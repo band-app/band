@@ -174,7 +174,9 @@ const projectsRouter = t.router({
               branch: wt.branch,
               path: wt.path,
               head: wt.head,
-              pinned: trackedByBranch.get(wt.branch)?.pinned ?? false,
+              // `trackedBranches.has(...)` guarantees `trackedByBranch.get(...)`
+              // returns a value, so the `!` non-null assertion is safe here.
+              pinned: trackedByBranch.get(wt.branch)!.pinned,
             }));
         } catch {
           // Fall back to state.json worktrees
@@ -191,7 +193,6 @@ const projectsRouter = t.router({
             return {
               ...wt,
               workspaceId,
-              pinned: trackedByBranch.get(wt.branch)?.pinned ?? false,
               agent: status?.agent ?? null,
             };
           }),
@@ -249,12 +250,12 @@ const projectsRouter = t.router({
         // Fall back to "main"
       }
 
-      let worktrees: { branch: string; path: string; head?: string }[] = [];
+      let worktrees: { branch: string; path: string; head?: string; pinned: boolean }[] = [];
       try {
         const gitWorktrees = await listWorktrees(input.path);
         worktrees = gitWorktrees
           .filter((wt) => !wt.isBare)
-          .map((wt) => ({ branch: wt.branch, path: wt.path, head: wt.head }));
+          .map((wt) => ({ branch: wt.branch, path: wt.path, head: wt.head, pinned: false }));
       } catch {
         // No worktrees
       }
@@ -363,7 +364,7 @@ const workspacesRouter = t.router({
         throw new Error(e instanceof Error ? e.message : String(e));
       }
 
-      proj.worktrees.push({ branch: input.branch, path: worktreePath });
+      proj.worktrees.push({ branch: input.branch, path: worktreePath, pinned: false });
       saveState(state);
 
       const workspaceId = toWorkspaceId(input.project, input.branch);
