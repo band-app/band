@@ -42,6 +42,16 @@ jobs:
 
     env:
       NODE_OPTIONS: "--max-old-space-size=6144"
+      # Path/key shared between the Restore/Save halves of each cargo cache.
+      # Defined once at job scope to remove the manual lock-step requirement
+      # that the in-line comments used to call out — a future edit to the
+      # key here flows to both halves without risk of drift.
+      CARGO_REGISTRY_PATH: |
+        ~/.cargo/registry
+        ~/.cargo/git
+      CARGO_REGISTRY_KEY: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+      CARGO_CLI_TARGET_PATH: apps/cli/target
+      CARGO_CLI_TARGET_KEY: cargo-cli-${{ runner.os }}-${{ hashFiles('apps/cli/Cargo.lock') }}
 
     steps:
       - name: Checkout
@@ -56,28 +66,22 @@ jobs:
 
       # Restore caches always (safe to read from untrusted runs). Saves are
       # split out below and gated on trusted events as defence-in-depth —
-      # see "Save … cache" steps near the end of the job. IMPORTANT: keep
-      # `path` and `key` in lock-step between Restore and Save halves; an
-      # edit to one without the matching change to the other silently
-      # creates dangling cache entries.
+      # see "Save … cache" steps near the end of the job. path/key are
+      # sourced from job-level env vars so the two halves can't drift.
       - name: Restore Cargo registry cache
         id: cache-cargo-registry
         uses: actions/cache/restore@v5
         with:
-          # When editing path/key here, mirror in "Save Cargo registry cache".
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          path: ${{ env.CARGO_REGISTRY_PATH }}
+          key: ${{ env.CARGO_REGISTRY_KEY }}
           restore-keys: cargo-registry-${{ runner.os }}-
 
       - name: Restore CLI target cache
         id: cache-cargo-cli
         uses: actions/cache/restore@v5
         with:
-          # When editing path/key here, mirror in "Save CLI target cache".
-          path: apps/cli/target
-          key: cargo-cli-${{ runner.os }}-${{ hashFiles('apps/cli/Cargo.lock') }}
+          path: ${{ env.CARGO_CLI_TARGET_PATH }}
+          key: ${{ env.CARGO_CLI_TARGET_KEY }}
           restore-keys: cargo-cli-${{ runner.os }}-
 
       - name: Setup pnpm
@@ -159,9 +163,13 @@ jobs:
       # `pull_request_target`; the latter would otherwise sneak past a
       # `!= 'pull_request'` short-circuit (`pull_request_target` is a
       # distinct event name) and re-introduce the exact poisoning vector
-      # this PR is meant to block as defence-in-depth. New non-PR triggers
-      # (workflow_dispatch, schedule, repository_dispatch, …) remain
-      # allowed without an explicit allowlist entry.
+      # this PR is meant to block as defence-in-depth. Non-PR triggers
+      # (push, workflow_dispatch, schedule, repository_dispatch,
+      # workflow_call, …) remain allowed without an explicit allowlist
+      # entry. NOTE for workflow_call: if ci.yml is ever exposed as a
+      # reusable workflow, `github.event_name` reflects the CALLER's
+      # event, so a caller running under `pull_request_target` would
+      # propagate that here and (correctly) be blocked.
       - name: Save Cargo registry cache
         if: |
           always() &&
@@ -171,11 +179,8 @@ jobs:
            github.event.pull_request.head.repo.full_name == github.repository)
         uses: actions/cache/save@v5
         with:
-          # When editing path/key here, mirror in "Restore Cargo registry cache".
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          path: ${{ env.CARGO_REGISTRY_PATH }}
+          key: ${{ env.CARGO_REGISTRY_KEY }}
 
       - name: Save CLI target cache
         if: |
@@ -186,9 +191,8 @@ jobs:
            github.event.pull_request.head.repo.full_name == github.repository)
         uses: actions/cache/save@v5
         with:
-          # When editing path/key here, mirror in "Restore CLI target cache".
-          path: apps/cli/target
-          key: cargo-cli-${{ runner.os }}-${{ hashFiles('apps/cli/Cargo.lock') }}
+          path: ${{ env.CARGO_CLI_TARGET_PATH }}
+          key: ${{ env.CARGO_CLI_TARGET_KEY }}
 
       - name: Build desktop (TypeScript main + preload)
         run: pnpm --filter @band-app/desktop build
