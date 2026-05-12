@@ -154,8 +154,13 @@ export const WorkspaceCard = memo(function WorkspaceCard({
                 </span>
               </div>
             </TooltipTrigger>
+            {/* When showProjectName is true the visible label already
+                spells out `project/branch`, so re-displaying it in the
+                tooltip is noise. Show the worktree's absolute path
+                instead — that's genuinely supplementary information the
+                card body never surfaces. */}
             <TooltipContent side="top">
-              {showProjectName ? `${projectName}/${worktree.branch}` : worktree.branch}
+              {showProjectName ? worktree.path : worktree.branch}
             </TooltipContent>
           </Tooltip>
           <div className="hidden @[10rem]:flex group-hover:flex items-center gap-2 shrink-0 ml-auto pl-2">

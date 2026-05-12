@@ -1690,7 +1690,7 @@ describe("tRPC — pinned workspaces", () => {
   });
 
   it("pinned state persists across server restart", async () => {
-    let res = await trpcMutate(server.url, "workspaces.setPinned", {
+    const res = await trpcMutate(server.url, "workspaces.setPinned", {
       project: "pin-repo",
       branch: "feature",
       pinned: true,
@@ -1708,9 +1708,16 @@ describe("tRPC — pinned workspaces", () => {
   });
 
   it("workspaces.remove drops the pinned worktree's row", async () => {
-    // `feature` is still pinned from the previous test. Remove it and
-    // confirm it disappears from projects.list entirely.
-    const res = await trpcMutate(server.url, "workspaces.remove", {
+    // Pin `feature` explicitly so this test owns its preconditions
+    // and doesn't depend on prior tests in the describe block.
+    let res = await trpcMutate(server.url, "workspaces.setPinned", {
+      project: "pin-repo",
+      branch: "feature",
+      pinned: true,
+    });
+    expect(res.status).toBe(200);
+
+    res = await trpcMutate(server.url, "workspaces.remove", {
       project: "pin-repo",
       branch: "feature",
     });

@@ -527,15 +527,30 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
   // worktree list, so for a pinned active workspace we reveal it by
   // expanding the Pinned section header — not the project or label group
   // that contains its (now hidden) original entry.
+  // Two refs so we run the reveal logic again when the *pinned-ness* of
+  // the active workspace changes, not only when activeWorkspaceId itself
+  // changes. Without the pinned-tracking ref, pinning or unpinning the
+  // currently-active workspace early-returns here before
+  // `pinnedCollapse.expand` (or the regular project/label expand) gets
+  // a chance to run.
   const revealedWorkspaceRef = useRef<string | null>(null);
+  const revealedAsPinnedRef = useRef<boolean>(false);
   useEffect(() => {
     if (!activeWorkspaceId) {
       revealedWorkspaceRef.current = null;
+      revealedAsPinnedRef.current = false;
       return;
     }
-    if (revealedWorkspaceRef.current === activeWorkspaceId) return;
+    const isActivePinned = pinnedEntries.some((e) => e.workspaceId === activeWorkspaceId);
+    if (
+      revealedWorkspaceRef.current === activeWorkspaceId &&
+      revealedAsPinnedRef.current === isActivePinned
+    ) {
+      return;
+    }
     revealedWorkspaceRef.current = activeWorkspaceId;
-    if (pinnedEntries.some((e) => e.workspaceId === activeWorkspaceId)) {
+    revealedAsPinnedRef.current = isActivePinned;
+    if (isActivePinned) {
       pinnedCollapse.expand(PINNED_SECTION_ID);
       keyboardNavRef.current = false;
       return;
