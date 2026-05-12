@@ -54,8 +54,12 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Cache Cargo registry
-        uses: actions/cache@v5
+      # Restore caches always (safe to read from untrusted runs). Saves are
+      # split out below and gated on trusted events as defence-in-depth —
+      # see "Save … cache" steps near the end of the job.
+      - name: Restore Cargo registry cache
+        id: cache-cargo-registry
+        uses: actions/cache/restore@v5
         with:
           path: |
             ~/.cargo/registry
@@ -63,8 +67,9 @@ jobs:
           key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: cargo-registry-${{ runner.os }}-
 
-      - name: Cache CLI target
-        uses: actions/cache@v5
+      - name: Restore CLI target cache
+        id: cache-cargo-cli
+        uses: actions/cache/restore@v5
         with:
           path: apps/cli/target
           key: cargo-cli-${{ runner.os }}-${{ hashFiles('apps/cli/Cargo.lock') }}
@@ -122,6 +127,37 @@ jobs:
 
       - name: Test (CLI)
         run: cargo test --manifest-path apps/cli/Cargo.toml -- --test-threads=4
+
+      # Cache writes (defence-in-depth). Even though our CI trigger is now
+      # `pull_request` (PR-scoped cache writes can't poison main), gating the
+      # save explicitly on a trusted event ensures a future workflow change
+      # that re-introduces `pull_request_target` cannot pollute the shared
+      # cargo caches that release.yml and nightly.yml also consume. Skipped
+      # entirely on an exact restore-key hit so we don't re-write identical
+      # state. See: TanStack npm supply-chain compromise postmortem.
+      - name: Save Cargo registry cache
+        if: |
+          always() &&
+          steps.cache-cargo-registry.outputs.cache-hit != 'true' &&
+          (github.event_name == 'push' ||
+           github.event.pull_request.head.repo.full_name == github.repository)
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Save CLI target cache
+        if: |
+          always() &&
+          steps.cache-cargo-cli.outputs.cache-hit != 'true' &&
+          (github.event_name == 'push' ||
+           github.event.pull_request.head.repo.full_name == github.repository)
+        uses: actions/cache/save@v5
+        with:
+          path: apps/cli/target
+          key: cargo-cli-${{ runner.os }}-${{ hashFiles('apps/cli/Cargo.lock') }}
 
       - name: Build desktop (TypeScript main + preload)
         run: pnpm --filter @band-app/desktop build
