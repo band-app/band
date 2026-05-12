@@ -638,6 +638,664 @@ describe("tRPC — workspace operations", () => {
     expect(res.status).toBe(500);
   });
 
+  // -- workspace.createFile --
+
+  it("workspace.createFile creates an empty file at the root", async () => {
+    const res = await trpcMutate(server.url, "workspace.createFile", {
+      workspaceId: "repo-main",
+      path: "NOTES.md",
+    });
+    expect(res.status).toBe(200);
+    const data = await trpcData<{ ok: boolean }>(res);
+    expect(data.ok).toBe(true);
+
+    // Verify the new file appears in listFiles and is empty
+    const listRes = await trpcQuery(server.url, "workspace.listFiles", {
+      workspaceId: "repo-main",
+      path: "",
+    });
+    const listData = await trpcData<{ entries: Array<{ name: string; type: string }> }>(listRes);
+    const entry = listData.entries.find((e) => e.name === "NOTES.md");
+    expect(entry).toBeDefined();
+    expect(entry!.type).toBe("file");
+
+    const getRes = await trpcQuery(server.url, "workspace.getFile", {
+      workspaceId: "repo-main",
+      path: "NOTES.md",
+    });
+    const getData = await trpcData<{ content: string }>(getRes);
+    expect(getData.content).toBe("");
+  });
+
+  it("workspace.createFile creates a file inside a subdirectory with content", async () => {
+    const res = await trpcMutate(server.url, "workspace.createFile", {
+      workspaceId: "repo-main",
+      path: "src/util.ts",
+      content: "export const x = 1;\n",
+    });
+    expect(res.status).toBe(200);
+
+    const getRes = await trpcQuery(server.url, "workspace.getFile", {
+      workspaceId: "repo-main",
+      path: "src/util.ts",
+    });
+    const getData = await trpcData<{ content: string; language?: string }>(getRes);
+    expect(getData.content).toBe("export const x = 1;\n");
+    expect(getData.language).toBe("typescript");
+  });
+
+  it("workspace.createFile rejects an existing path", async () => {
+    const res = await trpcMutate(server.url, "workspace.createFile", {
+      workspaceId: "repo-main",
+      path: "README.md",
+    });
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toMatch(/already exists/);
+  });
+
+  it("workspace.createFile rejects path traversal attempts", async () => {
+    const res = await trpcMutate(server.url, "workspace.createFile", {
+      workspaceId: "repo-main",
+      path: "../escape.txt",
+    });
+    expect(res.status).toBe(500);
+  });
+
+  it("workspace.createFile rejects when the parent directory does not exist", async () => {
+    const res = await trpcMutate(server.url, "workspace.createFile", {
+      workspaceId: "repo-main",
+      path: "no-such-dir/file.txt",
+    });
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toMatch(/Parent directory/);
+  });
+
+  it("workspace.createFile rejects empty path input", async () => {
+    const res = await trpcMutate(server.url, "workspace.createFile", {
+      workspaceId: "repo-main",
+      path: "",
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("workspace.createFile rejects unknown workspace", async () => {
+    const res = await trpcMutate(server.url, "workspace.createFile", {
+      workspaceId: "nonexistent-main",
+      path: "x.txt",
+    });
+    expect(res.status).toBe(500);
+  });
+
+  // -- workspace.createDirectory --
+
+  it("workspace.createDirectory creates a directory at the root", async () => {
+    const res = await trpcMutate(server.url, "workspace.createDirectory", {
+      workspaceId: "repo-main",
+      path: "docs",
+    });
+    expect(res.status).toBe(200);
+
+    const listRes = await trpcQuery(server.url, "workspace.listFiles", {
+      workspaceId: "repo-main",
+      path: "",
+    });
+    const listData = await trpcData<{ entries: Array<{ name: string; type: string }> }>(listRes);
+    const entry = listData.entries.find((e) => e.name === "docs");
+    expect(entry).toBeDefined();
+    expect(entry!.type).toBe("directory");
+  });
+
+  it("workspace.createDirectory creates a nested directory under an existing one", async () => {
+    const res = await trpcMutate(server.url, "workspace.createDirectory", {
+      workspaceId: "repo-main",
+      path: "docs/api",
+    });
+    expect(res.status).toBe(200);
+
+    const listRes = await trpcQuery(server.url, "workspace.listFiles", {
+      workspaceId: "repo-main",
+      path: "docs",
+    });
+    const listData = await trpcData<{ entries: Array<{ name: string; type: string }> }>(listRes);
+    const entry = listData.entries.find((e) => e.name === "api");
+    expect(entry).toBeDefined();
+    expect(entry!.type).toBe("directory");
+  });
+
+  it("workspace.createDirectory rejects an existing path", async () => {
+    const res = await trpcMutate(server.url, "workspace.createDirectory", {
+      workspaceId: "repo-main",
+      path: "src",
+    });
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toMatch(/already exists/);
+  });
+
+  it("workspace.createDirectory rejects path traversal attempts", async () => {
+    const res = await trpcMutate(server.url, "workspace.createDirectory", {
+      workspaceId: "repo-main",
+      path: "../escape-dir",
+    });
+    expect(res.status).toBe(500);
+  });
+
+  it("workspace.createDirectory rejects when the parent directory does not exist", async () => {
+    const res = await trpcMutate(server.url, "workspace.createDirectory", {
+      workspaceId: "repo-main",
+      path: "no-such-parent/child",
+    });
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toMatch(/Parent directory/);
+  });
+
+  it("workspace.createDirectory rejects empty path input", async () => {
+    const res = await trpcMutate(server.url, "workspace.createDirectory", {
+      workspaceId: "repo-main",
+      path: "",
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("workspace.createDirectory rejects unknown workspace", async () => {
+    const res = await trpcMutate(server.url, "workspace.createDirectory", {
+      workspaceId: "nonexistent-main",
+      path: "newdir",
+    });
+    expect(res.status).toBe(500);
+  });
+
+  // -- workspace.deletePath --
+
+  it("workspace.deletePath deletes a file", async () => {
+    // NOTES.md was created earlier in the createFile tests.
+    const res = await trpcMutate(server.url, "workspace.deletePath", {
+      workspaceId: "repo-main",
+      path: "NOTES.md",
+    });
+    expect(res.status).toBe(200);
+    const data = await trpcData<{ ok: boolean; kind: string }>(res);
+    expect(data.ok).toBe(true);
+    expect(data.kind).toBe("file");
+
+    // Verify it's gone from the listing.
+    const listRes = await trpcQuery(server.url, "workspace.listFiles", {
+      workspaceId: "repo-main",
+      path: "",
+    });
+    const listData = await trpcData<{ entries: Array<{ name: string }> }>(listRes);
+    expect(listData.entries.find((e) => e.name === "NOTES.md")).toBeUndefined();
+  });
+
+  it("workspace.deletePath deletes a nested file", async () => {
+    const res = await trpcMutate(server.url, "workspace.deletePath", {
+      workspaceId: "repo-main",
+      path: "src/util.ts",
+    });
+    expect(res.status).toBe(200);
+    const data = await trpcData<{ kind: string }>(res);
+    expect(data.kind).toBe("file");
+
+    const listRes = await trpcQuery(server.url, "workspace.listFiles", {
+      workspaceId: "repo-main",
+      path: "src",
+    });
+    const listData = await trpcData<{ entries: Array<{ name: string }> }>(listRes);
+    expect(listData.entries.find((e) => e.name === "util.ts")).toBeUndefined();
+  });
+
+  it("workspace.deletePath deletes an empty directory", async () => {
+    const res = await trpcMutate(server.url, "workspace.deletePath", {
+      workspaceId: "repo-main",
+      path: "docs/api",
+    });
+    expect(res.status).toBe(200);
+    const data = await trpcData<{ kind: string }>(res);
+    expect(data.kind).toBe("directory");
+
+    const listRes = await trpcQuery(server.url, "workspace.listFiles", {
+      workspaceId: "repo-main",
+      path: "docs",
+    });
+    const listData = await trpcData<{ entries: Array<{ name: string }> }>(listRes);
+    expect(listData.entries.find((e) => e.name === "api")).toBeUndefined();
+  });
+
+  it("workspace.deletePath deletes a directory recursively", async () => {
+    // Re-populate `docs` with a nested file so we can verify recursive removal.
+    await trpcMutate(server.url, "workspace.createFile", {
+      workspaceId: "repo-main",
+      path: "docs/inner.txt",
+      content: "hi",
+    });
+
+    const res = await trpcMutate(server.url, "workspace.deletePath", {
+      workspaceId: "repo-main",
+      path: "docs",
+    });
+    expect(res.status).toBe(200);
+    const data = await trpcData<{ kind: string }>(res);
+    expect(data.kind).toBe("directory");
+
+    const listRes = await trpcQuery(server.url, "workspace.listFiles", {
+      workspaceId: "repo-main",
+      path: "",
+    });
+    const listData = await trpcData<{ entries: Array<{ name: string }> }>(listRes);
+    expect(listData.entries.find((e) => e.name === "docs")).toBeUndefined();
+  });
+
+  it("workspace.deletePath rejects a missing path", async () => {
+    const res = await trpcMutate(server.url, "workspace.deletePath", {
+      workspaceId: "repo-main",
+      path: "no-such-thing.txt",
+    });
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toMatch(/does not exist/);
+  });
+
+  it("workspace.deletePath rejects path traversal attempts", async () => {
+    const res = await trpcMutate(server.url, "workspace.deletePath", {
+      workspaceId: "repo-main",
+      path: "../README.md",
+    });
+    expect(res.status).toBe(500);
+  });
+
+  it("workspace.deletePath refuses to delete .git internals", async () => {
+    const res = await trpcMutate(server.url, "workspace.deletePath", {
+      workspaceId: "repo-main",
+      path: ".git",
+    });
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toMatch(/\.git/);
+  });
+
+  it("workspace.deletePath rejects empty path input", async () => {
+    const res = await trpcMutate(server.url, "workspace.deletePath", {
+      workspaceId: "repo-main",
+      path: "",
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("workspace.deletePath rejects unknown workspace", async () => {
+    const res = await trpcMutate(server.url, "workspace.deletePath", {
+      workspaceId: "nonexistent-main",
+      path: "README.md",
+    });
+    expect(res.status).toBe(500);
+  });
+
+  // -- workspace.renamePath --
+
+  it("workspace.renamePath renames a file at the root", async () => {
+    // Set up: create a file we can rename.
+    await trpcMutate(server.url, "workspace.createFile", {
+      workspaceId: "repo-main",
+      path: "rename-me.txt",
+      content: "rename my contents\n",
+    });
+
+    const res = await trpcMutate(server.url, "workspace.renamePath", {
+      workspaceId: "repo-main",
+      fromPath: "rename-me.txt",
+      toPath: "renamed.txt",
+    });
+    expect(res.status).toBe(200);
+    const data = await trpcData<{ ok: boolean; kind: string }>(res);
+    expect(data.ok).toBe(true);
+    expect(data.kind).toBe("file");
+
+    // Old path is gone, new path exists with the same content.
+    const listRes = await trpcQuery(server.url, "workspace.listFiles", {
+      workspaceId: "repo-main",
+      path: "",
+    });
+    const listData = await trpcData<{ entries: Array<{ name: string }> }>(listRes);
+    expect(listData.entries.find((e) => e.name === "rename-me.txt")).toBeUndefined();
+    expect(listData.entries.find((e) => e.name === "renamed.txt")).toBeDefined();
+
+    const getRes = await trpcQuery(server.url, "workspace.getFile", {
+      workspaceId: "repo-main",
+      path: "renamed.txt",
+    });
+    const getData = await trpcData<{ content: string }>(getRes);
+    expect(getData.content).toBe("rename my contents\n");
+
+    // Cleanup so later tests don't see the renamed entry.
+    await trpcMutate(server.url, "workspace.deletePath", {
+      workspaceId: "repo-main",
+      path: "renamed.txt",
+    });
+  });
+
+  it("workspace.renamePath renames a directory along with its descendants", async () => {
+    await trpcMutate(server.url, "workspace.createDirectory", {
+      workspaceId: "repo-main",
+      path: "rename-dir",
+    });
+    await trpcMutate(server.url, "workspace.createFile", {
+      workspaceId: "repo-main",
+      path: "rename-dir/inner.txt",
+      content: "inside\n",
+    });
+
+    const res = await trpcMutate(server.url, "workspace.renamePath", {
+      workspaceId: "repo-main",
+      fromPath: "rename-dir",
+      toPath: "renamed-dir",
+    });
+    expect(res.status).toBe(200);
+    const data = await trpcData<{ kind: string }>(res);
+    expect(data.kind).toBe("directory");
+
+    // Descendant file should now be under the new path.
+    const innerRes = await trpcQuery(server.url, "workspace.getFile", {
+      workspaceId: "repo-main",
+      path: "renamed-dir/inner.txt",
+    });
+    const innerData = await trpcData<{ content: string }>(innerRes);
+    expect(innerData.content).toBe("inside\n");
+
+    // Cleanup.
+    await trpcMutate(server.url, "workspace.deletePath", {
+      workspaceId: "repo-main",
+      path: "renamed-dir",
+    });
+  });
+
+  it("workspace.renamePath rejects identical source and destination", async () => {
+    const res = await trpcMutate(server.url, "workspace.renamePath", {
+      workspaceId: "repo-main",
+      fromPath: "README.md",
+      toPath: "README.md",
+    });
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toMatch(/same/);
+  });
+
+  it("workspace.renamePath rejects when destination already exists", async () => {
+    const res = await trpcMutate(server.url, "workspace.renamePath", {
+      workspaceId: "repo-main",
+      fromPath: "README.md",
+      toPath: "src",
+    });
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toMatch(/already exists/);
+  });
+
+  it("workspace.renamePath rejects missing source", async () => {
+    const res = await trpcMutate(server.url, "workspace.renamePath", {
+      workspaceId: "repo-main",
+      fromPath: "no-such-file.txt",
+      toPath: "elsewhere.txt",
+    });
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toMatch(/does not exist/);
+  });
+
+  it("workspace.renamePath rejects when destination parent is missing", async () => {
+    const res = await trpcMutate(server.url, "workspace.renamePath", {
+      workspaceId: "repo-main",
+      fromPath: "README.md",
+      toPath: "no-such-dir/README.md",
+    });
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toMatch(/Destination parent/);
+  });
+
+  it("workspace.renamePath rejects path traversal on the source", async () => {
+    const res = await trpcMutate(server.url, "workspace.renamePath", {
+      workspaceId: "repo-main",
+      fromPath: "../README.md",
+      toPath: "elsewhere.txt",
+    });
+    expect(res.status).toBe(500);
+  });
+
+  it("workspace.renamePath rejects path traversal on the destination", async () => {
+    const res = await trpcMutate(server.url, "workspace.renamePath", {
+      workspaceId: "repo-main",
+      fromPath: "README.md",
+      toPath: "../escape.txt",
+    });
+    expect(res.status).toBe(500);
+  });
+
+  it("workspace.renamePath refuses to rename .git internals", async () => {
+    const res = await trpcMutate(server.url, "workspace.renamePath", {
+      workspaceId: "repo-main",
+      fromPath: ".git",
+      toPath: "git-backup",
+    });
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toMatch(/\.git/);
+  });
+
+  it("workspace.renamePath rejects empty source path", async () => {
+    const res = await trpcMutate(server.url, "workspace.renamePath", {
+      workspaceId: "repo-main",
+      fromPath: "",
+      toPath: "x.txt",
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("workspace.renamePath rejects empty destination path", async () => {
+    const res = await trpcMutate(server.url, "workspace.renamePath", {
+      workspaceId: "repo-main",
+      fromPath: "README.md",
+      toPath: "",
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("workspace.renamePath rejects unknown workspace", async () => {
+    const res = await trpcMutate(server.url, "workspace.renamePath", {
+      workspaceId: "nonexistent-main",
+      fromPath: "README.md",
+      toPath: "x.md",
+    });
+    expect(res.status).toBe(500);
+  });
+
+  // -- workspace.copyPath --
+
+  it("workspace.copyPath copies a file and leaves the original intact", async () => {
+    const res = await trpcMutate(server.url, "workspace.copyPath", {
+      workspaceId: "repo-main",
+      fromPath: "README.md",
+      toPath: "README-copy.md",
+    });
+    expect(res.status).toBe(200);
+    const data = await trpcData<{ ok: boolean; kind: string }>(res);
+    expect(data.ok).toBe(true);
+    expect(data.kind).toBe("file");
+
+    // Source still exists.
+    const srcRes = await trpcQuery(server.url, "workspace.getFile", {
+      workspaceId: "repo-main",
+      path: "README.md",
+    });
+    expect(srcRes.status).toBe(200);
+
+    // Copy has the same content.
+    const dstRes = await trpcQuery(server.url, "workspace.getFile", {
+      workspaceId: "repo-main",
+      path: "README-copy.md",
+    });
+    const dstData = await trpcData<{ content: string }>(dstRes);
+    expect(dstData.content).toBe("# My Project\n");
+
+    // Cleanup.
+    await trpcMutate(server.url, "workspace.deletePath", {
+      workspaceId: "repo-main",
+      path: "README-copy.md",
+    });
+  });
+
+  it("workspace.copyPath copies a directory recursively", async () => {
+    await trpcMutate(server.url, "workspace.createDirectory", {
+      workspaceId: "repo-main",
+      path: "to-copy",
+    });
+    await trpcMutate(server.url, "workspace.createFile", {
+      workspaceId: "repo-main",
+      path: "to-copy/inside.txt",
+      content: "nested\n",
+    });
+
+    const res = await trpcMutate(server.url, "workspace.copyPath", {
+      workspaceId: "repo-main",
+      fromPath: "to-copy",
+      toPath: "copied",
+    });
+    expect(res.status).toBe(200);
+    const data = await trpcData<{ kind: string }>(res);
+    expect(data.kind).toBe("directory");
+
+    // Verify the nested file landed at the new path with its content.
+    const innerRes = await trpcQuery(server.url, "workspace.getFile", {
+      workspaceId: "repo-main",
+      path: "copied/inside.txt",
+    });
+    const innerData = await trpcData<{ content: string }>(innerRes);
+    expect(innerData.content).toBe("nested\n");
+
+    // Cleanup both source and copy.
+    await trpcMutate(server.url, "workspace.deletePath", {
+      workspaceId: "repo-main",
+      path: "to-copy",
+    });
+    await trpcMutate(server.url, "workspace.deletePath", {
+      workspaceId: "repo-main",
+      path: "copied",
+    });
+  });
+
+  it("workspace.copyPath rejects copying onto an existing destination", async () => {
+    const res = await trpcMutate(server.url, "workspace.copyPath", {
+      workspaceId: "repo-main",
+      fromPath: "README.md",
+      toPath: "src",
+    });
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toMatch(/already exists/);
+  });
+
+  it("workspace.copyPath rejects copying a directory into its descendant", async () => {
+    await trpcMutate(server.url, "workspace.createDirectory", {
+      workspaceId: "repo-main",
+      path: "outer",
+    });
+    await trpcMutate(server.url, "workspace.createDirectory", {
+      workspaceId: "repo-main",
+      path: "outer/inner",
+    });
+
+    const res = await trpcMutate(server.url, "workspace.copyPath", {
+      workspaceId: "repo-main",
+      fromPath: "outer",
+      toPath: "outer/inner/copy",
+    });
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toMatch(/into itself/);
+
+    await trpcMutate(server.url, "workspace.deletePath", {
+      workspaceId: "repo-main",
+      path: "outer",
+    });
+  });
+
+  it("workspace.copyPath rejects missing source", async () => {
+    const res = await trpcMutate(server.url, "workspace.copyPath", {
+      workspaceId: "repo-main",
+      fromPath: "no-such-file.txt",
+      toPath: "anywhere.txt",
+    });
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toMatch(/does not exist/);
+  });
+
+  it("workspace.copyPath rejects path traversal on the source", async () => {
+    const res = await trpcMutate(server.url, "workspace.copyPath", {
+      workspaceId: "repo-main",
+      fromPath: "../README.md",
+      toPath: "elsewhere.txt",
+    });
+    expect(res.status).toBe(500);
+  });
+
+  it("workspace.copyPath rejects path traversal on the destination", async () => {
+    const res = await trpcMutate(server.url, "workspace.copyPath", {
+      workspaceId: "repo-main",
+      fromPath: "README.md",
+      toPath: "../escape.txt",
+    });
+    expect(res.status).toBe(500);
+  });
+
+  it("workspace.copyPath refuses to copy .git internals", async () => {
+    const res = await trpcMutate(server.url, "workspace.copyPath", {
+      workspaceId: "repo-main",
+      fromPath: ".git",
+      toPath: "git-backup",
+    });
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toMatch(/\.git/);
+  });
+
+  it("workspace.copyPath rejects identical source and destination", async () => {
+    const res = await trpcMutate(server.url, "workspace.copyPath", {
+      workspaceId: "repo-main",
+      fromPath: "README.md",
+      toPath: "README.md",
+    });
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toMatch(/same/);
+  });
+
+  it("workspace.copyPath rejects empty paths", async () => {
+    const emptyFrom = await trpcMutate(server.url, "workspace.copyPath", {
+      workspaceId: "repo-main",
+      fromPath: "",
+      toPath: "x.txt",
+    });
+    expect(emptyFrom.status).toBe(400);
+
+    const emptyTo = await trpcMutate(server.url, "workspace.copyPath", {
+      workspaceId: "repo-main",
+      fromPath: "README.md",
+      toPath: "",
+    });
+    expect(emptyTo.status).toBe(400);
+  });
+
+  it("workspace.copyPath rejects unknown workspace", async () => {
+    const res = await trpcMutate(server.url, "workspace.copyPath", {
+      workspaceId: "nonexistent-main",
+      fromPath: "README.md",
+      toPath: "x.md",
+    });
+    expect(res.status).toBe(500);
+  });
+
   // -- workspace.getDiff --
 
   it("workspace.getDiff returns empty diff on clean branch", async () => {

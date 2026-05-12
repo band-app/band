@@ -1,8 +1,8 @@
 import { execFile, execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, unlinkSync } from "node:fs";
-import { readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { basename, extname, join, resolve } from "node:path";
+import { cp, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { toWorkspaceId } from "@band-app/dashboard-core";
 import { createLogger } from "@band-app/logger";
@@ -1397,6 +1397,278 @@ const workspaceRouter = t.router({
       await writeFile(target, input.content, "utf-8");
 
       return { ok: true };
+    }),
+
+  createFile: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        path: z.string().min(1),
+        content: z.string().default(""),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const workspace = resolveWorkspace(input.workspaceId);
+      if (!workspace) {
+        throw new Error("Workspace not found");
+      }
+
+      const root = workspace.worktree.path;
+      const target = resolve(join(root, input.path));
+
+      if (!target.startsWith(root) || target === root) {
+        throw new Error("Invalid path");
+      }
+
+      if (existsSync(target)) {
+        throw new Error("A file or directory already exists at this path");
+      }
+
+      const parent = dirname(target);
+      if (!existsSync(parent)) {
+        throw new Error("Parent directory does not exist");
+      }
+      const parentStat = await stat(parent);
+      if (!parentStat.isDirectory()) {
+        throw new Error("Parent is not a directory");
+      }
+
+      await writeFile(target, input.content, { encoding: "utf-8", flag: "wx" });
+
+      return { ok: true };
+    }),
+
+  createDirectory: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        path: z.string().min(1),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const workspace = resolveWorkspace(input.workspaceId);
+      if (!workspace) {
+        throw new Error("Workspace not found");
+      }
+
+      const root = workspace.worktree.path;
+      const target = resolve(join(root, input.path));
+
+      if (!target.startsWith(root) || target === root) {
+        throw new Error("Invalid path");
+      }
+
+      if (existsSync(target)) {
+        throw new Error("A file or directory already exists at this path");
+      }
+
+      const parent = dirname(target);
+      if (!existsSync(parent)) {
+        throw new Error("Parent directory does not exist");
+      }
+      const parentStat = await stat(parent);
+      if (!parentStat.isDirectory()) {
+        throw new Error("Parent is not a directory");
+      }
+
+      await mkdir(target);
+
+      return { ok: true };
+    }),
+
+  deletePath: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        path: z.string().min(1),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const workspace = resolveWorkspace(input.workspaceId);
+      if (!workspace) {
+        throw new Error("Workspace not found");
+      }
+
+      const root = workspace.worktree.path;
+      const target = resolve(join(root, input.path));
+
+      if (!target.startsWith(root) || target === root) {
+        throw new Error("Invalid path");
+      }
+
+      // Refuse to delete the .git metadata folder — destroying it would
+      // corrupt the worktree.
+      const relative = target.slice(root.length + 1);
+      if (relative === ".git" || relative.startsWith(".git/")) {
+        throw new Error("Refusing to delete .git internals");
+      }
+
+      let entryStat: Awaited<ReturnType<typeof stat>>;
+      try {
+        entryStat = await stat(target);
+      } catch {
+        throw new Error("Path does not exist");
+      }
+
+      // `rm` with `recursive` handles both files and directories. We pass
+      // it unconditionally so callers don't need to know the entry kind.
+      await rm(target, { recursive: true, force: false });
+
+      return {
+        ok: true,
+        kind: entryStat.isDirectory() ? ("directory" as const) : ("file" as const),
+      };
+    }),
+
+  renamePath: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        fromPath: z.string().min(1),
+        toPath: z.string().min(1),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const workspace = resolveWorkspace(input.workspaceId);
+      if (!workspace) {
+        throw new Error("Workspace not found");
+      }
+
+      const root = workspace.worktree.path;
+      const fromTarget = resolve(join(root, input.fromPath));
+      const toTarget = resolve(join(root, input.toPath));
+
+      if (!fromTarget.startsWith(root) || fromTarget === root) {
+        throw new Error("Invalid source path");
+      }
+      if (!toTarget.startsWith(root) || toTarget === root) {
+        throw new Error("Invalid destination path");
+      }
+      if (fromTarget === toTarget) {
+        throw new Error("Source and destination are the same");
+      }
+
+      // Block touching .git on either side — corrupting it would break
+      // the entire worktree.
+      const fromRel = fromTarget.slice(root.length + 1);
+      const toRel = toTarget.slice(root.length + 1);
+      if (
+        fromRel === ".git" ||
+        fromRel.startsWith(".git/") ||
+        toRel === ".git" ||
+        toRel.startsWith(".git/")
+      ) {
+        throw new Error("Refusing to rename .git internals");
+      }
+
+      let entryStat: Awaited<ReturnType<typeof stat>>;
+      try {
+        entryStat = await stat(fromTarget);
+      } catch {
+        throw new Error("Source path does not exist");
+      }
+
+      if (existsSync(toTarget)) {
+        throw new Error("A file or directory already exists at the destination");
+      }
+
+      const toParent = dirname(toTarget);
+      if (!existsSync(toParent)) {
+        throw new Error("Destination parent directory does not exist");
+      }
+      const toParentStat = await stat(toParent);
+      if (!toParentStat.isDirectory()) {
+        throw new Error("Destination parent is not a directory");
+      }
+
+      await rename(fromTarget, toTarget);
+
+      return {
+        ok: true,
+        kind: entryStat.isDirectory() ? ("directory" as const) : ("file" as const),
+      };
+    }),
+
+  copyPath: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        fromPath: z.string().min(1),
+        toPath: z.string().min(1),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const workspace = resolveWorkspace(input.workspaceId);
+      if (!workspace) {
+        throw new Error("Workspace not found");
+      }
+
+      const root = workspace.worktree.path;
+      const fromTarget = resolve(join(root, input.fromPath));
+      const toTarget = resolve(join(root, input.toPath));
+
+      if (!fromTarget.startsWith(root) || fromTarget === root) {
+        throw new Error("Invalid source path");
+      }
+      if (!toTarget.startsWith(root) || toTarget === root) {
+        throw new Error("Invalid destination path");
+      }
+      if (fromTarget === toTarget) {
+        throw new Error("Source and destination are the same");
+      }
+
+      // Block touching .git on either side — corrupting it would break
+      // the entire worktree.
+      const fromRel = fromTarget.slice(root.length + 1);
+      const toRel = toTarget.slice(root.length + 1);
+      if (
+        fromRel === ".git" ||
+        fromRel.startsWith(".git/") ||
+        toRel === ".git" ||
+        toRel.startsWith(".git/")
+      ) {
+        throw new Error("Refusing to copy .git internals");
+      }
+
+      let entryStat: Awaited<ReturnType<typeof stat>>;
+      try {
+        entryStat = await stat(fromTarget);
+      } catch {
+        throw new Error("Source path does not exist");
+      }
+
+      // Block copying a directory into itself or any descendant — would
+      // either fail mid-copy or produce an infinite tree.
+      if (entryStat.isDirectory() && toTarget.startsWith(fromTarget + sep)) {
+        throw new Error("Cannot copy a directory into itself");
+      }
+
+      if (existsSync(toTarget)) {
+        throw new Error("A file or directory already exists at the destination");
+      }
+
+      const toParent = dirname(toTarget);
+      if (!existsSync(toParent)) {
+        throw new Error("Destination parent directory does not exist");
+      }
+      const toParentStat = await stat(toParent);
+      if (!toParentStat.isDirectory()) {
+        throw new Error("Destination parent is not a directory");
+      }
+
+      // `cp` with `recursive: true` handles both files and directories.
+      // `errorOnExist: true` guards against the race between our
+      // existsSync check above and the write.
+      await cp(fromTarget, toTarget, {
+        recursive: true,
+        errorOnExist: true,
+        force: false,
+      });
+
+      return {
+        ok: true,
+        kind: entryStat.isDirectory() ? ("directory" as const) : ("file" as const),
+      };
     }),
 
   searchFiles: publicProcedure

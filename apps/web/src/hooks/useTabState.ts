@@ -55,6 +55,17 @@ export interface UseTabStateReturn {
   isDirty: (filePath: string) => boolean;
   /** Remove all stored state for a file (e.g. when tab is closed). */
   removeFile: (filePath: string) => void;
+  /**
+   * Rename a stored file's state (and any descendants when `oldPath`
+   * was a directory). Used to keep persisted editor state in sync when
+   * the user renames a file/directory from the file browser.
+   */
+  renameFile: (oldPath: string, newPath: string) => void;
+  /**
+   * Remove stored state for `path` and anything sitting inside it.
+   * Used when a path is deleted from the file browser.
+   */
+  removePath: (path: string) => void;
 }
 
 export function useTabState(workspaceId: string): UseTabStateReturn {
@@ -107,5 +118,54 @@ export function useTabState(workspaceId: string): UseTabStateReturn {
     [workspaceId],
   );
 
-  return { get, update, getViewMode, setViewMode, isDirty, removeFile };
+  const renameFile = useCallback(
+    (oldPath: string, newPath: string) => {
+      if (oldPath === newPath) return;
+      const prefix = `${oldPath}/`;
+      let changed = false;
+      const next: Record<string, TabFileState> = {};
+      for (const [key, value] of Object.entries(stateRef.current)) {
+        if (key === oldPath) {
+          next[newPath] = value;
+          changed = true;
+        } else if (key.startsWith(prefix)) {
+          next[newPath + key.slice(oldPath.length)] = value;
+          changed = true;
+        } else {
+          next[key] = value;
+        }
+      }
+      if (changed) {
+        stateRef.current = next;
+        saveState(workspaceId, stateRef.current);
+      }
+    },
+    [workspaceId],
+  );
+
+  const removePath = useCallback(
+    (path: string) => {
+      const prefix = `${path}/`;
+      let changed = false;
+      for (const key of Object.keys(stateRef.current)) {
+        if (key === path || key.startsWith(prefix)) {
+          delete stateRef.current[key];
+          changed = true;
+        }
+      }
+      if (changed) saveState(workspaceId, stateRef.current);
+    },
+    [workspaceId],
+  );
+
+  return {
+    get,
+    update,
+    getViewMode,
+    setViewMode,
+    isDirty,
+    removeFile,
+    renameFile,
+    removePath,
+  };
 }

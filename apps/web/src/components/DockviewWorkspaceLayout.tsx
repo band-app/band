@@ -106,8 +106,6 @@ interface FilesParams {
   onSelectFile: (filePath: string | null) => void;
   onFileOpened: () => void;
   onFindInFile: (fn: (() => void) | null) => void;
-  onQuickOpen: () => void;
-  onSearchFiles: () => void;
 }
 
 interface TerminalParams {
@@ -196,8 +194,6 @@ function FilesPanelComponent({ params }: IDockviewPanelProps<FilesParams>) {
       openFilePath={params.openFilePath}
       onFileOpened={params.onFileOpened}
       onFindInFile={params.onFindInFile}
-      onQuickOpen={params.onQuickOpen}
-      onSearchFiles={params.onSearchFiles}
     />
   );
 }
@@ -1063,6 +1059,22 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
     return () => window.removeEventListener("band:open-file", handler);
   }, [isActive]);
 
+  // Window-event triggers for the file-tree toolbar's Quick Open / Search
+  // in Files buttons. See workspace.$workspaceId.tsx for the rationale —
+  // a window event is more reliable than threading the setters through
+  // multiple layers of route-component context.
+  useEffect(() => {
+    if (!isActive) return;
+    const openQO = () => setQuickOpenOpen(true);
+    const openSF = () => setSearchFilesOpen(true);
+    window.addEventListener("band:open-quick-open", openQO);
+    window.addEventListener("band:open-search-files", openSF);
+    return () => {
+      window.removeEventListener("band:open-quick-open", openQO);
+      window.removeEventListener("band:open-search-files", openSF);
+    };
+  }, [isActive]);
+
   // Listen for panel activation events from the title bar panel switcher
   useEffect(() => {
     if (!isActive) return;
@@ -1098,8 +1110,6 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
         onSelectFile: handleSelectFile,
         onFileOpened: handleFileOpened,
         onFindInFile: setFindInFile,
-        onQuickOpen: () => setQuickOpenOpen(true),
-        onSearchFiles: () => setSearchFilesOpen(true),
       });
       api.getPanel("terminal")?.api.updateParameters({
         workspaceId,

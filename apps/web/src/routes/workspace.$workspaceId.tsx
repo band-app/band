@@ -1,6 +1,7 @@
 import {
   type DiffStats,
   QuickOpenDialog,
+  SearchFilesDialog,
   useDashboardStore,
   type WorkspaceTab,
   WorkspaceTabNav,
@@ -54,6 +55,11 @@ const FindInFileContext = createContext<FindInFileContextValue>({
 export function useFindInFileContext() {
   return useContext(FindInFileContext);
 }
+
+// (Removed CodeToolbarContext — the toolbar now dispatches `band:open-quick-open`
+// and `band:open-search-files` window events that this layout and
+// DockviewWorkspaceLayout each listen for. Context proved unreliable
+// to thread through multiple route levels on the iOS Simulator.)
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -272,6 +278,8 @@ function MobileWorkspaceLayout({
   // Quick Open state for file link clicks from chat
   const [quickOpenOpen, setQuickOpenOpen] = useState(false);
   const [quickOpenQuery, setQuickOpenQuery] = useState<string | undefined>(undefined);
+  // Search-in-Files state for the file-tree toolbar (mobile / non-dockview).
+  const [searchFilesOpen, setSearchFilesOpen] = useState(false);
 
   const handleOpenFile = useCallback(
     (filename: string) => {
@@ -294,6 +302,23 @@ function MobileWorkspaceLayout({
     };
     window.addEventListener("band:open-file", handler);
     return () => window.removeEventListener("band:open-file", handler);
+  }, []);
+
+  // Window-event triggers for the file-tree toolbar's Quick Open / Search
+  // in Files buttons. We use a window event (rather than threading the
+  // setters through a React Context) because the toolbar is rendered by
+  // CodeBrowserView several levels down the route tree, and routing the
+  // setter via context proved unreliable on the iOS Simulator's tree.
+  // The toolbar dispatches the event; this layout owns the dialog state.
+  useEffect(() => {
+    const openQO = () => setQuickOpenOpen(true);
+    const openSF = () => setSearchFilesOpen(true);
+    window.addEventListener("band:open-quick-open", openQO);
+    window.addEventListener("band:open-search-files", openSF);
+    return () => {
+      window.removeEventListener("band:open-quick-open", openQO);
+      window.removeEventListener("band:open-search-files", openSF);
+    };
   }, []);
 
   const handleSwitchAgent = useCallback(
@@ -380,6 +405,12 @@ function MobileWorkspaceLayout({
             onOpenFile={handleOpenFile}
             initialQuery={quickOpenQuery}
             autoOpen={quickOpenQuery != null}
+          />
+          <SearchFilesDialog
+            workspaceId={workspaceId}
+            open={searchFilesOpen}
+            onOpenChange={setSearchFilesOpen}
+            onOpenFile={handleOpenFile}
           />
         </div>
       </AgentSwitcherContext.Provider>
