@@ -22,6 +22,10 @@ export const Channels = {
   installCli: "install_cli",
   openExternal: "open_external",
 
+  // Background app-update banner (see updater.ts)
+  updaterStatus: "updater_status",
+  updaterInstall: "updater_install",
+
   // Browser panels
   browserCreate: "browser_create",
   browserNavigate: "browser_navigate",
@@ -53,6 +57,10 @@ export const Events = {
    *  the `browserHost.viewDestroyed` tRPC mutation. */
   browserViewDestroyed: "browser-view-destroyed",
   windowFullscreenChanged: "window-fullscreen-changed",
+  /** Pushed by the main process when the background updater detects (or
+   *  clears) a pending app update. Payload: `PendingUpdate` from
+   *  updater.ts — `null` or `{ version }`. */
+  updaterStatusChanged: "updater-status-changed",
 } as const;
 
 export type EventName = (typeof Events)[keyof typeof Events];

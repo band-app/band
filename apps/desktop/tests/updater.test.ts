@@ -20,16 +20,28 @@
  */
 
 import { strict as assert } from "node:assert";
-import { describe, test } from "node:test";
+import { beforeEach, describe, test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 
 import {
+  __resetUpdaterGuardsForTests,
   type CheckForUpdateDeps,
   checkForUpdate,
+  checkForUpdateBackground,
+  installPendingUpdate,
+  type PendingUpdate,
   pickAutoUpdater,
+  schedulePeriodicCheck,
   scheduleStartupCheck,
   type UpdaterLike,
 } from "../src/main/updater.ts";
+
+// Module-scoped guards (`inFlightCheck`, `inFlightInstall`) persist across
+// the suite. Reset them before every test so a previous "skip" case doesn't
+// leak into the next.
+beforeEach(() => {
+  __resetUpdaterGuardsForTests();
+});
 
 // ---------------------------------------------------------------------------
 // FakeUpdater: same event surface as electron-updater's AppUpdater singleton
@@ -376,5 +388,250 @@ describe("pickAutoUpdater", () => {
     // `autoUpdater` is undefined because Node didn't hoist the CJS getter.
     const mod = { default: {}, AppUpdater: class {} };
     assert.throws(() => pickAutoUpdater(mod), /did not expose autoUpdater singleton/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// checkForUpdateBackground — silent check used by the 10s startup + 2h
+// periodic banner pipeline. No dialogs. Returns { version } or null.
+// ---------------------------------------------------------------------------
+
+describe("checkForUpdateBackground", () => {
+  test("returns { version } when an update is available", async () => {
+    const updater = new FakeUpdater({ checkOutcome: "available", version: "4.5.6" });
+    const result = await checkForUpdateBackground({ updater });
+    assert.deepEqual(result, { version: "4.5.6" });
+    assert.equal(updater.checkForUpdatesCalls, 1);
+    assert.equal(updater.downloadUpdateCalls, 0); // banner-driven, not auto-download
+  });
+
+  test("returns null when no update is available", async () => {
+    const updater = new FakeUpdater({ checkOutcome: "not-available" });
+    const result = await checkForUpdateBackground({ updater });
+    assert.equal(result, null);
+  });
+
+  test("returns null on error (silent — no dialog escape hatch)", async () => {
+    const updater = new FakeUpdater({ checkOutcome: "error", errorMessage: "503" });
+    const result = await checkForUpdateBackground({ updater });
+    assert.equal(result, null);
+  });
+
+  test("forces autoDownload + autoInstallOnAppQuit off", async () => {
+    const updater = new FakeUpdater({ checkOutcome: "not-available" });
+    updater.autoDownload = true;
+    updater.autoInstallOnAppQuit = true;
+    await checkForUpdateBackground({ updater });
+    assert.equal(updater.autoDownload, false);
+    assert.equal(updater.autoInstallOnAppQuit, false);
+  });
+
+  test("back-to-back calls don't cross-fire listeners", async () => {
+    const updater = new FakeUpdater({ checkOutcome: "available", version: "1.0.0" });
+    const r1 = await checkForUpdateBackground({ updater });
+    const r2 = await checkForUpdateBackground({ updater });
+    assert.deepEqual(r1, { version: "1.0.0" });
+    assert.deepEqual(r2, { version: "1.0.0" });
+    assert.equal(updater.checkForUpdatesCalls, 2);
+  });
+
+  test("skips when a check is already in flight (shared mutex)", async () => {
+    // Hold the first call inside `performCheck` by capturing the
+    // `update-not-available` listener and only invoking it once we want
+    // the first call to complete. Until then `inFlightCheck` is true and
+    // any second call should no-op.
+    let notAvailableListener: (() => void) | null = null;
+    const blockingUpdater: UpdaterLike = {
+      autoDownload: false,
+      autoInstallOnAppQuit: false,
+      on(event: string, listener: (...args: unknown[]) => void): void {
+        if (event === "update-not-available") notAvailableListener = listener as () => void;
+      },
+      removeAllListeners(): void {
+        notAvailableListener = null;
+      },
+      async checkForUpdates() {
+        return null; // resolves but doesn't emit — we drive the event below
+      },
+      async downloadUpdate() {
+        return null;
+      },
+      quitAndInstall() {},
+    };
+
+    const first = checkForUpdateBackground({ updater: blockingUpdater });
+    // Yield so the first call enters performCheck and registers its listener.
+    await delay(5);
+
+    // Second call: should no-op without touching its updater.
+    const tracker = new FakeUpdater({ checkOutcome: "available" });
+    const second = await checkForUpdateBackground({ updater: tracker });
+    assert.equal(second, null);
+    assert.equal(tracker.checkForUpdatesCalls, 0);
+
+    // Unblock the first call.
+    notAvailableListener?.();
+    const firstResult = await first;
+    assert.equal(firstResult, null);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// installPendingUpdate — banner-driven install. No dialogs.
+// ---------------------------------------------------------------------------
+
+describe("installPendingUpdate", () => {
+  test("downloads and restarts on success", async () => {
+    const updater = new FakeUpdater({
+      checkOutcome: "available", // unused — we don't run a check here
+      downloadOutcome: "downloaded",
+    });
+    let restarts = 0;
+    await installPendingUpdate({ updater, restart: () => restarts++ });
+    assert.equal(updater.downloadUpdateCalls, 1);
+    assert.equal(restarts, 1);
+  });
+
+  test("throws when the download fails (renderer flips banner to error)", async () => {
+    const updater = new FakeUpdater({
+      downloadOutcome: "error",
+      downloadErrorMessage: "checksum",
+    });
+    await assert.rejects(installPendingUpdate({ updater, restart: () => undefined }), /checksum/);
+  });
+
+  test("skips when an install is already in flight (mutex)", async () => {
+    // Hold the first install in the download phase by capturing the
+    // `update-downloaded` listener but never invoking it until we say so.
+    let downloadedListener: (() => void) | null = null;
+    let resolveDownload: (() => void) | null = null;
+    const blockingUpdater: UpdaterLike = {
+      autoDownload: false,
+      autoInstallOnAppQuit: false,
+      on(event: string, listener: (...args: unknown[]) => void): void {
+        if (event === "update-downloaded") downloadedListener = listener as () => void;
+      },
+      removeAllListeners(): void {
+        downloadedListener = null;
+      },
+      async checkForUpdates() {
+        return null;
+      },
+      async downloadUpdate() {
+        return new Promise<void>((resolve) => {
+          resolveDownload = resolve;
+        });
+      },
+      quitAndInstall() {},
+    };
+
+    let firstRestarts = 0;
+    const first = installPendingUpdate({
+      updater: blockingUpdater,
+      restart: () => firstRestarts++,
+    });
+    // Yield so the first call sets the guard and registers its listener.
+    await delay(5);
+
+    // Second call: should bail on the mutex without touching its updater.
+    const tracker = new FakeUpdater({ downloadOutcome: "downloaded" });
+    await installPendingUpdate({ updater: tracker, restart: () => undefined });
+    assert.equal(tracker.downloadUpdateCalls, 0);
+
+    // Unblock the first install so the test ends cleanly: emit downloaded,
+    // then resolve `downloadUpdate`'s promise.
+    downloadedListener?.();
+    resolveDownload?.();
+    await first;
+    assert.equal(firstRestarts, 1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// schedulePeriodicCheck — 2h ticker, banner-driven.
+// ---------------------------------------------------------------------------
+
+describe("schedulePeriodicCheck", () => {
+  test("returns no-op when not packaged (dev runs)", async () => {
+    const updater = new FakeUpdater({ checkOutcome: "available" });
+    let results = 0;
+    schedulePeriodicCheck(false, {
+      updater,
+      intervalMs: 10,
+      onResult: () => results++,
+    });
+    await delay(40);
+    assert.equal(updater.checkForUpdatesCalls, 0);
+    assert.equal(results, 0);
+  });
+
+  test("fires onResult on every tick", async () => {
+    const updater = new FakeUpdater({ checkOutcome: "available", version: "2.0.0" });
+    const observed: PendingUpdate[] = [];
+    const cancel = schedulePeriodicCheck(true, {
+      updater,
+      intervalMs: 15,
+      onResult: (p) => observed.push(p),
+    });
+
+    // Wait for a few ticks. setInterval doesn't fire immediately — first tick
+    // lands at ~intervalMs.
+    await delay(55);
+    cancel();
+
+    assert.ok(observed.length >= 2, `expected >=2 ticks, got ${observed.length}`);
+    for (const o of observed) {
+      assert.deepEqual(o, { version: "2.0.0" });
+    }
+  });
+
+  test("cancellation stops further ticks", async () => {
+    const updater = new FakeUpdater({ checkOutcome: "not-available" });
+    let results = 0;
+    const cancel = schedulePeriodicCheck(true, {
+      updater,
+      intervalMs: 10,
+      onResult: () => results++,
+    });
+    // Let one tick fire, then cancel.
+    await delay(25);
+    cancel();
+    const callsAfterCancel = updater.checkForUpdatesCalls;
+    await delay(40);
+    assert.equal(updater.checkForUpdatesCalls, callsAfterCancel);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// scheduleStartupCheck — refactored to use the background flow + onResult.
+// ---------------------------------------------------------------------------
+
+describe("scheduleStartupCheck (background mode)", () => {
+  test("invokes onResult with the available update", async () => {
+    const updater = new FakeUpdater({ checkOutcome: "available", version: "7.7.7" });
+    let observed: PendingUpdate = "sentinel" as unknown as PendingUpdate;
+    scheduleStartupCheck(true, {
+      updater,
+      delayMs: 5,
+      onResult: (p) => {
+        observed = p;
+      },
+    });
+    await delay(40);
+    assert.deepEqual(observed, { version: "7.7.7" });
+  });
+
+  test("invokes onResult with null when no update is available", async () => {
+    const updater = new FakeUpdater({ checkOutcome: "not-available" });
+    let observed: PendingUpdate = "sentinel" as unknown as PendingUpdate;
+    scheduleStartupCheck(true, {
+      updater,
+      delayMs: 5,
+      onResult: (p) => {
+        observed = p;
+      },
+    });
+    await delay(40);
+    assert.equal(observed, null);
   });
 });
