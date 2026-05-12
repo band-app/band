@@ -56,11 +56,15 @@ jobs:
 
       # Restore caches always (safe to read from untrusted runs). Saves are
       # split out below and gated on trusted events as defence-in-depth —
-      # see "Save … cache" steps near the end of the job.
+      # see "Save … cache" steps near the end of the job. IMPORTANT: keep
+      # `path` and `key` in lock-step between Restore and Save halves; an
+      # edit to one without the matching change to the other silently
+      # creates dangling cache entries.
       - name: Restore Cargo registry cache
         id: cache-cargo-registry
         uses: actions/cache/restore@v5
         with:
+          # When editing path/key here, mirror in "Save Cargo registry cache".
           path: |
             ~/.cargo/registry
             ~/.cargo/git
@@ -71,6 +75,7 @@ jobs:
         id: cache-cargo-cli
         uses: actions/cache/restore@v5
         with:
+          # When editing path/key here, mirror in "Save CLI target cache".
           path: apps/cli/target
           key: cargo-cli-${{ runner.os }}-${{ hashFiles('apps/cli/Cargo.lock') }}
           restore-keys: cargo-cli-${{ runner.os }}-
@@ -135,6 +140,17 @@ jobs:
       # cargo caches that release.yml and nightly.yml also consume. Skipped
       # entirely on an exact restore-key hit so we don't re-write identical
       # state. See: TanStack npm supply-chain compromise postmortem.
+      #
+      # The two save steps differ in their failure semantics:
+      #
+      #   - Cargo registry cache: `always()` so we save even when later
+      #     steps fail. The registry is just downloaded crate tarballs; there
+      #     is no notion of "partial" content and re-saving is harmless.
+      #
+      #   - CLI target cache: defaults to `success()` (no `always()`). The
+      #     target dir holds incremental compiler artifacts — saving them
+      #     after a failed cargo build/test can produce a cache entry that
+      #     poisons the next run with broken incremental state.
       - name: Save Cargo registry cache
         if: |
           always() &&
@@ -143,6 +159,7 @@ jobs:
            github.event.pull_request.head.repo.full_name == github.repository)
         uses: actions/cache/save@v5
         with:
+          # When editing path/key here, mirror in "Restore Cargo registry cache".
           path: |
             ~/.cargo/registry
             ~/.cargo/git
@@ -150,12 +167,13 @@ jobs:
 
       - name: Save CLI target cache
         if: |
-          always() &&
+          success() &&
           steps.cache-cargo-cli.outputs.cache-hit != 'true' &&
           (github.event_name == 'push' ||
            github.event.pull_request.head.repo.full_name == github.repository)
         uses: actions/cache/save@v5
         with:
+          # When editing path/key here, mirror in "Restore CLI target cache".
           path: apps/cli/target
           key: cargo-cli-${{ runner.os }}-${{ hashFiles('apps/cli/Cargo.lock') }}
 
