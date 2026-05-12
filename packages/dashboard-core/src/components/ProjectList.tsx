@@ -440,6 +440,42 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
     }
   }, [activeWorkspaceId, allWorkspaceIds]);
 
+  // Reveal the active workspace in the tree by auto-expanding the project
+  // and label group it belongs to. This runs when activeWorkspaceId changes
+  // — typically from the Ctrl+R workspace switcher (WorkspacePickerDialog),
+  // but also for any other external activation (URL nav, notifications,
+  // etc.). It deliberately depends only on activeWorkspaceId (plus the
+  // structural inputs needed to locate the workspace) so a user who
+  // manually re-collapses a project doesn't get fought by this effect on
+  // every render.
+  //
+  // We also clear keyboardNavRef so the focusedIndex effect above can
+  // re-run and move the highlight ring to the freshly-revealed workspace.
+  // Without that reset, arrow-key navigation followed by a Ctrl+R switch
+  // would leave the highlight stuck on the old position.
+  //
+  // If the active workspace falls outside the current label filter we
+  // don't bother expanding anything — it won't be rendered regardless.
+  useEffect(() => {
+    if (!activeWorkspaceId) return;
+    for (const group of groups) {
+      for (const project of group.projects) {
+        const containsActive = project.worktrees.some(
+          (wt) => toWorkspaceId(project.name, wt.branch) === activeWorkspaceId,
+        );
+        if (!containsActive) continue;
+        if (labelFilter && group.labelId !== labelFilter) return;
+        const headerVisible = labels.length > 0 && !labelFilter;
+        if (headerVisible) {
+          labelCollapse.expand(group.labelId ?? UNLABELED_KEY);
+        }
+        projectCollapse.expand(project.name);
+        keyboardNavRef.current = false;
+        return;
+      }
+    }
+  }, [activeWorkspaceId, groups, labelFilter, labels.length, labelCollapse, projectCollapse]);
+
   // Focus the container so keyboard navigation works immediately.
   // Depends on hasProjects because the container div only renders when
   // projects.length > 0 (see the early return below). On first mount with no

@@ -47,6 +47,8 @@ function write(key: string, set: Set<string>): void {
 export interface CollapseState {
   isCollapsed: (id: string) => boolean;
   toggle: (id: string) => void;
+  /** Idempotently mark an id as expanded (remove from collapsed set). */
+  expand: (id: string) => void;
   /** Replace the entire collapsed set in one shot (used for collapse-all). */
   setAll: (ids: Iterable<string>) => void;
 }
@@ -90,6 +92,23 @@ export function useCollapseState(storageKey: string): CollapseState {
     [storageKey],
   );
 
+  // Used by callers that need to reveal an item nested under collapsed
+  // ancestors (e.g. the workspace switcher revealing the selected workspace
+  // in the project tree). Idempotent — a no-op if the id isn't currently
+  // in the collapsed set, so it won't fight a user who manually expanded.
+  const expand = useCallback(
+    (id: string) => {
+      setCollapsed((prev) => {
+        if (!prev.has(id)) return prev;
+        const next = new Set(prev);
+        next.delete(id);
+        write(storageKey, next);
+        return next;
+      });
+    },
+    [storageKey],
+  );
+
   const setAll = useCallback(
     (ids: Iterable<string>) => {
       const next = new Set(ids);
@@ -101,5 +120,8 @@ export function useCollapseState(storageKey: string): CollapseState {
 
   // Memoised so consumers can use the returned object as a useMemo/useEffect
   // dependency without triggering work on every render.
-  return useMemo(() => ({ isCollapsed, toggle, setAll }), [isCollapsed, toggle, setAll]);
+  return useMemo(
+    () => ({ isCollapsed, toggle, expand, setAll }),
+    [isCollapsed, toggle, expand, setAll],
+  );
 }
