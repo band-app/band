@@ -144,18 +144,26 @@ jobs:
       # The two save steps differ in their failure semantics:
       #
       #   - Cargo registry cache: `always()` so we save even when later
-      #     steps fail. The registry is just downloaded crate tarballs; there
-      #     is no notion of "partial" content and re-saving is harmless.
+      #     steps fail. The registry holds downloaded crate tarballs plus
+      #     an index — a job cancelled mid-download may leave incomplete
+      #     files, but cargo re-validates against the index on the next
+      #     run, so a re-save is safe.
       #
       #   - CLI target cache: defaults to `success()` (no `always()`). The
       #     target dir holds incremental compiler artifacts — saving them
       #     after a failed cargo build/test can produce a cache entry that
       #     poisons the next run with broken incremental state.
+      #
+      # The trust gate is phrased as "not a pull_request, OR a same-repo
+      # PR" rather than enumerating allowed event types. New triggers
+      # (workflow_dispatch, schedule, repository_dispatch, …) are allowed
+      # by default and only forks are blocked, which is the invariant we
+      # actually want.
       - name: Save Cargo registry cache
         if: |
           always() &&
           steps.cache-cargo-registry.outputs.cache-hit != 'true' &&
-          (github.event_name == 'push' ||
+          (github.event_name != 'pull_request' ||
            github.event.pull_request.head.repo.full_name == github.repository)
         uses: actions/cache/save@v5
         with:
@@ -169,7 +177,7 @@ jobs:
         if: |
           success() &&
           steps.cache-cargo-cli.outputs.cache-hit != 'true' &&
-          (github.event_name == 'push' ||
+          (github.event_name != 'pull_request' ||
            github.event.pull_request.head.repo.full_name == github.repository)
         uses: actions/cache/save@v5
         with:
