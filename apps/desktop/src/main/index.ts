@@ -26,7 +26,12 @@ import { killPort } from "./services/port.js";
 import { getConfiguredPort, getWebBrowserCdpEnabled } from "./services/settings.js";
 import { resolveWebDir } from "./services/web-paths.js";
 import { ensureWebserverRunning, ManagedProcess } from "./services/web-server.js";
-import { scheduleStartupCheck } from "./updater.js";
+import {
+  installPendingUpdate,
+  type PendingUpdate,
+  schedulePeriodicCheck,
+  scheduleStartupCheck,
+} from "./updater.js";
 import { createMainWindow } from "./window.js";
 
 interface AppState {
@@ -35,6 +40,12 @@ interface AppState {
   browserManager: BrowserViewManager | null;
   unregisterIpc: (() => void) | null;
   cancelStartupUpdateCheck: (() => void) | null;
+  cancelPeriodicUpdateCheck: (() => void) | null;
+  /** The most recently observed available update, or null. Owned here so
+   *  the renderer can ask via `updater_status` (catching the race where it
+   *  mounts after the startup check completed) and so the broadcast layer
+   *  can dedupe by version. */
+  pendingUpdate: PendingUpdate;
   activityMonitor: ActivityMonitorHandle | null;
   cleanedUp: boolean;
   port: number;
@@ -48,11 +59,29 @@ const state: AppState = {
   browserManager: null,
   unregisterIpc: null,
   cancelStartupUpdateCheck: null,
+  cancelPeriodicUpdateCheck: null,
+  pendingUpdate: null,
   activityMonitor: null,
   cleanedUp: false,
   port: getConfiguredPort(),
   webDir: "",
 };
+
+/**
+ * Broadcast the current `pendingUpdate` to every renderer (multi-window
+ * safe). Dedupes by version so a stable periodic-no-update tick doesn't
+ * re-render the banner every 2h.
+ */
+function setPendingUpdate(next: PendingUpdate): void {
+  const prevVersion = state.pendingUpdate?.version ?? null;
+  const nextVersion = next?.version ?? null;
+  if (prevVersion === nextVersion) return;
+  state.pendingUpdate = next;
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.isDestroyed()) continue;
+    win.webContents.send("updater-status-changed", next);
+  }
+}
 
 function installCrashHandlers(): void {
   process.on("uncaughtException", (err) => {
@@ -96,9 +125,11 @@ async function cleanupOnce(): Promise<void> {
   if (state.cleanedUp) return;
   state.cleanedUp = true;
 
-  // Cancel any pending startup update check so its dialog doesn't pop up
-  // mid-shutdown (the 10s delay can outlive Cmd+Q on a quick quit).
+  // Cancel any pending update checks so the deferred timers don't fire
+  // mid-shutdown. The 10s startup delay can outlive a quick Cmd+Q, and
+  // the 2h periodic interval would otherwise tick during teardown.
   state.cancelStartupUpdateCheck?.();
+  state.cancelPeriodicUpdateCheck?.();
   state.activityMonitor?.stop();
   state.unregisterIpc?.();
   state.browserManager?.destroyAll();
@@ -185,13 +216,26 @@ async function bootstrap(): Promise<void> {
       resourcesPath: process.resourcesPath,
       appPath: app.getAppPath(),
     },
+    // Background app-update banner: the renderer reads `pendingUpdate`
+    // on mount and subscribes to `updater-status-changed`; `installUpdate`
+    // drives electron-updater's download + quitAndInstall.
+    getPendingUpdate: () => state.pendingUpdate,
+    installUpdate: () => installPendingUpdate(),
   });
 
   // Auto-update check 10s after launch (matches the Tauri shell's
   // `tokio::time::sleep(Duration::from_secs(10))` in lib.rs::run). No-op
-  // in unpacked dev runs (`!app.isPackaged`) — see updater.ts.
+  // in unpacked dev runs (`!app.isPackaged`) — see updater.ts. The
+  // result feeds the in-app banner via `setPendingUpdate` instead of an
+  // OS dialog (the menu item "Check for Updates…" keeps the dialog flow).
   state.cancelStartupUpdateCheck = scheduleStartupCheck(app.isPackaged, {
-    parentWindow: state.mainWindow,
+    onResult: setPendingUpdate,
+  });
+
+  // Periodic re-check every 2h while the app is running. Same gating + same
+  // banner pipeline as the startup check.
+  state.cancelPeriodicUpdateCheck = schedulePeriodicCheck(app.isPackaged, {
+    onResult: setPendingUpdate,
   });
 
   // Watch focus + AC/battery state and tell the web server to widen the

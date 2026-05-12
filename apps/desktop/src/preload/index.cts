@@ -46,6 +46,9 @@ const ALLOWED_INVOKE_CHANNELS = new Set<string>([
   "open_with_app",
   "install_cli",
   "open_external",
+  // Background app-update banner
+  "updater_status",
+  "updater_install",
   // Phase 3 — browser panels
   "browser_create",
   "browser_navigate",
@@ -69,6 +72,7 @@ const ALLOWED_EVENT_NAMES = new Set<string>([
   "browser-title-changed",
   "browser-view-destroyed",
   "window-fullscreen-changed",
+  "updater-status-changed",
 ]);
 
 type Unlisten = () => void;

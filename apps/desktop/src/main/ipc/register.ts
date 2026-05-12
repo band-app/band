@@ -47,6 +47,14 @@ export interface RegisterOptions {
    * resolve the sidecar binary inside the trust boundary.
    */
   cliPaths: CliPathOptions;
+  /**
+   * Background app-update banner state. The bootstrap owns the
+   * `pendingUpdate` cache and the install closure (which captures the
+   * `electron-updater` deps). Passing them in keeps `register.ts`
+   * decoupled from the updater module.
+   */
+  getPendingUpdate: () => { version: string } | null;
+  installUpdate: () => Promise<void>;
 }
 
 /**
@@ -85,6 +93,15 @@ export function registerIpc(opts: RegisterOptions): () => void {
     installCli(args.binaryPath, args.symlinkPath, opts.cliPaths),
   );
   handle(Channels.openExternal, (args: OpenExternalArgs) => openExternal(args.url));
+
+  // ---- Background app-update banner ----
+  // The renderer calls `updater_status` once on mount to seed initial state
+  // (a missed broadcast race) and subscribes to `updater-status-changed`
+  // for subsequent transitions. `updater_install` kicks off
+  // `installPendingUpdate` — the response never resolves on success because
+  // `electron-updater` quits the process to install.
+  handle(Channels.updaterStatus, () => opts.getPendingUpdate());
+  handle(Channels.updaterInstall, () => opts.installUpdate());
 
   // ---- Browser panels ----
   const bm = { manager: opts.browserManager };

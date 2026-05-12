@@ -66,6 +66,13 @@ export interface DashboardAdapter {
   checkCli(): Promise<CliStatus>;
   installCli(opts?: { allowPrompt?: boolean }): Promise<void>;
 
+  // Background app-update banner (desktop only — the web adapter omits these
+  // and the hook short-circuits to "none" so the banner never appears in a
+  // plain browser tab).
+  getUpdateStatus?(): Promise<{ version: string } | null>;
+  installUpdate?(): Promise<void>;
+  subscribeUpdateStatus?(cb: (pending: { version: string } | null) => void): Unsubscribe;
+
   // Agent status (optional)
   clearNeedsAttention?(workspaceId: string): Promise<void>;
 
