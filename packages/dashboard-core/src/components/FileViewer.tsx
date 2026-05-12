@@ -427,13 +427,15 @@ export function FileViewer({
           <PdfPreview src={fileUrl} filename={getFilename(filePath)} />
         )}
 
-        {/* Markdown preview (rendered) — uses displayContent so edits show live */}
+        {/* Markdown preview (rendered) — uses displayContent so edits show live.
+             Note: check `!== undefined` not truthiness so an empty file
+             (content === "") still renders the preview pane. */}
         {!loading &&
           !error &&
           previewType === "markdown" &&
           renderMarkdown &&
           viewMode === "preview" &&
-          displayContent && (
+          displayContent !== undefined && (
             <div className="h-full overflow-auto">
               <div className="mx-auto max-w-3xl px-8 py-6 text-sm">
                 {renderMarkdown(displayContent)}
@@ -441,16 +443,18 @@ export function FileViewer({
             </div>
           )}
 
-        {/* Source view: editable editor or read-only viewer */}
+        {/* Source view: editable editor or read-only viewer.
+             Same undefined-check as the markdown branch — empty files
+             are still valid and must surface the editor. */}
         {!loading &&
           !error &&
-          data?.content &&
+          data?.content !== undefined &&
           (previewType === "code" ||
             (previewType === "markdown" && (!renderMarkdown || viewMode === "source"))) &&
           (canEdit ? (
             <CodeMirrorEditor
-              content={displayContent!}
-              originalContent={data?.content}
+              content={displayContent ?? ""}
+              originalContent={data.content}
               language={lang}
               className="h-full"
               filePath={filePath}

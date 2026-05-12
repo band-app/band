@@ -2,6 +2,7 @@ import {
   buildLspWsUrl,
   createLspExtension,
   FileBrowser,
+  type FileBrowserHandle,
   FileViewer,
   getFilePreviewType,
   getLspLanguageId,
@@ -20,13 +21,34 @@ import {
   useSearch,
   useSettingsQuery,
 } from "@band-app/dashboard-core";
-import { cn, Tooltip, TooltipContent, TooltipTrigger } from "@band-app/ui";
+import {
+  cn,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@band-app/ui";
 import type { Extension } from "@codemirror/state";
 import { cjk } from "@streamdown/cjk";
 import { code } from "@streamdown/code";
 import { math } from "@streamdown/math";
 import { mermaid } from "@streamdown/mermaid";
-import { ChevronLeft, ChevronRight, Code, Eye, File, Search, TextSearch } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Code,
+  Eye,
+  File,
+  FilePlus,
+  FolderPlus,
+  MoreVertical,
+  Search,
+  TextSearch,
+} from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Group, Panel, Separator, usePanelRef } from "react-resizable-panels";
 import { Streamdown } from "streamdown";
@@ -119,10 +141,6 @@ interface CodeBrowserViewProps {
   onFileOpened?: () => void;
   /** Reports a callback that triggers find-in-file search (null when unavailable) */
   onFindInFile?: (fn: (() => void) | null) => void;
-  /** Called to open the Quick Open dialog */
-  onQuickOpen?: () => void;
-  /** Called to open the Search in Files dialog */
-  onSearchFiles?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -130,50 +148,217 @@ interface CodeBrowserViewProps {
 // ---------------------------------------------------------------------------
 
 interface FileTreeToolbarProps {
-  onQuickOpen?: () => void;
-  onSearchFiles?: () => void;
+  onNewFile?: () => void;
+  onNewFolder?: () => void;
 }
 
-function FileTreeToolbar({ onQuickOpen, onSearchFiles }: FileTreeToolbarProps) {
+// Below this width (px), the toolbar collapses its action buttons into a
+// vertical 3-dots dropdown so the panel stays usable even when narrow.
+const TOOLBAR_COMPACT_BREAKPOINT = 200;
+
+/**
+ * Build a pointerup handler that mirrors a click for touch / pen pointers.
+ *
+ * iOS Safari swallows the synthetic click on a Tooltip-wrapped button's
+ * first tap — the OS treats the tap as a "show hover state" gesture for
+ * the tooltip, the tooltip flashes, and `onClick` never fires. Lifting on
+ * pointerup is reliable across pointer types: we run the action there for
+ * touch and pen, and `preventDefault()` stops the synthetic click from
+ * firing afterward so mouse-pointer clicks (which take the `onClick` path)
+ * don't double-trigger.
+ */
+const touchPointerUp = (fn?: () => void) => (e: React.PointerEvent<HTMLButtonElement>) => {
+  if (!fn || e.pointerType === "mouse") return;
+  e.preventDefault();
+  fn();
+};
+
+/**
+ * Open Quick Open via a window event. The active workspace layout
+ * (MobileWorkspaceLayout in `workspace.$workspaceId.tsx` or
+ * DockviewWorkspaceLayout when desktop) listens for this event and
+ * opens its locally-owned dialog. Using an event avoids threading the
+ * setter through a React context across multiple route levels, which
+ * proved unreliable in practice on the iOS Simulator.
+ */
+const fireOpenQuickOpen = () => window.dispatchEvent(new CustomEvent("band:open-quick-open"));
+const fireOpenSearchFiles = () => window.dispatchEvent(new CustomEvent("band:open-search-files"));
+
+function FileTreeToolbar({ onNewFile, onNewFolder }: FileTreeToolbarProps) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [compact, setCompact] = useState(false);
+
+  useLayoutEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    setCompact(el.clientWidth < TOOLBAR_COMPACT_BREAKPOINT);
+  }, []);
+
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setCompact(entry.contentRect.width < TOOLBAR_COMPACT_BREAKPOINT);
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Defer the dropdown's menu actions until after the menu has fully
+  // closed — same trick the file-tree context menus use. Without this,
+  // selecting "New File" mounts the inline rename / new-entry input
+  // inside dashboard-core while Radix's FocusScope (still alive for
+  // the DropdownMenu's close transition) yanks focus back, and the
+  // input's own onBlur tears it down before it can take focus.
+  const pendingMenuAction = useRef<(() => void) | null>(null);
+  const queueMenuAction = useCallback((fn: () => void) => {
+    pendingMenuAction.current = fn;
+  }, []);
+  const flushMenuAction = useCallback((e: { preventDefault: () => void }) => {
+    e.preventDefault();
+    const fn = pendingMenuAction.current;
+    pendingMenuAction.current = null;
+    fn?.();
+  }, []);
+
   return (
-    <div className="flex h-9 shrink-0 items-center gap-0.5 border-b border-border/50 pl-3 pr-1.5">
+    <div
+      ref={rootRef}
+      className="flex h-9 shrink-0 items-center gap-0.5 border-b border-border/50 pl-3 pr-1.5"
+    >
       <span className="text-xs font-medium text-muted-foreground">Files</span>
       <div className="flex-1" />
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            onClick={onQuickOpen}
-            className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+      {compact ? (
+        <DropdownMenu>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  aria-label="File tree actions"
+                  className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors data-[state=open]:bg-accent data-[state=open]:text-foreground"
+                >
+                  <MoreVertical className="size-3.5" />
+                </button>
+              </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-xs">
+              More
+            </TooltipContent>
+          </Tooltip>
+          <DropdownMenuContent
+            align="end"
+            className="min-w-[10rem]"
+            onCloseAutoFocus={flushMenuAction}
           >
-            <Search className="size-3.5" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom" className="text-xs">
-          Quick Open{" "}
-          <kbd className="ml-1.5 rounded border border-popover-foreground/25 bg-popover-foreground/10 px-1 py-0.5 font-mono text-[14px]">
-            ⌘P
-          </kbd>
-        </TooltipContent>
-      </Tooltip>
+            {onNewFile && (
+              <DropdownMenuItem onSelect={() => queueMenuAction(onNewFile)}>
+                <FilePlus className="size-4" />
+                New File
+              </DropdownMenuItem>
+            )}
+            {onNewFolder && (
+              <DropdownMenuItem onSelect={() => queueMenuAction(onNewFolder)}>
+                <FolderPlus className="size-4" />
+                New Folder
+              </DropdownMenuItem>
+            )}
+            {(onNewFile || onNewFolder) && <DropdownMenuSeparator />}
+            <DropdownMenuItem onSelect={() => queueMenuAction(fireOpenQuickOpen)}>
+              <Search className="size-4" />
+              Quick Open
+              <kbd className="ml-auto rounded border border-popover-foreground/25 bg-popover-foreground/10 px-1 py-0.5 font-mono text-[10px]">
+                ⌘P
+              </kbd>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => queueMenuAction(fireOpenSearchFiles)}>
+              <TextSearch className="size-4" />
+              Search in Files
+              <kbd className="ml-auto rounded border border-popover-foreground/25 bg-popover-foreground/10 px-1 py-0.5 font-mono text-[10px]">
+                ⌘⇧F
+              </kbd>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : (
+        <>
+          {onNewFile && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={onNewFile}
+                  onPointerUp={touchPointerUp(onNewFile)}
+                  className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                >
+                  <FilePlus className="size-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="text-xs">
+                New File
+              </TooltipContent>
+            </Tooltip>
+          )}
 
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            onClick={onSearchFiles}
-            className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-          >
-            <TextSearch className="size-3.5" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom" className="text-xs">
-          Search in Files{" "}
-          <kbd className="ml-1.5 rounded border border-popover-foreground/25 bg-popover-foreground/10 px-1 py-0.5 font-mono text-[14px]">
-            ⌘⇧F
-          </kbd>
-        </TooltipContent>
-      </Tooltip>
+          {onNewFolder && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={onNewFolder}
+                  onPointerUp={touchPointerUp(onNewFolder)}
+                  className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                >
+                  <FolderPlus className="size-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="text-xs">
+                New Folder
+              </TooltipContent>
+            </Tooltip>
+          )}
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={fireOpenQuickOpen}
+                onPointerUp={touchPointerUp(fireOpenQuickOpen)}
+                className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+              >
+                <Search className="size-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-xs">
+              Quick Open{" "}
+              <kbd className="ml-1.5 rounded border border-popover-foreground/25 bg-popover-foreground/10 px-1 py-0.5 font-mono text-[14px]">
+                ⌘P
+              </kbd>
+            </TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={fireOpenSearchFiles}
+                onPointerUp={touchPointerUp(fireOpenSearchFiles)}
+                className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+              >
+                <TextSearch className="size-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-xs">
+              Search in Files{" "}
+              <kbd className="ml-1.5 rounded border border-popover-foreground/25 bg-popover-foreground/10 px-1 py-0.5 font-mono text-[14px]">
+                ⌘⇧F
+              </kbd>
+            </TooltipContent>
+          </Tooltip>
+        </>
+      )}
     </div>
   );
 }
@@ -189,8 +374,6 @@ export function CodeBrowserView({
   openFilePath,
   onFileOpened,
   onFindInFile,
-  onQuickOpen,
-  onSearchFiles,
 }: CodeBrowserViewProps) {
   const isDesktop = useIsDesktop();
   const fileTabs = useFileTabs(workspaceId);
@@ -882,6 +1065,130 @@ export function CodeBrowserView({
   }, [fileTabs.activeTabPath, handleTabClose]);
 
   // -------------------------------------------------------------------------
+  // File tree imperative handle (drives "new file" / "new folder" from toolbar)
+  // -------------------------------------------------------------------------
+  const fileBrowserRef = useRef<FileBrowserHandle | null>(null);
+
+  const handleNewFile = useCallback(() => {
+    fileBrowserRef.current?.startNewFile();
+  }, []);
+  const handleNewFolder = useCallback(() => {
+    fileBrowserRef.current?.startNewFolder();
+  }, []);
+
+  // -------------------------------------------------------------------------
+  // Keep tabs + editor state in sync with rename / delete in the file tree.
+  // -------------------------------------------------------------------------
+
+  // Save the editor view's current state for the currently active tab.
+  // This needs to happen synchronously BEFORE the file path changes so
+  // we don't lose pending edits when the editor remounts on the new
+  // path. Returns a function that flushes the saved state to either
+  // the rewritten path (rename) or drops it (delete).
+  const flushActiveEditorState = useCallback(() => {
+    const view = editorViewRef.current;
+    const fp = viewFilePathRef.current;
+    if (!view || !fp) return null;
+    try {
+      const state = serializeEditorState(view);
+      return { path: fp, state };
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const handlePathRenamed = useCallback(
+    (oldPath: string, newPath: string, _kind: "file" | "directory") => {
+      // Capture the live editor state for the active tab before any
+      // path rewriting so it survives the rename.
+      const flushed = flushActiveEditorState();
+
+      // Rewrite tab list and persisted per-tab state (editor state,
+      // view mode, edited content). Both handle exact and prefix-match
+      // semantics so directory renames cascade to descendant tabs.
+      fileTabs.renameFile(oldPath, newPath);
+      tabState.renameFile(oldPath, newPath);
+
+      // In-memory editor states keyed by path also need rewriting.
+      const oldPrefix = `${oldPath}/`;
+      const newStates: typeof savedEditorStatesRef.current = {};
+      for (const [key, value] of Object.entries(savedEditorStatesRef.current)) {
+        if (key === oldPath) {
+          newStates[newPath] = value;
+        } else if (key.startsWith(oldPrefix)) {
+          newStates[newPath + key.slice(oldPath.length)] = value;
+        } else {
+          newStates[key] = value;
+        }
+      }
+      // If we just captured the active editor's state, persist it
+      // under the renamed key so the editor restores cleanly when it
+      // remounts on the new path.
+      if (flushed) {
+        const rewritten =
+          flushed.path === oldPath
+            ? newPath
+            : flushed.path.startsWith(oldPrefix)
+              ? newPath + flushed.path.slice(oldPath.length)
+              : flushed.path;
+        newStates[rewritten] = flushed.state;
+        tabState.update(rewritten, {
+          editorState: flushed.state.editorState,
+          scrollTop: flushed.state.scrollTop,
+        });
+      }
+      savedEditorStatesRef.current = newStates;
+
+      // Sync the currently-viewed file path so the editor remounts on
+      // the new name (or the new descendant path).
+      if (viewFilePath === oldPath) {
+        skipFileEffectRef.current = true;
+        setViewFilePath(newPath);
+        onSelectFile?.(newPath);
+      } else if (viewFilePath.startsWith(oldPrefix)) {
+        const rewritten = newPath + viewFilePath.slice(oldPath.length);
+        skipFileEffectRef.current = true;
+        setViewFilePath(rewritten);
+        onSelectFile?.(rewritten);
+      }
+    },
+    [
+      fileTabs.renameFile,
+      tabState.renameFile,
+      tabState.update,
+      flushActiveEditorState,
+      viewFilePath,
+      onSelectFile,
+    ],
+  );
+
+  const handlePathDeleted = useCallback(
+    (path: string, _kind: "file" | "directory") => {
+      const prefix = `${path}/`;
+      // Drop in-memory editor state for any descendant.
+      for (const key of Object.keys(savedEditorStatesRef.current)) {
+        if (key === path || key.startsWith(prefix)) {
+          delete savedEditorStatesRef.current[key];
+        }
+      }
+      // Drop persisted per-tab state.
+      tabState.removePath(path);
+      // Drop tabs (this also adjusts activeTabPath if needed).
+      fileTabs.removePath(path);
+
+      // Clear the currently-viewed file if it sat inside the deleted tree.
+      if (viewFilePath === path || viewFilePath.startsWith(prefix)) {
+        setViewFilePath("");
+        setViewLine(undefined);
+        setViewLineEnd(undefined);
+        setViewColumn(undefined);
+        onSelectFile?.(null);
+      }
+    },
+    [fileTabs.removePath, tabState.removePath, viewFilePath, onSelectFile],
+  );
+
+  // -------------------------------------------------------------------------
   // Resizable file tree panel
   // -------------------------------------------------------------------------
   const treePanelRef = usePanelRef();
@@ -968,12 +1275,26 @@ export function CodeBrowserView({
             onEditedContentChange={handleEditedContentChange}
           />
         ) : (
-          <FileBrowser
-            workspaceId={workspaceId}
-            onOpenFile={handleSelectFile}
-            onOpenFilePinned={handleSelectFilePinned}
-            selectedFile={viewFilePath}
-          />
+          // Same toolbar-above-tree layout the desktop side-by-side uses,
+          // so New File / New Folder / Quick Open / Search in Files are
+          // reachable on touch without relying on the (undiscoverable)
+          // long-press → context menu. The toolbar already handles its
+          // own narrow-width collapse into a kebab, so this works at any
+          // mobile viewport.
+          <div className="flex h-full flex-col overflow-hidden">
+            <FileTreeToolbar onNewFile={handleNewFile} onNewFolder={handleNewFolder} />
+            <div className="min-h-0 flex-1 overflow-hidden">
+              <FileBrowser
+                ref={fileBrowserRef}
+                workspaceId={workspaceId}
+                onOpenFile={handleSelectFile}
+                onOpenFilePinned={handleSelectFilePinned}
+                selectedFile={viewFilePath}
+                onPathRenamed={handlePathRenamed}
+                onPathDeleted={handlePathDeleted}
+              />
+            </div>
+          </div>
         )
       ) : (
         // Desktop: side-by-side layout with resizable file tree
@@ -998,14 +1319,17 @@ export function CodeBrowserView({
             }}
           >
             <div className="flex h-full flex-col overflow-hidden border-r border-border">
-              <FileTreeToolbar onQuickOpen={onQuickOpen} onSearchFiles={onSearchFiles} />
+              <FileTreeToolbar onNewFile={handleNewFile} onNewFolder={handleNewFolder} />
               <div className="min-h-0 flex-1 overflow-hidden">
                 <FileBrowser
+                  ref={fileBrowserRef}
                   workspaceId={workspaceId}
                   onOpenFile={handleSelectFile}
                   onOpenFilePinned={handleSelectFilePinned}
                   compact
                   selectedFile={viewFilePath}
+                  onPathRenamed={handlePathRenamed}
+                  onPathDeleted={handlePathDeleted}
                 />
               </div>
             </div>

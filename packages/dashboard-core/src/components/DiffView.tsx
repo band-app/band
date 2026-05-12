@@ -1345,6 +1345,48 @@ export function DiffView({
     [adapter, workspaceId, diffMode, compareBranch],
   );
 
+  /**
+   * Reset every path in the list. Used by ChangesFileTree's right-click
+   * "Reset changes" — for a folder right-click the caller collects every
+   * leaf file path under that folder and passes them all here so they're
+   * reverted together. We revert in parallel and only refresh the
+   * summary once at the end so the UI doesn't flicker through N partial
+   * states.
+   */
+  const handleRevertPaths = useCallback(
+    async (paths: string[]) => {
+      const revertFile = adapter.revertFile;
+      if (!revertFile || paths.length === 0) return;
+
+      const results = await Promise.allSettled(
+        paths.map((p) =>
+          revertFile.call(adapter, workspaceId, p, diffMode, compareBranch ?? undefined),
+        ),
+      );
+
+      // Drop reverted entries from local cache.
+      setDiffCache((prev) => {
+        const next = new Map(prev);
+        for (const p of paths) next.delete(p);
+        return next;
+      });
+      for (const p of paths) expandedFilesRef.current.delete(p);
+
+      // Refresh the summary so file rows reflect their new (or absent) state.
+      fetchSummaryRef.current?.(true);
+
+      // Surface any partial failures so the user knows something didn't
+      // get reset. Individual failures don't roll back the rest — git's
+      // own atomicity is per-file anyway.
+      for (const r of results) {
+        if (r.status === "rejected") {
+          console.error("Failed to revert path:", r.reason);
+        }
+      }
+    },
+    [adapter, workspaceId, diffMode, compareBranch],
+  );
+
   // -------------------------------------------------------------------------
   // Fetch diff summary
   // -------------------------------------------------------------------------
@@ -1670,11 +1712,12 @@ export function DiffView({
           <div className="flex h-9 shrink-0 items-center border-b border-border px-3">
             <span className="text-xs font-medium text-muted-foreground">Files</span>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto py-1">
+          <div className="min-h-0 flex-1 overflow-y-auto py-1 pl-px">
             <ChangesFileTree
               fileStatuses={fileStatuses}
               onSelectFile={handleScrollToFile}
               activeFile={activeFile}
+              onRevertPaths={adapter.revertFile ? handleRevertPaths : undefined}
             />
           </div>
         </div>

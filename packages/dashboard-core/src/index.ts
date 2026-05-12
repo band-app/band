@@ -13,7 +13,7 @@ export { CommandPaletteDialog } from "./components/CommandPaletteDialog";
 export { CommitDialog } from "./components/CommitDialog";
 export { DashboardShell } from "./components/DashboardShell";
 export { type DiffStats, DiffView } from "./components/DiffView";
-export { FileBrowser } from "./components/FileBrowser";
+export { FileBrowser, type FileBrowserHandle } from "./components/FileBrowser";
 export { FileViewer } from "./components/FileViewer";
 export { GitStatusIndicator } from "./components/GitStatusIndicator";
 export { ImagePreview } from "./components/ImagePreview";

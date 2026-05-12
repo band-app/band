@@ -43,6 +43,19 @@ export interface UseFileTabsReturn {
   setActiveTab: (filePath: string) => void;
   closeOtherTabs: (filePath: string) => void;
   closeAllTabs: () => void;
+  /**
+   * Rename or move a file. Updates the tab whose path equals `oldPath`,
+   * and any descendant tab whose path starts with `oldPath + "/"` (used
+   * when the user renames a directory). The active tab pointer follows
+   * the renamed path automatically.
+   */
+  renameFile: (oldPath: string, newPath: string) => void;
+  /**
+   * Remove every tab whose path equals `path` or sits inside `path + "/"`.
+   * Used to keep tabs in sync when the user deletes a file or directory
+   * from the file browser.
+   */
+  removePath: (path: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -291,6 +304,80 @@ export function useFileTabs(workspaceId: string): UseFileTabsReturn {
     setActiveTabPathState(null);
   }, []);
 
+  // Helper: returns the rewritten path if `path` is `oldPath` itself or
+  // a descendant of `oldPath`. Returns null when it's outside the
+  // renamed subtree.
+  const rewritePath = useCallback(
+    (path: string, oldPath: string, newPath: string): string | null => {
+      if (path === oldPath) return newPath;
+      const prefix = `${oldPath}/`;
+      if (path.startsWith(prefix)) return newPath + path.slice(oldPath.length);
+      return null;
+    },
+    [],
+  );
+
+  const renameFile = useCallback(
+    (oldPath: string, newPath: string) => {
+      if (oldPath === newPath) return;
+      setOpenTabs((prev) => {
+        let changed = false;
+        const next = prev.map((tab) => {
+          const rewritten = rewritePath(tab.filePath, oldPath, newPath);
+          if (rewritten === null) return tab;
+          changed = true;
+          return tab.isPreview ? { filePath: rewritten, isPreview: true } : { filePath: rewritten };
+        });
+        return changed ? next : prev;
+      });
+      setActiveTabPathState((current) => {
+        if (current === null) return current;
+        const rewritten = rewritePath(current, oldPath, newPath);
+        return rewritten ?? current;
+      });
+    },
+    [rewritePath],
+  );
+
+  const removePath = useCallback((path: string) => {
+    const prefix = `${path}/`;
+    setOpenTabs((prev) => {
+      const next = prev.filter((tab) => tab.filePath !== path && !tab.filePath.startsWith(prefix));
+      if (next.length === prev.length) {
+        // Nothing to remove — still need to sync activeTabPath in case it
+        // was already cleared elsewhere.
+        return prev;
+      }
+      setActiveTabPathState((currentActive) => {
+        if (
+          currentActive !== null &&
+          (currentActive === path || currentActive.startsWith(prefix))
+        ) {
+          // Pick the tab that used to be just after the removed range,
+          // else the previous tab, else nothing.
+          if (next.length === 0) return null;
+          const removedIdx = prev.findIndex((t) => t.filePath === currentActive);
+          if (removedIdx === -1) return next[0].filePath;
+          // Find the surviving tab nearest to the removed slot.
+          // Search forward first.
+          for (let i = removedIdx; i < prev.length; i++) {
+            if (next.some((t) => t.filePath === prev[i].filePath)) {
+              return prev[i].filePath;
+            }
+          }
+          for (let i = removedIdx - 1; i >= 0; i--) {
+            if (next.some((t) => t.filePath === prev[i].filePath)) {
+              return prev[i].filePath;
+            }
+          }
+          return next[0].filePath;
+        }
+        return currentActive;
+      });
+      return next;
+    });
+  }, []);
+
   return {
     openTabs,
     activeTabPath,
@@ -302,5 +389,7 @@ export function useFileTabs(workspaceId: string): UseFileTabsReturn {
     setActiveTab,
     closeOtherTabs,
     closeAllTabs,
+    renameFile,
+    removePath,
   };
 }

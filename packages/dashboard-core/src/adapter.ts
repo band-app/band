@@ -94,6 +94,50 @@ export interface DashboardAdapter {
   getWorkspaceFile?(workspaceId: string, path: string): Promise<FileContentResult>;
   saveWorkspaceFile?(workspaceId: string, path: string, content: string): Promise<void>;
 
+  /**
+   * Create a new file at the given workspace-relative path. The file's
+   * parent directory must already exist. Throws if the path already
+   * exists. `content` defaults to an empty string.
+   */
+  createWorkspaceFile?(workspaceId: string, path: string, content?: string): Promise<void>;
+
+  /**
+   * Create a new directory at the given workspace-relative path. The
+   * directory's parent must already exist. Throws if the path already
+   * exists.
+   */
+  createWorkspaceDirectory?(workspaceId: string, path: string): Promise<void>;
+
+  /**
+   * Delete a file or directory at the given workspace-relative path.
+   * Directories are removed recursively. Throws if the path doesn't
+   * exist or refers to a protected location (e.g. `.git`).
+   */
+  deleteWorkspacePath?(workspaceId: string, path: string): Promise<{ kind: "file" | "directory" }>;
+
+  /**
+   * Rename or move a file/directory inside the workspace. `fromPath`
+   * and `toPath` are both workspace-relative. The destination must not
+   * already exist and its parent directory must exist.
+   */
+  renameWorkspacePath?(
+    workspaceId: string,
+    fromPath: string,
+    toPath: string,
+  ): Promise<{ kind: "file" | "directory" }>;
+
+  /**
+   * Recursively copy a file/directory inside the workspace. `fromPath`
+   * and `toPath` are both workspace-relative. The destination must not
+   * already exist and its parent directory must. Directories may not be
+   * copied into themselves.
+   */
+  copyWorkspacePath?(
+    workspaceId: string,
+    fromPath: string,
+    toPath: string,
+  ): Promise<{ kind: "file" | "directory" }>;
+
   /** Revert a single file to its original state, discarding all changes. */
   revertFile?(
     workspaceId: string,

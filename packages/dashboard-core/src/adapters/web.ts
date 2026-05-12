@@ -283,6 +283,47 @@ export class WebDashboardAdapter implements DashboardAdapter {
     await this.trpc.workspace.saveFile.mutate({ workspaceId, path, content });
   }
 
+  async createWorkspaceFile(workspaceId: string, path: string, content = ""): Promise<void> {
+    await this.trpc.workspace.createFile.mutate({ workspaceId, path, content });
+  }
+
+  async createWorkspaceDirectory(workspaceId: string, path: string): Promise<void> {
+    await this.trpc.workspace.createDirectory.mutate({ workspaceId, path });
+  }
+
+  async deleteWorkspacePath(
+    workspaceId: string,
+    path: string,
+  ): Promise<{ kind: "file" | "directory" }> {
+    return (await this.trpc.workspace.deletePath.mutate({ workspaceId, path })) as {
+      kind: "file" | "directory";
+    };
+  }
+
+  async renameWorkspacePath(
+    workspaceId: string,
+    fromPath: string,
+    toPath: string,
+  ): Promise<{ kind: "file" | "directory" }> {
+    return (await this.trpc.workspace.renamePath.mutate({
+      workspaceId,
+      fromPath,
+      toPath,
+    })) as { kind: "file" | "directory" };
+  }
+
+  async copyWorkspacePath(
+    workspaceId: string,
+    fromPath: string,
+    toPath: string,
+  ): Promise<{ kind: "file" | "directory" }> {
+    return (await this.trpc.workspace.copyPath.mutate({
+      workspaceId,
+      fromPath,
+      toPath,
+    })) as { kind: "file" | "directory" };
+  }
+
   async revertFile(
     workspaceId: string,
     filePath: string,
