@@ -29,6 +29,10 @@ export interface WorktreeInfo {
   head?: string;
   hasSetup?: boolean;
   hasTeardown?: boolean;
+  /** True when the user has pinned this workspace to the top of the tree.
+   *  The DB column is `NOT NULL DEFAULT false`, so the value is always
+   *  defined when the worktree comes through `projects.list`. */
+  pinned: boolean;
 }
 
 export type GitSyncState = "synced" | "ahead" | "behind" | "diverged";

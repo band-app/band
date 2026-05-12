@@ -1543,6 +1543,197 @@ describe("tRPC — workspace operations", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Pinned workspaces
+// ---------------------------------------------------------------------------
+
+describe("tRPC — pinned workspaces", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+  let repoPath: string;
+  let mainWorktreePath: string;
+  let featureWorktreePath: string;
+
+  // Helper: extract a worktree's pinned flag via projects.list.
+  async function readPinned(branch: string): Promise<boolean | undefined> {
+    const res = await trpcQuery(server.url, "projects.list");
+    const data = await trpcData<{
+      projects: Array<{ name: string; worktrees: Array<{ branch: string; pinned: boolean }> }>;
+    }>(res);
+    return data.projects[0]?.worktrees.find((w) => w.branch === branch)?.pinned;
+  }
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+
+    // Create the project repo + a second worktree on `feature` so we have
+    // two branches to pin/unpin/test reorder against.
+    repoPath = join(tmpHome, "pin-repo");
+    mkdirSync(repoPath, { recursive: true });
+    git(repoPath, ["init", "-b", "main"]);
+    writeFileSync(join(repoPath, "README.md"), "# Pin repo\n");
+    git(repoPath, ["add", "."]);
+    git(repoPath, ["commit", "-m", "initial commit"]);
+
+    mainWorktreePath = repoPath;
+    featureWorktreePath = join(tmpHome, ".band", "worktrees", "pin-repo", "feature");
+    mkdirSync(join(tmpHome, ".band", "worktrees", "pin-repo"), { recursive: true });
+    git(repoPath, ["worktree", "add", "-b", "feature", featureWorktreePath]);
+
+    seedState(tmpHome, {
+      projects: [
+        {
+          name: "pin-repo",
+          path: repoPath,
+          defaultBranch: "main",
+          worktrees: [
+            { branch: "main", path: mainWorktreePath },
+            { branch: "feature", path: featureWorktreePath },
+          ],
+        },
+      ],
+    });
+    seedSettings(tmpHome, {
+      tokenSecret: DEFAULT_TOKEN,
+      worktreesDir: join(tmpHome, ".band", "worktrees"),
+    });
+    server = await startServer({ tmpHome });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("projects.list returns pinned: false by default", async () => {
+    expect(await readPinned("main")).toBe(false);
+    expect(await readPinned("feature")).toBe(false);
+  });
+
+  it("workspaces.setPinned pins a workspace and projects.list reflects it", async () => {
+    const res = await trpcMutate(server.url, "workspaces.setPinned", {
+      project: "pin-repo",
+      branch: "feature",
+      pinned: true,
+    });
+    expect(res.status).toBe(200);
+    const data = await trpcData<{ ok: boolean }>(res);
+    expect(data.ok).toBe(true);
+
+    expect(await readPinned("feature")).toBe(true);
+    // Pinning one workspace must not affect siblings.
+    expect(await readPinned("main")).toBe(false);
+  });
+
+  it("workspaces.setPinned unpins a previously pinned workspace", async () => {
+    const res = await trpcMutate(server.url, "workspaces.setPinned", {
+      project: "pin-repo",
+      branch: "feature",
+      pinned: false,
+    });
+    expect(res.status).toBe(200);
+    expect(await readPinned("feature")).toBe(false);
+  });
+
+  it("workspaces.setPinned returns an error for unknown project", async () => {
+    const res = await trpcMutate(server.url, "workspaces.setPinned", {
+      project: "no-such-project",
+      branch: "feature",
+      pinned: true,
+    });
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error.message).toContain("not found");
+  });
+
+  it("workspaces.setPinned returns an error for unknown branch", async () => {
+    const res = await trpcMutate(server.url, "workspaces.setPinned", {
+      project: "pin-repo",
+      branch: "no-such-branch",
+      pinned: true,
+    });
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error.message).toContain("not found");
+  });
+
+  it("pinned state survives creating a sibling worktree (saveState rewrite)", async () => {
+    // Pin `feature`, then create a brand-new sibling worktree. The
+    // saveState-on-create path wipes & re-inserts every worktree row, so
+    // this is the regression test that the `pinned` flag round-trips
+    // through `WorktreeState` correctly.
+    let res = await trpcMutate(server.url, "workspaces.setPinned", {
+      project: "pin-repo",
+      branch: "feature",
+      pinned: true,
+    });
+    expect(res.status).toBe(200);
+
+    res = await trpcMutate(server.url, "workspaces.create", {
+      project: "pin-repo",
+      branch: "sibling",
+    });
+    expect(res.status).toBe(200);
+
+    expect(await readPinned("feature")).toBe(true);
+    expect(await readPinned("sibling")).toBe(false);
+
+    // Clean up: unpin and remove the sibling so the next test starts clean.
+    await trpcMutate(server.url, "workspaces.setPinned", {
+      project: "pin-repo",
+      branch: "feature",
+      pinned: false,
+    });
+    await trpcMutate(server.url, "workspaces.remove", {
+      project: "pin-repo",
+      branch: "sibling",
+    });
+  });
+
+  it("pinned state persists across server restart", async () => {
+    const res = await trpcMutate(server.url, "workspaces.setPinned", {
+      project: "pin-repo",
+      branch: "feature",
+      pinned: true,
+    });
+    expect(res.status).toBe(200);
+
+    // Restart the server with the same HOME — the on-disk SQLite is the
+    // only persistence layer for pin state, so a fresh process must see
+    // the same value.
+    await server.close();
+    server = await startServer({ tmpHome });
+
+    expect(await readPinned("feature")).toBe(true);
+    expect(await readPinned("main")).toBe(false);
+  });
+
+  it("workspaces.remove drops the pinned worktree's row", async () => {
+    // Pin `feature` explicitly so this test owns its preconditions
+    // and doesn't depend on prior tests in the describe block.
+    let res = await trpcMutate(server.url, "workspaces.setPinned", {
+      project: "pin-repo",
+      branch: "feature",
+      pinned: true,
+    });
+    expect(res.status).toBe(200);
+
+    res = await trpcMutate(server.url, "workspaces.remove", {
+      project: "pin-repo",
+      branch: "feature",
+    });
+    expect(res.status).toBe(200);
+
+    const listRes = await trpcQuery(server.url, "projects.list");
+    const data = await trpcData<{
+      projects: Array<{ worktrees: Array<{ branch: string }> }>;
+    }>(listRes);
+    const branches = data.projects[0].worktrees.map((w) => w.branch);
+    expect(branches).not.toContain("feature");
+    expect(branches).toContain("main");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Statuses
 // ---------------------------------------------------------------------------
 

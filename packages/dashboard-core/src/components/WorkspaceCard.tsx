@@ -2,6 +2,7 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuSeparator,
   ContextMenuTrigger,
   Tooltip,
   TooltipContent,
@@ -12,6 +13,8 @@ import {
   ArrowUpFromLine,
   Clipboard,
   FolderOpen,
+  Pin,
+  PinOff,
   Play,
   Square,
   Trash2,
@@ -42,6 +45,19 @@ interface Props {
   setupStatus?: SetupStatus;
   isFocused?: boolean;
   onShowDeleteDialog: (info: DeleteDialogInfo) => void;
+  /**
+   * When true (e.g. inside the Pinned section), render the branch label as
+   * `{project}/{branch}` instead of just `{branch}` so the user can tell
+   * cards apart when they're mixed across projects.
+   */
+  showProjectName?: boolean;
+  /**
+   * Toggle the pinned state for this card's workspace. Passed as a prop
+   * (rather than reading from `usePinnedWorkspaces()` inside the card) so
+   * each card stays inert to changes in the projects-query cache —
+   * otherwise every pin/unpin re-renders every WorkspaceCard on the page.
+   */
+  onTogglePinned: (project: string, branch: string, currentlyPinned: boolean) => void;
 }
 
 export const WorkspaceCard = memo(function WorkspaceCard({
@@ -53,6 +69,8 @@ export const WorkspaceCard = memo(function WorkspaceCard({
   setupStatus,
   isFocused,
   onShowDeleteDialog,
+  showProjectName,
+  onTogglePinned,
 }: Props) {
   const cardRef = useRef<HTMLDivElement>(null);
   const capabilities = useCapabilities();
@@ -69,6 +87,7 @@ export const WorkspaceCard = memo(function WorkspaceCard({
   const gitPull = useDashboardStore((s) => s.gitPull);
   const gitPush = useDashboardStore((s) => s.gitPush);
   const removeWorkspaceMutation = useRemoveWorkspace();
+  const isPinned = worktree.pinned;
 
   const workspaceId = toWorkspaceId(projectName, worktree.branch);
   const isActive = useDashboardStore((s) => s.activeWorkspaceId === workspaceId);
@@ -131,11 +150,18 @@ export const WorkspaceCard = memo(function WorkspaceCard({
                 <span
                   className={`text-sm truncate ${isActive ? "font-semibold text-foreground" : "font-medium text-muted-foreground"}`}
                 >
-                  {worktree.branch}
+                  {showProjectName ? `${projectName}/${worktree.branch}` : worktree.branch}
                 </span>
               </div>
             </TooltipTrigger>
-            <TooltipContent side="top">{worktree.branch}</TooltipContent>
+            {/* When showProjectName is true the visible label already
+                spells out `project/branch`, so re-displaying it in the
+                tooltip is noise. Show the worktree's absolute path
+                instead — that's genuinely supplementary information the
+                card body never surfaces. */}
+            <TooltipContent side="top">
+              {showProjectName ? worktree.path : worktree.branch}
+            </TooltipContent>
           </Tooltip>
           <div className="hidden @[10rem]:flex group-hover:flex items-center gap-2 shrink-0 ml-auto pl-2">
             <SetupStatusIndicator setup={setupStatus} />
@@ -145,6 +171,11 @@ export const WorkspaceCard = memo(function WorkspaceCard({
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
+        <ContextMenuItem onClick={() => onTogglePinned(projectName, worktree.branch, isPinned)}>
+          {isPinned ? <PinOff /> : <Pin />}
+          {isPinned ? "Unpin workspace" : "Pin workspace"}
+        </ContextMenuItem>
+        <ContextMenuSeparator />
         {capabilities.copyPath && (
           <ContextMenuItem onClick={() => navigator.clipboard.writeText(worktree.path)}>
             <Clipboard />
