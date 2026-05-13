@@ -62,6 +62,11 @@ writeFileSync(join(dir, "settings.json"), JSON.stringify({ tokenSecret: token, w
 // Record the spawn environment + execPath so the integration test can assert
 // the desktop shell actually invoked us via process.execPath +
 // ELECTRON_RUN_AS_NODE=1. Black-box check — no need to mock spawn.
+//
+// Written once at module load (this file is module-scope), so the assertion
+// captures the *first* spawn's env. That's the only invocation we need today
+// (each test allocates a fresh port and a fresh fake server); revisit if a
+// future test ever reuses a running server across cases.
 writeFileSync(join(dir, "spawn-env.json"), JSON.stringify({
   execPath: process.execPath,
   electronRunAsNode: process.env.ELECTRON_RUN_AS_NODE ?? null,
@@ -150,6 +155,9 @@ describe("web-server lifecycle", () => {
 
       // The fake server writes the spawn env it sees into ~/.band/spawn-env.json.
       // That tells us — black-box — what the desktop shell actually invoked.
+      // Note: `sandboxHome` here is the same path the fake server resolves
+      // via `homedir()` — the `before()` hook overrides `process.env.HOME`
+      // to point at `sandboxHome` before spawning anything.
       const raw = await readFile(join(sandboxHome, ".band", "spawn-env.json"), "utf8");
       const captured = JSON.parse(raw) as {
         execPath: string;

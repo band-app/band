@@ -20,6 +20,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { bandHome, dashLog } from "./log.js";
 import { killPort } from "./port.js";
 import { getConfiguredPort, tryGetToken } from "./settings.js";
+import { shellPath } from "./shell-path.js";
 
 const HEALTH_TIMEOUT_MS = 15_000;
 const HEALTH_POLL_INTERVAL_MS = 200;
@@ -164,7 +165,21 @@ function makeSpawnOptions(webDir: string, port: number, fds: ServerLogFds): Spaw
       // Node.js interpreter — no Chromium, no app lifecycle — so we get the
       // bundled Node runtime (22.x for Electron 35+, with `node:sqlite` as
       // a built-in) without requiring users to install Node themselves.
+      //
+      // Note: this var inherits into every grandchild the web server forks.
+      // Harmless for the current stack (Rust CLIs, git, etc. ignore it) but
+      // if we ever shell out to a tool that is itself an Electron app, it
+      // would be misinterpreted as a request to run that binary as raw
+      // Node. Re-evaluate then.
       ELECTRON_RUN_AS_NODE: "1",
+      // Repopulate PATH from the user's login shell. Even though we no
+      // longer need a system `node` on PATH (spawn target is
+      // `process.execPath`), the web server's *own* children — `claude`,
+      // `band`, `git`, etc. living in `/opt/homebrew/bin` or
+      // `~/.cargo/bin` — inherit this env and rely on it to find their
+      // binaries when the app is launched from Finder/Spotlight (macOS
+      // gives GUI launches only a sparse `/usr/bin:/bin:/usr/sbin:/sbin`).
+      PATH: shellPath(),
       PORT: String(port),
       // Silence the `node:sqlite` ExperimentalWarning. Node 22.x still
       // emits it; drop this once the bundled Node hits 24.x where the
