@@ -1607,7 +1607,7 @@ describe("tRPC — pinned workspaces", () => {
       // best-effort — fine if the test crashed before the worktree was created,
       // or if it was already cleaned up
     }
-    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   });
 
   it("projects.list returns pinned: false by default", async () => {
