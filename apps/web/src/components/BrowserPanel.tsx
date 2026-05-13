@@ -1,9 +1,11 @@
 import type { IDockviewPanelProps } from "dockview";
-import { ArrowLeft, ArrowRight, RotateCw, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, RotateCw, Wrench, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useBrowserFindInPage } from "../hooks/useBrowserFindInPage";
 import { invoke as desktopInvoke, listen as desktopListen } from "../lib/desktop-ipc";
 import { isDesktop } from "../lib/is-desktop";
 import { trpc } from "../lib/trpc-client";
+import { BrowserFindBar } from "./BrowserFindBar";
 
 const DEFAULT_URL = "";
 const BLANK_URL = "about:blank";
@@ -90,6 +92,13 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
   workspaceIdRef.current = workspaceId;
   const currentUrlRef = useRef(currentUrl);
   currentUrlRef.current = currentUrl;
+  // `inputUrl` is user-owned while the address-bar input has keyboard
+  // focus: incoming `browser-url-changed` events (e.g. navigation
+  // completing, redirects, in-page hash updates) must not overwrite
+  // the half-typed URL the user is editing. We sync from focus/blur
+  // rather than reading `document.activeElement` so the check stays
+  // synchronous inside the event listener.
+  const addressInputFocusedRef = useRef(false);
 
   // ------- restore persisted URL when workspaceId becomes available -------
   // useState initializers run on first mount when workspaceId may still be
@@ -199,7 +208,13 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
         // Don't sync about:blank to the address bar or localStorage
         if (url === BLANK_URL) return;
         setCurrentUrl(url);
-        setInputUrl(url);
+        // Preserve in-progress edits: while the user is typing in the
+        // address bar, the canonical URL still updates behind the scenes
+        // but the visible input value is left alone. See the matching
+        // logic in `BrowserPaneComponent` below.
+        if (!addressInputFocusedRef.current) {
+          setInputUrl(url);
+        }
         saveUrl(workspaceIdRef.current, url);
       });
     })();
@@ -364,14 +379,72 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
     }
   }, [invoke, workspaceId]);
 
+  const handleToggleDevTools = useCallback(async () => {
+    try {
+      await invoke("browser_toggle_dev_tools", { workspaceId });
+    } catch (e) {
+      console.error("browser_toggle_dev_tools failed:", e);
+    }
+  }, [invoke, workspaceId]);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
       if (e.key === "Enter") {
         e.preventDefault();
         handleNavigate(inputUrl);
+        return;
+      }
+      // Escape abandons an in-progress edit and snaps the input back
+      // to the canonical URL with the whole value re-selected — same
+      // as Chrome's address bar. Keep focus so the user can type to
+      // replace without re-clicking the bar.
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setInputUrl(currentUrlRef.current);
+        const input = e.currentTarget;
+        // Defer past the React commit so we select against the
+        // restored value (setting `input.value` mid-render would clear
+        // any selection we made here).
+        requestAnimationFrame(() => input.select());
       }
     },
     [inputUrl, handleNavigate],
+  );
+
+  const handleAddressFocus = useCallback((e: React.FocusEvent<HTMLInputElement>) => {
+    addressInputFocusedRef.current = true;
+    e.target.select();
+  }, []);
+
+  const handleAddressBlur = useCallback(() => {
+    addressInputFocusedRef.current = false;
+    // Re-sync to the latest committed URL in case events fired (and
+    // were ignored) while we were focused. Matches Chrome: typed-but-
+    // not-submitted URLs revert on blur.
+    setInputUrl(currentUrlRef.current);
+  }, []);
+
+  // ------- find in page -------
+  const find = useBrowserFindInPage({ key: workspaceId, keyName: "workspaceId" });
+
+  // Pane-scoped Cmd+F / Ctrl+F handler. Covers the case where keyboard
+  // focus is inside the React DOM (address bar, find bar input, the
+  // panel itself). The complementary case — focus inside the
+  // WebContentsView — is handled by the main process via
+  // `before-input-event` and reaches the hook through the
+  // `browser-find-shortcut` event.
+  const handlePaneKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (e.key.toLowerCase() !== "f") return;
+      if (e.shiftKey || e.altKey) return;
+      const isMac = navigator.platform.toLowerCase().includes("mac");
+      const wantsFind = isMac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+      if (!wantsFind) return;
+      e.preventDefault();
+      e.stopPropagation();
+      find.open();
+    },
+    [find],
   );
 
   // Don't render until workspaceId is injected — during layout sync fromJSON
@@ -389,7 +462,17 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
   }
 
   return (
-    <div className="flex h-full w-full flex-col">
+    <div
+      className="flex h-full w-full flex-col"
+      onKeyDown={handlePaneKeyDown}
+      // Cmd+R routing: the desktop menu's renderer-global handler walks
+      // up from `document.activeElement` looking for these data attrs
+      // to decide whether to reload this tab or fall through to the
+      // app.
+      data-band-browser-pane=""
+      data-band-browser-pane-key={workspaceId}
+      data-band-browser-pane-keyname="workspaceId"
+    >
       {/* Keyframes for the loading bar (injected once, deduped by browser) */}
       <style>{`@keyframes browser-bar-slide {
   0% { transform: translateX(-100%); }
@@ -438,10 +521,19 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
           value={inputUrl}
           onChange={(e) => setInputUrl(e.target.value)}
           onKeyDown={handleKeyDown}
-          onFocus={(e) => e.target.select()}
+          onFocus={handleAddressFocus}
+          onBlur={handleAddressBlur}
           className="min-w-0 flex-1 rounded border border-transparent bg-muted/50 px-3 py-1.5 text-sm text-foreground outline-none transition-colors focus:border-border"
           placeholder="Enter URL or search..."
         />
+        <button
+          type="button"
+          onClick={handleToggleDevTools}
+          className="flex items-center justify-center rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          title="Toggle DevTools"
+        >
+          <Wrench className="size-4" />
+        </button>
         {/* Loading progress bar — indeterminate sliding indicator */}
         {loading && (
           <div className="absolute inset-x-0 bottom-0 h-0.5 overflow-hidden bg-blue-500/10">
@@ -454,6 +546,11 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
           </div>
         )}
       </div>
+
+      {/* Find-in-page bar (Cmd+F / Ctrl+F) — slots between the address bar
+       *  and the webview placeholder so it stacks naturally above the
+       *  native WebContentsView. */}
+      <BrowserFindBar find={find} />
 
       {/* Placeholder – the native webview is positioned over this area */}
       <div ref={placeholderRef} className="min-h-0 flex-1" />
@@ -487,6 +584,9 @@ export function BrowserPaneComponent({
   browserIdRef.current = browserId;
   const currentUrlRef = useRef(currentUrl);
   currentUrlRef.current = currentUrl;
+  // While the address-bar input has focus, the user owns `inputUrl` —
+  // browser-url-changed events must not overwrite an in-progress edit.
+  const addressInputFocusedRef = useRef(false);
 
   // ------- helpers -------
 
@@ -606,7 +706,12 @@ export function BrowserPaneComponent({
         setLoading(event.payload.loading);
         if (url === BLANK_URL) return;
         setCurrentUrl(url);
-        setInputUrl(url);
+        // Don't clobber the user's in-progress address-bar edit. If they
+        // started typing mid-navigation, their text stays put until they
+        // submit (Enter), abandon (Escape), or blur the input.
+        if (!addressInputFocusedRef.current) {
+          setInputUrl(url);
+        }
 
         // Persist to server (debounced to avoid hammering on redirect chains)
         if (urlPersistTimer.current) clearTimeout(urlPersistTimer.current);
@@ -636,7 +741,22 @@ export function BrowserPaneComponent({
     return () => {
       unlistenUrl?.();
       unlistenTitle?.();
-      if (urlPersistTimer.current) clearTimeout(urlPersistTimer.current);
+      // Flush a pending URL persist before tearing down. Just clearing
+      // the timer would lose the latest URL — e.g. when the user
+      // navigates and then the workspace gets LRU-evicted before the
+      // debounce window elapses. Fire the mutation with whatever URL
+      // we have on hand; it's `void`-returning so it can safely race
+      // the unmount.
+      if (urlPersistTimer.current) {
+        clearTimeout(urlPersistTimer.current);
+        urlPersistTimer.current = null;
+        const finalUrl = currentUrlRef.current;
+        if (finalUrl && finalUrl !== BLANK_URL) {
+          trpc.browsers.navigate
+            .mutate({ browserId: browserIdRef.current, url: finalUrl })
+            .catch(() => {});
+        }
+      }
     };
   }, [api]);
 
@@ -780,14 +900,65 @@ export function BrowserPaneComponent({
     }
   }, [invoke, browserId]);
 
+  const handleToggleDevTools = useCallback(async () => {
+    try {
+      await invoke("browser_toggle_dev_tools", { browserId });
+    } catch (e) {
+      console.error("browser_toggle_dev_tools failed:", e);
+    }
+  }, [invoke, browserId]);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
       if (e.key === "Enter") {
         e.preventDefault();
         handleNavigate(inputUrl);
+        return;
+      }
+      // Escape abandons an in-progress edit and snaps the input back
+      // to the canonical URL with the whole value re-selected — same
+      // as Chrome's address bar. Keep focus so the user can type to
+      // replace without re-clicking the bar.
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setInputUrl(currentUrlRef.current);
+        const input = e.currentTarget;
+        // Defer past the React commit so we select against the
+        // restored value (setting `input.value` mid-render would clear
+        // any selection we made here).
+        requestAnimationFrame(() => input.select());
       }
     },
     [inputUrl, handleNavigate],
+  );
+
+  const handleAddressFocus = useCallback((e: React.FocusEvent<HTMLInputElement>) => {
+    addressInputFocusedRef.current = true;
+    e.target.select();
+  }, []);
+
+  const handleAddressBlur = useCallback(() => {
+    addressInputFocusedRef.current = false;
+    // Re-sync to the latest committed URL in case events fired (and
+    // were ignored) while we were focused.
+    setInputUrl(currentUrlRef.current);
+  }, []);
+
+  // ------- find in page -------
+  const find = useBrowserFindInPage({ key: browserId, keyName: "browserId" });
+
+  const handlePaneKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (e.key.toLowerCase() !== "f") return;
+      if (e.shiftKey || e.altKey) return;
+      const isMac = navigator.platform.toLowerCase().includes("mac");
+      const wantsFind = isMac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+      if (!wantsFind) return;
+      e.preventDefault();
+      e.stopPropagation();
+      find.open();
+    },
+    [find],
   );
 
   if (!browserId) return null;
@@ -801,7 +972,13 @@ export function BrowserPaneComponent({
   }
 
   return (
-    <div className="flex h-full w-full flex-col">
+    <div
+      className="flex h-full w-full flex-col"
+      onKeyDown={handlePaneKeyDown}
+      data-band-browser-pane=""
+      data-band-browser-pane-key={browserId}
+      data-band-browser-pane-keyname="browserId"
+    >
       <style>{`@keyframes browser-bar-slide {
   0% { transform: translateX(-100%); }
   50% { transform: translateX(200%); }
@@ -848,10 +1025,19 @@ export function BrowserPaneComponent({
           value={inputUrl}
           onChange={(e) => setInputUrl(e.target.value)}
           onKeyDown={handleKeyDown}
-          onFocus={(e) => e.target.select()}
+          onFocus={handleAddressFocus}
+          onBlur={handleAddressBlur}
           className="min-w-0 flex-1 rounded border border-transparent bg-muted/50 px-3 py-1.5 text-sm text-foreground outline-none transition-colors focus:border-border"
           placeholder="Enter URL or search..."
         />
+        <button
+          type="button"
+          onClick={handleToggleDevTools}
+          className="flex items-center justify-center rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          title="Toggle DevTools"
+        >
+          <Wrench className="size-4" />
+        </button>
         {loading && (
           <div className="absolute inset-x-0 bottom-0 h-0.5 overflow-hidden bg-blue-500/10">
             <div
@@ -863,6 +1049,7 @@ export function BrowserPaneComponent({
           </div>
         )}
       </div>
+      <BrowserFindBar find={find} />
       <div ref={placeholderRef} className="min-h-0 flex-1" />
     </div>
   );

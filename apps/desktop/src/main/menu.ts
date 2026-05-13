@@ -20,8 +20,18 @@
  */
 
 import { app, BrowserWindow, Menu, type MenuItemConstructorOptions } from "electron";
+import type { BrowserViewManager } from "../browser/view-manager.js";
 import { dashLog } from "./services/log.js";
 import { checkForUpdate, isUpdaterEnabled } from "./updater.js";
+
+/**
+ * Resolved at menu-click time so the menu can be installed before the
+ * `BrowserViewManager` exists (we install the menu in `app.whenReady`,
+ * the manager is constructed after the main window is created).
+ */
+export interface MenuDeps {
+  getBrowserManager: () => BrowserViewManager | null;
+}
 
 /** Run JS in whichever window is focused, falling back to the main window. */
 function evalInFocused(js: string): void {
@@ -33,6 +43,20 @@ function evalInFocused(js: string): void {
   void target.webContents.executeJavaScript(js, true).catch(() => {
     // Renderer hasn't registered the global yet (e.g. mid-reload). Drop.
   });
+}
+
+/**
+ * Cmd+= / Cmd+- / Actual-Size routing — same shape as `reloadFocused`:
+ *
+ *   1. WebContentsView has focus (user is in a rendered web page) →
+ *      adjust that view's `zoomFactor` directly.
+ *   2. Otherwise call `window.__bandZoom(action)`, which decides between
+ *      "zoom the browser pane the user is in" (IPC back to
+ *      `browser_zoom`) and "zoom the dashboard chrome".
+ */
+function zoomFocused(deps: MenuDeps, action: "in" | "out" | "reset"): void {
+  if (deps.getBrowserManager()?.zoomFocused(action)) return;
+  evalInFocused(`if(window.__bandZoom)window.__bandZoom(${JSON.stringify(action)})`);
 }
 
 /**
@@ -76,13 +100,55 @@ async function callRendererGlobal(name: string): Promise<void> {
   }
 }
 
-function reloadFocused(): void {
-  const target = BrowserWindow.getFocusedWindow();
+/**
+ * Cmd+R / Ctrl+R reload, routed by what's actually focused:
+ *
+ *   1. If a browser-pane `WebContentsView` has keyboard focus (the user
+ *      is clicked inside a rendered web page), reload that view — don't
+ *      reload the whole dashboard out from under them.
+ *
+ *   2. Otherwise call the renderer's `__bandReload` global. If keyboard
+ *      focus is in a browser-pane's *React* chrome (address bar, find
+ *      bar, tab handle), the global locates the pane via the
+ *      `data-band-browser-pane-*` attributes and reloads its tab via
+ *      `browser_reload` IPC. If focus is anywhere else, the global
+ *      falls through to `location.reload()` — same effect as the
+ *      previous dumb behaviour.
+ *
+ *   3. If the renderer global isn't registered (preload missing, or
+ *      called before the React tree mounted), reload the focused window
+ *      directly so the menu item still does *something*.
+ */
+async function reloadFocused(deps: MenuDeps): Promise<void> {
+  const focusedView = deps.getBrowserManager()?.findFocused();
+  if (focusedView) {
+    focusedView.webContents.reload();
+    return;
+  }
+
+  const target =
+    BrowserWindow.getFocusedWindow() ??
+    BrowserWindow.getAllWindows().find((w) => !w.isDestroyed()) ??
+    null;
   if (!target) return;
-  target.webContents.reload();
+
+  // `__bandReload` returns true if it consumed the event (either
+  // reloaded a browser pane or chose to reload the app itself). If it's
+  // not registered we get false and fall back to reloading the window.
+  const js = `(() => {
+    if (typeof window.__bandReload === "function") { window.__bandReload(); return true; }
+    return false;
+  })()`;
+  try {
+    const handled = await target.webContents.executeJavaScript(js, true);
+    if (!handled) target.webContents.reload();
+  } catch (err) {
+    dashLog(`menu: __bandReload invocation failed: ${String(err)}`);
+    target.webContents.reload();
+  }
 }
 
-export function buildAppMenu(): Menu {
+export function buildAppMenu(deps: MenuDeps): Menu {
   const isMac = process.platform === "darwin";
 
   const appName = app.name ?? "Band";
@@ -131,25 +197,27 @@ export function buildAppMenu(): Menu {
     {
       label: "Reload",
       accelerator: "CmdOrCtrl+R",
-      click: () => reloadFocused(),
+      click: () => {
+        void reloadFocused(deps);
+      },
     },
     { type: "separator" },
     {
       label: "Zoom In",
       accelerator: "CmdOrCtrl+=",
-      click: () => evalInFocused("if(window.__bandZoom)window.__bandZoom('in')"),
+      click: () => zoomFocused(deps, "in"),
     },
     {
       label: "Zoom Out",
       accelerator: "CmdOrCtrl+-",
-      click: () => evalInFocused("if(window.__bandZoom)window.__bandZoom('out')"),
+      click: () => zoomFocused(deps, "out"),
     },
     // Zoom-reset deliberately has no accelerator: CmdOrCtrl+0 is owned by
     // the dashboard's "All projects" label filter (see DashboardShell).
     // Reset is still reachable here via menu click.
     {
       label: "Actual Size",
-      click: () => evalInFocused("if(window.__bandZoom)window.__bandZoom('reset')"),
+      click: () => zoomFocused(deps, "reset"),
     },
     { type: "separator" },
     {
@@ -189,6 +257,6 @@ export function buildAppMenu(): Menu {
   return Menu.buildFromTemplate(template);
 }
 
-export function installAppMenu(): void {
-  Menu.setApplicationMenu(buildAppMenu());
+export function installAppMenu(deps: MenuDeps): void {
+  Menu.setApplicationMenu(buildAppMenu(deps));
 }

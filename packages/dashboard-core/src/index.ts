@@ -21,7 +21,12 @@ export { NewWorkspaceDialog } from "./components/NewWorkspaceForm";
 export { PdfPreview } from "./components/PdfPreview";
 export { ProjectList } from "./components/ProjectList";
 export { QuickOpenDialog } from "./components/QuickOpenDialog";
-export { SearchBar, type SearchBarHandle, type SearchOptions } from "./components/SearchBar";
+export {
+  SearchBar,
+  type SearchBarHandle,
+  type SearchOptionKey,
+  type SearchOptions,
+} from "./components/SearchBar";
 export { SearchFilesDialog } from "./components/SearchFilesDialog";
 export { SettingsPage } from "./components/SettingsPage";
 export { SetupStatusIndicator } from "./components/SetupStatusIndicator";

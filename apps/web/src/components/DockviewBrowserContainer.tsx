@@ -19,7 +19,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { invoke as desktopInvoke } from "../lib/desktop-ipc";
+import { invoke as desktopInvoke, listen as desktopListen } from "../lib/desktop-ipc";
 import { isDesktop } from "../lib/is-desktop";
 import { trpc } from "../lib/trpc-client";
 import { BrowserPaneComponent, type BrowserPaneParams, useFavicon } from "./BrowserPanel";
@@ -94,10 +94,16 @@ function persistToServer(workspaceId: string, layout: unknown, opts?: PersistOpt
   // Update React Query cache immediately so next mount is instant.
   // Derive browserIds from the layout's panels map so the cache stays
   // in sync — prevents orphan-pruning on remount after CLI additions.
+  // The `urls` map is owned by the queryFn (it comes from
+  // `trpc.browsers.list`) — preserve whatever the cache already holds,
+  // since URL changes are persisted via `trpc.browsers.navigate` and
+  // don't flow through this code path.
   if (opts?.queryClient) {
+    const prev = opts.queryClient.getQueryData<BrowserLayoutData>(browserLayoutKey(workspaceId));
     opts.queryClient.setQueryData(browserLayoutKey(workspaceId), {
       layout,
       browserIds: panelIdsFromLayout(layout),
+      urls: prev?.urls ?? new Map<string, string>(),
     });
   }
 
@@ -121,6 +127,14 @@ function persistToServer(workspaceId: string, layout: unknown, opts?: PersistOpt
 interface BrowserLayoutData {
   layout: unknown | null;
   browserIds: Set<string>;
+  /**
+   * Latest URL the server has on file for each browser, indexed by
+   * browserId. Injected into the layout's panel params on restore so
+   * BrowserPaneComponent mounts with `initialUrl` already set, instead
+   * of having to round-trip through `trpc.browsers.get` and racing the
+   * create-webview effect.
+   */
+  urls: Map<string, string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -131,6 +145,46 @@ function isDockviewLayout(obj: unknown): boolean {
   if (typeof obj !== "object" || obj === null) return false;
   const o = obj as Record<string, unknown>;
   return typeof o.grid === "object" && typeof o.panels === "object";
+}
+
+/**
+ * Clone the saved layout and inject `params.initialUrl` for any panel
+ * whose browserId appears in `urls`. Returns the layout unchanged when
+ * `urls` is null / empty so the original `fromJSON` path is exercised
+ * in tests / non-desktop modes.
+ *
+ * Done as a pre-`fromJSON` mutation rather than a post-restore
+ * `api.updateParameters` because BrowserPaneComponent reads
+ * `params.initialUrl` only in `useState` initializers — by the time
+ * we'd call updateParameters, the panel has already mounted with
+ * `initialUrl: undefined` and started the fallback server fetch.
+ */
+function injectInitialUrls(layout: unknown, urls: Map<string, string> | null): unknown {
+  if (!urls || urls.size === 0) return layout;
+  if (typeof layout !== "object" || layout === null) return layout;
+  const panels = (layout as Record<string, unknown>).panels;
+  if (typeof panels !== "object" || panels === null) return layout;
+  // Shallow clone the layout + panels map so we don't mutate the cache.
+  const nextPanels: Record<string, unknown> = {};
+  for (const [id, panel] of Object.entries(panels as Record<string, unknown>)) {
+    const url = urls.get(id);
+    if (
+      url &&
+      typeof panel === "object" &&
+      panel !== null &&
+      typeof (panel as Record<string, unknown>).params === "object"
+    ) {
+      const params = (panel as Record<string, unknown>).params as Record<string, unknown>;
+      // Only seed initialUrl when the layout didn't already carry one
+      // (a legacy save might have had it; respect it).
+      if (!params.initialUrl) {
+        nextPanels[id] = { ...panel, params: { ...params, initialUrl: url } };
+        continue;
+      }
+    }
+    nextPanels[id] = panel;
+  }
+  return { ...(layout as Record<string, unknown>), panels: nextPanels };
 }
 
 // ---------------------------------------------------------------------------
@@ -366,11 +420,18 @@ export function DockviewBrowserContainer({
         trpc.browserLayout.get.query({ workspaceId }).catch(() => ({ tree: null })),
         trpc.browsers.list
           .query({ workspaceId })
-          .catch(() => ({ browsers: [] as { id: string }[] })),
+          .catch(() => ({ browsers: [] as { id: string; url?: string }[] })),
       ]);
+      const urls = new Map<string, string>();
+      for (const b of browsers as { id: string; url?: string }[]) {
+        // Skip empty / about:blank — those won't usefully seed
+        // `initialUrl` and would just suppress the fallback fetch.
+        if (b.url && b.url !== "about:blank") urls.set(b.id, b.url);
+      }
       return {
         layout: tree,
         browserIds: new Set(browsers.map((b: { id: string }) => b.id)),
+        urls,
       };
     },
     staleTime: Number.POSITIVE_INFINITY, // never auto-refetch — we manage persistence ourselves
@@ -561,6 +622,42 @@ export function DockviewBrowserContainer({
     return () => window.removeEventListener("keydown", handler, true);
   }, [visible, closeTab, handleSplit, handleAddTab]);
 
+  // Cmd+T / Ctrl+T when the WebContentsView itself has focus.
+  // The keydown listener above only fires when DOM focus is inside this
+  // container; once the user clicks into the rendered web page, focus
+  // moves to a separate webContents and Chromium swallows the key. The
+  // main process intercepts the shortcut there (see
+  // `view-manager.ts::before-input-event`) and forwards
+  // `browser-new-tab-shortcut` carrying the source pane's browserId.
+  // We only react if the pane belongs to *this* container.
+  useEffect(() => {
+    if (!isDesktop) return;
+    let unlisten: (() => void) | undefined;
+    void (async () => {
+      unlisten = await desktopListen<{ browser_id: string; workspace_id: string }>(
+        "browser-new-tab-shortcut",
+        (event) => {
+          const api = apiRef.current;
+          if (!api) return;
+          const sourceId = event.payload.browser_id;
+          // Ignore the event if the source tab isn't one of ours —
+          // multiple workspaces can have a DockviewBrowserContainer
+          // mounted at once.
+          if (!sourceId || !api.getPanel(sourceId)) return;
+          void handleAddTab().then(() => {
+            requestAnimationFrame(() => {
+              const panel = apiRef.current?.activePanel;
+              panel?.view.content.element
+                .querySelector<HTMLInputElement>("input[type='text']")
+                ?.focus();
+            });
+          });
+        },
+      );
+    })();
+    return () => unlisten?.();
+  }, [handleAddTab]);
+
   // Listen for the workspace-level ⇧⌘B "focus Browser" event. Scoped
   // to this container's subtree via containerRef. The native webview
   // can't be focused from React, so we focus the URL input instead —
@@ -627,19 +724,27 @@ export function DockviewBrowserContainer({
   initialLayoutRef.current = initialData?.layout ?? null;
   const initialBrowserIdsRef = useRef<Set<string> | null>(null);
   initialBrowserIdsRef.current = initialData?.browserIds ?? null;
+  const initialUrlsRef = useRef<Map<string, string> | null>(null);
+  initialUrlsRef.current = initialData?.urls ?? null;
 
   const onReady = useCallback(
     (event: DockviewReadyEvent) => {
       apiRef.current = event.api;
       const savedLayout = initialLayoutRef.current;
       const knownBrowserIds = initialBrowserIdsRef.current;
+      const knownUrls = initialUrlsRef.current;
 
       if (savedLayout && isDockviewLayout(savedLayout)) {
         // Restore full dockview layout (preserves groups, splits, sizes)
         isRestoringRef.current = true;
+        // Inject the latest URLs into each panel's `params.initialUrl`
+        // before `fromJSON` so BrowserPaneComponent mounts with the URL
+        // already in hand — avoids the create-webview / server-fetch
+        // race that was leaving address bars empty after eviction.
+        const layoutToRestore = injectInitialUrls(savedLayout, knownUrls);
         try {
           // biome-ignore lint/suspicious/noExplicitAny: dockview fromJSON API requires any
-          event.api.fromJSON(savedLayout as any);
+          event.api.fromJSON(layoutToRestore as any);
         } catch (err) {
           console.error("[DockviewBrowserContainer] fromJSON failed, creating default:", err);
           createDefaultPanel(event.api, workspaceId);

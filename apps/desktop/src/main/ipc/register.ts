@@ -14,8 +14,11 @@ import type {
   BrowserCreateArgs,
   BrowserEnsureArgs,
   BrowserEvalArgs,
+  BrowserFindInPageArgs,
   BrowserKeyArg,
   BrowserNavigateArgs,
+  BrowserStopFindInPageArgs,
+  BrowserZoomArgs,
   CheckAppExistsArgs,
   InstallCliArgs,
   OpenExternalArgs,
@@ -125,6 +128,19 @@ export function registerIpc(opts: RegisterOptions): () => void {
   handle(Channels.browserEnsure, (args: BrowserEnsureArgs) => browserHandlers.ensure(bm, args));
   handle(Channels.browserGetCdpTarget, (args: BrowserKeyArg) =>
     browserHandlers.getCdpTarget(bm, args),
+  );
+  // Find in page
+  handle(Channels.browserFindInPage, (args: BrowserFindInPageArgs) =>
+    browserHandlers.findInPage(bm, args),
+  );
+  handle(Channels.browserStopFindInPage, (args: BrowserStopFindInPageArgs) =>
+    browserHandlers.stopFindInPage(bm, args),
+  );
+  // Per-tab zoom
+  handle(Channels.browserZoom, (args: BrowserZoomArgs) => browserHandlers.zoom(bm, args));
+  // Toggle DevTools for a browser tab
+  handle(Channels.browserToggleDevTools, (args: BrowserKeyArg) =>
+    browserHandlers.toggleDevTools(bm, args),
   );
 
   return () => {

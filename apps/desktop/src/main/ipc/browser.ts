@@ -10,8 +10,11 @@ import type {
   BrowserCreateArgs,
   BrowserEnsureArgs,
   BrowserEvalArgs,
+  BrowserFindInPageArgs,
   BrowserKeyArg,
   BrowserNavigateArgs,
+  BrowserStopFindInPageArgs,
+  BrowserZoomArgs,
 } from "../../shared/types.js";
 
 export interface BrowserIpcContext {
@@ -35,4 +38,11 @@ export const browserHandlers = {
   ensure: (ctx: BrowserIpcContext, args: BrowserEnsureArgs): void => ctx.manager.ensure(args),
   getCdpTarget: (ctx: BrowserIpcContext, args: BrowserKeyArg): Promise<string> =>
     ctx.manager.getCdpTargetId(args),
+  findInPage: (ctx: BrowserIpcContext, args: BrowserFindInPageArgs): number | undefined =>
+    ctx.manager.findInPage(args),
+  stopFindInPage: (ctx: BrowserIpcContext, args: BrowserStopFindInPageArgs): void =>
+    ctx.manager.stopFindInPage(args),
+  zoom: (ctx: BrowserIpcContext, args: BrowserZoomArgs): void => ctx.manager.zoom(args),
+  toggleDevTools: (ctx: BrowserIpcContext, args: BrowserKeyArg): void =>
+    ctx.manager.toggleDevTools(args),
 };

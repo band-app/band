@@ -65,12 +65,22 @@ const ALLOWED_INVOKE_CHANNELS = new Set<string>([
   // CDP screencast experiment bridge
   "browser_ensure",
   "browser_get_cdp_target",
+  // Find in page (Cmd+F / Ctrl+F overlay)
+  "browser_find_in_page",
+  "browser_stop_find_in_page",
+  // Per-tab zoom (Cmd+= / Cmd+- / Actual Size)
+  "browser_zoom",
+  // Toggle Chromium DevTools for a browser tab
+  "browser_toggle_dev_tools",
 ]);
 
 const ALLOWED_EVENT_NAMES = new Set<string>([
   "browser-url-changed",
   "browser-title-changed",
   "browser-view-destroyed",
+  "browser-found-in-page",
+  "browser-find-shortcut",
+  "browser-new-tab-shortcut",
   "window-fullscreen-changed",
   "updater-status-changed",
 ]);
