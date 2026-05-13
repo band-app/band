@@ -90,7 +90,7 @@ export {
   EXPERIMENTAL_FLAG_KEYS,
   useExperimentalContextMeter,
 } from "./lib/experimental-flags";
-export { getFileIcon } from "./lib/file-icon";
+export { getFileIcon, getFolderIcon } from "./lib/file-icon";
 export { type FileLocation, formatFileLocation, parseFileLocation } from "./lib/file-location";
 export { type FilePreviewType, getFilePreviewType } from "./lib/file-type";
 export { extensionToLanguage, filenameToLanguage } from "./lib/language-map";

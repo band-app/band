@@ -1,177 +1,134 @@
-import type { LucideIcon } from "lucide-react";
-import {
-  Braces,
-  Database,
-  File,
-  FileCode2,
-  FileJson,
-  FileText,
-  Globe,
-  Image,
-  Lock,
-  Music,
-  Package,
-  Settings,
-  Terminal,
-  Video,
-} from "lucide-react";
+import iconManifest from "material-icon-theme/dist/material-icons.json";
+import { createElement, type FC } from "react";
 
-const extensionIconMap: Record<string, LucideIcon> = {
-  // Code files
-  ts: FileCode2,
-  tsx: FileCode2,
-  js: FileCode2,
-  jsx: FileCode2,
-  mjs: FileCode2,
-  cjs: FileCode2,
-  py: FileCode2,
-  rb: FileCode2,
-  go: FileCode2,
-  rs: FileCode2,
-  java: FileCode2,
-  kt: FileCode2,
-  swift: FileCode2,
-  c: FileCode2,
-  cpp: FileCode2,
-  h: FileCode2,
-  hpp: FileCode2,
-  cs: FileCode2,
-  php: FileCode2,
-  r: FileCode2,
-  lua: FileCode2,
-  zig: FileCode2,
+interface IconManifest {
+  iconDefinitions: Record<string, { iconPath: string }>;
+  fileExtensions: Record<string, string>;
+  fileNames: Record<string, string>;
+  folderNames: Record<string, string>;
+  folderNamesExpanded: Record<string, string>;
+  languageIds: Record<string, string>;
+  file: string;
+  folder: string;
+  folderExpanded: string;
+}
 
-  // Web / markup
-  html: Globe,
-  htm: Globe,
-  css: Braces,
-  scss: Braces,
-  less: Braces,
-  sass: Braces,
-  vue: FileCode2,
-  svelte: FileCode2,
+const manifest = iconManifest as unknown as IconManifest;
 
-  // Data / config
-  json: FileJson,
-  jsonc: FileJson,
-  json5: FileJson,
-  yaml: FileText,
-  yml: FileText,
-  toml: FileText,
-  ini: FileText,
-  xml: FileText,
-  csv: FileText,
+// Bundle every material-icon-theme SVG as a static asset URL.
+// Path is relative to this file; Vite expands it at build time and emits
+// each SVG as a hashed asset. The output map is keyed by source path,
+// and we look up icons via the basename.
+const iconUrlByPath = import.meta.glob<string>(
+  "../../node_modules/material-icon-theme/icons/*.svg",
+  {
+    eager: true,
+    query: "?url",
+    import: "default",
+  },
+);
 
-  // Text / docs
-  md: FileText,
-  mdx: FileText,
-  txt: FileText,
-  rst: FileText,
-  tex: FileText,
-  log: FileText,
+const urlByBasename: Record<string, string> = {};
+for (const [path, url] of Object.entries(iconUrlByPath)) {
+  const file = path.split("/").pop();
+  if (file) urlByBasename[file] = url;
+}
 
-  // Shell / scripts
-  sh: Terminal,
-  bash: Terminal,
-  zsh: Terminal,
-  fish: Terminal,
-  ps1: Terminal,
-  bat: Terminal,
-  cmd: Terminal,
+function iconPathToUrl(iconPath: string): string | null {
+  const file = iconPath.split("/").pop();
+  if (!file) return null;
+  return urlByBasename[file] ?? null;
+}
 
-  // Images
-  png: Image,
-  jpg: Image,
-  jpeg: Image,
-  gif: Image,
-  svg: Image,
-  webp: Image,
-  ico: Image,
-  bmp: Image,
-  avif: Image,
+function resolveIconName(filename: string): string {
+  const basename = (filename.split("/").pop() ?? filename).toLowerCase();
 
-  // Audio
-  mp3: Music,
-  wav: Music,
-  ogg: Music,
-  flac: Music,
-  aac: Music,
+  // Exact filename match (e.g. Dockerfile, pubspec.yaml)
+  const byName = manifest.fileNames[basename];
+  if (byName) return byName;
 
-  // Video
-  mp4: Video,
-  webm: Video,
-  mov: Video,
-  avi: Video,
-  mkv: Video,
+  // Compound extensions: try longest first (e.g. "stories.tsx" before "tsx")
+  const segments = basename.split(".");
+  for (let i = 1; i < segments.length; i++) {
+    const ext = segments.slice(i).join(".");
+    const byExt = manifest.fileExtensions[ext];
+    if (byExt) return byExt;
+  }
 
-  // Database
-  sql: Database,
-  sqlite: Database,
-  db: Database,
+  return manifest.file;
+}
 
-  // Config / dotfiles
-  env: Settings,
-  editorconfig: Settings,
-  prettierrc: Settings,
-  eslintrc: Settings,
+type IconProps = { className?: string };
+type IconComponent = FC<IconProps>;
 
-  // Lock files
-  lock: Lock,
+const componentCache = new Map<string, IconComponent>();
 
-  // Package / archive
-  zip: Package,
-  tar: Package,
-  gz: Package,
-  tgz: Package,
-  bz2: Package,
-  xz: Package,
-  "7z": Package,
-  rar: Package,
-  wasm: Package,
-};
+function makeIconComponent(filename: string): IconComponent {
+  const iconName = resolveIconName(filename);
+  const def = manifest.iconDefinitions[iconName] ?? manifest.iconDefinitions[manifest.file];
+  const url = def ? iconPathToUrl(def.iconPath) : null;
 
-/** Well-known filenames that map to a specific icon regardless of extension */
-const filenameIconMap: Record<string, LucideIcon> = {
-  dockerfile: Settings,
-  "docker-compose.yml": Settings,
-  "docker-compose.yaml": Settings,
-  makefile: Terminal,
-  rakefile: Terminal,
-  procfile: Terminal,
-  ".gitignore": Settings,
-  ".gitattributes": Settings,
-  ".npmrc": Settings,
-  ".nvmrc": Settings,
-  ".prettierrc": Settings,
-  ".eslintrc": Settings,
-  ".editorconfig": Settings,
-  ".env": Settings,
-  ".env.local": Settings,
-  ".env.development": Settings,
-  ".env.production": Settings,
-};
+  const Component: IconComponent = ({ className }) =>
+    createElement("img", {
+      src: url ?? "",
+      alt: "",
+      "aria-hidden": true,
+      className,
+      draggable: false,
+    });
+  Component.displayName = `FileIcon(${iconName})`;
+  return Component;
+}
 
 /**
- * Returns the appropriate lucide-react icon component for a given filename.
- * Falls back to the generic File icon for unrecognized extensions.
+ * Returns a React component that renders a Material Icon Theme SVG for the given filename.
+ * Drop-in replacement for the previous lucide-react based icon resolver.
  */
-export function getFileIcon(filename: string): LucideIcon {
-  const lower = filename.toLowerCase();
+export function getFileIcon(filename: string): IconComponent {
+  const key = (filename.split("/").pop() ?? filename).toLowerCase();
+  const cached = componentCache.get(key);
+  if (cached) return cached;
+  const comp = makeIconComponent(filename);
+  componentCache.set(key, comp);
+  return comp;
+}
 
-  // Check full filename first (e.g. Dockerfile, Makefile)
-  const basename = lower.split("/").pop() ?? lower;
-  if (filenameIconMap[basename]) {
-    return filenameIconMap[basename];
-  }
+function resolveFolderIconName(name: string, expanded: boolean): string {
+  const basename = (name.split("/").pop() ?? name).toLowerCase();
+  const map = expanded ? manifest.folderNamesExpanded : manifest.folderNames;
+  const named = map[basename];
+  if (named) return named;
+  return expanded ? manifest.folderExpanded : manifest.folder;
+}
 
-  // Check extension
-  const dotIndex = basename.lastIndexOf(".");
-  if (dotIndex !== -1) {
-    const ext = basename.slice(dotIndex + 1);
-    if (extensionIconMap[ext]) {
-      return extensionIconMap[ext];
-    }
-  }
+const folderCache = new Map<string, IconComponent>();
 
-  return File;
+function makeFolderComponent(name: string, expanded: boolean): IconComponent {
+  const iconName = resolveFolderIconName(name, expanded);
+  const def = manifest.iconDefinitions[iconName];
+  const url = def ? iconPathToUrl(def.iconPath) : null;
+
+  const Component: IconComponent = ({ className }) =>
+    createElement("img", {
+      src: url ?? "",
+      alt: "",
+      "aria-hidden": true,
+      className,
+      draggable: false,
+    });
+  Component.displayName = `FolderIcon(${iconName})`;
+  return Component;
+}
+
+/**
+ * Returns a React component that renders a Material Icon Theme SVG for a folder.
+ * Use `expanded: true` for the open-folder variant.
+ */
+export function getFolderIcon(name: string, expanded = false): IconComponent {
+  const key = `${expanded ? "1" : "0"}:${(name.split("/").pop() ?? name).toLowerCase()}`;
+  const cached = folderCache.get(key);
+  if (cached) return cached;
+  const comp = makeFolderComponent(name, expanded);
+  folderCache.set(key, comp);
+  return comp;
 }

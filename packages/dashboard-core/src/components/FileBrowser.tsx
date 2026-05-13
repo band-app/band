@@ -20,7 +20,6 @@ import {
   Copy as CopyIcon,
   File as FileIconLucide,
   Folder,
-  FolderOpen,
   FolderPlus,
   Pencil,
   Scissors,
@@ -29,7 +28,7 @@ import {
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { useAdapter } from "../context";
 import { useDeferredMenuAction } from "../hooks/use-deferred-menu-action";
-import { getFileIcon } from "../lib/file-icon";
+import { getFileIcon, getFolderIcon } from "../lib/file-icon";
 import type { FileEntry } from "../types";
 
 interface FileBrowserProps {
@@ -428,18 +427,15 @@ function TreeNode({
       )}
 
       {/* Icon */}
-      {isDir ? (
-        isExpanded ? (
-          <FolderOpen className="size-4 shrink-0 text-blue-600 dark:text-blue-400" />
-        ) : (
-          <Folder className="size-4 shrink-0 text-blue-600 dark:text-blue-400" />
-        )
-      ) : (
-        (() => {
-          const FileIcon = getFileIcon(entry.name);
-          return <FileIcon className="size-4 shrink-0 text-muted-foreground" />;
-        })()
-      )}
+      {isDir
+        ? (() => {
+            const FolderIcon = getFolderIcon(entry.name, isExpanded);
+            return <FolderIcon className="size-4 shrink-0" />;
+          })()
+        : (() => {
+            const FileIcon = getFileIcon(entry.name);
+            return <FileIcon className="size-4 shrink-0" />;
+          })()}
 
       {/* Name */}
       <span className="min-w-0 flex-1 truncate">{entry.name}</span>
