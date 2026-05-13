@@ -26,6 +26,7 @@ export function injectInitialUrls(layout: unknown, urls: Map<string, string> | n
   if (typeof layout !== "object" || layout === null) return layout;
   const panels = (layout as Record<string, unknown>).panels;
   if (typeof panels !== "object" || panels === null) return layout;
+  let changed = false;
   const nextPanels: Record<string, unknown> = {};
   for (const [id, panel] of Object.entries(panels as Record<string, unknown>)) {
     const url = urls.get(id);
@@ -41,10 +42,16 @@ export function injectInitialUrls(layout: unknown, urls: Map<string, string> | n
       // one — a legacy save might have had it; respect it.
       if (!params.initialUrl) {
         nextPanels[id] = { ...panel, params: { ...params, initialUrl: url } };
+        changed = true;
         continue;
       }
     }
     nextPanels[id] = panel;
   }
+  // Preserve reference equality when nothing actually changed —
+  // callers (e.g. React Query) may rely on `===` to detect a stale
+  // layout, and re-allocating the wrapper on every workspace reopen
+  // would defeat that.
+  if (!changed) return layout;
   return { ...(layout as Record<string, unknown>), panels: nextPanels };
 }

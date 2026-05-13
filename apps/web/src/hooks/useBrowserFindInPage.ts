@@ -158,6 +158,19 @@ export function useBrowserFindInPage({
         }
         return;
       }
+      // When starting a brand-new scan (not just stepping through the
+      // existing match set), clear the stale counter from the previous
+      // query so the UI doesn't briefly flash the old "3 of 12" while
+      // the new scan is in flight. Stepping (`findNext: true`) reuses
+      // the previous result set so the counter stays accurate.
+      if (!(opts.findNext ?? false)) {
+        setMatchInfo(null);
+        // Also forget the in-flight request id so the listener doesn't
+        // accept any late events from the previous scan during the
+        // race window between this clear and the new invoke
+        // returning.
+        activeRequestIdRef.current = null;
+      }
       try {
         const reqId = await desktopInvoke<number | undefined>(
           "browser_find_in_page",

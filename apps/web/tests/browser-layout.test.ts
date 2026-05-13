@@ -85,6 +85,21 @@ describe("injectInitialUrls", () => {
     expect(result.panels.b.params.initialUrl).toBeUndefined();
   });
 
+  it("preserves reference equality when no panel matches", () => {
+    // urls has entries, but the keys don't intersect with any panel
+    // id — the function should hand the source layout straight back so
+    // callers using `===` to detect changes aren't fooled.
+    const layout = makeLayout({ a: { id: "a", params: { browserId: "a" } } });
+    expect(injectInitialUrls(layout, new Map([["zzz", "https://x.test"]]))).toBe(layout);
+  });
+
+  it("preserves reference equality when every match already has initialUrl", () => {
+    const layout = makeLayout({
+      a: { id: "a", params: { browserId: "a", initialUrl: "https://kept.test" } },
+    });
+    expect(injectInitialUrls(layout, new Map([["a", "https://incoming.test"]]))).toBe(layout);
+  });
+
   it("skips panels whose params are missing or malformed", () => {
     const layout = makeLayout({
       a: { id: "a" /* no params */ },

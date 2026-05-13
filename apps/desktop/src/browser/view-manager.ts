@@ -477,9 +477,20 @@ export class BrowserViewManager {
     const view = this.views.get(key);
     if (!view) return;
     // If DevTools is docked for this tab, tear down the sibling view
-    // first so we don't leak a WebContentsView whose page view is gone.
+    // first so we don't leak a WebContentsView whose page view is
+    // gone. Close the DevTools session on the page webContents first
+    // (mirrors `toggleDevTools`'s close path) — the page view is
+    // destroyed seconds later anyway so the call is best-effort, but
+    // keeping the two paths symmetric avoids surprises.
     const dt = this.devToolsViews.get(key);
     if (dt) {
+      if (!view.webContents.isDestroyed()) {
+        try {
+          view.webContents.closeDevTools();
+        } catch (err) {
+          console.error("destroy: closeDevTools threw:", err);
+        }
+      }
       this.removeChildFromParent(key, dt);
       if (!dt.webContents.isDestroyed()) dt.webContents.close();
       this.devToolsViews.delete(key);
