@@ -65,6 +65,7 @@ import {
   saveCronjobFile,
 } from "../lib/cronjob-store";
 import type { CronjobDefinition } from "../lib/cronjob-types";
+import { subscribeToFileChanges } from "../lib/file-watcher";
 import { fuzzyScore } from "../lib/fuzzy-score";
 import { execGit, gitCmd, listWorktrees } from "../lib/git";
 import { checkHooks, installHooks } from "../lib/hooks";
@@ -844,6 +845,79 @@ const workspaceRouter = t.router({
       if (!workspace) return { config: null };
       const config = loadWorkspaceTerminalConfig(workspace.worktree.path, workspace.project.path);
       return { config };
+    }),
+
+  /**
+   * Subscribe to external file-system changes inside a single workspace.
+   * The watcher is started on demand for that workspace and torn down when
+   * the last subscriber disconnects, so we don't keep OS watch handles
+   * open on every worktree the user has ever added (see issue #384).
+   *
+   * Yields one event per coalesced (parentDir) change; `path` is the
+   * workspace-relative parent directory ("" for the worktree root). The
+   * FileBrowser uses it as a cache invalidation key.
+   *
+   * Auth: enforced at the transport layer (the `band_token` cookie gates
+   * the WebSocket upgrade and HTTP requests in start-server.ts), so no
+   * per-procedure guard is needed — consistent with the rest of
+   * `workspaceRouter`.
+   */
+  fileChanges: publicProcedure
+    .input(z.object({ workspaceId: z.string() }))
+    .subscription(async function* (opts) {
+      // We rely on the tRPC adapter supplying a cancellation signal — both
+      // the WebSocket and HTTP transports we use today set it on every
+      // subscription. Fail loud if a future adapter omits it rather than
+      // silently parking this generator forever.
+      if (!opts.signal) {
+        throw new Error(
+          "workspace.fileChanges requires a cancellable subscription (opts.signal missing)",
+        );
+      }
+      const signal = opts.signal;
+
+      const queue: { path: string }[] = [];
+      let resolve: (() => void) | null = null;
+      // Set to true if the underlying watcher dies — the generator then
+      // finishes cleanly so the client sees the stream complete instead
+      // of waiting forever for an event from a dead handle.
+      let watcherClosed = false;
+
+      const unsubscribe = subscribeToFileChanges(opts.input.workspaceId, (path) => {
+        if (path === null) {
+          watcherClosed = true;
+        } else {
+          queue.push({ path });
+        }
+        resolve?.();
+      });
+
+      // Only unpark the generator here; the watcher tear-down lives in
+      // `finally` so we don't risk a double-unsubscribe if abort fires
+      // before the loop's last cleanup.
+      const onAbort = () => resolve?.();
+      signal.addEventListener("abort", onAbort);
+
+      try {
+        while (!signal.aborted && !watcherClosed) {
+          while (queue.length > 0) {
+            yield queue.shift()!;
+          }
+          if (signal.aborted || watcherClosed) break;
+          await new Promise<void>((r) => {
+            resolve = r;
+            // Close the race where abort/watcher-close fires between
+            // `resolve = null` and entering this executor: in that
+            // window the upstream `resolve?.()` was a no-op, so wake
+            // immediately ourselves.
+            if (signal.aborted || watcherClosed) r();
+          });
+          resolve = null;
+        }
+      } finally {
+        signal.removeEventListener("abort", onAbort);
+        unsubscribe();
+      }
     }),
 
   listBranches: publicProcedure

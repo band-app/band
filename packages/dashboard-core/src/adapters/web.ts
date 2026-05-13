@@ -208,6 +208,68 @@ export class WebDashboardAdapter implements DashboardAdapter {
     });
   }
 
+  subscribeFileChanges(workspaceId: string, handler: (path: string) => void): Unsubscribe {
+    // The server tears the underlying watcher down (and the subscription
+    // completes) when its `fs.watch` hits an unrecoverable error — e.g.
+    // the worktree directory was deleted. We reconnect with exponential
+    // backoff so the FileBrowser silently re-acquires auto-refresh when
+    // the workspace comes back, but doesn't busy-loop if the workspace
+    // is permanently gone (server returns immediately each time). The
+    // `active` flag stops reconnects after the caller unsubscribes; in
+    // the steady state the FileBrowser unmounts when the workspace is
+    // removed, so the loop terminates naturally.
+    let active = true;
+    let currentSub: { unsubscribe: () => void } | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let attempt = 0;
+    const MAX_BACKOFF_MS = 30_000;
+
+    // Some tRPC transports can fire onStopped after onError (or vice
+    // versa) for the same disconnect; the `!reconnectTimer` guard makes
+    // the second call a no-op so we don't schedule the reconnect twice.
+    const handleDisconnect = () => {
+      currentSub = null;
+      if (active && !reconnectTimer) {
+        // 500, 1000, 2000, 4000 … capped at 30 s.
+        const delay = Math.min(2 ** attempt * 500, MAX_BACKOFF_MS);
+        attempt += 1;
+        reconnectTimer = setTimeout(() => {
+          reconnectTimer = null;
+          if (active) connect();
+        }, delay);
+      }
+    };
+
+    const connect = () => {
+      currentSub = this.trpc.workspace.fileChanges.subscribe(
+        { workspaceId },
+        {
+          onData: (data: { path: string }) => {
+            // A successful data delivery proves the watcher is healthy;
+            // reset the backoff so the next disconnection restarts the
+            // climb from the floor.
+            attempt = 0;
+            handler(data.path);
+          },
+          onStopped: handleDisconnect,
+          onError: handleDisconnect,
+        },
+      );
+    };
+
+    connect();
+
+    return () => {
+      active = false;
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      currentSub?.unsubscribe();
+      currentSub = null;
+    };
+  }
+
   async checkHooks(): Promise<HooksStatus> {
     return await this.trpc.hooks.check.query();
   }

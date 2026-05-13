@@ -816,6 +816,34 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
     fetchDir("");
   }, [fetchDir]);
 
+  // ------- External file-change invalidation -------
+  //
+  // The server watches each workspace's worktree and emits a `file-change`
+  // event with the parent directory of any touched path. We invalidate
+  // only directories the user has already visited (i.e. live in the cache):
+  //  * If the directory is expanded, a force-refetch updates the tree in
+  //    place.
+  //  * If the directory is collapsed but cached, we still re-fetch so the
+  //    next expand shows the current contents instead of a stale snapshot.
+  //  * Paths the user has never visited stay out of cache and are fetched
+  //    on first expand — no invalidation needed.
+  useEffect(() => {
+    if (!adapter.subscribeFileChanges) return;
+    const unsubscribe = adapter.subscribeFileChanges(workspaceId, (changedPath) => {
+      // `getCachedContents` is a stable module-level helper (defined at
+      // the top of this file), so it doesn't need to be in the effect's
+      // dependency array.
+      const cache = getCachedContents(workspaceId);
+      if (!cache.has(changedPath)) return;
+      void fetchDir(changedPath, { force: true });
+    });
+    return unsubscribe;
+    // `fetchDir` is wrapped in `useCallback` above with `[adapter,
+    // workspaceId]`, so it's stable across renders of this component —
+    // the effect only tears the subscription down on workspace switch,
+    // not on every render.
+  }, [adapter, workspaceId, fetchDir]);
+
   // ------- Auto-expand to selected file -------
   const prevSelectedRef = useRef<string | undefined>(undefined);
 

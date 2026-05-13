@@ -59,6 +59,21 @@ export interface DashboardAdapter {
   /** Subscribe to raw status stream events (shared SSE connection). */
   subscribeStatusEvents(handler: (event: Record<string, unknown>) => void): Unsubscribe;
 
+  /**
+   * Subscribe to external file-system changes inside a workspace. The
+   * server emits one event per affected parent directory (workspace-
+   * relative path; "" for the root). The FileBrowser uses this to
+   * invalidate / refetch directory listings when files are touched by the
+   * agent, a terminal, the IDE, or drag-and-drop.
+   *
+   * Optional, matching the rest of the code-browsing methods on this
+   * interface. Adapters that omit it silently disable FileBrowser
+   * auto-refresh — the tree will only update on internal Band mutations
+   * (create/delete/rename/paste), not on external file-system changes
+   * (see issue #384).
+   */
+  subscribeFileChanges?(workspaceId: string, handler: (path: string) => void): Unsubscribe;
+
   // Hooks
   checkHooks(): Promise<HooksStatus>;
   installHooks(): Promise<void>;
