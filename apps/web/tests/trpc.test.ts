@@ -1601,7 +1601,13 @@ describe("tRPC — pinned workspaces", () => {
 
   afterAll(async () => {
     await server.close();
-    rmSync(tmpHome, { recursive: true, force: true });
+    try {
+      git(repoPath, ["worktree", "remove", "--force", featureWorktreePath]);
+    } catch {
+      // best-effort — fine if the test crashed before the worktree was created,
+      // or if it was already cleaned up
+    }
+    rmSync(tmpHome, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   });
 
   it("projects.list returns pinned: false by default", async () => {
