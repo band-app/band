@@ -1,7 +1,7 @@
 import type { IDockviewPanelProps } from "dockview";
 import { ArrowLeft, ArrowRight, RotateCw, Wrench, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { useBrowserFindInPage } from "../hooks/useBrowserFindInPage";
+import { useBrowserPaneControls } from "../hooks/useBrowserPaneControls";
 import { invoke as desktopInvoke, listen as desktopListen } from "../lib/desktop-ipc";
 import { isDesktop } from "../lib/is-desktop";
 import { trpc } from "../lib/trpc-client";
@@ -92,13 +92,10 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
   workspaceIdRef.current = workspaceId;
   const currentUrlRef = useRef(currentUrl);
   currentUrlRef.current = currentUrl;
-  // `inputUrl` is user-owned while the address-bar input has keyboard
-  // focus: incoming `browser-url-changed` events (e.g. navigation
-  // completing, redirects, in-page hash updates) must not overwrite
-  // the half-typed URL the user is editing. We sync from focus/blur
-  // rather than reading `document.activeElement` so the check stays
-  // synchronous inside the event listener.
-  const addressInputFocusedRef = useRef(false);
+  // `addressInputFocusedRef` is now owned by `useBrowserPaneControls`
+  // — it's destructured back out below and read inside the
+  // `browser-url-changed` listener to skip clobbering an in-progress
+  // address-bar edit.
 
   // ------- restore persisted URL when workspaceId becomes available -------
   // useState initializers run on first mount when workspaceId may still be
@@ -190,7 +187,12 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
   }, [created, getBounds, invoke, workspaceId]);
 
   // ------- listen for URL changes from the Rust side -------
+  // Refs (`workspaceIdRef`, `addressInputFocusedRef`) are intentionally
+  // read via `.current` inside the listener — adding `.current` to the
+  // deps would force the listener to re-bind on every focus/blur or
+  // workspace switch.
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: see above
   useEffect(() => {
     if (!isDesktop) return;
     let unlisten: (() => void) | undefined;
@@ -379,73 +381,24 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
     }
   }, [invoke, workspaceId]);
 
-  const handleToggleDevTools = useCallback(async () => {
-    try {
-      await invoke("browser_toggle_dev_tools", { workspaceId });
-    } catch (e) {
-      console.error("browser_toggle_dev_tools failed:", e);
-    }
-  }, [invoke, workspaceId]);
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        handleNavigate(inputUrl);
-        return;
-      }
-      // Escape abandons an in-progress edit and snaps the input back
-      // to the canonical URL with the whole value re-selected — same
-      // as Chrome's address bar. Keep focus so the user can type to
-      // replace without re-clicking the bar.
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setInputUrl(currentUrlRef.current);
-        const input = e.currentTarget;
-        // Defer past the React commit so we select against the
-        // restored value (setting `input.value` mid-render would clear
-        // any selection we made here).
-        requestAnimationFrame(() => input.select());
-      }
-    },
-    [inputUrl, handleNavigate],
-  );
-
-  const handleAddressFocus = useCallback((e: React.FocusEvent<HTMLInputElement>) => {
-    addressInputFocusedRef.current = true;
-    e.target.select();
-  }, []);
-
-  const handleAddressBlur = useCallback(() => {
-    addressInputFocusedRef.current = false;
-    // Re-sync to the latest committed URL in case events fired (and
-    // were ignored) while we were focused. Matches Chrome: typed-but-
-    // not-submitted URLs revert on blur.
-    setInputUrl(currentUrlRef.current);
-  }, []);
-
-  // ------- find in page -------
-  const find = useBrowserFindInPage({ key: workspaceId, keyName: "workspaceId" });
-
-  // Pane-scoped Cmd+F / Ctrl+F handler. Covers the case where keyboard
-  // focus is inside the React DOM (address bar, find bar input, the
-  // panel itself). The complementary case — focus inside the
-  // WebContentsView — is handled by the main process via
-  // `before-input-event` and reaches the hook through the
-  // `browser-find-shortcut` event.
-  const handlePaneKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLDivElement>) => {
-      if (e.key.toLowerCase() !== "f") return;
-      if (e.shiftKey || e.altKey) return;
-      const isMac = navigator.platform.toLowerCase().includes("mac");
-      const wantsFind = isMac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
-      if (!wantsFind) return;
-      e.preventDefault();
-      e.stopPropagation();
-      find.open();
-    },
-    [find],
-  );
+  // ------- pane chrome controls (find bar, DevTools, address-bar UX) -------
+  const {
+    find,
+    addressInputFocusedRef,
+    handleAddressFocus,
+    handleAddressBlur,
+    handleAddressKeyDown,
+    handlePaneKeyDown,
+    handleToggleDevTools,
+    paneDataAttrs,
+  } = useBrowserPaneControls({
+    key: workspaceId,
+    keyName: "workspaceId",
+    currentUrlRef,
+    setInputUrl,
+    inputUrl,
+    onNavigate: handleNavigate,
+  });
 
   // Don't render until workspaceId is injected — during layout sync fromJSON
   // recreates panels with empty params before injectParams runs a tick later.
@@ -465,13 +418,12 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
     <div
       className="flex h-full w-full flex-col"
       onKeyDown={handlePaneKeyDown}
-      // Cmd+R routing: the desktop menu's renderer-global handler walks
-      // up from `document.activeElement` looking for these data attrs
-      // to decide whether to reload this tab or fall through to the
-      // app.
-      data-band-browser-pane=""
-      data-band-browser-pane-key={workspaceId}
-      data-band-browser-pane-keyname="workspaceId"
+      // Cmd+R / Cmd+= routing: the desktop menu's renderer-global
+      // handlers walk up from `document.activeElement` looking for
+      // these data attrs to decide whether to act on this tab or fall
+      // through to the app. Sourced from `useBrowserPaneControls` so
+      // both panel variants stay in sync.
+      {...paneDataAttrs}
     >
       {/* Keyframes for the loading bar (injected once, deduped by browser) */}
       <style>{`@keyframes browser-bar-slide {
@@ -520,7 +472,7 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
           type="text"
           value={inputUrl}
           onChange={(e) => setInputUrl(e.target.value)}
-          onKeyDown={handleKeyDown}
+          onKeyDown={handleAddressKeyDown}
           onFocus={handleAddressFocus}
           onBlur={handleAddressBlur}
           className="min-w-0 flex-1 rounded border border-transparent bg-muted/50 px-3 py-1.5 text-sm text-foreground outline-none transition-colors focus:border-border"
@@ -584,9 +536,10 @@ export function BrowserPaneComponent({
   browserIdRef.current = browserId;
   const currentUrlRef = useRef(currentUrl);
   currentUrlRef.current = currentUrl;
-  // While the address-bar input has focus, the user owns `inputUrl` —
-  // browser-url-changed events must not overwrite an in-progress edit.
-  const addressInputFocusedRef = useRef(false);
+  // `addressInputFocusedRef` is destructured from
+  // `useBrowserPaneControls` below and read inside the
+  // `browser-url-changed` listener to skip clobbering an in-progress
+  // address-bar edit.
 
   // ------- helpers -------
 
@@ -688,8 +641,14 @@ export function BrowserPaneComponent({
 
   // ------- listen for URL / title changes from the Rust side -------
   // Persist URL to server (debounced) so it survives workspace switches.
+  // Refs (`browserIdRef`, `currentUrlRef`, `addressInputFocusedRef`,
+  // `urlPersistTimer`) are read via `.current` inside the listener —
+  // adding `.current` to the deps would force the listener to re-bind
+  // every URL/focus change. The `api` dep is the only thing that
+  // should re-bind this effect.
   const urlPersistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: see above
   useEffect(() => {
     if (!isDesktop) return;
     let unlistenUrl: (() => void) | undefined;
@@ -900,66 +859,24 @@ export function BrowserPaneComponent({
     }
   }, [invoke, browserId]);
 
-  const handleToggleDevTools = useCallback(async () => {
-    try {
-      await invoke("browser_toggle_dev_tools", { browserId });
-    } catch (e) {
-      console.error("browser_toggle_dev_tools failed:", e);
-    }
-  }, [invoke, browserId]);
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        handleNavigate(inputUrl);
-        return;
-      }
-      // Escape abandons an in-progress edit and snaps the input back
-      // to the canonical URL with the whole value re-selected — same
-      // as Chrome's address bar. Keep focus so the user can type to
-      // replace without re-clicking the bar.
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setInputUrl(currentUrlRef.current);
-        const input = e.currentTarget;
-        // Defer past the React commit so we select against the
-        // restored value (setting `input.value` mid-render would clear
-        // any selection we made here).
-        requestAnimationFrame(() => input.select());
-      }
-    },
-    [inputUrl, handleNavigate],
-  );
-
-  const handleAddressFocus = useCallback((e: React.FocusEvent<HTMLInputElement>) => {
-    addressInputFocusedRef.current = true;
-    e.target.select();
-  }, []);
-
-  const handleAddressBlur = useCallback(() => {
-    addressInputFocusedRef.current = false;
-    // Re-sync to the latest committed URL in case events fired (and
-    // were ignored) while we were focused.
-    setInputUrl(currentUrlRef.current);
-  }, []);
-
-  // ------- find in page -------
-  const find = useBrowserFindInPage({ key: browserId, keyName: "browserId" });
-
-  const handlePaneKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLDivElement>) => {
-      if (e.key.toLowerCase() !== "f") return;
-      if (e.shiftKey || e.altKey) return;
-      const isMac = navigator.platform.toLowerCase().includes("mac");
-      const wantsFind = isMac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
-      if (!wantsFind) return;
-      e.preventDefault();
-      e.stopPropagation();
-      find.open();
-    },
-    [find],
-  );
+  // ------- pane chrome controls (find bar, DevTools, address-bar UX) -------
+  const {
+    find,
+    addressInputFocusedRef,
+    handleAddressFocus,
+    handleAddressBlur,
+    handleAddressKeyDown,
+    handlePaneKeyDown,
+    handleToggleDevTools,
+    paneDataAttrs,
+  } = useBrowserPaneControls({
+    key: browserId,
+    keyName: "browserId",
+    currentUrlRef,
+    setInputUrl,
+    inputUrl,
+    onNavigate: handleNavigate,
+  });
 
   if (!browserId) return null;
 
@@ -972,13 +889,7 @@ export function BrowserPaneComponent({
   }
 
   return (
-    <div
-      className="flex h-full w-full flex-col"
-      onKeyDown={handlePaneKeyDown}
-      data-band-browser-pane=""
-      data-band-browser-pane-key={browserId}
-      data-band-browser-pane-keyname="browserId"
-    >
+    <div className="flex h-full w-full flex-col" onKeyDown={handlePaneKeyDown} {...paneDataAttrs}>
       <style>{`@keyframes browser-bar-slide {
   0% { transform: translateX(-100%); }
   50% { transform: translateX(200%); }
@@ -1024,7 +935,7 @@ export function BrowserPaneComponent({
           type="text"
           value={inputUrl}
           onChange={(e) => setInputUrl(e.target.value)}
-          onKeyDown={handleKeyDown}
+          onKeyDown={handleAddressKeyDown}
           onFocus={handleAddressFocus}
           onBlur={handleAddressBlur}
           className="min-w-0 flex-1 rounded border border-transparent bg-muted/50 px-3 py-1.5 text-sm text-foreground outline-none transition-colors focus:border-border"

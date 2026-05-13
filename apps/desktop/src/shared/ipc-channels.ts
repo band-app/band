@@ -55,9 +55,10 @@ export const Channels = {
   // dashboard's `document.documentElement.style.zoom` and from other
   // tabs.
   browserZoom: "browser_zoom",
-  // Toggle Chromium DevTools for the matching view. Opens in a
-  // detached window because a `WebContentsView` has no host window of
-  // its own to dock the panel into.
+  // Toggle Chromium DevTools for the matching view. DevTools is docked
+  // inside the tab area (bottom split) via a sibling `WebContentsView`
+  // wired up with `setDevToolsWebContents` — not as a detached OS
+  // window.
   browserToggleDevTools: "browser_toggle_dev_tools",
 } as const;
 

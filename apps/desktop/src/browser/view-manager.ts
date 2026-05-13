@@ -39,6 +39,7 @@ import {
   type BrowserZoomArgs,
   browserKey,
 } from "../shared/types.js";
+import { splitTabBounds } from "./layout.js";
 
 const MAX_BROWSER_VIEWS = 10;
 
@@ -58,6 +59,10 @@ const ZOOM_DEFAULT = 1.0;
 // short.
 const DEVTOOLS_SPLIT_RATIO = 0.4;
 const DEVTOOLS_MIN_HEIGHT = 160;
+// Page view never collapses below this on tall enough windows. On
+// windows shorter than `PAGE_MIN_HEIGHT`, the page view shrinks to
+// `bounds.height` (DevTools is sacrificed to keep page visible).
+const PAGE_MIN_HEIGHT = 40;
 
 export interface ViewManagerOptions {
   /** User-visible window that hosts the React UI; renders WebContentsViews
@@ -107,6 +112,14 @@ export class BrowserViewManager {
     string,
     { x: number; y: number; width: number; height: number }
   >();
+  /**
+   * Tracks the latest `setVisible` argument we passed for each tab so
+   * `toggleDevTools` can mirror the page view's current visibility on
+   * the new DevTools sibling. `WebContentsView` has a setter but no
+   * cross-version-stable getter (Electron's `WebContents.isVisible`
+   * isn't on the public typings of this version).
+   */
+  private readonly visibleByKey = new Map<string, boolean>();
 
   constructor(private readonly opts: ViewManagerOptions) {}
 
@@ -127,18 +140,17 @@ export class BrowserViewManager {
       this.moveTo(key, existing, "main");
       this.lastBoundsByKey.set(key, args);
       this.applyTabLayout(key, args);
-      existing.setVisible(true);
-      this.devToolsViews.get(key)?.setVisible(true);
+      this.setTabVisibility(key, true);
       return;
     }
 
     this.enforceLru();
 
-    const view = this.spawn(args.url, key);
-    this.moveTo(key, view, "main");
+    this.spawn(args.url, key);
+    this.moveTo(key, this.views.get(key) as WebContentsView, "main");
     this.lastBoundsByKey.set(key, args);
     this.applyTabLayout(key, args);
-    view.setVisible(true);
+    this.setTabVisibility(key, true);
   }
 
   /**
@@ -178,7 +190,7 @@ export class BrowserViewManager {
       // Belt-and-suspenders against ever leaving a view at
       // setVisible(false): no current code path does, but if a future
       // change introduces one, this keeps `ensure` robust.
-      existing.setVisible(true);
+      this.setTabVisibility(key, true);
       return;
     }
     this.enforceLru();
@@ -238,8 +250,7 @@ export class BrowserViewManager {
     if (!view) return;
     // Migrate back to the main window so the user can see the tab.
     if (this.opts.hiddenWindow) this.moveTo(key, view, "main");
-    view.setVisible(true);
-    this.devToolsViews.get(key)?.setVisible(true);
+    this.setTabVisibility(key, true);
   }
 
   hide(args: BrowserKeyArg): void {
@@ -252,14 +263,12 @@ export class BrowserViewManager {
       // on web. The hidden window is invisible to the user but counts as a
       // visible parent from chromium's POV.
       this.moveTo(key, view, "hidden");
-      view.setVisible(true);
-      this.devToolsViews.get(key)?.setVisible(true);
+      this.setTabVisibility(key, true);
     } else {
       // CDP screencast disabled: original behavior. setVisible(false)
       // parks the compositor, which is exactly what we want for a tab
       // the user isn't currently viewing.
-      view.setVisible(false);
-      this.devToolsViews.get(key)?.setVisible(false);
+      this.setTabVisibility(key, false);
     }
   }
 
@@ -428,9 +437,13 @@ export class BrowserViewManager {
       return;
     }
 
-    // Match page-view visibility (in case the tab is currently parked
-    // in the hidden window) and apply the split.
-    dt.setVisible(true);
+    // Match page-view visibility (the tab may currently be hidden —
+    // e.g. parked while another workspace is active). Showing the
+    // DevTools sibling while its page view is hidden would paint the
+    // panel over the workspace. We track visibility in `visibleByKey`
+    // because `WebContentsView` has a setter but no public getter.
+    const pageVisible = this.visibleByKey.get(key) ?? true;
+    dt.setVisible(pageVisible);
     const last = this.lastBoundsByKey.get(key);
     if (last) this.applyTabLayout(key, last);
   }
@@ -473,6 +486,7 @@ export class BrowserViewManager {
     this.views.delete(key);
     this.parentByKey.delete(key);
     this.lastBoundsByKey.delete(key);
+    this.visibleByKey.delete(key);
     const idx = this.order.indexOf(key);
     if (idx >= 0) this.order.splice(idx, 1);
     // Notify the renderer (which forwards to the web server's
@@ -502,18 +516,21 @@ export class BrowserViewManager {
     return null;
   }
 
-  /** Hide every tracked view. The Rust impl ignores `workspace_id`. */
+  /**
+   * Hide every tracked view. The Rust impl ignores `workspace_id`.
+   *
+   * Docked DevTools siblings must be hidden in lockstep — otherwise an
+   * open DevTools panel stays painted over the workspace when the user
+   * switches away (the page view goes invisible but its sibling
+   * doesn't).
+   */
   hideAll(): void {
-    for (const id of this.order) {
-      this.views.get(id)?.setVisible(false);
-    }
+    for (const id of this.order) this.setTabVisibility(id, false);
   }
 
   /** Show every tracked view. The Rust impl ignores `workspace_id`. */
   showAll(): void {
-    for (const id of this.order) {
-      this.views.get(id)?.setVisible(true);
-    }
+    for (const id of this.order) this.setTabVisibility(id, true);
   }
 
   /**
@@ -589,6 +606,7 @@ export class BrowserViewManager {
       this.parentByKey.set(key, "hidden");
       view.setBounds({ x: 0, y: 0, width: 1280, height: 720 });
       view.setVisible(true);
+      this.visibleByKey.set(key, true);
     } else {
       // CDP screencast disabled — original behavior. create() will
       // immediately call applyBounds + setVisible to position the view
@@ -631,6 +649,19 @@ export class BrowserViewManager {
     this.parentByKey.set(key, target);
   }
 
+  /**
+   * Single funnel for setting a tab's visibility. Mirrors `setVisible`
+   * on the page view AND its docked DevTools sibling (if any), and
+   * caches the state in `visibleByKey` so other code paths (e.g.
+   * `toggleDevTools` opening DevTools on an already-hidden tab) can
+   * read the current visibility without a getter on `WebContentsView`.
+   */
+  private setTabVisibility(key: string, visible: boolean): void {
+    this.views.get(key)?.setVisible(visible);
+    this.devToolsViews.get(key)?.setVisible(visible);
+    this.visibleByKey.set(key, visible);
+  }
+
   /** Resolve the BrowserWindow for a `Parent` enum value. */
   private windowFor(parent: Parent): BrowserWindow {
     return parent === "hidden" && this.opts.hiddenWindow
@@ -662,18 +693,18 @@ export class BrowserViewManager {
       this.applyBounds(view, bounds);
       return;
     }
-    const devHeight = Math.max(
-      DEVTOOLS_MIN_HEIGHT,
-      Math.round(bounds.height * DEVTOOLS_SPLIT_RATIO),
-    );
-    const pageHeight = Math.max(40, bounds.height - devHeight);
-    this.applyBounds(view, { ...bounds, height: pageHeight });
-    this.applyBounds(dt, {
-      x: bounds.x,
-      y: bounds.y + pageHeight,
-      width: bounds.width,
-      height: devHeight,
+    // Delegate the geometry to the pure helper in `./layout.ts` so the
+    // splitting logic can be exercised in tests without an Electron
+    // import. The helper guarantees `page.height + dev.height ===
+    // bounds.height`, even on short windows where the natural clamps
+    // would otherwise overlap.
+    const { page, dev } = splitTabBounds(bounds, {
+      splitRatio: DEVTOOLS_SPLIT_RATIO,
+      devMinHeight: DEVTOOLS_MIN_HEIGHT,
+      pageMinHeight: PAGE_MIN_HEIGHT,
     });
+    this.applyBounds(view, page);
+    this.applyBounds(dt, dev);
   }
 
   private wireEvents(key: string, view: WebContentsView): void {
