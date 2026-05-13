@@ -459,5 +459,10 @@ export default defineConfig(({ command }) => ({
       : {
           // node-pty is a native addon that cannot be bundled
           external: ["node-pty"],
+          // Force-bundle deps whose CJS main trips Node's ESM/CJS
+          // interop preparse (`Cannot read properties of undefined
+          // (reading 'exports')`). We only consume their JSON/asset
+          // subpaths from client-only code paths.
+          noExternal: ["material-icon-theme"],
         },
 }));
