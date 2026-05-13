@@ -65,6 +65,7 @@ import {
   saveCronjobFile,
 } from "../lib/cronjob-store";
 import type { CronjobDefinition } from "../lib/cronjob-types";
+import { subscribeToFileChanges } from "../lib/file-watcher";
 import { fuzzyScore } from "../lib/fuzzy-score";
 import { execGit, gitCmd, listWorktrees } from "../lib/git";
 import { checkHooks, installHooks } from "../lib/hooks";
@@ -844,6 +845,47 @@ const workspaceRouter = t.router({
       if (!workspace) return { config: null };
       const config = loadWorkspaceTerminalConfig(workspace.worktree.path, workspace.project.path);
       return { config };
+    }),
+
+  /**
+   * Subscribe to external file-system changes inside a single workspace.
+   * The watcher is started on demand for that workspace and torn down when
+   * the last subscriber disconnects, so we don't keep OS watch handles
+   * open on every worktree the user has ever added (see issue #384).
+   *
+   * Yields one event per coalesced (parentDir) change; `path` is the
+   * workspace-relative parent directory ("" for the worktree root). The
+   * FileBrowser uses it as a cache invalidation key.
+   */
+  fileChanges: publicProcedure
+    .input(z.object({ workspaceId: z.string() }))
+    .subscription(async function* (opts) {
+      const queue: { path: string }[] = [];
+      let resolve: (() => void) | null = null;
+
+      const unsubscribe = subscribeToFileChanges(opts.input.workspaceId, (path) => {
+        queue.push({ path });
+        resolve?.();
+      });
+
+      opts.signal?.addEventListener("abort", () => {
+        unsubscribe();
+        resolve?.();
+      });
+
+      try {
+        while (!opts.signal?.aborted) {
+          while (queue.length > 0) {
+            yield queue.shift()!;
+          }
+          await new Promise<void>((r) => {
+            resolve = r;
+          });
+          resolve = null;
+        }
+      } finally {
+        unsubscribe();
+      }
     }),
 
   listBranches: publicProcedure

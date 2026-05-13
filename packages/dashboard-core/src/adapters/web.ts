@@ -208,6 +208,16 @@ export class WebDashboardAdapter implements DashboardAdapter {
     });
   }
 
+  subscribeFileChanges(workspaceId: string, handler: (path: string) => void): Unsubscribe {
+    const sub = this.trpc.workspace.fileChanges.subscribe(
+      { workspaceId },
+      {
+        onData: (data: { path: string }) => handler(data.path),
+      },
+    );
+    return () => sub.unsubscribe();
+  }
+
   async checkHooks(): Promise<HooksStatus> {
     return await this.trpc.hooks.check.query();
   }
