@@ -168,9 +168,11 @@ function makeSpawnOptions(webDir: string, port: number, fds: ServerLogFds): Spaw
       //
       // Note: this var inherits into every grandchild the web server forks.
       // Harmless for the current stack (Rust CLIs, git, etc. ignore it) but
-      // if we ever shell out to a tool that is itself an Electron app, it
-      // would be misinterpreted as a request to run that binary as raw
-      // Node. Re-evaluate then.
+      // *not* harmless for any Electron-based binary in the call chain. The
+      // most concrete example is the VS Code `code` CLI (Electron) — if the
+      // web server ever shells out to it to open a file or run a task, it
+      // would launch as a plain Node interpreter instead of the editor. If
+      // we ever add such a call site, scrub this var from that spawn's env.
       ELECTRON_RUN_AS_NODE: "1",
       // Repopulate PATH from the user's login shell. Even though we no
       // longer need a system `node` on PATH (spawn target is
@@ -218,10 +220,12 @@ export async function spawnWebServer(opts: SpawnWebServerOptions): Promise<Child
     child.unref();
   }
   child.on("error", (err) => {
-    // After moving to the embedded Node runtime, ENOENT on the spawn binary
-    // is effectively impossible (it's bundled with the .app). Most errors
-    // here will be a missing `cwd` or start script — surface that directly
-    // instead of telling the user to install Node.
+    // After moving to the embedded Node runtime, ENOENT on the spawn
+    // *binary* is effectively impossible — `process.execPath` is the
+    // running interpreter, bundled with the .app. ENOENT on the *start
+    // script* can still happen if the web bundle is missing or
+    // corrupted, hence `script=` in the diagnostic below. Either way,
+    // we no longer tell users to install Node.
     dashLog(
       `Failed to start web server: ${err.message} (execPath=${process.execPath}, cwd=${opts.webDir}, script=${startScript})`,
     );

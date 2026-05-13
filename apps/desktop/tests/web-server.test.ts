@@ -46,6 +46,13 @@ async function findFreePort(): Promise<number> {
   });
 }
 
+// `FAKE_SERVER` is a *string* of JavaScript source. The test harness writes
+// it to `webDir/dist/start-server.mjs` and spawns it as a child process via
+// `spawnWebServer` — it is never `import`ed by the test runner itself. So
+// the `writeFileSync` calls inside this template only ever run inside the
+// spawned child, where `HOME` has already been overridden to `sandboxHome`
+// by the `before()` hook. There is no second context that would touch the
+// user's real `~/.band/`.
 const FAKE_SERVER = `import http from "node:http";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -167,9 +174,16 @@ describe("web-server lifecycle", () => {
 
       // We spawned via process.execPath (the running interpreter — Electron's
       // embedded Node in production, the system `node` in this test process).
-      // In either case it must match the parent's execPath, NOT a bare "node"
-      // looked up on PATH.
+      // In either case it must be an *absolute* path that matches the parent
+      // — NOT the bare string "node", which would indicate a regression back
+      // to `spawn("node", ...)`. (In a test env where `process.execPath` IS
+      // /usr/local/bin/node, simply asserting equality with `process.execPath`
+      // isn't enough to detect that regression — `node` from PATH would
+      // resolve to the same absolute path. Asserting absoluteness +
+      // non-literal-"node" closes that gap.)
       assert.equal(captured.execPath, process.execPath);
+      assert.ok(captured.execPath.startsWith("/"), "execPath must be absolute");
+      assert.notEqual(captured.execPath, "node");
 
       // ELECTRON_RUN_AS_NODE=1 is what makes the Electron binary act as a
       // pure Node interpreter when this code runs inside the packaged .app.
