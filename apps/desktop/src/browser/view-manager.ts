@@ -146,8 +146,13 @@ export class BrowserViewManager {
 
     this.enforceLru();
 
-    this.spawn(args.url, key);
-    this.moveTo(key, this.views.get(key) as WebContentsView, "main");
+    // Capture `spawn`'s return value directly. The previous form
+    // (`spawn(...); this.views.get(key) as WebContentsView`) papered
+    // over the failure mode where `spawn` is unable to insert into the
+    // map — `moveTo` would then be handed `undefined`, and
+    // `addChildView(undefined)` takes down the window.
+    const view = this.spawn(args.url, key);
+    this.moveTo(key, view, "main");
     this.lastBoundsByKey.set(key, args);
     this.applyTabLayout(key, args);
     this.setTabVisibility(key, true);
@@ -394,8 +399,11 @@ export class BrowserViewManager {
       // give the page view the full bounds back.
       try {
         wc.closeDevTools();
-      } catch {
-        // best-effort: closing on an already-detached state may throw
+      } catch (err) {
+        // best-effort: closing on an already-detached state may throw.
+        // Log so a real failure in the field is observable, but don't
+        // re-throw — the sibling view cleanup below still has to run.
+        console.error("toggleDevTools: closeDevTools threw:", err);
       }
       this.removeChildFromParent(key, existing);
       if (!existing.webContents.isDestroyed()) {
@@ -509,6 +517,10 @@ export class BrowserViewManager {
    * tab can be torn down between the menu firing and this lookup.
    */
   findFocused(): WebContentsView | null {
+    // Iterating `this.views.values()` (Map insertion order) is fine
+    // here — keyboard focus is exclusive, so at most one view can
+    // match, and the order doesn't affect the result. Do NOT switch
+    // to `this.order` (LRU order); that's only used for eviction.
     for (const view of this.views.values()) {
       if (view.webContents.isDestroyed()) continue;
       if (view.webContents.isFocused()) return view;
