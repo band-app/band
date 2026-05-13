@@ -7,6 +7,8 @@ export interface SearchOptions {
   regex: boolean;
 }
 
+export type SearchOptionKey = keyof SearchOptions;
+
 export interface SearchBarProps {
   /** Current search query text */
   query: string;
@@ -26,9 +28,19 @@ export interface SearchBarProps {
   onPrevious?: () => void;
   /** Called when user closes the search bar (Escape / X button) — omit to hide close button */
   onClose?: () => void;
+  /**
+   * Subset of toggle buttons to render. Defaults to all three
+   * (`caseSensitive`, `wholeWord`, `regex`). Callers backed by engines that
+   * only support a subset (e.g. Electron's `webContents.findInPage`, which
+   * only honours match-case) can narrow this to avoid showing toggles that
+   * would be no-ops.
+   */
+  visibleOptions?: readonly SearchOptionKey[];
   /** Extra class names for the root container */
   className?: string;
 }
+
+const DEFAULT_VISIBLE_OPTIONS: readonly SearchOptionKey[] = ["caseSensitive", "wholeWord", "regex"];
 
 export interface SearchBarHandle {
   focus: () => void;
@@ -71,10 +83,14 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(function Se
     onNext,
     onPrevious,
     onClose,
+    visibleOptions = DEFAULT_VISIBLE_OPTIONS,
     className,
   },
   ref,
 ) {
+  const showCase = visibleOptions.includes("caseSensitive");
+  const showWholeWord = visibleOptions.includes("wholeWord");
+  const showRegex = visibleOptions.includes("regex");
   const inputRef = useRef<HTMLInputElement>(null);
 
   useImperativeHandle(ref, () => ({
@@ -117,15 +133,21 @@ export const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(function Se
           }
         }}
       />
-      <ToggleButton active={options.caseSensitive} onClick={toggleCase} title="Match Case">
-        <CaseSensitive className="size-4" />
-      </ToggleButton>
-      <ToggleButton active={options.wholeWord} onClick={toggleWholeWord} title="Match Whole Word">
-        <WholeWord className="size-4" />
-      </ToggleButton>
-      <ToggleButton active={options.regex} onClick={toggleRegex} title="Use Regular Expression">
-        <Regex className="size-4" />
-      </ToggleButton>
+      {showCase && (
+        <ToggleButton active={options.caseSensitive} onClick={toggleCase} title="Match Case">
+          <CaseSensitive className="size-4" />
+        </ToggleButton>
+      )}
+      {showWholeWord && (
+        <ToggleButton active={options.wholeWord} onClick={toggleWholeWord} title="Match Whole Word">
+          <WholeWord className="size-4" />
+        </ToggleButton>
+      )}
+      {showRegex && (
+        <ToggleButton active={options.regex} onClick={toggleRegex} title="Use Regular Expression">
+          <Regex className="size-4" />
+        </ToggleButton>
+      )}
       {matchInfo && query && (
         <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
           {matchInfo.total > 0 ? `${matchInfo.current} of ${matchInfo.total}` : "No results"}

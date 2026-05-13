@@ -167,7 +167,9 @@ async function bootstrap(): Promise<void> {
 
   // Install the application menu (Edit/View/Settings + accelerators) before
   // creating the window so Cmd+, etc. are bound from the first frame.
-  installAppMenu();
+  // The Reload item resolves `state.browserManager` lazily because the
+  // manager is constructed later, after `createMainWindow`.
+  installAppMenu({ getBrowserManager: () => state.browserManager });
 
   // macOS dock icon. In a packaged build this comes from the .app's .icns
   // (Info.plist resolves CFBundleIconFile); in dev there's no bundle so we

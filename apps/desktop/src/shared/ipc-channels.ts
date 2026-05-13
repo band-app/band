@@ -44,6 +44,22 @@ export const Channels = {
   // chromium-side targetId.
   browserEnsure: "browser_ensure",
   browserGetCdpTarget: "browser_get_cdp_target",
+  // Find-in-page (Cmd+F / Ctrl+F overlay on a browser tab). The main
+  // process calls Electron's native `webContents.findInPage` so matches
+  // are highlighted by Chromium itself; results stream back as
+  // `browser-found-in-page` events.
+  browserFindInPage: "browser_find_in_page",
+  browserStopFindInPage: "browser_stop_find_in_page",
+  // Per-tab zoom (Cmd+= / Cmd+- / Actual Size). Adjusts
+  // `webContents.zoomFactor` on the matching view — independent of the
+  // dashboard's `document.documentElement.style.zoom` and from other
+  // tabs.
+  browserZoom: "browser_zoom",
+  // Toggle Chromium DevTools for the matching view. DevTools is docked
+  // inside the tab area (bottom split) via a sibling `WebContentsView`
+  // wired up with `setDevToolsWebContents` — not as a detached OS
+  // window.
+  browserToggleDevTools: "browser_toggle_dev_tools",
 } as const;
 
 export type ChannelName = (typeof Channels)[keyof typeof Channels];
@@ -56,6 +72,21 @@ export const Events = {
    *  this to invalidate the server's bandTabId → cdpTargetId cache via
    *  the `browserHost.viewDestroyed` tRPC mutation. */
   browserViewDestroyed: "browser-view-destroyed",
+  /** Streamed for every `webContents.findInPage` request (one initial
+   *  result + zero or more updates ending with `final_update: true`).
+   *  Drives the match counter (`3 of 12`) in the renderer find bar. */
+  browserFoundInPage: "browser-found-in-page",
+  /** Pushed when the user presses Cmd+F / Ctrl+F while keyboard focus is
+   *  inside the WebContentsView. The renderer's DOM-level keydown
+   *  listener never sees those events (Chromium consumes them inside the
+   *  child view) so the main process intercepts them via
+   *  `before-input-event` and forwards them back as this event for the
+   *  React find bar to open. */
+  browserFindShortcut: "browser-find-shortcut",
+  /** Pushed when the user presses Cmd+T / Ctrl+T while focus is inside a
+   *  WebContentsView. The renderer's DockviewBrowserContainer reacts by
+   *  opening a new tab in whichever container holds the source pane. */
+  browserNewTabShortcut: "browser-new-tab-shortcut",
   windowFullscreenChanged: "window-fullscreen-changed",
   /** Pushed by the main process when the background updater detects (or
    *  clears) a pending app update. Payload: `PendingUpdate` from

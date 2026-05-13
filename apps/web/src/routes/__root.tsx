@@ -35,6 +35,7 @@ import { ToolbarOverflowMenuItems, ToolbarOverflowProvider } from "../components
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useNavigationHistory } from "../hooks/useNavigationHistory";
 import { useZoom } from "../hooks/useZoom";
+import { getElectronBridge } from "../lib/desktop-ipc";
 import { isDesktop } from "../lib/is-desktop";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
 import { applyZoomLevel, loadZoomLevel, zoomIn, zoomOut, zoomReset } from "../lib/zoom";
@@ -138,6 +139,60 @@ function ThemeSync() {
   return null;
 }
 
+/**
+ * Exposes `window.__bandReload` for the desktop menu's Cmd+R handler.
+ *
+ * Routes the reload based on what's currently focused in the React DOM:
+ *
+ *   - Focus inside a browser pane (address bar, find bar, tab handle,
+ *     etc., identified by the `data-band-browser-pane` attribute the
+ *     `BrowserPanel` root sets): reload that browser tab via the
+ *     `browser_reload` IPC instead of reloading the whole dashboard.
+ *   - Anywhere else: `location.reload()`, matching the previous
+ *     default-menu behaviour.
+ *
+ * The webview-focused case (user is clicked inside a rendered web page)
+ * is handled in the main process *before* this global is called — see
+ * `menu.ts::reloadFocused`. By the time `__bandReload` runs, focus is
+ * inside the main-window DOM.
+ */
+function ReloadSync() {
+  useEffect(() => {
+    const globalKey = "__bandReload";
+    const win = window as unknown as Record<string, unknown>;
+    const handler = () => {
+      // Walk up from the focused element looking for a browser-pane root.
+      const active = document.activeElement as HTMLElement | null;
+      const paneEl = active?.closest("[data-band-browser-pane]") as HTMLElement | null;
+      if (paneEl) {
+        const key = paneEl.dataset.bandBrowserPaneKey;
+        const keyName = paneEl.dataset.bandBrowserPaneKeyname;
+        if (key && (keyName === "browserId" || keyName === "workspaceId")) {
+          const bridge = getElectronBridge();
+          if (bridge) {
+            void bridge.invoke("browser_reload", { [keyName]: key });
+            return;
+          }
+        }
+      }
+      // No browser pane focused — preserve the historical "Cmd+R reloads
+      // the dashboard" behaviour.
+      window.location.reload();
+    };
+    // Same defensive ownership check pattern as `__bandOpenSettings` in
+    // DashboardShell: cleanup only deletes if we still own the slot, so
+    // a stale unmount can't wipe a newer registration.
+    win[globalKey] = handler;
+    return () => {
+      if (win[globalKey] === handler) {
+        delete win[globalKey];
+      }
+    };
+  }, []);
+
+  return null;
+}
+
 /** Syncs the zoom level across windows and exposes a global function
  *  for the Electron menu handler to call via webContents.executeJavaScript(). */
 function ZoomSync() {
@@ -149,7 +204,27 @@ function ZoomSync() {
 
     // Expose a global function the Electron menu event handler can call via
     // webContents.executeJavaScript("if(window.__bandZoom)window.__bandZoom('in')").
+    //
+    // Same routing shape as `__bandReload`: if focus is inside a browser
+    // pane's React chrome (address bar, find bar, etc.), zoom that
+    // tab's WebContentsView via IPC. Otherwise fall through to the
+    // dashboard-wide CSS zoom. The "focus inside the rendered web page"
+    // case is handled in the main process before this function is
+    // called — see `menu.ts::zoomFocused`.
     (window as unknown as Record<string, unknown>).__bandZoom = (action: string) => {
+      const active = document.activeElement as HTMLElement | null;
+      const paneEl = active?.closest("[data-band-browser-pane]") as HTMLElement | null;
+      if (paneEl) {
+        const key = paneEl.dataset.bandBrowserPaneKey;
+        const keyName = paneEl.dataset.bandBrowserPaneKeyname;
+        if (key && (keyName === "browserId" || keyName === "workspaceId")) {
+          const bridge = getElectronBridge();
+          if (bridge) {
+            void bridge.invoke("browser_zoom", { [keyName]: key, action });
+            return;
+          }
+        }
+      }
       if (action === "in") zoomIn();
       else if (action === "out") zoomOut();
       else zoomReset();
@@ -324,6 +399,7 @@ function RootLayout() {
         <DashboardProvider adapter={adapter} capabilities={capabilities}>
           <ThemeSync />
           <ZoomSync />
+          <ReloadSync />
           <TooltipProvider>
             <AppShell />
           </TooltipProvider>
