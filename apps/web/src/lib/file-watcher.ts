@@ -27,12 +27,19 @@ import { resolveWorkspace } from "./workspace";
 //     deleted; we swallow both.
 // ---------------------------------------------------------------------------
 
-/**
- * Directory segments whose contents we never report to the client. Keeping
- * them out of the event stream avoids flooding the FileBrowser with
- * meaningless events when, for example, `pnpm install` rewrites
- * `node_modules`.
- */
+// Directory segments whose contents we never report to the client. Keeping
+// them out of the event stream avoids flooding the FileBrowser with
+// meaningless events when, for example, "pnpm install" rewrites
+// node_modules.
+//
+// Trade-off: this match is depth-agnostic, so "target/" anywhere in the
+// tree is silently filtered (intentional — Rust monorepos write to
+// apps/cli/target/, packages/*/target/, etc. on every cargo build). The
+// cost is that a repo that legitimately uses one of these names as a
+// source directory (e.g. a Go project with a nested "build/" source
+// folder) will see no refresh events from it. If a real user hits that,
+// the right fix is a per-project configurable ignore list rather than
+// unilaterally narrowing this set.
 const IGNORED_SEGMENTS = new Set<string>([
   ".git",
   "node_modules",

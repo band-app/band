@@ -209,13 +209,54 @@ export class WebDashboardAdapter implements DashboardAdapter {
   }
 
   subscribeFileChanges(workspaceId: string, handler: (path: string) => void): Unsubscribe {
-    const sub = this.trpc.workspace.fileChanges.subscribe(
-      { workspaceId },
-      {
-        onData: (data: { path: string }) => handler(data.path),
-      },
-    );
-    return () => sub.unsubscribe();
+    // The server tears the underlying watcher down (and the subscription
+    // completes) when its `fs.watch` hits an unrecoverable error — e.g.
+    // the worktree directory was deleted. We reconnect after a short
+    // delay so the FileBrowser silently re-acquires auto-refresh once
+    // the workspace is back. `active` guards against reconnecting after
+    // the caller has explicitly unsubscribed.
+    let active = true;
+    let currentSub: { unsubscribe: () => void } | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const connect = () => {
+      currentSub = this.trpc.workspace.fileChanges.subscribe(
+        { workspaceId },
+        {
+          onData: (data: { path: string }) => handler(data.path),
+          onStopped: () => {
+            currentSub = null;
+            if (active && !reconnectTimer) {
+              reconnectTimer = setTimeout(() => {
+                reconnectTimer = null;
+                if (active) connect();
+              }, 2_000);
+            }
+          },
+          onError: () => {
+            currentSub = null;
+            if (active && !reconnectTimer) {
+              reconnectTimer = setTimeout(() => {
+                reconnectTimer = null;
+                if (active) connect();
+              }, 2_000);
+            }
+          },
+        },
+      );
+    };
+
+    connect();
+
+    return () => {
+      active = false;
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      currentSub?.unsubscribe();
+      currentSub = null;
+    };
   }
 
   async checkHooks(): Promise<HooksStatus> {

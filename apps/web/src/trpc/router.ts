@@ -884,9 +884,8 @@ const workspaceRouter = t.router({
       // Only unpark the generator here; the watcher tear-down lives in
       // `finally` so we don't risk a double-unsubscribe if abort fires
       // before the loop's last cleanup.
-      opts.signal?.addEventListener("abort", () => {
-        resolve?.();
-      });
+      const onAbort = () => resolve?.();
+      opts.signal?.addEventListener("abort", onAbort);
 
       try {
         while (!opts.signal?.aborted && !watcherClosed) {
@@ -904,6 +903,7 @@ const workspaceRouter = t.router({
           resolve = null;
         }
       } finally {
+        opts.signal?.removeEventListener("abort", onAbort);
         unsubscribe();
       }
     }),
