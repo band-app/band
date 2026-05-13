@@ -172,19 +172,24 @@ describe("web-server lifecycle", () => {
         nodeOptions: string | null;
       };
 
-      // We spawned via process.execPath (the running interpreter — Electron's
-      // embedded Node in production, the system `node` in this test process).
-      // The child's execPath must match the parent's and must be absolute.
+      // The test asserts env *shape*, not the spawn-binary target:
       //
-      // Caveat: in a plain-Node test environment, asserting these does *not*
-      // catch a regression back to `spawn("node", [startScript])` — the OS
-      // resolves the literal "node" to an absolute path (e.g. /usr/local/bin/node)
-      // before the child starts, so the child's process.execPath ends up
-      // equal to the parent's. The actual regression detector for that case
-      // is the `electronRunAsNode === "1"` assertion below; plain `node`
-      // doesn't propagate that env var unless we explicitly set it, but the
-      // var MUST be present for the same code to work inside the packaged
-      // .app where process.execPath is the Electron binary.
+      //  - In production the spawn binary is the Electron `.app` executable
+      //    (process.execPath), which behaves as Node thanks to the
+      //    ELECTRON_RUN_AS_NODE=1 env var below.
+      //  - In this test environment the spawn binary is the system `node`
+      //    that's running the test runner. process.execPath of the spawned
+      //    child will equal process.execPath of the parent, and both will
+      //    be absolute paths.
+      //
+      // Note: this set of assertions does *not* distinguish
+      // `spawn(process.execPath, …)` from `spawn("node", …)` in a plain-Node
+      // CI environment — the OS resolves the literal "node" to an absolute
+      // path before the child starts, so the captured execPath would be
+      // identical in both cases. What this test does verify is that the env
+      // we set in `makeSpawnOptions` (ELECTRON_RUN_AS_NODE, NODE_OPTIONS) is
+      // actually propagated to the child, which is the contract the
+      // packaged .app relies on.
       assert.equal(captured.execPath, process.execPath);
       assert.ok(captured.execPath.startsWith("/"), "execPath must be absolute");
 
