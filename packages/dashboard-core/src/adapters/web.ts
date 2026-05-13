@@ -219,29 +219,23 @@ export class WebDashboardAdapter implements DashboardAdapter {
     let currentSub: { unsubscribe: () => void } | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
+    const handleDisconnect = () => {
+      currentSub = null;
+      if (active && !reconnectTimer) {
+        reconnectTimer = setTimeout(() => {
+          reconnectTimer = null;
+          if (active) connect();
+        }, 2_000);
+      }
+    };
+
     const connect = () => {
       currentSub = this.trpc.workspace.fileChanges.subscribe(
         { workspaceId },
         {
           onData: (data: { path: string }) => handler(data.path),
-          onStopped: () => {
-            currentSub = null;
-            if (active && !reconnectTimer) {
-              reconnectTimer = setTimeout(() => {
-                reconnectTimer = null;
-                if (active) connect();
-              }, 2_000);
-            }
-          },
-          onError: () => {
-            currentSub = null;
-            if (active && !reconnectTimer) {
-              reconnectTimer = setTimeout(() => {
-                reconnectTimer = null;
-                if (active) connect();
-              }, 2_000);
-            }
-          },
+          onStopped: handleDisconnect,
+          onError: handleDisconnect,
         },
       );
     };

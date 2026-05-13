@@ -830,6 +830,9 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
   useEffect(() => {
     if (!adapter.subscribeFileChanges) return;
     const unsubscribe = adapter.subscribeFileChanges(workspaceId, (changedPath) => {
+      // `getCachedContents` is a stable module-level helper (defined at
+      // the top of this file), so it doesn't need to be in the effect's
+      // dependency array.
       const cache = getCachedContents(workspaceId);
       if (!cache.has(changedPath)) return;
       void fetchDir(changedPath, { force: true });

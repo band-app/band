@@ -895,10 +895,11 @@ const workspaceRouter = t.router({
           if (opts.signal?.aborted || watcherClosed) break;
           await new Promise<void>((r) => {
             resolve = r;
-            // Close the race where abort fires between `resolve = null`
-            // and entering this executor: in that window the listener's
-            // `resolve?.()` was a no-op, so wake immediately ourselves.
-            if (opts.signal?.aborted) r();
+            // Close the race where abort/watcher-close fires between
+            // `resolve = null` and entering this executor: in that
+            // window the upstream `resolve?.()` was a no-op, so wake
+            // immediately ourselves.
+            if (opts.signal?.aborted || watcherClosed) r();
           });
           resolve = null;
         }
