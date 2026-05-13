@@ -838,6 +838,10 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
       void fetchDir(changedPath, { force: true });
     });
     return unsubscribe;
+    // `fetchDir` is wrapped in `useCallback` above with `[adapter,
+    // workspaceId]`, so it's stable across renders of this component —
+    // the effect only tears the subscription down on workspace switch,
+    // not on every render.
   }, [adapter, workspaceId, fetchDir]);
 
   // ------- Auto-expand to selected file -------

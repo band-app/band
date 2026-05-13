@@ -865,6 +865,11 @@ const workspaceRouter = t.router({
   fileChanges: publicProcedure
     .input(z.object({ workspaceId: z.string() }))
     .subscription(async function* (opts) {
+      // We rely on `opts.signal` being supplied by the tRPC adapter —
+      // both the WebSocket and HTTP transports we use today set it on
+      // every subscription. If a future adapter omits it, this loop
+      // would only exit via `watcherClosed` and a misbehaving client
+      // could park the generator indefinitely.
       const queue: { path: string }[] = [];
       let resolve: (() => void) | null = null;
       // Set to true if the underlying watcher dies — the generator then

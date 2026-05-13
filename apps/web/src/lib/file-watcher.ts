@@ -172,20 +172,19 @@ export function subscribeToFileChanges(
     }
 
     entry = { watcher, listeners: new Set(), pendingTimers: new Map() };
+    watchers.set(workspaceId, entry);
     // Recursive watches can emit unrecoverable errors (e.g. when the
     // watched directory is removed). Wake every current subscriber with
     // a `null` sentinel so their tRPC generators can finish cleanly
     // instead of parking forever waiting for an event from a dead
-    // watcher. Drop the entry afterwards so the next subscriber retries
-    // with a fresh handle.
+    // watcher. Closing over `entry` directly (rather than re-resolving
+    // through the map) keeps the notification flow obvious and survives
+    // any future change to how `watchers` is keyed.
+    const localEntry = entry;
     watcher.on("error", () => {
-      const current = watchers.get(workspaceId);
-      if (current) {
-        for (const listener of current.listeners) listener(null);
-      }
+      for (const listener of localEntry.listeners) listener(null);
       stopWatcher(workspaceId);
     });
-    watchers.set(workspaceId, entry);
   }
 
   entry.listeners.add(listener);
