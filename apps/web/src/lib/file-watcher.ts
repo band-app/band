@@ -133,6 +133,10 @@ export function subscribeToFileChanges(
 
     let watcher: FSWatcher;
     try {
+      // NOTE: `recursive: true` is only supported on macOS and Windows
+      // for Node ≤ 21; Linux gained it in Node 22.0. Band's web server
+      // already requires Node ≥ 22.5 (`apps/web/package.json#engines`),
+      // so this is safe across all supported platforms.
       watcher = fsWatch(root, { recursive: true, persistent: false }, (_event, filename) => {
         // `filename` may be null on some platforms or under heavy churn —
         // the change is real but we can't pinpoint where, so skip. Without

@@ -868,8 +868,10 @@ const workspaceRouter = t.router({
         resolve?.();
       });
 
+      // Only unpark the generator here; the watcher tear-down lives in
+      // `finally` so we don't risk a double-unsubscribe if abort fires
+      // before the loop's last cleanup.
       opts.signal?.addEventListener("abort", () => {
-        unsubscribe();
         resolve?.();
       });
 
@@ -878,8 +880,13 @@ const workspaceRouter = t.router({
           while (queue.length > 0) {
             yield queue.shift()!;
           }
+          if (opts.signal?.aborted) break;
           await new Promise<void>((r) => {
             resolve = r;
+            // Close the race where abort fires between `resolve = null`
+            // and entering this executor: in that window the listener's
+            // `resolve?.()` was a no-op, so wake immediately ourselves.
+            if (opts.signal?.aborted) r();
           });
           resolve = null;
         }
