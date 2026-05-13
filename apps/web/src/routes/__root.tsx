@@ -35,6 +35,7 @@ import { ToolbarOverflowMenuItems, ToolbarOverflowProvider } from "../components
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useNavigationHistory } from "../hooks/useNavigationHistory";
 import { useZoom } from "../hooks/useZoom";
+import { getElectronBridge } from "../lib/desktop-ipc";
 import { isDesktop } from "../lib/is-desktop";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
 import { applyZoomLevel, loadZoomLevel, zoomIn, zoomOut, zoomReset } from "../lib/zoom";
@@ -167,15 +168,7 @@ function ReloadSync() {
         const key = paneEl.dataset.bandBrowserPaneKey;
         const keyName = paneEl.dataset.bandBrowserPaneKeyname;
         if (key && (keyName === "browserId" || keyName === "workspaceId")) {
-          const bridge = (
-            window as unknown as {
-              __BAND_DESKTOP__?: { invoke: (channel: string, args?: unknown) => Promise<unknown> };
-            }
-          ).__BAND_DESKTOP__;
-          // Calling the preload bridge directly keeps this independent of
-          // any React-side IPC wrapper module — the route file already
-          // imports adapters but not desktop-ipc, and dragging it in here
-          // just to call one channel feels heavy.
+          const bridge = getElectronBridge();
           if (bridge) {
             void bridge.invoke("browser_reload", { [keyName]: key });
             return;
@@ -225,11 +218,7 @@ function ZoomSync() {
         const key = paneEl.dataset.bandBrowserPaneKey;
         const keyName = paneEl.dataset.bandBrowserPaneKeyname;
         if (key && (keyName === "browserId" || keyName === "workspaceId")) {
-          const bridge = (
-            window as unknown as {
-              __BAND_DESKTOP__?: { invoke: (channel: string, args?: unknown) => Promise<unknown> };
-            }
-          ).__BAND_DESKTOP__;
+          const bridge = getElectronBridge();
           if (bridge) {
             void bridge.invoke("browser_zoom", { [keyName]: key, action });
             return;

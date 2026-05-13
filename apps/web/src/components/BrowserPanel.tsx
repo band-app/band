@@ -477,6 +477,11 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
           onBlur={handleAddressBlur}
           className="min-w-0 flex-1 rounded border border-transparent bg-muted/50 px-3 py-1.5 text-sm text-foreground outline-none transition-colors focus:border-border"
           placeholder="Enter URL or search..."
+          // Stable hook for `DockviewBrowserContainer` to focus the
+          // address bar via `[data-band-address-input]` — more durable
+          // than `input[type='text']`, which would also match the
+          // find-bar's search input.
+          data-band-address-input=""
         />
         <button
           type="button"
@@ -940,6 +945,11 @@ export function BrowserPaneComponent({
           onBlur={handleAddressBlur}
           className="min-w-0 flex-1 rounded border border-transparent bg-muted/50 px-3 py-1.5 text-sm text-foreground outline-none transition-colors focus:border-border"
           placeholder="Enter URL or search..."
+          // Stable hook for `DockviewBrowserContainer` to focus the
+          // address bar via `[data-band-address-input]` — more durable
+          // than `input[type='text']`, which would also match the
+          // find-bar's search input.
+          data-band-address-input=""
         />
         <button
           type="button"

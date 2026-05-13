@@ -56,6 +56,21 @@ export interface UseBrowserFindInPageReturn {
   searchBarRef: React.RefObject<SearchBarHandle | null>;
 }
 
+/**
+ * `SearchOptions` is shared with other search bars in the app (file
+ * search, diff search, etc.), which need all three toggles. Browser
+ * find-in-page only honours `caseSensitive` — Chromium's
+ * `webContents.findInPage` API does not expose whole-word or regex
+ * mode. `BrowserFindBar` therefore renders only the case-sensitive
+ * toggle (`visibleOptions={["caseSensitive"]}`); `wholeWord` and
+ * `regex` are accepted on the type but silently ignored here.
+ *
+ * If a future caller flips them on (e.g. a test or programmatic
+ * usage), the search will NOT re-fire — `issueFind` only depends on
+ * `options.caseSensitive` — and the result set won't change. This is
+ * intentional: silently dropping the unsupported toggles is more
+ * honest than pretending to honour them.
+ */
 const DEFAULT_OPTIONS: SearchOptions = {
   caseSensitive: false,
   wholeWord: false,
@@ -95,6 +110,14 @@ export function useBrowserFindInPage({
   const searchBarRef = useRef<SearchBarHandle>(null);
   const keyRef = useRef(key);
   keyRef.current = key;
+  /**
+   * The `requestId` returned by the most recent `webContents.findInPage`
+   * call. Chromium can keep emitting `found-in-page` events for a
+   * cancelled request after the next request has already started; the
+   * stale match counter would briefly overwrite the new one. Filtering
+   * the listener by `requestId` discards those late stragglers.
+   */
+  const activeRequestIdRef = useRef<number | null>(null);
 
   // Pull the right id field out of an event payload — both fields carry
   // the same value today, but using the renderer's chosen `keyName` keeps
@@ -125,6 +148,9 @@ export function useBrowserFindInPage({
       if (!isDesktop) return;
       if (!text) {
         setMatchInfo(null);
+        // Forget the in-flight request so any straggling `found-in-page`
+        // events for it are dropped by the listener.
+        activeRequestIdRef.current = null;
         try {
           await desktopInvoke("browser_stop_find_in_page", buildArgs({ action: "clearSelection" }));
         } catch {
@@ -133,7 +159,7 @@ export function useBrowserFindInPage({
         return;
       }
       try {
-        await desktopInvoke(
+        const reqId = await desktopInvoke<number | undefined>(
           "browser_find_in_page",
           buildArgs({
             text,
@@ -146,6 +172,9 @@ export function useBrowserFindInPage({
             },
           }),
         );
+        // Track the new requestId so the `found-in-page` listener can
+        // ignore late events from the previous query.
+        if (typeof reqId === "number") activeRequestIdRef.current = reqId;
       } catch (e) {
         // Network is in-process IPC; only fails on shape mismatch /
         // missing handler. Log but don't propagate.
@@ -159,6 +188,7 @@ export function useBrowserFindInPage({
     setIsOpen(false);
     setQuery("");
     setMatchInfo(null);
+    activeRequestIdRef.current = null;
     if (!isDesktop) return;
     desktopInvoke("browser_stop_find_in_page", buildArgs({ action: "clearSelection" })).catch(
       () => {},
@@ -186,6 +216,16 @@ export function useBrowserFindInPage({
     void (async () => {
       unlisten = await desktopListen<FoundInPagePayload>("browser-found-in-page", (event) => {
         if (payloadKey(event.payload) !== keyRef.current) return;
+        // Drop late events from a cancelled request — Chromium can
+        // emit them after we've already started a new scan, and the
+        // stale `matches` / `activeMatchOrdinal` would briefly flicker
+        // into the visible counter.
+        if (
+          activeRequestIdRef.current !== null &&
+          event.payload.request_id !== activeRequestIdRef.current
+        ) {
+          return;
+        }
         setMatchInfo({
           total: event.payload.matches,
           // Chromium reports `0` while a query is being typed and the

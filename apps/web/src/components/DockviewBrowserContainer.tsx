@@ -527,7 +527,13 @@ export function DockviewBrowserContainer({
         requestAnimationFrame(() => {
           const panel = api.activePanel;
           if (!panel) return;
-          panel.view.content.element.querySelector<HTMLInputElement>("input[type='text']")?.focus();
+          // `data-band-address-input` is set on the address-bar input in
+          // BrowserPanel.tsx — using the data attribute (rather than
+          // `input[type='text']`) avoids accidentally matching the
+          // find-bar input if it's mounted in the same panel.
+          panel.view.content.element
+            .querySelector<HTMLInputElement>("[data-band-address-input]")
+            ?.focus();
         });
         return;
       }
@@ -544,7 +550,7 @@ export function DockviewBrowserContainer({
             const panel = apiRef.current?.activePanel;
             if (!panel) return;
             panel.view.content.element
-              .querySelector<HTMLInputElement>("input[type='text']")
+              .querySelector<HTMLInputElement>("[data-band-address-input]")
               ?.focus();
           });
         });
@@ -609,7 +615,7 @@ export function DockviewBrowserContainer({
             requestAnimationFrame(() => {
               const panel = apiRef.current?.activePanel;
               panel?.view.content.element
-                .querySelector<HTMLInputElement>("input[type='text']")
+                .querySelector<HTMLInputElement>("[data-band-address-input]")
                 ?.focus();
             });
           });
@@ -631,7 +637,7 @@ export function DockviewBrowserContainer({
       if (!root || root.offsetParent === null) return;
       // Prefer the visible address bar (multiple are mounted while
       // the user has multiple browser tabs open inside the panel).
-      const inputs = root.querySelectorAll<HTMLInputElement>('input[placeholder^="Enter URL"]');
+      const inputs = root.querySelectorAll<HTMLInputElement>("[data-band-address-input]");
       for (const input of inputs) {
         if (input.offsetParent !== null) {
           input.focus({ preventScroll: true });
