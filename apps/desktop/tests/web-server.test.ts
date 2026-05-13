@@ -182,14 +182,12 @@ describe("web-server lifecycle", () => {
       //    child will equal process.execPath of the parent, and both will
       //    be absolute paths.
       //
-      // Note: this set of assertions does *not* distinguish
-      // `spawn(process.execPath, …)` from `spawn("node", …)` in a plain-Node
-      // CI environment — the OS resolves the literal "node" to an absolute
-      // path before the child starts, so the captured execPath would be
-      // identical in both cases. What this test does verify is that the env
-      // we set in `makeSpawnOptions` (ELECTRON_RUN_AS_NODE, NODE_OPTIONS) is
-      // actually propagated to the child, which is the contract the
-      // packaged .app relies on.
+      // CI gap: cannot verify the spawn-binary choice without a real
+      // Electron binary in the test process. The OS resolves the literal
+      // "node" to an absolute path before the child starts, so a refactor
+      // back to `spawn("node", …)` would still pass these assertions. The
+      // only real guard is a manual smoke test of the packaged `.app` with
+      // system `node` removed from PATH.
       assert.equal(captured.execPath, process.execPath);
       assert.ok(captured.execPath.startsWith("/"), "execPath must be absolute");
 
@@ -199,8 +197,10 @@ describe("web-server lifecycle", () => {
       assert.equal(captured.electronRunAsNode, "1");
 
       // Keep the experimental warning silencer until Node bundled by Electron
-      // moves to 24.x where node:sqlite is stable.
-      assert.equal(captured.nodeOptions, "--no-warnings=ExperimentalWarning");
+      // moves to 24.x where node:sqlite is stable. We *append* to whatever
+      // NODE_OPTIONS the parent had, so this assertion checks containment
+      // rather than equality.
+      assert.match(captured.nodeOptions ?? "", /--no-warnings=ExperimentalWarning/);
     } finally {
       await managed.kill();
     }

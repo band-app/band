@@ -186,7 +186,14 @@ function makeSpawnOptions(webDir: string, port: number, fds: ServerLogFds): Spaw
       // Silence the `node:sqlite` ExperimentalWarning. Node 22.x still
       // emits it; drop this once the bundled Node hits 24.x where the
       // module is marked Stable.
-      NODE_OPTIONS: "--no-warnings=ExperimentalWarning",
+      //
+      // Append (not replace) so we don't clobber any NODE_OPTIONS the
+      // parent already had — e.g. `--max-old-space-size=…` from a dev's
+      // shell profile, or a `--require` loader. Node parses
+      // space-separated flags in this var.
+      NODE_OPTIONS: [process.env.NODE_OPTIONS, "--no-warnings=ExperimentalWarning"]
+        .filter(Boolean)
+        .join(" "),
     },
     stdio: ["ignore", fds.out, fds.err],
     // Detached on Unix puts the spawn into its own process group so
