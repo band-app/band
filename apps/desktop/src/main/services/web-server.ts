@@ -160,11 +160,40 @@ function makeSpawnOptions(webDir: string, port: number, fds: ServerLogFds): Spaw
     cwd: webDir,
     env: {
       ...process.env,
+      // The web server is spawned via `process.execPath` (the Electron
+      // binary). `ELECTRON_RUN_AS_NODE=1` tells Electron to act as a plain
+      // Node.js interpreter — no Chromium, no app lifecycle — so we get the
+      // bundled Node runtime (22.x for Electron 35+, with `node:sqlite` as
+      // a built-in) without requiring users to install Node themselves.
+      //
+      // Note: this var inherits into every grandchild the web server forks.
+      // Harmless for the current stack (Rust CLIs, git, etc. ignore it) but
+      // *not* harmless for any Electron-based binary in the call chain. The
+      // most concrete example is the VS Code `code` CLI (Electron) — if the
+      // web server ever shells out to it to open a file or run a task, it
+      // would launch as a plain Node interpreter instead of the editor. If
+      // we ever add such a call site, scrub this var from that spawn's env.
+      ELECTRON_RUN_AS_NODE: "1",
+      // Repopulate PATH from the user's login shell. Even though we no
+      // longer need a system `node` on PATH (spawn target is
+      // `process.execPath`), the web server's *own* children — `claude`,
+      // `band`, `git`, etc. living in `/opt/homebrew/bin` or
+      // `~/.cargo/bin` — inherit this env and rely on it to find their
+      // binaries when the app is launched from Finder/Spotlight (macOS
+      // gives GUI launches only a sparse `/usr/bin:/bin:/usr/sbin:/sbin`).
       PATH: shellPath(),
       PORT: String(port),
-      // Silence the `node:sqlite` ExperimentalWarning. Drop once Node marks
-      // the module Stable. Matches the Tauri code.
-      NODE_OPTIONS: "--no-warnings=ExperimentalWarning",
+      // Silence the `node:sqlite` ExperimentalWarning. Node 22.x still
+      // emits it; drop this once the bundled Node hits 24.x where the
+      // module is marked Stable.
+      //
+      // Append (not replace) so we don't clobber any NODE_OPTIONS the
+      // parent already had — e.g. `--max-old-space-size=…` from a dev's
+      // shell profile, or a `--require` loader. Node parses
+      // space-separated flags in this var.
+      NODE_OPTIONS: [process.env.NODE_OPTIONS, "--no-warnings=ExperimentalWarning"]
+        .filter(Boolean)
+        .join(" "),
     },
     stdio: ["ignore", fds.out, fds.err],
     // Detached on Unix puts the spawn into its own process group so
@@ -174,23 +203,39 @@ function makeSpawnOptions(webDir: string, port: number, fds: ServerLogFds): Spaw
 }
 
 /**
- * Spawn `node dist/start-server.mjs` in `webDir`. Returns the child handle;
- * caller is responsible for tracking it (typically via `ManagedProcess`).
+ * Spawn the bundled web server in `webDir`, using Electron's embedded Node
+ * runtime (`process.execPath` + `ELECTRON_RUN_AS_NODE=1`). Returns the child
+ * handle; caller is responsible for tracking it (typically via
+ * `ManagedProcess`).
+ *
+ * Using the embedded Node — rather than `spawn("node", ...)` — means the app
+ * works even when the user has no system Node installed (or has the wrong
+ * version, or a sparse `PATH` from a Finder/Spotlight launch). It also
+ * guarantees the runtime ships `node:sqlite` as a built-in, which our
+ * `apps/web/src/lib/db/connection.ts` relies on.
  */
 export async function spawnWebServer(opts: SpawnWebServerOptions): Promise<ChildProcess> {
   const startScript = join(opts.webDir, "dist/start-server.mjs");
   const fds = await openServerLog();
-  const child = spawn("node", [startScript], makeSpawnOptions(opts.webDir, opts.port, fds));
+  const child = spawn(
+    process.execPath,
+    [startScript],
+    makeSpawnOptions(opts.webDir, opts.port, fds),
+  );
   if (process.platform !== "win32") {
     // Don't let the parent process wait on the child; we manage its lifetime.
     child.unref();
   }
   child.on("error", (err) => {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      dashLog("Node.js is required but not installed. Install it from https://nodejs.org");
-    } else {
-      dashLog(`Failed to start web server: ${err.message}`);
-    }
+    // After moving to the embedded Node runtime, ENOENT on the spawn
+    // *binary* is effectively impossible — `process.execPath` is the
+    // running interpreter, bundled with the .app. ENOENT on the *start
+    // script* can still happen if the web bundle is missing or
+    // corrupted, hence `script=` in the diagnostic below. Either way,
+    // we no longer tell users to install Node.
+    dashLog(
+      `Failed to start web server: ${err.message} (execPath=${process.execPath}, cwd=${opts.webDir}, script=${startScript})`,
+    );
   });
   return child;
 }
