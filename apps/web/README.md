@@ -6,8 +6,10 @@ Web server + dashboard frontend for Band. Provides the tRPC API, WebSocket layer
 
 This package runs under [Node.js](https://nodejs.org) v22.5 or newer. The shebang on `bin/band-server.mjs` is `#!/usr/bin/env node`.
 
+> ℹ️ Users running the Band **desktop app** do **not** need to install Node themselves — the desktop shell ships its own bundled Node runtime (via Electron) and spawns the web server under it. The Node 22.5+ requirement only applies to people running this package directly via `band-server` / `node dist/start-server.mjs`, or doing local development against the source tree.
+
 ```bash
-# Run the server
+# Run the server (standalone consumer scenario)
 band-server
 # or:
 node dist/start-server.mjs
@@ -23,7 +25,7 @@ We were briefly on `bun:sqlite` (PR #353) to dodge the same ABI problem, but Bun
 
 ## Install
 
-Node v22.5+ must be on `PATH` first.
+For the standalone scenario (running `band-server` outside the desktop app), Node v22.5+ must be on `PATH`. Desktop app users can skip this section — the .app brings its own Node.
 
 ```bash
 # 1. Install Node.js 22.5+ (https://nodejs.org)

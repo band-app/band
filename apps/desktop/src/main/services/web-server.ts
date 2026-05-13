@@ -20,7 +20,6 @@ import { setTimeout as delay } from "node:timers/promises";
 import { bandHome, dashLog } from "./log.js";
 import { killPort } from "./port.js";
 import { getConfiguredPort, tryGetToken } from "./settings.js";
-import { shellPath } from "./shell-path.js";
 
 const HEALTH_TIMEOUT_MS = 15_000;
 const HEALTH_POLL_INTERVAL_MS = 200;
@@ -160,10 +159,16 @@ function makeSpawnOptions(webDir: string, port: number, fds: ServerLogFds): Spaw
     cwd: webDir,
     env: {
       ...process.env,
-      PATH: shellPath(),
+      // The web server is spawned via `process.execPath` (the Electron
+      // binary). `ELECTRON_RUN_AS_NODE=1` tells Electron to act as a plain
+      // Node.js interpreter — no Chromium, no app lifecycle — so we get the
+      // bundled Node runtime (22.x for Electron 35+, with `node:sqlite` as
+      // a built-in) without requiring users to install Node themselves.
+      ELECTRON_RUN_AS_NODE: "1",
       PORT: String(port),
-      // Silence the `node:sqlite` ExperimentalWarning. Drop once Node marks
-      // the module Stable. Matches the Tauri code.
+      // Silence the `node:sqlite` ExperimentalWarning. Node 22.x still
+      // emits it; drop this once the bundled Node hits 24.x where the
+      // module is marked Stable.
       NODE_OPTIONS: "--no-warnings=ExperimentalWarning",
     },
     stdio: ["ignore", fds.out, fds.err],
@@ -174,23 +179,37 @@ function makeSpawnOptions(webDir: string, port: number, fds: ServerLogFds): Spaw
 }
 
 /**
- * Spawn `node dist/start-server.mjs` in `webDir`. Returns the child handle;
- * caller is responsible for tracking it (typically via `ManagedProcess`).
+ * Spawn the bundled web server in `webDir`, using Electron's embedded Node
+ * runtime (`process.execPath` + `ELECTRON_RUN_AS_NODE=1`). Returns the child
+ * handle; caller is responsible for tracking it (typically via
+ * `ManagedProcess`).
+ *
+ * Using the embedded Node — rather than `spawn("node", ...)` — means the app
+ * works even when the user has no system Node installed (or has the wrong
+ * version, or a sparse `PATH` from a Finder/Spotlight launch). It also
+ * guarantees the runtime ships `node:sqlite` as a built-in, which our
+ * `apps/web/src/lib/db/connection.ts` relies on.
  */
 export async function spawnWebServer(opts: SpawnWebServerOptions): Promise<ChildProcess> {
   const startScript = join(opts.webDir, "dist/start-server.mjs");
   const fds = await openServerLog();
-  const child = spawn("node", [startScript], makeSpawnOptions(opts.webDir, opts.port, fds));
+  const child = spawn(
+    process.execPath,
+    [startScript],
+    makeSpawnOptions(opts.webDir, opts.port, fds),
+  );
   if (process.platform !== "win32") {
     // Don't let the parent process wait on the child; we manage its lifetime.
     child.unref();
   }
   child.on("error", (err) => {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      dashLog("Node.js is required but not installed. Install it from https://nodejs.org");
-    } else {
-      dashLog(`Failed to start web server: ${err.message}`);
-    }
+    // After moving to the embedded Node runtime, ENOENT on the spawn binary
+    // is effectively impossible (it's bundled with the .app). Most errors
+    // here will be a missing `cwd` or start script — surface that directly
+    // instead of telling the user to install Node.
+    dashLog(
+      `Failed to start web server: ${err.message} (execPath=${process.execPath}, cwd=${opts.webDir}, script=${startScript})`,
+    );
   });
   return child;
 }

@@ -33,6 +33,8 @@ Download the latest signed `.dmg` from [GitHub Releases](https://github.com/band
 
 Auto-update is built in (via `electron-updater`): the app checks daily and prompts before installing.
 
+The desktop app is fully self-contained — it ships its own Node.js runtime (Electron's bundled Node 22.x) and runs the web server under that. End users do **not** need to install Node.js separately.
+
 ### Nightly
 
 Bleeding-edge builds from the `main` branch are published to a single rolling [`nightly` release](https://github.com/band-app/band/releases/tag/nightly) every day at 04:00 UTC. Nightly builds:
@@ -68,7 +70,9 @@ packages/
 
 ## Prerequisites
 
-- [Node.js](https://nodejs.org) v22.5+ (we use the built-in `node:sqlite` module)
+The packaged desktop app ships its own Node runtime via Electron, so end users only need macOS. The prerequisites below apply when **building from source**.
+
+- [Node.js](https://nodejs.org) v22.5+ — required to drive `pnpm install`, run the test suite, and build the web bundle (we use the built-in `node:sqlite` module)
 - [pnpm](https://pnpm.io) v10+
 - [Rust](https://rustup.rs) (for the CLI)
 - macOS
