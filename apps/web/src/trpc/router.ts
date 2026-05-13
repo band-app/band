@@ -856,15 +856,28 @@ const workspaceRouter = t.router({
    * Yields one event per coalesced (parentDir) change; `path` is the
    * workspace-relative parent directory ("" for the worktree root). The
    * FileBrowser uses it as a cache invalidation key.
+   *
+   * Auth: enforced at the transport layer (the `band_token` cookie gates
+   * the WebSocket upgrade and HTTP requests in start-server.ts), so no
+   * per-procedure guard is needed — consistent with the rest of
+   * `workspaceRouter`.
    */
   fileChanges: publicProcedure
     .input(z.object({ workspaceId: z.string() }))
     .subscription(async function* (opts) {
       const queue: { path: string }[] = [];
       let resolve: (() => void) | null = null;
+      // Set to true if the underlying watcher dies — the generator then
+      // finishes cleanly so the client sees the stream complete instead
+      // of waiting forever for an event from a dead handle.
+      let watcherClosed = false;
 
       const unsubscribe = subscribeToFileChanges(opts.input.workspaceId, (path) => {
-        queue.push({ path });
+        if (path === null) {
+          watcherClosed = true;
+        } else {
+          queue.push({ path });
+        }
         resolve?.();
       });
 
@@ -876,11 +889,11 @@ const workspaceRouter = t.router({
       });
 
       try {
-        while (!opts.signal?.aborted) {
+        while (!opts.signal?.aborted && !watcherClosed) {
           while (queue.length > 0) {
             yield queue.shift()!;
           }
-          if (opts.signal?.aborted) break;
+          if (opts.signal?.aborted || watcherClosed) break;
           await new Promise<void>((r) => {
             resolve = r;
             // Close the race where abort fires between `resolve = null`

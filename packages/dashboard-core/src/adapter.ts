@@ -65,6 +65,12 @@ export interface DashboardAdapter {
    * relative path; "" for the root). The FileBrowser uses this to
    * invalidate / refetch directory listings when files are touched by the
    * agent, a terminal, the IDE, or drag-and-drop.
+   *
+   * Optional, matching the rest of the code-browsing methods on this
+   * interface. Adapters that omit it silently disable FileBrowser
+   * auto-refresh — the tree will only update on internal Band mutations
+   * (create/delete/rename/paste), not on external file-system changes
+   * (see issue #384).
    */
   subscribeFileChanges?(workspaceId: string, handler: (path: string) => void): Unsubscribe;
 

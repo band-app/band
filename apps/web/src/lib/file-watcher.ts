@@ -57,7 +57,18 @@ const IGNORED_SEGMENTS = new Set<string>([
  */
 const DEBOUNCE_MS = 250;
 
-export type FileChangeListener = (path: string) => void;
+/**
+ * Listener for file-change events.
+ *
+ * - `path` (string): workspace-relative parent directory whose contents
+ *   changed.
+ * - `path === null`: sentinel meaning the underlying watcher hit an
+ *   unrecoverable error (e.g. the worktree directory was deleted) and is
+ *   shutting down. Listeners should stop waiting for more events and let
+ *   their subscription complete; the next subscriber will create a fresh
+ *   watcher.
+ */
+export type FileChangeListener = (path: string | null) => void;
 export type Unsubscribe = () => void;
 
 interface WatchEntry {
@@ -154,10 +165,19 @@ export function subscribeToFileChanges(
     }
 
     entry = { watcher, listeners: new Set(), pendingTimers: new Map() };
-    // Recursive watches can emit transient errors (e.g. when a watched
-    // subdir is removed). Drop the watcher so the next subscriber retries
+    // Recursive watches can emit unrecoverable errors (e.g. when the
+    // watched directory is removed). Wake every current subscriber with
+    // a `null` sentinel so their tRPC generators can finish cleanly
+    // instead of parking forever waiting for an event from a dead
+    // watcher. Drop the entry afterwards so the next subscriber retries
     // with a fresh handle.
-    watcher.on("error", () => stopWatcher(workspaceId));
+    watcher.on("error", () => {
+      const current = watchers.get(workspaceId);
+      if (current) {
+        for (const listener of current.listeners) listener(null);
+      }
+      stopWatcher(workspaceId);
+    });
     watchers.set(workspaceId, entry);
   }
 

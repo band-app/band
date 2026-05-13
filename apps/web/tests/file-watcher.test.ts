@@ -178,8 +178,10 @@ interface Subscription {
 /**
  * Subscribe to `workspace.fileChanges` for a single workspace. The
  * resolved `ready` promise waits for the server to confirm the
- * subscription has started AND adds a short grace period so the
- * recursive `fs.watch` is fully primed before the test touches the FS.
+ * subscription has started AND adds a grace period so the recursive
+ * `fs.watch` handle is fully primed before the test touches the FS.
+ * 500 ms is conservative for slow / shared CI runners — at 250 ms the
+ * very first write occasionally races the kernel setting up the watch.
  */
 function subscribeFileChanges(serverUrl: string, workspaceId: string): Subscription {
   const wsUrl = `${serverUrl.replace(/^http/, "ws")}/trpc`;
@@ -225,7 +227,7 @@ function subscribeFileChanges(serverUrl: string, workspaceId: string): Subscript
   });
 
   return {
-    ready: started.then(() => new Promise<void>((r) => setTimeout(r, 250))),
+    ready: started.then(() => new Promise<void>((r) => setTimeout(r, 500))),
     fileChanges,
     waitForFileChange(pathPredicate, timeoutMs = 5_000) {
       const matches = (event: FileChangePayload) =>
