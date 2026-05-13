@@ -865,11 +865,17 @@ const workspaceRouter = t.router({
   fileChanges: publicProcedure
     .input(z.object({ workspaceId: z.string() }))
     .subscription(async function* (opts) {
-      // We rely on `opts.signal` being supplied by the tRPC adapter —
-      // both the WebSocket and HTTP transports we use today set it on
-      // every subscription. If a future adapter omits it, this loop
-      // would only exit via `watcherClosed` and a misbehaving client
-      // could park the generator indefinitely.
+      // We rely on the tRPC adapter supplying a cancellation signal — both
+      // the WebSocket and HTTP transports we use today set it on every
+      // subscription. Fail loud if a future adapter omits it rather than
+      // silently parking this generator forever.
+      if (!opts.signal) {
+        throw new Error(
+          "workspace.fileChanges requires a cancellable subscription (opts.signal missing)",
+        );
+      }
+      const signal = opts.signal;
+
       const queue: { path: string }[] = [];
       let resolve: (() => void) | null = null;
       // Set to true if the underlying watcher dies — the generator then
@@ -890,26 +896,26 @@ const workspaceRouter = t.router({
       // `finally` so we don't risk a double-unsubscribe if abort fires
       // before the loop's last cleanup.
       const onAbort = () => resolve?.();
-      opts.signal?.addEventListener("abort", onAbort);
+      signal.addEventListener("abort", onAbort);
 
       try {
-        while (!opts.signal?.aborted && !watcherClosed) {
+        while (!signal.aborted && !watcherClosed) {
           while (queue.length > 0) {
             yield queue.shift()!;
           }
-          if (opts.signal?.aborted || watcherClosed) break;
+          if (signal.aborted || watcherClosed) break;
           await new Promise<void>((r) => {
             resolve = r;
             // Close the race where abort/watcher-close fires between
             // `resolve = null` and entering this executor: in that
             // window the upstream `resolve?.()` was a no-op, so wake
             // immediately ourselves.
-            if (opts.signal?.aborted || watcherClosed) r();
+            if (signal.aborted || watcherClosed) r();
           });
           resolve = null;
         }
       } finally {
-        opts.signal?.removeEventListener("abort", onAbort);
+        signal.removeEventListener("abort", onAbort);
         unsubscribe();
       }
     }),
