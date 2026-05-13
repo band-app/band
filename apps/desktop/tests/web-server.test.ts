@@ -174,16 +174,19 @@ describe("web-server lifecycle", () => {
 
       // We spawned via process.execPath (the running interpreter — Electron's
       // embedded Node in production, the system `node` in this test process).
-      // In either case it must be an *absolute* path that matches the parent
-      // — NOT the bare string "node", which would indicate a regression back
-      // to `spawn("node", ...)`. (In a test env where `process.execPath` IS
-      // /usr/local/bin/node, simply asserting equality with `process.execPath`
-      // isn't enough to detect that regression — `node` from PATH would
-      // resolve to the same absolute path. Asserting absoluteness +
-      // non-literal-"node" closes that gap.)
+      // The child's execPath must match the parent's and must be absolute.
+      //
+      // Caveat: in a plain-Node test environment, asserting these does *not*
+      // catch a regression back to `spawn("node", [startScript])` — the OS
+      // resolves the literal "node" to an absolute path (e.g. /usr/local/bin/node)
+      // before the child starts, so the child's process.execPath ends up
+      // equal to the parent's. The actual regression detector for that case
+      // is the `electronRunAsNode === "1"` assertion below; plain `node`
+      // doesn't propagate that env var unless we explicitly set it, but the
+      // var MUST be present for the same code to work inside the packaged
+      // .app where process.execPath is the Electron binary.
       assert.equal(captured.execPath, process.execPath);
       assert.ok(captured.execPath.startsWith("/"), "execPath must be absolute");
-      assert.notEqual(captured.execPath, "node");
 
       // ELECTRON_RUN_AS_NODE=1 is what makes the Electron binary act as a
       // pure Node interpreter when this code runs inside the packaged .app.
