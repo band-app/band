@@ -224,6 +224,9 @@ export class WebDashboardAdapter implements DashboardAdapter {
     let attempt = 0;
     const MAX_BACKOFF_MS = 30_000;
 
+    // Some tRPC transports can fire onStopped after onError (or vice
+    // versa) for the same disconnect; the `!reconnectTimer` guard makes
+    // the second call a no-op so we don't schedule the reconnect twice.
     const handleDisconnect = () => {
       currentSub = null;
       if (active && !reconnectTimer) {
