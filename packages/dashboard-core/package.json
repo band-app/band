@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "scripts": {},
+  "sideEffects": false,
+  "scripts": {
+    "test": "node --experimental-strip-types --test 'tests/**/*.test.ts'"
+  },
   "main": "src/index.ts",
   "types": "src/index.ts",
   "exports": {
