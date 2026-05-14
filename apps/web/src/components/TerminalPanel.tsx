@@ -9,6 +9,7 @@ import type { ISearchOptions, SearchAddon } from "@xterm/addon-search";
 import type { WebglAddon } from "@xterm/addon-webgl";
 import type { ITheme, Terminal } from "@xterm/xterm";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useVirtualKeyboardToolbar } from "../hooks/useVirtualKeyboardToolbar";
 import { openExternalUrl } from "../lib/open-external-url";
 import {
   type ArrowDirection,
@@ -773,6 +774,14 @@ export function TerminalPanel({
     addon.findNext(searchQuery, toXtermSearchOptions(searchOptions));
   }, [searchQuery, searchOptions]);
 
+  // Reserve space at the bottom of the terminal container equal to the
+  // floating toolbar's height. Without this, the toolbar (which uses
+  // `position: fixed`) renders on top of the bottom rows of the terminal
+  // and hides the prompt while typing. The hook returns 0 on desktop so
+  // the layout is unchanged there. The ResizeObserver in the mount effect
+  // notices the size change and reflows xterm via `fitAddon.fit()`.
+  const { contentBottomInset } = useVirtualKeyboardToolbar();
+
   return (
     <div className="relative flex h-full w-full flex-col">
       {searchOpen && (
@@ -790,7 +799,14 @@ export function TerminalPanel({
         />
       )}
       <div className="relative min-h-0 flex-1">
-        <div ref={containerRef} className="absolute inset-2 overflow-hidden" />
+        <div
+          ref={containerRef}
+          className="absolute inset-x-2 top-2 overflow-hidden"
+          // `bottom = base gap + toolbar reservation`. Inline style instead of
+          // a Tailwind class so the reservation can be 0 on desktop without an
+          // extra conditional class.
+          style={{ bottom: 8 + contentBottomInset }}
+        />
       </div>
       {/* iOS / touch keyboard accessory toolbar. Renders nothing on desktop
           (gated by `useVirtualKeyboardToolbar`). Sits in `position: fixed`

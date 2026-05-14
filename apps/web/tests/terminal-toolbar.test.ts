@@ -255,6 +255,35 @@ describe("useVirtualKeyboardToolbar", () => {
     expect(result.current?.bottomOffset).toBe(0);
     u();
   });
+
+  it("contentBottomInset is positive on touch devices so the terminal can reserve space", () => {
+    setTouchDevice(true);
+    const { result, unmount: u } = renderToolbarHook();
+    // Specific value is documented in the hook; just assert it's the toolbar
+    // height and not, say, equal to bottomOffset (a common bug would be to
+    // conflate the two).
+    expect(result.current?.contentBottomInset).toBeGreaterThan(0);
+    expect(result.current?.contentBottomInset).not.toBe(result.current?.bottomOffset);
+    u();
+  });
+
+  it("contentBottomInset stays at 0 on desktop so the layout is untouched", () => {
+    setTouchDevice(false);
+    const { result, unmount: u } = renderToolbarHook();
+    expect(result.current?.contentBottomInset).toBe(0);
+    u();
+  });
+
+  it("contentBottomInset does NOT grow when the keyboard opens (toolbar is fixed-height)", () => {
+    setTouchDevice(true);
+    const { result, unmount: u } = renderToolbarHook();
+    const before = result.current?.contentBottomInset;
+    act(() => {
+      setKeyboardOpen(300);
+    });
+    expect(result.current?.contentBottomInset).toBe(before);
+    u();
+  });
 });
 
 // ---------------------------------------------------------------------------

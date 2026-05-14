@@ -1,6 +1,17 @@
 import { useEffect, useState } from "react";
 
 /**
+ * Pixel height the accessory toolbar occupies on screen. Derived from its
+ * Tailwind classes: the row is `py-1.5` (12px total padding) + `h-9` buttons
+ * (36px), plus a 1px `border-t`. Kept in sync with TerminalToolbar.tsx by
+ * convention. Used by consumers (TerminalPanel) to reserve a matching strip
+ * of bottom inset so their content isn't covered by the floating bar.
+ *
+ * If you change the toolbar's vertical sizing, update this constant too.
+ */
+export const TERMINAL_TOOLBAR_HEIGHT_PX = 49;
+
+/**
  * Detects whether to render a "virtual keyboard accessory" toolbar (iOS-style
  * row of helper keys above the soft keyboard) and where to position it.
  *
@@ -14,6 +25,13 @@ import { useEffect, useState } from "react";
  *   API reports a smaller `height` + nonzero `offsetTop`; the difference vs
  *   `window.innerHeight` is the keyboard's pixel height. When the keyboard is
  *   closed, this is 0 and the toolbar pins to the bottom of the screen.
+ * - `contentBottomInset`: how many pixels the *terminal content* should
+ *   reserve at the bottom so it isn't hidden beneath the floating toolbar.
+ *   Equal to the toolbar height when `enabled`, else 0. The toolbar itself
+ *   is `position: fixed`, so without this reservation a panel that reaches
+ *   the bottom of the visual viewport (the common iOS layout — the workspace
+ *   already shrinks to `visualViewport.height`) would render its bottom rows
+ *   underneath the bar, hiding the prompt/cursor while typing.
  *
  * Why VisualViewport and not `env(keyboard-inset-height)`: the CSS env var is
  * iOS 17+ and still flaky in PWAs / WKWebView. The VisualViewport API has
@@ -23,6 +41,7 @@ import { useEffect, useState } from "react";
 export interface VirtualKeyboardToolbarState {
   enabled: boolean;
   bottomOffset: number;
+  contentBottomInset: number;
 }
 
 const TOUCH_QUERY = "(hover: none) and (pointer: coarse)";
@@ -76,5 +95,9 @@ export function useVirtualKeyboardToolbar(): VirtualKeyboardToolbarState {
     };
   }, [enabled]);
 
-  return { enabled, bottomOffset };
+  return {
+    enabled,
+    bottomOffset,
+    contentBottomInset: enabled ? TERMINAL_TOOLBAR_HEIGHT_PX : 0,
+  };
 }
