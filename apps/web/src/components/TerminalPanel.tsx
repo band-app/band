@@ -9,7 +9,24 @@ import type { ISearchOptions, SearchAddon } from "@xterm/addon-search";
 import type { WebglAddon } from "@xterm/addon-webgl";
 import type { ITheme, Terminal } from "@xterm/xterm";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useVirtualKeyboardToolbar } from "../hooks/useVirtualKeyboardToolbar";
 import { openExternalUrl } from "../lib/open-external-url";
+import {
+  type ArrowDirection,
+  applySelection,
+  type Cell,
+  getLineText,
+  moveCell,
+  pointToCell,
+  wordSelectionAt,
+} from "../lib/terminal-selection";
+import { TerminalToolbar } from "./TerminalToolbar";
+
+/** How long a finger must rest on the terminal to trigger word-selection. */
+const LONG_PRESS_MS = 500;
+/** Maximum movement (px) tolerated during the long-press timer before we
+ *  treat the gesture as a scroll instead of a long-press. */
+const LONG_PRESS_SLOP_PX = 10;
 
 /** xterm.js search addon decoration colors. The addon requires decorations to be
  *  set in order for `onDidChangeResults` to fire (which drives the "N of M"
@@ -144,6 +161,71 @@ export function TerminalPanel({
   const searchBarRef = useRef<SearchBarHandle>(null);
   // Stable ref for the xterm key-event closure (which is captured once at mount).
   const openSearchRef = useRef<() => void>(() => {});
+
+  // ---- iOS keyboard accessory toolbar state ----
+  // `terminalReady` flips once the dynamic-imported xterm.js instance is
+  // attached and addons are loaded. We can't render TerminalToolbar before
+  // then because it dereferences `terminalRef.current` directly (e.g. for
+  // `hasSelection()`). Promoting the ref to state is overkill — a single
+  // boolean is enough to trigger the re-render that paints the toolbar.
+  const [terminalReady, setTerminalReady] = useState(false);
+  // Sticky Ctrl modifier wired up to the toolbar. Ref mirrors state because
+  // the xterm `attachCustomKeyEventHandler` closure is captured once at mount
+  // and cannot read React state directly. `setPendingCtrl` from useState is a
+  // stable identity, so reading it from inside the captured closure is safe.
+  const pendingCtrlRef = useRef(false);
+  const [pendingCtrl, setPendingCtrl] = useState(false);
+  const handleToggleCtrl = useCallback(() => {
+    const next = !pendingCtrlRef.current;
+    pendingCtrlRef.current = next;
+    setPendingCtrl(next);
+  }, []);
+
+  // Long-press → word-select → arrow-extend state.
+  // `selectionAnchor` is the cell that stays fixed; `selectionHead` is the
+  // moving cell the arrow buttons push around. Both are absolute buffer
+  // coordinates (row includes scrollback offset). null = idle mode.
+  // The refs mirror state for the same reason as pendingCtrl: the touch
+  // handlers installed inside the mount effect capture once. The "enter"
+  // path is inlined into the long-press timer callback in the mount effect
+  // — it has more local context (the live terminal + screen element) than
+  // a top-level callback could see without ref-routing every dependency.
+  const selectionAnchorRef = useRef<Cell | null>(null);
+  const selectionHeadRef = useRef<Cell | null>(null);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const exitSelectionMode = useCallback(() => {
+    selectionAnchorRef.current = null;
+    selectionHeadRef.current = null;
+    setSelectionMode(false);
+    terminalRef.current?.clearSelection();
+  }, []);
+  const handleExtendSelection = useCallback((direction: ArrowDirection) => {
+    const terminal = terminalRef.current;
+    const anchor = selectionAnchorRef.current;
+    const head = selectionHeadRef.current;
+    if (!terminal || !anchor || !head) return;
+    const next = moveCell(head, direction, terminal);
+    selectionHeadRef.current = next;
+    applySelection(terminal, anchor, next);
+  }, []);
+  // Select All from the idle toolbar: highlight every cell in the buffer
+  // AND enter selection mode, so the user immediately sees the Copy / Done
+  // controls. Without the mode flip, Select All would visually select but
+  // leave the user with no way to copy.
+  const handleSelectAll = useCallback(() => {
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    const anchor: Cell = { col: 0, row: 0 };
+    const lastRow = Math.max(0, terminal.buffer.active.length - 1);
+    const head: Cell = { col: Math.max(0, terminal.cols - 1), row: lastRow };
+    applySelection(terminal, anchor, head);
+    selectionAnchorRef.current = anchor;
+    selectionHeadRef.current = head;
+    setSelectionMode(true);
+    // Same rationale as the long-press path: drop the iOS keyboard so the
+    // toolbar isn't squeezed against the bottom.
+    terminal.blur();
+  }, []);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -290,6 +372,37 @@ export function TerminalPanel({
       // - Alt+Arrow   → word navigation (ESC+b / ESC+f)
       terminal.attachCustomKeyEventHandler((e) => {
         if (e.type === "keydown") {
+          // Pending Ctrl (set by the iOS toolbar's sticky Ctrl button): the
+          // user already tapped "Ctrl" once; transform the next single
+          // printable key into a Ctrl+key control character. Letters a..z map
+          // to 0x01..0x1A, the same byte the desktop renderer would emit for
+          // Ctrl+A..Ctrl+Z. Anything outside that range silently clears the
+          // pending flag (consistent with how a real Ctrl modifier behaves on
+          // a hardware keyboard — Ctrl+5 just sends `5`).
+          if (
+            pendingCtrlRef.current &&
+            e.key.length === 1 &&
+            !e.metaKey &&
+            !e.altKey &&
+            !e.ctrlKey
+          ) {
+            const lower = e.key.toLowerCase();
+            const code = lower.charCodeAt(0);
+            if (code >= 97 && code <= 122) {
+              terminal.input(String.fromCharCode(code - 96));
+              pendingCtrlRef.current = false;
+              // Schedule the state update so React renders the un-armed
+              // button — we're inside a non-React event handler.
+              setPendingCtrl(false);
+              e.preventDefault();
+              return false;
+            }
+            // Non-letter printable: just clear the pending modifier and let
+            // the key go through unmodified. This matches "armed-and-dismiss"
+            // behavior in Termius / Blink.
+            pendingCtrlRef.current = false;
+            setPendingCtrl(false);
+          }
           // Cmd+F (macOS) / Ctrl+F (Linux/Windows) → open the find bar.
           // Call preventDefault so the browser doesn't open native find-in-page
           // alongside our overlay (no-op in Electron, important in the web app).
@@ -320,6 +433,10 @@ export function TerminalPanel({
       terminalRef.current = terminal;
       fitAddonRef.current = fitAddon;
       searchAddonRef.current = searchAddon;
+      // Trigger a re-render so the iOS keyboard accessory toolbar (which
+      // dereferences `terminalRef.current`) can mount. We deliberately wait
+      // until *after* the addons are loaded so `hasSelection()` etc. behave.
+      setTerminalReady(true);
 
       // Mobile touch scrolling. xterm renders `.xterm-screen` (canvas/dom) on top
       // of the scrollable `.xterm-viewport`, so touches on the visible terminal
@@ -357,6 +474,80 @@ export function TerminalPanel({
       containerEl.addEventListener("touchend", onTouchEnd, { passive: true });
       containerEl.addEventListener("touchcancel", onTouchEnd, { passive: true });
 
+      // Long-press → word-select. Sets a timer on touchstart; cancels on any
+      // significant movement (so a scroll drag wins) or early lift. When it
+      // fires we resolve the touch point into a buffer cell, read the line
+      // text, expand to word boundaries, and tell the toolbar to switch into
+      // selection mode. From that point the toolbar's arrows extend the
+      // highlighted range.
+      //
+      // Implementation note: we read the .xterm-screen element fresh each
+      // time. xterm.js destroys and rebuilds it on certain renderer switches,
+      // so caching it at mount could leave us pointing at a detached node.
+      let longPressTimer: number | null = null;
+      let longPressStart: { x: number; y: number } | null = null;
+      const cancelLongPress = () => {
+        if (longPressTimer !== null) {
+          window.clearTimeout(longPressTimer);
+          longPressTimer = null;
+        }
+        longPressStart = null;
+      };
+      const onLongPressStart = (e: TouchEvent) => {
+        cancelLongPress();
+        if (e.touches.length !== 1) return;
+        const t = e.touches[0];
+        longPressStart = { x: t.clientX, y: t.clientY };
+        longPressTimer = window.setTimeout(() => {
+          longPressTimer = null;
+          const start = longPressStart;
+          if (!start) return;
+          const screenEl = containerEl.querySelector(".xterm-screen") as HTMLElement | null;
+          if (!screenEl) return;
+          const cell = pointToCell(start.x, start.y, terminal, screenEl);
+          const lineText = getLineText(terminal, cell.row);
+          const { anchor, head } = wordSelectionAt(cell, lineText);
+          applySelection(terminal, anchor, head);
+          selectionAnchorRef.current = anchor;
+          selectionHeadRef.current = head;
+          setSelectionMode(true);
+          // Suppress the tap-to-focus that would otherwise fire when the
+          // finger lifts (we don't want the iOS keyboard to pop open right
+          // after the user just made a selection).
+          tapStartX = null;
+          tapStartY = null;
+          // Dismiss the iOS soft keyboard. The user is about to navigate
+          // with the toolbar arrows, not type — the keyboard is just stealing
+          // screen space and squeezing the toolbar against the terminal
+          // bottom. `terminal.blur()` blurs xterm's hidden textarea, which
+          // iOS treats as the signal to slide the keyboard down. We re-open
+          // it later if the user taps inside the terminal (existing
+          // tap-to-focus path) or otherwise re-engages typing.
+          terminal.blur();
+          // Light haptic — feels native, no-op where unsupported (desktop,
+          // most non-iOS browsers). Wrapped in typeof check because the
+          // Vibration API isn't in lib.dom.d.ts on all TS versions.
+          if (typeof navigator.vibrate === "function") {
+            try {
+              navigator.vibrate(15);
+            } catch {
+              // Some browsers throw if vibration is policy-blocked; ignore.
+            }
+          }
+        }, LONG_PRESS_MS);
+      };
+      const onLongPressMove = (e: TouchEvent) => {
+        if (!longPressStart || e.touches.length !== 1) return;
+        const t = e.touches[0];
+        const dx = Math.abs(t.clientX - longPressStart.x);
+        const dy = Math.abs(t.clientY - longPressStart.y);
+        if (dx > LONG_PRESS_SLOP_PX || dy > LONG_PRESS_SLOP_PX) cancelLongPress();
+      };
+      containerEl.addEventListener("touchstart", onLongPressStart, { passive: true });
+      containerEl.addEventListener("touchmove", onLongPressMove, { passive: true });
+      containerEl.addEventListener("touchend", cancelLongPress, { passive: true });
+      containerEl.addEventListener("touchcancel", cancelLongPress, { passive: true });
+
       // Mobile focus-on-tap. Disabling `pointer-events` on the WebGL canvas
       // (see `attachWebGL` above) lets touches reach `.xterm-screen`, but
       // xterm.js's built-in click→focus path doesn't reliably re-engage the
@@ -393,6 +584,17 @@ export function TerminalPanel({
         const dx = Math.abs(e.changedTouches[0].clientX - startX);
         const dy = Math.abs(e.changedTouches[0].clientY - startY);
         if (dx < 10 && dy < 10) {
+          // Tap during selection mode: exit selection. iOS users expect a
+          // tap outside the selection to dismiss the edit menu; ours behaves
+          // the same. The toolbar's own buttons sit in a fixed-position
+          // overlay outside containerEl so their taps don't reach this
+          // handler.
+          if (selectionAnchorRef.current !== null) {
+            selectionAnchorRef.current = null;
+            selectionHeadRef.current = null;
+            setSelectionMode(false);
+            terminal.clearSelection();
+          }
           terminal.focus();
         }
       };
@@ -473,10 +675,91 @@ export function TerminalPanel({
         onTitleChangeRef.current?.(title);
       });
 
-      // Auto-fit on container resize (skip zero-size to avoid killing server PTY)
+      // Re-apply the active selection after every xterm resize. xterm's
+      // SelectionService internally subscribes to `bufferService.onResize`
+      // and calls `clearSelection()` whenever `rowsChanged` — that wipes
+      // the SelectionModel entirely. Our `terminal.onResize` listener and
+      // the SelectionService's clear listener are both fired during the
+      // same synchronous resize pass, and the registration order isn't
+      // guaranteed: if the clear runs after us, our re-apply gets undone
+      // before the frame paints. (This is what made the iOS keyboard-
+      // dismiss path lose the highlight even after the earlier fix.)
+      //
+      // Defer the re-apply via requestAnimationFrame so it lands *after*
+      // every synchronous resize handler has run, but still before the
+      // browser paints the frame — exactly when xterm is about to render
+      // the new dimensions. Coalesce repeated resizes (iOS animates the
+      // keyboard slide, so multiple onResize events fire in quick
+      // succession) with a single pending-RAF flag.
+      let selectionRafId: number | null = null;
+      const reapplySelectionOnNextFrame = () => {
+        if (selectionRafId !== null) return;
+        if (!selectionAnchorRef.current || !selectionHeadRef.current) return;
+        selectionRafId = requestAnimationFrame(() => {
+          selectionRafId = null;
+          const anchor = selectionAnchorRef.current;
+          const head = selectionHeadRef.current;
+          if (anchor && head) applySelection(terminal, anchor, head);
+        });
+      };
+      const selectionResizeDisposable = terminal.onResize(reapplySelectionOnNextFrame);
+
+      // Auto-fit on container resize (skip zero-size to avoid killing server PTY).
+      // Also handles devicePixelRatio changes (Chrome DevTools mobile-emulation
+      // toggle, dragging the window between a retina and non-retina monitor,
+      // OS zoom changes). On DPR change the WebGL canvas's backing store is
+      // mismatched with its CSS display size — the text balloons to fill the
+      // stretched canvas. Re-attaching the addon resizes the backing store and
+      // re-measures cell dimensions at the new DPR; same recovery path as
+      // `onContextLoss`.
+      let lastDpr = window.devicePixelRatio;
+      // Shared DPR-change handler. The WebGL canvas's backing store was
+      // sized for the old DPR; without intervention, the browser stretches
+      // it to fit the new CSS dimensions and the terminal text balloons
+      // by a factor of (newDPR/oldDPR). Two things have to happen:
+      //
+      // 1) xterm's CharSizeService must re-measure. Its cache feeds the
+      //    WebGL addon's `_updateDimensions`. Toggling `fontSize` is the
+      //    public-API way to force a re-measure — the options proxy fires
+      //    `onSpecificOptionChange("fontSize")` when the new value differs,
+      //    and CharSizeService is subscribed to that. Perturb-by-one then
+      //    restore so the integer delta fires the event without leaving
+      //    the terminal at the wrong size.
+      //
+      // 2) The WebGL addon's `_devicePixelRatio` cache must update. It's
+      //    set once at activation and only refreshed via the private
+      //    `handleDevicePixelRatioChange()`. The reliable public-API path
+      //    is to dispose the addon and re-attach — the new instance reads
+      //    the live `coreBrowserService.dpr` (a live getter for
+      //    `window.devicePixelRatio`). We do this AFTER the font toggle so
+      //    the new addon picks up the freshly measured CharSizeService
+      //    values.
+      //
+      // No-op when no addon is mounted (DOM renderer — CSS sizing handles
+      // DPR natively).
+      const handleDprChange = () => {
+        const currentDpr = window.devicePixelRatio;
+        if (currentDpr === lastDpr) return;
+        lastDpr = currentDpr;
+        const fs = terminal.options.fontSize;
+        if (typeof fs === "number") {
+          terminal.options.fontSize = fs + 1;
+          terminal.options.fontSize = fs;
+        }
+        const addon = webglAddonRef.current;
+        if (addon) {
+          addon.dispose();
+          webglAddonRef.current = null;
+          attachWebGL();
+        }
+        fitAddon.fit();
+      };
       const resizeObserver = new ResizeObserver((entries) => {
         const entry = entries[0];
         if (!entry || entry.contentRect.width === 0 || entry.contentRect.height === 0) return;
+        // Check DPR before fit so the re-attached addon picks up the right
+        // cell dimensions.
+        handleDprChange();
         fitAddon.fit();
         if (ws.readyState === WebSocket.OPEN && terminal.cols > 0 && terminal.rows > 0) {
           ws.send(
@@ -490,15 +773,40 @@ export function TerminalPanel({
       });
       resizeObserver.observe(containerRef.current!);
 
+      // Belt-and-suspenders: also listen for DPR changes that don't cause a
+      // container size change (rare — e.g. an external display unplug, or
+      // dragging the window between two same-size monitors with different
+      // DPR). `matchMedia('(resolution: Xdppx)')` only fires for the
+      // specific transition out of X, so we re-bind after each change.
+      let dprMql: MediaQueryList | undefined;
+      const bindDprListener = () => {
+        dprMql = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+        dprMql.addEventListener("change", onDprMediaChange);
+      };
+      const onDprMediaChange = () => {
+        handleDprChange();
+        dprMql?.removeEventListener("change", onDprMediaChange);
+        bindDprListener();
+      };
+      bindDprListener();
+
       cleanup = () => {
         themeObserver.disconnect();
         resizeObserver.disconnect();
         searchResultsDisposable.dispose();
+        selectionResizeDisposable.dispose();
+        if (selectionRafId !== null) cancelAnimationFrame(selectionRafId);
         webglContextLossDisposable?.dispose();
+        dprMql?.removeEventListener("change", onDprMediaChange);
+        cancelLongPress();
         containerEl.removeEventListener("touchstart", onTouchStart);
         containerEl.removeEventListener("touchmove", onTouchMove);
         containerEl.removeEventListener("touchend", onTouchEnd);
         containerEl.removeEventListener("touchcancel", onTouchEnd);
+        containerEl.removeEventListener("touchstart", onLongPressStart);
+        containerEl.removeEventListener("touchmove", onLongPressMove);
+        containerEl.removeEventListener("touchend", cancelLongPress);
+        containerEl.removeEventListener("touchcancel", cancelLongPress);
         containerEl.removeEventListener("touchstart", onTapStart);
         containerEl.removeEventListener("touchend", onTapEnd);
         containerEl.removeEventListener("touchcancel", onTapCancel);
@@ -511,6 +819,15 @@ export function TerminalPanel({
         searchAddonRef.current = null;
         webglAddonRef.current = null;
         wsRef.current = null;
+        // Reset toolbar state so a remount (e.g. terminal reconnect) doesn't
+        // come back up with selection mode armed against a buffer row that
+        // no longer exists, or with Ctrl still pending.
+        selectionAnchorRef.current = null;
+        selectionHeadRef.current = null;
+        pendingCtrlRef.current = false;
+        setSelectionMode(false);
+        setPendingCtrl(false);
+        setTerminalReady(false);
       };
     });
 
@@ -592,6 +909,14 @@ export function TerminalPanel({
     addon.findNext(searchQuery, toXtermSearchOptions(searchOptions));
   }, [searchQuery, searchOptions]);
 
+  // Reserve space at the bottom of the terminal container equal to the
+  // floating toolbar's height. Without this, the toolbar (which uses
+  // `position: fixed`) renders on top of the bottom rows of the terminal
+  // and hides the prompt while typing. The hook returns 0 on desktop so
+  // the layout is unchanged there. The ResizeObserver in the mount effect
+  // notices the size change and reflows xterm via `fitAddon.fit()`.
+  const { contentBottomInset } = useVirtualKeyboardToolbar();
+
   return (
     <div className="relative flex h-full w-full flex-col">
       {searchOpen && (
@@ -609,8 +934,34 @@ export function TerminalPanel({
         />
       )}
       <div className="relative min-h-0 flex-1">
-        <div ref={containerRef} className="absolute inset-2 overflow-hidden" />
+        <div
+          ref={containerRef}
+          className="absolute inset-x-2 top-2 overflow-hidden"
+          // `bottom = base gap + toolbar reservation`. Inline style instead of
+          // a Tailwind class so the reservation can be 0 on desktop without an
+          // extra conditional class.
+          style={{ bottom: 8 + contentBottomInset }}
+        />
       </div>
+      {/* iOS / touch keyboard accessory toolbar. Renders nothing on desktop
+          (gated by `useVirtualKeyboardToolbar`). Sits in `position: fixed`
+          relative to the visual viewport so it floats just above the soft
+          keyboard when open and pins to the screen bottom otherwise. */}
+      {terminalReady && terminalRef.current && (
+        <TerminalToolbar
+          terminal={terminalRef.current}
+          sendInput={(data) => {
+            const ws = wsRef.current;
+            if (ws?.readyState === WebSocket.OPEN) ws.send(data);
+          }}
+          pendingCtrl={pendingCtrl}
+          onToggleCtrl={handleToggleCtrl}
+          selectionMode={selectionMode}
+          onExtendSelection={handleExtendSelection}
+          onExitSelection={exitSelectionMode}
+          onSelectAll={handleSelectAll}
+        />
+      )}
     </div>
   );
 }
