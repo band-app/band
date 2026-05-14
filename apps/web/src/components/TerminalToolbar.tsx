@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useCallback, useMemo } from "react";
 import { useVirtualKeyboardToolbar } from "../hooks/useVirtualKeyboardToolbar";
+import { readClipboardText, writeClipboardText } from "../lib/clipboard";
 import type { ArrowDirection } from "../lib/terminal-selection";
 
 /**
@@ -85,14 +86,11 @@ export function TerminalToolbar({
     if (!terminal.hasSelection()) return;
     const text = terminal.getSelection();
     if (!text) return;
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch (err) {
-      // iOS may reject this if the page lost the user-gesture token between
-      // pointerdown and the clipboard promise resolving. Surface to console
-      // only — the alternative is a blocking modal that's much worse UX.
-      console.warn("[TerminalToolbar] clipboard write failed:", err);
-    }
+    // `writeClipboardText` falls back to `document.execCommand('copy')` in
+    // non-secure contexts (the common case for iOS on a dev server reached
+    // over the LAN — `navigator.clipboard` is `undefined` there).
+    const ok = await writeClipboardText(text);
+    if (!ok) console.warn("[TerminalToolbar] clipboard write failed");
   }, [terminal]);
 
   // Copy *and* exit selection mode in one tap. Used by the selection-mode
@@ -103,14 +101,13 @@ export function TerminalToolbar({
   }, [handleCopy, onExitSelection]);
 
   const handlePaste = useCallback(async () => {
-    try {
-      const text = await navigator.clipboard.readText();
-      if (text) sendInput(text);
-    } catch (err) {
-      // iOS 13.4+ prompts for clipboard permission the first time and the
-      // promise rejects on denial. Nothing to do — the user can retry.
-      console.warn("[TerminalToolbar] clipboard read failed:", err);
-    }
+    // `readClipboardText` returns "" if the API is unavailable (non-secure
+    // context) or if iOS denies the permission prompt. There's no legacy
+    // fallback for read — modern browsers blocked `execCommand('paste')`
+    // years ago. If you're hitting this on iOS over HTTP, switch to HTTPS
+    // (e.g. via the tunnel feature) for paste to work.
+    const text = await readClipboardText();
+    if (text) sendInput(text);
   }, [sendInput]);
 
   const handleSelectAll = useCallback(() => {

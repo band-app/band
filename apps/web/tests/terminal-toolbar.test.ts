@@ -393,7 +393,7 @@ describe("TerminalToolbar – clipboard actions", () => {
     unmount(root, container);
   });
 
-  it("Paste silently swallows clipboard denial (no exception bubbles)", async () => {
+  it("Paste silently swallows clipboard denial — no input sent, no throw", async () => {
     readText.mockRejectedValueOnce(new Error("denied"));
     const sent: string[] = [];
     const term = makeFakeTerminal();
@@ -401,15 +401,16 @@ describe("TerminalToolbar – clipboard actions", () => {
     const pasteBtn = container.querySelector(
       "button[aria-label='Paste from clipboard']",
     ) as HTMLButtonElement;
-    const errorSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // The new `readClipboardText` helper swallows denial silently and
+    // returns "" — there's no console.warn anymore. Asserting that nothing
+    // got sent is sufficient: a thrown exception would have failed the act
+    // wrapper.
     await act(async () => {
       dispatchPointerDown(pasteBtn);
       await Promise.resolve();
       await Promise.resolve();
     });
     expect(sent).toEqual([]);
-    expect(errorSpy).toHaveBeenCalled();
-    errorSpy.mockRestore();
     unmount(root, container);
   });
 
