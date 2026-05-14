@@ -636,3 +636,43 @@ fn format_usage_line(cmd: &serde_json::Value) -> String {
 
     parts.join(" ")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Drift guard: the Rust `SUPPORTED_AGENTS` list and the TS
+    /// `SUPPORTED_AGENT_TYPES` list (`packages/coding-agent/src/install-skills.ts`)
+    /// must be identical. If a new agent type is added to one side and not
+    /// the other, the web server's boot-time install and the CLI's
+    /// `skills install` would silently disagree on which agents get
+    /// linked — a bug class that's nearly invisible in normal use.
+    ///
+    /// Mirrored on the TS side by a matching `node:test` case in
+    /// `packages/coding-agent/tests/install-skills.test.ts`. Touching one
+    /// list without the other now fails *that side's* test suite, which
+    /// CI gates on. Adding a new agent therefore requires:
+    ///   1. Wiring up its adapter + `getInstallSkillsDir` + binary detection.
+    ///   2. Adding the type name to both lists (and both tests).
+    ///   3. Adding it to the supported-agents table in CLAUDE.md.
+    #[test]
+    fn supported_agents_matches_canonical_list() {
+        // Order matters: dispatchers iterate in this order, and tests on
+        // both sides assume the same ordering for stable agent-detection
+        // priority.
+        let expected = [
+            "claude-code",
+            "codex",
+            "openai-codex",
+            "gemini-cli",
+            "opencode",
+        ];
+        assert_eq!(
+            SUPPORTED_AGENTS,
+            &expected[..],
+            "Rust SUPPORTED_AGENTS drifted from the canonical list; update both this slice and \
+             packages/coding-agent/src/install-skills.ts::SUPPORTED_AGENT_TYPES (plus the \
+             matching test on each side) when adding/removing an agent"
+        );
+    }
+}

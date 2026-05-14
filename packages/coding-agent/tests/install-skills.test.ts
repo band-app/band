@@ -165,6 +165,29 @@ describe("getAgentConfigDir", () => {
 });
 
 describe("SUPPORTED_AGENT_TYPES", () => {
+  /**
+   * Drift guard: this list and the Rust `SUPPORTED_AGENTS` in
+   * `apps/cli/src/skills.rs` must stay identical. The web server's
+   * boot-time install and the CLI's `band skills install` both read
+   * their own copy; if a new agent is added to one side and not the
+   * other, the two install paths silently disagree.
+   *
+   * Mirrored on the Rust side by a matching `#[test]` in skills.rs.
+   * Touching one list without the other now fails *that side's* test
+   * suite, which CI gates on. Order matters: the value below is also
+   * the iteration order both dispatchers use for stable agent-detection
+   * priority.
+   */
+  it("matches the canonical list (mirrored in Rust SUPPORTED_AGENTS)", () => {
+    assert.deepEqual(
+      [...SUPPORTED_AGENT_TYPES],
+      ["claude-code", "codex", "openai-codex", "gemini-cli", "opencode"],
+      "TS SUPPORTED_AGENT_TYPES drifted from the canonical list; update both this " +
+        "tuple and apps/cli/src/skills.rs::SUPPORTED_AGENTS (plus the matching test on " +
+        "each side) when adding/removing an agent",
+    );
+  });
+
   it("only lists agent types that have a documented install-skills dir", async () => {
     for (const type of SUPPORTED_AGENT_TYPES) {
       const dir = await getInstallSkillsDir(type, HOME);
