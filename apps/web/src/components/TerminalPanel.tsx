@@ -10,7 +10,22 @@ import type { WebglAddon } from "@xterm/addon-webgl";
 import type { ITheme, Terminal } from "@xterm/xterm";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { openExternalUrl } from "../lib/open-external-url";
+import {
+  type ArrowDirection,
+  applySelection,
+  type Cell,
+  getLineText,
+  moveCell,
+  pointToCell,
+  wordSelectionAt,
+} from "../lib/terminal-selection";
 import { TerminalToolbar } from "./TerminalToolbar";
+
+/** How long a finger must rest on the terminal to trigger word-selection. */
+const LONG_PRESS_MS = 500;
+/** Maximum movement (px) tolerated during the long-press timer before we
+ *  treat the gesture as a scroll instead of a long-press. */
+const LONG_PRESS_SLOP_PX = 10;
 
 /** xterm.js search addon decoration colors. The addon requires decorations to be
  *  set in order for `onDidChangeResults` to fire (which drives the "N of M"
@@ -163,6 +178,34 @@ export function TerminalPanel({
     const next = !pendingCtrlRef.current;
     pendingCtrlRef.current = next;
     setPendingCtrl(next);
+  }, []);
+
+  // Long-press → word-select → arrow-extend state.
+  // `selectionAnchor` is the cell that stays fixed; `selectionHead` is the
+  // moving cell the arrow buttons push around. Both are absolute buffer
+  // coordinates (row includes scrollback offset). null = idle mode.
+  // The refs mirror state for the same reason as pendingCtrl: the touch
+  // handlers installed inside the mount effect capture once. The "enter"
+  // path is inlined into the long-press timer callback in the mount effect
+  // — it has more local context (the live terminal + screen element) than
+  // a top-level callback could see without ref-routing every dependency.
+  const selectionAnchorRef = useRef<Cell | null>(null);
+  const selectionHeadRef = useRef<Cell | null>(null);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const exitSelectionMode = useCallback(() => {
+    selectionAnchorRef.current = null;
+    selectionHeadRef.current = null;
+    setSelectionMode(false);
+    terminalRef.current?.clearSelection();
+  }, []);
+  const handleExtendSelection = useCallback((direction: ArrowDirection) => {
+    const terminal = terminalRef.current;
+    const anchor = selectionAnchorRef.current;
+    const head = selectionHeadRef.current;
+    if (!terminal || !anchor || !head) return;
+    const next = moveCell(head, direction, terminal);
+    selectionHeadRef.current = next;
+    applySelection(terminal, anchor, next);
   }, []);
 
   useEffect(() => {
@@ -412,6 +455,72 @@ export function TerminalPanel({
       containerEl.addEventListener("touchend", onTouchEnd, { passive: true });
       containerEl.addEventListener("touchcancel", onTouchEnd, { passive: true });
 
+      // Long-press → word-select. Sets a timer on touchstart; cancels on any
+      // significant movement (so a scroll drag wins) or early lift. When it
+      // fires we resolve the touch point into a buffer cell, read the line
+      // text, expand to word boundaries, and tell the toolbar to switch into
+      // selection mode. From that point the toolbar's arrows extend the
+      // highlighted range.
+      //
+      // Implementation note: we read the .xterm-screen element fresh each
+      // time. xterm.js destroys and rebuilds it on certain renderer switches,
+      // so caching it at mount could leave us pointing at a detached node.
+      let longPressTimer: number | null = null;
+      let longPressStart: { x: number; y: number } | null = null;
+      const cancelLongPress = () => {
+        if (longPressTimer !== null) {
+          window.clearTimeout(longPressTimer);
+          longPressTimer = null;
+        }
+        longPressStart = null;
+      };
+      const onLongPressStart = (e: TouchEvent) => {
+        cancelLongPress();
+        if (e.touches.length !== 1) return;
+        const t = e.touches[0];
+        longPressStart = { x: t.clientX, y: t.clientY };
+        longPressTimer = window.setTimeout(() => {
+          longPressTimer = null;
+          const start = longPressStart;
+          if (!start) return;
+          const screenEl = containerEl.querySelector(".xterm-screen") as HTMLElement | null;
+          if (!screenEl) return;
+          const cell = pointToCell(start.x, start.y, terminal, screenEl);
+          const lineText = getLineText(terminal, cell.row);
+          const { anchor, head } = wordSelectionAt(cell, lineText);
+          applySelection(terminal, anchor, head);
+          selectionAnchorRef.current = anchor;
+          selectionHeadRef.current = head;
+          setSelectionMode(true);
+          // Suppress the tap-to-focus that would otherwise fire when the
+          // finger lifts (we don't want the iOS keyboard to pop open right
+          // after the user just made a selection).
+          tapStartX = null;
+          tapStartY = null;
+          // Light haptic — feels native, no-op where unsupported (desktop,
+          // most non-iOS browsers). Wrapped in typeof check because the
+          // Vibration API isn't in lib.dom.d.ts on all TS versions.
+          if (typeof navigator.vibrate === "function") {
+            try {
+              navigator.vibrate(15);
+            } catch {
+              // Some browsers throw if vibration is policy-blocked; ignore.
+            }
+          }
+        }, LONG_PRESS_MS);
+      };
+      const onLongPressMove = (e: TouchEvent) => {
+        if (!longPressStart || e.touches.length !== 1) return;
+        const t = e.touches[0];
+        const dx = Math.abs(t.clientX - longPressStart.x);
+        const dy = Math.abs(t.clientY - longPressStart.y);
+        if (dx > LONG_PRESS_SLOP_PX || dy > LONG_PRESS_SLOP_PX) cancelLongPress();
+      };
+      containerEl.addEventListener("touchstart", onLongPressStart, { passive: true });
+      containerEl.addEventListener("touchmove", onLongPressMove, { passive: true });
+      containerEl.addEventListener("touchend", cancelLongPress, { passive: true });
+      containerEl.addEventListener("touchcancel", cancelLongPress, { passive: true });
+
       // Mobile focus-on-tap. Disabling `pointer-events` on the WebGL canvas
       // (see `attachWebGL` above) lets touches reach `.xterm-screen`, but
       // xterm.js's built-in click→focus path doesn't reliably re-engage the
@@ -448,6 +557,17 @@ export function TerminalPanel({
         const dx = Math.abs(e.changedTouches[0].clientX - startX);
         const dy = Math.abs(e.changedTouches[0].clientY - startY);
         if (dx < 10 && dy < 10) {
+          // Tap during selection mode: exit selection. iOS users expect a
+          // tap outside the selection to dismiss the edit menu; ours behaves
+          // the same. The toolbar's own buttons sit in a fixed-position
+          // overlay outside containerEl so their taps don't reach this
+          // handler.
+          if (selectionAnchorRef.current !== null) {
+            selectionAnchorRef.current = null;
+            selectionHeadRef.current = null;
+            setSelectionMode(false);
+            terminal.clearSelection();
+          }
           terminal.focus();
         }
       };
@@ -550,10 +670,15 @@ export function TerminalPanel({
         resizeObserver.disconnect();
         searchResultsDisposable.dispose();
         webglContextLossDisposable?.dispose();
+        cancelLongPress();
         containerEl.removeEventListener("touchstart", onTouchStart);
         containerEl.removeEventListener("touchmove", onTouchMove);
         containerEl.removeEventListener("touchend", onTouchEnd);
         containerEl.removeEventListener("touchcancel", onTouchEnd);
+        containerEl.removeEventListener("touchstart", onLongPressStart);
+        containerEl.removeEventListener("touchmove", onLongPressMove);
+        containerEl.removeEventListener("touchend", cancelLongPress);
+        containerEl.removeEventListener("touchcancel", cancelLongPress);
         containerEl.removeEventListener("touchstart", onTapStart);
         containerEl.removeEventListener("touchend", onTapEnd);
         containerEl.removeEventListener("touchcancel", onTapCancel);
@@ -680,6 +805,9 @@ export function TerminalPanel({
           }}
           pendingCtrl={pendingCtrl}
           onToggleCtrl={handleToggleCtrl}
+          selectionMode={selectionMode}
+          onExtendSelection={handleExtendSelection}
+          onExitSelection={exitSelectionMode}
         />
       )}
     </div>

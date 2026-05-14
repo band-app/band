@@ -7,29 +7,40 @@ import {
   ClipboardCopy,
   ClipboardPaste,
   TextCursorInput,
+  X,
 } from "lucide-react";
 import { useCallback, useMemo } from "react";
 import { useVirtualKeyboardToolbar } from "../hooks/useVirtualKeyboardToolbar";
+import type { ArrowDirection } from "../lib/terminal-selection";
 
 /**
  * Floating accessory toolbar rendered above the iOS virtual keyboard inside the
- * terminal panel. Provides copy/paste/select-all (since iOS Safari's native
- * long-press menu never reaches the xterm canvas) plus the keys the soft
- * keyboard hides that terminal users need (Esc, Tab, Ctrl, arrows).
+ * terminal panel. Has two layouts that swap based on `selectionMode`:
  *
- * Design notes:
+ * - **Idle** (`selectionMode === false`): Copy · Paste · Select All · Esc ·
+ *   Tab · Ctrl · ← → ↑ ↓ (arrows send ANSI escape sequences to the PTY,
+ *   identical to a hardware arrow press).
+ *
+ * - **Selecting** (`selectionMode === true`): Copy · Done · ← → ↑ ↓ (arrows
+ *   extend the highlighted selection one cell at a time; the parent owns the
+ *   anchor/head state and updates xterm via `terminal.select()`).
+ *
+ * Selection mode is entered by long-pressing inside the terminal — that flow
+ * lives in TerminalPanel.tsx, which calls back here through the `selectionMode`
+ * prop and the `onExtendSelection` / `onExitSelection` callbacks.
+ *
+ * Design notes that apply to both layouts:
  * - We render only on touch-only devices via {@link useVirtualKeyboardToolbar}.
  *   Desktops never paint this — there's no virtual keyboard to float above.
- * - All actions are dispatched on `onPointerDown` rather than `onClick`. iOS
- *   Safari treats a `pointerdown` as part of the user gesture chain that
- *   enables `navigator.clipboard.readText()`; a separate `click` event fires
- *   too late and after the gesture has expired in some installable-PWA
- *   contexts. We also call `preventDefault()` so the tap never blurs the
- *   terminal's hidden textarea — keeping the soft keyboard up between actions.
- * - "Ctrl" is sticky: tapping it sets a pending flag that the next regular
- *   keystroke from the iOS keyboard consumes (mapped to a control character by
- *   the parent's xterm key handler). The button stays highlighted while
- *   pending and clears itself once a key is sent. This matches Termius /
+ * - All actions fire on `onPointerDown` rather than `onClick`. iOS Safari
+ *   treats `pointerdown` as part of the user-gesture chain that enables
+ *   `navigator.clipboard.readText()`; a separate `click` event fires too late
+ *   in some installable-PWA contexts. We also `preventDefault()` so the tap
+ *   never blurs the terminal's hidden textarea — keeping the soft keyboard
+ *   up between actions.
+ * - "Ctrl" (idle only) is sticky: tapping it sets a pending flag that the
+ *   next regular keystroke from the iOS keyboard consumes (mapped to a
+ *   control character by the parent's xterm key handler). Matches Termius /
  *   Blink behavior on iOS.
  */
 export interface TerminalToolbarProps {
@@ -41,6 +52,12 @@ export interface TerminalToolbarProps {
   pendingCtrl: boolean;
   /** Toggle the pending-Ctrl state. */
   onToggleCtrl: () => void;
+  /** True after a long-press has armed a selection. Swaps the layout. */
+  selectionMode: boolean;
+  /** Called when an arrow is tapped while `selectionMode` is true. */
+  onExtendSelection: (direction: ArrowDirection) => void;
+  /** Called when the user dismisses selection mode (Done, or Copy). */
+  onExitSelection: () => void;
 }
 
 // ANSI / CSI escape sequences for the keys the iOS soft keyboard omits.
@@ -58,6 +75,9 @@ export function TerminalToolbar({
   sendInput,
   pendingCtrl,
   onToggleCtrl,
+  selectionMode,
+  onExtendSelection,
+  onExitSelection,
 }: TerminalToolbarProps) {
   const { enabled, bottomOffset } = useVirtualKeyboardToolbar();
 
@@ -74,6 +94,13 @@ export function TerminalToolbar({
       console.warn("[TerminalToolbar] clipboard write failed:", err);
     }
   }, [terminal]);
+
+  // Copy *and* exit selection mode in one tap. Used by the selection-mode
+  // Copy button; the idle Copy button just calls handleCopy.
+  const handleCopyAndExit = useCallback(async () => {
+    await handleCopy();
+    onExitSelection();
+  }, [handleCopy, onExitSelection]);
 
   const handlePaste = useCallback(async () => {
     try {
@@ -93,9 +120,8 @@ export function TerminalToolbar({
     terminal.focus();
   }, [terminal]);
 
-  // Build a list of static key buttons. Memoized so the inline object identity
-  // is stable across re-renders (helps if anyone wraps the toolbar in memo).
-  const keyButtons = useMemo(
+  // Memoized button lists so identities are stable across re-renders.
+  const idleKeyButtons = useMemo(
     () => [
       { label: "Esc", seq: SEQ_ESC, ariaLabel: "Send Escape" },
       { label: "Tab", seq: SEQ_TAB, ariaLabel: "Send Tab" },
@@ -103,13 +129,24 @@ export function TerminalToolbar({
     [],
   );
 
-  const arrowButtons = useMemo(
+  const idleArrows = useMemo(
     () => [
       { Icon: ArrowLeft, seq: SEQ_ARROW_LEFT, ariaLabel: "Arrow Left" },
       { Icon: ArrowDown, seq: SEQ_ARROW_DOWN, ariaLabel: "Arrow Down" },
       { Icon: ArrowUp, seq: SEQ_ARROW_UP, ariaLabel: "Arrow Up" },
       { Icon: ArrowRight, seq: SEQ_ARROW_RIGHT, ariaLabel: "Arrow Right" },
     ],
+    [],
+  );
+
+  const selectionArrows = useMemo(
+    () =>
+      [
+        { Icon: ArrowLeft, dir: "left", ariaLabel: "Extend selection left" },
+        { Icon: ArrowDown, dir: "down", ariaLabel: "Extend selection down" },
+        { Icon: ArrowUp, dir: "up", ariaLabel: "Extend selection up" },
+        { Icon: ArrowRight, dir: "right", ariaLabel: "Extend selection right" },
+      ] as const,
     [],
   );
 
@@ -125,80 +162,122 @@ export function TerminalToolbar({
       void fn();
     };
 
+  // Wrapper that visually distinguishes selection mode — a primary-tinted
+  // strip across the top of the bar makes it immediately obvious that
+  // arrows mean something different right now.
   return (
     <div
       data-testid="terminal-toolbar"
+      data-mode={selectionMode ? "selection" : "idle"}
       role="toolbar"
-      aria-label="Terminal accessory keys"
-      // `position: fixed` so the bar tracks the visual viewport regardless of
-      // where the terminal panel sits inside its dockview layout. `left: 0;
-      // right: 0` spans the full width; the inner flex row centers content.
+      aria-label={selectionMode ? "Terminal selection controls" : "Terminal accessory keys"}
       style={{ bottom: bottomOffset }}
       className="fixed inset-x-0 z-50 flex justify-center border-t border-border bg-background/95 shadow-lg backdrop-blur-md"
     >
       <div className="flex w-full max-w-3xl items-center gap-1 overflow-x-auto px-2 py-1.5">
-        {/* Selection / clipboard group */}
-        <ToolbarButton
-          ariaLabel="Copy selection"
-          title="Copy"
-          onPointerDown={tap(handleCopy)}
-          disabled={!terminal.hasSelection()}
-        >
-          <ClipboardCopy className="size-4" />
-          <span className="text-xs">Copy</span>
-        </ToolbarButton>
-        <ToolbarButton
-          ariaLabel="Paste from clipboard"
-          title="Paste"
-          onPointerDown={tap(handlePaste)}
-        >
-          <ClipboardPaste className="size-4" />
-          <span className="text-xs">Paste</span>
-        </ToolbarButton>
-        <ToolbarButton
-          ariaLabel="Select all"
-          title="Select all"
-          onPointerDown={tap(handleSelectAll)}
-        >
-          <TextCursorInput className="size-4" />
-          <span className="text-xs">All</span>
-        </ToolbarButton>
+        {selectionMode ? (
+          <>
+            <ToolbarButton
+              ariaLabel="Copy selection and exit"
+              title="Copy"
+              onPointerDown={tap(handleCopyAndExit)}
+              variant="primary"
+            >
+              <ClipboardCopy className="size-4" />
+              <span className="text-xs">Copy</span>
+            </ToolbarButton>
+            <ToolbarButton
+              ariaLabel="Exit selection mode"
+              title="Done"
+              onPointerDown={tap(onExitSelection)}
+            >
+              <X className="size-4" />
+              <span className="text-xs">Done</span>
+            </ToolbarButton>
 
-        <div className="mx-1 h-6 w-px shrink-0 bg-border" aria-hidden="true" />
+            <div className="mx-1 h-6 w-px shrink-0 bg-border" aria-hidden="true" />
 
-        {/* Special keys */}
-        {keyButtons.map(({ label, seq, ariaLabel }) => (
-          <ToolbarButton
-            key={label}
-            ariaLabel={ariaLabel}
-            title={label}
-            onPointerDown={tap(() => sendInput(seq))}
-          >
-            <span className="text-xs font-medium">{label}</span>
-          </ToolbarButton>
-        ))}
-        <ToolbarButton
-          ariaLabel={pendingCtrl ? "Cancel pending Ctrl" : "Arm Ctrl modifier"}
-          title="Ctrl (sticky — taps the next key as Ctrl+key)"
-          onPointerDown={tap(onToggleCtrl)}
-          active={pendingCtrl}
-        >
-          <span className="text-xs font-medium">Ctrl</span>
-        </ToolbarButton>
+            <span
+              className="mr-1 shrink-0 select-none text-xs font-medium uppercase tracking-wide text-muted-foreground"
+              aria-hidden="true"
+            >
+              Extend
+            </span>
 
-        <div className="mx-1 h-6 w-px shrink-0 bg-border" aria-hidden="true" />
+            {selectionArrows.map(({ Icon, dir, ariaLabel }) => (
+              <ToolbarButton
+                key={dir}
+                ariaLabel={ariaLabel}
+                title={ariaLabel}
+                onPointerDown={tap(() => onExtendSelection(dir))}
+              >
+                <Icon className="size-4" />
+              </ToolbarButton>
+            ))}
+          </>
+        ) : (
+          <>
+            <ToolbarButton
+              ariaLabel="Copy selection"
+              title="Copy"
+              onPointerDown={tap(handleCopy)}
+              disabled={!terminal.hasSelection()}
+            >
+              <ClipboardCopy className="size-4" />
+              <span className="text-xs">Copy</span>
+            </ToolbarButton>
+            <ToolbarButton
+              ariaLabel="Paste from clipboard"
+              title="Paste"
+              onPointerDown={tap(handlePaste)}
+            >
+              <ClipboardPaste className="size-4" />
+              <span className="text-xs">Paste</span>
+            </ToolbarButton>
+            <ToolbarButton
+              ariaLabel="Select all"
+              title="Select all"
+              onPointerDown={tap(handleSelectAll)}
+            >
+              <TextCursorInput className="size-4" />
+              <span className="text-xs">All</span>
+            </ToolbarButton>
 
-        {/* Arrow cluster */}
-        {arrowButtons.map(({ Icon, seq, ariaLabel }) => (
-          <ToolbarButton
-            key={ariaLabel}
-            ariaLabel={ariaLabel}
-            title={ariaLabel}
-            onPointerDown={tap(() => sendInput(seq))}
-          >
-            <Icon className="size-4" />
-          </ToolbarButton>
-        ))}
+            <div className="mx-1 h-6 w-px shrink-0 bg-border" aria-hidden="true" />
+
+            {idleKeyButtons.map(({ label, seq, ariaLabel }) => (
+              <ToolbarButton
+                key={label}
+                ariaLabel={ariaLabel}
+                title={label}
+                onPointerDown={tap(() => sendInput(seq))}
+              >
+                <span className="text-xs font-medium">{label}</span>
+              </ToolbarButton>
+            ))}
+            <ToolbarButton
+              ariaLabel={pendingCtrl ? "Cancel pending Ctrl" : "Arm Ctrl modifier"}
+              title="Ctrl (sticky — taps the next key as Ctrl+key)"
+              onPointerDown={tap(onToggleCtrl)}
+              active={pendingCtrl}
+            >
+              <span className="text-xs font-medium">Ctrl</span>
+            </ToolbarButton>
+
+            <div className="mx-1 h-6 w-px shrink-0 bg-border" aria-hidden="true" />
+
+            {idleArrows.map(({ Icon, seq, ariaLabel }) => (
+              <ToolbarButton
+                key={ariaLabel}
+                ariaLabel={ariaLabel}
+                title={ariaLabel}
+                onPointerDown={tap(() => sendInput(seq))}
+              >
+                <Icon className="size-4" />
+              </ToolbarButton>
+            ))}
+          </>
+        )}
       </div>
     </div>
   );
@@ -207,8 +286,9 @@ export function TerminalToolbar({
 // ---------------------------------------------------------------------------
 // ToolbarButton — minimal local component to keep the markup readable.
 // Not exported from the package's `<Button>` because we want pointerdown
-// semantics, larger touch targets, and the active-state styling for sticky
-// Ctrl; the shared component is built for click semantics.
+// semantics, larger touch targets, and the active/primary-state styling for
+// sticky Ctrl + the selection-mode Copy button; the shared component is built
+// for click semantics.
 // ---------------------------------------------------------------------------
 
 interface ToolbarButtonProps {
@@ -216,6 +296,9 @@ interface ToolbarButtonProps {
   title: string;
   onPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => void;
   active?: boolean;
+  /** "primary" tints the button like a CTA — used for the prominent Copy in
+   *  selection mode. "default" is the neutral background used elsewhere. */
+  variant?: "default" | "primary";
   disabled?: boolean;
   children: React.ReactNode;
 }
@@ -225,9 +308,15 @@ function ToolbarButton({
   title,
   onPointerDown,
   active,
+  variant = "default",
   disabled,
   children,
 }: ToolbarButtonProps) {
+  const palette = active
+    ? "bg-primary text-primary-foreground"
+    : variant === "primary"
+      ? "bg-primary text-primary-foreground hover:bg-primary/90"
+      : "bg-muted/60 hover:bg-muted active:bg-muted";
   return (
     <button
       type="button"
@@ -242,9 +331,7 @@ function ToolbarButton({
       className={[
         "inline-flex h-9 min-w-9 shrink-0 items-center justify-center gap-1 rounded-md px-2",
         "text-foreground transition-colors",
-        active
-          ? "bg-primary text-primary-foreground"
-          : "bg-muted/60 hover:bg-muted active:bg-muted",
+        palette,
         "disabled:opacity-40",
       ].join(" ")}
     >

@@ -147,6 +147,9 @@ function mount(props: {
   sendInput: (data: string) => void;
   pendingCtrl?: boolean;
   onToggleCtrl?: () => void;
+  selectionMode?: boolean;
+  onExtendSelection?: (direction: "left" | "right" | "up" | "down") => void;
+  onExitSelection?: () => void;
 }): { container: HTMLDivElement; root: Root } {
   const container = document.createElement("div");
   document.body.appendChild(container);
@@ -159,6 +162,9 @@ function mount(props: {
         sendInput: props.sendInput,
         pendingCtrl: props.pendingCtrl ?? false,
         onToggleCtrl: props.onToggleCtrl ?? (() => {}),
+        selectionMode: props.selectionMode ?? false,
+        onExtendSelection: props.onExtendSelection ?? (() => {}),
+        onExitSelection: props.onExitSelection ?? (() => {}),
       }),
     );
   });
@@ -451,5 +457,136 @@ describe("TerminalToolbar – special keys", () => {
     expect(ctrlBtn).not.toBeNull();
     expect(ctrlBtn.getAttribute("aria-pressed")).toBe("true");
     unmount(root, container);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Selection-mode layout
+// ---------------------------------------------------------------------------
+
+describe("TerminalToolbar – selection mode", () => {
+  beforeEach(() => {
+    setTouchDevice(true);
+  });
+
+  it("renders the selection layout when selectionMode is true", () => {
+    const term = makeFakeTerminal("hello");
+    const { container, root } = mount({
+      terminal: term,
+      sendInput: () => {},
+      selectionMode: true,
+    });
+    const bar = container.querySelector("[data-testid='terminal-toolbar']") as HTMLElement;
+    expect(bar.getAttribute("data-mode")).toBe("selection");
+    // Idle-only controls should not be present.
+    expect(container.querySelector("button[aria-label='Paste from clipboard']")).toBeNull();
+    expect(container.querySelector("button[aria-label='Select all']")).toBeNull();
+    expect(container.querySelector("button[aria-label='Arm Ctrl modifier']")).toBeNull();
+    expect(container.querySelector("button[aria-label='Send Escape']")).toBeNull();
+    expect(container.querySelector("button[aria-label='Send Tab']")).toBeNull();
+    // The four extend buttons + Copy + Done should be present.
+    expect(container.querySelector("button[aria-label='Copy selection and exit']")).not.toBeNull();
+    expect(container.querySelector("button[aria-label='Exit selection mode']")).not.toBeNull();
+    for (const aria of [
+      "Extend selection left",
+      "Extend selection right",
+      "Extend selection up",
+      "Extend selection down",
+    ]) {
+      expect(container.querySelector(`button[aria-label='${aria}']`)).not.toBeNull();
+    }
+    unmount(root, container);
+  });
+
+  it("arrow buttons call onExtendSelection with the matching direction", () => {
+    const onExtendSelection = vi.fn();
+    const term = makeFakeTerminal("text");
+    const { container, root } = mount({
+      terminal: term,
+      sendInput: () => {},
+      selectionMode: true,
+      onExtendSelection,
+    });
+    const tap = (label: string) => {
+      const btn = container.querySelector(`button[aria-label='${label}']`) as HTMLButtonElement;
+      act(() => {
+        dispatchPointerDown(btn);
+      });
+    };
+    tap("Extend selection left");
+    tap("Extend selection right");
+    tap("Extend selection up");
+    tap("Extend selection down");
+    expect(onExtendSelection.mock.calls.map((c) => c[0])).toEqual(["left", "right", "up", "down"]);
+    unmount(root, container);
+  });
+
+  it("Done exits selection mode without copying", () => {
+    const onExitSelection = vi.fn();
+    let writeText: ReturnType<typeof vi.fn> | undefined;
+    const originalClipboard = navigator.clipboard;
+    writeText = vi.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText, readText: () => Promise.resolve("") },
+    });
+    try {
+      const term = makeFakeTerminal("text");
+      const { container, root } = mount({
+        terminal: term,
+        sendInput: () => {},
+        selectionMode: true,
+        onExitSelection,
+      });
+      const doneBtn = container.querySelector(
+        "button[aria-label='Exit selection mode']",
+      ) as HTMLButtonElement;
+      act(() => {
+        dispatchPointerDown(doneBtn);
+      });
+      expect(onExitSelection).toHaveBeenCalledTimes(1);
+      expect(writeText).not.toHaveBeenCalled();
+      unmount(root, container);
+    } finally {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: originalClipboard,
+      });
+    }
+  });
+
+  it("Copy in selection mode copies the selection AND exits selection mode", async () => {
+    const onExitSelection = vi.fn();
+    const writeText = vi.fn(() => Promise.resolve());
+    const originalClipboard = navigator.clipboard;
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText, readText: () => Promise.resolve("") },
+    });
+    try {
+      const term = makeFakeTerminal("selected text");
+      const { container, root } = mount({
+        terminal: term,
+        sendInput: () => {},
+        selectionMode: true,
+        onExitSelection,
+      });
+      const copyBtn = container.querySelector(
+        "button[aria-label='Copy selection and exit']",
+      ) as HTMLButtonElement;
+      await act(async () => {
+        dispatchPointerDown(copyBtn);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(writeText).toHaveBeenCalledWith("selected text");
+      expect(onExitSelection).toHaveBeenCalledTimes(1);
+      unmount(root, container);
+    } finally {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: originalClipboard,
+      });
+    }
   });
 });
