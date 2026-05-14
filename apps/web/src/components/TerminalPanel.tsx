@@ -675,22 +675,34 @@ export function TerminalPanel({
         onTitleChangeRef.current?.(title);
       });
 
-      // Re-apply the active selection after every xterm resize. xterm.js's
-      // selection layer doesn't always re-paint after `fit()` reflows the
-      // viewport — the internal SelectionModel still holds the range (so
-      // `hasSelection()` and `getSelection()` keep returning the right
-      // values, and Copy still works correctly) but the visual highlight
-      // disappears. This bites the long-press path on iOS specifically:
-      // entering selection mode blurs the terminal → keyboard dismisses →
-      // visual viewport grows → ResizeObserver fits xterm → selection goes
-      // invisible. Re-running `terminal.select(...)` from our retained
-      // anchor/head triggers a fresh render. No-op when not in selection
-      // mode (refs are null).
-      const selectionResizeDisposable = terminal.onResize(() => {
-        const anchor = selectionAnchorRef.current;
-        const head = selectionHeadRef.current;
-        if (anchor && head) applySelection(terminal, anchor, head);
-      });
+      // Re-apply the active selection after every xterm resize. xterm's
+      // SelectionService internally subscribes to `bufferService.onResize`
+      // and calls `clearSelection()` whenever `rowsChanged` — that wipes
+      // the SelectionModel entirely. Our `terminal.onResize` listener and
+      // the SelectionService's clear listener are both fired during the
+      // same synchronous resize pass, and the registration order isn't
+      // guaranteed: if the clear runs after us, our re-apply gets undone
+      // before the frame paints. (This is what made the iOS keyboard-
+      // dismiss path lose the highlight even after the earlier fix.)
+      //
+      // Defer the re-apply via requestAnimationFrame so it lands *after*
+      // every synchronous resize handler has run, but still before the
+      // browser paints the frame — exactly when xterm is about to render
+      // the new dimensions. Coalesce repeated resizes (iOS animates the
+      // keyboard slide, so multiple onResize events fire in quick
+      // succession) with a single pending-RAF flag.
+      let selectionRafId: number | null = null;
+      const reapplySelectionOnNextFrame = () => {
+        if (selectionRafId !== null) return;
+        if (!selectionAnchorRef.current || !selectionHeadRef.current) return;
+        selectionRafId = requestAnimationFrame(() => {
+          selectionRafId = null;
+          const anchor = selectionAnchorRef.current;
+          const head = selectionHeadRef.current;
+          if (anchor && head) applySelection(terminal, anchor, head);
+        });
+      };
+      const selectionResizeDisposable = terminal.onResize(reapplySelectionOnNextFrame);
 
       // Auto-fit on container resize (skip zero-size to avoid killing server PTY).
       // Also handles devicePixelRatio changes (Chrome DevTools mobile-emulation
@@ -759,6 +771,7 @@ export function TerminalPanel({
         resizeObserver.disconnect();
         searchResultsDisposable.dispose();
         selectionResizeDisposable.dispose();
+        if (selectionRafId !== null) cancelAnimationFrame(selectionRafId);
         webglContextLossDisposable?.dispose();
         dprMql?.removeEventListener("change", onDprMediaChange);
         cancelLongPress();
