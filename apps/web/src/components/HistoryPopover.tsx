@@ -72,8 +72,16 @@ function dayKeyFor(ts: number): string {
 }
 
 function labelFor(dayKey: string): string {
-  const today = dayKeyFor(Date.now());
-  const yesterday = dayKeyFor(Date.now() - 24 * 60 * 60 * 1000);
+  // Calendar-aware "yesterday": construct yesterday's `Date` from
+  // today's calendar fields minus one day, rather than `now - 24h`.
+  // A pure-offset comparison drifts across DST boundaries and is
+  // wrong shortly after midnight (entries from early yesterday
+  // morning would be exactly 24h-ago, falling on the day-before-
+  // yesterday key).
+  const now = new Date();
+  const today = dayKeyFor(now.getTime());
+  const yesterdayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  const yesterday = dayKeyFor(yesterdayDate.getTime());
   if (dayKey === today) return "Today";
   if (dayKey === yesterday) return "Yesterday";
 

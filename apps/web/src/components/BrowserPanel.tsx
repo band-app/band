@@ -1,27 +1,14 @@
 import type { IDockviewPanelProps } from "dockview";
 import { ArrowLeft, ArrowRight, RotateCw, Wrench, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { flushSync } from "react-dom";
 import { useBrowserPaneControls } from "../hooks/useBrowserPaneControls";
-import { useBrowserPaneFrozen } from "../lib/browser-pane-freeze";
+import { useBrowserPaneFreeze } from "../hooks/useBrowserPaneFreeze";
 import { invoke as desktopInvoke, listen as desktopListen } from "../lib/desktop-ipc";
 import { isDesktop } from "../lib/is-desktop";
 import { trpc } from "../lib/trpc-client";
 import { AddressBarAutocomplete } from "./AddressBarAutocomplete";
 import { BrowserFindBar } from "./BrowserFindBar";
 import { HistoryPopover } from "./HistoryPopover";
-
-// Wait for the browser to paint at least one frame after the current
-// React commit. Double-rAF is the canonical idiom: the first rAF fires
-// before paint, the second after. We use this so the snapshot `<img>`
-// is actually on screen before we hide the native `WebContentsView`
-// — otherwise the OS can hide the view a frame before React paints,
-// briefly exposing the blank placeholder underneath.
-function waitForPaint(): Promise<void> {
-  return new Promise((resolve) => {
-    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-  });
-}
 
 const DEFAULT_URL = "";
 const BLANK_URL = "about:blank";
@@ -100,14 +87,6 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
   const [inputUrl, setInputUrl] = useState(() => loadUrl(workspaceId) ?? DEFAULT_URL);
   const [loading, setLoading] = useState(false);
   const [created, setCreated] = useState(false);
-  // Static JPEG snapshot of the live webview shown while any overlay
-  // (dialog / popover / dropdown / command palette) is open over the
-  // pane. The native `WebContentsView` sits above the DOM, so any
-  // floating UI would otherwise be hidden behind it — instead we
-  // freeze the view (`browser_hide`) and paint this raster into the
-  // placeholder. See `lib/browser-pane-freeze.ts`.
-  const [snapshot, setSnapshot] = useState<string | null>(null);
-  const frozen = useBrowserPaneFrozen();
   const createdRef = useRef(false);
   const placeholderRef = useRef<HTMLDivElement>(null);
   const creatingRef = useRef(false);
@@ -116,6 +95,17 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
   workspaceIdRef.current = workspaceId;
   const currentUrlRef = useRef(currentUrl);
   currentUrlRef.current = currentUrl;
+  // Freeze on overlay — captures a snapshot + hides the native view
+  // while any popover / dialog / dropdown is open. `snapshot` is
+  // the JPEG data URL to paint into the placeholder. Shared with
+  // `BrowserPaneComponent` via the `useBrowserPaneFreeze` hook.
+  const ipcKeyRef = useRef({ workspaceId });
+  ipcKeyRef.current = { workspaceId };
+  const { snapshot } = useBrowserPaneFreeze({
+    created,
+    visible: api.isActive && params.wsActive !== false,
+    ipcKeyRef,
+  });
   // `addressInputFocusedRef` is now owned by `useBrowserPaneControls`
   // — it's destructured back out below and read inside the
   // `browser-url-changed` listener to skip clobbering an in-progress
@@ -466,103 +456,6 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
     onNavigate: handleNavigate,
   });
 
-  // Snapshot + hide the native view whenever any overlay
-  // (dialog / popover / dropdown / command palette / context menu)
-  // is open anywhere in the app. Without this the overlay would
-  // render *behind* the WebContentsView's OS-level compositor layer.
-  // See `lib/browser-pane-freeze.ts` for the full story and
-  // `BrowserViewManager.capturePage` for the snapshot side.
-  //
-  // The capture is best-effort: if the view is gone (LRU evicted)
-  // or capture races against a navigation, we still hide the view
-  // and just leave the placeholder blank — strictly better than
-  // having the overlay disappear.
-  //
-  // Multi-pane / split-layout correctness:
-  //
-  //   - In a split layout, several panes can be visible at once.
-  //     They each react to `frozen` independently and freeze in
-  //     parallel — desired.
-  //
-  //   - Panes that are currently HIDDEN (inactive dockview tab in
-  //     the same group, or workspace not active) must be left
-  //     alone — calling `browser_show` on them when the overlay
-  //     closes would surface them over the user's chosen tab.
-  //     We gate on `api.isActive` + `params.wsActive` at freeze
-  //     time and remember the decision in `freezeAppliedRef` so
-  //     the unfreeze path only restores panes we actually hid.
-  const freezeAppliedRef = useRef(false);
-  useEffect(() => {
-    if (!isDesktop || !created) return;
-    let cancelled = false;
-    if (frozen) {
-      const visibleNow = api.isActive && params.wsActive !== false;
-      if (!visibleNow) return; // skip — leaving the hidden view untouched
-      freezeAppliedRef.current = true;
-      (async () => {
-        let painted = false;
-        try {
-          const dataUrl = await desktopInvoke<string | null>("browser_capture_page", {
-            workspaceId: workspaceIdRef.current,
-          });
-          if (!cancelled && dataUrl) {
-            // `flushSync` commits the snapshot state immediately so
-            // the `<img>` is in the DOM by the time we yield. The
-            // double-rAF wait then guarantees the browser has actually
-            // PAINTED the img before we tell Electron to hide the
-            // native view — otherwise there's a one-frame window
-            // where the OS-level view is gone but the img hasn't been
-            // composited yet, producing a visible flicker.
-            flushSync(() => setSnapshot(dataUrl));
-            await waitForPaint();
-            painted = true;
-          }
-        } catch {
-          // ignore — fall back to a blank placeholder
-        }
-        if (cancelled) return;
-        if (!painted) {
-          // Capture failed; still pause media + hide. The placeholder
-          // will be blank, same as the pre-fix behaviour.
-        }
-        // Capture happened FIRST (so the snapshot shows the live frame,
-        // not a paused-controls state); now pause media + hide.
-        // `browser_pause_media` mutes + invokes `pause()` on every
-        // top-frame `<video>`/`<audio>` — covers the audio that
-        // `setVisible(false)` doesn't stop.
-        desktopInvoke("browser_pause_media", { workspaceId: workspaceIdRef.current }).catch(
-          () => {},
-        );
-        desktopInvoke("browser_hide", { workspaceId: workspaceIdRef.current }).catch(() => {});
-      })();
-    } else {
-      if (freezeAppliedRef.current) {
-        freezeAppliedRef.current = false;
-        desktopInvoke("browser_show", { workspaceId: workspaceIdRef.current }).catch(() => {});
-        // Resume after show so the page is visible by the time
-        // `play()` lands — avoids the brief flash where audio
-        // restarts before the visual frame snaps back.
-        desktopInvoke("browser_resume_media", { workspaceId: workspaceIdRef.current }).catch(
-          () => {},
-        );
-        // Keep the snapshot up for one more paint so the native view
-        // gets a chance to come back on top before the snapshot is
-        // removed. Otherwise React commits the `null` clear before the
-        // OS compositor has the view visible again, briefly exposing
-        // a blank placeholder.
-        (async () => {
-          await waitForPaint();
-          if (!cancelled) setSnapshot(null);
-        })();
-      } else {
-        setSnapshot(null);
-      }
-    }
-    return () => {
-      cancelled = true;
-    };
-  }, [frozen, created, api, params.wsActive]);
-
   // Don't render until workspaceId is injected — during layout sync fromJSON
   // recreates panels with empty params before injectParams runs a tick later.
   if (!workspaceId) return null;
@@ -733,10 +626,6 @@ export function BrowserPaneComponent({
   const [inputUrl, setInputUrl] = useState(() => initialUrl ?? DEFAULT_URL);
   const [loading, setLoading] = useState(false);
   const [created, setCreated] = useState(false);
-  // Snapshot raster shown while any overlay is open — see comment
-  // on the `BrowserPanelComponent` variant for full details.
-  const [snapshot, setSnapshot] = useState<string | null>(null);
-  const frozen = useBrowserPaneFrozen();
   const createdRef = useRef(false);
   const placeholderRef = useRef<HTMLDivElement>(null);
   const creatingRef = useRef(false);
@@ -754,6 +643,14 @@ export function BrowserPaneComponent({
   const [workspaceId, setWorkspaceId] = useState(workspaceIdParam ?? "");
   const workspaceIdRef = useRef(workspaceId);
   workspaceIdRef.current = workspaceId;
+  // Freeze on overlay — see `useBrowserPaneFreeze` hook.
+  const ipcKeyRef = useRef({ browserId });
+  ipcKeyRef.current = { browserId };
+  const { snapshot } = useBrowserPaneFreeze({
+    created,
+    visible: api.isVisible && params.wsActive !== false,
+    ipcKeyRef,
+  });
   // `addressInputFocusedRef` is destructured from
   // `useBrowserPaneControls` below and read inside the
   // `browser-url-changed` listener to skip clobbering an in-progress
@@ -1133,63 +1030,6 @@ export function BrowserPaneComponent({
     inputUrl,
     onNavigate: handleNavigate,
   });
-
-  // Snapshot + hide on overlay. See identical effect on
-  // `BrowserPanelComponent` for the rationale, including the
-  // multi-pane visibility gating below.
-  const freezeAppliedRef = useRef(false);
-  useEffect(() => {
-    if (!isDesktop || !created) return;
-    let cancelled = false;
-    if (frozen) {
-      // For multi-tab panes, dockview's `api.isVisible` is the
-      // authoritative signal — it's `false` when this pane lives in
-      // a dockview tab group that isn't currently focused, *or*
-      // when its tab is inactive within its own group. We don't
-      // touch hidden panes; doing so would re-show them over the
-      // user's chosen tab when the overlay closes.
-      const visibleNow = api.isVisible && params.wsActive !== false;
-      if (!visibleNow) return;
-      freezeAppliedRef.current = true;
-      (async () => {
-        try {
-          const dataUrl = await desktopInvoke<string | null>("browser_capture_page", {
-            browserId: browserIdRef.current,
-          });
-          if (!cancelled && dataUrl) {
-            // flushSync + waitForPaint to avoid flicker — see
-            // identical block in `BrowserPanelComponent` for details.
-            flushSync(() => setSnapshot(dataUrl));
-            await waitForPaint();
-          }
-        } catch {
-          // ignore
-        }
-        if (cancelled) return;
-        // See `BrowserPanelComponent` variant for capture/pause/hide ordering.
-        desktopInvoke("browser_pause_media", { browserId: browserIdRef.current }).catch(() => {});
-        desktopInvoke("browser_hide", { browserId: browserIdRef.current }).catch(() => {});
-      })();
-    } else {
-      if (freezeAppliedRef.current) {
-        freezeAppliedRef.current = false;
-        desktopInvoke("browser_show", { browserId: browserIdRef.current }).catch(() => {});
-        desktopInvoke("browser_resume_media", { browserId: browserIdRef.current }).catch(() => {});
-        // Defer the snapshot clear by one paint so the native view
-        // is back on top before the img is removed — see
-        // `BrowserPanelComponent` for the rationale.
-        (async () => {
-          await waitForPaint();
-          if (!cancelled) setSnapshot(null);
-        })();
-      } else {
-        setSnapshot(null);
-      }
-    }
-    return () => {
-      cancelled = true;
-    };
-  }, [frozen, created, api, params.wsActive]);
 
   if (!browserId) return null;
 

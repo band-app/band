@@ -2150,6 +2150,48 @@ describe("tRPC — browser history", () => {
     expect(data.entries).toEqual([]);
   });
 
+  it("history.search treats LIKE metacharacters as literals", async () => {
+    const ws = freshWorkspace();
+    // One row whose URL actually contains '%', two without.
+    await trpcMutate(server.url, "history.record", {
+      workspaceId: ws,
+      url: "https://example.com/literal%percent",
+    });
+    await trpcMutate(server.url, "history.record", {
+      workspaceId: ws,
+      url: "https://example.com/other-a",
+    });
+    await trpcMutate(server.url, "history.record", {
+      workspaceId: ws,
+      url: "https://example.com/other-b",
+    });
+
+    // A bare `%` without escaping would match every row (SQLite LIKE
+    // wildcard). After escaping it should be treated as a literal
+    // character — only the one matching URL comes back.
+    const res = await trpcQuery(server.url, "history.search", {
+      workspaceId: ws,
+      query: "%percent",
+    });
+    const data = await trpcData<{ entries: HistoryEntryShape[] }>(res);
+    expect(data.entries).toHaveLength(1);
+    expect(data.entries[0].url).toContain("%percent");
+
+    // And `_` is also a SQLite wildcard (single character) — same
+    // treatment.
+    await trpcMutate(server.url, "history.record", {
+      workspaceId: ws,
+      url: "https://example.com/with_underscore",
+    });
+    const underscoreRes = await trpcQuery(server.url, "history.search", {
+      workspaceId: ws,
+      query: "with_under",
+    });
+    const underscoreData = await trpcData<{ entries: HistoryEntryShape[] }>(underscoreRes);
+    expect(underscoreData.entries).toHaveLength(1);
+    expect(underscoreData.entries[0].url).toContain("with_underscore");
+  });
+
   it("history.delete removes a single entry by id", async () => {
     const ws = freshWorkspace();
     await trpcMutate(server.url, "history.record", {
@@ -2255,6 +2297,34 @@ describe("tRPC — browser history", () => {
     const listData = await trpcData<{ entries: HistoryEntryShape[] }>(listRes);
     expect(listData.entries).toEqual([]);
   });
+
+  // "Last day" / "Last week" semantics — these ranges delete RECENT
+  // entries (visited within the window), not old ones, matching how
+  // browsers' "Clear browsing history → Last hour / day / week"
+  // option works. We can't test the boundary precisely from
+  // integration tests (the IPC doesn't accept a `now` override), but
+  // we can at least confirm a fresh row IS cleared by each range.
+  for (const range of ["day", "week"] as const) {
+    it(`history.clear with range '${range}' deletes recent entries`, async () => {
+      const ws = freshWorkspace();
+      await trpcMutate(server.url, "history.record", {
+        workspaceId: ws,
+        url: `https://example.com/${range}-recent`,
+      });
+
+      const clearRes = await trpcMutate(server.url, "history.clear", {
+        workspaceId: ws,
+        range,
+      });
+      expect(clearRes.status).toBe(200);
+      const clearData = await trpcData<{ deleted: number }>(clearRes);
+      expect(clearData.deleted).toBe(1);
+
+      const listRes = await trpcQuery(server.url, "history.list", { workspaceId: ws });
+      const listData = await trpcData<{ entries: HistoryEntryShape[] }>(listRes);
+      expect(listData.entries).toEqual([]);
+    });
+  }
 
   it("history.clear rejects an unknown range", async () => {
     const ws = freshWorkspace();
