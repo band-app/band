@@ -353,7 +353,12 @@ export async function installSkills(opts: InstallSkillsOptions = {}): Promise<In
 
         // Skip if the shared dir for this skill isn't actually there
         // (could happen if the generator failed to emit it above).
+        // Track each missed (agent, skill) pair in `result.skipped`
+        // so the `setup.ts` info-log counter reflects the gap; a
+        // silent `continue` here would make the booted process look
+        // healthier than it is when the shared-write phase warned.
         if (!existsSync(shared)) {
+          result.skipped.push(link);
           continue;
         }
 

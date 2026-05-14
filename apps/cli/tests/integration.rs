@@ -2757,16 +2757,37 @@ fn skills_sandbox(agent_dirs: &[&str]) -> tempfile::TempDir {
     tmp
 }
 
-/// Run `band skills install --home <tmp>` and parse its JSON output.
+/// Run `band skills install --home <tmp>` with a clean environment (no
+/// inherited `CODEX_HOME`) and parse its JSON output.
+///
+/// The CLI's `codex_home()` helper reads `$CODEX_HOME` at call time and
+/// uses it instead of `home` when set. If a developer runs the test
+/// suite from a shell that has `CODEX_HOME` exported (real install,
+/// previous test session, accidental export), the subprocess would
+/// pick it up and either:
+///   - link skills into the developer's real `$CODEX_HOME/skills/`, or
+///   - silently skip codex detection (if `$CODEX_HOME` points
+///     somewhere that doesn't exist), making assertions like
+///     `agents.len() == 2` flake on otherwise-correct code.
+///
+/// Stripping `CODEX_HOME` from the child's env at this seam isolates
+/// every `run_install_json` caller without touching the developer's
+/// actual shell. Tests that *want* to exercise the env override
+/// (`skills_install_dedupes_codex_and_openai_codex` etc.) can use
+/// `run_install_json_with_env` below.
 fn run_install_json(home: &Path) -> serde_json::Value {
-    let output = band_offline(&[
-        "--output",
-        "json",
-        "skills",
-        "install",
-        "--home",
-        home.to_str().unwrap(),
-    ]);
+    let output = Command::new(env!("CARGO_BIN_EXE_band"))
+        .env_remove("CODEX_HOME")
+        .args([
+            "--output",
+            "json",
+            "skills",
+            "install",
+            "--home",
+            home.to_str().unwrap(),
+        ])
+        .output()
+        .expect("failed to execute band");
     assert!(output.status.success(), "stderr: {}", stderr(&output));
     serde_json::from_str(&stdout(&output))
         .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)))
