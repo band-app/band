@@ -55,7 +55,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { dirname, join, relative } from "node:path";
+import { dirname, join } from "node:path";
 import {
   getAgentConfigDir,
   getInstallSkillsDir,
@@ -354,12 +354,11 @@ export async function installSkills(opts: InstallSkillsOptions = {}): Promise<In
         switch (outcome.kind) {
           case "created":
             result.linked.push(link);
-            opts.log?.info(
-              "Linked %s skills/%s → %s",
-              target.agentType,
-              name,
-              relative(target.skillsDir, shared),
-            );
+            // Log the absolute target — that's what `ensureSymlinkInner`
+            // actually writes to disk (`symlinkSync(target, link, "dir")`
+            // with `target = shared`). Logging a relative path here would
+            // disagree with what `ls -la <link>` shows.
+            opts.log?.info("Linked %s skills/%s → %s", target.agentType, name, shared);
             break;
           case "already":
             result.alreadyLinked.push(link);

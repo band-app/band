@@ -456,7 +456,13 @@ fn agent_skills_dir(agent: &str, home: &Path) -> PathBuf {
         "codex" | "openai-codex" => codex_home(home).join("skills"),
         "gemini-cli" => home.join(".gemini").join("skills"),
         "opencode" => home.join(".config").join("opencode").join("skills"),
-        _ => home.join(agent).join("skills"),
+        // All callers iterate `SUPPORTED_AGENTS`, so any other value
+        // is a programming error. Fail loudly rather than constructing
+        // a plausible-looking `home/<unknown>/skills` path that would
+        // create symlinks in the wrong place if a future caller passes
+        // an unvetted string. The `supported_agents_matches_canonical_list`
+        // unit test below is the primary guard against that drift.
+        _ => unreachable!("agent_skills_dir called with unsupported agent type: {agent}"),
     }
 }
 
