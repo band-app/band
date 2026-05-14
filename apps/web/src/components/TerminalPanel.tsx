@@ -675,6 +675,23 @@ export function TerminalPanel({
         onTitleChangeRef.current?.(title);
       });
 
+      // Re-apply the active selection after every xterm resize. xterm.js's
+      // selection layer doesn't always re-paint after `fit()` reflows the
+      // viewport — the internal SelectionModel still holds the range (so
+      // `hasSelection()` and `getSelection()` keep returning the right
+      // values, and Copy still works correctly) but the visual highlight
+      // disappears. This bites the long-press path on iOS specifically:
+      // entering selection mode blurs the terminal → keyboard dismisses →
+      // visual viewport grows → ResizeObserver fits xterm → selection goes
+      // invisible. Re-running `terminal.select(...)` from our retained
+      // anchor/head triggers a fresh render. No-op when not in selection
+      // mode (refs are null).
+      const selectionResizeDisposable = terminal.onResize(() => {
+        const anchor = selectionAnchorRef.current;
+        const head = selectionHeadRef.current;
+        if (anchor && head) applySelection(terminal, anchor, head);
+      });
+
       // Auto-fit on container resize (skip zero-size to avoid killing server PTY)
       const resizeObserver = new ResizeObserver((entries) => {
         const entry = entries[0];
@@ -696,6 +713,7 @@ export function TerminalPanel({
         themeObserver.disconnect();
         resizeObserver.disconnect();
         searchResultsDisposable.dispose();
+        selectionResizeDisposable.dispose();
         webglContextLossDisposable?.dispose();
         cancelLongPress();
         containerEl.removeEventListener("touchstart", onTouchStart);
