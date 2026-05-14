@@ -2166,12 +2166,41 @@ describe("tRPC — browser history", () => {
     const toDelete = listData.entries.find((e) => e.url.endsWith("/delete"));
     expect(toDelete).toBeDefined();
 
-    const delRes = await trpcMutate(server.url, "history.delete", { id: toDelete!.id });
+    const delRes = await trpcMutate(server.url, "history.delete", {
+      id: toDelete!.id,
+      workspaceId: ws,
+    });
     expect(delRes.status).toBe(200);
 
     const afterRes = await trpcQuery(server.url, "history.list", { workspaceId: ws });
     const afterData = await trpcData<{ entries: HistoryEntryShape[] }>(afterRes);
     expect(afterData.entries.map((e) => e.url)).toEqual(["https://a.example/keep"]);
+  });
+
+  it("history.delete is scoped to the workspace — can't delete other workspace's rows", async () => {
+    const wsA = freshWorkspace();
+    const wsB = freshWorkspace();
+    await trpcMutate(server.url, "history.record", {
+      workspaceId: wsA,
+      url: "https://a.example/owned-by-a",
+    });
+
+    // Find the row id under workspace A.
+    const listRes = await trpcQuery(server.url, "history.list", { workspaceId: wsA });
+    const listData = await trpcData<{ entries: HistoryEntryShape[] }>(listRes);
+    const targetId = listData.entries[0].id;
+
+    // Attempt to delete it as workspace B — should be a silent no-op.
+    const delRes = await trpcMutate(server.url, "history.delete", {
+      id: targetId,
+      workspaceId: wsB,
+    });
+    expect(delRes.status).toBe(200);
+
+    // Row still exists under wsA.
+    const afterRes = await trpcQuery(server.url, "history.list", { workspaceId: wsA });
+    const afterData = await trpcData<{ entries: HistoryEntryShape[] }>(afterRes);
+    expect(afterData.entries).toHaveLength(1);
   });
 
   it("history.clear with range 'all' wipes only the target workspace", async () => {

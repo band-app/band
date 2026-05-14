@@ -10,7 +10,7 @@
  * touches Drizzle directly.
  */
 
-import { and, eq, gte, like, or, sql } from "drizzle-orm";
+import { and, eq, gte, or, sql } from "drizzle-orm";
 import { getDb } from "./db/connection";
 import { browserHistory } from "./db/schema";
 
@@ -105,7 +105,10 @@ export interface UpdateMetaInput {
  */
 export function updateVisitMeta(input: UpdateMetaInput): void {
   const db = getDb();
-  const updates: Record<string, unknown> = {};
+  // Use the Drizzle-inferred row type so the compiler catches typos
+  // in the `set` keys — `Record<string, unknown>` would silently
+  // no-op an `if (input.title)` -> `updates.titel = ...` slip.
+  const updates: Partial<typeof browserHistory.$inferInsert> = {};
   if (input.title !== undefined) updates.title = input.title;
   if (input.faviconUrl !== undefined) updates.faviconUrl = input.faviconUrl;
   if (Object.keys(updates).length === 0) return;
@@ -156,7 +159,14 @@ export function searchHistory(
   const trimmed = query.trim();
   if (!trimmed) return [];
 
-  const pattern = `%${trimmed.toLowerCase()}%`;
+  // SQLite's LIKE treats `%`, `_`, and `\` as wildcards / escape
+  // chars — without escaping, a bare `%` query would match every
+  // row in the workspace. Escape the user input and tell LIKE that
+  // `\` is the escape character (see the `ESCAPE '\\'` raw-SQL
+  // suffix on each `like()` below; Drizzle's `like()` helper
+  // doesn't take an escape argument so we splice it in via `sql`).
+  const escaped = trimmed.toLowerCase().replace(/[%_\\]/g, "\\$&");
+  const pattern = `%${escaped}%`;
   const cappedLimit = Math.min(Math.max(limit, 1), 50);
 
   // Frecency expression — kept inline so we don't need a generated
@@ -174,8 +184,8 @@ export function searchHistory(
       and(
         eq(browserHistory.workspaceId, workspaceId),
         or(
-          like(sql`LOWER(${browserHistory.url})`, pattern),
-          like(sql`LOWER(COALESCE(${browserHistory.title}, ''))`, pattern),
+          sql`LOWER(${browserHistory.url}) LIKE ${pattern} ESCAPE '\\'`,
+          sql`LOWER(COALESCE(${browserHistory.title}, '')) LIKE ${pattern} ESCAPE '\\'`,
         ),
       ),
     )
@@ -184,10 +194,17 @@ export function searchHistory(
     .all();
 }
 
-/** Delete a single history entry by id. No-op if not found. */
-export function deleteHistoryEntry(id: number): void {
+/**
+ * Delete a single history entry by id. Scoped to the workspace so a
+ * compromised renderer that knows an integer row id can't reach
+ * across workspaces. No-op if not found or if the row belongs to a
+ * different workspace.
+ */
+export function deleteHistoryEntry(id: number, workspaceId: string): void {
   const db = getDb();
-  db.delete(browserHistory).where(eq(browserHistory.id, id)).run();
+  db.delete(browserHistory)
+    .where(and(eq(browserHistory.id, id), eq(browserHistory.workspaceId, workspaceId)))
+    .run();
 }
 
 /**

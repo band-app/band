@@ -3165,9 +3165,13 @@ const historyRouter = t.router({
     }),
 
   delete: publicProcedure
-    .input(z.object({ id: z.number().int().nonnegative() }))
+    // `positive()` rather than `nonnegative()` — autoincrement ids
+    // start at 1. `workspaceId` scopes the delete so a caller that
+    // knows a row id from a *different* workspace can't reach into
+    // it.
+    .input(z.object({ id: z.number().int().positive(), workspaceId: z.string().min(1) }))
     .mutation(({ input }) => {
-      deleteHistoryEntry(input.id);
+      deleteHistoryEntry(input.id, input.workspaceId);
       return { ok: true };
     }),
 

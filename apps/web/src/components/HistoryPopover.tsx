@@ -24,7 +24,7 @@ import {
   PopoverTrigger,
 } from "@band-app/ui";
 import { ChevronDown, Globe, History, Search, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { trpc } from "../lib/trpc-client";
 
 export interface HistoryEntry {
@@ -99,21 +99,35 @@ function timeFor(ts: number): string {
 }
 
 export function HistoryPopover({ workspaceId, onNavigate }: HistoryPopoverProps) {
+  // `useId` gives this instance a stable, unique id — important
+  // because in split-pane layouts multiple `HistoryPopover`
+  // instances coexist, and a hardcoded id would cause
+  // `document.getElementById` (in `onOpenAutoFocus` below) to focus
+  // the wrong popover's input.
+  const searchId = useId();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
   const [loading, setLoading] = useState(false);
-  const reloadKey = useRef(0);
+  // Plain state counter (not a ref) — bumping it re-runs the fetch
+  // effect via the deps array. A ref + `setEntries(prev => prev)`
+  // trick doesn't work: React 18 bails out on same-reference state
+  // updates, so the effect would never see the incremented value.
+  const [reloadKey, setReloadKey] = useState(0);
 
-  // Bump `reloadKey.current` to trigger a refetch. Lets per-row delete
+  // Bump the reload counter to trigger a refetch. Lets per-row delete
   // and the Clear footer refresh the list without piping state.
   const refresh = useCallback(() => {
-    reloadKey.current += 1;
-    setEntries((prev) => prev); // force a state read on next render
+    setReloadKey((k) => k + 1);
   }, []);
 
   // Fetch on open + on query change + when `refresh()` bumps the key.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `reloadKey.current` is intentionally read inside the effect to trigger refetches.
+  // `reloadKey` is intentionally a trigger-only dependency — bumping
+  // it via `refresh()` re-runs this effect even though the body
+  // doesn't read its value. Biome's exhaustive-deps rule flags this
+  // as "extra dependency" because the read is absent; the suppression
+  // documents that it's the intended re-run mechanism.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reloadKey is a trigger-only dep — see comment above.
   useEffect(() => {
     if (!open) return;
 
@@ -145,7 +159,7 @@ export function HistoryPopover({ workspaceId, onNavigate }: HistoryPopoverProps)
       cancelled = true;
       clearTimeout(handle);
     };
-  }, [open, query, workspaceId, reloadKey.current]);
+  }, [open, query, workspaceId, reloadKey]);
 
   const groups = useMemo(() => groupByDay(entries), [entries]);
 
@@ -159,13 +173,13 @@ export function HistoryPopover({ workspaceId, onNavigate }: HistoryPopoverProps)
 
   const handleDelete = useCallback(
     async (id: number) => {
-      await trpc.history.delete.mutate({ id }).catch(() => {});
+      await trpc.history.delete.mutate({ id, workspaceId }).catch(() => {});
       // Optimistic local update so the UI doesn't flash empty during
       // refetch.
       setEntries((prev) => prev.filter((e) => e.id !== id));
       refresh();
     },
-    [refresh],
+    [refresh, workspaceId],
   );
 
   const handleClear = useCallback(
@@ -196,7 +210,7 @@ export function HistoryPopover({ workspaceId, onNavigate }: HistoryPopoverProps)
           // Focus our search input rather than the first focusable
           // element (which is whichever row happens to render first).
           e.preventDefault();
-          const input = document.getElementById("history-popover-search");
+          const input = document.getElementById(searchId);
           if (input) input.focus();
         }}
       >
@@ -204,7 +218,7 @@ export function HistoryPopover({ workspaceId, onNavigate }: HistoryPopoverProps)
         <div className="flex items-center gap-2 border-b border-border px-3 py-2">
           <Search className="size-4 shrink-0 text-muted-foreground" />
           <input
-            id="history-popover-search"
+            id={searchId}
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
