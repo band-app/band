@@ -77,6 +77,12 @@ Editing a `SKILL.md` in `~/.agents/skills/` is reflected in every linked agent w
 
 The list of supported agents lives in `packages/coding-agent/src/install-skills.ts::SUPPORTED_AGENT_TYPES` (a single place to update when a new agent adds skills support). The sync logic lives in `apps/web/src/lib/cli-skills.ts::installSkills` and runs on every server boot from `runFirstTimeSetup` — idempotent: an existing symlink pointing at the right shared dir is left alone, an existing symlink pointing elsewhere (or a real directory occupying the path) is reported as a conflict rather than overwritten.
 
-### Manual regeneration
+### Manual regeneration & install
 
-Run `band generate-skills --output-dir apps/cli/skills` to regenerate all six skill files in-repo. At runtime the Band web server invokes the same subcommand and writes the result into `~/.agents/skills/` — no manual copy step is needed.
+- `band generate-skills --output-dir apps/cli/skills` — regenerate the six in-repo skill templates from the live CLI schema (used in development to keep the source-controlled SKILL.md files current).
+- `band skills install` — render the templates against the current schema and install them into `~/.agents/skills/`, then symlink each detected coding agent's skills directory. Idempotent. Useful for users running the CLI outside the Band dashboard, or for forcing a re-sync without rebooting the web server. The Band web server invokes the same install logic on every boot from `runFirstTimeSetup`, so most users never need to call it directly.
+
+Optional flags on `band skills install`:
+
+- `--home <path>` — override the destination home dir (mostly for tests).
+- `--filter <substr>` — only install skills whose name contains the substring (e.g. `--filter chat`).
