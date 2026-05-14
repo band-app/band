@@ -55,11 +55,13 @@ Skills are installed once into a canonical, agent-agnostic location and then lin
 
 ```
 ~/.agents/skills/<name>/SKILL.md          ← canonical content (one copy)
-~/.claude/skills/<name>            → ../../.agents/skills/<name>     (symlink)
-~/.codex/skills/<name>             → ../../.agents/skills/<name>     (symlink)
-~/.gemini/skills/<name>            → ../../.agents/skills/<name>     (symlink)
-~/.config/opencode/skills/<name>   → ../../../.agents/skills/<name>  (symlink)
+~/.claude/skills/<name>            → ~/.agents/skills/<name>     (symlink)
+~/.codex/skills/<name>             → ~/.agents/skills/<name>     (symlink)
+~/.gemini/skills/<name>            → ~/.agents/skills/<name>     (symlink)
+~/.config/opencode/skills/<name>   → ~/.agents/skills/<name>     (symlink)
 ```
+
+The symlinks are created with **absolute** targets (`symlinkSync(target, link, "dir")` in TS / `std::os::unix::fs::symlink` in Rust, both fed the canonical `~/.agents/skills/<name>` path). That keeps the link valid regardless of where it lives in the agent's directory tree, at the cost of breaking if the home directory ever moves — acceptable since each user only installs into their own `$HOME`.
 
 Editing a `SKILL.md` in `~/.agents/skills/` is reflected in every linked agent without re-running the installer.
 

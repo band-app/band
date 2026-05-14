@@ -141,6 +141,12 @@ export type SupportedAgentType = (typeof SUPPORTED_AGENT_TYPES)[number];
  *
  * Returns `null` for unknown types so callers can no-op rather than
  * crash if the supported-agents list ever drifts ahead of the switch.
+ *
+ * Note: for `codex`/`openai-codex`, `$CODEX_HOME` takes precedence over
+ * `home` when set — callers that need full isolation (e.g. test
+ * sandboxes) must also control the `CODEX_HOME` environment variable.
+ * The matching Rust helper (`apps/cli/src/skills.rs::codex_home`) has
+ * the same behaviour.
  */
 export function getAgentConfigDir(type: string, home: string = homedir()): string | null {
   switch (type) {

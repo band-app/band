@@ -2878,7 +2878,14 @@ fn skills_install_skips_agents_without_a_config_dir() {
     assert!(!home.join(".claude").exists());
     assert!(!home.join(".codex").exists());
     assert!(!home.join(".config").join("opencode").exists());
-    for name in ["band", "band-chat", "band-terminal", "band-browser"] {
+    for name in [
+        "band",
+        "band-chat",
+        "band-terminal",
+        "band-browser",
+        "band-start",
+        "band-loop",
+    ] {
         let link = home.join(".gemini").join("skills").join(name);
         let meta = fs::symlink_metadata(&link)
             .unwrap_or_else(|e| panic!("expected {} to exist: {e}", link.display()));
@@ -3002,7 +3009,14 @@ fn skills_install_writes_shared_skills_even_when_no_agents_are_detected() {
     assert_eq!(result["agents"].as_array().unwrap().len(), 0);
 
     let shared_dir = home.join(".agents").join("skills");
-    for name in ["band", "band-chat", "band-terminal", "band-browser"] {
+    for name in [
+        "band",
+        "band-chat",
+        "band-terminal",
+        "band-browser",
+        "band-start",
+        "band-loop",
+    ] {
         assert!(
             shared_dir.join(name).join("SKILL.md").is_file(),
             "shared {} should exist",

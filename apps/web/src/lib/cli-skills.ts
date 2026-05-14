@@ -429,8 +429,25 @@ function ensureSymlink(args: EnsureSymlinkArgs): EnsureSymlinkOutcome {
   }
 
   if (existing === null) {
-    symlinkSync(target, link, "dir");
-    return { kind: "created" };
+    try {
+      symlinkSync(target, link, "dir");
+      return { kind: "created" };
+    } catch (err) {
+      // Tight TOCTOU race: between the `lstatSync` above and this
+      // `symlinkSync`, another process (concurrent server boot, a shell
+      // command, `band skills install` invoked manually) could have
+      // created something at `link`. Re-enter the function so the
+      // newly-created entry is classified as `already`/`conflict` via
+      // the lstat path above. Any non-EEXIST error is propagated as a
+      // conflict, matching the lstat-failure branch.
+      if ((err as NodeJS.ErrnoException).code === "EEXIST") {
+        return ensureSymlink(args);
+      }
+      return {
+        kind: "conflict",
+        reason: `failed to create symlink: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
   }
 
   if (existing.isSymbolicLink()) {
