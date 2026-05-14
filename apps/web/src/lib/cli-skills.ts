@@ -290,8 +290,11 @@ export async function installSkills(opts: InstallSkillsOptions = {}): Promise<In
       if (!existsSync(sourcePath)) {
         // Generator didn't emit this skill. Could happen if the templates
         // diverge from BAND_SKILL_NAMES — log and move on rather than
-        // crashing the whole boot path.
+        // crashing the whole boot path. Track the shared destination as
+        // `skipped` so the boot-time `setup.ts` log counter reflects
+        // the gap instead of silently dropping to zero.
         opts.log?.warn("Generated skill missing from staging dir: %s (skipping)", sourcePath);
+        result.skipped.push(destPath);
         continue;
       }
 
