@@ -498,6 +498,14 @@ export function TerminalPanel({
           // after the user just made a selection).
           tapStartX = null;
           tapStartY = null;
+          // Dismiss the iOS soft keyboard. The user is about to navigate
+          // with the toolbar arrows, not type — the keyboard is just stealing
+          // screen space and squeezing the toolbar against the terminal
+          // bottom. `terminal.blur()` blurs xterm's hidden textarea, which
+          // iOS treats as the signal to slide the keyboard down. We re-open
+          // it later if the user taps inside the terminal (existing
+          // tap-to-focus path) or otherwise re-engages typing.
+          terminal.blur();
           // Light haptic — feels native, no-op where unsupported (desktop,
           // most non-iOS browsers). Wrapped in typeof check because the
           // Vibration API isn't in lib.dom.d.ts on all TS versions.
