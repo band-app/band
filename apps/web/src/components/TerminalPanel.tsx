@@ -10,6 +10,7 @@ import type { WebglAddon } from "@xterm/addon-webgl";
 import type { ITheme, Terminal } from "@xterm/xterm";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { openExternalUrl } from "../lib/open-external-url";
+import { TerminalToolbar } from "./TerminalToolbar";
 
 /** xterm.js search addon decoration colors. The addon requires decorations to be
  *  set in order for `onDidChangeResults` to fire (which drives the "N of M"
@@ -144,6 +145,25 @@ export function TerminalPanel({
   const searchBarRef = useRef<SearchBarHandle>(null);
   // Stable ref for the xterm key-event closure (which is captured once at mount).
   const openSearchRef = useRef<() => void>(() => {});
+
+  // ---- iOS keyboard accessory toolbar state ----
+  // `terminalReady` flips once the dynamic-imported xterm.js instance is
+  // attached and addons are loaded. We can't render TerminalToolbar before
+  // then because it dereferences `terminalRef.current` directly (e.g. for
+  // `hasSelection()`). Promoting the ref to state is overkill — a single
+  // boolean is enough to trigger the re-render that paints the toolbar.
+  const [terminalReady, setTerminalReady] = useState(false);
+  // Sticky Ctrl modifier wired up to the toolbar. Ref mirrors state because
+  // the xterm `attachCustomKeyEventHandler` closure is captured once at mount
+  // and cannot read React state directly. `setPendingCtrl` from useState is a
+  // stable identity, so reading it from inside the captured closure is safe.
+  const pendingCtrlRef = useRef(false);
+  const [pendingCtrl, setPendingCtrl] = useState(false);
+  const handleToggleCtrl = useCallback(() => {
+    const next = !pendingCtrlRef.current;
+    pendingCtrlRef.current = next;
+    setPendingCtrl(next);
+  }, []);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -290,6 +310,37 @@ export function TerminalPanel({
       // - Alt+Arrow   → word navigation (ESC+b / ESC+f)
       terminal.attachCustomKeyEventHandler((e) => {
         if (e.type === "keydown") {
+          // Pending Ctrl (set by the iOS toolbar's sticky Ctrl button): the
+          // user already tapped "Ctrl" once; transform the next single
+          // printable key into a Ctrl+key control character. Letters a..z map
+          // to 0x01..0x1A, the same byte the desktop renderer would emit for
+          // Ctrl+A..Ctrl+Z. Anything outside that range silently clears the
+          // pending flag (consistent with how a real Ctrl modifier behaves on
+          // a hardware keyboard — Ctrl+5 just sends `5`).
+          if (
+            pendingCtrlRef.current &&
+            e.key.length === 1 &&
+            !e.metaKey &&
+            !e.altKey &&
+            !e.ctrlKey
+          ) {
+            const lower = e.key.toLowerCase();
+            const code = lower.charCodeAt(0);
+            if (code >= 97 && code <= 122) {
+              terminal.input(String.fromCharCode(code - 96));
+              pendingCtrlRef.current = false;
+              // Schedule the state update so React renders the un-armed
+              // button — we're inside a non-React event handler.
+              setPendingCtrl(false);
+              e.preventDefault();
+              return false;
+            }
+            // Non-letter printable: just clear the pending modifier and let
+            // the key go through unmodified. This matches "armed-and-dismiss"
+            // behavior in Termius / Blink.
+            pendingCtrlRef.current = false;
+            setPendingCtrl(false);
+          }
           // Cmd+F (macOS) / Ctrl+F (Linux/Windows) → open the find bar.
           // Call preventDefault so the browser doesn't open native find-in-page
           // alongside our overlay (no-op in Electron, important in the web app).
@@ -320,6 +371,10 @@ export function TerminalPanel({
       terminalRef.current = terminal;
       fitAddonRef.current = fitAddon;
       searchAddonRef.current = searchAddon;
+      // Trigger a re-render so the iOS keyboard accessory toolbar (which
+      // dereferences `terminalRef.current`) can mount. We deliberately wait
+      // until *after* the addons are loaded so `hasSelection()` etc. behave.
+      setTerminalReady(true);
 
       // Mobile touch scrolling. xterm renders `.xterm-screen` (canvas/dom) on top
       // of the scrollable `.xterm-viewport`, so touches on the visible terminal
@@ -511,6 +566,7 @@ export function TerminalPanel({
         searchAddonRef.current = null;
         webglAddonRef.current = null;
         wsRef.current = null;
+        setTerminalReady(false);
       };
     });
 
@@ -611,6 +667,21 @@ export function TerminalPanel({
       <div className="relative min-h-0 flex-1">
         <div ref={containerRef} className="absolute inset-2 overflow-hidden" />
       </div>
+      {/* iOS / touch keyboard accessory toolbar. Renders nothing on desktop
+          (gated by `useVirtualKeyboardToolbar`). Sits in `position: fixed`
+          relative to the visual viewport so it floats just above the soft
+          keyboard when open and pins to the screen bottom otherwise. */}
+      {terminalReady && terminalRef.current && (
+        <TerminalToolbar
+          terminal={terminalRef.current}
+          sendInput={(data) => {
+            const ws = wsRef.current;
+            if (ws?.readyState === WebSocket.OPEN) ws.send(data);
+          }}
+          pendingCtrl={pendingCtrl}
+          onToggleCtrl={handleToggleCtrl}
+        />
+      )}
     </div>
   );
 }
