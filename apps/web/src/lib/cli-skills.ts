@@ -28,10 +28,16 @@
  *
  *   ~/.agents/skills/band/SKILL.md            ← canonical (written once)
  *   ~/.agents/skills/band-chat/SKILL.md
- *   ~/.claude/skills/band       → ../../.agents/skills/band     (symlink)
- *   ~/.codex/skills/band        → ../../.agents/skills/band     (symlink)
- *   ~/.gemini/skills/band       → ../../.agents/skills/band     (symlink)
- *   ~/.config/opencode/skills/band → ../../../.agents/skills/band (symlink)
+ *   ~/.claude/skills/band       → ~/.agents/skills/band     (symlink, absolute target)
+ *   ~/.codex/skills/band        → ~/.agents/skills/band     (symlink, absolute target)
+ *   ~/.gemini/skills/band       → ~/.agents/skills/band     (symlink, absolute target)
+ *   ~/.config/opencode/skills/band → ~/.agents/skills/band  (symlink, absolute target)
+ *
+ * The link target is an absolute path (`symlinkSync(target, link, "dir")`
+ * where `target` is `join(sharedDir, name)`). Absolute keeps the link
+ * valid regardless of where it lives in the agent's directory tree, at
+ * the cost of breaking if `$HOME` ever moves — acceptable for per-user
+ * installs.
  */
 
 import { execFile } from "node:child_process";
@@ -384,6 +390,15 @@ interface EnsureSymlinkArgs {
   link: string;
   target: string;
   log?: InstallSkillsOptions["log"];
+  /**
+   * Internal flag set by the EEXIST recovery branch to prevent unbounded
+   * recursion if the filesystem is in a pathological state (e.g. `lstat`
+   * consistently reports ENOENT but `symlink` consistently returns
+   * EEXIST). One retry is enough for the realistic TOCTOU race; if the
+   * second attempt still hits EEXIST we surface a conflict rather than
+   * looping forever on the boot path.
+   */
+  _retried?: boolean;
 }
 
 type EnsureSymlinkOutcome =
@@ -441,7 +456,16 @@ function ensureSymlink(args: EnsureSymlinkArgs): EnsureSymlinkOutcome {
       // the lstat path above. Any non-EEXIST error is propagated as a
       // conflict, matching the lstat-failure branch.
       if ((err as NodeJS.ErrnoException).code === "EEXIST") {
-        return ensureSymlink(args);
+        if (args._retried) {
+          // Second EEXIST in a row means the filesystem is reporting
+          // contradictory state (lstat says ENOENT, symlink says EEXIST).
+          // Bail out rather than recurse indefinitely on the boot path.
+          return {
+            kind: "conflict",
+            reason: "EEXIST after retry — filesystem state is inconsistent",
+          };
+        }
+        return ensureSymlink({ ...args, _retried: true });
       }
       return {
         kind: "conflict",
