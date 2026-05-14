@@ -692,10 +692,38 @@ export function TerminalPanel({
         if (anchor && head) applySelection(terminal, anchor, head);
       });
 
-      // Auto-fit on container resize (skip zero-size to avoid killing server PTY)
+      // Auto-fit on container resize (skip zero-size to avoid killing server PTY).
+      // Also handles devicePixelRatio changes (Chrome DevTools mobile-emulation
+      // toggle, dragging the window between a retina and non-retina monitor,
+      // OS zoom changes). On DPR change the WebGL canvas's backing store is
+      // mismatched with its CSS display size — the text balloons to fill the
+      // stretched canvas. Re-attaching the addon resizes the backing store and
+      // re-measures cell dimensions at the new DPR; same recovery path as
+      // `onContextLoss`.
+      let lastDpr = window.devicePixelRatio;
+      // Shared DPR-change handler. Disposes the WebGL addon and re-attaches
+      // so its canvas is re-sized at the new device-pixel ratio and the
+      // cell dimensions are re-measured. No-op if already in sync, or if
+      // there's no WebGL addon mounted (DOM renderer auto-handles DPR via
+      // CSS).
+      const handleDprChange = () => {
+        const currentDpr = window.devicePixelRatio;
+        if (currentDpr === lastDpr) return;
+        lastDpr = currentDpr;
+        const addon = webglAddonRef.current;
+        if (addon) {
+          addon.dispose();
+          webglAddonRef.current = null;
+          attachWebGL();
+        }
+        fitAddon.fit();
+      };
       const resizeObserver = new ResizeObserver((entries) => {
         const entry = entries[0];
         if (!entry || entry.contentRect.width === 0 || entry.contentRect.height === 0) return;
+        // Check DPR before fit so the re-attached addon picks up the right
+        // cell dimensions.
+        handleDprChange();
         fitAddon.fit();
         if (ws.readyState === WebSocket.OPEN && terminal.cols > 0 && terminal.rows > 0) {
           ws.send(
@@ -709,12 +737,30 @@ export function TerminalPanel({
       });
       resizeObserver.observe(containerRef.current!);
 
+      // Belt-and-suspenders: also listen for DPR changes that don't cause a
+      // container size change (rare — e.g. an external display unplug, or
+      // dragging the window between two same-size monitors with different
+      // DPR). `matchMedia('(resolution: Xdppx)')` only fires for the
+      // specific transition out of X, so we re-bind after each change.
+      let dprMql: MediaQueryList | undefined;
+      const bindDprListener = () => {
+        dprMql = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+        dprMql.addEventListener("change", onDprMediaChange);
+      };
+      const onDprMediaChange = () => {
+        handleDprChange();
+        dprMql?.removeEventListener("change", onDprMediaChange);
+        bindDprListener();
+      };
+      bindDprListener();
+
       cleanup = () => {
         themeObserver.disconnect();
         resizeObserver.disconnect();
         searchResultsDisposable.dispose();
         selectionResizeDisposable.dispose();
         webglContextLossDisposable?.dispose();
+        dprMql?.removeEventListener("change", onDprMediaChange);
         cancelLongPress();
         containerEl.removeEventListener("touchstart", onTouchStart);
         containerEl.removeEventListener("touchmove", onTouchMove);
