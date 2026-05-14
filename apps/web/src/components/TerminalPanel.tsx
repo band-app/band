@@ -819,6 +819,14 @@ export function TerminalPanel({
         searchAddonRef.current = null;
         webglAddonRef.current = null;
         wsRef.current = null;
+        // Reset toolbar state so a remount (e.g. terminal reconnect) doesn't
+        // come back up with selection mode armed against a buffer row that
+        // no longer exists, or with Ctrl still pending.
+        selectionAnchorRef.current = null;
+        selectionHeadRef.current = null;
+        pendingCtrlRef.current = false;
+        setSelectionMode(false);
+        setPendingCtrl(false);
         setTerminalReady(false);
       };
     });

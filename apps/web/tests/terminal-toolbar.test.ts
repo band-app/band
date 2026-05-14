@@ -14,9 +14,8 @@
  * observable effect: bytes sent, clipboard writes, or DOM/state changes.
  */
 import type { Terminal } from "@xterm/xterm";
-import { createElement } from "react";
+import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { act } from "react-dom/test-utils";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { TerminalToolbar } from "../src/components/TerminalToolbar";
 import { useVirtualKeyboardToolbar } from "../src/hooks/useVirtualKeyboardToolbar";
@@ -456,11 +455,24 @@ describe("TerminalToolbar – special keys", () => {
     const ctrlBtn = container.querySelector(
       "button[aria-label='Arm Ctrl modifier']",
     ) as HTMLButtonElement;
-    expect(ctrlBtn.getAttribute("aria-pressed")).toBeNull();
+    // WAI-ARIA: toggle buttons must have `aria-pressed="false"` (not absent)
+    // when not pressed so assistive tech announces the toggle semantics on
+    // first encounter.
+    expect(ctrlBtn.getAttribute("aria-pressed")).toBe("false");
     act(() => {
       dispatchPointerDown(ctrlBtn);
     });
     expect(onToggleCtrl).toHaveBeenCalledTimes(1);
+    unmount(root, container);
+  });
+
+  it("non-toggle buttons (e.g. Paste) omit aria-pressed entirely", () => {
+    const term = makeFakeTerminal();
+    const { container, root } = mount({ terminal: term, sendInput: () => {} });
+    const pasteBtn = container.querySelector(
+      "button[aria-label='Paste from clipboard']",
+    ) as HTMLButtonElement;
+    expect(pasteBtn.getAttribute("aria-pressed")).toBeNull();
     unmount(root, container);
   });
 

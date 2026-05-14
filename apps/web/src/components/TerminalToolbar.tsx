@@ -78,6 +78,17 @@ const SEQ_ARROW_DOWN = "\x1b[B";
 const SEQ_ARROW_RIGHT = "\x1b[C";
 const SEQ_ARROW_LEFT = "\x1b[D";
 
+// Common pointerdown wrapper: prevent the default so the tap doesn't blur
+// the xterm helper textarea (which would dismiss the iOS keyboard) and
+// returns a handler that invokes `fn`. Module-scoped so each render doesn't
+// rebuild a fresh closure for every button.
+const tap =
+  (fn: () => void | Promise<void>) =>
+  (e: React.PointerEvent<HTMLButtonElement>): void => {
+    e.preventDefault();
+    void fn();
+  };
+
 export function TerminalToolbar({
   terminal,
   sendInput,
@@ -128,12 +139,16 @@ export function TerminalToolbar({
     [],
   );
 
+  // Arrow order matches the PR description and the visual convention on
+  // physical iOS keyboards: horizontal pair first (← →), then vertical
+  // pair (↑ ↓). Earlier the order was ← ↓ ↑ → which contradicted the
+  // documented layout (PR #413 review).
   const idleArrows = useMemo(
     () => [
       { Icon: ArrowLeft, seq: SEQ_ARROW_LEFT, ariaLabel: "Arrow Left" },
-      { Icon: ArrowDown, seq: SEQ_ARROW_DOWN, ariaLabel: "Arrow Down" },
-      { Icon: ArrowUp, seq: SEQ_ARROW_UP, ariaLabel: "Arrow Up" },
       { Icon: ArrowRight, seq: SEQ_ARROW_RIGHT, ariaLabel: "Arrow Right" },
+      { Icon: ArrowUp, seq: SEQ_ARROW_UP, ariaLabel: "Arrow Up" },
+      { Icon: ArrowDown, seq: SEQ_ARROW_DOWN, ariaLabel: "Arrow Down" },
     ],
     [],
   );
@@ -142,24 +157,14 @@ export function TerminalToolbar({
     () =>
       [
         { Icon: ArrowLeft, dir: "left", ariaLabel: "Extend selection left" },
-        { Icon: ArrowDown, dir: "down", ariaLabel: "Extend selection down" },
-        { Icon: ArrowUp, dir: "up", ariaLabel: "Extend selection up" },
         { Icon: ArrowRight, dir: "right", ariaLabel: "Extend selection right" },
+        { Icon: ArrowUp, dir: "up", ariaLabel: "Extend selection up" },
+        { Icon: ArrowDown, dir: "down", ariaLabel: "Extend selection down" },
       ] as const,
     [],
   );
 
   if (!enabled) return null;
-
-  // Common pointerdown wrapper: prevent the default so the tap doesn't blur
-  // the xterm helper textarea (which would dismiss the iOS keyboard).
-  // Returns a handler that calls `fn` after preventing default.
-  const tap =
-    (fn: () => void | Promise<void>) =>
-    (e: React.PointerEvent<HTMLButtonElement>): void => {
-      e.preventDefault();
-      void fn();
-    };
 
   // Wrapper that visually distinguishes selection mode — a primary-tinted
   // strip across the top of the bar makes it immediately obvious that
@@ -320,7 +325,11 @@ function ToolbarButton({
     <button
       type="button"
       aria-label={ariaLabel}
-      aria-pressed={active ? true : undefined}
+      // Toggle buttons (sticky Ctrl) explicitly pass a boolean so screen
+      // readers announce the toggle state — `false` renders as
+      // `aria-pressed="false"` not absent, per WAI-ARIA. Plain buttons
+      // pass `active` undefined to omit the attribute entirely.
+      aria-pressed={active}
       title={title}
       onPointerDown={onPointerDown}
       disabled={disabled}

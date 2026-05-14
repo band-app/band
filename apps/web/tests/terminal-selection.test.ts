@@ -105,9 +105,13 @@ describe("findWordBoundaries", () => {
     expect(findWordBoundaries(line, 3)).toEqual({ start: 3, end: 4 });
   });
 
-  it("handles col past end of line by returning a 1-cell range", () => {
+  it("handles col past end of line by returning a 1-cell range at the line end", () => {
     const line = "abc";
-    expect(findWordBoundaries(line, 10)).toEqual({ start: 3, end: 11 });
+    expect(findWordBoundaries(line, 10)).toEqual({ start: 3, end: 4 });
+  });
+
+  it("handles col past end of an empty line by returning a 1-cell range at 0", () => {
+    expect(findWordBoundaries("", 5)).toEqual({ start: 0, end: 1 });
   });
 });
 

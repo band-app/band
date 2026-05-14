@@ -61,17 +61,24 @@ export function pointToCell(
 /**
  * Find the start/end columns of the "word" at `col` in the given line text.
  *
- * Returns `[col, col + 1)` if `col` is not on a word character — that's a
- * one-cell range, which we still highlight so the user has visible feedback
- * after a long-press on whitespace or a delimiter (they can then use the
- * arrow keys to grow it).
+ * Returns a one-cell range `[c, c + 1)` if `col` is not on a word character
+ * (or is past the end of the line). Clamped to the line bounds so the
+ * caller always gets a 1-cell selection it can apply — the user can grow
+ * it with the toolbar arrows.
  *
  * `end` is exclusive (one past the last word cell), matching xterm.js's
  * `select(col, row, length)` semantics — `length = end - start`.
  */
 export function findWordBoundaries(line: string, col: number): { start: number; end: number } {
+  // Out-of-bounds (or non-word) → always a 1-cell range. Earlier versions
+  // returned `{ start: clamp(...), end: col + 1 }` which for col past the
+  // line length produced a multi-cell highlight of trailing whitespace
+  // (band-app/band PR #413 review). Clamp start AND derive end as start + 1
+  // so the range stays single-cell regardless of how far past the line the
+  // user tapped.
   if (col < 0 || col >= line.length || !WORD_RE.test(line[col])) {
-    return { start: clamp(col, 0, Math.max(0, line.length)), end: col + 1 };
+    const safeCol = clamp(col, 0, Math.max(0, line.length));
+    return { start: safeCol, end: safeCol + 1 };
   }
   let start = col;
   while (start > 0 && WORD_RE.test(line[start - 1])) start--;
