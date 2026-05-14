@@ -350,7 +350,7 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
     process.env.CODEX_HOME = customCodexHome;
     try {
       const { installSkills } = await import("../src/lib/cli-skills");
-      await installSkills({ home: process.env.HOME! });
+      const result = await installSkills({ home: process.env.HOME! });
 
       for (const name of SKILL_NAMES) {
         const link = join(customCodexHome, "skills", name);
@@ -359,6 +359,15 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
       // And nothing should have landed under the default ~/.codex/skills/
       // (we didn't create ~/.codex either, so detection skips it).
       expect(existsSync(join(process.env.HOME!, ".codex", "skills"))).toBe(false);
+
+      // Lock in that claude-code (from beforeEach) AND codex (via the
+      // env override) both got linked — without this count, a future
+      // regression that silently skips claude-code while this test
+      // narrowly checks the codex path would pass.
+      expect(
+        result.linked.length,
+        "claude-code (from beforeEach) + codex (via $CODEX_HOME) = 2 × SKILL_NAMES symlinks",
+      ).toBe(SKILL_NAMES.length * 2);
     } finally {
       if (originalCodexHome !== undefined) process.env.CODEX_HOME = originalCodexHome;
       else delete process.env.CODEX_HOME;
