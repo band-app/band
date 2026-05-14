@@ -1,83 +1,111 @@
-import iconManifest from "material-icon-theme/dist/material-icons.json";
 import { createElement, type FC } from "react";
+import { resolveFolderIconName, resolveIconName, resolveIconPath } from "./file-icon-resolve";
 
-interface IconManifest {
-  iconDefinitions: Record<string, { iconPath: string }>;
-  fileExtensions: Record<string, string>;
-  fileNames: Record<string, string>;
-  folderNames: Record<string, string>;
-  folderNamesExpanded: Record<string, string>;
-  languageIds: Record<string, string>;
-  file: string;
-  folder: string;
-  folderExpanded: string;
-}
+// All material-icon-theme SVGs inlined as raw strings, then assembled into a
+// single hidden <svg> sprite parsed via DOMParser and appended to <body>.
+// Components render via <use href="#mit-{basename}"> — synchronous, no network
+// roundtrip, no flicker. SVG sources originate from the bundled npm package
+// at build time, not from user input.
+const iconSources = import.meta.glob<string>("../../node_modules/material-icon-theme/icons/*.svg", {
+  query: "?raw",
+  import: "default",
+  eager: true,
+});
 
-const manifest = iconManifest as unknown as IconManifest;
+const SYMBOL_PREFIX = "mit-";
+const SPRITE_ID = "mit-icon-sprite";
 
-// Bundle every material-icon-theme SVG as a static asset URL.
-// Path is relative to this file; Vite expands it at build time and emits
-// each SVG as a hashed asset. The output map is keyed by source path,
-// and we look up icons via the basename.
-const iconUrlByPath = import.meta.glob<string>(
-  "../../node_modules/material-icon-theme/icons/*.svg",
-  {
-    eager: true,
-    query: "?url",
-    import: "default",
-  },
-);
-
-const urlByBasename: Record<string, string> = {};
-for (const [path, url] of Object.entries(iconUrlByPath)) {
+const symbolByBasename: Record<string, string> = {};
+for (const path of Object.keys(iconSources)) {
   const file = path.split("/").pop();
-  if (file) urlByBasename[file] = url;
+  if (file) symbolByBasename[file] = `${SYMBOL_PREFIX}${file.replace(/\.svg$/, "")}`;
 }
 
-function iconPathToUrl(iconPath: string): string | null {
+function buildSpriteMarkup(): string {
+  const parts: string[] = [
+    '<svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;width:0;height:0" aria-hidden="true">',
+  ];
+  for (const [path, src] of Object.entries(iconSources)) {
+    const file = path.split("/").pop();
+    if (!file) continue;
+    const viewBox = src.match(/\sviewBox="([^"]+)"/)?.[1] ?? "0 0 32 32";
+    const inner = src.match(/<svg[^>]*>([\s\S]*)<\/svg>\s*$/)?.[1];
+    if (!inner) continue;
+    parts.push(`<symbol id="${symbolByBasename[file]}" viewBox="${viewBox}">${inner}</symbol>`);
+  }
+  parts.push("</svg>");
+  return parts.join("");
+}
+
+let spriteInjected = false;
+function ensureSprite(): void {
+  if (spriteInjected) return;
+  if (typeof document === "undefined" || typeof DOMParser === "undefined") return;
+  if (document.getElementById(SPRITE_ID)) {
+    spriteInjected = true;
+    return;
+  }
+  const parsed = new DOMParser().parseFromString(buildSpriteMarkup(), "image/svg+xml");
+  const root = parsed.documentElement;
+  if (root.nodeName === "parsererror") return;
+  root.id = SPRITE_ID;
+  document.body.appendChild(root);
+  spriteInjected = true;
+}
+
+// Inject at module init so the sprite is in the DOM before the first React
+// commit references any <use href>.
+ensureSprite();
+
+function symbolIdForIcon(iconName: string): string | null {
+  const iconPath = resolveIconPath(iconName);
+  if (!iconPath) return null;
   const file = iconPath.split("/").pop();
   if (!file) return null;
-  return urlByBasename[file] ?? null;
-}
-
-function resolveIconName(filename: string): string {
-  const basename = (filename.split("/").pop() ?? filename).toLowerCase();
-
-  // Exact filename match (e.g. Dockerfile, pubspec.yaml)
-  const byName = manifest.fileNames[basename];
-  if (byName) return byName;
-
-  // Compound extensions: try longest first (e.g. "stories.tsx" before "tsx")
-  const segments = basename.split(".");
-  for (let i = 1; i < segments.length; i++) {
-    const ext = segments.slice(i).join(".");
-    const byExt = manifest.fileExtensions[ext];
-    if (byExt) return byExt;
-  }
-
-  return manifest.file;
+  return symbolByBasename[file] ?? null;
 }
 
 type IconProps = { className?: string };
 type IconComponent = FC<IconProps>;
 
-const componentCache = new Map<string, IconComponent>();
+const componentByKey = new Map<string, IconComponent>();
 
-function makeIconComponent(filename: string): IconComponent {
-  const iconName = resolveIconName(filename);
-  const def = manifest.iconDefinitions[iconName] ?? manifest.iconDefinitions[manifest.file];
-  const url = def ? iconPathToUrl(def.iconPath) : null;
-
-  const Component: IconComponent = ({ className }) =>
-    createElement("img", {
-      src: url ?? "",
-      alt: "",
-      "aria-hidden": true,
-      className,
-      draggable: false,
-    });
-  Component.displayName = `FileIcon(${iconName})`;
+function makeComponent(iconName: string, displayPrefix: string): IconComponent {
+  const symbolId = symbolIdForIcon(iconName);
+  const Component: IconComponent = ({ className }) => {
+    // Defensive: idempotent. Covers post-hydration first-paint where module
+    // top-level ran before document was ready.
+    ensureSprite();
+    if (!symbolId) {
+      return createElement("svg", {
+        width: 16,
+        height: 16,
+        "aria-hidden": true,
+        className,
+      });
+    }
+    return createElement(
+      "svg",
+      {
+        width: 16,
+        height: 16,
+        "aria-hidden": true,
+        className,
+      },
+      createElement("use", { href: `#${symbolId}` }),
+    );
+  };
+  Component.displayName = `${displayPrefix}(${iconName})`;
   return Component;
+}
+
+function getOrCreate(iconName: string, displayPrefix: string): IconComponent {
+  const key = `${displayPrefix}:${iconName}`;
+  const cached = componentByKey.get(key);
+  if (cached) return cached;
+  const comp = makeComponent(iconName, displayPrefix);
+  componentByKey.set(key, comp);
+  return comp;
 }
 
 /**
@@ -85,39 +113,7 @@ function makeIconComponent(filename: string): IconComponent {
  * Drop-in replacement for the previous lucide-react based icon resolver.
  */
 export function getFileIcon(filename: string): IconComponent {
-  const key = (filename.split("/").pop() ?? filename).toLowerCase();
-  const cached = componentCache.get(key);
-  if (cached) return cached;
-  const comp = makeIconComponent(filename);
-  componentCache.set(key, comp);
-  return comp;
-}
-
-function resolveFolderIconName(name: string, expanded: boolean): string {
-  const basename = (name.split("/").pop() ?? name).toLowerCase();
-  const map = expanded ? manifest.folderNamesExpanded : manifest.folderNames;
-  const named = map[basename];
-  if (named) return named;
-  return expanded ? manifest.folderExpanded : manifest.folder;
-}
-
-const folderCache = new Map<string, IconComponent>();
-
-function makeFolderComponent(name: string, expanded: boolean): IconComponent {
-  const iconName = resolveFolderIconName(name, expanded);
-  const def = manifest.iconDefinitions[iconName];
-  const url = def ? iconPathToUrl(def.iconPath) : null;
-
-  const Component: IconComponent = ({ className }) =>
-    createElement("img", {
-      src: url ?? "",
-      alt: "",
-      "aria-hidden": true,
-      className,
-      draggable: false,
-    });
-  Component.displayName = `FolderIcon(${iconName})`;
-  return Component;
+  return getOrCreate(resolveIconName(filename), "FileIcon");
 }
 
 /**
@@ -125,10 +121,5 @@ function makeFolderComponent(name: string, expanded: boolean): IconComponent {
  * Use `expanded: true` for the open-folder variant.
  */
 export function getFolderIcon(name: string, expanded = false): IconComponent {
-  const key = `${expanded ? "1" : "0"}:${(name.split("/").pop() ?? name).toLowerCase()}`;
-  const cached = folderCache.get(key);
-  if (cached) return cached;
-  const comp = makeFolderComponent(name, expanded);
-  folderCache.set(key, comp);
-  return comp;
+  return getOrCreate(resolveFolderIconName(name, expanded), "FolderIcon");
 }
