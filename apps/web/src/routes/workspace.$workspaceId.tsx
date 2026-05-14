@@ -3,6 +3,7 @@ import {
   QuickOpenDialog,
   SearchFilesDialog,
   useDashboardStore,
+  useDiffTarget,
   type WorkspaceTab,
   WorkspaceTabNav,
 } from "@band-app/dashboard-core";
@@ -101,12 +102,20 @@ function useActiveTab(workspaceId: string): WorkspaceTab {
 }
 
 function useDiffFileCount(workspaceId: string): number {
+  // Track the same diff target (mode + compare branch) the user picked in the
+  // Changes tab — without this, the badge always queried the default branch
+  // and ignored Uncommitted / non-default branch selections (issue #396).
+  const { diffMode, compareBranch } = useDiffTarget(workspaceId);
   const [count, setCount] = useState(0);
   useEffect(() => {
     let cancelled = false;
     const fetchCount = () => {
       trpc.workspace.getDiffSummary
-        .query({ workspaceId })
+        .query({
+          workspaceId,
+          diffMode,
+          compareBranch: compareBranch ?? undefined,
+        })
         .then((result) => {
           if (!cancelled) setCount(result.stats?.filesChanged ?? 0);
         })
@@ -118,7 +127,7 @@ function useDiffFileCount(workspaceId: string): number {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [workspaceId]);
+  }, [workspaceId, diffMode, compareBranch]);
   return count;
 }
 

@@ -39,6 +39,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useAdapter } from "../context";
+import { readStoredCompareBranch, useDiffTarget } from "../hooks/use-diff-target";
 import { useIsDark } from "../hooks/use-is-dark";
 import { useSearch } from "../hooks/use-search";
 import { buildFileTree, flattenFileTreeOrder } from "../lib/build-file-tree";
@@ -47,7 +48,7 @@ import { formatFileLocation } from "../lib/file-location";
 import { extensionToLanguage, filenameToLanguage } from "../lib/language-map";
 import { selectionToChatExtension } from "../lib/selection-to-chat";
 import type { SSEEvent } from "../lib/sse";
-import type { DiffMode, FileStatus, WorkspaceDiffSummary } from "../types";
+import type { FileStatus, WorkspaceDiffSummary } from "../types";
 import { ChangesFileTree } from "./ChangesFileTree";
 import { CommitDialog } from "./CommitDialog";
 import { FileStatusBadge } from "./FileStatusBadge";
@@ -75,42 +76,6 @@ function getStoredViewMode(): ViewMode {
 function storeViewMode(mode: ViewMode) {
   try {
     localStorage.setItem(VIEW_MODE_KEY, mode);
-  } catch {}
-}
-
-const DIFF_MODE_KEY = "band:diff-mode";
-
-function getStoredDiffMode(): DiffMode {
-  try {
-    const v = localStorage.getItem(DIFF_MODE_KEY);
-    if (v === "uncommitted" || v === "branch") return v;
-  } catch {}
-  return "branch";
-}
-
-function storeDiffMode(mode: DiffMode) {
-  try {
-    localStorage.setItem(DIFF_MODE_KEY, mode);
-  } catch {}
-}
-
-const COMPARE_BRANCH_KEY_PREFIX = "band:diff-compare-branch:";
-
-function getStoredCompareBranch(workspaceId: string): string | null {
-  try {
-    return localStorage.getItem(COMPARE_BRANCH_KEY_PREFIX + workspaceId);
-  } catch {
-    return null;
-  }
-}
-
-function storeCompareBranch(workspaceId: string, branch: string | null) {
-  try {
-    if (branch) {
-      localStorage.setItem(COMPARE_BRANCH_KEY_PREFIX + workspaceId, branch);
-    } else {
-      localStorage.removeItem(COMPARE_BRANCH_KEY_PREFIX + workspaceId);
-    }
   } catch {}
 }
 
@@ -858,16 +823,16 @@ export function DiffView({
   // Fingerprint of the last fetched summary to detect actual data changes from SSE polls
   const prevFingerprintRef = useRef<string>("");
   const [viewMode, setViewModeState] = useState<ViewMode>(getStoredViewMode);
-  const [diffMode, setDiffModeState] = useState<DiffMode>(getStoredDiffMode);
   const [expandAll, setExpandAllState] = useState(getStoredExpandAll);
-  const [compareBranch, setCompareBranchState] = useState<string | null>(() =>
-    getStoredCompareBranch(workspaceId),
-  );
+  // `diffMode` and `compareBranch` are owned by a shared hook so that other
+  // subscribers (e.g. the Changes-tab badge in the workspace layout) re-read
+  // the same target when the user changes it here. See issue #396.
+  const { diffMode, compareBranch, setDiffMode, setCompareBranch } = useDiffTarget(workspaceId);
   // Seed `availableBranches` with the persisted selection so the picker shows
   // the stored branch immediately on mount, instead of flashing empty until
   // listWorkspaceBranches resolves.
   const [availableBranches, setAvailableBranches] = useState<string[]>(() => {
-    const stored = getStoredCompareBranch(workspaceId);
+    const stored = readStoredCompareBranch(workspaceId);
     return stored ? [stored] : [];
   });
   // The project's default branch, fetched via listWorkspaceBranches. We track
@@ -880,22 +845,12 @@ export function DiffView({
     setViewModeState(mode);
     storeViewMode(mode);
   }, []);
-  const setDiffMode = useCallback((mode: DiffMode) => {
-    setDiffModeState(mode);
-    storeDiffMode(mode);
-  }, []);
-  const setCompareBranch = useCallback(
-    (branch: string | null) => {
-      setCompareBranchState(branch);
-      storeCompareBranch(workspaceId, branch);
-    },
-    [workspaceId],
-  );
 
-  // Reload stored compareBranch + reseed availableBranches when workspace changes
+  // Reseed availableBranches when workspace changes — `useDiffTarget` already
+  // re-reads the stored compareBranch internally, but availableBranches and
+  // availableDefaultBranch belong to this component and need a manual reset.
   useEffect(() => {
-    const stored = getStoredCompareBranch(workspaceId);
-    setCompareBranchState(stored);
+    const stored = readStoredCompareBranch(workspaceId);
     setAvailableBranches(stored ? [stored] : []);
     setAvailableDefaultBranch(null);
   }, [workspaceId]);
