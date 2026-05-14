@@ -131,7 +131,17 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
     const el = placeholderRef.current;
     if (!el) return null;
     const rect = el.getBoundingClientRect();
-    return { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
+    // Inset by 1px on the left and right so the dockview group separators
+    // (1px lines between this pane and its horizontal neighbors) stay
+    // visible. The native WebContentsView is an OS-level layer that floats
+    // above the React DOM, so without these insets it draws on top of the
+    // separators on either side.
+    return {
+      x: rect.left + 1,
+      y: rect.top,
+      width: Math.max(0, rect.width - 2),
+      height: rect.height,
+    };
   }, []);
 
   const invoke = useCallback(async (cmd: string, args?: Record<string, unknown>) => {
@@ -371,7 +381,27 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
   const handleNavigate = useCallback(
     async (rawUrl: string) => {
       let normalized = rawUrl.trim();
-      if (!normalized) return;
+
+      // Empty input — load a blank page and clear the address bar.
+      // The `browser-url-changed` listener filters out `about:blank`,
+      // so the input stays visibly empty rather than showing
+      // "about:blank" after the navigation lands.
+      if (!normalized) {
+        setCurrentUrl("");
+        setInputUrl("");
+        setLoading(false);
+        saveUrl(workspaceId, "");
+        if (createdRef.current) {
+          try {
+            await invoke("browser_navigate", { workspaceId, url: BLANK_URL });
+          } catch (e) {
+            console.error("browser_navigate failed:", e);
+          }
+        } else {
+          pendingNavRef.current = BLANK_URL;
+        }
+        return;
+      }
 
       if (!normalized.startsWith("http://") && !normalized.startsWith("https://")) {
         if (normalized.includes(".") && !normalized.includes(" ")) {
@@ -662,7 +692,17 @@ export function BrowserPaneComponent({
     const el = placeholderRef.current;
     if (!el) return null;
     const rect = el.getBoundingClientRect();
-    return { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
+    // Inset by 1px on the left and right so the dockview group separators
+    // (1px lines between this pane and its horizontal neighbors) stay
+    // visible. The native WebContentsView is an OS-level layer that floats
+    // above the React DOM, so without these insets it draws on top of the
+    // separators on either side.
+    return {
+      x: rect.left + 1,
+      y: rect.top,
+      width: Math.max(0, rect.width - 2),
+      height: rect.height,
+    };
   }, []);
 
   const invoke = useCallback(async (cmd: string, args?: Record<string, unknown>) => {
@@ -949,7 +989,25 @@ export function BrowserPaneComponent({
   const handleNavigate = useCallback(
     async (rawUrl: string) => {
       let normalized = rawUrl.trim();
-      if (!normalized) return;
+
+      // Empty input — load a blank page and clear the address bar.
+      // The `browser-url-changed` listener filters out `about:blank`,
+      // so the input stays visibly empty after the navigation lands.
+      if (!normalized) {
+        setCurrentUrl("");
+        setInputUrl("");
+        setLoading(false);
+        if (createdRef.current) {
+          try {
+            await invoke("browser_navigate", { browserId, url: BLANK_URL });
+          } catch (e) {
+            console.error("browser_navigate failed:", e);
+          }
+        } else {
+          pendingNavRef.current = BLANK_URL;
+        }
+        return;
+      }
 
       if (!normalized.startsWith("http://") && !normalized.startsWith("https://")) {
         if (normalized.includes(".") && !normalized.includes(" ")) {

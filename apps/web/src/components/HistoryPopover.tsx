@@ -251,7 +251,7 @@ export function HistoryPopover({ workspaceId, onNavigate }: HistoryPopoverProps)
                   {group.entries.map((entry) => (
                     <li
                       key={entry.id}
-                      className="group flex items-center gap-2 px-3 py-1.5 hover:bg-accent/60"
+                      className="group relative flex min-w-0 items-center gap-2 py-1.5 pl-3 pr-2 hover:bg-accent/60"
                     >
                       {entry.faviconUrl ? (
                         <img
@@ -265,25 +265,48 @@ export function HistoryPopover({ workspaceId, onNavigate }: HistoryPopoverProps)
                       ) : (
                         <Globe className="size-4 shrink-0 text-muted-foreground" />
                       )}
+                      {/* Content button fills the row (no flex sibling on
+                          the right) so the URL row's time can sit flush
+                          against `pr-2` of the li. The trash button is
+                          absolutely positioned below — it does not reserve
+                          flow width, and it fades in on hover to swap
+                          places with the time. */}
                       <button
                         type="button"
                         onClick={() => handleNavigate(entry.url)}
-                        className="flex min-w-0 flex-1 flex-col text-left"
+                        // `items-stretch` is required to override the
+                        // UA default `align-items: flex-start` on
+                        // `<button>` elements, which would otherwise
+                        // keep child rows at their content width and
+                        // prevent the URL row from spanning the full
+                        // button — leaving the right-aligned time
+                        // glued to the URL instead of the row's edge.
+                        //
+                        // `pr-6` reserves space on the right so the
+                        // absolutely-positioned trash button (~18px wide
+                        // at `right-2`) doesn't visually land on top of
+                        // the title or time when it fades in on hover.
+                        className="flex min-w-0 flex-1 flex-col items-stretch gap-0.5 overflow-hidden pr-6 text-left"
                       >
-                        <span className="truncate text-sm font-medium leading-tight text-foreground">
+                        <span className="block truncate text-sm font-medium leading-tight text-foreground">
                           {entry.title || entry.url}
                         </span>
-                        <span className="truncate text-xs leading-tight text-muted-foreground">
-                          {entry.url}
+                        {/* URL + time share a row. `min-w-0 flex-1 truncate`
+                            on the URL guarantees the right-aligned time
+                            (`shrink-0`) never gets pushed off the row. */}
+                        <span className="flex min-w-0 items-baseline gap-2 leading-tight">
+                          <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+                            {entry.url}
+                          </span>
+                          <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
+                            {timeFor(entry.lastVisitedAt)}
+                          </span>
                         </span>
                       </button>
-                      <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-                        {timeFor(entry.lastVisitedAt)}
-                      </span>
                       <button
                         type="button"
                         onClick={() => handleDelete(entry.id)}
-                        className="rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
                         title="Delete entry"
                         aria-label="Delete entry"
                       >
