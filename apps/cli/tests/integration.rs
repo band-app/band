@@ -2991,14 +2991,19 @@ fn skills_install_surfaces_conflict_when_dangling_symlink_exists() {
         .as_array()
         .expect("conflicts");
     assert!(
-        conflicts.iter().any(|c| c["path"].as_str() == Some(link.to_str().unwrap())
-            && c["reason"].as_str().unwrap_or("").contains("broken")),
+        conflicts
+            .iter()
+            .any(|c| c["path"].as_str() == Some(link.to_str().unwrap())
+                && c["reason"].as_str().unwrap_or("").contains("broken")),
         "expected broken-symlink conflict for {} in {conflicts:?}",
         link.display()
     );
     // The dangling symlink is left in place — no overwrite.
     let meta = fs::symlink_metadata(&link).expect("metadata");
-    assert!(meta.file_type().is_symlink(), "link should still be a symlink");
+    assert!(
+        meta.file_type().is_symlink(),
+        "link should still be a symlink"
+    );
     assert!(
         fs::canonicalize(&link).is_err(),
         "link should still be dangling"
