@@ -120,6 +120,16 @@ export class BrowserViewManager {
    * isn't on the public typings of this version).
    */
   private readonly visibleByKey = new Map<string, boolean>();
+  /**
+   * Per-tab snapshot of the audio-muted flag taken at the start of a
+   * freeze cycle. `pauseMedia` records the current value here before
+   * forcing the tab to mute; `resumeMedia` reads it back and only
+   * clears the mute if the tab was unmuted before the freeze. Without
+   * this, a tab the user had explicitly muted (right-click → Mute Tab,
+   * or a script call) would be silently un-muted by every freeze
+   * cycle.
+   */
+  private readonly preFreezeMutedByKey = new Map<string, boolean>();
 
   constructor(private readonly opts: ViewManagerOptions) {}
 
@@ -370,9 +380,14 @@ export class BrowserViewManager {
    *     microseconds per tab and avoids a roundtrip to check first.
    */
   async pauseMedia(args: BrowserKeyArg): Promise<void> {
-    const view = this.views.get(browserKey(args));
+    const key = browserKey(args);
+    const view = this.views.get(key);
     if (!view) return;
     try {
+      // Capture the user's pre-freeze mute intent so `resumeMedia`
+      // can restore it. A tab the user manually muted should stay
+      // muted after the overlay closes.
+      this.preFreezeMutedByKey.set(key, view.webContents.isAudioMuted());
       view.webContents.setAudioMuted(true);
       await view.webContents.executeJavaScript(
         `(() => {
@@ -391,7 +406,8 @@ export class BrowserViewManager {
   }
 
   async resumeMedia(args: BrowserKeyArg): Promise<void> {
-    const view = this.views.get(browserKey(args));
+    const key = browserKey(args);
+    const view = this.views.get(key);
     if (!view) return;
     try {
       await view.webContents.executeJavaScript(
@@ -411,12 +427,16 @@ export class BrowserViewManager {
     } catch {
       // Best-effort — JS sweep may fail on a crashed renderer.
     }
-    // Unmute unconditionally, even if the JS sweep above threw —
-    // the Chromium-level mute is independent of page state and
-    // must always be cleared, otherwise the tab is left
-    // permanently silent until the next overlay cycle.
+    // Restore the pre-freeze mute state. We only flip it back to
+    // unmuted if the tab was unmuted before the freeze; if the user
+    // had explicitly muted it (or never went through `pauseMedia`,
+    // i.e. no entry in the map), leave it alone. This runs
+    // regardless of whether the JS sweep above threw, so a crashed
+    // renderer can't leave the tab stuck in our forced-mute state.
     try {
-      view.webContents.setAudioMuted(false);
+      const wasMuted = this.preFreezeMutedByKey.get(key) ?? false;
+      this.preFreezeMutedByKey.delete(key);
+      if (!wasMuted) view.webContents.setAudioMuted(false);
     } catch {
       // View may have been destroyed between the JS call and here.
     }
