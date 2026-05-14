@@ -18,9 +18,12 @@ import type { ArrowDirection } from "../lib/terminal-selection";
  * Floating accessory toolbar rendered above the iOS virtual keyboard inside the
  * terminal panel. Has two layouts that swap based on `selectionMode`:
  *
- * - **Idle** (`selectionMode === false`): Copy · Paste · Select All · Esc ·
- *   Tab · Ctrl · ← → ↑ ↓ (arrows send ANSI escape sequences to the PTY,
- *   identical to a hardware arrow press).
+ * - **Idle** (`selectionMode === false`): Paste · Select All · Esc · Tab ·
+ *   Ctrl · ← → ↑ ↓ (arrows send ANSI escape sequences to the PTY,
+ *   identical to a hardware arrow press). No Copy in idle mode — there's
+ *   no way to make a selection from idle without entering selection mode
+ *   (long-press, or Select All which delegates to the parent's
+ *   `onSelectAll` callback to flip into selection mode immediately).
  *
  * - **Selecting** (`selectionMode === true`): Copy · Done · ← → ↑ ↓ (arrows
  *   extend the highlighted selection one cell at a time; the parent owns the
@@ -59,6 +62,10 @@ export interface TerminalToolbarProps {
   onExtendSelection: (direction: ArrowDirection) => void;
   /** Called when the user dismisses selection mode (Done, or Copy). */
   onExitSelection: () => void;
+  /** Called when the idle-mode "Select All" button is tapped. The parent
+   *  highlights every cell in the buffer and flips into selection mode, so
+   *  the user can immediately Copy via the selection-mode toolbar. */
+  onSelectAll: () => void;
 }
 
 // ANSI / CSI escape sequences for the keys the iOS soft keyboard omits.
@@ -79,6 +86,7 @@ export function TerminalToolbar({
   selectionMode,
   onExtendSelection,
   onExitSelection,
+  onSelectAll,
 }: TerminalToolbarProps) {
   const { enabled, bottomOffset } = useVirtualKeyboardToolbar();
 
@@ -93,8 +101,9 @@ export function TerminalToolbar({
     if (!ok) console.warn("[TerminalToolbar] clipboard write failed");
   }, [terminal]);
 
-  // Copy *and* exit selection mode in one tap. Used by the selection-mode
-  // Copy button; the idle Copy button just calls handleCopy.
+  // Copy *and* exit selection mode in one tap. The only Copy button lives
+  // in the selection-mode layout; idle mode has no Copy (there's no way to
+  // make a selection without first entering selection mode anyway).
   const handleCopyAndExit = useCallback(async () => {
     await handleCopy();
     onExitSelection();
@@ -109,13 +118,6 @@ export function TerminalToolbar({
     const text = await readClipboardText();
     if (text) sendInput(text);
   }, [sendInput]);
-
-  const handleSelectAll = useCallback(() => {
-    terminal.selectAll();
-    // selectAll() does not move focus; re-focus so subsequent toolbar Copy
-    // works without an intermediate tap.
-    terminal.focus();
-  }, [terminal]);
 
   // Memoized button lists so identities are stable across re-renders.
   const idleKeyButtons = useMemo(
@@ -214,15 +216,12 @@ export function TerminalToolbar({
           </>
         ) : (
           <>
-            <ToolbarButton
-              ariaLabel="Copy selection"
-              title="Copy"
-              onPointerDown={tap(handleCopy)}
-              disabled={!terminal.hasSelection()}
-            >
-              <ClipboardCopy className="size-4" />
-              <span className="text-xs">Copy</span>
-            </ToolbarButton>
+            {/* No idle-mode Copy: there's no way to make a selection without
+             *  entering selection mode (long-press or Select All), so an
+             *  idle Copy button is always either disabled or stale (the
+             *  toolbar doesn't re-render on xterm selection changes). Copy
+             *  lives in the selection-mode layout where it's reachable
+             *  immediately after creating a selection. */}
             <ToolbarButton
               ariaLabel="Paste from clipboard"
               title="Paste"
@@ -234,7 +233,10 @@ export function TerminalToolbar({
             <ToolbarButton
               ariaLabel="Select all"
               title="Select all"
-              onPointerDown={tap(handleSelectAll)}
+              // Delegates to the parent so the highlight is paired with a
+              // mode flip into selection-mode — otherwise the user would
+              // see a selection but have no UI to copy it.
+              onPointerDown={tap(onSelectAll)}
             >
               <TextCursorInput className="size-4" />
               <span className="text-xs">All</span>

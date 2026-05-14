@@ -150,6 +150,7 @@ function mount(props: {
   selectionMode?: boolean;
   onExtendSelection?: (direction: "left" | "right" | "up" | "down") => void;
   onExitSelection?: () => void;
+  onSelectAll?: () => void;
 }): { container: HTMLDivElement; root: Root } {
   const container = document.createElement("div");
   document.body.appendChild(container);
@@ -165,6 +166,7 @@ function mount(props: {
         selectionMode: props.selectionMode ?? false,
         onExtendSelection: props.onExtendSelection ?? (() => {}),
         onExitSelection: props.onExitSelection ?? (() => {}),
+        onSelectAll: props.onSelectAll ?? (() => {}),
       }),
     );
   });
@@ -348,31 +350,12 @@ describe("TerminalToolbar – clipboard actions", () => {
     }
   });
 
-  it("Copy writes the terminal selection to the clipboard", async () => {
+  it("idle toolbar has no Copy button (Copy lives in selection mode)", () => {
     const term = makeFakeTerminal("hello world");
     const { container, root } = mount({ terminal: term, sendInput: () => {} });
-    const copyBtn = container.querySelector(
-      "button[aria-label='Copy selection']",
-    ) as HTMLButtonElement;
-    expect(copyBtn).not.toBeNull();
-    expect(copyBtn.disabled).toBe(false);
-    await act(async () => {
-      dispatchPointerDown(copyBtn);
-      // Microtask flush so the async handler resolves before we assert.
-      await Promise.resolve();
-    });
-    expect(writeText).toHaveBeenCalledTimes(1);
-    expect(writeText).toHaveBeenCalledWith("hello world");
-    unmount(root, container);
-  });
-
-  it("Copy button is disabled when there is no selection", () => {
-    const term = makeFakeTerminal("");
-    const { container, root } = mount({ terminal: term, sendInput: () => {} });
-    const copyBtn = container.querySelector(
-      "button[aria-label='Copy selection']",
-    ) as HTMLButtonElement;
-    expect(copyBtn.disabled).toBe(true);
+    // Aria labels for Copy in either mode.
+    expect(container.querySelector("button[aria-label='Copy selection']")).toBeNull();
+    expect(container.querySelector("button[aria-label='Copy selection and exit']")).toBeNull();
     unmount(root, container);
   });
 
@@ -414,15 +397,23 @@ describe("TerminalToolbar – clipboard actions", () => {
     unmount(root, container);
   });
 
-  it("Select All asks xterm to select everything and re-focuses", () => {
+  it("Select All delegates to onSelectAll (parent flips into selection mode)", () => {
+    const onSelectAll = vi.fn();
     const term = makeFakeTerminal();
-    const { container, root } = mount({ terminal: term, sendInput: () => {} });
+    const { container, root } = mount({
+      terminal: term,
+      sendInput: () => {},
+      onSelectAll,
+    });
     const allBtn = container.querySelector("button[aria-label='Select all']") as HTMLButtonElement;
     act(() => {
       dispatchPointerDown(allBtn);
     });
-    expect(term.selectAllCalls).toBe(1);
-    expect(term.focusCalls).toBe(1);
+    // The toolbar no longer pokes the terminal directly — the parent owns
+    // both the selection-state flip and the actual xterm call. We only
+    // assert that the prop fired.
+    expect(onSelectAll).toHaveBeenCalledTimes(1);
+    expect(term.selectAllCalls).toBe(0);
     unmount(root, container);
   });
 });

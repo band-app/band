@@ -208,6 +208,24 @@ export function TerminalPanel({
     selectionHeadRef.current = next;
     applySelection(terminal, anchor, next);
   }, []);
+  // Select All from the idle toolbar: highlight every cell in the buffer
+  // AND enter selection mode, so the user immediately sees the Copy / Done
+  // controls. Without the mode flip, Select All would visually select but
+  // leave the user with no way to copy.
+  const handleSelectAll = useCallback(() => {
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    const anchor: Cell = { col: 0, row: 0 };
+    const lastRow = Math.max(0, terminal.buffer.active.length - 1);
+    const head: Cell = { col: Math.max(0, terminal.cols - 1), row: lastRow };
+    applySelection(terminal, anchor, head);
+    selectionAnchorRef.current = anchor;
+    selectionHeadRef.current = head;
+    setSelectionMode(true);
+    // Same rationale as the long-press path: drop the iOS keyboard so the
+    // toolbar isn't squeezed against the bottom.
+    terminal.blur();
+  }, []);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -832,6 +850,7 @@ export function TerminalPanel({
           selectionMode={selectionMode}
           onExtendSelection={handleExtendSelection}
           onExitSelection={exitSelectionMode}
+          onSelectAll={handleSelectAll}
         />
       )}
     </div>
