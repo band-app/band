@@ -206,8 +206,12 @@ export interface InstallSkillsResult {
    */
   conflicts: string[];
   /**
-   * Per-agent skill paths that were skipped because no band binary
-   * could be located (so no shared skills exist to link to).
+   * Shared-directory SKILL.md paths that were skipped because no band
+   * binary could be located on this host (so the install can't run at
+   * all). Always one entry per skill in `BAND_SKILL_NAMES` (i.e. exactly
+   * 6 today) — *not* one entry per (agent × skill) pair, because the
+   * shared layout means there is one canonical path regardless of how
+   * many agents would have been linked.
    */
   skipped: string[];
 }
