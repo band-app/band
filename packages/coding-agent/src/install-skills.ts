@@ -156,7 +156,11 @@ export function getAgentConfigDir(type: string, home: string = homedir()): strin
     case "openai-codex":
       // Both adapters share `$CODEX_HOME` (default `~/.codex`). Honor
       // the env override at call time so test overrides take effect.
-      return process.env.CODEX_HOME ?? join(home, ".codex");
+      // Use `||` instead of `??` so an empty-string `$CODEX_HOME=` is
+      // treated as unset rather than being returned as `""` (which would
+      // explode at the first `statSync`). Matches the Rust
+      // `codex_home()` helper's `!val.is_empty()` check.
+      return process.env.CODEX_HOME || join(home, ".codex");
     case "gemini-cli":
       return join(home, ".gemini");
     case "opencode":

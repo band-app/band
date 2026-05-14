@@ -390,15 +390,6 @@ interface EnsureSymlinkArgs {
   link: string;
   target: string;
   log?: InstallSkillsOptions["log"];
-  /**
-   * Internal flag set by the EEXIST recovery branch to prevent unbounded
-   * recursion if the filesystem is in a pathological state (e.g. `lstat`
-   * consistently reports ENOENT but `symlink` consistently returns
-   * EEXIST). One retry is enough for the realistic TOCTOU race; if the
-   * second attempt still hits EEXIST we surface a conflict rather than
-   * looping forever on the boot path.
-   */
-  _retried?: boolean;
 }
 
 type EnsureSymlinkOutcome =
@@ -423,6 +414,13 @@ type EnsureSymlinkOutcome =
  * intentionally maintaining. "Refuse and log" is the safe default.
  */
 function ensureSymlink(args: EnsureSymlinkArgs): EnsureSymlinkOutcome {
+  // `_retried` is a private recursion guard set only by this function
+  // when the EEXIST recovery branch re-enters. Kept off the public
+  // `EnsureSymlinkArgs` interface so external callers can't supply it.
+  return ensureSymlinkInner(args, false);
+}
+
+function ensureSymlinkInner(args: EnsureSymlinkArgs, retried: boolean): EnsureSymlinkOutcome {
   const { link, target } = args;
 
   // Ensure the parent directory of the link exists. Creating it is
@@ -456,7 +454,7 @@ function ensureSymlink(args: EnsureSymlinkArgs): EnsureSymlinkOutcome {
       // the lstat path above. Any non-EEXIST error is propagated as a
       // conflict, matching the lstat-failure branch.
       if ((err as NodeJS.ErrnoException).code === "EEXIST") {
-        if (args._retried) {
+        if (retried) {
           // Second EEXIST in a row means the filesystem is reporting
           // contradictory state (lstat says ENOENT, symlink says EEXIST).
           // Bail out rather than recurse indefinitely on the boot path.
@@ -465,7 +463,7 @@ function ensureSymlink(args: EnsureSymlinkArgs): EnsureSymlinkOutcome {
             reason: "EEXIST after retry — filesystem state is inconsistent",
           };
         }
-        return ensureSymlink({ ...args, _retried: true });
+        return ensureSymlinkInner(args, true);
       }
       return {
         kind: "conflict",

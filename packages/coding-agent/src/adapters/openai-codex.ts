@@ -211,7 +211,11 @@ export const OPENAI_CODEX_DEFAULT_BINARY = "codex";
  * See https://developers.openai.com/codex/skills.
  */
 export function getOpenAICodexInstallSkillsDir(home: string = homedir()): string {
-  const codexHome = process.env.CODEX_HOME ?? join(home, ".codex");
+  // `||` (not `??`) so empty-string `$CODEX_HOME=` falls back to
+  // `~/.codex` instead of returning `"/skills"`. Matches the module-level
+  // `CODEX_HOME` constant above (which uses `||`) and the Rust
+  // `codex_home()` helper.
+  const codexHome = process.env.CODEX_HOME || join(home, ".codex");
   return join(codexHome, "skills");
 }
 

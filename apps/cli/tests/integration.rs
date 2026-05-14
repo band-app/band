@@ -2924,6 +2924,12 @@ fn skills_install_dedupes_codex_and_openai_codex() {
     assert_eq!(result["symlinks"]["linked"].as_array().unwrap().len(), 12);
 }
 
+// The conflict path relies on `std::os::unix::fs::symlink` to plant a
+// decoy, so it only exercises a meaningful scenario on unix. Gating the
+// whole test on `#[cfg(unix)]` avoids it silently passing-by-omission on
+// other platforms (which would make a Windows-port regression invisible
+// here).
+#[cfg(unix)]
 #[test]
 fn skills_install_surfaces_conflict_when_wrong_target_symlink_exists() {
     let tmp = skills_sandbox(&[".claude"]);
@@ -2935,7 +2941,6 @@ fn skills_install_surfaces_conflict_when_wrong_target_symlink_exists() {
     let claude_skills = home.join(".claude").join("skills");
     fs::create_dir_all(&claude_skills).expect("create skills dir");
     let link = claude_skills.join("band");
-    #[cfg(unix)]
     std::os::unix::fs::symlink(&decoy, &link).expect("plant decoy symlink");
 
     let result = run_install_json(home);

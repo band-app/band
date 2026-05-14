@@ -515,7 +515,11 @@ export const CODEX_DEFAULT_BINARY = "codex";
  * value. See https://developers.openai.com/codex/skills.
  */
 export function getCodexInstallSkillsDir(home: string = homedir()): string {
-  const codexHome = process.env.CODEX_HOME ?? join(home, ".codex");
+  // `||` (not `??`) so empty-string `$CODEX_HOME=` falls back to
+  // `~/.codex` instead of returning `"/skills"`. Module-level
+  // `CODEX_HOME` at the bottom of this file already uses the same
+  // guard; keep both consistent.
+  const codexHome = process.env.CODEX_HOME || join(home, ".codex");
   return join(codexHome, "skills");
 }
 
