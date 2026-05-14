@@ -49,4 +49,34 @@ The Band CLI ships **six domain-specific skills**, each generated from its own t
 
 Reference-shaped templates (e.g. `band`, `band-chat`, `band-terminal`, `band-browser`) have a `commands:` frontmatter field listing comma-separated CLI command-name prefixes, plus a `<!-- COMMANDS -->` placeholder in the body; the generator filters the schema by those prefixes and splices the rendered Commands section into the placeholder. Workflow-shaped templates (e.g. `band-start`, `band-loop`) are self-contained recipes — they omit both `commands:` and the placeholder, and the generator emits the template body verbatim. The split improves trigger precision and keeps each generated SKILL.md scoped to one task type (issue #331).
 
-Run `band generate-skills --output-dir apps/cli/skills` to regenerate all six skills, then copy each `<name>/SKILL.md` to `~/.claude/skills/<name>/SKILL.md`.
+### Installed skill layout (shared + symlinks)
+
+Skills are installed once into a canonical, agent-agnostic location and then linked into each detected coding-agent's skills directory:
+
+```
+~/.agents/skills/<name>/SKILL.md          ← canonical content (one copy)
+~/.claude/skills/<name>            → ../../.agents/skills/<name>     (symlink)
+~/.codex/skills/<name>             → ../../.agents/skills/<name>     (symlink)
+~/.gemini/skills/<name>            → ../../.agents/skills/<name>     (symlink)
+~/.config/opencode/skills/<name>   → ../../../.agents/skills/<name>  (symlink)
+```
+
+Editing a `SKILL.md` in `~/.agents/skills/` is reflected in every linked agent without re-running the installer.
+
+**Supported coding agents** (Band creates a symlink for each one whose config dir is present on the host):
+
+| Agent type     | Detected via         | Skills dir                       |
+| -------------- | -------------------- | -------------------------------- |
+| `claude-code`  | `~/.claude/` exists  | `~/.claude/skills/`              |
+| `codex`        | `~/.codex/` exists (`$CODEX_HOME` honored) | `~/.codex/skills/` |
+| `openai-codex` | shares `~/.codex/`   | `~/.codex/skills/` (deduped)     |
+| `gemini-cli`   | `~/.gemini/` exists  | `~/.gemini/skills/`              |
+| `opencode`     | `~/.config/opencode/` exists | `~/.config/opencode/skills/` |
+
+`cursor-cli` is deliberately excluded — Cursor has no documented user-scope skills directory.
+
+The list of supported agents lives in `packages/coding-agent/src/install-skills.ts::SUPPORTED_AGENT_TYPES` (a single place to update when a new agent adds skills support). The sync logic lives in `apps/web/src/lib/cli-skills.ts::installSkills` and runs on every server boot from `runFirstTimeSetup` — idempotent: an existing symlink pointing at the right shared dir is left alone, an existing symlink pointing elsewhere (or a real directory occupying the path) is reported as a conflict rather than overwritten.
+
+### Manual regeneration
+
+Run `band generate-skills --output-dir apps/cli/skills` to regenerate all six skill files in-repo. At runtime the Band web server invokes the same subcommand and writes the result into `~/.agents/skills/` — no manual copy step is needed.

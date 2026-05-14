@@ -1,4 +1,5 @@
 import { homedir } from "node:os";
+import { join } from "node:path";
 
 /**
  * Resolve the *highest-priority global* skills directory for a coding-agent
@@ -84,6 +85,76 @@ export async function getDefaultAgentBinary(type: string): Promise<string | null
       const { OPENCODE_DEFAULT_BINARY } = await import("./adapters/opencode.js");
       return OPENCODE_DEFAULT_BINARY;
     }
+    default:
+      return null;
+  }
+}
+
+/**
+ * The canonical, agent-agnostic location for Band's shipped skills. Each
+ * skill is installed *once* as `~/.agents/skills/<name>/SKILL.md`; the
+ * per-agent skill directories (e.g. `~/.claude/skills/<name>`) are then
+ * created as directory-level symlinks pointing back here.
+ *
+ * The shared layout means:
+ *
+ *   1. Skill content lives in one place — editing a SKILL.md updates every
+ *      agent that's been linked, without re-running the installer.
+ *   2. No `mkdir`-then-copy fan-out across N agent directories on every
+ *      boot. Idempotency simplifies to "is the symlink already correct?".
+ *   3. The destination follows the tool-agnostic convention already
+ *      documented by OpenCode and Gemini CLI as their lowest-priority
+ *      shared skills root (see the adapter doc-comments). Other agents
+ *      that adopt the convention later don't need adapter changes — only
+ *      a new entry in `SUPPORTED_AGENT_TYPES`.
+ */
+export function getSharedSkillsDir(home: string = homedir()): string {
+  return join(home, ".agents", "skills");
+}
+
+/**
+ * Agent types Band knows how to link into. Each entry must have an
+ * `install-skills-dir` documented by its adapter (`getInstallSkillsDir`
+ * returns a non-null path) — otherwise there's nowhere to put the
+ * symlink. `cursor-cli` is deliberately omitted because the Cursor CLI
+ * has no documented user-scope skills directory at the time of writing.
+ *
+ * Order is informational only: the linker iterates this list once and
+ * skips any agent that isn't detected on the host.
+ */
+export const SUPPORTED_AGENT_TYPES = [
+  "claude-code",
+  "codex",
+  "openai-codex",
+  "gemini-cli",
+  "opencode",
+] as const;
+
+export type SupportedAgentType = (typeof SUPPORTED_AGENT_TYPES)[number];
+
+/**
+ * Filesystem path of the *parent* config directory the agent owns —
+ * `~/.claude` for Claude Code, `~/.codex` for Codex, etc. Used by the
+ * linker to detect "is this agent installed on this machine?" without
+ * shelling out: if the directory exists, the agent has been configured
+ * here at some point and is a legitimate link target.
+ *
+ * Returns `null` for unknown types so callers can no-op rather than
+ * crash if the supported-agents list ever drifts ahead of the switch.
+ */
+export function getAgentConfigDir(type: string, home: string = homedir()): string | null {
+  switch (type) {
+    case "claude-code":
+      return join(home, ".claude");
+    case "codex":
+    case "openai-codex":
+      // Both adapters share `$CODEX_HOME` (default `~/.codex`). Honor
+      // the env override at call time so test overrides take effect.
+      return process.env.CODEX_HOME ?? join(home, ".codex");
+    case "gemini-cli":
+      return join(home, ".gemini");
+    case "opencode":
+      return join(home, ".config", "opencode");
     default:
       return null;
   }
