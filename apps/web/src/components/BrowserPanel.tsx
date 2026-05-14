@@ -2,10 +2,13 @@ import type { IDockviewPanelProps } from "dockview";
 import { ArrowLeft, ArrowRight, RotateCw, Wrench, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useBrowserPaneControls } from "../hooks/useBrowserPaneControls";
+import { useBrowserPaneFreeze } from "../hooks/useBrowserPaneFreeze";
 import { invoke as desktopInvoke, listen as desktopListen } from "../lib/desktop-ipc";
 import { isDesktop } from "../lib/is-desktop";
 import { trpc } from "../lib/trpc-client";
+import { AddressBarAutocomplete } from "./AddressBarAutocomplete";
 import { BrowserFindBar } from "./BrowserFindBar";
+import { HistoryPopover } from "./HistoryPopover";
 
 const DEFAULT_URL = "";
 const BLANK_URL = "about:blank";
@@ -92,6 +95,17 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
   workspaceIdRef.current = workspaceId;
   const currentUrlRef = useRef(currentUrl);
   currentUrlRef.current = currentUrl;
+  // Freeze on overlay — captures a snapshot + hides the native view
+  // while any popover / dialog / dropdown is open. `snapshot` is
+  // the JPEG data URL to paint into the placeholder. Shared with
+  // `BrowserPaneComponent` via the `useBrowserPaneFreeze` hook.
+  const ipcKeyRef = useRef({ workspaceId });
+  ipcKeyRef.current = { workspaceId };
+  const { snapshot } = useBrowserPaneFreeze({
+    created,
+    visible: api.isActive && params.wsActive !== false,
+    ipcKeyRef,
+  });
   // `addressInputFocusedRef` is now owned by `useBrowserPaneControls`
   // — it's destructured back out below and read inside the
   // `browser-url-changed` listener to skip clobbering an in-progress
@@ -195,10 +209,11 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
   // biome-ignore lint/correctness/useExhaustiveDependencies: see above
   useEffect(() => {
     if (!isDesktop) return;
-    let unlisten: (() => void) | undefined;
+    let unlistenUrl: (() => void) | undefined;
+    let unlistenTitle: (() => void) | undefined;
 
     (async () => {
-      unlisten = await desktopListen<{
+      unlistenUrl = await desktopListen<{
         url: string;
         workspace_id: string;
         loading: boolean;
@@ -218,11 +233,50 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
           setInputUrl(url);
         }
         saveUrl(workspaceIdRef.current, url);
+
+        // Record committed navigations into the per-workspace history.
+        // `loading=false` is the "load finished" signal; `did-start-
+        // navigation` (`loading=true`) intentionally does NOT record
+        // because the URL there can be wrong for redirect chains —
+        // we'd insert an intermediate hop and never resolve to the
+        // real destination's title. Server-side filtering rejects
+        // about:blank / chrome-extension / devtools / file URLs.
+        if (!event.payload.loading) {
+          let favicon: string | undefined;
+          try {
+            favicon = `${new URL(url).origin}/favicon.ico`;
+          } catch {
+            // not a valid URL — leave favicon undefined
+          }
+          trpc.history.record
+            .mutate({ workspaceId: workspaceIdRef.current, url, faviconUrl: favicon })
+            .catch(() => {});
+        }
+      });
+
+      // Backfill the title onto the most recent history row for this
+      // URL as soon as Chromium resolves it (typically 100-2000ms
+      // after the URL commit).
+      unlistenTitle = await desktopListen<{
+        workspace_id: string;
+        title: string;
+      }>("browser-title-changed", (event) => {
+        if (event.payload.workspace_id !== workspaceIdRef.current) return;
+        const url = currentUrlRef.current;
+        if (!url || url === BLANK_URL) return;
+        trpc.history.updateMeta
+          .mutate({
+            workspaceId: workspaceIdRef.current,
+            url,
+            title: event.payload.title,
+          })
+          .catch(() => {});
       });
     })();
 
     return () => {
-      unlisten?.();
+      unlistenUrl?.();
+      unlistenTitle?.();
     };
   }, []);
 
@@ -390,10 +444,12 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
     handleAddressKeyDown,
     handlePaneKeyDown,
     handleToggleDevTools,
+    autocomplete,
     paneDataAttrs,
   } = useBrowserPaneControls({
     key: workspaceId,
     keyName: "workspaceId",
+    workspaceId,
     currentUrlRef,
     setInputUrl,
     inputUrl,
@@ -483,6 +539,7 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
           // find-bar's search input.
           data-band-address-input=""
         />
+        <HistoryPopover workspaceId={workspaceId} onNavigate={handleNavigate} />
         <button
           type="button"
           onClick={handleToggleDevTools}
@@ -502,6 +559,13 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
             />
           </div>
         )}
+        {/* History autocomplete — absolutely positioned under the
+            address-bar row (which is `relative`). Opening it
+            registers a freeze hold via `useFreezeWhile` in
+            `useBrowserPaneControls`, so the WebContentsView is
+            replaced with a snapshot raster underneath and this
+            dropdown sits cleanly on top. Mirrors Chrome's omnibox. */}
+        <AddressBarAutocomplete state={autocomplete} onSelect={handleNavigate} />
       </div>
 
       {/* Find-in-page bar (Cmd+F / Ctrl+F) — slots between the address bar
@@ -510,7 +574,36 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
       <BrowserFindBar find={find} />
 
       {/* Placeholder – the native webview is positioned over this area */}
-      <div ref={placeholderRef} className="min-h-0 flex-1" />
+      <div ref={placeholderRef} className="relative min-h-0 flex-1">
+        {snapshot ? (
+          // Frozen raster shown while any overlay is open. See
+          // `lib/browser-pane-freeze.ts`.
+          //
+          // `object-contain object-top` (not `object-cover`):
+          //   - When the tab has docked DevTools, `capturePage`
+          //     returns just the *page view*'s pixels — DevTools is a
+          //     sibling `WebContentsView` and isn't part of the
+          //     capture. The placeholder div, however, spans the
+          //     whole tab area (page + DevTools). With `object-cover`
+          //     the image would stretch to fill both, distorting the
+          //     page visibly. With `object-contain object-top` the
+          //     image scales preserving aspect ratio and pins to the
+          //     top edge, so the page sits exactly where it was and
+          //     the DevTools strip below stays empty (DevTools is
+          //     hidden by the same `browser_hide` call). Without
+          //     DevTools, aspects match the placeholder and `contain`
+          //     gives the same result as `cover`.
+          //   - Followup if it becomes annoying: also capture the
+          //     DevTools view and stack a second `<img>` below, so
+          //     the docked panel doesn't vanish either.
+          <img
+            src={snapshot}
+            alt=""
+            className="pointer-events-none absolute inset-0 size-full object-contain object-top"
+            draggable={false}
+          />
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -527,7 +620,7 @@ export function BrowserPaneComponent({
   params: BrowserPaneParams;
   api: IDockviewPanelProps<BrowserPaneParams>["api"];
 }) {
-  const { browserId, initialUrl } = params;
+  const { browserId, initialUrl, workspaceId: workspaceIdParam } = params;
 
   const [currentUrl, setCurrentUrl] = useState(() => initialUrl ?? DEFAULT_URL);
   const [inputUrl, setInputUrl] = useState(() => initialUrl ?? DEFAULT_URL);
@@ -541,6 +634,23 @@ export function BrowserPaneComponent({
   browserIdRef.current = browserId;
   const currentUrlRef = useRef(currentUrl);
   currentUrlRef.current = currentUrl;
+  // `workspaceId` may be absent on the BrowserPaneParams when the panel
+  // is restored from a saved layout that pre-dates the history feature.
+  // Backfill it lazily from `trpc.browsers.get` so history recording and
+  // autocomplete still know which workspace they belong to. Keep the
+  // value in a ref so listeners read the latest workspace without
+  // re-binding.
+  const [workspaceId, setWorkspaceId] = useState(workspaceIdParam ?? "");
+  const workspaceIdRef = useRef(workspaceId);
+  workspaceIdRef.current = workspaceId;
+  // Freeze on overlay — see `useBrowserPaneFreeze` hook.
+  const ipcKeyRef = useRef({ browserId });
+  ipcKeyRef.current = { browserId };
+  const { snapshot } = useBrowserPaneFreeze({
+    created,
+    visible: api.isVisible && params.wsActive !== false,
+    ipcKeyRef,
+  });
   // `addressInputFocusedRef` is destructured from
   // `useBrowserPaneControls` below and read inside the
   // `browser-url-changed` listener to skip clobbering an in-progress
@@ -572,6 +682,12 @@ export function BrowserPaneComponent({
       .query({ browserId })
       .then((result) => {
         if (cancelled) return;
+        const ws = result.browser?.workspaceId;
+        if (ws && !workspaceIdRef.current) {
+          // Lazy workspace backfill — see comment on `workspaceId`
+          // state above.
+          setWorkspaceId(ws);
+        }
         const url = result.browser?.url;
         if (!url || url === "" || url === BLANK_URL) return;
         setCurrentUrl(url);
@@ -684,11 +800,27 @@ export function BrowserPaneComponent({
         }, 500);
 
         // Try to extract favicon from the URL's origin
+        let faviconForHistory: string | undefined;
         try {
           const origin = new URL(url).origin;
-          setFaviconUrl(browserIdRef.current, `${origin}/favicon.ico`);
+          faviconForHistory = `${origin}/favicon.ico`;
+          setFaviconUrl(browserIdRef.current, faviconForHistory);
         } catch {
           // ignore invalid URLs
+        }
+
+        // Record committed navigations into the per-workspace history.
+        // Gated on `loading=false` so we only capture the final URL
+        // after a redirect chain settles. The server filters
+        // about:blank / chrome-extension / devtools / file URLs.
+        if (!event.payload.loading && workspaceIdRef.current) {
+          trpc.history.record
+            .mutate({
+              workspaceId: workspaceIdRef.current,
+              url,
+              faviconUrl: faviconForHistory,
+            })
+            .catch(() => {});
         }
       });
       unlistenTitle = await desktopListen<{ browser_id: string; title: string }>(
@@ -697,6 +829,20 @@ export function BrowserPaneComponent({
           if (event.payload.browser_id !== browserIdRef.current) return;
           if (event.payload.title) {
             api.setTitle(event.payload.title);
+            // Backfill the title onto the existing history row for the
+            // current URL. `page-title-updated` typically lands
+            // 100-2000ms after `did-stop-loading`, so the row already
+            // exists from the URL listener above.
+            const url = currentUrlRef.current;
+            if (url && url !== BLANK_URL && workspaceIdRef.current) {
+              trpc.history.updateMeta
+                .mutate({
+                  workspaceId: workspaceIdRef.current,
+                  url,
+                  title: event.payload.title,
+                })
+                .catch(() => {});
+            }
           }
         },
       );
@@ -873,10 +1019,12 @@ export function BrowserPaneComponent({
     handleAddressKeyDown,
     handlePaneKeyDown,
     handleToggleDevTools,
+    autocomplete,
     paneDataAttrs,
   } = useBrowserPaneControls({
     key: browserId,
     keyName: "browserId",
+    workspaceId,
     currentUrlRef,
     setInputUrl,
     inputUrl,
@@ -951,6 +1099,9 @@ export function BrowserPaneComponent({
           // find-bar's search input.
           data-band-address-input=""
         />
+        {workspaceId ? (
+          <HistoryPopover workspaceId={workspaceId} onNavigate={handleNavigate} />
+        ) : null}
         <button
           type="button"
           onClick={handleToggleDevTools}
@@ -969,9 +1120,24 @@ export function BrowserPaneComponent({
             />
           </div>
         )}
+        {/* History autocomplete — absolutely positioned under the
+            address-bar row (which is `relative`). See identical block
+            in `BrowserPanelComponent` for the freeze-hold rationale. */}
+        <AddressBarAutocomplete state={autocomplete} onSelect={handleNavigate} />
       </div>
       <BrowserFindBar find={find} />
-      <div ref={placeholderRef} className="min-h-0 flex-1" />
+      <div ref={placeholderRef} className="relative min-h-0 flex-1">
+        {snapshot ? (
+          // `object-contain object-top` — see the identical block in
+          // `BrowserPanelComponent` for the DevTools-aware rationale.
+          <img
+            src={snapshot}
+            alt=""
+            className="pointer-events-none absolute inset-0 size-full object-contain object-top"
+            draggable={false}
+          />
+        ) : null}
+      </div>
     </div>
   );
 }

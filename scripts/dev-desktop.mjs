@@ -122,10 +122,23 @@ function startElectron() {
   if (!detectedPort) return;
   if (!existsSync(mainEntry)) return;
   if (electronProc) return;
+  // Strip `ELECTRON_RUN_AS_NODE` from the inherited env. When that var is
+  // truthy, the Electron binary runs as plain Node.js: it skips its
+  // browser-process bootstrap, doesn't register `"electron"` as a
+  // built-in module, and `require("electron")` falls through to the npm
+  // wrapper (which exports the binary path as a string). The user code
+  // then crashes with `TypeError: Cannot read properties of undefined
+  // (reading 'whenReady')` — or, with ESM main, an NPE deep in Node's
+  // CJS-from-ESM preparser. Same root cause as electron/electron#8200
+  // (2016) and the closing comment on #49018 / #49034. The env var is
+  // set by some agent / IDE shells (notably Claude Code's runtime) for
+  // their own use of Electron's bundled Node; we don't want that
+  // leaking into the dev launch here.
+  const { ELECTRON_RUN_AS_NODE: _eran, ...envWithoutRunAsNode } = process.env;
   electronProc = spawn("pnpm", ["exec", "electron", "."], {
     cwd: desktopDir,
     stdio: "inherit",
-    env: { ...process.env, BAND_DEV_WEB_URL: `http://localhost:${detectedPort}` },
+    env: { ...envWithoutRunAsNode, BAND_DEV_WEB_URL: `http://localhost:${detectedPort}` },
   });
   electronProc.on("exit", (code) => {
     electronProc = null;

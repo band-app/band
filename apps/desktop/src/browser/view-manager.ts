@@ -120,6 +120,16 @@ export class BrowserViewManager {
    * isn't on the public typings of this version).
    */
   private readonly visibleByKey = new Map<string, boolean>();
+  /**
+   * Per-tab snapshot of the audio-muted flag taken at the start of a
+   * freeze cycle. `pauseMedia` records the current value here before
+   * forcing the tab to mute; `resumeMedia` reads it back and only
+   * clears the mute if the tab was unmuted before the freeze. Without
+   * this, a tab the user had explicitly muted (right-click → Mute Tab,
+   * or a script call) would be silently un-muted by every freeze
+   * cycle.
+   */
+  private readonly preFreezeMutedByKey = new Map<string, boolean>();
 
   constructor(private readonly opts: ViewManagerOptions) {}
 
@@ -341,6 +351,132 @@ export class BrowserViewManager {
     const view = this.views.get(browserKey(args));
     if (!view) return;
     view.webContents.stopFindInPage(args.action ?? "clearSelection");
+  }
+
+  /**
+   * Pause / resume media (video + audio) on a tab and toggle the
+   * tab's audio mute. Used by the freeze-on-overlay path: when the
+   * page is about to be swapped for a static snapshot, we want media
+   * to stop — `setVisible(false)` alone is not enough; Chromium
+   * keeps playing the audio track of `<video>` / `<audio>` elements
+   * while their parent view is hidden (the visual frame stops being
+   * composited, but the audio thread carries on). VS Code exhibits
+   * the same "video paused while command palette is open" behaviour
+   * we're matching here.
+   *
+   * Implementation:
+   *
+   *   - `setAudioMuted(true)` is the immediate, robust silence
+   *     primitive. Works for everything — native `<video>`, iframe
+   *     embeds (YouTube etc.), WebAudio, MediaSource streams.
+   *   - `executeJavaScript` then pauses every `<video>` / `<audio>`
+   *     element in the top frame, tagging each with a sentinel
+   *     dataset attribute so the resume path knows which elements
+   *     to restart (vs. ones the page itself had paused). Top-frame
+   *     only — cross-origin iframes (YouTube etc.) can't be
+   *     reached from here, but the mute above already silences them
+   *     so the user-perceived effect is the same.
+   *   - We run the JS even when no media exists; it's a few
+   *     microseconds per tab and avoids a roundtrip to check first.
+   */
+  async pauseMedia(args: BrowserKeyArg): Promise<void> {
+    const key = browserKey(args);
+    const view = this.views.get(key);
+    if (!view) return;
+    try {
+      // Capture the user's pre-freeze mute intent so `resumeMedia`
+      // can restore it. A tab the user manually muted should stay
+      // muted after the overlay closes.
+      this.preFreezeMutedByKey.set(key, view.webContents.isAudioMuted());
+      view.webContents.setAudioMuted(true);
+      await view.webContents.executeJavaScript(
+        `(() => {
+           for (const el of document.querySelectorAll("video, audio")) {
+             if (!el.paused) {
+               el.dataset.__bandFreezeResume = "1";
+               el.pause();
+             }
+           }
+         })();`,
+        true,
+      );
+    } catch {
+      // Best-effort — view may have been destroyed mid-flight.
+    }
+  }
+
+  async resumeMedia(args: BrowserKeyArg): Promise<void> {
+    const key = browserKey(args);
+    const view = this.views.get(key);
+    if (!view) return;
+    try {
+      await view.webContents.executeJavaScript(
+        `(() => {
+           for (const el of document.querySelectorAll("video, audio")) {
+             if (el.dataset.__bandFreezeResume === "1") {
+               delete el.dataset.__bandFreezeResume;
+               // play() returns a Promise that may reject if the page
+               // never had user-gesture grant; swallow so a single
+               // bad element doesn't block the rest.
+               el.play().catch(() => {});
+             }
+           }
+         })();`,
+        true,
+      );
+    } catch {
+      // Best-effort — JS sweep may fail on a crashed renderer.
+    }
+    // Restore the pre-freeze mute state. We only flip it back to
+    // unmuted if the tab was unmuted before the freeze; if the user
+    // had explicitly muted it (or never went through `pauseMedia`,
+    // i.e. no entry in the map), leave it alone. This runs
+    // regardless of whether the JS sweep above threw, so a crashed
+    // renderer can't leave the tab stuck in our forced-mute state.
+    try {
+      const wasMuted = this.preFreezeMutedByKey.get(key) ?? false;
+      this.preFreezeMutedByKey.delete(key);
+      if (!wasMuted) view.webContents.setAudioMuted(false);
+    } catch {
+      // View may have been destroyed between the JS call and here.
+    }
+  }
+
+  /**
+   * Capture the current rendered frame of a tab as a JPEG data URL.
+   *
+   * Used by the "freeze-on-overlay" mechanism: when any popover, dialog,
+   * dropdown or command palette opens, the renderer captures a snapshot
+   * of every visible browser pane, paints it as an `<img>` inside the
+   * placeholder, and hides the native `WebContentsView`. Without this
+   * the overlay would render *behind* the WebContentsView because it's
+   * an OS-level compositor layer above the renderer DOM. Same trick VS
+   * Code uses for its command palette / quick-open over webview panels
+   * — and confirmed empirically: the captured raster freezes media
+   * playback and doesn't reflow on resize, which matches the observed
+   * VS Code behaviour.
+   *
+   * Returns a JPEG (quality 75) rather than the PNG default because
+   * the image is a transient overlay backdrop; quality 75 is visually
+   * indistinguishable at the typical 1×-2× DPR scales and the base64
+   * payload is roughly 5-10× smaller — cheap enough to ship over IPC
+   * at popover-open frequency without flooding the channel.
+   */
+  async capturePage(args: BrowserKeyArg): Promise<string | null> {
+    const view = this.views.get(browserKey(args));
+    if (!view) return null;
+    try {
+      const image = await view.webContents.capturePage();
+      // Empty image (zero-size view or compositor still warming up).
+      if (image.isEmpty()) return null;
+      const jpeg = image.toJPEG(75);
+      return `data:image/jpeg;base64,${jpeg.toString("base64")}`;
+    } catch {
+      // Capture can fail if the view was destroyed mid-flight (LRU
+      // eviction, explicit close). Treat as "no snapshot available"
+      // — the renderer falls back to a blank placeholder.
+      return null;
+    }
   }
 
   /**

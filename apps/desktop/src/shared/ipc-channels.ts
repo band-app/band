@@ -50,6 +50,19 @@ export const Channels = {
   // `browser-found-in-page` events.
   browserFindInPage: "browser_find_in_page",
   browserStopFindInPage: "browser_stop_find_in_page",
+  // Snapshot the current rendered frame as a JPEG data URL. Used by
+  // the renderer-side "freeze-on-overlay" mechanism so popovers /
+  // dialogs / dropdowns stack visibly over a static raster instead of
+  // disappearing behind the native WebContentsView's OS compositor
+  // layer. See `BrowserViewManager.capturePage`.
+  browserCapturePage: "browser_capture_page",
+  // Pause / resume media playback alongside the freeze. `setVisible`
+  // alone doesn't stop audio; these IPCs add `setAudioMuted` plus a
+  // top-frame `pause()` / `play()` sweep so an open overlay matches
+  // the user's intuition that the page is "really" paused while the
+  // popup is up. See `BrowserViewManager.pauseMedia` / `resumeMedia`.
+  browserPauseMedia: "browser_pause_media",
+  browserResumeMedia: "browser_resume_media",
   // Per-tab zoom (Cmd+= / Cmd+- / Actual Size). Adjusts
   // `webContents.zoomFactor` on the matching view — independent of the
   // dashboard's `document.documentElement.style.zoom` and from other

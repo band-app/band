@@ -14,6 +14,8 @@
  *     blur.
  *   - `handleAddressKeyDown` — Enter submits via `onNavigate`; Escape
  *     restores `currentUrlRef`, re-selects the input, keeps focus.
+ *     Arrow keys steer the history autocomplete dropdown when it is
+ *     open.
  *   - `handlePaneKeyDown` — opens the find bar on Cmd/Ctrl+F when DOM
  *     focus is somewhere inside the pane chrome.
  *   - `handleToggleDevTools` — wires the wrench button to the
@@ -21,24 +23,48 @@
  *   - `paneDataAttrs` — `data-band-browser-pane-*` attributes that
  *     `__bandReload` / `__bandZoom` walk up from `document.activeElement`
  *     to identify which tab to act on.
+ *   - `autocomplete` — history-backed URL suggestions that show up
+ *     while the address bar is focused with a non-empty value.
  *
  * No-op outside the Electron desktop shell.
  */
 
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useFreezeWhile } from "../lib/browser-pane-freeze";
 import { invoke as desktopInvoke } from "../lib/desktop-ipc";
 import { isDesktop } from "../lib/is-desktop";
+import { trpc } from "../lib/trpc-client";
 import {
   type BrowserKeyName,
   type UseBrowserFindInPageReturn,
   useBrowserFindInPage,
 } from "./useBrowserFindInPage";
 
+export interface AutocompleteEntry {
+  id: number;
+  url: string;
+  title: string | null;
+  faviconUrl: string | null;
+  visitCount: number;
+}
+
+export interface AutocompleteState {
+  isOpen: boolean;
+  items: AutocompleteEntry[];
+  selectedIndex: number;
+  /** Imperatively close — e.g. after a successful navigation. */
+  close: () => void;
+  /** Mouse hover handler — keeps keyboard/mouse selection in sync. */
+  setSelectedIndex: (i: number) => void;
+}
+
 export interface UseBrowserPaneControlsArgs {
   /** Opaque LRU key of the underlying WebContentsView. */
   key: string;
   /** Whether `key` is a multi-tab `browserId` or a legacy `workspaceId`. */
   keyName: BrowserKeyName;
+  /** Workspace this pane belongs to. Drives history autocomplete scope. */
+  workspaceId: string;
   /** Latest committed URL (for Escape restore). Ref so `setInputUrl`
    *  reads the current value, not a stale closure. */
   currentUrlRef: React.RefObject<string>;
@@ -46,7 +72,8 @@ export interface UseBrowserPaneControlsArgs {
   setInputUrl: (s: string) => void;
   /** Address-bar input value (passed to `onNavigate` on Enter). */
   inputUrl: string;
-  /** Called when the user submits the address bar (Enter). */
+  /** Called when the user submits the address bar (Enter) or picks a
+   *  history suggestion. */
   onNavigate: (url: string) => void;
 }
 
@@ -59,6 +86,7 @@ export interface UseBrowserPaneControlsReturn {
   handleAddressKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => void;
   handlePaneKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => void;
   handleToggleDevTools: () => Promise<void>;
+  autocomplete: AutocompleteState;
   /** Spread onto the pane's root `<div>` so the desktop menu's
    *  contextual Cmd+R / Cmd+= can locate this pane via
    *  `document.activeElement.closest("[data-band-browser-pane]")`. */
@@ -69,13 +97,86 @@ export interface UseBrowserPaneControlsReturn {
   };
 }
 
+// How long after the user stops typing before we hit `history.search`.
+// 50ms feels instantaneous and avoids hammering the DB on every
+// keystroke. The search itself is sub-ms for any realistic history
+// volume.
+const AUTOCOMPLETE_DEBOUNCE_MS = 50;
+// Delay between blur and close, so a click on a dropdown row commits
+// before the dropdown disappears.
+const AUTOCOMPLETE_BLUR_CLOSE_MS = 100;
+
 export function useBrowserPaneControls(
   args: UseBrowserPaneControlsArgs,
 ): UseBrowserPaneControlsReturn {
-  const { key, keyName, currentUrlRef, setInputUrl, inputUrl, onNavigate } = args;
+  const { key, keyName, workspaceId, currentUrlRef, setInputUrl, inputUrl, onNavigate } = args;
 
   const find = useBrowserFindInPage({ key, keyName });
   const addressInputFocusedRef = useRef(false);
+
+  // ------- Autocomplete state -------
+  const [autocompleteItems, setAutocompleteItems] = useState<AutocompleteEntry[]>([]);
+  const [autocompleteIsOpen, setAutocompleteIsOpen] = useState(false);
+  const [autocompleteSelectedIndex, setAutocompleteSelectedIndex] = useState(0);
+
+  // Freeze the native browser panes while the autocomplete dropdown
+  // is open so the dropdown can render absolutely on top of the
+  // snapshot raster (Chrome-omnibox-style overlay) rather than
+  // displacing the page in the flex column. The autocomplete is a
+  // plain inline div — not a Radix portal — so the DOM watcher
+  // doesn't see it; we register an explicit freeze hold instead.
+  useFreezeWhile(autocompleteIsOpen);
+
+  const closeAutocomplete = useCallback(() => {
+    setAutocompleteIsOpen(false);
+    setAutocompleteItems([]);
+    setAutocompleteSelectedIndex(0);
+  }, []);
+
+  // Debounced history search. We only fire when the address bar is
+  // focused *and* the input is non-empty — typing a URL bar query
+  // mid-page shouldn't open a phantom dropdown.
+  useEffect(() => {
+    if (!addressInputFocusedRef.current) return;
+    const trimmed = inputUrl.trim();
+    if (trimmed === "") {
+      closeAutocomplete();
+      return;
+    }
+    // Skip the search call if the input is exactly the committed URL —
+    // happens when the user focuses the bar without typing, or hits
+    // Escape and the value is restored. Saves a roundtrip for the most
+    // common case.
+    if (trimmed === currentUrlRef.current.trim()) {
+      closeAutocomplete();
+      return;
+    }
+
+    let cancelled = false;
+    const handle = setTimeout(() => {
+      trpc.history.search
+        .query({ workspaceId, query: trimmed, limit: 8 })
+        .then((result) => {
+          if (cancelled) return;
+          if (result.entries.length === 0) {
+            closeAutocomplete();
+            return;
+          }
+          setAutocompleteItems(result.entries);
+          setAutocompleteIsOpen(true);
+          setAutocompleteSelectedIndex(0);
+        })
+        .catch(() => {
+          // Server unreachable / shutting down — silently close.
+          if (!cancelled) closeAutocomplete();
+        });
+    }, AUTOCOMPLETE_DEBOUNCE_MS);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [inputUrl, workspaceId, closeAutocomplete, currentUrlRef]);
 
   const handleAddressFocus = useCallback((e: React.FocusEvent<HTMLInputElement>) => {
     addressInputFocusedRef.current = true;
@@ -88,12 +189,51 @@ export function useBrowserPaneControls(
     // were ignored) while we were focused. Matches Chrome: typed-but-
     // not-submitted URLs revert on blur.
     setInputUrl(currentUrlRef.current);
-  }, [currentUrlRef, setInputUrl]);
+    // Defer close so an `onMouseDown` on a dropdown row gets a chance
+    // to trigger `onNavigate` before its parent unmounts. Re-check
+    // focus before actually closing: if the user blurred and
+    // refocused inside the debounce window (e.g. quick tab-switch
+    // away and back), keep the dropdown up.
+    setTimeout(() => {
+      if (!addressInputFocusedRef.current) closeAutocomplete();
+    }, AUTOCOMPLETE_BLUR_CLOSE_MS);
+  }, [currentUrlRef, setInputUrl, closeAutocomplete]);
 
   const handleAddressKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
+      // ----- Autocomplete keyboard navigation -----
+      if (autocompleteIsOpen) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          setAutocompleteSelectedIndex((i) => Math.min(i + 1, autocompleteItems.length - 1));
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          setAutocompleteSelectedIndex((i) => Math.max(i - 1, 0));
+          return;
+        }
+        if (e.key === "Enter") {
+          const selected = autocompleteItems[autocompleteSelectedIndex];
+          if (selected) {
+            e.preventDefault();
+            closeAutocomplete();
+            onNavigate(selected.url);
+            return;
+          }
+        }
+        if (e.key === "Escape") {
+          // First Escape closes the dropdown; if the user hits it again
+          // we fall through to the canonical-URL restore below.
+          e.preventDefault();
+          closeAutocomplete();
+          return;
+        }
+      }
+
       if (e.key === "Enter") {
         e.preventDefault();
+        closeAutocomplete();
         onNavigate(inputUrl);
         return;
       }
@@ -116,7 +256,16 @@ export function useBrowserPaneControls(
         });
       }
     },
-    [inputUrl, onNavigate, setInputUrl, currentUrlRef],
+    [
+      inputUrl,
+      onNavigate,
+      setInputUrl,
+      currentUrlRef,
+      autocompleteIsOpen,
+      autocompleteItems,
+      autocompleteSelectedIndex,
+      closeAutocomplete,
+    ],
   );
 
   const handlePaneKeyDown = useCallback(
@@ -152,6 +301,13 @@ export function useBrowserPaneControls(
     handleAddressKeyDown,
     handlePaneKeyDown,
     handleToggleDevTools,
+    autocomplete: {
+      isOpen: autocompleteIsOpen,
+      items: autocompleteItems,
+      selectedIndex: autocompleteSelectedIndex,
+      close: closeAutocomplete,
+      setSelectedIndex: setAutocompleteSelectedIndex,
+    },
     paneDataAttrs: {
       "data-band-browser-pane": "",
       "data-band-browser-pane-key": key,

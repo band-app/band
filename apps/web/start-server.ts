@@ -76,6 +76,22 @@ const port = parseInt(process.env.PORT || "3456", 10);
 delete process.env.PORT;
 process.env.BAND_PORT = String(port);
 
+// Scrub `ELECTRON_RUN_AS_NODE` from `process.env` once at boot — see
+// issue #406. The desktop shell spawns this web server via Electron's
+// embedded Node by setting `ELECTRON_RUN_AS_NODE=1`
+// (apps/desktop/src/main/services/web-server.ts). Without this scrub
+// the var leaks into every child the web server forks and every
+// grandchild of those forks. Today most of our spawns target
+// non-Electron binaries (rust `band`, `git`, `claude`, Codex) which
+// ignore the var, but as soon as we spawn an Electron binary anywhere
+// in the tree — `code` from VS Code, a packaged MCP server, the dev
+// `pnpm dev:desktop` workflow that hosts its own Electron — that
+// child silently runs as plain Node, leaves `app` / `BrowserWindow`
+// undefined, and crashes with a confusing CJS-from-ESM NPE in Node's
+// loader. Scrubbing once here caps the blast radius at one location
+// instead of relying on every future spawn site to remember.
+delete process.env.ELECTRON_RUN_AS_NODE;
+
 const { handleAuth, expectedToken } = createAuthMiddleware(getOrCreateToken());
 
 const assets = sirv(clientDir, {
