@@ -2743,3 +2743,404 @@ fn generate_skills_json_output_lists_generated_skills() {
         }
     }
 }
+
+// --- skills install tests ---
+
+/// Set up a fresh sandbox HOME for `skills install` tests. Optionally
+/// pre-creates the listed agent config dirs so detection picks them up.
+fn skills_sandbox(agent_dirs: &[&str]) -> tempfile::TempDir {
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let home = tmp.path();
+    for rel in agent_dirs {
+        fs::create_dir_all(home.join(rel)).expect("create agent config dir");
+    }
+    tmp
+}
+
+/// Run `band skills install --home <tmp>` with a clean environment (no
+/// inherited `CODEX_HOME`) and parse its JSON output.
+///
+/// The CLI's `codex_home()` helper reads `$CODEX_HOME` at call time and
+/// uses it instead of `home` when set. If a developer runs the test
+/// suite from a shell that has `CODEX_HOME` exported (real install,
+/// previous test session, accidental export), the subprocess would
+/// pick it up and either:
+///   - link skills into the developer's real `$CODEX_HOME/skills/`, or
+///   - silently skip codex detection (if `$CODEX_HOME` points
+///     somewhere that doesn't exist), making assertions like
+///     `agents.len() == 2` flake on otherwise-correct code.
+///
+/// Stripping `CODEX_HOME` from the child's env at this seam isolates
+/// every `run_install_json` caller without touching the developer's
+/// actual shell. Tests that *want* to exercise the env override
+/// (`skills_install_dedupes_codex_and_openai_codex` etc.) can use
+/// `run_install_json_with_env` below.
+fn run_install_json(home: &Path) -> serde_json::Value {
+    let output = Command::new(env!("CARGO_BIN_EXE_band"))
+        .env_remove("CODEX_HOME")
+        .args([
+            "--output",
+            "json",
+            "skills",
+            "install",
+            "--home",
+            home.to_str().unwrap(),
+        ])
+        .output()
+        .expect("failed to execute band");
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    serde_json::from_str(&stdout(&output))
+        .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)))
+}
+
+#[test]
+fn skills_install_writes_shared_skills_and_links_into_claude() {
+    let tmp = skills_sandbox(&[".claude"]);
+    let home = tmp.path();
+    let result = run_install_json(home);
+
+    // Shared SKILL.md files all created fresh.
+    let written = result["shared"]["written"]
+        .as_array()
+        .expect("written array");
+    assert_eq!(
+        written.len(),
+        6,
+        "expected 6 shared writes, got {written:?}"
+    );
+
+    let shared_dir = home.join(".agents").join("skills");
+    for name in [
+        "band",
+        "band-chat",
+        "band-terminal",
+        "band-browser",
+        "band-start",
+        "band-loop",
+    ] {
+        let shared = shared_dir.join(name).join("SKILL.md");
+        assert!(
+            shared.is_file(),
+            "shared file missing: {}",
+            shared.display()
+        );
+
+        let link = home.join(".claude").join("skills").join(name);
+        let metadata = fs::symlink_metadata(&link)
+            .unwrap_or_else(|e| panic!("symlink_metadata({}) failed: {e}", link.display()));
+        assert!(
+            metadata.file_type().is_symlink(),
+            "{} is not a symlink",
+            link.display()
+        );
+        // Symlink should resolve to the shared dir for this skill (via realpath).
+        let resolved = fs::canonicalize(&link).expect("canonicalize link");
+        let expected = fs::canonicalize(shared_dir.join(name)).expect("canonicalize shared dir");
+        assert_eq!(
+            resolved,
+            expected,
+            "link {} points elsewhere",
+            link.display()
+        );
+    }
+}
+
+#[test]
+fn skills_install_is_idempotent_on_second_run() {
+    let tmp = skills_sandbox(&[".claude"]);
+    let home = tmp.path();
+
+    let first = run_install_json(home);
+    assert_eq!(first["shared"]["written"].as_array().unwrap().len(), 6);
+    assert_eq!(
+        first["symlinks"]["linked"].as_array().unwrap().len(),
+        6,
+        "expected 6 fresh symlinks on first run"
+    );
+
+    let second = run_install_json(home);
+    assert_eq!(
+        second["shared"]["written"].as_array().unwrap().len(),
+        0,
+        "second run should not write any shared files"
+    );
+    assert_eq!(
+        second["shared"]["unchanged"].as_array().unwrap().len(),
+        6,
+        "second run should report 6 unchanged shared files"
+    );
+    assert_eq!(
+        second["symlinks"]["linked"].as_array().unwrap().len(),
+        0,
+        "second run should not create any new symlinks"
+    );
+    assert_eq!(
+        second["symlinks"]["alreadyLinked"]
+            .as_array()
+            .unwrap()
+            .len(),
+        6,
+        "second run should report 6 already-linked"
+    );
+}
+
+#[test]
+fn skills_install_skips_agents_without_a_config_dir() {
+    // Only .gemini exists; the other supported agents should be skipped.
+    let tmp = skills_sandbox(&[".gemini"]);
+    let home = tmp.path();
+    let result = run_install_json(home);
+
+    let agents = result["agents"].as_array().expect("agents array");
+    assert_eq!(agents.len(), 1, "expected 1 agent detected, got {agents:?}");
+    assert_eq!(agents[0]["type"].as_str(), Some("gemini-cli"));
+
+    // No symlinks anywhere except under .gemini/skills.
+    assert!(!home.join(".claude").exists());
+    assert!(!home.join(".codex").exists());
+    assert!(!home.join(".config").join("opencode").exists());
+    for name in [
+        "band",
+        "band-chat",
+        "band-terminal",
+        "band-browser",
+        "band-start",
+        "band-loop",
+    ] {
+        let link = home.join(".gemini").join("skills").join(name);
+        let meta = fs::symlink_metadata(&link)
+            .unwrap_or_else(|e| panic!("expected {} to exist: {e}", link.display()));
+        assert!(
+            meta.file_type().is_symlink(),
+            "{} not symlink",
+            link.display()
+        );
+    }
+}
+
+#[test]
+fn skills_install_dedupes_codex_and_openai_codex() {
+    // codex and openai-codex share $CODEX_HOME (default ~/.codex). The
+    // command must only link once, not twice.
+    let tmp = skills_sandbox(&[".codex", ".claude"]);
+    let home = tmp.path();
+    let result = run_install_json(home);
+
+    let agents = result["agents"].as_array().expect("agents array");
+    let types: Vec<&str> = agents
+        .iter()
+        .map(|a| a["type"].as_str().unwrap_or(""))
+        .collect();
+    // Exactly 2 distinct skill-dir targets: claude-code + codex (openai-codex deduped away).
+    assert_eq!(
+        agents.len(),
+        2,
+        "expected 2 agents after dedupe, got {types:?}"
+    );
+    assert!(types.contains(&"claude-code"));
+    assert!(types.contains(&"codex"));
+    assert!(!types.contains(&"openai-codex"));
+
+    // 6 skills × 2 agents = 12 symlinks total.
+    assert_eq!(result["symlinks"]["linked"].as_array().unwrap().len(), 12);
+}
+
+// The conflict path relies on `std::os::unix::fs::symlink` to plant a
+// decoy, so it only exercises a meaningful scenario on unix. Gating the
+// whole test on `#[cfg(unix)]` avoids it silently passing-by-omission on
+// other platforms (which would make a Windows-port regression invisible
+// here).
+#[cfg(unix)]
+#[test]
+fn skills_install_surfaces_conflict_when_wrong_target_symlink_exists() {
+    let tmp = skills_sandbox(&[".claude"]);
+    let home = tmp.path();
+
+    // Plant a symlink at ~/.claude/skills/band that points at a decoy.
+    let decoy = home.join("decoy-band-skill");
+    fs::create_dir_all(&decoy).expect("create decoy");
+    let claude_skills = home.join(".claude").join("skills");
+    fs::create_dir_all(&claude_skills).expect("create skills dir");
+    let link = claude_skills.join("band");
+    std::os::unix::fs::symlink(&decoy, &link).expect("plant decoy symlink");
+
+    let result = run_install_json(home);
+
+    // Conflict reported, link untouched.
+    let conflicts = result["symlinks"]["conflicts"]
+        .as_array()
+        .expect("conflicts");
+    assert!(
+        conflicts
+            .iter()
+            .any(|c| c["path"].as_str() == Some(link.to_str().unwrap())),
+        "expected conflict for {} in {conflicts:?}",
+        link.display()
+    );
+    let resolved = fs::canonicalize(&link).expect("canonicalize");
+    let expected = fs::canonicalize(&decoy).expect("canonicalize decoy");
+    assert_eq!(resolved, expected, "link should still point at decoy");
+
+    // Other skills still get linked normally.
+    assert!(result["symlinks"]["linked"].as_array().unwrap().len() >= 5);
+}
+
+// Dangling-symlink scenario: the link exists but its target has been
+// removed (e.g. the user manually pruned `~/.agents/skills/`, or `$HOME`
+// moved since the last install). Implementation reports
+// `existing symlink is broken (...)` as a Conflict; lock that in.
+#[cfg(unix)]
+#[test]
+fn skills_install_surfaces_conflict_when_dangling_symlink_exists() {
+    let tmp = skills_sandbox(&[".claude"]);
+    let home = tmp.path();
+
+    let claude_skills = home.join(".claude").join("skills");
+    fs::create_dir_all(&claude_skills).expect("create skills dir");
+    let link = claude_skills.join("band");
+
+    // Plant a symlink at ~/.claude/skills/band whose target never existed.
+    let bogus_target = home.join("never-existed").join("agents-skills-band");
+    std::os::unix::fs::symlink(&bogus_target, &link).expect("plant dangling symlink");
+    // Sanity: lstat sees the symlink, canonicalize/read on it fails.
+    assert!(fs::symlink_metadata(&link).is_ok());
+    assert!(fs::canonicalize(&link).is_err());
+
+    let result = run_install_json(home);
+
+    let conflicts = result["symlinks"]["conflicts"]
+        .as_array()
+        .expect("conflicts");
+    assert!(
+        conflicts
+            .iter()
+            .any(|c| c["path"].as_str() == Some(link.to_str().unwrap())
+                && c["reason"].as_str().unwrap_or("").contains("broken")),
+        "expected broken-symlink conflict for {} in {conflicts:?}",
+        link.display()
+    );
+    // The dangling symlink is left in place — no overwrite.
+    let meta = fs::symlink_metadata(&link).expect("metadata");
+    assert!(
+        meta.file_type().is_symlink(),
+        "link should still be a symlink"
+    );
+    assert!(
+        fs::canonicalize(&link).is_err(),
+        "link should still be dangling"
+    );
+    // Other skills still get linked correctly.
+    assert!(result["symlinks"]["linked"].as_array().unwrap().len() >= 5);
+}
+
+#[test]
+fn skills_install_surfaces_conflict_when_real_directory_occupies_path() {
+    let tmp = skills_sandbox(&[".claude"]);
+    let home = tmp.path();
+
+    // Plant a real directory with user content at ~/.claude/skills/band.
+    let claude_skills = home.join(".claude").join("skills");
+    let real_dir = claude_skills.join("band");
+    fs::create_dir_all(&real_dir).expect("create real dir");
+    let user_file = real_dir.join("SKILL.md");
+    fs::write(&user_file, "# user-authored band skill\n").expect("write user file");
+
+    let result = run_install_json(home);
+
+    let conflicts = result["symlinks"]["conflicts"]
+        .as_array()
+        .expect("conflicts");
+    assert!(
+        conflicts
+            .iter()
+            .any(|c| c["path"].as_str() == Some(real_dir.to_str().unwrap())
+                && c["reason"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("real directory")),
+        "expected real-directory conflict, got {conflicts:?}"
+    );
+    // User content preserved.
+    assert_eq!(
+        fs::read_to_string(&user_file).expect("read user file"),
+        "# user-authored band skill\n"
+    );
+    // Path is still a real directory, not a symlink.
+    let meta = fs::symlink_metadata(&real_dir).expect("metadata");
+    assert!(!meta.file_type().is_symlink());
+}
+
+#[test]
+fn skills_install_writes_shared_skills_even_when_no_agents_are_detected() {
+    // No agent config dirs exist — installing still populates ~/.agents/skills/
+    // because the shared content is useful on its own.
+    let tmp = skills_sandbox(&[]);
+    let home = tmp.path();
+    let result = run_install_json(home);
+
+    assert_eq!(result["shared"]["written"].as_array().unwrap().len(), 6);
+    assert_eq!(result["symlinks"]["linked"].as_array().unwrap().len(), 0);
+    assert_eq!(result["agents"].as_array().unwrap().len(), 0);
+
+    let shared_dir = home.join(".agents").join("skills");
+    for name in [
+        "band",
+        "band-chat",
+        "band-terminal",
+        "band-browser",
+        "band-start",
+        "band-loop",
+    ] {
+        assert!(
+            shared_dir.join(name).join("SKILL.md").is_file(),
+            "shared {} should exist",
+            name
+        );
+    }
+}
+
+#[test]
+fn skills_install_text_output_summarizes_each_stage() {
+    let tmp = skills_sandbox(&[".claude"]);
+    let home = tmp.path();
+    let output = band_offline(&["skills", "install", "--home", home.to_str().unwrap()]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let stdout = stdout(&output);
+    assert!(stdout.contains("Installed 6 skill(s)"));
+    assert!(stdout.contains("shared: 6 written"));
+    assert!(stdout.contains("symlinks: 6 created"));
+    assert!(stdout.contains("claude-code →"));
+}
+
+#[test]
+fn skills_install_filter_limits_to_matching_skills_only() {
+    let tmp = skills_sandbox(&[".claude"]);
+    let home = tmp.path();
+    let output = band_offline(&[
+        "--output",
+        "json",
+        "skills",
+        "install",
+        "--home",
+        home.to_str().unwrap(),
+        "--filter",
+        "chat",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let result: serde_json::Value = serde_json::from_str(&stdout(&output)).expect("json");
+
+    let skills = result["skills"].as_array().expect("skills");
+    assert_eq!(skills.len(), 1);
+    assert_eq!(skills[0]["name"].as_str(), Some("band-chat"));
+
+    assert!(home
+        .join(".agents")
+        .join("skills")
+        .join("band-chat")
+        .join("SKILL.md")
+        .is_file());
+    assert!(!home.join(".agents").join("skills").join("band").exists());
+    // Only one symlink (just band-chat) under .claude/skills/.
+    assert_eq!(result["symlinks"]["linked"].as_array().unwrap().len(), 1);
+}

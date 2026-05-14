@@ -75,6 +75,27 @@ enum Commands {
         #[arg(long)]
         filter: Option<String>,
     },
+    /// Manage CLI-shipped skills (`band`, `band-chat`, `band-terminal`,
+    /// `band-browser`, `band-start`, `band-loop`)
+    Skills {
+        #[command(subcommand)]
+        cmd: SkillsCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum SkillsCmd {
+    /// Install (or refresh) skills into the shared `~/.agents/skills/`
+    /// directory and symlink each detected coding agent's skills/ folder.
+    Install {
+        /// Override the destination home dir (advanced; mostly for tests).
+        /// Defaults to `$HOME`.
+        #[arg(long)]
+        home: Option<String>,
+        /// Filter which skills to install by name (substring match).
+        #[arg(long)]
+        filter: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -568,6 +589,11 @@ fn main() {
         Commands::GenerateSkills { output_dir, filter } => {
             skills::generate_skills(&output_dir, filter.as_deref())
         }
+        Commands::Skills { cmd } => match cmd {
+            SkillsCmd::Install { home, filter } => {
+                skills::install_skills(home.as_deref(), filter.as_deref())
+            }
+        },
     };
 
     match result {
@@ -2405,6 +2431,15 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "--output-dir", "type": "string", "required": false, "description": "Output directory for generated skills (default: skills/)"},
                 {"name": "--filter", "type": "string", "required": false, "description": "Filter skills by name (substring match)"},
             ]
+        }),
+        serde_json::json!({
+            "name": "skills install",
+            "description": "Install (or refresh) skills into ~/.agents/skills and symlink each detected coding agent's skills/ folder",
+            "parameters": [
+                {"name": "--home", "type": "string", "required": false, "description": "Override the destination home dir (advanced; mostly for tests). Defaults to $HOME."},
+                {"name": "--filter", "type": "string", "required": false, "description": "Filter which skills to install by name (substring match)"},
+            ],
+            "notes": "Idempotent: leaves a correct existing symlink alone; surfaces a clear conflict (without overwriting) when a different symlink or a real directory occupies the target path. Supported agents: claude-code, codex, openai-codex, gemini-cli, opencode. cursor-cli is excluded (no skills dir)."
         }),
     ];
 

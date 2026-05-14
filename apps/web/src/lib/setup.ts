@@ -147,29 +147,35 @@ async function ensureClaudeHooks(): Promise<void> {
 }
 
 /**
- * Sync the bundled CLI skills into each detected agent's global skills dir.
+ * Sync the bundled CLI skills into the shared `~/.agents/skills/` root and
+ * link each detected agent's skills directory back to it.
  *
- * `installSkills` is idempotent: it only writes when the destination is
- * missing or has different content. After an electron-updater install, the
- * app relaunches → bootstrap → web server boot → `runFirstTimeSetup`, so
- * this same step also handles the post-update refresh — no separate update
- * hook is needed. Failures are logged but don't block boot, matching the
- * rest of the setup pipeline.
+ * `installSkills` is idempotent: it only writes a shared SKILL.md when the
+ * destination is missing or has different content, and only creates a
+ * per-agent symlink when one isn't already in place. After an
+ * electron-updater install, the app relaunches → bootstrap → web server
+ * boot → `runFirstTimeSetup`, so this same step also handles the
+ * post-update refresh — no separate update hook is needed. Failures are
+ * logged but don't block boot, matching the rest of the setup pipeline.
  */
 async function ensureSkillsInstalled(): Promise<void> {
   try {
-    // installSkills reads `settings.codingAgents` itself and filters to
-    // agents whose binary is actually reachable, so we don't repeat that
-    // logic here. Keeping the trampoline so the boot pipeline stays
-    // uniform with the other `ensureXxx` steps.
+    // `installSkills` detects supported agents by checking each agent's
+    // parent config dir on the filesystem — no settings lookup needed
+    // here. Keeping the trampoline so the boot pipeline stays uniform
+    // with the other `ensureXxx` steps.
     const result = await installSkills({ log });
     const wrote = result.written.length + result.updated.length;
-    if (wrote > 0) {
+    const linkChange = result.linked.length;
+    if (wrote > 0 || linkChange > 0 || result.conflicts.length > 0) {
       log.info(
-        "Synced CLI skills (%d written, %d updated, %d unchanged, %d skipped)",
+        "Synced CLI skills (shared: %d written, %d updated, %d unchanged; symlinks: %d created, %d already-linked, %d conflicts, %d skipped)",
         result.written.length,
         result.updated.length,
         result.unchanged.length,
+        result.linked.length,
+        result.alreadyLinked.length,
+        result.conflicts.length,
         result.skipped.length,
       );
     }
