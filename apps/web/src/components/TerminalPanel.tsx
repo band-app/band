@@ -713,15 +713,39 @@ export function TerminalPanel({
       // re-measures cell dimensions at the new DPR; same recovery path as
       // `onContextLoss`.
       let lastDpr = window.devicePixelRatio;
-      // Shared DPR-change handler. Disposes the WebGL addon and re-attaches
-      // so its canvas is re-sized at the new device-pixel ratio and the
-      // cell dimensions are re-measured. No-op if already in sync, or if
-      // there's no WebGL addon mounted (DOM renderer auto-handles DPR via
-      // CSS).
+      // Shared DPR-change handler. The WebGL canvas's backing store was
+      // sized for the old DPR; without intervention, the browser stretches
+      // it to fit the new CSS dimensions and the terminal text balloons
+      // by a factor of (newDPR/oldDPR). Two things have to happen:
+      //
+      // 1) xterm's CharSizeService must re-measure. Its cache feeds the
+      //    WebGL addon's `_updateDimensions`. Toggling `fontSize` is the
+      //    public-API way to force a re-measure — the options proxy fires
+      //    `onSpecificOptionChange("fontSize")` when the new value differs,
+      //    and CharSizeService is subscribed to that. Perturb-by-one then
+      //    restore so the integer delta fires the event without leaving
+      //    the terminal at the wrong size.
+      //
+      // 2) The WebGL addon's `_devicePixelRatio` cache must update. It's
+      //    set once at activation and only refreshed via the private
+      //    `handleDevicePixelRatioChange()`. The reliable public-API path
+      //    is to dispose the addon and re-attach — the new instance reads
+      //    the live `coreBrowserService.dpr` (a live getter for
+      //    `window.devicePixelRatio`). We do this AFTER the font toggle so
+      //    the new addon picks up the freshly measured CharSizeService
+      //    values.
+      //
+      // No-op when no addon is mounted (DOM renderer — CSS sizing handles
+      // DPR natively).
       const handleDprChange = () => {
         const currentDpr = window.devicePixelRatio;
         if (currentDpr === lastDpr) return;
         lastDpr = currentDpr;
+        const fs = terminal.options.fontSize;
+        if (typeof fs === "number") {
+          terminal.options.fontSize = fs + 1;
+          terminal.options.fontSize = fs;
+        }
         const addon = webglAddonRef.current;
         if (addon) {
           addon.dispose();
