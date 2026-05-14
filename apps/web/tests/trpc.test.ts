@@ -1935,6 +1935,309 @@ describe("tRPC — services activity", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Browser history
+// ---------------------------------------------------------------------------
+
+interface HistoryEntryShape {
+  id: number;
+  workspaceId: string;
+  url: string;
+  title: string | null;
+  faviconUrl: string | null;
+  lastVisitedAt: number;
+  visitCount: number;
+}
+
+describe("tRPC — browser history", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    seedState(tmpHome, { projects: [] });
+    seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
+    server = await startServer({ tmpHome });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  // Each test gets its own workspaceId so suites stay independent — the
+  // server keeps the DB across tests (it's process-lifetime), so two
+  // tests that both wrote to "wsA" would otherwise leak state.
+  let wsCounter = 0;
+  function freshWorkspace(): string {
+    wsCounter += 1;
+    return `ws-history-${wsCounter}`;
+  }
+
+  it("history.record inserts a new entry for a workspace", async () => {
+    const ws = freshWorkspace();
+    const recRes = await trpcMutate(server.url, "history.record", {
+      workspaceId: ws,
+      url: "https://example.com/",
+      title: "Example",
+    });
+    expect(recRes.status).toBe(200);
+
+    const listRes = await trpcQuery(server.url, "history.list", { workspaceId: ws });
+    const data = await trpcData<{ entries: HistoryEntryShape[] }>(listRes);
+    expect(data.entries).toHaveLength(1);
+    expect(data.entries[0].url).toBe("https://example.com/");
+    expect(data.entries[0].title).toBe("Example");
+    expect(data.entries[0].visitCount).toBe(1);
+  });
+
+  it("history.record dedupes by (workspaceId, url) and bumps visit count", async () => {
+    const ws = freshWorkspace();
+    const url = "https://example.com/dedupe";
+
+    for (let i = 0; i < 3; i += 1) {
+      const res = await trpcMutate(server.url, "history.record", { workspaceId: ws, url });
+      expect(res.status).toBe(200);
+      // Small sleep so `lastVisitedAt` strictly increases (clock
+      // resolution can otherwise compress two writes onto the same ms).
+      await new Promise((r) => setTimeout(r, 2));
+    }
+
+    const listRes = await trpcQuery(server.url, "history.list", { workspaceId: ws });
+    const data = await trpcData<{ entries: HistoryEntryShape[] }>(listRes);
+    expect(data.entries).toHaveLength(1);
+    expect(data.entries[0].visitCount).toBe(3);
+  });
+
+  it("history.record filters disallowed URL schemes", async () => {
+    const ws = freshWorkspace();
+
+    // Each of these URLs is a Chromium-internal / extension / devtools /
+    // local-file scheme that must never make it into history. The
+    // mutation accepts them (status 200) but returns `recorded: false`
+    // so callers can distinguish a filtered URL from one that hit the
+    // DB.
+    for (const url of [
+      "about:blank",
+      "chrome-extension://abcdef/options.html",
+      "devtools://devtools/bundled/inspector.html",
+      "file:///etc/hosts",
+    ]) {
+      const res = await trpcMutate(server.url, "history.record", { workspaceId: ws, url });
+      expect(res.status).toBe(200);
+      const body = await trpcData<{ recorded: boolean }>(res);
+      expect(body.recorded).toBe(false);
+    }
+
+    const listRes = await trpcQuery(server.url, "history.list", { workspaceId: ws });
+    const data = await trpcData<{ entries: HistoryEntryShape[] }>(listRes);
+    expect(data.entries).toHaveLength(0);
+  });
+
+  it("history.updateMeta backfills title and favicon on an existing entry", async () => {
+    const ws = freshWorkspace();
+    const url = "https://example.com/meta";
+
+    await trpcMutate(server.url, "history.record", { workspaceId: ws, url });
+
+    const res = await trpcMutate(server.url, "history.updateMeta", {
+      workspaceId: ws,
+      url,
+      title: "Late-arriving title",
+      faviconUrl: "https://example.com/favicon.ico",
+    });
+    expect(res.status).toBe(200);
+
+    const listRes = await trpcQuery(server.url, "history.list", { workspaceId: ws });
+    const data = await trpcData<{ entries: HistoryEntryShape[] }>(listRes);
+    expect(data.entries[0].title).toBe("Late-arriving title");
+    expect(data.entries[0].faviconUrl).toBe("https://example.com/favicon.ico");
+  });
+
+  it("history.updateMeta is a no-op when no matching row exists", async () => {
+    const ws = freshWorkspace();
+    const res = await trpcMutate(server.url, "history.updateMeta", {
+      workspaceId: ws,
+      url: "https://nothing.example/",
+      title: "Phantom",
+    });
+    expect(res.status).toBe(200);
+
+    const listRes = await trpcQuery(server.url, "history.list", { workspaceId: ws });
+    const data = await trpcData<{ entries: HistoryEntryShape[] }>(listRes);
+    expect(data.entries).toHaveLength(0);
+  });
+
+  it("history.list returns entries in recency order and is workspace-scoped", async () => {
+    const wsA = freshWorkspace();
+    const wsB = freshWorkspace();
+
+    await trpcMutate(server.url, "history.record", {
+      workspaceId: wsA,
+      url: "https://a.example/first",
+    });
+    await new Promise((r) => setTimeout(r, 2));
+    await trpcMutate(server.url, "history.record", {
+      workspaceId: wsA,
+      url: "https://a.example/second",
+    });
+    await new Promise((r) => setTimeout(r, 2));
+    await trpcMutate(server.url, "history.record", {
+      workspaceId: wsB,
+      url: "https://b.example/only",
+    });
+
+    const aRes = await trpcQuery(server.url, "history.list", { workspaceId: wsA });
+    const aData = await trpcData<{ entries: HistoryEntryShape[] }>(aRes);
+    expect(aData.entries.map((e) => e.url)).toEqual([
+      "https://a.example/second",
+      "https://a.example/first",
+    ]);
+
+    const bRes = await trpcQuery(server.url, "history.list", { workspaceId: wsB });
+    const bData = await trpcData<{ entries: HistoryEntryShape[] }>(bRes);
+    expect(bData.entries.map((e) => e.url)).toEqual(["https://b.example/only"]);
+  });
+
+  it("history.search matches on URL and title and ranks by frecency", async () => {
+    const ws = freshWorkspace();
+
+    // High-frecency: recorded 5 times, very recent.
+    for (let i = 0; i < 5; i += 1) {
+      await trpcMutate(server.url, "history.record", {
+        workspaceId: ws,
+        url: "https://docs.example.com/frequent",
+        title: "Docs frequent page",
+      });
+      await new Promise((r) => setTimeout(r, 2));
+    }
+
+    // Low-frecency: recorded once, equally recent.
+    await trpcMutate(server.url, "history.record", {
+      workspaceId: ws,
+      url: "https://docs.example.com/rare",
+      title: "Other rare page",
+    });
+
+    // Title-only match — substring match on title, not URL.
+    await trpcMutate(server.url, "history.record", {
+      workspaceId: ws,
+      url: "https://misc.example.com/whatever",
+      title: "Docs by title only",
+    });
+
+    const res = await trpcQuery(server.url, "history.search", {
+      workspaceId: ws,
+      query: "docs",
+    });
+    const data = await trpcData<{ entries: HistoryEntryShape[] }>(res);
+
+    // All three rows should match (two on URL substring "docs.", one on
+    // title "Docs by title only").
+    expect(data.entries).toHaveLength(3);
+    // Frecency winner is the 5-visit row, regardless of which row was
+    // inserted last.
+    expect(data.entries[0].url).toBe("https://docs.example.com/frequent");
+  });
+
+  it("history.search returns nothing for an empty query", async () => {
+    const ws = freshWorkspace();
+    await trpcMutate(server.url, "history.record", {
+      workspaceId: ws,
+      url: "https://example.org/",
+    });
+    const res = await trpcQuery(server.url, "history.search", { workspaceId: ws, query: "" });
+    const data = await trpcData<{ entries: HistoryEntryShape[] }>(res);
+    expect(data.entries).toEqual([]);
+  });
+
+  it("history.delete removes a single entry by id", async () => {
+    const ws = freshWorkspace();
+    await trpcMutate(server.url, "history.record", {
+      workspaceId: ws,
+      url: "https://a.example/keep",
+    });
+    await trpcMutate(server.url, "history.record", {
+      workspaceId: ws,
+      url: "https://a.example/delete",
+    });
+
+    const listRes = await trpcQuery(server.url, "history.list", { workspaceId: ws });
+    const listData = await trpcData<{ entries: HistoryEntryShape[] }>(listRes);
+    const toDelete = listData.entries.find((e) => e.url.endsWith("/delete"));
+    expect(toDelete).toBeDefined();
+
+    const delRes = await trpcMutate(server.url, "history.delete", { id: toDelete!.id });
+    expect(delRes.status).toBe(200);
+
+    const afterRes = await trpcQuery(server.url, "history.list", { workspaceId: ws });
+    const afterData = await trpcData<{ entries: HistoryEntryShape[] }>(afterRes);
+    expect(afterData.entries.map((e) => e.url)).toEqual(["https://a.example/keep"]);
+  });
+
+  it("history.clear with range 'all' wipes only the target workspace", async () => {
+    const wsA = freshWorkspace();
+    const wsB = freshWorkspace();
+
+    await trpcMutate(server.url, "history.record", {
+      workspaceId: wsA,
+      url: "https://a.example/x",
+    });
+    await trpcMutate(server.url, "history.record", {
+      workspaceId: wsB,
+      url: "https://b.example/y",
+    });
+
+    const clearRes = await trpcMutate(server.url, "history.clear", {
+      workspaceId: wsA,
+      range: "all",
+    });
+    expect(clearRes.status).toBe(200);
+    const clearData = await trpcData<{ deleted: number }>(clearRes);
+    expect(clearData.deleted).toBe(1);
+
+    const aListRes = await trpcQuery(server.url, "history.list", { workspaceId: wsA });
+    const aListData = await trpcData<{ entries: HistoryEntryShape[] }>(aListRes);
+    expect(aListData.entries).toEqual([]);
+
+    const bListRes = await trpcQuery(server.url, "history.list", { workspaceId: wsB });
+    const bListData = await trpcData<{ entries: HistoryEntryShape[] }>(bListRes);
+    expect(bListData.entries).toHaveLength(1);
+  });
+
+  it("history.clear with range 'hour' only deletes recent entries", async () => {
+    const ws = freshWorkspace();
+
+    // Seed a fresh row (recorded now).
+    await trpcMutate(server.url, "history.record", {
+      workspaceId: ws,
+      url: "https://example.com/recent",
+    });
+
+    const clearRes = await trpcMutate(server.url, "history.clear", {
+      workspaceId: ws,
+      range: "hour",
+    });
+    expect(clearRes.status).toBe(200);
+    const clearData = await trpcData<{ deleted: number }>(clearRes);
+    expect(clearData.deleted).toBe(1);
+
+    // Verify the row is gone.
+    const listRes = await trpcQuery(server.url, "history.list", { workspaceId: ws });
+    const listData = await trpcData<{ entries: HistoryEntryShape[] }>(listRes);
+    expect(listData.entries).toEqual([]);
+  });
+
+  it("history.clear rejects an unknown range", async () => {
+    const ws = freshWorkspace();
+    const res = await trpcMutate(server.url, "history.clear", {
+      workspaceId: ws,
+      range: "forever",
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Auth enforcement on tRPC endpoints
 // ---------------------------------------------------------------------------
 

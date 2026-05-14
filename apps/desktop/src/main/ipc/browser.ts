@@ -42,6 +42,12 @@ export const browserHandlers = {
     ctx.manager.findInPage(args),
   stopFindInPage: (ctx: BrowserIpcContext, args: BrowserStopFindInPageArgs): void =>
     ctx.manager.stopFindInPage(args),
+  capturePage: (ctx: BrowserIpcContext, args: BrowserKeyArg): Promise<string | null> =>
+    ctx.manager.capturePage(args),
+  pauseMedia: (ctx: BrowserIpcContext, args: BrowserKeyArg): Promise<void> =>
+    ctx.manager.pauseMedia(args),
+  resumeMedia: (ctx: BrowserIpcContext, args: BrowserKeyArg): Promise<void> =>
+    ctx.manager.resumeMedia(args),
   zoom: (ctx: BrowserIpcContext, args: BrowserZoomArgs): void => ctx.manager.zoom(args),
   toggleDevTools: (ctx: BrowserIpcContext, args: BrowserKeyArg): void =>
     ctx.manager.toggleDevTools(args),

@@ -1,11 +1,27 @@
 import type { IDockviewPanelProps } from "dockview";
 import { ArrowLeft, ArrowRight, RotateCw, Wrench, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { flushSync } from "react-dom";
 import { useBrowserPaneControls } from "../hooks/useBrowserPaneControls";
+import { useBrowserPaneFrozen } from "../lib/browser-pane-freeze";
 import { invoke as desktopInvoke, listen as desktopListen } from "../lib/desktop-ipc";
 import { isDesktop } from "../lib/is-desktop";
 import { trpc } from "../lib/trpc-client";
+import { AddressBarAutocomplete } from "./AddressBarAutocomplete";
 import { BrowserFindBar } from "./BrowserFindBar";
+import { HistoryPopover } from "./HistoryPopover";
+
+// Wait for the browser to paint at least one frame after the current
+// React commit. Double-rAF is the canonical idiom: the first rAF fires
+// before paint, the second after. We use this so the snapshot `<img>`
+// is actually on screen before we hide the native `WebContentsView`
+// — otherwise the OS can hide the view a frame before React paints,
+// briefly exposing the blank placeholder underneath.
+function waitForPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  });
+}
 
 const DEFAULT_URL = "";
 const BLANK_URL = "about:blank";
@@ -84,6 +100,14 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
   const [inputUrl, setInputUrl] = useState(() => loadUrl(workspaceId) ?? DEFAULT_URL);
   const [loading, setLoading] = useState(false);
   const [created, setCreated] = useState(false);
+  // Static JPEG snapshot of the live webview shown while any overlay
+  // (dialog / popover / dropdown / command palette) is open over the
+  // pane. The native `WebContentsView` sits above the DOM, so any
+  // floating UI would otherwise be hidden behind it — instead we
+  // freeze the view (`browser_hide`) and paint this raster into the
+  // placeholder. See `lib/browser-pane-freeze.ts`.
+  const [snapshot, setSnapshot] = useState<string | null>(null);
+  const frozen = useBrowserPaneFrozen();
   const createdRef = useRef(false);
   const placeholderRef = useRef<HTMLDivElement>(null);
   const creatingRef = useRef(false);
@@ -195,10 +219,11 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
   // biome-ignore lint/correctness/useExhaustiveDependencies: see above
   useEffect(() => {
     if (!isDesktop) return;
-    let unlisten: (() => void) | undefined;
+    let unlistenUrl: (() => void) | undefined;
+    let unlistenTitle: (() => void) | undefined;
 
     (async () => {
-      unlisten = await desktopListen<{
+      unlistenUrl = await desktopListen<{
         url: string;
         workspace_id: string;
         loading: boolean;
@@ -218,11 +243,50 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
           setInputUrl(url);
         }
         saveUrl(workspaceIdRef.current, url);
+
+        // Record committed navigations into the per-workspace history.
+        // `loading=false` is the "load finished" signal; `did-start-
+        // navigation` (`loading=true`) intentionally does NOT record
+        // because the URL there can be wrong for redirect chains —
+        // we'd insert an intermediate hop and never resolve to the
+        // real destination's title. Server-side filtering rejects
+        // about:blank / chrome-extension / devtools / file URLs.
+        if (!event.payload.loading) {
+          let favicon: string | undefined;
+          try {
+            favicon = `${new URL(url).origin}/favicon.ico`;
+          } catch {
+            // not a valid URL — leave favicon undefined
+          }
+          trpc.history.record
+            .mutate({ workspaceId: workspaceIdRef.current, url, faviconUrl: favicon })
+            .catch(() => {});
+        }
+      });
+
+      // Backfill the title onto the most recent history row for this
+      // URL as soon as Chromium resolves it (typically 100-2000ms
+      // after the URL commit).
+      unlistenTitle = await desktopListen<{
+        workspace_id: string;
+        title: string;
+      }>("browser-title-changed", (event) => {
+        if (event.payload.workspace_id !== workspaceIdRef.current) return;
+        const url = currentUrlRef.current;
+        if (!url || url === BLANK_URL) return;
+        trpc.history.updateMeta
+          .mutate({
+            workspaceId: workspaceIdRef.current,
+            url,
+            title: event.payload.title,
+          })
+          .catch(() => {});
       });
     })();
 
     return () => {
-      unlisten?.();
+      unlistenUrl?.();
+      unlistenTitle?.();
     };
   }, []);
 
@@ -390,15 +454,114 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
     handleAddressKeyDown,
     handlePaneKeyDown,
     handleToggleDevTools,
+    autocomplete,
     paneDataAttrs,
   } = useBrowserPaneControls({
     key: workspaceId,
     keyName: "workspaceId",
+    workspaceId,
     currentUrlRef,
     setInputUrl,
     inputUrl,
     onNavigate: handleNavigate,
   });
+
+  // Snapshot + hide the native view whenever any overlay
+  // (dialog / popover / dropdown / command palette / context menu)
+  // is open anywhere in the app. Without this the overlay would
+  // render *behind* the WebContentsView's OS-level compositor layer.
+  // See `lib/browser-pane-freeze.ts` for the full story and
+  // `BrowserViewManager.capturePage` for the snapshot side.
+  //
+  // The capture is best-effort: if the view is gone (LRU evicted)
+  // or capture races against a navigation, we still hide the view
+  // and just leave the placeholder blank — strictly better than
+  // having the overlay disappear.
+  //
+  // Multi-pane / split-layout correctness:
+  //
+  //   - In a split layout, several panes can be visible at once.
+  //     They each react to `frozen` independently and freeze in
+  //     parallel — desired.
+  //
+  //   - Panes that are currently HIDDEN (inactive dockview tab in
+  //     the same group, or workspace not active) must be left
+  //     alone — calling `browser_show` on them when the overlay
+  //     closes would surface them over the user's chosen tab.
+  //     We gate on `api.isActive` + `params.wsActive` at freeze
+  //     time and remember the decision in `freezeAppliedRef` so
+  //     the unfreeze path only restores panes we actually hid.
+  const freezeAppliedRef = useRef(false);
+  useEffect(() => {
+    if (!isDesktop || !created) return;
+    let cancelled = false;
+    if (frozen) {
+      const visibleNow = api.isActive && params.wsActive !== false;
+      if (!visibleNow) return; // skip — leaving the hidden view untouched
+      freezeAppliedRef.current = true;
+      (async () => {
+        let painted = false;
+        try {
+          const dataUrl = await desktopInvoke<string | null>("browser_capture_page", {
+            workspaceId: workspaceIdRef.current,
+          });
+          if (!cancelled && dataUrl) {
+            // `flushSync` commits the snapshot state immediately so
+            // the `<img>` is in the DOM by the time we yield. The
+            // double-rAF wait then guarantees the browser has actually
+            // PAINTED the img before we tell Electron to hide the
+            // native view — otherwise there's a one-frame window
+            // where the OS-level view is gone but the img hasn't been
+            // composited yet, producing a visible flicker.
+            flushSync(() => setSnapshot(dataUrl));
+            await waitForPaint();
+            painted = true;
+          }
+        } catch {
+          // ignore — fall back to a blank placeholder
+        }
+        if (cancelled) return;
+        if (!painted) {
+          // Capture failed; still pause media + hide. The placeholder
+          // will be blank, same as the pre-fix behaviour.
+        }
+        // Capture happened FIRST (so the snapshot shows the live frame,
+        // not a paused-controls state); now pause media + hide.
+        // `browser_pause_media` mutes + invokes `pause()` on every
+        // top-frame `<video>`/`<audio>` — covers the audio that
+        // `setVisible(false)` doesn't stop.
+        desktopInvoke("browser_pause_media", { workspaceId: workspaceIdRef.current }).catch(
+          () => {},
+        );
+        desktopInvoke("browser_hide", { workspaceId: workspaceIdRef.current }).catch(() => {});
+      })();
+    } else {
+      if (freezeAppliedRef.current) {
+        freezeAppliedRef.current = false;
+        desktopInvoke("browser_show", { workspaceId: workspaceIdRef.current }).catch(() => {});
+        // Resume after show so the page is visible by the time
+        // `play()` lands — avoids the brief flash where audio
+        // restarts before the visual frame snaps back.
+        desktopInvoke("browser_resume_media", { workspaceId: workspaceIdRef.current }).catch(
+          () => {},
+        );
+        // Keep the snapshot up for one more paint so the native view
+        // gets a chance to come back on top before the snapshot is
+        // removed. Otherwise React commits the `null` clear before the
+        // OS compositor has the view visible again, briefly exposing
+        // a blank placeholder.
+        (async () => {
+          await waitForPaint();
+          if (!cancelled) setSnapshot(null);
+        })();
+      } else {
+        setSnapshot(null);
+      }
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [frozen, created, api, params.wsActive]);
 
   // Don't render until workspaceId is injected — during layout sync fromJSON
   // recreates panels with empty params before injectParams runs a tick later.
@@ -483,6 +646,7 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
           // find-bar's search input.
           data-band-address-input=""
         />
+        <HistoryPopover workspaceId={workspaceId} onNavigate={handleNavigate} />
         <button
           type="button"
           onClick={handleToggleDevTools}
@@ -502,6 +666,13 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
             />
           </div>
         )}
+        {/* History autocomplete — absolutely positioned under the
+            address-bar row (which is `relative`). Opening it
+            registers a freeze hold via `useFreezeWhile` in
+            `useBrowserPaneControls`, so the WebContentsView is
+            replaced with a snapshot raster underneath and this
+            dropdown sits cleanly on top. Mirrors Chrome's omnibox. */}
+        <AddressBarAutocomplete state={autocomplete} onSelect={handleNavigate} />
       </div>
 
       {/* Find-in-page bar (Cmd+F / Ctrl+F) — slots between the address bar
@@ -510,7 +681,36 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
       <BrowserFindBar find={find} />
 
       {/* Placeholder – the native webview is positioned over this area */}
-      <div ref={placeholderRef} className="min-h-0 flex-1" />
+      <div ref={placeholderRef} className="relative min-h-0 flex-1">
+        {snapshot ? (
+          // Frozen raster shown while any overlay is open. See
+          // `lib/browser-pane-freeze.ts`.
+          //
+          // `object-contain object-top` (not `object-cover`):
+          //   - When the tab has docked DevTools, `capturePage`
+          //     returns just the *page view*'s pixels — DevTools is a
+          //     sibling `WebContentsView` and isn't part of the
+          //     capture. The placeholder div, however, spans the
+          //     whole tab area (page + DevTools). With `object-cover`
+          //     the image would stretch to fill both, distorting the
+          //     page visibly. With `object-contain object-top` the
+          //     image scales preserving aspect ratio and pins to the
+          //     top edge, so the page sits exactly where it was and
+          //     the DevTools strip below stays empty (DevTools is
+          //     hidden by the same `browser_hide` call). Without
+          //     DevTools, aspects match the placeholder and `contain`
+          //     gives the same result as `cover`.
+          //   - Followup if it becomes annoying: also capture the
+          //     DevTools view and stack a second `<img>` below, so
+          //     the docked panel doesn't vanish either.
+          <img
+            src={snapshot}
+            alt=""
+            className="pointer-events-none absolute inset-0 size-full object-contain object-top"
+            draggable={false}
+          />
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -527,12 +727,16 @@ export function BrowserPaneComponent({
   params: BrowserPaneParams;
   api: IDockviewPanelProps<BrowserPaneParams>["api"];
 }) {
-  const { browserId, initialUrl } = params;
+  const { browserId, initialUrl, workspaceId: workspaceIdParam } = params;
 
   const [currentUrl, setCurrentUrl] = useState(() => initialUrl ?? DEFAULT_URL);
   const [inputUrl, setInputUrl] = useState(() => initialUrl ?? DEFAULT_URL);
   const [loading, setLoading] = useState(false);
   const [created, setCreated] = useState(false);
+  // Snapshot raster shown while any overlay is open — see comment
+  // on the `BrowserPanelComponent` variant for full details.
+  const [snapshot, setSnapshot] = useState<string | null>(null);
+  const frozen = useBrowserPaneFrozen();
   const createdRef = useRef(false);
   const placeholderRef = useRef<HTMLDivElement>(null);
   const creatingRef = useRef(false);
@@ -541,6 +745,15 @@ export function BrowserPaneComponent({
   browserIdRef.current = browserId;
   const currentUrlRef = useRef(currentUrl);
   currentUrlRef.current = currentUrl;
+  // `workspaceId` may be absent on the BrowserPaneParams when the panel
+  // is restored from a saved layout that pre-dates the history feature.
+  // Backfill it lazily from `trpc.browsers.get` so history recording and
+  // autocomplete still know which workspace they belong to. Keep the
+  // value in a ref so listeners read the latest workspace without
+  // re-binding.
+  const [workspaceId, setWorkspaceId] = useState(workspaceIdParam ?? "");
+  const workspaceIdRef = useRef(workspaceId);
+  workspaceIdRef.current = workspaceId;
   // `addressInputFocusedRef` is destructured from
   // `useBrowserPaneControls` below and read inside the
   // `browser-url-changed` listener to skip clobbering an in-progress
@@ -572,6 +785,12 @@ export function BrowserPaneComponent({
       .query({ browserId })
       .then((result) => {
         if (cancelled) return;
+        const ws = result.browser?.workspaceId;
+        if (ws && !workspaceIdRef.current) {
+          // Lazy workspace backfill — see comment on `workspaceId`
+          // state above.
+          setWorkspaceId(ws);
+        }
         const url = result.browser?.url;
         if (!url || url === "" || url === BLANK_URL) return;
         setCurrentUrl(url);
@@ -684,11 +903,27 @@ export function BrowserPaneComponent({
         }, 500);
 
         // Try to extract favicon from the URL's origin
+        let faviconForHistory: string | undefined;
         try {
           const origin = new URL(url).origin;
-          setFaviconUrl(browserIdRef.current, `${origin}/favicon.ico`);
+          faviconForHistory = `${origin}/favicon.ico`;
+          setFaviconUrl(browserIdRef.current, faviconForHistory);
         } catch {
           // ignore invalid URLs
+        }
+
+        // Record committed navigations into the per-workspace history.
+        // Gated on `loading=false` so we only capture the final URL
+        // after a redirect chain settles. The server filters
+        // about:blank / chrome-extension / devtools / file URLs.
+        if (!event.payload.loading && workspaceIdRef.current) {
+          trpc.history.record
+            .mutate({
+              workspaceId: workspaceIdRef.current,
+              url,
+              faviconUrl: faviconForHistory,
+            })
+            .catch(() => {});
         }
       });
       unlistenTitle = await desktopListen<{ browser_id: string; title: string }>(
@@ -697,6 +932,20 @@ export function BrowserPaneComponent({
           if (event.payload.browser_id !== browserIdRef.current) return;
           if (event.payload.title) {
             api.setTitle(event.payload.title);
+            // Backfill the title onto the existing history row for the
+            // current URL. `page-title-updated` typically lands
+            // 100-2000ms after `did-stop-loading`, so the row already
+            // exists from the URL listener above.
+            const url = currentUrlRef.current;
+            if (url && url !== BLANK_URL && workspaceIdRef.current) {
+              trpc.history.updateMeta
+                .mutate({
+                  workspaceId: workspaceIdRef.current,
+                  url,
+                  title: event.payload.title,
+                })
+                .catch(() => {});
+            }
           }
         },
       );
@@ -873,15 +1122,74 @@ export function BrowserPaneComponent({
     handleAddressKeyDown,
     handlePaneKeyDown,
     handleToggleDevTools,
+    autocomplete,
     paneDataAttrs,
   } = useBrowserPaneControls({
     key: browserId,
     keyName: "browserId",
+    workspaceId,
     currentUrlRef,
     setInputUrl,
     inputUrl,
     onNavigate: handleNavigate,
   });
+
+  // Snapshot + hide on overlay. See identical effect on
+  // `BrowserPanelComponent` for the rationale, including the
+  // multi-pane visibility gating below.
+  const freezeAppliedRef = useRef(false);
+  useEffect(() => {
+    if (!isDesktop || !created) return;
+    let cancelled = false;
+    if (frozen) {
+      // For multi-tab panes, dockview's `api.isVisible` is the
+      // authoritative signal — it's `false` when this pane lives in
+      // a dockview tab group that isn't currently focused, *or*
+      // when its tab is inactive within its own group. We don't
+      // touch hidden panes; doing so would re-show them over the
+      // user's chosen tab when the overlay closes.
+      const visibleNow = api.isVisible && params.wsActive !== false;
+      if (!visibleNow) return;
+      freezeAppliedRef.current = true;
+      (async () => {
+        try {
+          const dataUrl = await desktopInvoke<string | null>("browser_capture_page", {
+            browserId: browserIdRef.current,
+          });
+          if (!cancelled && dataUrl) {
+            // flushSync + waitForPaint to avoid flicker — see
+            // identical block in `BrowserPanelComponent` for details.
+            flushSync(() => setSnapshot(dataUrl));
+            await waitForPaint();
+          }
+        } catch {
+          // ignore
+        }
+        if (cancelled) return;
+        // See `BrowserPanelComponent` variant for capture/pause/hide ordering.
+        desktopInvoke("browser_pause_media", { browserId: browserIdRef.current }).catch(() => {});
+        desktopInvoke("browser_hide", { browserId: browserIdRef.current }).catch(() => {});
+      })();
+    } else {
+      if (freezeAppliedRef.current) {
+        freezeAppliedRef.current = false;
+        desktopInvoke("browser_show", { browserId: browserIdRef.current }).catch(() => {});
+        desktopInvoke("browser_resume_media", { browserId: browserIdRef.current }).catch(() => {});
+        // Defer the snapshot clear by one paint so the native view
+        // is back on top before the img is removed — see
+        // `BrowserPanelComponent` for the rationale.
+        (async () => {
+          await waitForPaint();
+          if (!cancelled) setSnapshot(null);
+        })();
+      } else {
+        setSnapshot(null);
+      }
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [frozen, created, api, params.wsActive]);
 
   if (!browserId) return null;
 
@@ -951,6 +1259,9 @@ export function BrowserPaneComponent({
           // find-bar's search input.
           data-band-address-input=""
         />
+        {workspaceId ? (
+          <HistoryPopover workspaceId={workspaceId} onNavigate={handleNavigate} />
+        ) : null}
         <button
           type="button"
           onClick={handleToggleDevTools}
@@ -969,9 +1280,24 @@ export function BrowserPaneComponent({
             />
           </div>
         )}
+        {/* History autocomplete — absolutely positioned under the
+            address-bar row (which is `relative`). See identical block
+            in `BrowserPanelComponent` for the freeze-hold rationale. */}
+        <AddressBarAutocomplete state={autocomplete} onSelect={handleNavigate} />
       </div>
       <BrowserFindBar find={find} />
-      <div ref={placeholderRef} className="min-h-0 flex-1" />
+      <div ref={placeholderRef} className="relative min-h-0 flex-1">
+        {snapshot ? (
+          // `object-contain object-top` — see the identical block in
+          // `BrowserPanelComponent` for the DevTools-aware rationale.
+          <img
+            src={snapshot}
+            alt=""
+            className="pointer-events-none absolute inset-0 size-full object-contain object-top"
+            draggable={false}
+          />
+        ) : null}
+      </div>
     </div>
   );
 }

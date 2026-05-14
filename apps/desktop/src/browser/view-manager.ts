@@ -344,6 +344,114 @@ export class BrowserViewManager {
   }
 
   /**
+   * Pause / resume media (video + audio) on a tab and toggle the
+   * tab's audio mute. Used by the freeze-on-overlay path: when the
+   * page is about to be swapped for a static snapshot, we want media
+   * to stop — `setVisible(false)` alone is not enough; Chromium
+   * keeps playing the audio track of `<video>` / `<audio>` elements
+   * while their parent view is hidden (the visual frame stops being
+   * composited, but the audio thread carries on). VS Code exhibits
+   * the same "video paused while command palette is open" behaviour
+   * we're matching here.
+   *
+   * Implementation:
+   *
+   *   - `setAudioMuted(true)` is the immediate, robust silence
+   *     primitive. Works for everything — native `<video>`, iframe
+   *     embeds (YouTube etc.), WebAudio, MediaSource streams.
+   *   - `executeJavaScript` then pauses every `<video>` / `<audio>`
+   *     element in the top frame, tagging each with a sentinel
+   *     dataset attribute so the resume path knows which elements
+   *     to restart (vs. ones the page itself had paused). Top-frame
+   *     only — cross-origin iframes (YouTube etc.) can't be
+   *     reached from here, but the mute above already silences them
+   *     so the user-perceived effect is the same.
+   *   - We run the JS even when no media exists; it's a few
+   *     microseconds per tab and avoids a roundtrip to check first.
+   */
+  async pauseMedia(args: BrowserKeyArg): Promise<void> {
+    const view = this.views.get(browserKey(args));
+    if (!view) return;
+    try {
+      view.webContents.setAudioMuted(true);
+      await view.webContents.executeJavaScript(
+        `(() => {
+           for (const el of document.querySelectorAll("video, audio")) {
+             if (!el.paused) {
+               el.dataset.__bandFreezeResume = "1";
+               el.pause();
+             }
+           }
+         })();`,
+        true,
+      );
+    } catch {
+      // Best-effort — view may have been destroyed mid-flight.
+    }
+  }
+
+  async resumeMedia(args: BrowserKeyArg): Promise<void> {
+    const view = this.views.get(browserKey(args));
+    if (!view) return;
+    try {
+      await view.webContents.executeJavaScript(
+        `(() => {
+           for (const el of document.querySelectorAll("video, audio")) {
+             if (el.dataset.__bandFreezeResume === "1") {
+               delete el.dataset.__bandFreezeResume;
+               // play() returns a Promise that may reject if the page
+               // never had user-gesture grant; swallow so a single
+               // bad element doesn't block the rest.
+               el.play().catch(() => {});
+             }
+           }
+         })();`,
+        true,
+      );
+      view.webContents.setAudioMuted(false);
+    } catch {
+      // Best-effort.
+    }
+  }
+
+  /**
+   * Capture the current rendered frame of a tab as a JPEG data URL.
+   *
+   * Used by the "freeze-on-overlay" mechanism: when any popover, dialog,
+   * dropdown or command palette opens, the renderer captures a snapshot
+   * of every visible browser pane, paints it as an `<img>` inside the
+   * placeholder, and hides the native `WebContentsView`. Without this
+   * the overlay would render *behind* the WebContentsView because it's
+   * an OS-level compositor layer above the renderer DOM. Same trick VS
+   * Code uses for its command palette / quick-open over webview panels
+   * — and confirmed empirically: the captured raster freezes media
+   * playback and doesn't reflow on resize, which matches the observed
+   * VS Code behaviour.
+   *
+   * Returns a JPEG (quality 75) rather than the PNG default because
+   * the image is a transient overlay backdrop; quality 75 is visually
+   * indistinguishable at the typical 1×-2× DPR scales and the base64
+   * payload is roughly 5-10× smaller — cheap enough to ship over IPC
+   * at popover-open frequency without flooding the channel.
+   */
+  async capturePage(args: BrowserKeyArg): Promise<string | null> {
+    const view = this.views.get(browserKey(args));
+    if (!view) return null;
+    try {
+      const image = await view.webContents.capturePage();
+      // Empty image (zero-size view or compositor still warming up).
+      if (image.isEmpty()) return null;
+      const jpeg = image.toJPEG(75);
+      return `data:image/jpeg;base64,${jpeg.toString("base64")}`;
+    } catch {
+      // Capture can fail if the view was destroyed mid-flight (LRU
+      // eviction, explicit close). Treat as "no snapshot available"
+      // — the renderer falls back to a blank placeholder.
+      return null;
+    }
+  }
+
+  /**
    * Per-tab zoom. Adjusts `webContents.zoomFactor` on the targeted view
    * by ±`ZOOM_STEP`, or sets it back to `ZOOM_DEFAULT`. The zoom is
    * stored on the WebContents (Electron preserves it across reloads on

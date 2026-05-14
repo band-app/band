@@ -136,6 +136,15 @@ export function registerIpc(opts: RegisterOptions): () => void {
   handle(Channels.browserStopFindInPage, (args: BrowserStopFindInPageArgs) =>
     browserHandlers.stopFindInPage(bm, args),
   );
+  // Capture-page (JPEG snapshot for the freeze-on-overlay mechanism)
+  handle(Channels.browserCapturePage, (args: BrowserKeyArg) =>
+    browserHandlers.capturePage(bm, args),
+  );
+  // Pause / resume media on freeze
+  handle(Channels.browserPauseMedia, (args: BrowserKeyArg) => browserHandlers.pauseMedia(bm, args));
+  handle(Channels.browserResumeMedia, (args: BrowserKeyArg) =>
+    browserHandlers.resumeMedia(bm, args),
+  );
   // Per-tab zoom
   handle(Channels.browserZoom, (args: BrowserZoomArgs) => browserHandlers.zoom(bm, args));
   // Toggle DevTools for a browser tab

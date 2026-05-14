@@ -68,6 +68,11 @@ const ALLOWED_INVOKE_CHANNELS = new Set<string>([
   // Find in page (Cmd+F / Ctrl+F overlay)
   "browser_find_in_page",
   "browser_stop_find_in_page",
+  // Capture-page (JPEG snapshot for the freeze-on-overlay mechanism)
+  "browser_capture_page",
+  // Pause / resume media on freeze
+  "browser_pause_media",
+  "browser_resume_media",
   // Per-tab zoom (Cmd+= / Cmd+- / Actual Size)
   "browser_zoom",
   // Toggle Chromium DevTools for a browser tab

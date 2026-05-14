@@ -1,4 +1,4 @@
-import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const workspaceStatuses = sqliteTable("workspace_statuses", {
   workspaceId: text("workspace_id").primaryKey(),
@@ -83,3 +83,26 @@ export const cronjobs = sqliteTable("cronjobs", {
   lastRunAt: text("last_run_at"),
   lastRunStatus: text("last_run_status", { enum: ["completed", "failed", "skipped"] }),
 });
+
+// Persistent browser pane history (per-workspace).
+//
+// One row per (workspaceId, url): revisiting a URL bumps `visitCount` and
+// `lastVisitedAt` rather than inserting a duplicate row. Keeps storage
+// bounded and makes frecency a single SQL expression
+// (`visit_count / (1 + age_days)`).
+export const browserHistory = sqliteTable(
+  "browser_history",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    workspaceId: text("workspace_id").notNull(),
+    url: text("url").notNull(),
+    title: text("title"),
+    faviconUrl: text("favicon_url"),
+    lastVisitedAt: integer("last_visited_at").notNull(),
+    visitCount: integer("visit_count").notNull().default(1),
+  },
+  (t) => [
+    uniqueIndex("browser_history_workspace_url_uq").on(t.workspaceId, t.url),
+    index("browser_history_workspace_visited_idx").on(t.workspaceId, t.lastVisitedAt),
+  ],
+);

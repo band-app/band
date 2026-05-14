@@ -18,6 +18,15 @@ import {
 } from "../lib/agent-pool";
 import { getPollerActivity, setPollerActivity } from "../lib/branch-status-poller";
 import {
+  type ClearRange,
+  clearHistory,
+  deleteHistoryEntry,
+  listHistory,
+  recordVisit,
+  searchHistory,
+  updateVisitMeta,
+} from "../lib/browser-history-store";
+import {
   type EnsureViewEvent,
   markTargetDestroyed,
   onEnsureView,
@@ -3072,6 +3081,110 @@ const browserHostRouter = t.router({
 });
 
 // ---------------------------------------------------------------------------
+// Browser history (persistent per-workspace visit log).
+//
+// Surfaced as `trpc.history.*` and consumed by:
+//   - `BrowserPanel` listeners — call `record` on each committed
+//     navigation and `updateMeta` when `page-title-updated` fires.
+//   - `useBrowserPaneControls` — calls `search` to drive address-bar
+//     autocomplete.
+//   - `HistoryPopover` — calls `list` / `search` / `delete` / `clear`.
+//
+// Visits are upserted on (workspaceId, url) — see `browser-history-store`
+// for the dedupe/frecency rules.
+// ---------------------------------------------------------------------------
+
+const clearRangeSchema = z.enum(["hour", "day", "week", "all"]);
+
+const historyRouter = t.router({
+  record: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string().min(1),
+        url: z.string().min(1),
+        title: z.string().optional(),
+        faviconUrl: z.string().optional(),
+      }),
+    )
+    .mutation(({ input }) => {
+      const recorded = recordVisit({
+        workspaceId: input.workspaceId,
+        url: input.url,
+        title: input.title,
+        faviconUrl: input.faviconUrl,
+      });
+      return { ok: true, recorded };
+    }),
+
+  updateMeta: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string().min(1),
+        url: z.string().min(1),
+        title: z.string().optional(),
+        faviconUrl: z.string().optional(),
+      }),
+    )
+    .mutation(({ input }) => {
+      updateVisitMeta({
+        workspaceId: input.workspaceId,
+        url: input.url,
+        title: input.title,
+        faviconUrl: input.faviconUrl,
+      });
+      return { ok: true };
+    }),
+
+  list: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string().min(1),
+        limit: z.number().int().positive().max(500).optional(),
+        offset: z.number().int().nonnegative().optional(),
+      }),
+    )
+    .query(({ input }) => {
+      const entries = listHistory(input.workspaceId, {
+        limit: input.limit,
+        offset: input.offset,
+      });
+      return { entries };
+    }),
+
+  search: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string().min(1),
+        query: z.string(),
+        limit: z.number().int().positive().max(50).optional(),
+      }),
+    )
+    .query(({ input }) => {
+      const entries = searchHistory(input.workspaceId, input.query, input.limit ?? 8);
+      return { entries };
+    }),
+
+  delete: publicProcedure
+    .input(z.object({ id: z.number().int().nonnegative() }))
+    .mutation(({ input }) => {
+      deleteHistoryEntry(input.id);
+      return { ok: true };
+    }),
+
+  clear: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string().min(1),
+        range: clearRangeSchema,
+      }),
+    )
+    .mutation(({ input }) => {
+      const deleted = clearHistory(input.workspaceId, input.range satisfies ClearRange);
+      return { deleted };
+    }),
+});
+
+// ---------------------------------------------------------------------------
 // Queue (persisted queued messages)
 // ---------------------------------------------------------------------------
 
@@ -3375,6 +3488,7 @@ export const appRouter = t.router({
   browserLayout: browserLayoutRouter,
   browsers: browsersRouter,
   browserHost: browserHostRouter,
+  history: historyRouter,
   statuses: statusesRouter,
   status: statusRouter,
   cronjobs: cronjobsRouter,
