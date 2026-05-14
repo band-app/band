@@ -175,10 +175,14 @@ export function HistoryPopover({ workspaceId, onNavigate }: HistoryPopoverProps)
 
   const handleDelete = useCallback(
     async (id: number) => {
+      // No optimistic local update — `refresh()` re-fetches the list,
+      // so the deleted row disappears on the next render anyway. The
+      // earlier optimistic-then-refresh approach created a double
+      // render (entries vanish, then refetch repaints them) and
+      // could leave the UI inconsistent if the server returned an
+      // error: the row would be locally hidden until the refetch
+      // restored it.
       await trpc.history.delete.mutate({ id, workspaceId }).catch(() => {});
-      // Optimistic local update so the UI doesn't flash empty during
-      // refetch.
-      setEntries((prev) => prev.filter((e) => e.id !== id));
       refresh();
     },
     [refresh, workspaceId],

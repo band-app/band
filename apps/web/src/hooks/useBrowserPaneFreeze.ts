@@ -101,10 +101,8 @@ export function useBrowserPaneFreeze(args: UseBrowserPaneFreezeArgs): UseBrowser
 
     if (frozen) {
       if (!visible) return; // hidden pane — leave alone
-      freezeAppliedRef.current = true;
       const ipcKey = ipcKeyRef.current;
       (async () => {
-        let painted = false;
         try {
           const dataUrl = await desktopInvoke<string | null>("browser_capture_page", ipcKey);
           if (!cancelled && dataUrl) {
@@ -116,13 +114,20 @@ export function useBrowserPaneFreeze(args: UseBrowserPaneFreezeArgs): UseBrowser
             // <img> is on screen, producing a flicker.
             flushSync(() => setSnapshot(dataUrl));
             await waitForPaint();
-            painted = true;
           }
         } catch {
           // ignore — fall back to a blank placeholder
         }
         if (cancelled) return;
-        void painted; // (kept for future ordering tweaks)
+        // Mark "we hid this pane" only AFTER we've crossed the
+        // cancellation check and are about to actually call
+        // `browser_hide`. Setting it earlier would race: if the
+        // overlay closed mid-capture, the cleanup would set
+        // `cancelled = true` and the next effect run (with
+        // `frozen=false`) would see the ref already `true` and call
+        // `browser_show` on a pane we never hid — potentially
+        // surfacing a tab the user hadn't chosen.
+        freezeAppliedRef.current = true;
         // Capture happened FIRST so the snapshot reflects the live
         // frame; now pause media (audio mute + JS pause sweep) and
         // hide the native view. `setVisible(false)` alone doesn't

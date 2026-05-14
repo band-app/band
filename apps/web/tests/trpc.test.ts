@@ -2190,6 +2190,23 @@ describe("tRPC — browser history", () => {
     const underscoreData = await trpcData<{ entries: HistoryEntryShape[] }>(underscoreRes);
     expect(underscoreData.entries).toHaveLength(1);
     expect(underscoreData.entries[0].url).toContain("with_underscore");
+
+    // Backslash is the LIKE escape character itself — our code
+    // escapes it (so a literal `\` in the input stays literal) AND
+    // passes `ESCAPE '\\'` to SQLite. The end-to-end test confirms
+    // the JS→SQLite escape chain isn't double-unescaped along the
+    // way.
+    await trpcMutate(server.url, "history.record", {
+      workspaceId: ws,
+      url: "https://example.com/with\\backslash",
+    });
+    const slashRes = await trpcQuery(server.url, "history.search", {
+      workspaceId: ws,
+      query: "with\\back",
+    });
+    const slashData = await trpcData<{ entries: HistoryEntryShape[] }>(slashRes);
+    expect(slashData.entries).toHaveLength(1);
+    expect(slashData.entries[0].url).toContain("with\\backslash");
   });
 
   it("history.delete removes a single entry by id", async () => {

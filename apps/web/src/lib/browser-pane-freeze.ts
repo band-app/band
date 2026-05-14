@@ -245,6 +245,12 @@ export function startPopupWatcher(): () => void {
     watcherStarted = false;
     watcherCleanup = null;
     domOverlayCount = 0;
+    // Also reset manual holds — defensive for test environments
+    // that start/stop the watcher multiple times. The watcher is
+    // documented as run-for-lifetime-of-page in production, so
+    // this rarely matters, but it stops stale holds from a prior
+    // run leaking into the next start.
+    manualHoldCount = 0;
     emitIfChanged();
   };
   return watcherCleanup;

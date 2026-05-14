@@ -3106,6 +3106,30 @@ const clearRangeSchema = z.enum(["hour", "day", "week", "all"]);
 const MAX_URL_LENGTH = 2048;
 const MAX_TITLE_LENGTH = 1024;
 
+// Whitelist of URL schemes accepted for `faviconUrl`. The rendered
+// `<img src={faviconUrl}>` in `HistoryPopover` /
+// `AddressBarAutocomplete` would otherwise execute any scheme the
+// renderer dreamt up — `data:image/...;base64,...` URIs would
+// inflate the DB, and `javascript:` would be a renderer XSS vector
+// (though the renderer is trusted; defence in depth still). Real
+// favicons are always http(s) origin-relative.
+const ALLOWED_FAVICON_SCHEMES = ["http:", "https:"] as const;
+const faviconUrlSchema = z
+  .string()
+  .max(MAX_URL_LENGTH)
+  .refine(
+    (val) => {
+      try {
+        return ALLOWED_FAVICON_SCHEMES.includes(
+          new URL(val).protocol as (typeof ALLOWED_FAVICON_SCHEMES)[number],
+        );
+      } catch {
+        return false;
+      }
+    },
+    { message: "faviconUrl must be a http(s) URL" },
+  );
+
 const historyRouter = t.router({
   record: publicProcedure
     .input(
@@ -3113,7 +3137,7 @@ const historyRouter = t.router({
         workspaceId: z.string().min(1),
         url: z.string().min(1).max(MAX_URL_LENGTH),
         title: z.string().max(MAX_TITLE_LENGTH).optional(),
-        faviconUrl: z.string().max(MAX_URL_LENGTH).optional(),
+        faviconUrl: faviconUrlSchema.optional(),
       }),
     )
     .mutation(({ input }) => {
@@ -3132,7 +3156,7 @@ const historyRouter = t.router({
         workspaceId: z.string().min(1),
         url: z.string().min(1).max(MAX_URL_LENGTH),
         title: z.string().max(MAX_TITLE_LENGTH).optional(),
-        faviconUrl: z.string().max(MAX_URL_LENGTH).optional(),
+        faviconUrl: faviconUrlSchema.optional(),
       }),
     )
     .mutation(({ input }) => {
