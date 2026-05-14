@@ -408,9 +408,17 @@ export class BrowserViewManager {
          })();`,
         true,
       );
+    } catch {
+      // Best-effort — JS sweep may fail on a crashed renderer.
+    }
+    // Unmute unconditionally, even if the JS sweep above threw —
+    // the Chromium-level mute is independent of page state and
+    // must always be cleared, otherwise the tab is left
+    // permanently silent until the next overlay cycle.
+    try {
       view.webContents.setAudioMuted(false);
     } catch {
-      // Best-effort.
+      // View may have been destroyed between the JS call and here.
     }
   }
 

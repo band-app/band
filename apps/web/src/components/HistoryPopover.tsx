@@ -25,17 +25,11 @@ import {
 } from "@band-app/ui";
 import { ChevronDown, Globe, History, Search, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
+// Single source of truth — same type the server-side store uses.
+// Imported from `browser-history-types` (not `browser-history-store`)
+// so this renderer module doesn't pull Drizzle into the client bundle.
+import type { HistoryEntry } from "../lib/browser-history-types";
 import { trpc } from "../lib/trpc-client";
-
-export interface HistoryEntry {
-  id: number;
-  workspaceId: string;
-  url: string;
-  title: string | null;
-  faviconUrl: string | null;
-  lastVisitedAt: number;
-  visitCount: number;
-}
 
 export interface HistoryPopoverProps {
   workspaceId: string;

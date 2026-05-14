@@ -3096,14 +3096,24 @@ const browserHostRouter = t.router({
 
 const clearRangeSchema = z.enum(["hour", "day", "week", "all"]);
 
+// Caps on the size of strings we persist. No real navigable URL is
+// longer than 2048 chars (browsers historically cap somewhere
+// between 2 KB and 8 KB; 2048 is the conservative web-server
+// default). Titles can be longer in theory but we'd never display
+// more than a few hundred chars. faviconUrl is normally just an
+// origin + `/favicon.ico`. These caps protect against a misbehaving
+// renderer inflating the DB with megabyte-sized `data:` URIs.
+const MAX_URL_LENGTH = 2048;
+const MAX_TITLE_LENGTH = 1024;
+
 const historyRouter = t.router({
   record: publicProcedure
     .input(
       z.object({
         workspaceId: z.string().min(1),
-        url: z.string().min(1),
-        title: z.string().optional(),
-        faviconUrl: z.string().optional(),
+        url: z.string().min(1).max(MAX_URL_LENGTH),
+        title: z.string().max(MAX_TITLE_LENGTH).optional(),
+        faviconUrl: z.string().max(MAX_URL_LENGTH).optional(),
       }),
     )
     .mutation(({ input }) => {
@@ -3120,9 +3130,9 @@ const historyRouter = t.router({
     .input(
       z.object({
         workspaceId: z.string().min(1),
-        url: z.string().min(1),
-        title: z.string().optional(),
-        faviconUrl: z.string().optional(),
+        url: z.string().min(1).max(MAX_URL_LENGTH),
+        title: z.string().max(MAX_TITLE_LENGTH).optional(),
+        faviconUrl: z.string().max(MAX_URL_LENGTH).optional(),
       }),
     )
     .mutation(({ input }) => {

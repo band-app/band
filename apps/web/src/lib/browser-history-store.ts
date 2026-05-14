@@ -11,20 +11,14 @@
  */
 
 import { and, eq, gte, or, sql } from "drizzle-orm";
+import type { ClearRange, HistoryEntry } from "./browser-history-types";
 import { getDb } from "./db/connection";
 import { browserHistory } from "./db/schema";
 
-export interface HistoryEntry {
-  id: number;
-  workspaceId: string;
-  url: string;
-  title: string | null;
-  faviconUrl: string | null;
-  lastVisitedAt: number;
-  visitCount: number;
-}
-
-export type ClearRange = "hour" | "day" | "week" | "all";
+// Re-export the shared types so existing call sites that imported
+// from `browser-history-store` still resolve. New code should import
+// directly from `browser-history-types` to avoid pulling Drizzle.
+export type { ClearRange, HistoryEntry };
 
 // URL prefixes that must never be recorded — Chromium-internal,
 // extension surface, devtools, and local-file paths leak nothing useful

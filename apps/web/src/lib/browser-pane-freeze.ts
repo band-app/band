@@ -181,12 +181,15 @@ const OPEN_OVERLAY_SELECTORS = [
   '[role="listbox"][data-state="open"]',
 ] as const;
 
+// Single combined selector — one tree traversal instead of N. Each
+// element can only match one slot in the union (a node is a dialog
+// OR a menu OR a popover, not several at once), so no double-count
+// risk. Kept as a top-level constant so the string is computed once
+// rather than on every tick.
+const OPEN_OVERLAY_COMBINED_SELECTOR = OPEN_OVERLAY_SELECTORS.join(",");
+
 function countOpenOverlays(): number {
-  let total = 0;
-  for (const sel of OPEN_OVERLAY_SELECTORS) {
-    total += document.querySelectorAll(sel).length;
-  }
-  return total;
+  return document.querySelectorAll(OPEN_OVERLAY_COMBINED_SELECTOR).length;
 }
 
 let watcherStarted = false;
