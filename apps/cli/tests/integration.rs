@@ -2964,6 +2964,49 @@ fn skills_install_surfaces_conflict_when_wrong_target_symlink_exists() {
     assert!(result["symlinks"]["linked"].as_array().unwrap().len() >= 5);
 }
 
+// Dangling-symlink scenario: the link exists but its target has been
+// removed (e.g. the user manually pruned `~/.agents/skills/`, or `$HOME`
+// moved since the last install). Implementation reports
+// `existing symlink is broken (...)` as a Conflict; lock that in.
+#[cfg(unix)]
+#[test]
+fn skills_install_surfaces_conflict_when_dangling_symlink_exists() {
+    let tmp = skills_sandbox(&[".claude"]);
+    let home = tmp.path();
+
+    let claude_skills = home.join(".claude").join("skills");
+    fs::create_dir_all(&claude_skills).expect("create skills dir");
+    let link = claude_skills.join("band");
+
+    // Plant a symlink at ~/.claude/skills/band whose target never existed.
+    let bogus_target = home.join("never-existed").join("agents-skills-band");
+    std::os::unix::fs::symlink(&bogus_target, &link).expect("plant dangling symlink");
+    // Sanity: lstat sees the symlink, canonicalize/read on it fails.
+    assert!(fs::symlink_metadata(&link).is_ok());
+    assert!(fs::canonicalize(&link).is_err());
+
+    let result = run_install_json(home);
+
+    let conflicts = result["symlinks"]["conflicts"]
+        .as_array()
+        .expect("conflicts");
+    assert!(
+        conflicts.iter().any(|c| c["path"].as_str() == Some(link.to_str().unwrap())
+            && c["reason"].as_str().unwrap_or("").contains("broken")),
+        "expected broken-symlink conflict for {} in {conflicts:?}",
+        link.display()
+    );
+    // The dangling symlink is left in place — no overwrite.
+    let meta = fs::symlink_metadata(&link).expect("metadata");
+    assert!(meta.file_type().is_symlink(), "link should still be a symlink");
+    assert!(
+        fs::canonicalize(&link).is_err(),
+        "link should still be dangling"
+    );
+    // Other skills still get linked correctly.
+    assert!(result["symlinks"]["linked"].as_array().unwrap().len() >= 5);
+}
+
 #[test]
 fn skills_install_surfaces_conflict_when_real_directory_occupies_path() {
     let tmp = skills_sandbox(&[".claude"]);

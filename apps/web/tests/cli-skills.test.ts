@@ -401,6 +401,44 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
     expect(existsSync(join(home, ".agents", "skills", "band", "SKILL.md"))).toBe(true);
   });
 
+  it("surfaces a conflict when a dangling symlink exists at the link path", async () => {
+    // The link exists but its target was removed (e.g. ~/.agents/skills/
+    // pruned by hand, $HOME moved). The shared-write phase will recreate
+    // the target dir before linking, but if a user planted a dangling
+    // symlink earlier the existing-symlink branch must classify it as a
+    // conflict (broken target) rather than crash on canonicalize.
+    const home = process.env.HOME!;
+    const claudeSkills = join(home, ".claude", "skills");
+    mkdirSync(claudeSkills, { recursive: true });
+    const link = join(claudeSkills, "band");
+    const bogusTarget = join(home, "never-existed", "agents-skills-band");
+    symlinkSync(bogusTarget, link, "dir");
+
+    // Sanity: the shared dir hasn't been written yet, so the link target
+    // does NOT exist on disk before installSkills runs.
+    expect(existsSync(bogusTarget)).toBe(false);
+
+    // Force the shared dir to be different from the bogus target before
+    // running install — by deleting any pre-existing shared dir we would
+    // simulate "shared dir was pruned between runs". (No-op on first run,
+    // but explicit makes the intent clear.)
+    rmSync(join(home, ".agents", "skills", "band"), { recursive: true, force: true });
+
+    const { installSkills } = await import("../src/lib/cli-skills");
+    const result = await installSkills({ home });
+
+    // realpathSync on a dangling symlink fails, which the implementation
+    // surfaces as "existing symlink is broken" (rather than the
+    // wrong-target message used when both endpoints resolve).
+    expect(
+      result.conflicts.some((c) => c.startsWith(link) && c.includes("existing symlink is broken")),
+      `expected broken-symlink conflict for ${link} in ${result.conflicts.join("\n")}`,
+    ).toBe(true);
+    // The dangling symlink is left in place — no overwrite.
+    expect(lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(link)).toBe(bogusTarget);
+  });
+
   it("surfaces a conflict when a real directory occupies the target path", async () => {
     const home = process.env.HOME!;
     const claudeSkills = join(home, ".claude", "skills");
