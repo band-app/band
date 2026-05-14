@@ -190,8 +190,13 @@ export function useBrowserPaneControls(
     // not-submitted URLs revert on blur.
     setInputUrl(currentUrlRef.current);
     // Defer close so an `onMouseDown` on a dropdown row gets a chance
-    // to trigger `onNavigate` before its parent unmounts.
-    setTimeout(closeAutocomplete, AUTOCOMPLETE_BLUR_CLOSE_MS);
+    // to trigger `onNavigate` before its parent unmounts. Re-check
+    // focus before actually closing: if the user blurred and
+    // refocused inside the debounce window (e.g. quick tab-switch
+    // away and back), keep the dropdown up.
+    setTimeout(() => {
+      if (!addressInputFocusedRef.current) closeAutocomplete();
+    }, AUTOCOMPLETE_BLUR_CLOSE_MS);
   }, [currentUrlRef, setInputUrl, closeAutocomplete]);
 
   const handleAddressKeyDown = useCallback(

@@ -2033,6 +2033,41 @@ describe("tRPC — browser history", () => {
     expect(data.entries).toHaveLength(0);
   });
 
+  it("history.record rejects disallowed faviconUrl schemes", async () => {
+    const ws = freshWorkspace();
+    // The faviconUrl is rendered as <img src> in the popover /
+    // autocomplete; we restrict it to http(s) so a renderer can't
+    // smuggle in `data:` URIs (DB inflation) or `javascript:`
+    // (XSS hygiene).
+    for (const faviconUrl of [
+      "javascript:alert(1)",
+      "data:image/png;base64,iVBOR=",
+      "file:///etc/favicon.ico",
+      "ftp://example.com/favicon.ico",
+      "not-a-url",
+    ]) {
+      const res = await trpcMutate(server.url, "history.record", {
+        workspaceId: ws,
+        url: "https://example.com/scheme-check",
+        faviconUrl,
+      });
+      // Zod refinement failure surfaces as 400.
+      expect(res.status).toBe(400);
+    }
+    // And the http(s) cases must still succeed.
+    for (const faviconUrl of [
+      "https://example.com/favicon.ico",
+      "http://example.com/favicon.ico",
+    ]) {
+      const res = await trpcMutate(server.url, "history.record", {
+        workspaceId: ws,
+        url: `https://example.com/scheme-ok-${encodeURIComponent(faviconUrl)}`,
+        faviconUrl,
+      });
+      expect(res.status).toBe(200);
+    }
+  });
+
   it("history.updateMeta backfills title and favicon on an existing entry", async () => {
     const ws = freshWorkspace();
     const url = "https://example.com/meta";

@@ -10,7 +10,7 @@
  * touches Drizzle directly.
  */
 
-import { and, eq, gte, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, or, sql } from "drizzle-orm";
 import type { ClearRange, HistoryEntry } from "./browser-history-types";
 import { getDb } from "./db/connection";
 import { browserHistory } from "./db/schema";
@@ -130,7 +130,7 @@ export function listHistory(workspaceId: string, opts: ListHistoryOptions = {}):
     .select()
     .from(browserHistory)
     .where(eq(browserHistory.workspaceId, workspaceId))
-    .orderBy(sql`${browserHistory.lastVisitedAt} DESC`)
+    .orderBy(desc(browserHistory.lastVisitedAt))
     .limit(limit)
     .offset(offset)
     .all();
@@ -183,7 +183,7 @@ export function searchHistory(
         ),
       ),
     )
-    .orderBy(sql`${score} DESC, ${browserHistory.lastVisitedAt} DESC`)
+    .orderBy(sql`${score} DESC`, desc(browserHistory.lastVisitedAt))
     .limit(cappedLimit)
     .all();
 }
