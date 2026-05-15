@@ -7,6 +7,7 @@ import {
   parseFileLocation,
   QuickOpenDialog,
   SearchFilesDialog,
+  useDiffTarget,
   useSettingsQuery,
   WorkspacePickerDialog,
 } from "@band-app/dashboard-core";
@@ -458,13 +459,21 @@ const MainGroupRightActions = memo(function MainGroupRightActions(
 // ---------------------------------------------------------------------------
 
 function useDiffFileCount(workspaceId: string, isActive: boolean): number {
+  // Track the same diff target (mode + compare branch) the user picked in the
+  // Changes panel — without this, the badge always queried the default branch
+  // and ignored Uncommitted / non-default branch selections (issue #396).
+  const { diffMode, compareBranch } = useDiffTarget(workspaceId);
   const [count, setCount] = useState(0);
   useEffect(() => {
     if (!isActive) return;
     let cancelled = false;
     const fetchCount = () => {
       trpc.workspace.getDiffSummary
-        .query({ workspaceId })
+        .query({
+          workspaceId,
+          diffMode,
+          compareBranch: compareBranch ?? undefined,
+        })
         .then((result) => {
           if (!cancelled) setCount(result.stats?.filesChanged ?? 0);
         })
@@ -476,7 +485,7 @@ function useDiffFileCount(workspaceId: string, isActive: boolean): number {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [workspaceId, isActive]);
+  }, [workspaceId, isActive, diffMode, compareBranch]);
   return count;
 }
 

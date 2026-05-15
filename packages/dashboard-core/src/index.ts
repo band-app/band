@@ -36,6 +36,7 @@ export { WorkspacePickerDialog } from "./components/WorkspacePickerDialog";
 export { type WorkspaceTab, WorkspaceTabNav } from "./components/WorkspaceTabNav";
 // Context
 export { DashboardProvider, useAdapter, useCapabilities } from "./context";
+export { type UseDiffTargetReturn, useDiffTarget } from "./hooks/use-diff-target";
 export {
   type EditorHistoryEntry,
   type UseEditorHistoryReturn,
