@@ -38,17 +38,19 @@ export function findCliBinary(): string | null {
   // --- Strategy B: Electron extraResources layout (issue #364) ---
   // electron-builder ships the sidecar at <Resources>/binaries/band on every
   // platform. The web server runs as a child of the main process with cwd
-  // set to <Resources>/web/dist by `services/web-server.ts`, so the sidecar
-  // is one level up and across into `binaries/`. We try both the cwd-based
-  // and module-relative paths so the resolution survives a future change to
-  // the spawn cwd (the import.meta.dirname path matches the bundled file's
-  // installed location).
+  // set to <Resources>/web by `services/web-server.ts` (via
+  // `web-paths.ts::resolveWebDir`), so the sidecar is one level up and
+  // across into `binaries/`. We try both the cwd-based and module-relative
+  // paths so the resolution survives a future change to the spawn cwd (the
+  // import.meta.dirname path matches the bundled file's installed location
+  // at `<Resources>/web/dist/start-server.mjs`).
   const exe = platform() === "win32" ? "band.exe" : "band";
   const electronCandidates = [
-    // From cwd (<Resources>/web/dist) → <Resources>/binaries/band
-    resolve(process.cwd(), "..", "..", "binaries", exe),
-    // From the bundled dist file (<Resources>/web/dist/...) → <Resources>/binaries/band
-    resolve(import.meta.dirname, "..", "..", "..", "binaries", exe),
+    // From cwd (<Resources>/web) → <Resources>/binaries/band
+    resolve(process.cwd(), "..", "binaries", exe),
+    // From the bundled dist file (<Resources>/web/dist/start-server.mjs)
+    // → <Resources>/binaries/band
+    resolve(import.meta.dirname, "..", "..", "binaries", exe),
   ];
   for (const p of electronCandidates) {
     try {
@@ -144,9 +146,7 @@ export interface InstallCliOptions {
 export async function installCli(_opts: InstallCliOptions = {}): Promise<void> {
   const binaryPath = findCliBinary();
   if (!binaryPath) {
-    throw new Error(
-      "Could not find band CLI binary. Build it first with: cargo build --release -p band-cli",
-    );
+    throw new Error("Bundled CLI binary missing - try reinstalling Band");
   }
 
   const dir = dirname(SYMLINK_PATH);

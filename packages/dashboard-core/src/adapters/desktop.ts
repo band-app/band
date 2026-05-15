@@ -62,9 +62,7 @@ export class DesktopDashboardAdapter extends WebDashboardAdapter {
       if (opts?.allowPrompt && isDesktopShell() && message.includes("elevation-required")) {
         const paths = await this.trpc.cli.resolve.query();
         if (!paths) {
-          throw new Error(
-            "Could not find band CLI binary. Build it first with: cargo build --release -p band-cli",
-          );
+          throw new Error("Bundled CLI binary missing - try reinstalling Band");
         }
         await desktopInvoke("install_cli", {
           binaryPath: paths.binaryPath,
