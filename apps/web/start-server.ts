@@ -22,7 +22,11 @@ import { mimeTypeFromFilename } from "./src/lib/mime-types.ts";
 import { checkPrereqs } from "./src/lib/process-utils.ts";
 import { runFirstTimeSetup } from "./src/lib/setup.ts";
 import { bandHome, getOrCreateToken, loadSettings, resetAgentStatuses } from "./src/lib/state.ts";
-import { cleanupStaleTasks } from "./src/lib/task-store.ts";
+import {
+  cleanupStaleTasks,
+  startTaskPruneScheduler,
+  stopTaskPruneScheduler,
+} from "./src/lib/task-store.ts";
 import { killAllTerminals } from "./src/lib/terminal-manager.ts";
 import { handleTerminalConnection } from "./src/lib/terminal-ws.ts";
 import { startTunnel, stopTunnel } from "./src/lib/tunnel.ts";
@@ -187,7 +191,19 @@ async function main() {
 
   // Mark any persisted "running" tasks as "failed" — no agent can be running
   // if the server just started.
+  //
+  // ORDER MATTERS: this must run BEFORE `startTaskPruneScheduler` below. The
+  // prune's `completedAt`-branch only matches non-null timestamps; stamping
+  // dangling `running` rows with `completedAt = now` here ensures they're
+  // evaluated against the cutoff via `completedAt` rather than relying on
+  // the fallback to `startedAt`. Swapping these two calls would leave very
+  // old in-flight rows wedged in `running` state for one extra boot cycle.
   cleanupStaleTasks();
+
+  // Kick off the periodic task-history sweep (issue #416). Runs one pass
+  // immediately, then every 24h, deleting rows older than 30 days. The
+  // timer is unref()'d so it doesn't block shutdown.
+  startTaskPruneScheduler();
 
   // Reset any "working" agent statuses — no agent is active on a fresh
   // server start.
@@ -517,6 +533,7 @@ async function main() {
   const shutdown = async () => {
     stopBranchStatusPoller();
     stopCronjobScheduler();
+    stopTaskPruneScheduler();
     killAllTerminals();
     killAllServers();
     await stopTunnel().catch(() => {});

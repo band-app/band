@@ -1,5 +1,5 @@
 import { createLogger } from "@band-app/logger";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull, lt, or } from "drizzle-orm";
 import { getDb } from "./db/connection";
 import { tasks } from "./db/schema";
 
@@ -133,6 +133,150 @@ export function cleanupStaleTasks(): number {
     log.info({ count }, "cleaned up stale tasks on startup");
   }
   return count;
+}
+
+/**
+ * Delete all tasks belonging to a workspace.
+ *
+ * Called when a workspace is removed (`projects.remove` in `trpc/router.ts`).
+ * Workspaces are not first-class DB rows (they live in `state.json`), so we
+ * can't lean on `ON DELETE CASCADE` — the caller is responsible for invoking
+ * this helper next to the other workspace-scoped cleanups.
+ *
+ * Returns the number of rows deleted.
+ */
+export function deleteWorkspaceTasks(workspaceId: string): number {
+  const db = getDb();
+  const result = db.delete(tasks).where(eq(tasks.workspaceId, workspaceId)).run();
+  return result.changes;
+}
+
+/**
+ * Delete tasks whose effective age timestamp is older than `cutoffMs`.
+ *
+ * "Age" is measured against `completedAt` when present, and falls back to
+ * `startedAt` for tasks that never completed (e.g. orphans from a previous
+ * crash that `cleanupStaleTasks` didn't see because the row predates the
+ * current schema, or rows that were inserted but never updated). This way
+ * a stuck `running` row from a month ago is still pruned instead of living
+ * forever.
+ *
+ * The query intentionally has no `status` filter: a row that's still
+ * marked `running` 30 days after it was started is by definition stale
+ * (every server boot calls `cleanupStaleTasks` to flip dangling `running`
+ * rows to `failed`, so an in-flight task can survive a server restart
+ * but not 30 days of restarts).
+ *
+ * Returns the number of rows deleted.
+ */
+export function deleteTasksOlderThan(cutoffMs: number): number {
+  const db = getDb();
+  // NOTE: `startedAt` is `NOT NULL` in the schema, so the first branch covers
+  // every NULL-`completedAt` row that's older than the cutoff. A row with both
+  // columns NULL would match neither branch and live forever, but the insert
+  // path always sets `startedAt`, so that combination is unreachable today.
+  const result = db
+    .delete(tasks)
+    .where(
+      or(
+        and(isNull(tasks.completedAt), lt(tasks.startedAt, cutoffMs)),
+        // The explicit `isNotNull` guard is technically redundant — SQLite
+        // treats `NULL < cutoffMs` as NULL (falsy) in a WHERE predicate, so
+        // null-`completedAt` rows would be skipped here regardless. We keep
+        // it so the intent is obvious without leaning on SQLite NULL
+        // semantics, and so the query stays correct under a future Drizzle
+        // or backend swap.
+        and(isNotNull(tasks.completedAt), lt(tasks.completedAt, cutoffMs)),
+      ),
+    )
+    .run();
+  return result.changes;
+}
+
+// ---------------------------------------------------------------------------
+// Periodic prune (issue #416)
+// ---------------------------------------------------------------------------
+
+/** Retention window for completed/abandoned task rows. */
+export const TASK_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** How often the background sweep re-runs after the first pass on boot. */
+export const TASK_PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+// `Symbol.for` + `globalThis` rather than a plain module-scope variable so
+// the singleton survives module re-evaluation (HMR in dev, vitest worker
+// module isolation). Without this, a second `startTaskPruneScheduler()`
+// call after a reload would schedule a second timer instead of being a
+// no-op. Same pattern as `cronjob-scheduler.ts`.
+const PRUNE_SCHEDULER_KEY = Symbol.for("band.task-prune-scheduler");
+const pruneG = globalThis as unknown as Record<symbol, unknown>;
+
+interface PruneSchedulerState {
+  timer: NodeJS.Timeout | null;
+}
+
+if (!pruneG[PRUNE_SCHEDULER_KEY]) {
+  pruneG[PRUNE_SCHEDULER_KEY] = { timer: null } satisfies PruneSchedulerState;
+}
+
+const pruneState = pruneG[PRUNE_SCHEDULER_KEY] as PruneSchedulerState;
+
+/**
+ * Run a single prune pass with the default 30-day retention window.
+ * Exposed as its own export so tests (and the boot path) can trigger a
+ * deterministic sweep without standing up the interval timer.
+ */
+export function pruneOldTasks(retentionMs: number = TASK_RETENTION_MS): number {
+  const cutoff = Date.now() - retentionMs;
+  const count = deleteTasksOlderThan(cutoff);
+  if (count > 0) {
+    log.info({ count, retentionMs }, "pruned tasks older than retention window");
+  }
+  return count;
+}
+
+/**
+ * Start the background prune sweep.
+ *
+ * Runs one pass immediately, then re-runs every `intervalMs` (default 24h).
+ * Idempotent: a second call is a no-op while the previous timer is still
+ * active. The timer is `unref()`'d so it doesn't keep the event loop alive
+ * during shutdown.
+ */
+export function startTaskPruneScheduler(
+  options: { retentionMs?: number; intervalMs?: number } = {},
+): void {
+  if (pruneState.timer) return;
+
+  const retentionMs = options.retentionMs ?? TASK_RETENTION_MS;
+  const intervalMs = options.intervalMs ?? TASK_PRUNE_INTERVAL_MS;
+
+  // Log-and-continue: a DB lock or corruption at boot time must not crash
+  // `main()` before the server binds its port. The interval handler below
+  // applies the same policy.
+  try {
+    pruneOldTasks(retentionMs);
+  } catch (err) {
+    log.error({ err }, "initial task prune on boot failed");
+  }
+
+  const timer = setInterval(() => {
+    try {
+      pruneOldTasks(retentionMs);
+    } catch (err) {
+      log.error({ err }, "scheduled task prune failed");
+    }
+  }, intervalMs);
+  timer.unref();
+  pruneState.timer = timer;
+}
+
+/** Stop the background prune sweep. Used on graceful shutdown and in tests. */
+export function stopTaskPruneScheduler(): void {
+  if (pruneState.timer) {
+    clearInterval(pruneState.timer);
+    pruneState.timer = null;
+  }
 }
 
 /**

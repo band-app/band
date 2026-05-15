@@ -117,7 +117,7 @@ import {
   submitTask,
   TaskConflictError,
 } from "../lib/task-runner";
-import { listTasks, loadTask } from "../lib/task-store";
+import { deleteWorkspaceTasks, listTasks, loadTask } from "../lib/task-store";
 import { loadWorkspaceTerminalConfig } from "../lib/terminal-config";
 import {
   deleteTerminalLayout,
@@ -483,6 +483,25 @@ const workspacesRouter = t.router({
             // Clean up workspace-scoped cronjobs
             stopJobsForKey(workspaceId);
             deleteCronjobFile(workspaceId);
+
+            // Delete persisted task history for the workspace (issue #416).
+            // Tasks aren't covered by a FK cascade because workspaces aren't a
+            // first-class DB row, so the cleanup is explicit here next to the
+            // other workspace-scoped removals. Task cleanup is best-effort —
+            // a DB lock or WAL timeout must not abort the whole removal or
+            // suppress the `emit` below, otherwise the dashboard would keep
+            // showing the just-deleted workspace.
+            try {
+              const deletedTasks = deleteWorkspaceTasks(workspaceId);
+              if (deletedTasks > 0) {
+                log.info(
+                  { workspaceId, count: deletedTasks },
+                  "deleted workspace tasks on removal",
+                );
+              }
+            } catch (err) {
+              log.error({ workspaceId, err }, "failed to delete workspace tasks on removal");
+            }
 
             // Notify subscribers (dashboard status stream) that this workspace is gone
             emit({ kind: "remove", workspaceId });
