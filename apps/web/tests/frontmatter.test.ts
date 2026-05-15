@@ -54,6 +54,13 @@ describe("parseFrontmatter", () => {
     expect(parseFrontmatter(content).frontmatter).toEqual([["title", "Hello"]]);
   });
 
+  it("does not collapse a single-character quote value to an empty string", () => {
+    // `key: "` is malformed YAML — both startsWith and endsWith match the
+    // same character, but slice(1, -1) would silently drop the value.
+    const content = ["---", 'key: "', "---", ""].join("\n");
+    expect(parseFrontmatter(content).frontmatter).toEqual([["key", '"']]);
+  });
+
   it("preserves colons inside the value", () => {
     const content = ["---", "url: https://example.com:8080/path", "---", ""].join("\n");
     expect(parseFrontmatter(content).frontmatter).toEqual([

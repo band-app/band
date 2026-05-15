@@ -34,7 +34,12 @@ export interface ParsedMarkdown {
  * raw content still renders rather than silently disappearing).
  */
 export function parseFrontmatter(content: string): ParsedMarkdown {
-  if (!content) return { frontmatter: [], body: content };
+  // Fast-path the common case: most files have no frontmatter and we don't
+  // want to pay for an O(n) split on every render. The trim-based check
+  // below still handles the (rare) `  ---  ` whitespace edge case.
+  if (!content || !content.startsWith("---")) {
+    return { frontmatter: [], body: content };
+  }
 
   const lines = content.split("\n");
   if (lines[0]?.trim() !== FRONTMATTER_DELIMITER) {
@@ -62,9 +67,12 @@ export function parseFrontmatter(content: string): ParsedMarkdown {
 
     const key = line.slice(0, colonIndex).trim();
     let value = line.slice(colonIndex + 1).trim();
+    // `value.length > 1` so a single-character quote (e.g. `key: "`) isn't
+    // silently collapsed to an empty string by `slice(1, -1)`.
     if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
+      value.length > 1 &&
+      ((value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'")))
     ) {
       value = value.slice(1, -1);
     }
