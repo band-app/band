@@ -35,13 +35,7 @@ const SKILL_TEMPLATES: &[(&str, &str)] = &[
 /// (`packages/coding-agent/src/install-skills.ts`); both lists must stay
 /// in sync. `cursor-cli` is deliberately omitted — it has no documented
 /// user-scope skills directory.
-const SUPPORTED_AGENTS: &[&str] = &[
-    "claude-code",
-    "codex",
-    "openai-codex",
-    "gemini-cli",
-    "opencode",
-];
+const SUPPORTED_AGENTS: &[&str] = &["claude-code", "codex", "gemini-cli", "opencode"];
 
 /// A single rendered skill ready to be written to disk.
 struct RenderedSkill {
@@ -418,8 +412,8 @@ fn write_shared_skill(dest: &Path, content: &[u8]) -> Result<SharedWriteOutcome,
 
 /// Detect which supported coding agents are installed on this host
 /// (filesystem-based: the parent config directory exists). Returns
-/// `(agent_type, skills_dir)` pairs, deduplicated by `skills_dir` so the
-/// codex/openai-codex pair doesn't get linked twice.
+/// `(agent_type, skills_dir)` pairs, deduplicated by `skills_dir` in case
+/// two agent types ever resolve to the same directory.
 fn detect_agent_targets(home: &Path) -> Vec<(&'static str, PathBuf)> {
     let mut out: Vec<(&'static str, PathBuf)> = Vec::new();
     let mut seen: Vec<PathBuf> = Vec::new();
@@ -443,7 +437,7 @@ fn detect_agent_targets(home: &Path) -> Vec<(&'static str, PathBuf)> {
 fn agent_config_dir(agent: &str, home: &Path) -> Option<PathBuf> {
     match agent {
         "claude-code" => Some(home.join(".claude")),
-        "codex" | "openai-codex" => Some(codex_home(home)),
+        "codex" => Some(codex_home(home)),
         "gemini-cli" => Some(home.join(".gemini")),
         "opencode" => Some(home.join(".config").join("opencode")),
         _ => None,
@@ -453,7 +447,7 @@ fn agent_config_dir(agent: &str, home: &Path) -> Option<PathBuf> {
 fn agent_skills_dir(agent: &str, home: &Path) -> PathBuf {
     match agent {
         "claude-code" => home.join(".claude").join("skills"),
-        "codex" | "openai-codex" => codex_home(home).join("skills"),
+        "codex" => codex_home(home).join("skills"),
         "gemini-cli" => home.join(".gemini").join("skills"),
         "opencode" => home.join(".config").join("opencode").join("skills"),
         // All callers iterate `SUPPORTED_AGENTS`, so any other value
@@ -666,13 +660,7 @@ mod tests {
         // Order matters: dispatchers iterate in this order, and tests on
         // both sides assume the same ordering for stable agent-detection
         // priority.
-        let expected = [
-            "claude-code",
-            "codex",
-            "openai-codex",
-            "gemini-cli",
-            "opencode",
-        ];
+        let expected = ["claude-code", "codex", "gemini-cli", "opencode"];
         assert_eq!(
             SUPPORTED_AGENTS,
             &expected[..],

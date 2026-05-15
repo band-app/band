@@ -2439,7 +2439,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "--home", "type": "string", "required": false, "description": "Override the destination home dir (advanced; mostly for tests). Defaults to $HOME."},
                 {"name": "--filter", "type": "string", "required": false, "description": "Filter which skills to install by name (substring match)"},
             ],
-            "notes": "Idempotent: leaves a correct existing symlink alone; surfaces a clear conflict (without overwriting) when a different symlink or a real directory occupies the target path. Supported agents: claude-code, codex, openai-codex, gemini-cli, opencode. cursor-cli is excluded (no skills dir)."
+            "notes": "Idempotent: leaves a correct existing symlink alone; surfaces a clear conflict (without overwriting) when a different symlink or a real directory occupies the target path. Supported agents: claude-code, codex, gemini-cli, opencode. cursor-cli is excluded (no skills dir)."
         }),
     ];
 

@@ -330,19 +330,6 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
     expect(result.linked.length).toBe(SKILL_NAMES.length);
   });
 
-  it("dedupes targets when codex and openai-codex share $CODEX_HOME/skills", async () => {
-    // Both codex and openai-codex resolve to the same `~/.codex/skills`
-    // dir. Detection should only link once per skill, not twice.
-    mkdirSync(join(process.env.HOME!, ".codex"), { recursive: true });
-    const { installSkills } = await import("../src/lib/cli-skills");
-    const result = await installSkills({ home: process.env.HOME! });
-
-    // Skills are in: ~/.claude/skills (from beforeEach) + ~/.codex/skills.
-    // 2 agents × N skills = 2N symlinks (not 3N — dedupe drops the
-    // openai-codex duplicate).
-    expect(result.linked.length).toBe(2 * SKILL_NAMES.length);
-  });
-
   it("honours $CODEX_HOME when set so codex symlinks follow the override", async () => {
     const customCodexHome = join(tmp, "custom-codex");
     mkdirSync(customCodexHome, { recursive: true });

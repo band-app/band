@@ -11,10 +11,6 @@ export async function createCodingAgent(config: CodingAgentConfig): Promise<Codi
       const { CursorCliAdapter } = await import("./adapters/cursor-cli.js");
       return new CursorCliAdapter(config);
     }
-    case "openai-codex": {
-      const { OpenAICodexAdapter } = await import("./adapters/openai-codex.js");
-      return new OpenAICodexAdapter(config);
-    }
     case "codex": {
       const { CodexAdapter } = await import("./adapters/codex.js");
       return new CodexAdapter(config);

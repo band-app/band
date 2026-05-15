@@ -71,7 +71,6 @@ Editing a `SKILL.md` in `~/.agents/skills/` is reflected in every linked agent w
 | -------------- | -------------------- | -------------------------------- |
 | `claude-code`  | `~/.claude/` exists  | `~/.claude/skills/`              |
 | `codex`        | `~/.codex/` exists (`$CODEX_HOME` honored) | `~/.codex/skills/` |
-| `openai-codex` | shares `~/.codex/`   | `~/.codex/skills/` (deduped)     |
 | `gemini-cli`   | `~/.gemini/` exists  | `~/.gemini/skills/`              |
 | `opencode`     | `~/.config/opencode/` exists | `~/.config/opencode/skills/` |
 
