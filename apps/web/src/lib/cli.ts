@@ -11,16 +11,26 @@ export type CliStatus =
 
 export const SYMLINK_PATH = "/usr/local/bin/band";
 
-/** Find the CLI binary by trying multiple resolution strategies. */
-export function findCliBinary(): string | null {
+/**
+ * Pure resolver for the band CLI binary. Takes the cwd and the calling
+ * module's dirname as inputs so callers can drive it with synthetic paths in
+ * tests. The function still hits the real filesystem to confirm each
+ * candidate exists — that's the actual contract we care about — but it has
+ * no dependency on `process.cwd()` or `import.meta.dirname` so an integration
+ * test can lay out a fake packaged-app tree under a tmp dir and call this
+ * directly, without subprocess gymnastics.
+ */
+export function findCliBinaryAt(opts: { cwd: string; dirname: string }): string | null {
+  const { cwd, dirname } = opts;
+
   // --- Strategy A: cargo build output (dev & source builds) ---
   const appsStrategies = [
     // cwd = apps/web/ (Vite dev and production server)
-    resolve(process.cwd(), ".."),
+    resolve(cwd, ".."),
     // cwd = project root (fallback)
-    resolve(process.cwd(), "apps"),
+    resolve(cwd, "apps"),
     // From this source file (apps/web/src/lib/ → apps/)
-    resolve(import.meta.dirname, "..", "..", ".."),
+    resolve(dirname, "..", "..", ".."),
   ];
 
   for (const appsDir of appsStrategies) {
@@ -42,15 +52,15 @@ export function findCliBinary(): string | null {
   // `web-paths.ts::resolveWebDir`), so the sidecar is one level up and
   // across into `binaries/`. We try both the cwd-based and module-relative
   // paths so the resolution survives a future change to the spawn cwd (the
-  // import.meta.dirname path matches the bundled file's installed location
-  // at `<Resources>/web/dist/start-server.mjs`).
+  // dirname path matches the bundled file's installed location at
+  // `<Resources>/web/dist/start-server.mjs`).
   const exe = platform() === "win32" ? "band.exe" : "band";
   const electronCandidates = [
     // From cwd (<Resources>/web) → <Resources>/binaries/band
-    resolve(process.cwd(), "..", "binaries", exe),
+    resolve(cwd, "..", "binaries", exe),
     // From the bundled dist file (<Resources>/web/dist/start-server.mjs)
     // → <Resources>/binaries/band
-    resolve(import.meta.dirname, "..", "..", "binaries", exe),
+    resolve(dirname, "..", "..", "binaries", exe),
   ];
   for (const p of electronCandidates) {
     try {
@@ -62,6 +72,11 @@ export function findCliBinary(): string | null {
   }
 
   return null;
+}
+
+/** Find the CLI binary by trying multiple resolution strategies. */
+export function findCliBinary(): string | null {
+  return findCliBinaryAt({ cwd: process.cwd(), dirname: import.meta.dirname });
 }
 
 export async function checkCli(): Promise<CliStatus> {

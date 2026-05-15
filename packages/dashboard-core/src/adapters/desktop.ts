@@ -62,7 +62,13 @@ export class DesktopDashboardAdapter extends WebDashboardAdapter {
       if (opts?.allowPrompt && isDesktopShell() && message.includes("elevation-required")) {
         const paths = await this.trpc.cli.resolve.query();
         if (!paths) {
-          throw new Error("Bundled CLI binary missing - try reinstalling Band");
+          // The tRPC resolver returned null. That can mean the bundled
+          // sidecar is genuinely missing on disk, but it can also mean the
+          // web server isn't ready or the call timed out — so don't
+          // confidently blame a missing file like cli.ts::installCli does.
+          throw new Error(
+            "Could not resolve CLI binary path - try reinstalling Band or restarting the app",
+          );
         }
         await desktopInvoke("install_cli", {
           binaryPath: paths.binaryPath,
