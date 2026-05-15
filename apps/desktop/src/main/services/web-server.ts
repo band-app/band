@@ -153,9 +153,21 @@ export async function openServerLog(): Promise<ServerLogFds> {
 export interface SpawnWebServerOptions {
   webDir: string;
   port: number;
+  /**
+   * `app.isPackaged` from the caller. Used to set `BAND_PACKAGED=1` in the
+   * spawned web server's env so it can pick a packaged-vs-dev error
+   * message when the bundled CLI sidecar isn't found. Defaults to false so
+   * tests don't have to fake an Electron app.
+   */
+  isPackaged?: boolean;
 }
 
-function makeSpawnOptions(webDir: string, port: number, fds: ServerLogFds): SpawnOptions {
+function makeSpawnOptions(
+  webDir: string,
+  port: number,
+  fds: ServerLogFds,
+  isPackaged: boolean,
+): SpawnOptions {
   return {
     cwd: webDir,
     env: {
@@ -174,6 +186,13 @@ function makeSpawnOptions(webDir: string, port: number, fds: ServerLogFds): Spaw
       // would launch as a plain Node interpreter instead of the editor. If
       // we ever add such a call site, scrub this var from that spawn's env.
       ELECTRON_RUN_AS_NODE: "1",
+      // Signal to the bundled web server that it's running inside a
+      // packaged Electron app (not a dev `pnpm dev:desktop` run). Used by
+      // `apps/web/src/lib/cli.ts::installCli` to pick the right error
+      // message when the sidecar can't be found: ".dmg user, try
+      // reinstalling" vs. "developer, run cargo build first". Set only
+      // when truly packaged so dev-electron stays on the dev message.
+      ...(isPackaged ? { BAND_PACKAGED: "1" } : {}),
       // Repopulate PATH from the user's login shell. Even though we no
       // longer need a system `node` on PATH (spawn target is
       // `process.execPath`), the web server's *own* children — `claude`,
@@ -220,7 +239,7 @@ export async function spawnWebServer(opts: SpawnWebServerOptions): Promise<Child
   const child = spawn(
     process.execPath,
     [startScript],
-    makeSpawnOptions(opts.webDir, opts.port, fds),
+    makeSpawnOptions(opts.webDir, opts.port, fds, opts.isPackaged ?? false),
   );
   if (process.platform !== "win32") {
     // Don't let the parent process wait on the child; we manage its lifetime.
@@ -249,6 +268,8 @@ export interface EnsureWebserverOptions {
   managed: ManagedProcess;
   /** Override the configured port (defaults to settings.json / 3456). */
   port?: number;
+  /** Forwarded to `spawnWebServer` — see SpawnWebServerOptions.isPackaged. */
+  isPackaged?: boolean;
 }
 
 export interface EnsureWebserverResult {
@@ -269,7 +290,7 @@ export async function ensureWebserverRunning(
   const port = opts.port ?? getConfiguredPort();
   await killPort(port);
 
-  const child = await spawnWebServer({ webDir: opts.webDir, port });
+  const child = await spawnWebServer({ webDir: opts.webDir, port, isPackaged: opts.isPackaged });
   opts.managed.set(child);
 
   const deadline = Date.now() + HEALTH_TIMEOUT_MS;
@@ -291,6 +312,8 @@ export async function ensureWebserverRunning(
 export interface WebserverIpcContext {
   webDir: string;
   managed: ManagedProcess;
+  /** Forwarded to `spawnWebServer` — see SpawnWebServerOptions.isPackaged. */
+  isPackaged?: boolean;
 }
 
 /**
@@ -304,7 +327,7 @@ export async function webserverStart(ctx: WebserverIpcContext): Promise<void> {
   const token = tryGetToken();
   if (token && (await checkLocalHealth(port, token))) return;
 
-  const child = await spawnWebServer({ webDir: ctx.webDir, port });
+  const child = await spawnWebServer({ webDir: ctx.webDir, port, isPackaged: ctx.isPackaged });
   ctx.managed.set(child);
 }
 

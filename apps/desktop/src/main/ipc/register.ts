@@ -77,7 +77,11 @@ export function registerIpc(opts: RegisterOptions): () => void {
   // Native window dragging is handled via CSS `-webkit-app-region: drag` on
   // the title bar — no IPC handler needed.
   handle(Channels.webserverStart, () =>
-    webserverStart({ webDir: opts.webDir, managed: opts.managed }),
+    webserverStart({
+      webDir: opts.webDir,
+      managed: opts.managed,
+      isPackaged: opts.cliPaths.isPackaged,
+    }),
   );
   handle(Channels.webserverStop, () =>
     webserverStop({ webDir: opts.webDir, managed: opts.managed }),

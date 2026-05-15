@@ -11,16 +11,26 @@ export type CliStatus =
 
 export const SYMLINK_PATH = "/usr/local/bin/band";
 
-/** Find the CLI binary by trying multiple resolution strategies. */
-export function findCliBinary(): string | null {
+/**
+ * Pure resolver for the band CLI binary. Takes the cwd and the calling
+ * module's dirname as inputs so callers can drive it with synthetic paths in
+ * tests. The function still hits the real filesystem to confirm each
+ * candidate exists — that's the actual contract we care about — but it has
+ * no dependency on `process.cwd()` or `import.meta.dirname` so an integration
+ * test can lay out a fake packaged-app tree under a tmp dir and call this
+ * directly, without subprocess gymnastics.
+ */
+export function findCliBinaryAt(opts: { cwd: string; dirname: string }): string | null {
+  const { cwd, dirname } = opts;
+
   // --- Strategy A: cargo build output (dev & source builds) ---
   const appsStrategies = [
     // cwd = apps/web/ (Vite dev and production server)
-    resolve(process.cwd(), ".."),
+    resolve(cwd, ".."),
     // cwd = project root (fallback)
-    resolve(process.cwd(), "apps"),
+    resolve(cwd, "apps"),
     // From this source file (apps/web/src/lib/ → apps/)
-    resolve(import.meta.dirname, "..", "..", ".."),
+    resolve(dirname, "..", "..", ".."),
   ];
 
   for (const appsDir of appsStrategies) {
@@ -38,17 +48,19 @@ export function findCliBinary(): string | null {
   // --- Strategy B: Electron extraResources layout (issue #364) ---
   // electron-builder ships the sidecar at <Resources>/binaries/band on every
   // platform. The web server runs as a child of the main process with cwd
-  // set to <Resources>/web/dist by `services/web-server.ts`, so the sidecar
-  // is one level up and across into `binaries/`. We try both the cwd-based
-  // and module-relative paths so the resolution survives a future change to
-  // the spawn cwd (the import.meta.dirname path matches the bundled file's
-  // installed location).
+  // set to <Resources>/web by `services/web-server.ts` (via
+  // `web-paths.ts::resolveWebDir`), so the sidecar is one level up and
+  // across into `binaries/`. We try both the cwd-based and module-relative
+  // paths so the resolution survives a future change to the spawn cwd (the
+  // dirname path matches the bundled file's installed location at
+  // `<Resources>/web/dist/start-server.mjs`).
   const exe = platform() === "win32" ? "band.exe" : "band";
   const electronCandidates = [
-    // From cwd (<Resources>/web/dist) → <Resources>/binaries/band
-    resolve(process.cwd(), "..", "..", "binaries", exe),
-    // From the bundled dist file (<Resources>/web/dist/...) → <Resources>/binaries/band
-    resolve(import.meta.dirname, "..", "..", "..", "binaries", exe),
+    // From cwd (<Resources>/web) → <Resources>/binaries/band
+    resolve(cwd, "..", "binaries", exe),
+    // From the bundled dist file (<Resources>/web/dist/start-server.mjs)
+    // → <Resources>/binaries/band
+    resolve(dirname, "..", "..", "binaries", exe),
   ];
   for (const p of electronCandidates) {
     try {
@@ -60,6 +72,11 @@ export function findCliBinary(): string | null {
   }
 
   return null;
+}
+
+/** Find the CLI binary by trying multiple resolution strategies. */
+export function findCliBinary(): string | null {
+  return findCliBinaryAt({ cwd: process.cwd(), dirname: import.meta.dirname });
 }
 
 export async function checkCli(): Promise<CliStatus> {
@@ -141,12 +158,34 @@ export interface InstallCliOptions {
   allowPrompt?: boolean;
 }
 
+/**
+ * Pick the right message when `findCliBinary` returns null. The two
+ * audiences are mutually exclusive: a .dmg user has no source tree (so the
+ * cargo build advice is useless), and a developer running `pnpm dev`
+ * without a built CLI has no .app bundle to reinstall. The desktop main
+ * process tags the spawned web server with `BAND_PACKAGED=1` when
+ * `app.isPackaged === true` (see `apps/desktop/src/main/services/web-server.ts`),
+ * which is the cleanest available signal — `ELECTRON_RUN_AS_NODE` is set
+ * in both packaged and dev-electron runs, so it can't distinguish them.
+ */
+export function noBinaryError(env: NodeJS.ProcessEnv = process.env): Error {
+  // Strict `=== "1"` rather than truthy: a stray `BAND_PACKAGED=0` is a
+  // non-empty string and would otherwise pick the wrong branch. The
+  // setter in `apps/desktop/src/main/services/web-server.ts` only writes
+  // "1" or omits the key, so this is defense against a future caller
+  // doing something weird, not against current behavior.
+  if (env.BAND_PACKAGED === "1") {
+    return new Error("Bundled CLI binary missing - try reinstalling Band");
+  }
+  return new Error(
+    "Could not find band CLI binary. Build it first with: cargo build --release -p band-cli",
+  );
+}
+
 export async function installCli(_opts: InstallCliOptions = {}): Promise<void> {
   const binaryPath = findCliBinary();
   if (!binaryPath) {
-    throw new Error(
-      "Could not find band CLI binary. Build it first with: cargo build --release -p band-cli",
-    );
+    throw noBinaryError();
   }
 
   const dir = dirname(SYMLINK_PATH);
