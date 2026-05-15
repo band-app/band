@@ -31,7 +31,7 @@ import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { findCliBinaryAt } from "../src/lib/cli";
+import { findCliBinaryAt, noBinaryError } from "../src/lib/cli";
 
 describe("findCliBinaryAt in packaged Electron layout", () => {
   let tmp: string;
@@ -81,5 +81,49 @@ describe("findCliBinaryAt in packaged Electron layout", () => {
 
     const result = findCliBinaryAt({ cwd: webDir, dirname: distDir });
     expect(result).toBeNull();
+  });
+
+  it("resolves via the dirname-based candidate when the cwd path misses", () => {
+    // The earlier positive test always short-circuits at the cwd-based
+    // Strategy B candidate. If a future regression revives the off-by-one
+    // on the *dirname*-based candidate only, that test would still pass.
+    // Pin the second candidate by passing a cwd that resolves nowhere
+    // (cwd/../binaries/band does not exist), forcing the resolver to fall
+    // through to the dirname path.
+    const resources = join(tmp, "Resources");
+    const distDir = join(resources, "web", "dist");
+    const binDir = join(resources, "binaries");
+    mkdirSync(distDir, { recursive: true });
+    mkdirSync(binDir, { recursive: true });
+    const sidecar = join(binDir, "band");
+    writeFileSync(sidecar, "#!/bin/sh\nexit 0\n", "utf-8");
+    chmodSync(sidecar, 0o755);
+
+    // cwd points at an unrelated subtree with no binaries/ sibling, so the
+    // cwd-based candidate misses. dirname is the real bundled location.
+    const unrelatedCwd = join(tmp, "unrelated", "deep", "subdir");
+    mkdirSync(unrelatedCwd, { recursive: true });
+
+    const result = findCliBinaryAt({ cwd: unrelatedCwd, dirname: distDir });
+    expect(result).toBe(sidecar);
+  });
+});
+
+describe("noBinaryError", () => {
+  it("returns the .dmg-user message when BAND_PACKAGED is set", () => {
+    const err = noBinaryError({ BAND_PACKAGED: "1" });
+    expect(err.message).toBe("Bundled CLI binary missing - try reinstalling Band");
+  });
+
+  it("returns the cargo-build message when BAND_PACKAGED is unset", () => {
+    const err = noBinaryError({});
+    expect(err.message).toMatch(/cargo build --release -p band-cli/);
+  });
+
+  it("treats an empty BAND_PACKAGED as unset", () => {
+    // process.env values are strings; an empty string is the same as "not
+    // present" for our boolean intent.
+    const err = noBinaryError({ BAND_PACKAGED: "" });
+    expect(err.message).toMatch(/cargo build --release -p band-cli/);
   });
 });

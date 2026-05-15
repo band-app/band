@@ -116,6 +116,7 @@ async function resolveDashboardUrl(): Promise<string> {
   const { port, token } = await ensureWebserverRunning({
     webDir: state.webDir,
     managed: state.managed,
+    isPackaged: app.isPackaged,
   });
   state.port = port;
   return `http://localhost:${port}/?token=${encodeURIComponent(token)}`;

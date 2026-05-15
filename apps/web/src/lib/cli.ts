@@ -158,10 +158,29 @@ export interface InstallCliOptions {
   allowPrompt?: boolean;
 }
 
+/**
+ * Pick the right message when `findCliBinary` returns null. The two
+ * audiences are mutually exclusive: a .dmg user has no source tree (so the
+ * cargo build advice is useless), and a developer running `pnpm dev`
+ * without a built CLI has no .app bundle to reinstall. The desktop main
+ * process tags the spawned web server with `BAND_PACKAGED=1` when
+ * `app.isPackaged === true` (see `apps/desktop/src/main/services/web-server.ts`),
+ * which is the cleanest available signal — `ELECTRON_RUN_AS_NODE` is set
+ * in both packaged and dev-electron runs, so it can't distinguish them.
+ */
+export function noBinaryError(env: NodeJS.ProcessEnv = process.env): Error {
+  if (env.BAND_PACKAGED) {
+    return new Error("Bundled CLI binary missing - try reinstalling Band");
+  }
+  return new Error(
+    "Could not find band CLI binary. Build it first with: cargo build --release -p band-cli",
+  );
+}
+
 export async function installCli(_opts: InstallCliOptions = {}): Promise<void> {
   const binaryPath = findCliBinary();
   if (!binaryPath) {
-    throw new Error("Bundled CLI binary missing - try reinstalling Band");
+    throw noBinaryError();
   }
 
   const dir = dirname(SYMLINK_PATH);
