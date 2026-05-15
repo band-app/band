@@ -104,12 +104,11 @@ export interface SkillTarget {
  * `get<Agent>InstallSkillsDir` exports next to each adapter's discovery
  * logic) — this layer only orchestrates detection, lookup, and dedupe.
  *
- * Two agent types can resolve to the same directory (codex and
- * openai-codex both map to `$CODEX_HOME/skills/`). We dedupe so the
- * (skill, target) loop doesn't try to create the same symlink twice on
- * each boot. Agent types without a documented global skills directory
- * (e.g. `cursor-cli`) are silently skipped at the
- * `SUPPORTED_AGENT_TYPES` level.
+ * Dedupe is still applied across agent types in case two map to the same
+ * directory in the future, so the (skill, target) loop doesn't try to
+ * create the same symlink twice on each boot. Agent types without a
+ * documented global skills directory (e.g. `cursor-cli`) are silently
+ * skipped at the `SUPPORTED_AGENT_TYPES` level.
  */
 export async function resolveSkillTargets(home: string = homedir()): Promise<SkillTarget[]> {
   const seen = new Set<string>();

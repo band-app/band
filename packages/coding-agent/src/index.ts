@@ -5,7 +5,6 @@ export {
   type CursorCliConfig,
   codingAgentConfigSchema,
   type GeminiCliConfig,
-  type OpenAICodexConfig,
   type OpenCodeConfig,
 } from "./config.js";
 export type {

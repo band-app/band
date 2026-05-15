@@ -30,10 +30,6 @@ export async function getInstallSkillsDir(
       const { getCodexInstallSkillsDir } = await import("./adapters/codex.js");
       return getCodexInstallSkillsDir(home);
     }
-    case "openai-codex": {
-      const { getOpenAICodexInstallSkillsDir } = await import("./adapters/openai-codex.js");
-      return getOpenAICodexInstallSkillsDir(home);
-    }
     case "gemini-cli": {
       const { getGeminiCliInstallSkillsDir } = await import("./adapters/gemini-cli.js");
       return getGeminiCliInstallSkillsDir(home);
@@ -72,10 +68,6 @@ export async function getDefaultAgentBinary(type: string): Promise<string | null
     case "codex": {
       const { CODEX_DEFAULT_BINARY } = await import("./adapters/codex.js");
       return CODEX_DEFAULT_BINARY;
-    }
-    case "openai-codex": {
-      const { OPENAI_CODEX_DEFAULT_BINARY } = await import("./adapters/openai-codex.js");
-      return OPENAI_CODEX_DEFAULT_BINARY;
     }
     case "gemini-cli": {
       const { GEMINI_CLI_DEFAULT_BINARY } = await import("./adapters/gemini-cli.js");
@@ -122,13 +114,7 @@ export function getSharedSkillsDir(home: string = homedir()): string {
  * Order is informational only: the linker iterates this list once and
  * skips any agent that isn't detected on the host.
  */
-export const SUPPORTED_AGENT_TYPES = [
-  "claude-code",
-  "codex",
-  "openai-codex",
-  "gemini-cli",
-  "opencode",
-] as const;
+export const SUPPORTED_AGENT_TYPES = ["claude-code", "codex", "gemini-cli", "opencode"] as const;
 
 export type SupportedAgentType = (typeof SUPPORTED_AGENT_TYPES)[number];
 
@@ -142,24 +128,21 @@ export type SupportedAgentType = (typeof SUPPORTED_AGENT_TYPES)[number];
  * Returns `null` for unknown types so callers can no-op rather than
  * crash if the supported-agents list ever drifts ahead of the switch.
  *
- * Note: for `codex`/`openai-codex`, `$CODEX_HOME` takes precedence over
- * `home` when set — callers that need full isolation (e.g. test
- * sandboxes) must also control the `CODEX_HOME` environment variable.
- * The matching Rust helper (`apps/cli/src/skills.rs::codex_home`) has
- * the same behaviour.
+ * Note: for `codex`, `$CODEX_HOME` takes precedence over `home` when set —
+ * callers that need full isolation (e.g. test sandboxes) must also control
+ * the `CODEX_HOME` environment variable. The matching Rust helper
+ * (`apps/cli/src/skills.rs::codex_home`) has the same behaviour.
  */
 export function getAgentConfigDir(type: string, home: string = homedir()): string | null {
   switch (type) {
     case "claude-code":
       return join(home, ".claude");
     case "codex":
-    case "openai-codex":
-      // Both adapters share `$CODEX_HOME` (default `~/.codex`). Honor
-      // the env override at call time so test overrides take effect.
-      // Use `||` instead of `??` so an empty-string `$CODEX_HOME=` is
-      // treated as unset rather than being returned as `""` (which would
-      // explode at the first `statSync`). Matches the Rust
-      // `codex_home()` helper's `!val.is_empty()` check.
+      // Honor `$CODEX_HOME` (default `~/.codex`) at call time so test
+      // overrides take effect. Use `||` instead of `??` so an empty-string
+      // `$CODEX_HOME=` is treated as unset rather than being returned as
+      // `""` (which would explode at the first `statSync`). Matches the
+      // Rust `codex_home()` helper's `!val.is_empty()` check.
       return process.env.CODEX_HOME || join(home, ".codex");
     case "gemini-cli":
       return join(home, ".gemini");

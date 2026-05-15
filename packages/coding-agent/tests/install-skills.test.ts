@@ -41,22 +41,10 @@ describe("getInstallSkillsDir", () => {
     assert.equal(dir, "/tmp/band-test-home/.codex/skills");
   });
 
-  it("resolves openai-codex to $CODEX_HOME/skills (same as codex)", async () => {
-    const dir = await getInstallSkillsDir("openai-codex", HOME);
-    assert.equal(dir, "/tmp/band-test-home/.codex/skills");
-  });
-
   it("honours $CODEX_HOME for codex", async () => {
     originalCodexHome = process.env.CODEX_HOME;
     process.env.CODEX_HOME = "/custom/codex/dir";
     const dir = await getInstallSkillsDir("codex", HOME);
-    assert.equal(dir, "/custom/codex/dir/skills");
-  });
-
-  it("honours $CODEX_HOME for openai-codex", async () => {
-    originalCodexHome = process.env.CODEX_HOME;
-    process.env.CODEX_HOME = "/custom/codex/dir";
-    const dir = await getInstallSkillsDir("openai-codex", HOME);
     assert.equal(dir, "/custom/codex/dir/skills");
   });
 
@@ -88,10 +76,6 @@ describe("getDefaultAgentBinary", () => {
 
   it("resolves codex to 'codex'", async () => {
     assert.equal(await getDefaultAgentBinary("codex"), "codex");
-  });
-
-  it("resolves openai-codex to 'codex' (same binary as the CLI Codex adapter)", async () => {
-    assert.equal(await getDefaultAgentBinary("openai-codex"), "codex");
   });
 
   it("resolves gemini-cli to 'gemini'", async () => {
@@ -135,16 +119,10 @@ describe("getAgentConfigDir", () => {
     assert.equal(getAgentConfigDir("codex", HOME), "/tmp/band-test-home/.codex");
   });
 
-  it("resolves openai-codex to ~/.codex (shares config dir with codex)", () => {
-    delete process.env.CODEX_HOME;
-    assert.equal(getAgentConfigDir("openai-codex", HOME), "/tmp/band-test-home/.codex");
-  });
-
-  it("honours $CODEX_HOME for codex/openai-codex", () => {
+  it("honours $CODEX_HOME for codex", () => {
     originalCodexHome = process.env.CODEX_HOME;
     process.env.CODEX_HOME = "/custom/codex";
     assert.equal(getAgentConfigDir("codex", HOME), "/custom/codex");
-    assert.equal(getAgentConfigDir("openai-codex", HOME), "/custom/codex");
   });
 
   it("resolves gemini-cli to ~/.gemini", () => {
@@ -181,7 +159,7 @@ describe("SUPPORTED_AGENT_TYPES", () => {
   it("matches the canonical list (mirrored in Rust SUPPORTED_AGENTS)", () => {
     assert.deepEqual(
       [...SUPPORTED_AGENT_TYPES],
-      ["claude-code", "codex", "openai-codex", "gemini-cli", "opencode"],
+      ["claude-code", "codex", "gemini-cli", "opencode"],
       "TS SUPPORTED_AGENT_TYPES drifted from the canonical list; update both this " +
         "tuple and apps/cli/src/skills.rs::SUPPORTED_AGENTS (plus the matching test on " +
         "each side) when adding/removing an agent",

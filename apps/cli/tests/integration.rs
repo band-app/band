@@ -2772,8 +2772,7 @@ fn skills_sandbox(agent_dirs: &[&str]) -> tempfile::TempDir {
 ///
 /// Stripping `CODEX_HOME` from the child's env at this seam isolates
 /// every `run_install_json` caller without touching the developer's
-/// actual shell. Tests that *want* to exercise the env override
-/// (`skills_install_dedupes_codex_and_openai_codex` etc.) can use
+/// actual shell. Tests that *want* to exercise the env override can use
 /// `run_install_json_with_env` below.
 fn run_install_json(home: &Path) -> serde_json::Value {
     let output = Command::new(env!("CARGO_BIN_EXE_band"))
@@ -2916,33 +2915,6 @@ fn skills_install_skips_agents_without_a_config_dir() {
             link.display()
         );
     }
-}
-
-#[test]
-fn skills_install_dedupes_codex_and_openai_codex() {
-    // codex and openai-codex share $CODEX_HOME (default ~/.codex). The
-    // command must only link once, not twice.
-    let tmp = skills_sandbox(&[".codex", ".claude"]);
-    let home = tmp.path();
-    let result = run_install_json(home);
-
-    let agents = result["agents"].as_array().expect("agents array");
-    let types: Vec<&str> = agents
-        .iter()
-        .map(|a| a["type"].as_str().unwrap_or(""))
-        .collect();
-    // Exactly 2 distinct skill-dir targets: claude-code + codex (openai-codex deduped away).
-    assert_eq!(
-        agents.len(),
-        2,
-        "expected 2 agents after dedupe, got {types:?}"
-    );
-    assert!(types.contains(&"claude-code"));
-    assert!(types.contains(&"codex"));
-    assert!(!types.contains(&"openai-codex"));
-
-    // 6 skills × 2 agents = 12 symlinks total.
-    assert_eq!(result["symlinks"]["linked"].as_array().unwrap().len(), 12);
 }
 
 // The conflict path relies on `std::os::unix::fs::symlink` to plant a
