@@ -1,5 +1,5 @@
 import { createLogger } from "@band-app/logger";
-import { and, desc, eq, isNull, lt, or } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull, lt, or } from "drizzle-orm";
 import { getDb } from "./db/connection";
 import { tasks } from "./db/schema";
 
@@ -180,11 +180,13 @@ export function deleteTasksOlderThan(cutoffMs: number): number {
     .where(
       or(
         and(isNull(tasks.completedAt), lt(tasks.startedAt, cutoffMs)),
-        // NULL-`completedAt` rows are already handled by the first branch.
-        // In SQLite, `NULL < cutoffMs` evaluates to NULL (falsy in a WHERE
-        // predicate), so this branch only matches rows where `completedAt`
-        // is non-null and older than the cutoff.
-        lt(tasks.completedAt, cutoffMs),
+        // The explicit `isNotNull` guard is technically redundant — SQLite
+        // treats `NULL < cutoffMs` as NULL (falsy) in a WHERE predicate, so
+        // null-`completedAt` rows would be skipped here regardless. We keep
+        // it so the intent is obvious without leaning on SQLite NULL
+        // semantics, and so the query stays correct under a future Drizzle
+        // or backend swap.
+        and(isNotNull(tasks.completedAt), lt(tasks.completedAt, cutoffMs)),
       ),
     )
     .run();
