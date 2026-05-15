@@ -84,8 +84,16 @@ async function startServer(opts: { tmpHome: string }): Promise<ServerHandle> {
           url: `http://127.0.0.1:${port}`,
           home: tmpHome,
           close: () =>
+            // SIGTERM first, but fall back to SIGKILL after 5s so a server
+            // stuck in a DB lock can't hang `afterAll` indefinitely.
             new Promise<void>((r) => {
-              child.on("exit", () => r());
+              const fallback = setTimeout(() => {
+                child.kill("SIGKILL");
+              }, 5_000);
+              child.on("exit", () => {
+                clearTimeout(fallback);
+                r();
+              });
               child.kill("SIGTERM");
             }),
         });

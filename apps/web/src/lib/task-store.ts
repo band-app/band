@@ -161,6 +161,12 @@ export function deleteWorkspaceTasks(workspaceId: string): number {
  * a stuck `running` row from a month ago is still pruned instead of living
  * forever.
  *
+ * The query intentionally has no `status` filter: a row that's still
+ * marked `running` 30 days after it was started is by definition stale
+ * (every server boot calls `cleanupStaleTasks` to flip dangling `running`
+ * rows to `failed`, so an in-flight task can survive a server restart
+ * but not 30 days of restarts).
+ *
  * Returns the number of rows deleted.
  */
 export function deleteTasksOlderThan(cutoffMs: number): number {
@@ -195,6 +201,11 @@ export const TASK_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 /** How often the background sweep re-runs after the first pass on boot. */
 export const TASK_PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
+// `Symbol.for` + `globalThis` rather than a plain module-scope variable so
+// the singleton survives module re-evaluation (HMR in dev, vitest worker
+// module isolation). Without this, a second `startTaskPruneScheduler()`
+// call after a reload would schedule a second timer instead of being a
+// no-op. Same pattern as `cronjob-scheduler.ts`.
 const PRUNE_SCHEDULER_KEY = Symbol.for("band.task-prune-scheduler");
 const pruneG = globalThis as unknown as Record<symbol, unknown>;
 
