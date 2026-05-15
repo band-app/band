@@ -50,13 +50,13 @@ describe("resolveFolderIconName", () => {
 
   it("returns the named folder icon when present", () => {
     const src = manifest.folderNames.src;
-    if (!src) return;
+    assert.ok(src, "manifest.folderNames.src should exist in material-icon-theme");
     assert.equal(resolveFolderIconName("src", false), src);
   });
 
   it("uses the expanded variant when expanded=true", () => {
     const srcExpanded = manifest.folderNamesExpanded.src;
-    if (!srcExpanded) return;
+    assert.ok(srcExpanded, "manifest.folderNamesExpanded.src should exist in material-icon-theme");
     assert.equal(resolveFolderIconName("src", true), srcExpanded);
   });
 });

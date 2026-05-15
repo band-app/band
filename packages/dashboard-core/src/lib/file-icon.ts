@@ -6,11 +6,30 @@ import { resolveFolderIconName, resolveIconName, resolveIconPath } from "./file-
 // Components render via <use href="#mit-{basename}"> — synchronous, no network
 // roundtrip, no flicker. SVG sources originate from the bundled npm package
 // at build time, not from user input.
-const iconSources = import.meta.glob<string>("../../node_modules/material-icon-theme/icons/*.svg", {
-  query: "?raw",
-  import: "default",
-  eager: true,
-});
+//
+// Glob path is relative to this file (src/lib/), so it resolves to
+// packages/dashboard-core/node_modules/material-icon-theme/icons/*.svg. pnpm
+// places a package-local symlink there; if hoisting config ever changes the
+// glob matches zero files — caught by the non-empty assertion below rather
+// than silently shipping blank icons.
+//
+// SSR-gated: import.meta.env.SSR constant-folds to a {} branch on the server
+// so Vite dead-code-eliminates the ~1.2k inlined SVG strings out of the SSR
+// bundle (the sprite is never injected server-side anyway).
+const iconSources: Record<string, string> = import.meta.env.SSR
+  ? {}
+  : import.meta.glob<string>("../../node_modules/material-icon-theme/icons/*.svg", {
+      query: "?raw",
+      import: "default",
+      eager: true,
+    });
+
+if (!import.meta.env.SSR && Object.keys(iconSources).length === 0) {
+  throw new Error(
+    "[dashboard-core/file-icon] material-icon-theme SVG glob matched zero files. " +
+      "Check packages/dashboard-core/node_modules/material-icon-theme/icons.",
+  );
+}
 
 const SYMBOL_PREFIX = "mit-";
 const SPRITE_ID = "mit-icon-sprite";
@@ -23,13 +42,18 @@ for (const path of Object.keys(iconSources)) {
 
 function buildSpriteMarkup(): string {
   const parts: string[] = [
-    '<svg xmlns="http://www.w3.org/2000/svg" style="position:absolute;width:0;height:0" aria-hidden="true">',
+    // xmlns:xlink is required: a handful of source icons (aurelia,
+    // folder-css, folder-cloud-functions, …) use xlink:href internally.
+    // buildSpriteMarkup strips each icon's own <svg> wrapper (which carried
+    // the declaration), so without it here the strict image/svg+xml parse
+    // hits an undefined-prefix error and the ENTIRE sprite is discarded.
+    '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" style="position:absolute;width:0;height:0" aria-hidden="true">',
   ];
   for (const [path, src] of Object.entries(iconSources)) {
     const file = path.split("/").pop();
     if (!file) continue;
-    const viewBox = src.match(/\sviewBox="([^"]+)"/)?.[1] ?? "0 0 32 32";
-    const inner = src.match(/<svg[^>]*>([\s\S]*)<\/svg>\s*$/)?.[1];
+    const viewBox = src.match(/viewBox="([^"]+)"/)?.[1] ?? "0 0 32 32";
+    const inner = src.match(/<svg[^>]*>([\s\S]*?)<\/svg>\s*$/)?.[1];
     if (!inner) continue;
     parts.push(`<symbol id="${symbolByBasename[file]}" viewBox="${viewBox}">${inner}</symbol>`);
   }
@@ -38,6 +62,7 @@ function buildSpriteMarkup(): string {
 }
 
 let spriteInjected = false;
+let spriteMarkupCache: string | null = null;
 function ensureSprite(): void {
   if (spriteInjected) return;
   if (typeof document === "undefined" || typeof DOMParser === "undefined") return;
@@ -45,9 +70,20 @@ function ensureSprite(): void {
     spriteInjected = true;
     return;
   }
-  const parsed = new DOMParser().parseFromString(buildSpriteMarkup(), "image/svg+xml");
+  // Body may not be parsed yet when the module-init call runs (script in
+  // <head> without defer). Bail; the per-render ensureSprite() retries once
+  // the body exists. Memoize the markup so that retry path doesn't re-run
+  // the ~1.2k-SVG regex/join on every render until then.
+  if (!document.body) return;
+  if (spriteMarkupCache === null) spriteMarkupCache = buildSpriteMarkup();
+  const parsed = new DOMParser().parseFromString(spriteMarkupCache, "image/svg+xml");
   const root = parsed.documentElement;
-  if (root.nodeName === "parsererror") return;
+  if (root.nodeName === "parsererror") {
+    console.error(
+      "[dashboard-core/file-icon] Failed to parse SVG sprite markup. Icons will render blank.",
+    );
+    return;
+  }
   root.id = SPRITE_ID;
   document.body.appendChild(root);
   spriteInjected = true;
