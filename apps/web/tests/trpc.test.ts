@@ -1492,9 +1492,13 @@ describe("tRPC — workspace operations", () => {
   });
 
   it("workspace.getDiffSummary in uncommitted mode hides committed changes", async () => {
-    // The previous tests committed feature-only.txt on feature-cmp. With
-    // diffMode="uncommitted" we diff against HEAD, so a clean working tree
-    // should report zero files changed regardless of what's on the branch.
+    // This test (like several others in this describe block) chains on the
+    // worktree state left by the earlier "workspace.getDiff with non-default
+    // compareBranch ..." case, which creates `repo-feature-cmp` and commits
+    // `feature-only.txt` on it. Vitest runs `it` blocks within a file in
+    // source order, so the chain is deterministic. With diffMode="uncommitted"
+    // we diff against HEAD, so a clean working tree should report zero files
+    // changed regardless of what's committed on the branch.
     const res = await trpcQuery(server.url, "workspace.getDiffSummary", {
       workspaceId: "repo-feature-cmp",
       diffMode: "uncommitted",
@@ -1516,7 +1520,12 @@ describe("tRPC — workspace operations", () => {
     const listData = await trpcData<{
       projects: Array<{ worktrees: Array<{ branch: string; path: string }> }>;
     }>(listRes);
-    const featureCmp = listData.projects[0].worktrees.find((wt) => wt.branch === "feature-cmp");
+    // Search across every project's worktrees rather than indexing into the
+    // first project — robust to fixtures gaining additional projects or to
+    // the server returning them in a different order.
+    const featureCmp = listData.projects
+      .flatMap((p) => p.worktrees)
+      .find((wt) => wt.branch === "feature-cmp");
     expect(featureCmp).toBeDefined();
     writeFileSync(join(featureCmp!.path, "wip.txt"), "work in progress\n");
 

@@ -1,11 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
 import type { DiffMode } from "../types";
 
-// Storage keys are intentionally shared across every subscriber in the same
-// window so that the DiffView and the Changes-tab badge always read the same
-// target — see issue #396 ("Changes tab — out of sync"), where the badge
-// always reflected the default-branch comparison instead of the user's pick.
-const DIFF_MODE_KEY = "band:diff-mode";
+// Both keys are workspace-scoped so the DiffView and the Changes-tab badge
+// always read the same target — see issue #396 ("Changes tab — out of sync").
+// `diffMode` used to be a global preference (one key for all workspaces) but
+// that caused the badge for workspace B to inherit workspace A's mode the
+// first time a user opened B in a new session; per-workspace keys keep the
+// state symmetric with `compareBranch` and match the principle of least
+// surprise. Users who had a stored `diffMode` under the previous global key
+// will fall back to the default ("branch") once after the upgrade, then
+// their per-workspace pick will persist normally.
+const DIFF_MODE_KEY_PREFIX = "band:diff-mode:";
 const COMPARE_BRANCH_KEY_PREFIX = "band:diff-compare-branch:";
 
 /**
@@ -22,9 +27,9 @@ export interface DiffTargetChangeDetail {
   compareBranch: string | null;
 }
 
-export function readStoredDiffMode(): DiffMode {
+function readStoredDiffMode(workspaceId: string): DiffMode {
   try {
-    const v = localStorage.getItem(DIFF_MODE_KEY);
+    const v = localStorage.getItem(DIFF_MODE_KEY_PREFIX + workspaceId);
     if (v === "uncommitted" || v === "branch") return v;
   } catch {}
   return "branch";
@@ -38,9 +43,9 @@ export function readStoredCompareBranch(workspaceId: string): string | null {
   }
 }
 
-function writeDiffMode(mode: DiffMode) {
+function writeDiffMode(workspaceId: string, mode: DiffMode) {
   try {
-    localStorage.setItem(DIFF_MODE_KEY, mode);
+    localStorage.setItem(DIFF_MODE_KEY_PREFIX + workspaceId, mode);
   } catch {}
 }
 
@@ -74,7 +79,7 @@ export interface UseDiffTargetReturn {
  * keeps the Changes-tab badge in sync with the DiffView's branch dropdown.
  */
 export function useDiffTarget(workspaceId: string): UseDiffTargetReturn {
-  const [diffMode, setDiffModeState] = useState<DiffMode>(readStoredDiffMode);
+  const [diffMode, setDiffModeState] = useState<DiffMode>(() => readStoredDiffMode(workspaceId));
   const [compareBranch, setCompareBranchState] = useState<string | null>(() =>
     readStoredCompareBranch(workspaceId),
   );
@@ -83,7 +88,7 @@ export function useDiffTarget(workspaceId: string): UseDiffTargetReturn {
   // its own compareBranch entry, and we want to honor a previously stored
   // selection rather than carry over the previous workspace's pick.
   useEffect(() => {
-    setDiffModeState(readStoredDiffMode());
+    setDiffModeState(readStoredDiffMode(workspaceId));
     setCompareBranchState(readStoredCompareBranch(workspaceId));
   }, [workspaceId]);
 
@@ -111,7 +116,7 @@ export function useDiffTarget(workspaceId: string): UseDiffTargetReturn {
   // concurrently would still observe a consistent payload.
   const setDiffMode = useCallback(
     (mode: DiffMode) => {
-      writeDiffMode(mode);
+      writeDiffMode(workspaceId, mode);
       setDiffModeState(mode);
       dispatchChange({
         workspaceId,
@@ -128,7 +133,7 @@ export function useDiffTarget(workspaceId: string): UseDiffTargetReturn {
       setCompareBranchState(branch);
       dispatchChange({
         workspaceId,
-        diffMode: readStoredDiffMode(),
+        diffMode: readStoredDiffMode(workspaceId),
         compareBranch: branch,
       });
     },
