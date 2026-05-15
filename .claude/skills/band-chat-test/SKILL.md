@@ -47,15 +47,25 @@ pnpm dev:web > /tmp/band-dev.log 2>&1 &
 DEV_PID=$!
 
 # Wait for Vite to print its Local: line, then extract the port
-for i in 1 2 3 4 5 6 7 8 9 10; do
+PORT=""
+for _ in $(seq 1 15); do
   sleep 2
   PORT=$(grep -oE 'Local:\s+http://localhost:[0-9]+' /tmp/band-dev.log | grep -oE '[0-9]+$' | head -1)
   if [ -n "$PORT" ]; then break; fi
 done
+
+# Fail loudly rather than silently letting the rest of the workflow
+# target the wrong server. Slow machines / first-run dep installs can
+# push Vite's startup past 30 s — bump the loop bound if needed, but
+# never proceed with $PORT empty.
+if [ -z "$PORT" ]; then
+  echo "ERROR: timed out waiting for Vite to bind a port — dumping /tmp/band-dev.log:" >&2
+  cat /tmp/band-dev.log >&2
+  kill -TERM "$DEV_PID" 2>/dev/null
+  exit 1
+fi
 echo "Dev server on port $PORT (pid $DEV_PID)"
 ```
-
-If `$PORT` is empty after ~20 s, dump `/tmp/band-dev.log` and fix whatever is wrong (port exhaustion, dependency installs, etc.) before continuing.
 
 ### 2. Point the CLI at the dev server
 
