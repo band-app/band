@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { DiffMode } from "../types";
 
 // Both keys are workspace-scoped so the DiffView and the Changes-tab badge
@@ -25,6 +25,13 @@ export interface DiffTargetChangeDetail {
   workspaceId: string;
   diffMode: DiffMode;
   compareBranch: string | null;
+  /**
+   * Per-instance identifier of the subscriber that dispatched the event.
+   * Used to skip the echo-back into the same instance's event handler.
+   * Optional — handlers that don't recognize the value should still update
+   * normally, so external dispatches (e.g. tests) work without it.
+   */
+  source?: string;
 }
 
 function readStoredDiffMode(workspaceId: string): DiffMode {
@@ -84,6 +91,15 @@ export function useDiffTarget(workspaceId: string): UseDiffTargetReturn {
     readStoredCompareBranch(workspaceId),
   );
 
+  // Per-instance identifier for skipping the echo-back when this instance is
+  // the dispatcher of the event. React 18 batches the redundant setState
+  // calls so it's only a small efficiency win, but it also keeps any
+  // future debug logging in the handler from firing on every self-mutation.
+  const instanceIdRef = useRef<string>("");
+  if (!instanceIdRef.current) {
+    instanceIdRef.current = Math.random().toString(36).slice(2);
+  }
+
   // Re-read stored values when the workspace changes — every workspace has
   // its own compareBranch entry, and we want to honor a previously stored
   // selection rather than carry over the previous workspace's pick.
@@ -97,15 +113,28 @@ export function useDiffTarget(workspaceId: string): UseDiffTargetReturn {
   // intentionally ignored — Band is single-window, and reacting to them would
   // duplicate the writeback and re-fire dispatchChange().
   useEffect(() => {
+    const instanceId = instanceIdRef.current;
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<DiffTargetChangeDetail>).detail;
       if (!detail || detail.workspaceId !== workspaceId) return;
+      // Skip the echo-back if this instance was the dispatcher — setDiff*
+      // already called setState directly before dispatching the event.
+      if (detail.source && detail.source === instanceId) return;
       setDiffModeState(detail.diffMode);
       setCompareBranchState(detail.compareBranch);
     };
     window.addEventListener(CHANGE_EVENT, handler);
     return () => window.removeEventListener(CHANGE_EVENT, handler);
   }, [workspaceId]);
+
+  // One-shot cleanup of the legacy global `band:diff-mode` key from the
+  // pre-per-workspace storage layout. Runs once per session per subscriber;
+  // localStorage.removeItem is a no-op once the key is gone.
+  useEffect(() => {
+    try {
+      localStorage.removeItem("band:diff-mode");
+    } catch {}
+  }, []);
 
   // The dispatchChange payload reads the "other" value (the one not being
   // mutated) back from localStorage rather than from React state. This is
@@ -122,6 +151,7 @@ export function useDiffTarget(workspaceId: string): UseDiffTargetReturn {
         workspaceId,
         diffMode: mode,
         compareBranch: readStoredCompareBranch(workspaceId),
+        source: instanceIdRef.current,
       });
     },
     [workspaceId],
@@ -135,6 +165,7 @@ export function useDiffTarget(workspaceId: string): UseDiffTargetReturn {
         workspaceId,
         diffMode: readStoredDiffMode(workspaceId),
         compareBranch: branch,
+        source: instanceIdRef.current,
       });
     },
     [workspaceId],
