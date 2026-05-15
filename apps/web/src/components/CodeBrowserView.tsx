@@ -1239,6 +1239,22 @@ export function CodeBrowserView({
     }
   }, [openFilePath, treeCollapsed, treePanelRef]);
 
+  // Auto-expand tree when the last tab is closed. Otherwise the user is
+  // stranded: FileTabBar (which owns the tree-toggle button) renders null
+  // when there are no tabs, so a collapsed tree leaves no visible UI to
+  // open another file. (Issue #424)
+  //
+  // `treeCollapsed` is intentionally in the dep array — beyond the
+  // close-last-tab and mount-with-empty-tabs cases, it also re-expands
+  // the tree if the user drags the separator gripper to collapse it
+  // while no tabs are open. That's the desired behaviour: you can't
+  // strand yourself by collapsing the only remaining navigation UI.
+  useEffect(() => {
+    if (fileTabs.openTabs.length === 0 && treeCollapsed) {
+      treePanelRef.current?.expand();
+    }
+  }, [fileTabs.openTabs.length, treeCollapsed, treePanelRef]);
+
   // -------------------------------------------------------------------------
   // Render — mobile toggle layout or desktop side-by-side layout
   // -------------------------------------------------------------------------
