@@ -19,16 +19,5 @@
     "@anthropic-ai/claude-agent-sdk": "^0.2.123",
     "@nothumanwork/cursor-agents-sdk": "^0.7.0",
     "@openai/codex-sdk": "^0.128.0"
-  },
-  "peerDependenciesMeta": {
-    "@anthropic-ai/claude-agent-sdk": {
-      "optional": true
-    },
-    "@nothumanwork/cursor-agents-sdk": {
-      "optional": true
-    },
-    "@openai/codex-sdk": {
-      "optional": true
-    }
   }
 }

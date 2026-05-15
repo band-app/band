@@ -61,12 +61,7 @@
     },
     "packages/coding-agent": {
       "entry": ["src/index.ts", "tests/mocks/*.mjs"],
-      "project": ["src/**/*.ts", "tests/**/*.{ts,mjs}"],
-      "ignoreDependencies": [
-        "@anthropic-ai/claude-agent-sdk",
-        "@nothumanwork/cursor-agents-sdk",
-        "@openai/codex-sdk"
-      ]
+      "project": ["src/**/*.ts", "tests/**/*.{ts,mjs}"]
     },
     "packages/logger": {
       "entry": ["src/index.ts"],
