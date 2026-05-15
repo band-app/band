@@ -127,7 +127,7 @@ describe("noBinaryError", () => {
     expect(err.message).toMatch(/cargo build --release -p band-cli/);
   });
 
-  it("treats BAND_PACKAGED=0 as unset (strict === \"1\" check)", () => {
+  it('treats BAND_PACKAGED=0 as unset (strict === "1" check)', () => {
     // "0" is truthy as a non-empty string but semantically means "off".
     // A truthy check would mis-route to the reinstall message.
     const err = noBinaryError({ BAND_PACKAGED: "0" });
