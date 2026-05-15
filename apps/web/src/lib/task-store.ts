@@ -165,14 +165,19 @@ export function deleteWorkspaceTasks(workspaceId: string): number {
  */
 export function deleteTasksOlderThan(cutoffMs: number): number {
   const db = getDb();
+  // NOTE: `startedAt` is `NOT NULL` in the schema, so the first branch covers
+  // every NULL-`completedAt` row that's older than the cutoff. A row with both
+  // columns NULL would match neither branch and live forever, but the insert
+  // path always sets `startedAt`, so that combination is unreachable today.
   const result = db
     .delete(tasks)
     .where(
       or(
         and(isNull(tasks.completedAt), lt(tasks.startedAt, cutoffMs)),
-        // SAFETY: completedAt may be null, but the AND short-circuits via the
-        // OR above; SQLite returns false for NULL comparisons so this branch
-        // only ever matches rows with a non-null completedAt.
+        // NULL-`completedAt` rows are already handled by the first branch.
+        // In SQLite, `NULL < cutoffMs` evaluates to NULL (falsy in a WHERE
+        // predicate), so this branch only matches rows where `completedAt`
+        // is non-null and older than the cutoff.
         lt(tasks.completedAt, cutoffMs),
       ),
     )
@@ -233,7 +238,14 @@ export function startTaskPruneScheduler(
   const retentionMs = options.retentionMs ?? TASK_RETENTION_MS;
   const intervalMs = options.intervalMs ?? TASK_PRUNE_INTERVAL_MS;
 
-  pruneOldTasks(retentionMs);
+  // Log-and-continue: a DB lock or corruption at boot time must not crash
+  // `main()` before the server binds its port. The interval handler below
+  // applies the same policy.
+  try {
+    pruneOldTasks(retentionMs);
+  } catch (err) {
+    log.error({ err }, "initial task prune on boot failed");
+  }
 
   const timer = setInterval(() => {
     try {

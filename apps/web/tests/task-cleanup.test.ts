@@ -19,14 +19,13 @@ import { DatabaseSync } from "node:sqlite";
 import { drizzle } from "drizzle-orm/node-sqlite";
 import { migrate } from "drizzle-orm/node-sqlite/migrator";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { TASK_RETENTION_MS } from "../src/lib/task-store";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { SERVER_RUNTIME, SERVER_SCRIPT } from "./helpers/server-runtime";
 
 const PROJECT_ROOT = join(import.meta.dirname, "..");
 const DEFAULT_TOKEN = "task-cleanup-test-token";
 const MIGRATIONS_FOLDER = join(import.meta.dirname, "..", "src", "lib", "db", "migrations");
-
-const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
 // ---------------------------------------------------------------------------
 // Server lifecycle (mirrors the pattern used in `tasks-crud.test.ts`)
@@ -340,7 +339,7 @@ describe("auto-prune tasks older than 30 days (issue #416)", () => {
 
   it("removes old tasks while keeping recent ones; orphaned rows fall back to startedAt; reruns are idempotent", async () => {
     const now = Date.now();
-    const old = now - THIRTY_DAYS_MS - 60_000; // 30 d + 1 min old
+    const old = now - TASK_RETENTION_MS - 60_000; // 30 d + 1 min old
     const recent = now - 60_000; // 1 min old
 
     // ── Seed the DB before the server boots ──
