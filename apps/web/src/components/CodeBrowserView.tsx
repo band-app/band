@@ -55,6 +55,7 @@ import { Streamdown } from "streamdown";
 import { useFileTabs } from "../hooks/useFileTabs";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useTabState } from "../hooks/useTabState";
+import { applyFrontmatterTable } from "../lib/frontmatter";
 import { FileTabBar } from "./FileTabBar";
 import { streamdownComponents } from "./streamdown-components";
 
@@ -111,6 +112,11 @@ function saveFileTreeCollapsed(wsId: string, collapsed: boolean): void {
 // ---------------------------------------------------------------------------
 
 function renderMarkdown(content: string) {
+  // Frontmatter (YAML between `---` delimiters at the top of the file) is
+  // rewritten into a markdown table by `applyFrontmatterTable` so SKILL.md
+  // / plan-file metadata renders as a scannable table instead of leaking
+  // raw `---` delimiters into the preview. When there is no frontmatter,
+  // the helper returns the original string unchanged.
   return (
     <Streamdown
       className={cn(
@@ -120,7 +126,7 @@ function renderMarkdown(content: string) {
       plugins={streamdownPlugins}
       components={streamdownComponents}
     >
-      {content}
+      {applyFrontmatterTable(content)}
     </Streamdown>
   );
 }
