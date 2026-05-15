@@ -84,7 +84,7 @@ band chats send \
   --message "<the test prompt>"
 ```
 
-- `<agent-type>` — one of `codex`, `claude-code`, `opencode`, `cursor-cli`. Use the exact type ID; values not in `band settings`'s `codingAgents[].id` list are silently rejected and the workspace's default agent is used instead, so verify with `band settings` first if you're unsure.
+- `<agent-type>` — one of `codex`, `claude-code`, `opencode`, `cursor-cli` (the latter has no skills directory but is valid for chat). Use the exact type ID; values not in `band settings`'s `codingAgents[].id` list are silently rejected and the workspace's default agent is used instead, so verify with `band settings` first if you're unsure.
 - `<model-id>` — call `/trpc/models.listAll` (or the `models.listAll` CLI helper) for the list each adapter accepts. For `codex` see `CODEX_MODELS` in `packages/coding-agent/src/adapters/codex.ts`.
 
 Test prompts should be **small and observable** — "list the files in this directory" or "echo 'pong' to a file called pong.txt". Avoid prompts that touch the network or take more than a turn or two; every turn costs API budget and time, and the goal is to confirm the *event pipeline* works, not to evaluate the model.
@@ -158,7 +158,7 @@ If you created a one-off chat pane during the test and want to tidy up, list and
 |---|---|---|
 | `band` commands succeed but you don't see the chat in your dev dashboard | CLI is talking to the production server on 3456, not your dev server | Re-export `BAND_SERVER_URL` and re-run; verify with `band settings` |
 | `Cannot connect to Band web server` | Wrong port, or dev server not booted yet | Recheck `/tmp/band-dev.log` for the `Local:` line; the port may have moved |
-| `session-result.success: false` with `Cannot find module "@openai/codex-sdk"` | Adapter's static SDK import is breaking — but in a Band install path the SDK is always present (see CLAUDE.md note on optional peers). Most often this means you're running against the production server's pre-built bundle, not the dev source | Confirm `BAND_SERVER_URL` is set to the dev port |
+| `session-result.success: false` with `Cannot find module "@openai/codex-sdk"` | The adapter's static SDK import is failing. `@openai/codex-sdk` is a concrete peer dep that pnpm auto-installs, so a properly-built Band install always has it — hitting this almost always means you're running against a pre-built bundle that omitted the dep, not the dev source | Confirm `BAND_SERVER_URL` is set to the dev port |
 | `session-result.success: false` with auth-style errors from the codex binary | The user is not logged in to the agent CLI | `codex login` (or equivalent for the agent) — auth state is host-wide |
 | `chat watch` hangs forever after a tool-use | Agent waiting on an approval the SDK is configured to never grant; or a sandbox-write that needs a different mode | Pass `--mode edit` to `band chats send`; for codex specifically, the adapter passes `approvalPolicy: "never"` so this should be rare |
 | `band chats send` succeeds but the stream's events look wrong (claude-code shapes when you asked for codex, etc.) | The agent type was rejected silently and Band fell back to the workspace's default agent | Verify the `--agent <id>` value is one of the IDs in `band settings` under `codingAgents[].id`. When in doubt, query `/trpc/models.listAll` |
