@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createLogger } from "@band-app/logger";
+import { Codex } from "@openai/codex-sdk";
 import type { OpenAICodexConfig } from "../config.js";
 import type { AgentEvent } from "../events.js";
 import { readSkillsFromDir } from "../skills.js";
@@ -55,17 +56,7 @@ export class OpenAICodexAdapter implements CodingAgent {
       "runSession starting",
     );
 
-    const moduleName = ["@openai", "codex-sdk"].join("/");
-    const sdk = (await import(moduleName)) as {
-      Codex: new (opts: {
-        model: string;
-      }) => {
-        startThread(): CodexThread;
-        resumeThread(id: string): CodexThread;
-      };
-    };
-
-    const codex = new sdk.Codex({ model: effectiveModel });
+    const codex = new Codex({ model: effectiveModel });
 
     const startMs = Date.now();
     let turnCount = 0;
@@ -181,17 +172,6 @@ export class OpenAICodexAdapter implements CodingAgent {
       { id: "o4-mini", name: "o4-mini", contextWindow: 200_000 },
     ];
   }
-}
-
-interface CodexThread {
-  runStreamed(
-    prompt: string,
-    options?: {
-      cwd?: string;
-      maxTurns?: number;
-      sandbox?: string;
-    },
-  ): AsyncIterable<Record<string, unknown>>;
 }
 
 const CODEX_HOME = process.env.CODEX_HOME || join(homedir(), ".codex");
