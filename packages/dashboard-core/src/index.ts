@@ -39,7 +39,6 @@ export { DashboardProvider, useAdapter, useCapabilities } from "./context";
 export {
   type DiffTargetChangeDetail,
   readStoredCompareBranch,
-  readStoredDiffMode,
   type UseDiffTargetReturn,
   useDiffTarget,
 } from "./hooks/use-diff-target";

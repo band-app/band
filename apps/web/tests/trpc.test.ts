@@ -1565,7 +1565,16 @@ describe("tRPC — workspace operations", () => {
     // Diffing against `main` vs `develop` should reuse the same merge-base
     // resolution as getDiff (covered above), so the file count for each
     // target matches what the Changes tab displays — locking in the wiring
-    // that the badge now follows.
+    // that the badge now follows. We only assert the echoed-back compareBranch
+    // here because in this fixture `develop` was forked from the same commit
+    // as `feature-cmp`'s base on `main` (see the setup in the earlier
+    // `workspace.getDiff with non-default compareBranch …` test), so both
+    // targets resolve to the same merge-base and the file counts coincide —
+    // the existing `getDiff` test calls this out in its closing comment. The
+    // value of these summary assertions is verifying that the endpoint
+    // accepts and routes the `compareBranch` parameter at all; the
+    // count-divergence aspect is covered by the uncommitted-vs-branch test
+    // above, where the two modes produce strictly different counts.
     const mainRes = await trpcQuery(server.url, "workspace.getDiffSummary", {
       workspaceId: "repo-feature-cmp",
       diffMode: "branch",

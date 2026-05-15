@@ -102,6 +102,13 @@ export function useDiffTarget(workspaceId: string): UseDiffTargetReturn {
     return () => window.removeEventListener(CHANGE_EVENT, handler);
   }, [workspaceId]);
 
+  // The dispatchChange payload reads the "other" value (the one not being
+  // mutated) back from localStorage rather than from React state. This is
+  // intentional: writeDiffMode / writeCompareBranch always run on the line
+  // above, so localStorage is already the freshest source of truth — and
+  // reading from a ref or closure would require extra plumbing to keep the
+  // setter callbacks stable. Two subscribers in the same tree that mutate
+  // concurrently would still observe a consistent payload.
   const setDiffMode = useCallback(
     (mode: DiffMode) => {
       writeDiffMode(mode);
