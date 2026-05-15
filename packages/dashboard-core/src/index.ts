@@ -38,7 +38,6 @@ export { type WorkspaceTab, WorkspaceTabNav } from "./components/WorkspaceTabNav
 export { DashboardProvider, useAdapter, useCapabilities } from "./context";
 export {
   type DiffTargetChangeDetail,
-  readStoredCompareBranch,
   type UseDiffTargetReturn,
   useDiffTarget,
 } from "./hooks/use-diff-target";

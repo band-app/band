@@ -1495,8 +1495,9 @@ describe("tRPC — workspace operations", () => {
     // This test (like several others in this describe block) chains on the
     // worktree state left by the earlier "workspace.getDiff with non-default
     // compareBranch ..." case, which creates `repo-feature-cmp` and commits
-    // `feature-only.txt` on it. Vitest runs `it` blocks within a file in
-    // source order, so the chain is deterministic. With diffMode="uncommitted"
+    // `feature-only.txt` on it. The test runner processes `it` blocks within
+    // a file in source order, so the chain is deterministic. With
+    // diffMode="uncommitted"
     // we diff against HEAD, so a clean working tree should report zero files
     // changed regardless of what's committed on the branch.
     //
