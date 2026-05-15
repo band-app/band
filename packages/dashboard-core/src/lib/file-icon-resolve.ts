@@ -42,5 +42,11 @@ export function resolveFolderIconName(name: string, expanded: boolean): string {
 
 export function resolveIconPath(iconName: string): string | null {
   const def = manifest.iconDefinitions[iconName] ?? manifest.iconDefinitions[manifest.file];
-  return def?.iconPath ?? null;
+  if (!def?.iconPath) {
+    console.error(
+      `[dashboard-core/file-icon] Missing iconDefinitions entry for "${iconName}" and fallback "${manifest.file}".`,
+    );
+    return null;
+  }
+  return def.iconPath;
 }

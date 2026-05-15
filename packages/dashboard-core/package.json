@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "sideEffects": false,
+  "sideEffects": [
+    "src/lib/file-icon.ts"
+  ],
   "scripts": {
     "test": "node --experimental-strip-types --test 'tests/**/*.test.ts'"
   },
