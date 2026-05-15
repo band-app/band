@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import type { DiffMode } from "../types";
 
 // Both keys are workspace-scoped so the DiffView and the Changes-tab badge
@@ -93,12 +93,12 @@ export function useDiffTarget(workspaceId: string): UseDiffTargetReturn {
 
   // Per-instance identifier for skipping the echo-back when this instance is
   // the dispatcher of the event. React 18 batches the redundant setState
-  // calls so it's only a small efficiency win, but it also keeps any
-  // future debug logging in the handler from firing on every self-mutation.
-  const instanceIdRef = useRef<string>("");
-  if (!instanceIdRef.current) {
-    instanceIdRef.current = Math.random().toString(36).slice(2);
-  }
+  // calls so it's only a small efficiency win, but it also keeps any future
+  // debug logging in the handler from firing on every self-mutation.
+  // `useId` is stable across renders, tied to React's reconciler, and avoids
+  // pulling in a `Math.random()` allocation that would otherwise run on every
+  // render even though `useRef` would discard it.
+  const instanceId = useId();
 
   // Re-read stored values when the workspace changes — every workspace has
   // its own compareBranch entry, and we want to honor a previously stored
@@ -112,8 +112,15 @@ export function useDiffTarget(workspaceId: string): UseDiffTargetReturn {
   // the change locally so React re-renders. Cross-window `storage` events are
   // intentionally ignored — Band is single-window, and reacting to them would
   // duplicate the writeback and re-fire dispatchChange().
+  //
+  // NOTE: there is a brief pre-paint window between the first render and
+  // when this effect registers the listener, during which an event dispatched
+  // by another subscriber would be missed. In practice this is a non-issue
+  // because the DiffView and the badge hooks mount together in the same tick
+  // and user interaction happens much later — but worth revisiting if Band
+  // ever renders them in separate React roots or defers one with
+  // `startTransition`.
   useEffect(() => {
-    const instanceId = instanceIdRef.current;
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<DiffTargetChangeDetail>).detail;
       if (!detail || detail.workspaceId !== workspaceId) return;
@@ -125,11 +132,11 @@ export function useDiffTarget(workspaceId: string): UseDiffTargetReturn {
     };
     window.addEventListener(CHANGE_EVENT, handler);
     return () => window.removeEventListener(CHANGE_EVENT, handler);
-  }, [workspaceId]);
+  }, [workspaceId, instanceId]);
 
   // One-shot cleanup of the legacy global `band:diff-mode` key from the
-  // pre-per-workspace storage layout. Runs once per session per subscriber;
-  // localStorage.removeItem is a no-op once the key is gone.
+  // pre-per-workspace storage layout. Runs once per mount; localStorage.removeItem
+  // is a no-op once the key is gone.
   useEffect(() => {
     try {
       localStorage.removeItem("band:diff-mode");
@@ -151,10 +158,10 @@ export function useDiffTarget(workspaceId: string): UseDiffTargetReturn {
         workspaceId,
         diffMode: mode,
         compareBranch: readStoredCompareBranch(workspaceId),
-        source: instanceIdRef.current,
+        source: instanceId,
       });
     },
-    [workspaceId],
+    [workspaceId, instanceId],
   );
 
   const setCompareBranch = useCallback(
@@ -165,10 +172,10 @@ export function useDiffTarget(workspaceId: string): UseDiffTargetReturn {
         workspaceId,
         diffMode: readStoredDiffMode(workspaceId),
         compareBranch: branch,
-        source: instanceIdRef.current,
+        source: instanceId,
       });
     },
-    [workspaceId],
+    [workspaceId, instanceId],
   );
 
   return { diffMode, compareBranch, setDiffMode, setCompareBranch };
