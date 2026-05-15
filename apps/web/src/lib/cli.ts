@@ -169,7 +169,12 @@ export interface InstallCliOptions {
  * in both packaged and dev-electron runs, so it can't distinguish them.
  */
 export function noBinaryError(env: NodeJS.ProcessEnv = process.env): Error {
-  if (env.BAND_PACKAGED) {
+  // Strict `=== "1"` rather than truthy: a stray `BAND_PACKAGED=0` is a
+  // non-empty string and would otherwise pick the wrong branch. The
+  // setter in `apps/desktop/src/main/services/web-server.ts` only writes
+  // "1" or omits the key, so this is defense against a future caller
+  // doing something weird, not against current behavior.
+  if (env.BAND_PACKAGED === "1") {
     return new Error("Bundled CLI binary missing - try reinstalling Band");
   }
   return new Error(
