@@ -191,6 +191,13 @@ async function main() {
 
   // Mark any persisted "running" tasks as "failed" — no agent can be running
   // if the server just started.
+  //
+  // ORDER MATTERS: this must run BEFORE `startTaskPruneScheduler` below. The
+  // prune's `completedAt`-branch only matches non-null timestamps; stamping
+  // dangling `running` rows with `completedAt = now` here ensures they're
+  // evaluated against the cutoff via `completedAt` rather than relying on
+  // the fallback to `startedAt`. Swapping these two calls would leave very
+  // old in-flight rows wedged in `running` state for one extra boot cycle.
   cleanupStaleTasks();
 
   // Kick off the periodic task-history sweep (issue #416). Runs one pass
