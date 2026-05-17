@@ -37,6 +37,17 @@ describe("build output", () => {
     expect(readdirSync(prebuildsDir).length).toBeGreaterThan(0);
   });
 
+  it("contains the @vscode/ripgrep wrapper package", () => {
+    expect(existsSync(join(dist, "node_modules/@vscode/ripgrep/package.json"))).toBe(true);
+    expect(existsSync(join(dist, "node_modules/@vscode/ripgrep/lib/index.js"))).toBe(true);
+  });
+
+  it("contains the host-platform ripgrep binary", () => {
+    const platformPkg = `@vscode/ripgrep-${process.platform}-${process.arch}`;
+    const binName = process.platform === "win32" ? "rg.exe" : "rg";
+    expect(existsSync(join(dist, "node_modules", platformPkg, "bin", binName))).toBe(true);
+  });
+
   it("does NOT bundle a SQLite native module", () => {
     // SQLite is provided by Node's built-in `node:sqlite` (RC since 22.13).
     // Nothing for SQLite should ship under dist/node_modules/.
