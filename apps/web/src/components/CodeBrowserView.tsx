@@ -745,9 +745,18 @@ export function CodeBrowserView({
     current: 0,
   });
 
-  // `isMarkdown` flips based on file extension; markdownPreviewRef.current
-  // is only populated when the preview is actually mounted. Combine them
-  // so the routing only kicks in when both conditions hold.
+  // True whenever the *intent* is "search the markdown preview" — file
+  // is markdown, the user is in preview mode, and there's actually a
+  // file in view. We deliberately don't fold a
+  // `markdownPreviewRef.current != null` check into this boolean: refs
+  // don't trigger re-renders, so reading one during render produces a
+  // stale value that would never update when the preview finishes
+  // mounting. Instead, every call site that derefs the ref guards with
+  // `if (!handle) return` — those guards live in the effect, the
+  // imperative handlers, and the close path below. The brief window
+  // between this flag flipping true and the ref being populated only
+  // affects display strings (the SearchBar placeholder); operations
+  // are no-ops until the handle arrives.
   const isMarkdownPreviewActive = isMarkdown && mdViewMode === "preview" && !!viewFilePath;
 
   // Drive the preview's imperative search whenever the bar's query or

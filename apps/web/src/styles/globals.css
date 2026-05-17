@@ -150,17 +150,40 @@ pre {
  * Highlight API silently ignore these rules; the find bar still
  * navigates and counts matches, just without paint.
  */
-/* Light-mode tints; `::highlight()` pseudo-elements can't inherit from
- * the originating element's `color-scheme`, so a future dark-theme
- * pass will need explicit overrides (likely a `.dark` body class that
- * re-declares both rules — `prefers-color-scheme` alone won't catch
- * Band's manual theme toggle). */
+/* Highlight tints for the markdown-preview find bar. `::highlight()`
+ * pseudo-elements cascade through their *originating element* (the
+ * range's parent), so a `.dark ::highlight(name)` rule applies when
+ * the matched text is descended from `.dark` on the document root —
+ * which is exactly how Band's theme toggle works. We keep a
+ * `prefers-color-scheme` fallback for any future surface that paints
+ * without first being wrapped in `.dark`. Opacities mirror the
+ * CodeMirror palette in
+ * `packages/dashboard-core/src/lib/codemirror-setup.ts`: a touch
+ * dimmer on light, a touch brighter on dark, so neither read as a
+ * full block. */
 ::highlight(band-md-find) {
-  background-color: rgba(255, 213, 0, 0.4);
+  background-color: rgba(255, 213, 0, 0.35);
 }
 
 ::highlight(band-md-find-active) {
+  background-color: rgba(255, 150, 50, 0.5);
+}
+
+.dark ::highlight(band-md-find) {
+  background-color: rgba(255, 213, 0, 0.4);
+}
+
+.dark ::highlight(band-md-find-active) {
   background-color: rgba(255, 150, 50, 0.55);
+}
+
+@media (prefers-color-scheme: dark) {
+  ::highlight(band-md-find) {
+    background-color: rgba(255, 213, 0, 0.4);
+  }
+  ::highlight(band-md-find-active) {
+    background-color: rgba(255, 150, 50, 0.55);
+  }
 }
 
 html,
