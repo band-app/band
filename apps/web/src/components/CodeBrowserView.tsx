@@ -33,10 +33,6 @@ import {
   TooltipTrigger,
 } from "@band-app/ui";
 import type { Extension } from "@codemirror/state";
-import { cjk } from "@streamdown/cjk";
-import { code } from "@streamdown/code";
-import { math } from "@streamdown/math";
-import { mermaid } from "@streamdown/mermaid";
 import {
   ChevronLeft,
   ChevronRight,
@@ -57,9 +53,7 @@ import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useTabState } from "../hooks/useTabState";
 import { applyFrontmatterTable } from "../lib/frontmatter";
 import { FileTabBar } from "./FileTabBar";
-import { streamdownComponents } from "./streamdown-components";
-
-const streamdownPlugins = { cjk, code, math, mermaid };
+import { streamdownComponents, streamdownPlugins } from "./streamdown-components";
 
 // ---------------------------------------------------------------------------
 // File tree width persistence

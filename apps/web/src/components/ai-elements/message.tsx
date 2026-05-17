@@ -1,8 +1,4 @@
 import { cn } from "@band-app/ui";
-import { cjk } from "@streamdown/cjk";
-import { code } from "@streamdown/code";
-import { math } from "@streamdown/math";
-import { mermaid } from "@streamdown/mermaid";
 import type { UIMessage } from "ai";
 import { Download, Expand, FileIcon } from "lucide-react";
 import type { ComponentProps, HTMLAttributes } from "react";
@@ -10,6 +6,7 @@ import { memo, useCallback, useState } from "react";
 import remarkBreaks from "remark-breaks";
 import { defaultRehypePlugins, defaultRemarkPlugins, Streamdown } from "streamdown";
 
+import { streamdownPlugins } from "../streamdown-components";
 import {
   fileLinkComponents,
   fileLinkRehypePlugins,
@@ -52,8 +49,6 @@ export const MessageContent = ({ children, className, ...props }: MessageContent
 );
 
 export type MessageResponseProps = ComponentProps<typeof Streamdown>;
-
-const streamdownPlugins = { cjk, code, math, mermaid };
 
 export const MessageResponse = memo(
   ({ className, ...props }: MessageResponseProps) => (
