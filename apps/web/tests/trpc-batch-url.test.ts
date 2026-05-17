@@ -31,6 +31,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { toWorkspaceId } from "@band-app/dashboard-core";
 import { createTRPCClient, httpBatchLink } from "@trpc/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { AppRouter } from "../src/trpc/router";
@@ -216,10 +217,9 @@ describe("tRPC — batch URL splitting (#430)", () => {
     // Create a feature workspace and modify every file on the branch so
     // each one will appear in the diff against the merge-base with main.
     const client = createBatchClient(server.url);
-    const createRes = await client.workspaces.create.mutate({
-      project: "repo",
-      branch: "many-files",
-    });
+    const project = "repo";
+    const branch = "many-files";
+    const createRes = await client.workspaces.create.mutate({ project, branch });
     const wtPath = createRes.path;
 
     for (let i = 0; i < FILE_COUNT; i++) {
@@ -228,7 +228,10 @@ describe("tRPC — batch URL splitting (#430)", () => {
     git(wtPath, ["add", "."]);
     git(wtPath, ["commit", "-m", "modify every file"]);
 
-    workspaceId = "repo-many-files";
+    // Derive the workspaceId via the canonical helper so a future naming
+    // convention change doesn't silently fail this test with a misleading
+    // "workspace not found" error instead of the batch-URL assertion.
+    workspaceId = toWorkspaceId(project, branch);
     // `getDiffSummary` is the procedure DiffView itself uses to discover
     // the merge-base + per-file statuses before fanning out a
     // `getFileDiff` query per expanded file, so use it here too.
