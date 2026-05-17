@@ -1162,9 +1162,10 @@ export function CodeBrowserView({
   // so reads/writes hit `host.readFile` / `host.saveFile`.
   // -------------------------------------------------------------------------
   const capabilities = useCapabilities();
+  const pickFile = capabilities.pickFile;
   const handleOpenExternalFile = useCallback(async () => {
-    if (!capabilities.pickFile) return;
-    const absolutePath = await capabilities.pickFile();
+    if (!pickFile) return;
+    const absolutePath = await pickFile();
     if (!absolutePath) return;
     fileTabs.openTabExternal(absolutePath);
     setViewFilePath(absolutePath);
@@ -1175,19 +1176,19 @@ export function CodeBrowserView({
     // the route only carries workspace-relative paths, and pushing an
     // absolute path would corrupt the back/forward stack. External tabs
     // remain reachable via the tab bar and Cmd+W close.
-  }, [capabilities, fileTabs.openTabExternal]);
+  }, [pickFile, fileTabs.openTabExternal]);
 
   // Surface the action via the same command-palette event pattern as
   // Quick Open / Search in Files. Listened to here so the desktop-shell
   // capability check stays local.
   useEffect(() => {
-    if (!capabilities.pickFile) return;
+    if (!pickFile) return;
     const handler = () => {
       void handleOpenExternalFile();
     };
     window.addEventListener("band:open-file-external", handler);
     return () => window.removeEventListener("band:open-file-external", handler);
-  }, [capabilities.pickFile, handleOpenExternalFile]);
+  }, [pickFile, handleOpenExternalFile]);
 
   // -------------------------------------------------------------------------
   // Keep tabs + editor state in sync with rename / delete in the file tree.
@@ -1417,7 +1418,7 @@ export function CodeBrowserView({
             <FileTreeToolbar
               onNewFile={handleNewFile}
               onNewFolder={handleNewFolder}
-              onOpenFile={capabilities.pickFile ? handleOpenExternalFile : undefined}
+              onOpenFile={pickFile ? handleOpenExternalFile : undefined}
             />
             <div className="min-h-0 flex-1 overflow-hidden">
               <FileBrowser
@@ -1458,7 +1459,7 @@ export function CodeBrowserView({
               <FileTreeToolbar
                 onNewFile={handleNewFile}
                 onNewFolder={handleNewFolder}
-                onOpenFile={capabilities.pickFile ? handleOpenExternalFile : undefined}
+                onOpenFile={pickFile ? handleOpenExternalFile : undefined}
               />
               <div className="min-h-0 flex-1 overflow-hidden">
                 <FileBrowser

@@ -324,21 +324,24 @@ describe("tRPC — host.readFile / host.saveFile (external files)", () => {
   it("host.readFile / host.saveFile reject unauthenticated callers", async () => {
     // The host procedures bypass the workspace containment guard, so
     // the transport-layer band_token cookie is the only thing standing
-    // between an unauthenticated caller and arbitrary FS access.
-    // Verify the cookie gate actually fires when omitted.
+    // between an unauthenticated caller and arbitrary FS access. The
+    // assertion pins the response to 401 (the status auth.test.ts also
+    // verifies for missing/invalid tokens) — a generic "non-200" would
+    // pass even if the auth gate were broken and the server returned a
+    // crash 500.
     const readRes = await fetch(
       `${server.url}/trpc/host.readFile?input=${encodeURIComponent(
         JSON.stringify({ absolutePath: externalPath }),
       )}`,
     );
-    expect(readRes.status).not.toBe(200);
+    expect(readRes.status).toBe(401);
 
     const saveRes = await fetch(`${server.url}/trpc/host.saveFile`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ absolutePath: externalPath, content: "evil" }),
     });
-    expect(saveRes.status).not.toBe(200);
+    expect(saveRes.status).toBe(401);
 
     // And the file on disk must be untouched (still the previous test's content).
     const onDisk = readFileSync(externalPath, "utf-8");

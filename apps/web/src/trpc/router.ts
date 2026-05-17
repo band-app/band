@@ -1,8 +1,8 @@
 import { execFile, execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, unlinkSync } from "node:fs";
-import { cp, lstat, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { basename, dirname, extname, join, resolve, sep } from "node:path";
+import { existsSync, constants as fsConstants, mkdirSync, unlinkSync } from "node:fs";
+import { cp, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { basename, dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { toWorkspaceId } from "@band-app/dashboard-core";
 import { createLogger } from "@band-app/logger";
@@ -2028,32 +2028,27 @@ const workspaceRouter = t.router({
  *     (which already gives the token holder read/write across every
  *     registered worktree) and is acceptable for a single-user
  *     personal-tool model.
- *   - Symlinks are rejected with `lstat()`. Without this, a symlink
- *     to `/etc/passwd` (or similar) would satisfy `isFile()` because
- *     `stat()` follows symlinks; we'd happily read/write the target.
+ *   - Symlinks are rejected. `stat()` follows symlinks, so a symlink
+ *     to `/etc/passwd` (or similar) would satisfy `isFile()` and we'd
+ *     happily read/write the target. Open paths with `O_NOFOLLOW` so
+ *     the kernel itself refuses to traverse a symlink, eliminating
+ *     the TOCTOU window between an `lstat()` check and the subsequent
+ *     read/write (an attacker swapping the file for a symlink between
+ *     those two syscalls would otherwise slip through).
  *   - Inputs must be absolute paths to regular files. Directories,
  *     symlinks, sockets, devices, FIFOs are all rejected.
+ *
+ * Cross-platform note: `O_NOFOLLOW` is available on macOS/Linux (the
+ * platforms Band's `package.json` declares); Windows lacks a direct
+ * equivalent and is explicitly out of scope here.
  */
-async function statRegularFileOrThrow(target: string): Promise<{ size: number }> {
-  let lstatResult: Awaited<ReturnType<typeof lstat>>;
-  try {
-    lstatResult = await lstat(target);
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === "ENOENT") throw new Error("File not found");
-    if (code === "EACCES" || code === "EPERM") throw new Error("Permission denied");
-    throw err;
-  }
-  if (lstatResult.isSymbolicLink()) {
-    throw new Error("Symbolic links are not allowed");
-  }
-  if (lstatResult.isDirectory()) {
-    throw new Error("Cannot operate on a directory");
-  }
-  if (!lstatResult.isFile()) {
-    throw new Error("Not a regular file");
-  }
-  return { size: lstatResult.size };
+function mapFsError(err: unknown): Error {
+  const code = (err as NodeJS.ErrnoException).code;
+  if (code === "ENOENT") return new Error("File not found");
+  if (code === "ELOOP") return new Error("Symbolic links are not allowed");
+  if (code === "EACCES" || code === "EPERM") return new Error("Permission denied");
+  if (code === "EISDIR") return new Error("Cannot operate on a directory");
+  return err as Error;
 }
 
 const hostRouter = t.router({
@@ -2061,31 +2056,57 @@ const hostRouter = t.router({
     .input(z.object({ absolutePath: z.string().min(1) }))
     .query(async ({ input }) => {
       const target = input.absolutePath;
-      if (!target.startsWith("/")) {
+      if (!isAbsolute(target)) {
         throw new Error("Absolute path required");
       }
 
-      const { size } = await statRegularFileOrThrow(target);
-
-      if (size > MAX_FILE_SIZE) {
-        return { tooLarge: true as const, size };
+      // O_RDONLY | O_NOFOLLOW: refuse to traverse a symlink. The kernel
+      // returns ELOOP if the final path component is a symlink, which
+      // we surface as "Symbolic links are not allowed" via mapFsError.
+      let fh: Awaited<ReturnType<typeof open>>;
+      try {
+        fh = await open(target, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+      } catch (err) {
+        throw mapFsError(err);
       }
+      try {
+        const stats = await fh.stat();
+        if (stats.isDirectory()) {
+          throw new Error("Cannot operate on a directory");
+        }
+        if (!stats.isFile()) {
+          throw new Error("Not a regular file");
+        }
+        const size = stats.size;
 
-      const buffer = await readFile(target);
+        if (size > MAX_FILE_SIZE) {
+          return { tooLarge: true as const, size };
+        }
 
-      const sample = buffer.subarray(0, 8192);
-      if (sample.includes(0)) {
-        return { binary: true as const, size };
+        // Sample the first 8KB to detect binary content before allocating
+        // a buffer for the full file. For a binary file that's the whole
+        // story; for a text file we then read the rest.
+        const sampleLen = Math.min(8192, size);
+        const sample = Buffer.alloc(sampleLen);
+        if (sampleLen > 0) {
+          await fh.read(sample, 0, sampleLen, 0);
+          if (sample.includes(0)) {
+            return { binary: true as const, size };
+          }
+        }
+
+        const buffer = await fh.readFile();
+        const ext = extname(target).toLowerCase();
+        const language = LANG_MAP[ext];
+
+        return {
+          content: buffer.toString("utf-8"),
+          size,
+          language,
+        };
+      } finally {
+        await fh.close();
       }
-
-      const ext = extname(target).toLowerCase();
-      const language = LANG_MAP[ext];
-
-      return {
-        content: buffer.toString("utf-8"),
-        size,
-        language,
-      };
     }),
 
   saveFile: publicProcedure
@@ -2100,13 +2121,36 @@ const hostRouter = t.router({
     )
     .mutation(async ({ input }) => {
       const target = input.absolutePath;
-      if (!target.startsWith("/")) {
+      if (!isAbsolute(target)) {
         throw new Error("Absolute path required");
       }
 
-      await statRegularFileOrThrow(target);
-
-      await writeFile(target, input.content, "utf-8");
+      // O_WRONLY | O_TRUNC | O_NOFOLLOW: open the existing file
+      // exclusively for writing (no symlink traversal, no follow-up
+      // syscall window for an attacker to swap a symlink in). Crucially
+      // we do NOT pass O_CREAT — saveFile is a write-back of an
+      // existing file, not a create.
+      let fh: Awaited<ReturnType<typeof open>>;
+      try {
+        fh = await open(
+          target,
+          fsConstants.O_WRONLY | fsConstants.O_TRUNC | fsConstants.O_NOFOLLOW,
+        );
+      } catch (err) {
+        throw mapFsError(err);
+      }
+      try {
+        const stats = await fh.stat();
+        if (stats.isDirectory()) {
+          throw new Error("Cannot operate on a directory");
+        }
+        if (!stats.isFile()) {
+          throw new Error("Not a regular file");
+        }
+        await fh.writeFile(input.content, "utf-8");
+      } finally {
+        await fh.close();
+      }
 
       return { ok: true };
     }),
