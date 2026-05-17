@@ -13,6 +13,7 @@ esbuild start-server.ts \
   --outfile=dist/start-server.mjs \
   --external:./server/server.js \
   --external:node-pty \
+  --external:@vscode/ripgrep \
   --banner:js="import{createRequire as __cr}from'module';import{fileURLToPath as __fu}from'url';import{dirname as __dn}from'path';const require=__cr(import.meta.url);const __filename=__fu(import.meta.url);const __dirname=__dn(__filename);"
 
 # Copy native modules into dist/ for self-contained builds (Electron app).
@@ -55,6 +56,39 @@ if [ "${NPM_PUBLISH:-}" != "1" ]; then
       find "$dir" -maxdepth 1 -type f ! -name '*.pdb' -exec cp {} "$target/" \;
     done
     chmod +x dist/node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true
+  fi
+
+  # -----------------------------------------------------------------------
+  # Copy @vscode/ripgrep wrapper + platform-specific binary into dist/.
+  # The wrapper (lib/index.js) does:
+  #   createRequire(import.meta.url).resolve(`@vscode/ripgrep-${platform}-${arch}/bin/rg`)
+  # so the platform package must be resolvable as a sibling in node_modules.
+  # We only ship the binary for the host platform to keep the bundle small;
+  # cross-platform builds will need to vendor binaries for each target.
+  # -----------------------------------------------------------------------
+
+  RG_REAL="$(cd node_modules/@vscode/ripgrep && pwd -P)"
+  mkdir -p dist/node_modules/@vscode/ripgrep/lib
+  cp "$RG_REAL/package.json" dist/node_modules/@vscode/ripgrep/
+  cp "$RG_REAL/lib/index.js" dist/node_modules/@vscode/ripgrep/lib/
+  cp "$RG_REAL/lib/index.d.ts" dist/node_modules/@vscode/ripgrep/lib/ 2>/dev/null || true
+
+  RG_PLATFORM="$(node -e 'console.log(process.platform)')"
+  RG_ARCH="$(node -e 'console.log(process.arch)')"
+  RG_PLATFORM_PKG="@vscode/ripgrep-${RG_PLATFORM}-${RG_ARCH}"
+  # Under pnpm's strict layout, the platform-specific package is hoisted
+  # only into `@vscode/ripgrep`'s own sandbox, not into the workspace's
+  # top-level node_modules — so we resolve it from the wrapper's directory.
+  RG_PLATFORM_BIN="$(cd "$RG_REAL" && node -e "console.log(require.resolve('${RG_PLATFORM_PKG}/package.json'))" 2>/dev/null || true)"
+  if [ -n "$RG_PLATFORM_BIN" ]; then
+    RG_PLATFORM_DIR="$(dirname "$RG_PLATFORM_BIN")"
+    RG_BIN="$([ "$RG_PLATFORM" = "win32" ] && echo "rg.exe" || echo "rg")"
+    mkdir -p "dist/node_modules/${RG_PLATFORM_PKG}/bin"
+    cp "$RG_PLATFORM_DIR/package.json" "dist/node_modules/${RG_PLATFORM_PKG}/"
+    cp "$RG_PLATFORM_DIR/bin/$RG_BIN" "dist/node_modules/${RG_PLATFORM_PKG}/bin/"
+    chmod +x "dist/node_modules/${RG_PLATFORM_PKG}/bin/$RG_BIN"
+  else
+    echo "WARNING: ${RG_PLATFORM_PKG} not found; find-in-files will not work in this build" >&2
   fi
 
   # SQLite is provided by Node's built-in `node:sqlite` (Stability 1.2 RC,
