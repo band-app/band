@@ -137,6 +137,55 @@ pre {
   overflow-x: auto;
 }
 
+/*
+ * Markdown preview find-in-page highlights.
+ *
+ * `MarkdownPreview` registers two Custom Highlight API names —
+ * `band-md-find` for the non-active matches, `band-md-find-active` for
+ * the currently-focused one — and paints them via `::highlight()`. The
+ * colour palette mirrors CodeMirror's `cm-searchMatch` /
+ * `cm-searchMatch-selected` (defined in
+ * `packages/dashboard-core/src/lib/codemirror-setup.ts`) so the editor
+ * and preview surfaces feel consistent. Browsers without the Custom
+ * Highlight API silently ignore these rules; the find bar still
+ * navigates and counts matches, just without paint.
+ */
+/* Highlight tints for the markdown-preview find bar. `::highlight()`
+ * pseudo-elements cascade through their *originating element* (the
+ * range's parent), so a `.dark ::highlight(name)` rule applies when
+ * the matched text is descended from `.dark` on the document root —
+ * which is exactly how Band's theme toggle works. We keep a
+ * `prefers-color-scheme` fallback for any future surface that paints
+ * without first being wrapped in `.dark`. Opacities mirror the
+ * CodeMirror palette in
+ * `packages/dashboard-core/src/lib/codemirror-setup.ts`: a touch
+ * dimmer on light, a touch brighter on dark, so neither read as a
+ * full block. */
+::highlight(band-md-find) {
+  background-color: rgba(255, 213, 0, 0.35);
+}
+
+::highlight(band-md-find-active) {
+  background-color: rgba(255, 150, 50, 0.5);
+}
+
+.dark ::highlight(band-md-find) {
+  background-color: rgba(255, 213, 0, 0.4);
+}
+
+.dark ::highlight(band-md-find-active) {
+  background-color: rgba(255, 150, 50, 0.55);
+}
+
+@media (prefers-color-scheme: dark) {
+  ::highlight(band-md-find) {
+    background-color: rgba(255, 213, 0, 0.4);
+  }
+  ::highlight(band-md-find-active) {
+    background-color: rgba(255, 150, 50, 0.55);
+  }
+}
+
 html,
 body {
   height: 100%;

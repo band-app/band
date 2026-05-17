@@ -22,7 +22,6 @@ import {
   useSettingsQuery,
 } from "@band-app/dashboard-core";
 import {
-  cn,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -47,13 +46,12 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Group, Panel, Separator, usePanelRef } from "react-resizable-panels";
-import { Streamdown } from "streamdown";
 import { useFileTabs } from "../hooks/useFileTabs";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useTabState } from "../hooks/useTabState";
-import { applyFrontmatterTable } from "../lib/frontmatter";
 import { FileTabBar } from "./FileTabBar";
-import { streamdownComponents, streamdownPlugins } from "./streamdown-components";
+import type { MarkdownPreviewHandle, MarkdownPreviewMatchInfo } from "./MarkdownPreview";
+import { MarkdownPreview } from "./MarkdownPreview";
 
 // ---------------------------------------------------------------------------
 // File tree width persistence
@@ -99,30 +97,6 @@ function saveFileTreeCollapsed(wsId: string, collapsed: boolean): void {
   } catch {
     // storage unavailable
   }
-}
-
-// ---------------------------------------------------------------------------
-// Markdown renderer
-// ---------------------------------------------------------------------------
-
-function renderMarkdown(content: string) {
-  // Frontmatter (YAML between `---` delimiters at the top of the file) is
-  // rewritten into a markdown table by `applyFrontmatterTable` so SKILL.md
-  // / plan-file metadata renders as a scannable table instead of leaking
-  // raw `---` delimiters into the preview. When there is no frontmatter,
-  // the helper returns the original string unchanged.
-  return (
-    <Streamdown
-      className={cn(
-        "size-full break-words leading-relaxed [overflow-wrap:anywhere]",
-        "[&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
-      )}
-      plugins={streamdownPlugins}
-      components={streamdownComponents}
-    >
-      {applyFrontmatterTable(content)}
-    </Streamdown>
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -750,9 +724,66 @@ export function CodeBrowserView({
   // -------------------------------------------------------------------------
   // Find-in-file state
   // -------------------------------------------------------------------------
+  //
+  // One shared SearchBar drives find for both source and preview modes.
+  // In source mode it dispatches to the CodeMirror editor via the
+  // existing `useSearch` hook. In preview mode the same query, options,
+  // and next/prev clicks are routed to `MarkdownPreview` through its
+  // imperative ref. The bar's open/close state and input still live on
+  // `useSearch` — only the *target* of each operation switches based on
+  // `mdViewMode`. This keeps the keybind path (the find-in-file
+  // callback wired by `DockviewWorkspaceLayout`) intact, and stops
+  // duplicate bars from stacking on top of each other in markdown
+  // tabs.
   const getViews = useCallback(() => (editorViewRef.current ? [editorViewRef.current] : []), []);
 
   const search = useSearch({ getViews, onFindInFile });
+
+  const markdownPreviewRef = useRef<MarkdownPreviewHandle>(null);
+  const [mdMatchInfo, setMdMatchInfo] = useState<MarkdownPreviewMatchInfo>({
+    total: 0,
+    current: 0,
+  });
+
+  // True whenever the *intent* is "search the markdown preview" — file
+  // is markdown, the user is in preview mode, and there's actually a
+  // file in view. We deliberately don't fold a
+  // `markdownPreviewRef.current != null` check into this boolean: refs
+  // don't trigger re-renders, so reading one during render produces a
+  // stale value that would never update when the preview finishes
+  // mounting. Instead, every call site that derefs the ref guards with
+  // `if (!handle) return` — those guards live in the effect, the
+  // imperative handlers, and the close path below. The brief window
+  // between this flag flipping true and the ref being populated only
+  // affects display strings (the SearchBar placeholder); operations
+  // are no-ops until the handle arrives.
+  const isMarkdownPreviewActive = isMarkdown && mdViewMode === "preview" && !!viewFilePath;
+
+  // Drive the preview's imperative search whenever the bar's query or
+  // options change while preview mode is active. This is what makes the
+  // top "Find in file" bar light up matches inside the rendered
+  // markdown.
+  useEffect(() => {
+    if (!isMarkdownPreviewActive) return;
+    if (!search.searchOpen) return;
+    const handle = markdownPreviewRef.current;
+    if (!handle) return;
+    handle.search(search.searchQuery, search.searchOptions);
+  }, [isMarkdownPreviewActive, search.searchOpen, search.searchQuery, search.searchOptions]);
+
+  // Implicit close: mode switch (preview ↔ source) or file change while
+  // the bar is open. Explicit close (X button / Esc) goes through
+  // `handleSearchClose`, which clears synchronously to avoid a paint
+  // frame where the bar is gone but the highlights still show; this
+  // effect then re-clears on the same React batch when `searchOpen`
+  // flips. The double call is intentional and idempotent — both
+  // `registry.delete` and `setMdMatchInfo({ total: 0, current: 0 })`
+  // are no-ops on the second run.
+  useEffect(() => {
+    if (isMarkdownPreviewActive && search.searchOpen) return;
+    markdownPreviewRef.current?.clear();
+    setMdMatchInfo({ total: 0, current: 0 });
+  }, [isMarkdownPreviewActive, search.searchOpen]);
 
   // Flag: focus the editor once the next view is ready (after cross-file nav)
   const focusOnViewReadyRef = useRef(false);
@@ -781,6 +812,47 @@ export function CodeBrowserView({
   useEffect(() => {
     search.handleCloseSearch();
   }, [viewFilePath]);
+
+  // Render the markdown preview with its ref + match-info callback
+  // hooked in. Stable identity matters less than the closure capture
+  // — `renderMarkdown` is called inline by FileViewer on every render,
+  // not stored in an effect dep.
+  const renderMarkdown = useCallback((content: string) => {
+    return (
+      <MarkdownPreview
+        ref={markdownPreviewRef}
+        content={content}
+        onMatchInfoChange={setMdMatchInfo}
+      />
+    );
+  }, []);
+
+  // Pressing Next / Previous on the shared SearchBar: route to the
+  // markdown preview when in preview mode, otherwise let `useSearch`
+  // drive the editor as before.
+  const handleSearchNext = useCallback(() => {
+    if (isMarkdownPreviewActive) {
+      markdownPreviewRef.current?.next();
+    } else {
+      search.handleNext();
+    }
+  }, [isMarkdownPreviewActive, search.handleNext]);
+
+  const handleSearchPrevious = useCallback(() => {
+    if (isMarkdownPreviewActive) {
+      markdownPreviewRef.current?.previous();
+    } else {
+      search.handlePrevious();
+    }
+  }, [isMarkdownPreviewActive, search.handlePrevious]);
+
+  // Close should clear the preview's highlights regardless of mode —
+  // the user might have toggled to source mode while the bar was open.
+  const handleSearchClose = useCallback(() => {
+    markdownPreviewRef.current?.clear();
+    setMdMatchInfo({ total: 0, current: 0 });
+    search.handleCloseSearch();
+  }, [search.handleCloseSearch]);
 
   // Open a file in the preview slot. `openTabPreview` pins a dirty preview
   // in place before evicting (single atomic setState updater) so unsaved
@@ -1289,6 +1361,22 @@ export function CodeBrowserView({
               tabState.get(viewFilePath)?.scrollTop
             }
             onEditedContentChange={handleEditedContentChange}
+            toolbar={
+              search.searchOpen ? (
+                <SearchBar
+                  ref={search.searchBarRef}
+                  query={search.searchQuery}
+                  onQueryChange={search.setSearchQuery}
+                  options={search.searchOptions}
+                  onOptionsChange={search.setSearchOptions}
+                  placeholder={isMarkdownPreviewActive ? "Find in preview..." : "Find in file..."}
+                  matchInfo={isMarkdownPreviewActive ? mdMatchInfo : search.matchInfo}
+                  onNext={handleSearchNext}
+                  onPrevious={handleSearchPrevious}
+                  onClose={handleSearchClose}
+                />
+              ) : undefined
+            }
           />
         ) : (
           // Same toolbar-above-tree layout the desktop side-by-side uses,
@@ -1462,11 +1550,13 @@ export function CodeBrowserView({
                           onQueryChange={search.setSearchQuery}
                           options={search.searchOptions}
                           onOptionsChange={search.setSearchOptions}
-                          placeholder="Find in file..."
-                          matchInfo={search.matchInfo}
-                          onNext={search.handleNext}
-                          onPrevious={search.handlePrevious}
-                          onClose={search.handleCloseSearch}
+                          placeholder={
+                            isMarkdownPreviewActive ? "Find in preview..." : "Find in file..."
+                          }
+                          matchInfo={isMarkdownPreviewActive ? mdMatchInfo : search.matchInfo}
+                          onNext={handleSearchNext}
+                          onPrevious={handleSearchPrevious}
+                          onClose={handleSearchClose}
                         />
                       ) : undefined
                     }
