@@ -34,7 +34,8 @@ export class WebDashboardAdapter implements DashboardAdapter {
       splitLink({
         condition: (op) => op.type === "subscription",
         true: wsLink({ client: wsClient }),
-        false: httpBatchLink({ url: "/trpc" }),
+        // Cap batched GETs to stay under Node/proxy header limits — issue #430.
+        false: httpBatchLink({ url: "/trpc", maxURLLength: 2000 }),
       }),
     ],
   });

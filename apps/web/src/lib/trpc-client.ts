@@ -13,7 +13,8 @@ export const trpc = createTRPCClient<AppRouter>({
     splitLink({
       condition: (op) => op.type === "subscription",
       true: wsLink({ client: wsClient }),
-      false: httpBatchLink({ url: "/trpc" }),
+      // Keep maxURLLength in sync with WebDashboardAdapter (packages/dashboard-core/src/adapters/web.ts) — issue #430.
+      false: httpBatchLink({ url: "/trpc", maxURLLength: 2000 }),
     }),
   ],
 });
