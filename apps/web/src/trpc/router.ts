@@ -1,7 +1,7 @@
 import { execFile, execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, unlinkSync } from "node:fs";
-import { cp, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { cp, lstat, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { toWorkspaceId } from "@band-app/dashboard-core";
@@ -2010,19 +2010,52 @@ const workspaceRouter = t.router({
 
 /**
  * Read/write files identified by an absolute filesystem path, with no
- * workspace-root containment check. Backs the "Open File…" action
- * (issue #433): users pick a file via the desktop file picker and edit
- * it in a Band editor tab even though it sits outside the current
+ * workspace-root containment check. Backs the editor's "Open File…"
+ * action: users pick a file via the desktop file picker and edit it
+ * in a Band editor tab even though it sits outside the current
  * workspace.
  *
- * Authentication: the band_token cookie/header is enforced at the
- * transport layer (see start-server.ts), so only the local desktop
- * user can call these procedures. Because they bypass the
- * workspace-relative path traversal guard used by `workspace.getFile`
- * / `workspace.saveFile`, we require the path to be absolute and to
- * point at a regular file. Reading a directory or symlink target that
- * isn't a file is rejected.
+ * Security model:
+ *   - The `band_token` cookie/header is enforced at the transport
+ *     layer (see start-server.ts), so only the local desktop user
+ *     can call these procedures.
+ *   - These procedures intentionally bypass the workspace-relative
+ *     path traversal guard used by `workspace.getFile` /
+ *     `workspace.saveFile`. The renderer is expected to source paths
+ *     from the OS file picker, but the server cannot prove that — a
+ *     bearer of the token can call `host.saveFile` with any absolute
+ *     path. This matches the existing trust boundary of the dashboard
+ *     (which already gives the token holder read/write across every
+ *     registered worktree) and is acceptable for a single-user
+ *     personal-tool model.
+ *   - Symlinks are rejected with `lstat()`. Without this, a symlink
+ *     to `/etc/passwd` (or similar) would satisfy `isFile()` because
+ *     `stat()` follows symlinks; we'd happily read/write the target.
+ *   - Inputs must be absolute paths to regular files. Directories,
+ *     symlinks, sockets, devices, FIFOs are all rejected.
  */
+async function statRegularFileOrThrow(target: string): Promise<{ size: number }> {
+  let lstatResult: Awaited<ReturnType<typeof lstat>>;
+  try {
+    lstatResult = await lstat(target);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") throw new Error("File not found");
+    if (code === "EACCES" || code === "EPERM") throw new Error("Permission denied");
+    throw err;
+  }
+  if (lstatResult.isSymbolicLink()) {
+    throw new Error("Symbolic links are not allowed");
+  }
+  if (lstatResult.isDirectory()) {
+    throw new Error("Cannot operate on a directory");
+  }
+  if (!lstatResult.isFile()) {
+    throw new Error("Not a regular file");
+  }
+  return { size: lstatResult.size };
+}
+
 const hostRouter = t.router({
   readFile: publicProcedure
     .input(z.object({ absolutePath: z.string().min(1) }))
@@ -2032,11 +2065,7 @@ const hostRouter = t.router({
         throw new Error("Absolute path required");
       }
 
-      const fileStat = await stat(target);
-      if (!fileStat.isFile()) {
-        throw new Error("Not a regular file");
-      }
-      const size = fileStat.size;
+      const { size } = await statRegularFileOrThrow(target);
 
       if (size > MAX_FILE_SIZE) {
         return { tooLarge: true as const, size };
@@ -2063,7 +2092,10 @@ const hostRouter = t.router({
     .input(
       z.object({
         absolutePath: z.string().min(1),
-        content: z.string(),
+        // Match the read-side cap so a misbehaving client can't fill
+        // disk via the save endpoint while the read endpoint refuses
+        // anything that wide.
+        content: z.string().max(MAX_FILE_SIZE),
       }),
     )
     .mutation(async ({ input }) => {
@@ -2072,13 +2104,7 @@ const hostRouter = t.router({
         throw new Error("Absolute path required");
       }
 
-      const fileStat = await stat(target);
-      if (fileStat.isDirectory()) {
-        throw new Error("Cannot write to a directory");
-      }
-      if (!fileStat.isFile()) {
-        throw new Error("Not a regular file");
-      }
+      await statRegularFileOrThrow(target);
 
       await writeFile(target, input.content, "utf-8");
 

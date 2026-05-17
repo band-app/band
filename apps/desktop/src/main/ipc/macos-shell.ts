@@ -51,8 +51,8 @@ export async function pickFolder(parent: BrowserWindow | null): Promise<string |
  * cancels. Anchored to `parent` so the dialog is sheet-style on macOS and
  * modal-relative on other platforms.
  *
- * Backs the "Open File…" action in the editor (issue #433) — lets a user
- * open files that sit outside the current workspace root.
+ * Backs the editor's "Open File…" action — lets a user open files
+ * that sit outside the current workspace root.
  */
 export async function pickFile(parent: BrowserWindow | null): Promise<string | null> {
   const opts = {

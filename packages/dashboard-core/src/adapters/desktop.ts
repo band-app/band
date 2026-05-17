@@ -141,8 +141,8 @@ export class NativeShellCapabilities implements PlatformCapabilities {
   }
 
   /**
-   * Open the OS file picker for the "Open File…" action (issue #433).
-   * The native dialog returns the absolute path; the renderer hands that
+   * Open the OS file picker for the editor's "Open File…" action. The
+   * native dialog returns the absolute path; the renderer hands that
    * path to `adapter.readExternalFile` / `adapter.saveExternalFile` for
    * the actual file IO.
    *

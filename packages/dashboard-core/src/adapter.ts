@@ -118,8 +118,8 @@ export interface DashboardAdapter {
   saveWorkspaceFile?(workspaceId: string, path: string, content: string): Promise<void>;
 
   /**
-   * Read a file by absolute filesystem path — used by the "Open File…"
-   * action (issue #433) for files that sit outside any registered
+   * Read a file by absolute filesystem path — used by the editor's
+   * "Open File…" action for files that sit outside any registered
    * workspace root. The server-side procedure bypasses the workspace
    * containment check; authentication still flows through the same
    * band_token cookie used by every other tRPC call.

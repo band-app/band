@@ -7,8 +7,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 export interface FileTab {
   /**
    * For workspace files this is the workspace-relative path
-   * (`src/main.ts`). For external files (issue #433) this is the
-   * absolute filesystem path returned by the OS file picker
+   * (`src/main.ts`). For external files this is the absolute
+   * filesystem path returned by the OS file picker
    * (`/Users/alice/notes/scratch.md`). The shape is the same so
    * downstream tab plumbing (active-tab pointer, dedup, eviction)
    * doesn't have to special-case the two flavours.

@@ -157,7 +157,7 @@ interface FileTreeToolbarProps {
    * editor tab. Only defined inside the desktop shell (where the
    * native dialog is available — see `capabilities.pickFile`), so the
    * toolbar simply omits the action on the web. Backs the "Open File…"
-   * flow for issue #433.
+   * flow.
    */
   onOpenFile?: () => void;
 }
@@ -505,14 +505,26 @@ export function CodeBrowserView({
   // mobile) OR the container is narrower than 600px (narrow dockview panel).
   const useMobileLayout = !isDesktop || (containerWidth !== null && containerWidth < 600);
 
-  // Whether the currently-viewed file lives outside the workspace root
-  // (opened via "Open File…" — issue #433). Derived from the tab list so
-  // we don't have to thread a second flag everywhere a path does.
-  const viewIsExternal = useMemo(() => {
-    if (!viewFilePath) return false;
-    const tab = fileTabs.openTabs.find((t) => t.filePath === viewFilePath);
-    return tab?.isExternal === true;
-  }, [viewFilePath, fileTabs.openTabs]);
+  // Look up whether a given path is an external (out-of-workspace) tab.
+  // Returns `false` for null / unknown paths so the workspace-relative
+  // path through `onSelectFile` keeps firing for anything that hasn't
+  // explicitly been opened as external.
+  const isExternalPath = useCallback(
+    (filePath: string | null): boolean => {
+      if (filePath === null) return false;
+      const tab = fileTabs.openTabs.find((t) => t.filePath === filePath);
+      return tab?.isExternal === true;
+    },
+    [fileTabs.openTabs],
+  );
+
+  // Whether the currently-viewed file lives outside the workspace root.
+  // Derived from the tab list so we don't have to thread a second flag
+  // everywhere a path does.
+  const viewIsExternal = useMemo(
+    () => isExternalPath(viewFilePath || null),
+    [isExternalPath, viewFilePath],
+  );
 
   // The parent route's onSelectFile pushes the path into the URL
   // (`/workspace/$workspaceId/code/$filePath`). External files use
@@ -520,12 +532,17 @@ export function CodeBrowserView({
   // (`/workspace/foo/code//Users/alice/foo.md`) — so we silently drop
   // those notifications. The tab list (persisted to localStorage) is
   // the source of truth for "what's currently being viewed" instead.
+  //
+  // The guard checks `isExternalPath` against the current tab list so
+  // the invariant ("external tabs don't round-trip through the route")
+  // is explicit, rather than relying on the implicit "external paths
+  // happen to be absolute, workspace-relative paths happen not to be."
   const notifySelectFile = useCallback(
     (filePath: string | null) => {
-      if (filePath?.startsWith("/")) return;
+      if (isExternalPath(filePath)) return;
       onSelectFile?.(filePath);
     },
-    [onSelectFile],
+    [isExternalPath, onSelectFile],
   );
 
   // Markdown view mode (controlled from here, rendered in tab bar actions)
@@ -562,9 +579,9 @@ export function CodeBrowserView({
   const [lspExtension, setLspExtension] = useState<Extension | null>(null);
 
   // Detect the language of the current file and build the LSP WebSocket URL.
-  // External files (issue #433) are outside the workspace's project root, so
-  // the workspace's tsserver wouldn't have any useful context for them —
-  // skip LSP entirely.
+  // External files are outside the workspace's project root, so the
+  // workspace's tsserver wouldn't have any useful context for them — skip
+  // LSP entirely.
   const lspServerLang = useMemo(() => {
     if (!settings.enableLSP) return null;
     if (!viewFilePath) return null;
@@ -1139,10 +1156,10 @@ export function CodeBrowserView({
 
   // -------------------------------------------------------------------------
   // Open File… — desktop-only "open a file from anywhere on the local
-  // filesystem" action (issue #433). The OS file picker lives in the
-  // Electron main process; once we have the path back, the file flows
-  // through the same FileViewer used for workspace files, just with the
-  // `external` flag set so reads/writes hit `host.readFile` / `host.saveFile`.
+  // filesystem" action. The OS file picker lives in the Electron main
+  // process; once we have the path back, the file flows through the same
+  // FileViewer used for workspace files, just with the `external` flag set
+  // so reads/writes hit `host.readFile` / `host.saveFile`.
   // -------------------------------------------------------------------------
   const capabilities = useCapabilities();
   const handleOpenExternalFile = useCallback(async () => {
@@ -1376,7 +1393,7 @@ export function CodeBrowserView({
             renderMarkdown={renderMarkdown}
             editable
             // LSP is workspace-scoped — external files have no project root,
-            // so we deliberately skip the extension for them (issue #433).
+            // so we deliberately skip the extension for them.
             lspExtension={viewIsExternal ? null : lspExtension}
             initialEditedContent={tabState.get(viewFilePath)?.editedContent ?? null}
             savedEditorState={

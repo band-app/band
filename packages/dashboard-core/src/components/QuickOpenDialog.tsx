@@ -210,9 +210,9 @@ export function QuickOpenDialog({
   );
 
   // "Open File…" entry — surfaces the OS file picker so the user can
-  // open a file from anywhere on the local filesystem (issue #433).
-  // Only available when the host shell exposes `pickFile` (i.e. the
-  // Electron desktop app); plain browser tabs hide the action.
+  // open a file from anywhere on the local filesystem. Only available
+  // when the host shell exposes `pickFile` (i.e. the Electron desktop
+  // app); plain browser tabs hide the action.
   const canOpenExternal = !!capabilities.pickFile;
   const handleOpenExternal = useCallback(() => {
     // Dispatch via the same event pattern Quick Open / Search in Files

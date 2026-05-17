@@ -68,8 +68,8 @@ interface FileViewerProps {
   onEditedContentChange?: (content: string | null) => void;
   /**
    * When true, `filePath` is treated as an absolute filesystem path
-   * outside the workspace root (the "Open File…" flow — issue #433),
-   * and reads/writes go through the host file IO surface
+   * outside the workspace root (the "Open File…" flow), and reads
+   * /writes go through the host file IO surface
    * (`adapter.readExternalFile` / `adapter.saveExternalFile`) instead of
    * the workspace one. `workspaceId` is still required by the prop
    * shape but is unused on this path — image/PDF preview URLs and LSP
@@ -197,7 +197,8 @@ export function FileViewer({
     // External files don't have a workspace-relative URL; for the moment we
     // fall through to the text-content path (binary detection will catch
     // genuine images), since opening an arbitrary binary outside the workspace
-    // root is rare and the image preview UI isn't a goal of issue #433.
+    // root is rare and the image preview UI isn't a goal of the external-file
+    // flow.
     if (!external && (previewType === "image" || previewType === "pdf")) {
       setData(null);
       setLoading(false);
@@ -237,8 +238,8 @@ export function FileViewer({
 
   const lang = data?.content ? detectLanguage(filePath, data.language) : "plaintext";
 
-  // External files don't have a workspace-relative raw URL endpoint.
-  // Image/PDF rendering for external paths isn't a goal of issue #433.
+  // External files don't have a workspace-relative raw URL endpoint, so
+  // image/PDF rendering for external paths is intentionally not wired.
   const fileUrl =
     !external && adapter.getWorkspaceFileUrl
       ? adapter.getWorkspaceFileUrl(workspaceId, filePath)

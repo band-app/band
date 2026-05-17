@@ -252,7 +252,7 @@ export function FileTabBar({
                 : tab.filePath;
             // Tooltip / native title: external tabs surface the full
             // absolute path so the user can tell at a glance where edits
-            // will be written (issue #433 acceptance criteria).
+            // will be written.
             const tabTitle = isExternal
               ? `${tab.filePath} (external file)`
               : isPreview
@@ -286,10 +286,10 @@ export function FileTabBar({
                     {/* File icon */}
                     <Icon className="size-3.5 shrink-0" />
 
-                    {/* External-file badge (issue #433). Sits between the
-                        file icon and the name so the user can tell at a
-                        glance that the tab's filePath is an absolute path
-                        outside the workspace root. */}
+                    {/* External-file badge. Sits between the file icon and
+                        the name so the user can tell at a glance that the
+                        tab's filePath is an absolute path outside the
+                        workspace root. */}
                     {isExternal && (
                       <ExternalLink className="size-3 shrink-0 text-muted-foreground/70" />
                     )}

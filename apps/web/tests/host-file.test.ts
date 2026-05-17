@@ -1,5 +1,5 @@
 // Integration tests for the host file IO procedures (`host.readFile`,
-// `host.saveFile`) that back the "Open File…" action — issue #433.
+// `host.saveFile`) that back the editor's "Open File…" action.
 //
 // We exercise the real server pipeline: spawn the production server in a
 // child process, then call the tRPC procedures over HTTP against an actual
@@ -9,7 +9,15 @@
 // the integration-test suite.
 
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -191,7 +199,7 @@ describe("tRPC — host.readFile / host.saveFile (external files)", () => {
     const res = await trpcQuery(server.url, "host.readFile", { absolutePath: outsideDir });
     expect(res.status).toBe(500);
     const body = await res.json();
-    expect(body.error.message).toContain("Not a regular file");
+    expect(body.error.message).toMatch(/directory|regular file/);
   });
 
   it("host.saveFile writes new contents to the on-disk file", async () => {
@@ -231,5 +239,109 @@ describe("tRPC — host.readFile / host.saveFile (external files)", () => {
     expect(res.status).toBe(500);
     const body = await res.json();
     expect(body.error.message).toMatch(/directory|regular file/);
+  });
+
+  it("host.saveFile returns a descriptive error for a non-existent file", async () => {
+    // The endpoint refuses to create files — it's a save, not a create.
+    // We want a clean "File not found" message instead of a raw ENOENT
+    // bubbling up as an opaque 500.
+    const missing = join(outsideDir, "definitely-does-not-exist.txt");
+    const res = await trpcMutate(server.url, "host.saveFile", {
+      absolutePath: missing,
+      content: "anything",
+    });
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error.message).toContain("File not found");
+  });
+
+  it("host.readFile rejects symbolic links", async () => {
+    // The OS picker can return a symlink, but the host endpoints must
+    // not silently follow it — a symlink to /etc/passwd would otherwise
+    // pass the `isFile()` check after stat(). lstat()-based detection
+    // surfaces it cleanly.
+    const target = join(outsideDir, "real.txt");
+    writeFileSync(target, "real content\n", "utf-8");
+    const link = join(outsideDir, "link.txt");
+    symlinkSync(target, link);
+
+    const res = await trpcQuery(server.url, "host.readFile", { absolutePath: link });
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error.message).toContain("Symbolic link");
+  });
+
+  it("host.saveFile rejects symbolic links", async () => {
+    const target = join(outsideDir, "real-save.txt");
+    writeFileSync(target, "real content\n", "utf-8");
+    const link = join(outsideDir, "link-save.txt");
+    symlinkSync(target, link);
+
+    const res = await trpcMutate(server.url, "host.saveFile", {
+      absolutePath: link,
+      content: "should not write through symlink",
+    });
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error.message).toContain("Symbolic link");
+
+    // And the target file must be unchanged.
+    expect(readFileSync(target, "utf-8")).toBe("real content\n");
+  });
+
+  it("host.readFile returns { tooLarge: true } for files larger than MAX_FILE_SIZE", async () => {
+    // MAX_FILE_SIZE is 1MB server-side; write something just past the
+    // threshold so the boundary is exercised without bloating the test.
+    const bigPath = join(outsideDir, "big.bin");
+    const big = Buffer.alloc(1024 * 1024 + 1, 65); // 1MB + 1 byte of "A"
+    writeFileSync(bigPath, big);
+
+    const res = await trpcQuery(server.url, "host.readFile", { absolutePath: bigPath });
+    expect(res.status).toBe(200);
+    const data = await trpcData<{ tooLarge?: true; size: number; content?: string }>(res);
+    expect(data.tooLarge).toBe(true);
+    expect(data.size).toBe(big.length);
+    // No content should be sent.
+    expect(data.content).toBeUndefined();
+  });
+
+  it("host.readFile returns { binary: true } for files containing NUL bytes", async () => {
+    // The detection samples the first 8KB for null bytes — the cheapest
+    // signal that a file is binary. We don't want raw binary content
+    // streamed back into a text editor.
+    const binPath = join(outsideDir, "small.bin");
+    const bin = Buffer.from([0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]);
+    writeFileSync(binPath, bin);
+
+    const res = await trpcQuery(server.url, "host.readFile", { absolutePath: binPath });
+    expect(res.status).toBe(200);
+    const data = await trpcData<{ binary?: true; size: number; content?: string }>(res);
+    expect(data.binary).toBe(true);
+    expect(data.size).toBe(bin.length);
+    expect(data.content).toBeUndefined();
+  });
+
+  it("host.readFile / host.saveFile reject unauthenticated callers", async () => {
+    // The host procedures bypass the workspace containment guard, so
+    // the transport-layer band_token cookie is the only thing standing
+    // between an unauthenticated caller and arbitrary FS access.
+    // Verify the cookie gate actually fires when omitted.
+    const readRes = await fetch(
+      `${server.url}/trpc/host.readFile?input=${encodeURIComponent(
+        JSON.stringify({ absolutePath: externalPath }),
+      )}`,
+    );
+    expect(readRes.status).not.toBe(200);
+
+    const saveRes = await fetch(`${server.url}/trpc/host.saveFile`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ absolutePath: externalPath, content: "evil" }),
+    });
+    expect(saveRes.status).not.toBe(200);
+
+    // And the file on disk must be untouched (still the previous test's content).
+    const onDisk = readFileSync(externalPath, "utf-8");
+    expect(onDisk).not.toBe("evil");
   });
 });
