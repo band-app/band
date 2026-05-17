@@ -13,7 +13,7 @@ export const trpc = createTRPCClient<AppRouter>({
     splitLink({
       condition: (op) => op.type === "subscription",
       true: wsLink({ client: wsClient }),
-      false: httpBatchLink({ url: "/trpc" }),
+      false: httpBatchLink({ url: "/trpc", maxURLLength: 2000 }),
     }),
   ],
 });
