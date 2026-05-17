@@ -129,18 +129,27 @@ async function openMarkdownPreview(page: Page): Promise<void> {
 test("Cmd+F opens the find bar, counts and steps through matches, Esc closes", async ({ page }) => {
   await openMarkdownPreview(page);
 
-  const findInput = page.getByPlaceholder("Find in preview...");
+  // The find bar uses a single placeholder string in both source and
+  // preview modes — only the search target differs internally. The
+  // placeholder flips to "Find in preview..." while the preview is the
+  // active surface.
+  const findInput = page.getByPlaceholder(/Find in (preview|file)\.\.\./);
   await expect(findInput).toHaveCount(0);
 
-  // The capture-phase keydown listener in MarkdownPreview should pick
-  // this up regardless of which element currently has focus, as long as
-  // the preview is in the layout. Use the modifier the host platform
-  // would actually emit.
+  // Cmd+F goes through `DockviewWorkspaceLayout`'s capture-phase
+  // keybind → `useSearch.handleOpenSearch` → renders the toolbar
+  // SearchBar. CodeBrowserView routes the input through to
+  // MarkdownPreview's imperative ref while preview mode is active.
   const modifier = process.platform === "darwin" ? "Meta" : "Control";
   await page.keyboard.press(`${modifier}+f`);
 
+  // Exactly one find bar should appear — the unified top one. The old
+  // "stacked bars" regression (#435 follow-up) would surface here as a
+  // second input with the same placeholder.
+  await expect(findInput).toHaveCount(1);
   await expect(findInput).toBeVisible();
   await expect(findInput).toBeFocused();
+  await expect(findInput).toHaveAttribute("placeholder", "Find in preview...");
 
   await findInput.fill("needle");
 
