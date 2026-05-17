@@ -66,6 +66,16 @@ interface FileViewerProps {
   savedScrollTop?: number;
   /** Called when edited content changes (for persistence to tab state) */
   onEditedContentChange?: (content: string | null) => void;
+  /**
+   * When true, `filePath` is treated as an absolute filesystem path
+   * outside the workspace root (the "Open File…" flow — issue #433),
+   * and reads/writes go through the host file IO surface
+   * (`adapter.readExternalFile` / `adapter.saveExternalFile`) instead of
+   * the workspace one. `workspaceId` is still required by the prop
+   * shape but is unused on this path — image/PDF preview URLs and LSP
+   * are intentionally not wired for external files.
+   */
+  external?: boolean;
 }
 
 function getFilename(path: string): string {
@@ -111,6 +121,7 @@ export function FileViewer({
   savedEditorState,
   savedScrollTop,
   onEditedContentChange,
+  external,
 }: FileViewerProps) {
   const adapter = useAdapter();
   const [data, setData] = useState<FileContentResult | null>(null);
@@ -133,7 +144,7 @@ export function FileViewer({
 
   const isDirty = editedContent !== null && editedContent !== data?.content;
 
-  const canEdit = editable && !!adapter.saveWorkspaceFile;
+  const canEdit = editable && (external ? !!adapter.saveExternalFile : !!adapter.saveWorkspaceFile);
 
   const previewType: FilePreviewType = getFilePreviewType(filePath);
 
@@ -182,15 +193,20 @@ export function FileViewer({
   }, [previewType, viewMode, onEditorView]);
 
   useEffect(() => {
-    // Images and PDFs are rendered via the raw file URL — no tRPC fetch needed
-    if (previewType === "image" || previewType === "pdf") {
+    // Images and PDFs are rendered via the raw file URL — no tRPC fetch needed.
+    // External files don't have a workspace-relative URL; for the moment we
+    // fall through to the text-content path (binary detection will catch
+    // genuine images), since opening an arbitrary binary outside the workspace
+    // root is rare and the image preview UI isn't a goal of issue #433.
+    if (!external && (previewType === "image" || previewType === "pdf")) {
       setData(null);
       setLoading(false);
       setError(null);
       return;
     }
 
-    if (!adapter.getWorkspaceFile) {
+    const loader = external ? adapter.readExternalFile : adapter.getWorkspaceFile;
+    if (!loader) {
       setError("File viewing not supported");
       setLoading(false);
       return;
@@ -201,8 +217,10 @@ export function FileViewer({
     setError(null);
     setData(null);
 
-    adapter
-      .getWorkspaceFile(workspaceId, filePath)
+    const promise = external
+      ? adapter.readExternalFile!(filePath)
+      : adapter.getWorkspaceFile!(workspaceId, filePath);
+    promise
       .then((result) => {
         if (!cancelled) setData(result);
       })
@@ -215,13 +233,16 @@ export function FileViewer({
     return () => {
       cancelled = true;
     };
-  }, [adapter, workspaceId, filePath, previewType]);
+  }, [adapter, workspaceId, filePath, previewType, external]);
 
   const lang = data?.content ? detectLanguage(filePath, data.language) : "plaintext";
 
-  const fileUrl = adapter.getWorkspaceFileUrl
-    ? adapter.getWorkspaceFileUrl(workspaceId, filePath)
-    : undefined;
+  // External files don't have a workspace-relative raw URL endpoint.
+  // Image/PDF rendering for external paths isn't a goal of issue #433.
+  const fileUrl =
+    !external && adapter.getWorkspaceFileUrl
+      ? adapter.getWorkspaceFileUrl(workspaceId, filePath)
+      : undefined;
 
   const showMarkdownToggle = previewType === "markdown" && renderMarkdown;
 
@@ -235,11 +256,16 @@ export function FileViewer({
   onEditedContentChangeRef.current = onEditedContentChange;
 
   const handleSave = useCallback(async () => {
-    if (!adapter.saveWorkspaceFile || editedContentRef.current === null) return;
+    if (editedContentRef.current === null) return;
+    const save = external
+      ? adapter.saveExternalFile && ((c: string) => adapter.saveExternalFile!(filePath, c))
+      : adapter.saveWorkspaceFile &&
+        ((c: string) => adapter.saveWorkspaceFile!(workspaceId, filePath, c));
+    if (!save) return;
     setSaving(true);
     setSaveError(null);
     try {
-      await adapter.saveWorkspaceFile(workspaceId, filePath, editedContentRef.current);
+      await save(editedContentRef.current);
       // Update the data state so isDirty resets
       const savedContent = editedContentRef.current;
       setData((prev) => (prev ? { ...prev, content: savedContent } : prev));
@@ -252,7 +278,7 @@ export function FileViewer({
     } finally {
       setSaving(false);
     }
-  }, [adapter, workspaceId, filePath]);
+  }, [adapter, workspaceId, filePath, external]);
 
   const handleContentChange = useCallback((newContent: string) => {
     // When undo brings the content back to the on-disk version, clear

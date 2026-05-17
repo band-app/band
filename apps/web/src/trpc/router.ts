@@ -2005,6 +2005,88 @@ const workspaceRouter = t.router({
 });
 
 // ---------------------------------------------------------------------------
+// Host (external file operations — outside any workspace root)
+// ---------------------------------------------------------------------------
+
+/**
+ * Read/write files identified by an absolute filesystem path, with no
+ * workspace-root containment check. Backs the "Open File…" action
+ * (issue #433): users pick a file via the desktop file picker and edit
+ * it in a Band editor tab even though it sits outside the current
+ * workspace.
+ *
+ * Authentication: the band_token cookie/header is enforced at the
+ * transport layer (see start-server.ts), so only the local desktop
+ * user can call these procedures. Because they bypass the
+ * workspace-relative path traversal guard used by `workspace.getFile`
+ * / `workspace.saveFile`, we require the path to be absolute and to
+ * point at a regular file. Reading a directory or symlink target that
+ * isn't a file is rejected.
+ */
+const hostRouter = t.router({
+  readFile: publicProcedure
+    .input(z.object({ absolutePath: z.string().min(1) }))
+    .query(async ({ input }) => {
+      const target = input.absolutePath;
+      if (!target.startsWith("/")) {
+        throw new Error("Absolute path required");
+      }
+
+      const fileStat = await stat(target);
+      if (!fileStat.isFile()) {
+        throw new Error("Not a regular file");
+      }
+      const size = fileStat.size;
+
+      if (size > MAX_FILE_SIZE) {
+        return { tooLarge: true as const, size };
+      }
+
+      const buffer = await readFile(target);
+
+      const sample = buffer.subarray(0, 8192);
+      if (sample.includes(0)) {
+        return { binary: true as const, size };
+      }
+
+      const ext = extname(target).toLowerCase();
+      const language = LANG_MAP[ext];
+
+      return {
+        content: buffer.toString("utf-8"),
+        size,
+        language,
+      };
+    }),
+
+  saveFile: publicProcedure
+    .input(
+      z.object({
+        absolutePath: z.string().min(1),
+        content: z.string(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const target = input.absolutePath;
+      if (!target.startsWith("/")) {
+        throw new Error("Absolute path required");
+      }
+
+      const fileStat = await stat(target);
+      if (fileStat.isDirectory()) {
+        throw new Error("Cannot write to a directory");
+      }
+      if (!fileStat.isFile()) {
+        throw new Error("Not a regular file");
+      }
+
+      await writeFile(target, input.content, "utf-8");
+
+      return { ok: true };
+    }),
+});
+
+// ---------------------------------------------------------------------------
 // Tunnel
 // ---------------------------------------------------------------------------
 
@@ -3688,6 +3770,7 @@ export const appRouter = t.router({
   hooks: hooksRouter,
   cli: cliRouter,
   workspace: workspaceRouter,
+  host: hostRouter,
   tunnel: tunnelRouter,
   prereqs: prereqsRouter,
   tasks: tasksRouter,

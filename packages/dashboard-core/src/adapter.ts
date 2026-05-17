@@ -118,6 +118,19 @@ export interface DashboardAdapter {
   saveWorkspaceFile?(workspaceId: string, path: string, content: string): Promise<void>;
 
   /**
+   * Read a file by absolute filesystem path — used by the "Open File…"
+   * action (issue #433) for files that sit outside any registered
+   * workspace root. The server-side procedure bypasses the workspace
+   * containment check; authentication still flows through the same
+   * band_token cookie used by every other tRPC call.
+   */
+  readExternalFile?(absolutePath: string): Promise<FileContentResult>;
+
+  /** Write a file by absolute filesystem path. Mirror of `saveWorkspaceFile`
+   *  for external files. */
+  saveExternalFile?(absolutePath: string, content: string): Promise<void>;
+
+  /**
    * Create a new file at the given workspace-relative path. The file's
    * parent directory must already exist. Throws if the path already
    * exists. `content` defaults to an empty string.
@@ -217,6 +230,15 @@ export interface PlatformCapabilities {
   copyPath?: boolean;
   revealInFinder?(path: string): Promise<void>;
   pickFolder?(): Promise<string | null>;
+  /**
+   * Open the OS file picker and resolve with the chosen absolute file path
+   * (or `null` when the user cancels). Defined only when the renderer is
+   * running inside the Electron desktop shell — plain browser tabs cannot
+   * trigger native file dialogs without a user-initiated `<input type="file">`
+   * click and have no way to obtain the file's absolute path anyway, so
+   * callers must gate their UI on this capability being present.
+   */
+  pickFile?(): Promise<string | null>;
   openUrl?(url: string): Promise<void>;
   getWorkspaceHref?(workspaceId: string): string | undefined;
   /** Optional navigate function for client-side routing (avoids full page reload). */

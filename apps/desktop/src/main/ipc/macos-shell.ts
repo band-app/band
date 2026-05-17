@@ -2,6 +2,7 @@
  * macOS shell bridges.
  *
  *   - `pickFolder` — system folder picker (cross-platform via Electron's `dialog`).
+ *   - `pickFile` — system file picker for opening external files (cross-platform).
  *   - `revealInFinder` — open the path in the platform's file manager.
  *   - `checkAppExists` — look in /Applications and friends, fall back to `which`.
  *   - `openWithApp` — `open -a <app> <path>` (macOS only).
@@ -32,6 +33,31 @@ export async function pickFolder(parent: BrowserWindow | null): Promise<string |
   const opts = {
     title: "Select a git repository",
     properties: ["openDirectory"] as Array<"openDirectory">,
+  };
+  const result = parent
+    ? await dialog.showOpenDialog(parent, opts)
+    : await dialog.showOpenDialog(opts);
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return result.filePaths[0] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// pickFile
+// ---------------------------------------------------------------------------
+
+/**
+ * Open the system file picker for opening a single file from anywhere on the
+ * local filesystem. Returns the absolute POSIX path or `null` when the user
+ * cancels. Anchored to `parent` so the dialog is sheet-style on macOS and
+ * modal-relative on other platforms.
+ *
+ * Backs the "Open File…" action in the editor (issue #433) — lets a user
+ * open files that sit outside the current workspace root.
+ */
+export async function pickFile(parent: BrowserWindow | null): Promise<string | null> {
+  const opts = {
+    title: "Open File",
+    properties: ["openFile"] as Array<"openFile">,
   };
   const result = parent
     ? await dialog.showOpenDialog(parent, opts)

@@ -16,6 +16,7 @@ import {
   toFileUri,
   toLspServerLang,
   toWorkspaceId,
+  useCapabilities,
   useEditorHistory,
   useProjects,
   useSearch,
@@ -39,6 +40,7 @@ import {
   Code,
   Eye,
   File,
+  FileInput,
   FilePlus,
   FolderPlus,
   MoreVertical,
@@ -150,6 +152,14 @@ interface CodeBrowserViewProps {
 interface FileTreeToolbarProps {
   onNewFile?: () => void;
   onNewFolder?: () => void;
+  /**
+   * Trigger the OS file picker and open the chosen file in a new
+   * editor tab. Only defined inside the desktop shell (where the
+   * native dialog is available — see `capabilities.pickFile`), so the
+   * toolbar simply omits the action on the web. Backs the "Open File…"
+   * flow for issue #433.
+   */
+  onOpenFile?: () => void;
 }
 
 // Below this width (px), the toolbar collapses its action buttons into a
@@ -184,7 +194,7 @@ const touchPointerUp = (fn?: () => void) => (e: React.PointerEvent<HTMLButtonEle
 const fireOpenQuickOpen = () => window.dispatchEvent(new CustomEvent("band:open-quick-open"));
 const fireOpenSearchFiles = () => window.dispatchEvent(new CustomEvent("band:open-search-files"));
 
-function FileTreeToolbar({ onNewFile, onNewFolder }: FileTreeToolbarProps) {
+function FileTreeToolbar({ onNewFile, onNewFolder, onOpenFile }: FileTreeToolbarProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [compact, setCompact] = useState(false);
 
@@ -280,6 +290,12 @@ function FileTreeToolbar({ onNewFile, onNewFolder }: FileTreeToolbarProps) {
                 ⌘⇧F
               </kbd>
             </DropdownMenuItem>
+            {onOpenFile && (
+              <DropdownMenuItem onSelect={() => queueMenuAction(onOpenFile)}>
+                <FileInput className="size-4" />
+                Open File…
+              </DropdownMenuItem>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       ) : (
@@ -316,6 +332,24 @@ function FileTreeToolbar({ onNewFile, onNewFolder }: FileTreeToolbarProps) {
               </TooltipTrigger>
               <TooltipContent side="bottom" className="text-xs">
                 New Folder
+              </TooltipContent>
+            </Tooltip>
+          )}
+
+          {onOpenFile && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={onOpenFile}
+                  onPointerUp={touchPointerUp(onOpenFile)}
+                  className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                >
+                  <FileInput className="size-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="text-xs">
+                Open File…
               </TooltipContent>
             </Tooltip>
           )}
@@ -471,6 +505,29 @@ export function CodeBrowserView({
   // mobile) OR the container is narrower than 600px (narrow dockview panel).
   const useMobileLayout = !isDesktop || (containerWidth !== null && containerWidth < 600);
 
+  // Whether the currently-viewed file lives outside the workspace root
+  // (opened via "Open File…" — issue #433). Derived from the tab list so
+  // we don't have to thread a second flag everywhere a path does.
+  const viewIsExternal = useMemo(() => {
+    if (!viewFilePath) return false;
+    const tab = fileTabs.openTabs.find((t) => t.filePath === viewFilePath);
+    return tab?.isExternal === true;
+  }, [viewFilePath, fileTabs.openTabs]);
+
+  // The parent route's onSelectFile pushes the path into the URL
+  // (`/workspace/$workspaceId/code/$filePath`). External files use
+  // absolute filesystem paths, which would produce a nonsensical URL
+  // (`/workspace/foo/code//Users/alice/foo.md`) — so we silently drop
+  // those notifications. The tab list (persisted to localStorage) is
+  // the source of truth for "what's currently being viewed" instead.
+  const notifySelectFile = useCallback(
+    (filePath: string | null) => {
+      if (filePath?.startsWith("/")) return;
+      onSelectFile?.(filePath);
+    },
+    [onSelectFile],
+  );
+
   // Markdown view mode (controlled from here, rendered in tab bar actions)
   const [mdViewMode, setMdViewModeState] = useState<"preview" | "source">("preview");
   const isMarkdown = viewFilePath ? getFilePreviewType(viewFilePath) === "markdown" : false;
@@ -504,10 +561,14 @@ export function CodeBrowserView({
   // -------------------------------------------------------------------------
   const [lspExtension, setLspExtension] = useState<Extension | null>(null);
 
-  // Detect the language of the current file and build the LSP WebSocket URL
+  // Detect the language of the current file and build the LSP WebSocket URL.
+  // External files (issue #433) are outside the workspace's project root, so
+  // the workspace's tsserver wouldn't have any useful context for them —
+  // skip LSP entirely.
   const lspServerLang = useMemo(() => {
     if (!settings.enableLSP) return null;
     if (!viewFilePath) return null;
+    if (viewIsExternal) return null;
     const ext = viewFilePath.split(".").pop()?.toLowerCase();
     if (!ext) return null;
     // Map file extension to CodeMirror language name, then to LSP server lang
@@ -523,7 +584,7 @@ export function CodeBrowserView({
     };
     const cmLang = langMap[ext];
     return cmLang ? toLspServerLang(cmLang) : null;
-  }, [viewFilePath, settings.enableLSP]);
+  }, [viewFilePath, viewIsExternal, settings.enableLSP]);
 
   const lspWsUrl = useMemo(
     () => (lspServerLang ? buildLspWsUrl(workspaceId, lspServerLang) : null),
@@ -820,10 +881,10 @@ export function CodeBrowserView({
       setViewLine(undefined);
       setViewLineEnd(undefined);
       setViewColumn(undefined);
-      onSelectFile?.(filePath);
+      notifySelectFile(filePath);
     },
     [
-      onSelectFile,
+      notifySelectFile,
       pushDepartureAndArrival,
       openPreviewWithGuard,
       fileTabs.openTabPinned,
@@ -845,9 +906,9 @@ export function CodeBrowserView({
       setViewLine(undefined);
       setViewLineEnd(undefined);
       setViewColumn(undefined);
-      onSelectFile?.(filePath);
+      notifySelectFile(filePath);
     },
-    [onSelectFile, pushDepartureAndArrival, fileTabs.openTabPinned, viewFilePath],
+    [notifySelectFile, pushDepartureAndArrival, fileTabs.openTabPinned, viewFilePath],
   );
 
   const handleBack = useCallback(() => {
@@ -855,8 +916,8 @@ export function CodeBrowserView({
     setViewLine(undefined);
     setViewLineEnd(undefined);
     setViewColumn(undefined);
-    onSelectFile?.(null);
-  }, [onSelectFile]);
+    notifySelectFile(null);
+  }, [notifySelectFile]);
 
   // -------------------------------------------------------------------------
   // Tab handlers
@@ -889,9 +950,9 @@ export function CodeBrowserView({
       setViewLine(undefined);
       setViewLineEnd(undefined);
       setViewColumn(undefined);
-      onSelectFile?.(filePath);
+      notifySelectFile(filePath);
     },
-    [fileTabs.setActiveTab, onSelectFile, viewFilePath, tabState.update],
+    [fileTabs.setActiveTab, notifySelectFile, viewFilePath, tabState.update],
   );
 
   const handleTabClose = useCallback(
@@ -931,7 +992,7 @@ export function CodeBrowserView({
       setViewLine(undefined);
       setViewLineEnd(undefined);
       setViewColumn(undefined);
-      onSelectFile?.(null);
+      notifySelectFile(null);
     } else if (fileTabs.activeTabPath && fileTabs.activeTabPath !== viewFilePath) {
       // Active tab changed (e.g. after closing) — sync to new active tab
       // Cursor/scroll position is restored from savedEditorStatesRef via props
@@ -940,7 +1001,7 @@ export function CodeBrowserView({
       setViewLine(undefined);
       setViewLineEnd(undefined);
       setViewColumn(undefined);
-      onSelectFile?.(fileTabs.activeTabPath);
+      notifySelectFile(fileTabs.activeTabPath);
     }
   }, [fileTabs.activeTabPath, fileTabs.openTabs.length]);
 
@@ -958,7 +1019,7 @@ export function CodeBrowserView({
       setViewLine(entry.line);
       setViewLineEnd(undefined);
       setViewColumn(entry.column);
-      onSelectFile?.(entry.filePath);
+      notifySelectFile(entry.filePath);
 
       if (sameFile && editorViewRef.current) {
         // Same file: directly scroll + focus the editor view.
@@ -972,7 +1033,7 @@ export function CodeBrowserView({
         focusOnViewReadyRef.current = true;
       }
     },
-    [viewFilePath, onSelectFile, openPreviewWithGuard],
+    [viewFilePath, notifySelectFile, openPreviewWithGuard],
   );
 
   const handleEditorGoBack = useCallback(() => {
@@ -1014,7 +1075,7 @@ export function CodeBrowserView({
         setViewLine(undefined);
         setViewLineEnd(undefined);
         setViewColumn(undefined);
-        onSelectFile?.(detail.filePath);
+        notifySelectFile(detail.filePath);
         // The LSP library will position the cursor once resolveNavigation provides the view
         focusOnViewReadyRef.current = true;
       }
@@ -1022,7 +1083,7 @@ export function CodeBrowserView({
 
     window.addEventListener("band:lsp-navigate", handleLspNavigate);
     return () => window.removeEventListener("band:lsp-navigate", handleLspNavigate);
-  }, [pushDepartureAndArrival, fileTabs.openTabPinned, onSelectFile]);
+  }, [pushDepartureAndArrival, fileTabs.openTabPinned, notifySelectFile]);
 
   // Ctrl+Tab / Ctrl+Shift+Tab to switch between file tabs
   useEffect(() => {
@@ -1075,6 +1136,41 @@ export function CodeBrowserView({
   const handleNewFolder = useCallback(() => {
     fileBrowserRef.current?.startNewFolder();
   }, []);
+
+  // -------------------------------------------------------------------------
+  // Open File… — desktop-only "open a file from anywhere on the local
+  // filesystem" action (issue #433). The OS file picker lives in the
+  // Electron main process; once we have the path back, the file flows
+  // through the same FileViewer used for workspace files, just with the
+  // `external` flag set so reads/writes hit `host.readFile` / `host.saveFile`.
+  // -------------------------------------------------------------------------
+  const capabilities = useCapabilities();
+  const handleOpenExternalFile = useCallback(async () => {
+    if (!capabilities.pickFile) return;
+    const absolutePath = await capabilities.pickFile();
+    if (!absolutePath) return;
+    fileTabs.openTabExternal(absolutePath);
+    setViewFilePath(absolutePath);
+    setViewLine(undefined);
+    setViewLineEnd(undefined);
+    setViewColumn(undefined);
+    // We deliberately do NOT call onSelectFile / push to editor history —
+    // the route only carries workspace-relative paths, and pushing an
+    // absolute path would corrupt the back/forward stack. External tabs
+    // remain reachable via the tab bar and Cmd+W close.
+  }, [capabilities, fileTabs.openTabExternal]);
+
+  // Surface the action via the same command-palette event pattern as
+  // Quick Open / Search in Files. Listened to here so the desktop-shell
+  // capability check stays local.
+  useEffect(() => {
+    if (!capabilities.pickFile) return;
+    const handler = () => {
+      void handleOpenExternalFile();
+    };
+    window.addEventListener("band:open-file-external", handler);
+    return () => window.removeEventListener("band:open-file-external", handler);
+  }, [capabilities.pickFile, handleOpenExternalFile]);
 
   // -------------------------------------------------------------------------
   // Keep tabs + editor state in sync with rename / delete in the file tree.
@@ -1144,12 +1240,12 @@ export function CodeBrowserView({
       if (viewFilePath === oldPath) {
         skipFileEffectRef.current = true;
         setViewFilePath(newPath);
-        onSelectFile?.(newPath);
+        notifySelectFile(newPath);
       } else if (viewFilePath.startsWith(oldPrefix)) {
         const rewritten = newPath + viewFilePath.slice(oldPath.length);
         skipFileEffectRef.current = true;
         setViewFilePath(rewritten);
-        onSelectFile?.(rewritten);
+        notifySelectFile(rewritten);
       }
     },
     [
@@ -1158,7 +1254,7 @@ export function CodeBrowserView({
       tabState.update,
       flushActiveEditorState,
       viewFilePath,
-      onSelectFile,
+      notifySelectFile,
     ],
   );
 
@@ -1182,10 +1278,10 @@ export function CodeBrowserView({
         setViewLine(undefined);
         setViewLineEnd(undefined);
         setViewColumn(undefined);
-        onSelectFile?.(null);
+        notifySelectFile(null);
       }
     },
-    [fileTabs.removePath, tabState.removePath, viewFilePath, onSelectFile],
+    [fileTabs.removePath, tabState.removePath, viewFilePath, notifySelectFile],
   );
 
   // -------------------------------------------------------------------------
@@ -1267,6 +1363,7 @@ export function CodeBrowserView({
           <FileViewer
             workspaceId={workspaceId}
             filePath={viewFilePath}
+            external={viewIsExternal}
             line={viewLine}
             lineEnd={viewLineEnd}
             column={viewColumn}
@@ -1278,7 +1375,9 @@ export function CodeBrowserView({
             onCursorLineChange={handleCursorLineChange}
             renderMarkdown={renderMarkdown}
             editable
-            lspExtension={lspExtension}
+            // LSP is workspace-scoped — external files have no project root,
+            // so we deliberately skip the extension for them (issue #433).
+            lspExtension={viewIsExternal ? null : lspExtension}
             initialEditedContent={tabState.get(viewFilePath)?.editedContent ?? null}
             savedEditorState={
               savedEditorStatesRef.current[viewFilePath]?.editorState ??
@@ -1298,7 +1397,11 @@ export function CodeBrowserView({
           // own narrow-width collapse into a kebab, so this works at any
           // mobile viewport.
           <div className="flex h-full flex-col overflow-hidden">
-            <FileTreeToolbar onNewFile={handleNewFile} onNewFolder={handleNewFolder} />
+            <FileTreeToolbar
+              onNewFile={handleNewFile}
+              onNewFolder={handleNewFolder}
+              onOpenFile={capabilities.pickFile ? handleOpenExternalFile : undefined}
+            />
             <div className="min-h-0 flex-1 overflow-hidden">
               <FileBrowser
                 ref={fileBrowserRef}
@@ -1335,7 +1438,11 @@ export function CodeBrowserView({
             }}
           >
             <div className="flex h-full flex-col overflow-hidden border-r border-border">
-              <FileTreeToolbar onNewFile={handleNewFile} onNewFolder={handleNewFolder} />
+              <FileTreeToolbar
+                onNewFile={handleNewFile}
+                onNewFolder={handleNewFolder}
+                onOpenFile={capabilities.pickFile ? handleOpenExternalFile : undefined}
+              />
               <div className="min-h-0 flex-1 overflow-hidden">
                 <FileBrowser
                   ref={fileBrowserRef}
@@ -1433,6 +1540,7 @@ export function CodeBrowserView({
                   <FileViewer
                     workspaceId={workspaceId}
                     filePath={viewFilePath}
+                    external={viewIsExternal}
                     line={viewLine}
                     lineEnd={viewLineEnd}
                     column={viewColumn}
@@ -1441,7 +1549,9 @@ export function CodeBrowserView({
                     renderMarkdown={renderMarkdown}
                     editable
                     hideTitleBar
-                    lspExtension={lspExtension}
+                    // LSP is workspace-scoped — external files have no project
+                    // root, so we deliberately skip the extension for them.
+                    lspExtension={viewIsExternal ? null : lspExtension}
                     viewMode={isMarkdown ? mdViewMode : undefined}
                     onViewModeChange={isMarkdown ? setMdViewMode : undefined}
                     initialEditedContent={tabState.get(viewFilePath)?.editedContent ?? null}

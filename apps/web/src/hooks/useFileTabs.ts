@@ -5,9 +5,26 @@ import { useCallback, useEffect, useRef, useState } from "react";
 // ---------------------------------------------------------------------------
 
 export interface FileTab {
+  /**
+   * For workspace files this is the workspace-relative path
+   * (`src/main.ts`). For external files (issue #433) this is the
+   * absolute filesystem path returned by the OS file picker
+   * (`/Users/alice/notes/scratch.md`). The shape is the same so
+   * downstream tab plumbing (active-tab pointer, dedup, eviction)
+   * doesn't have to special-case the two flavours.
+   */
   filePath: string;
   /** Preview tab — italic, single shared slot, replaced by next preview open. */
   isPreview?: boolean;
+  /**
+   * True when `filePath` is an absolute path to a file outside the
+   * current workspace root, opened via the "Open File…" action. The
+   * editor uses the host file IO surface (`host.readFile` /
+   * `host.saveFile`) instead of the workspace one, and the tab is
+   * rendered with an "external" marker so the user can tell at a
+   * glance that edits write to an out-of-workspace path.
+   */
+  isExternal?: boolean;
 }
 
 export interface UseFileTabsReturn {
@@ -19,6 +36,13 @@ export interface UseFileTabsReturn {
    * New tabs are created as pinned.
    */
   openTab: (filePath: string) => void;
+  /**
+   * Open a file outside the workspace root as a pinned, external tab.
+   * The path is absolute (returned by the OS file picker). If a tab
+   * for this path already exists it is activated; no second tab is
+   * created.
+   */
+  openTabExternal: (absolutePath: string) => void;
   /**
    * Open as a preview tab — replaces any existing preview tab.
    *
@@ -65,6 +89,7 @@ export interface UseFileTabsReturn {
 interface PersistedTab {
   filePath: string;
   isPreview?: boolean;
+  isExternal?: boolean;
 }
 
 interface PersistedTabState {
@@ -100,12 +125,11 @@ function loadTabState(workspaceId: string): { tabs: FileTab[]; active: string | 
         "filePath" in t &&
         typeof (t as { filePath: unknown }).filePath === "string"
       ) {
-        const obj = t as { filePath: string; isPreview?: unknown };
-        tabs.push(
-          obj.isPreview === true
-            ? { filePath: obj.filePath, isPreview: true }
-            : { filePath: obj.filePath },
-        );
+        const obj = t as { filePath: string; isPreview?: unknown; isExternal?: unknown };
+        const tab: FileTab = { filePath: obj.filePath };
+        if (obj.isPreview === true) tab.isPreview = true;
+        if (obj.isExternal === true) tab.isExternal = true;
+        tabs.push(tab);
       }
     }
     const active = typeof parsed.active === "string" ? parsed.active : null;
@@ -118,7 +142,17 @@ function loadTabState(workspaceId: string): { tabs: FileTab[]; active: string | 
 function saveTabState(workspaceId: string, tabs: FileTab[], active: string | null): void {
   try {
     const state: PersistedTabState = {
-      tabs: tabs.map((t) => (t.isPreview ? { filePath: t.filePath, isPreview: true } : t.filePath)),
+      tabs: tabs.map((t) => {
+        // Bare-string serialization is the legacy/compact form for plain
+        // pinned workspace tabs. Anything carrying extra flags (preview,
+        // external) is written as an object so the loader can re-hydrate
+        // the flag.
+        if (!t.isPreview && !t.isExternal) return t.filePath;
+        const out: PersistedTab = { filePath: t.filePath };
+        if (t.isPreview) out.isPreview = true;
+        if (t.isExternal) out.isExternal = true;
+        return out;
+      }),
       active,
     };
     localStorage.setItem(storageKey(workspaceId), JSON.stringify(state));
@@ -198,10 +232,28 @@ export function useFileTabs(workspaceId: string): UseFileTabsReturn {
       if (idx === -1) return [...prev, { filePath }];
       if (!prev[idx].isPreview) return prev;
       const next = prev.slice();
-      next[idx] = { filePath };
+      // Preserve isExternal when promoting a preview tab to pinned.
+      next[idx] = prev[idx].isExternal ? { filePath, isExternal: true } : { filePath };
       return next;
     });
     setActiveTabPathState(filePath);
+  }, []);
+
+  const openTabExternal = useCallback((absolutePath: string) => {
+    // External files are always opened pinned — they're a deliberate user
+    // intent ("I want to edit this specific file"), so the preview-tab
+    // single-slot model isn't appropriate.
+    setOpenTabs((prev) => {
+      const idx = prev.findIndex((t) => t.filePath === absolutePath);
+      if (idx === -1) return [...prev, { filePath: absolutePath, isExternal: true }];
+      // Already open — make sure it stays marked as external and pinned.
+      const existing = prev[idx];
+      if (existing.isExternal && !existing.isPreview) return prev;
+      const next = prev.slice();
+      next[idx] = { filePath: absolutePath, isExternal: true };
+      return next;
+    });
+    setActiveTabPathState(absolutePath);
   }, []);
 
   const openTabPreview = useCallback(
@@ -384,6 +436,7 @@ export function useFileTabs(workspaceId: string): UseFileTabsReturn {
     openTab,
     openTabPreview,
     openTabPinned,
+    openTabExternal,
     pinTab,
     closeTab,
     setActiveTab,

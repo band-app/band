@@ -33,6 +33,7 @@ import {
   installCli,
   openExternal,
   openWithApp,
+  pickFile,
   pickFolder,
   revealInFinder,
 } from "./macos-shell.js";
@@ -93,6 +94,7 @@ export function registerIpc(opts: RegisterOptions): () => void {
   // Args are camelCase because they're forwarded to the handlers as typed
   // objects — Electron's IPC has no FFI-level case conversion.
   handle(Channels.pickFolder, () => pickFolder(opts.mainWindow));
+  handle(Channels.pickFile, () => pickFile(opts.mainWindow));
   handle(Channels.revealInFinder, (args: RevealInFinderArgs) => revealInFinder(args.path));
   handle(Channels.checkAppExists, (args: CheckAppExistsArgs) => checkAppExists(args.appName));
   handle(Channels.openWithApp, (args: OpenWithAppArgs) => openWithApp(args.path, args.appName));
