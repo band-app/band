@@ -140,6 +140,22 @@ export class NativeShellCapabilities implements PlatformCapabilities {
     return desktopInvoke<string | null>("pick_folder");
   }
 
+  /**
+   * Open the OS file picker for the editor's "Open File…" action. The
+   * native dialog returns the absolute path; the renderer hands that
+   * path to `adapter.readExternalFile` / `adapter.saveExternalFile` for
+   * the actual file IO.
+   *
+   * Only meaningful inside the Electron shell — plain browser tabs can't
+   * surface a native dialog that yields an absolute filesystem path, so
+   * we return `null` and callers gate the UI on `capabilities.pickFile`
+   * being defined (same pattern `pickFolder` uses).
+   */
+  async pickFile(): Promise<string | null> {
+    if (!isDesktopShell()) return null;
+    return desktopInvoke<string | null>("pick_file");
+  }
+
   async openUrl(url: string): Promise<void> {
     if (!isDesktopShell()) {
       window.open(url, "_blank");

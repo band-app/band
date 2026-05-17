@@ -17,7 +17,16 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@band-app/ui";
-import { ChevronLeft, ChevronRight, Clipboard, Copy, PanelLeft, Pin, X } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Clipboard,
+  Copy,
+  ExternalLink,
+  PanelLeft,
+  Pin,
+  X,
+} from "lucide-react";
 import type React from "react";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { FileTab } from "../hooks/useFileTabs";
@@ -231,11 +240,24 @@ export function FileTabBar({
             const isActive = tab.filePath === activeTabPath;
             const isDirty = isDirtyFn?.(tab.filePath) ?? false;
             const isPreview = tab.isPreview ?? false;
+            const isExternal = tab.isExternal ?? false;
             const basename = getBasename(tab.filePath);
             const Icon = getFileIcon(basename);
-            const absolutePath = workspacePath
-              ? `${workspacePath.replace(/\/$/, "")}/${tab.filePath}`
-              : tab.filePath;
+            // External tabs already carry the absolute path; workspace tabs
+            // join with the worktree root for the "Copy Absolute Path" item.
+            const absolutePath = isExternal
+              ? tab.filePath
+              : workspacePath
+                ? `${workspacePath.replace(/\/$/, "")}/${tab.filePath}`
+                : tab.filePath;
+            // Tooltip / native title: external tabs surface the full
+            // absolute path so the user can tell at a glance where edits
+            // will be written.
+            const tabTitle = isExternal
+              ? `${tab.filePath} (external file)`
+              : isPreview
+                ? `${tab.filePath} (preview — double-click to keep open)`
+                : tab.filePath;
 
             return (
               <ContextMenu key={tab.filePath}>
@@ -245,11 +267,7 @@ export function FileTabBar({
                     type="button"
                     role="tab"
                     aria-selected={isActive}
-                    title={
-                      isPreview
-                        ? `${tab.filePath} (preview — double-click to keep open)`
-                        : tab.filePath
-                    }
+                    title={tabTitle}
                     onClick={() => onSelectTab(tab.filePath)}
                     onDoubleClick={() => isPreview && onPinTab?.(tab.filePath)}
                     onMouseDown={(e) => handleMouseDown(e, tab.filePath)}
@@ -268,8 +286,23 @@ export function FileTabBar({
                     {/* File icon */}
                     <Icon className="size-3.5 shrink-0" />
 
-                    {/* File name — italic when in preview mode */}
-                    <span className={cn("min-w-0 flex-1 truncate", isPreview && "italic")}>
+                    {/* External-file badge. Sits between the file icon and
+                        the name so the user can tell at a glance that the
+                        tab's filePath is an absolute path outside the
+                        workspace root. */}
+                    {isExternal && (
+                      <ExternalLink className="size-3 shrink-0 text-muted-foreground/70" />
+                    )}
+
+                    {/* File name — italic when in preview mode, muted
+                        when external so the badge is reinforced visually. */}
+                    <span
+                      className={cn(
+                        "min-w-0 flex-1 truncate",
+                        isPreview && "italic",
+                        isExternal && "text-muted-foreground/90",
+                      )}
+                    >
                       {basename}
                     </span>
 

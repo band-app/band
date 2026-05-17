@@ -11,8 +11,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@band-app/ui";
+import { FileInput } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useAdapter } from "../context";
+import { useAdapter, useCapabilities } from "../context";
 import { getFileIcon } from "../lib/file-icon";
 import { formatFileLocation, parseFileLocation } from "../lib/file-location";
 
@@ -49,6 +50,7 @@ export function QuickOpenDialog({
   onQueryChange,
 }: QuickOpenDialogProps) {
   const adapter = useAdapter();
+  const capabilities = useCapabilities();
   const [query, setQuery] = useState("");
   const [files, setFiles] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -207,6 +209,19 @@ export function QuickOpenDialog({
     [onOpenFile, onOpenChange, parsedQuery],
   );
 
+  // "Open File…" entry — surfaces the OS file picker so the user can
+  // open a file from anywhere on the local filesystem. Only available
+  // when the host shell exposes `pickFile` (i.e. the Electron desktop
+  // app); plain browser tabs hide the action.
+  const canOpenExternal = !!capabilities.pickFile;
+  const handleOpenExternal = useCallback(() => {
+    // Dispatch via the same event pattern Quick Open / Search in Files
+    // use — CodeBrowserView owns the OS-picker invocation and tab plumbing,
+    // so this dialog stays free of workspace-state knowledge.
+    onOpenChange(false);
+    window.dispatchEvent(new CustomEvent("band:open-file-external"));
+  }, [onOpenChange]);
+
   // The list of files to render: recent files when query is empty, search results otherwise
   const displayFiles = showRecent ? recentFiles : files;
   const groupHeading = showRecent ? "Recent files" : undefined;
@@ -264,6 +279,17 @@ export function QuickOpenDialog({
                     );
                   })}
                 </CommandGroup>
+                {canOpenExternal && (
+                  <CommandGroup heading="Actions">
+                    <CommandItem value="__band_open_file_external__" onSelect={handleOpenExternal}>
+                      <FileInput className="size-4 shrink-0 text-muted-foreground" />
+                      <span className="text-sm">Open File…</span>
+                      <span className="ml-auto text-xs text-muted-foreground">
+                        Pick a file outside this workspace
+                      </span>
+                    </CommandItem>
+                  </CommandGroup>
+                )}
               </>
             )}
           </CommandList>

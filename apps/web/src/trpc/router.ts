@@ -1,8 +1,8 @@
 import { execFile, execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, unlinkSync } from "node:fs";
-import { cp, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { basename, dirname, extname, join, resolve, sep } from "node:path";
+import { existsSync, constants as fsConstants, mkdirSync, unlinkSync } from "node:fs";
+import { cp, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { basename, dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { toWorkspaceId } from "@band-app/dashboard-core";
 import { createLogger } from "@band-app/logger";
@@ -2005,6 +2005,158 @@ const workspaceRouter = t.router({
 });
 
 // ---------------------------------------------------------------------------
+// Host (external file operations — outside any workspace root)
+// ---------------------------------------------------------------------------
+
+/**
+ * Read/write files identified by an absolute filesystem path, with no
+ * workspace-root containment check. Backs the editor's "Open File…"
+ * action: users pick a file via the desktop file picker and edit it
+ * in a Band editor tab even though it sits outside the current
+ * workspace.
+ *
+ * Security model:
+ *   - The `band_token` cookie/header is enforced at the transport
+ *     layer (see start-server.ts), so only the local desktop user
+ *     can call these procedures.
+ *   - These procedures intentionally bypass the workspace-relative
+ *     path traversal guard used by `workspace.getFile` /
+ *     `workspace.saveFile`. The renderer is expected to source paths
+ *     from the OS file picker, but the server cannot prove that — a
+ *     bearer of the token can call `host.saveFile` with any absolute
+ *     path. This matches the existing trust boundary of the dashboard
+ *     (which already gives the token holder read/write across every
+ *     registered worktree) and is acceptable for a single-user
+ *     personal-tool model.
+ *   - Symlinks are rejected. `stat()` follows symlinks, so a symlink
+ *     to `/etc/passwd` (or similar) would satisfy `isFile()` and we'd
+ *     happily read/write the target. Open paths with `O_NOFOLLOW` so
+ *     the kernel itself refuses to traverse a symlink, eliminating
+ *     the TOCTOU window between an `lstat()` check and the subsequent
+ *     read/write (an attacker swapping the file for a symlink between
+ *     those two syscalls would otherwise slip through).
+ *   - Inputs must be absolute paths to regular files. Directories,
+ *     symlinks, sockets, devices, FIFOs are all rejected.
+ *
+ * Cross-platform note: `O_NOFOLLOW` is available on macOS/Linux (the
+ * platforms Band's `package.json` declares); Windows lacks a direct
+ * equivalent and is explicitly out of scope here.
+ */
+function mapFsError(err: unknown): Error {
+  const code = (err as NodeJS.ErrnoException).code;
+  if (code === "ENOENT") return new Error("File not found");
+  if (code === "ELOOP") return new Error("Symbolic links are not allowed");
+  if (code === "EACCES" || code === "EPERM") return new Error("Permission denied");
+  if (code === "EISDIR") return new Error("Cannot operate on a directory");
+  return err as Error;
+}
+
+const hostRouter = t.router({
+  readFile: publicProcedure
+    .input(z.object({ absolutePath: z.string().min(1) }))
+    .query(async ({ input }) => {
+      const target = input.absolutePath;
+      if (!isAbsolute(target)) {
+        throw new Error("Absolute path required");
+      }
+
+      // O_RDONLY | O_NOFOLLOW: refuse to traverse a symlink. The kernel
+      // returns ELOOP if the final path component is a symlink, which
+      // we surface as "Symbolic links are not allowed" via mapFsError.
+      let fh: Awaited<ReturnType<typeof open>>;
+      try {
+        fh = await open(target, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+      } catch (err) {
+        throw mapFsError(err);
+      }
+      try {
+        const stats = await fh.stat();
+        if (stats.isDirectory()) {
+          throw new Error("Cannot operate on a directory");
+        }
+        if (!stats.isFile()) {
+          throw new Error("Not a regular file");
+        }
+        const size = stats.size;
+
+        if (size > MAX_FILE_SIZE) {
+          return { tooLarge: true as const, size };
+        }
+
+        // Sample the first 8KB to detect binary content before allocating
+        // a buffer for the full file. For a binary file that's the whole
+        // story; for a text file we then read the rest.
+        const sampleLen = Math.min(8192, size);
+        const sample = Buffer.alloc(sampleLen);
+        if (sampleLen > 0) {
+          await fh.read(sample, 0, sampleLen, 0);
+          if (sample.includes(0)) {
+            return { binary: true as const, size };
+          }
+        }
+
+        const buffer = await fh.readFile();
+        const ext = extname(target).toLowerCase();
+        const language = LANG_MAP[ext];
+
+        return {
+          content: buffer.toString("utf-8"),
+          size,
+          language,
+        };
+      } finally {
+        await fh.close();
+      }
+    }),
+
+  saveFile: publicProcedure
+    .input(
+      z.object({
+        absolutePath: z.string().min(1),
+        // Match the read-side cap so a misbehaving client can't fill
+        // disk via the save endpoint while the read endpoint refuses
+        // anything that wide.
+        content: z.string().max(MAX_FILE_SIZE),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const target = input.absolutePath;
+      if (!isAbsolute(target)) {
+        throw new Error("Absolute path required");
+      }
+
+      // O_WRONLY | O_TRUNC | O_NOFOLLOW: open the existing file
+      // exclusively for writing (no symlink traversal, no follow-up
+      // syscall window for an attacker to swap a symlink in). Crucially
+      // we do NOT pass O_CREAT — saveFile is a write-back of an
+      // existing file, not a create.
+      let fh: Awaited<ReturnType<typeof open>>;
+      try {
+        fh = await open(
+          target,
+          fsConstants.O_WRONLY | fsConstants.O_TRUNC | fsConstants.O_NOFOLLOW,
+        );
+      } catch (err) {
+        throw mapFsError(err);
+      }
+      try {
+        const stats = await fh.stat();
+        if (stats.isDirectory()) {
+          throw new Error("Cannot operate on a directory");
+        }
+        if (!stats.isFile()) {
+          throw new Error("Not a regular file");
+        }
+        await fh.writeFile(input.content, "utf-8");
+      } finally {
+        await fh.close();
+      }
+
+      return { ok: true };
+    }),
+});
+
+// ---------------------------------------------------------------------------
 // Tunnel
 // ---------------------------------------------------------------------------
 
@@ -3688,6 +3840,7 @@ export const appRouter = t.router({
   hooks: hooksRouter,
   cli: cliRouter,
   workspace: workspaceRouter,
+  host: hostRouter,
   tunnel: tunnelRouter,
   prereqs: prereqsRouter,
   tasks: tasksRouter,

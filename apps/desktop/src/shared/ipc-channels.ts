@@ -16,6 +16,7 @@ export const Channels = {
 
   // macOS shell bridges + open_external
   pickFolder: "pick_folder",
+  pickFile: "pick_file",
   revealInFinder: "reveal_in_finder",
   checkAppExists: "check_app_exists",
   openWithApp: "open_with_app",
