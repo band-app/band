@@ -1,26 +1,29 @@
 // Regression coverage for issue #430 ("DiffView shows 'Unexpected end of JSON
-// input' on branches with many changes").
+// input' on branches with many changes", including the "expand all" path).
 //
-// Root cause: `httpBatchLink` in `src/lib/trpc-client.ts` was configured
-// without `maxURLLength`, so its default cap is `Infinity`. DiffView fires
-// one `workspace.getFileDiff` query per expanded file on every SSE
-// `branch-status` tick. On branches with many changed files, all of those
-// queries collapse into a single GET whose URL encodes every batched op's
-// `workspaceId` + `filePath` + `mergeBase` (40-char SHA). Past Node's default
-// 16 KiB header limit the server returns 431 with an empty body and the
-// batch link's `response.json()` blows up with "Unexpected end of JSON
-// input", failing every op in the batch.
+// Root cause: two separate `httpBatchLink`s — one in
+// `apps/web/src/lib/trpc-client.ts`, one in
+// `packages/dashboard-core/src/adapters/web.ts` (the client DiffView
+// actually routes through) — were configured without `maxURLLength`, so
+// the default cap is `Infinity`. DiffView fires one
+// `workspace.getFileDiff` query per expanded file on mount, on every SSE
+// `branch-status` tick, and all at once when the user clicks "expand all".
+// All of those queries collapse into a single GET whose URL encodes every
+// batched op's `workspaceId` + `filePath` + `mergeBase` (40-char SHA).
+// Past Node's default 16 KiB header limit the server returns 431 with an
+// empty body and the batch link's `response.json()` blows up with
+// "Unexpected end of JSON input", failing every op in the batch.
 //
-// Fix: pass `maxURLLength: 2000` to `httpBatchLink`. tRPC's batch link then
-// splits over-long batches into multiple smaller GETs that each stay well
-// under the header limit.
+// Fix: pass `maxURLLength: 2000` to both `httpBatchLink`s. tRPC's batch
+// link then splits over-long batches into multiple smaller GETs that
+// each stay well under the header limit.
 //
 // This test exercises the real production server with a real tRPC client
-// configured exactly like `src/lib/trpc-client.ts` and fires N parallel
-// `workspace.getFileDiff` queries — N picked high enough that, without the
-// fix, the single batched GET would exceed Node's default
-// `--max-http-header-size` of 16 KiB. With the fix, the batch link splits the
-// requests into multiple smaller GETs, so every query resolves with a
+// configured the same way both production clients are, and fires N
+// parallel `workspace.getFileDiff` queries — N picked high enough that,
+// without the fix, the single batched GET would exceed Node's default
+// `--max-http-header-size` of 16 KiB. With the fix, the batch link splits
+// the requests into multiple smaller GETs, so every query resolves with a
 // `{ diff }` shape instead of rejecting on a parse error.
 
 import { execFileSync, spawn } from "node:child_process";
@@ -133,11 +136,13 @@ function git(cwd: string, args: string[]): string {
   return execFileSync("git", args, { cwd, env: gitEnv, encoding: "utf-8" });
 }
 
-// Match the production tRPC client configuration in `src/lib/trpc-client.ts`
-// as closely as possible — same link, same `maxURLLength`. We omit the
-// `wsLink` half of the production `splitLink` because this test only exercises
-// queries (no subscriptions) and the WS client there requires a browser
-// `location` global that doesn't exist in Node.
+// Match both production tRPC client configurations (the one in
+// `apps/web/src/lib/trpc-client.ts` and the one in
+// `packages/dashboard-core/src/adapters/web.ts`) — same link, same
+// `maxURLLength`. We omit the `wsLink` half of the production `splitLink`
+// because this test only exercises queries (no subscriptions) and the WS
+// client there requires a browser `location` global that doesn't exist in
+// Node.
 function createBatchClient(serverUrl: string) {
   return createTRPCClient<AppRouter>({
     links: [

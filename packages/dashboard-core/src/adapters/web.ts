@@ -34,7 +34,15 @@ export class WebDashboardAdapter implements DashboardAdapter {
       splitLink({
         condition: (op) => op.type === "subscription",
         true: wsLink({ client: wsClient }),
-        false: httpBatchLink({ url: "/trpc" }),
+        // `maxURLLength: 2000` keeps batched GETs under any browser /
+        // proxy / Node `--max-http-header-size` cap (default 16 KiB).
+        // Without it, DiffView's per-file `workspace.getFileDiff` fan-out
+        // on branches with many changes collapses into a single GET whose
+        // URL exceeds the header limit; the server returns an empty body
+        // and every op rejects with "Unexpected end of JSON input"
+        // (issue #430). tRPC splits over-long batches into multiple
+        // smaller GETs that each stay under the cap.
+        false: httpBatchLink({ url: "/trpc", maxURLLength: 2000 }),
       }),
     ],
   });
