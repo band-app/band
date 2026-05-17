@@ -117,7 +117,7 @@ test.afterAll(async () => {
 async function openMarkdownPreview(page: Page): Promise<void> {
   const url =
     `${server.url}/workspace/${encodeURIComponent(workspaceId)}` +
-    `/code/${FILE_PATH}?token=${TOKEN}`;
+    `/code/${encodeURIComponent(FILE_PATH)}?token=${TOKEN}`;
   await page.goto(url);
   // The markdown renders into a sticky heading — when it appears, the
   // preview is laid out and ready for the find bar to attach its keybind.
