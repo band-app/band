@@ -22,7 +22,6 @@ import {
   useSettingsQuery,
 } from "@band-app/dashboard-core";
 import {
-  cn,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -47,13 +46,11 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Group, Panel, Separator, usePanelRef } from "react-resizable-panels";
-import { Streamdown } from "streamdown";
 import { useFileTabs } from "../hooks/useFileTabs";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useTabState } from "../hooks/useTabState";
-import { applyFrontmatterTable } from "../lib/frontmatter";
 import { FileTabBar } from "./FileTabBar";
-import { streamdownComponents, streamdownPlugins } from "./streamdown-components";
+import { MarkdownPreview } from "./MarkdownPreview";
 
 // ---------------------------------------------------------------------------
 // File tree width persistence
@@ -106,23 +103,12 @@ function saveFileTreeCollapsed(wsId: string, collapsed: boolean): void {
 // ---------------------------------------------------------------------------
 
 function renderMarkdown(content: string) {
-  // Frontmatter (YAML between `---` delimiters at the top of the file) is
-  // rewritten into a markdown table by `applyFrontmatterTable` so SKILL.md
-  // / plan-file metadata renders as a scannable table instead of leaking
-  // raw `---` delimiters into the preview. When there is no frontmatter,
-  // the helper returns the original string unchanged.
-  return (
-    <Streamdown
-      className={cn(
-        "size-full break-words leading-relaxed [overflow-wrap:anywhere]",
-        "[&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
-      )}
-      plugins={streamdownPlugins}
-      components={streamdownComponents}
-    >
-      {applyFrontmatterTable(content)}
-    </Streamdown>
-  );
+  // `MarkdownPreview` wraps the shared Streamdown renderer with a
+  // Cmd+F find bar (highlights, "n of m" counter, next/prev nav, Esc
+  // to close). Frontmatter rewriting (`---` block → leading markdown
+  // table) happens inside `MarkdownPreview` so all preview surfaces
+  // get the same behaviour.
+  return <MarkdownPreview content={content} />;
 }
 
 // ---------------------------------------------------------------------------

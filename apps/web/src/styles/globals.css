@@ -137,6 +137,27 @@ pre {
   overflow-x: auto;
 }
 
+/*
+ * Markdown preview find-in-page highlights.
+ *
+ * `MarkdownPreview` registers two Custom Highlight API names —
+ * `band-md-find` for the non-active matches, `band-md-find-active` for
+ * the currently-focused one — and paints them via `::highlight()`. The
+ * colour palette mirrors CodeMirror's `cm-searchMatch` /
+ * `cm-searchMatch-selected` (defined in
+ * `packages/dashboard-core/src/lib/codemirror-setup.ts`) so the editor
+ * and preview surfaces feel consistent. Browsers without the Custom
+ * Highlight API silently ignore these rules; the find bar still
+ * navigates and counts matches, just without paint.
+ */
+::highlight(band-md-find) {
+  background-color: rgba(255, 213, 0, 0.4);
+}
+
+::highlight(band-md-find-active) {
+  background-color: rgba(255, 150, 50, 0.55);
+}
+
 html,
 body {
   height: 100%;

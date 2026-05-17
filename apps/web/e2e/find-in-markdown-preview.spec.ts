@@ -1,0 +1,176 @@
+/**
+ * End-to-end coverage for the markdown-preview find bar (issue #435).
+ *
+ * Drives a real Band server against an on-disk worktree containing a
+ * markdown file with deterministic match counts, then exercises the
+ * find UX through the renderer: open with Cmd+F, count matches, step
+ * through them with Enter / Shift+Enter, and dismiss with Escape.
+ *
+ * The test runs against Playwright's bundled Chromium, which supports
+ * the CSS Custom Highlight API the preview uses for painting. The
+ * assertions key off observable UI state (the match counter, the
+ * input's presence and focus) rather than the highlight overlay
+ * itself, so the test stays useful even on browsers that fall back to
+ * the no-paint path.
+ */
+
+import { execFileSync } from "node:child_process";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { toWorkspaceId } from "@band-app/dashboard-core";
+import { expect, type Page, test } from "@playwright/test";
+import {
+  createTmpHome,
+  type ServerHandle,
+  seedSettings,
+  seedState,
+  startServer,
+} from "./helpers/server";
+
+// Force the mobile layout (viewport < 1024 px) so the workspace route's
+// `Outlet` mounts `CodeBrowserView` directly via the routed component
+// tree rather than going through the dockview panel manager. The find
+// bar's behaviour is identical in either layout — but the mobile path
+// keeps the test focused on the preview and skips deep dockview /
+// chat-pane setup that would otherwise need to be coaxed.
+test.use({ viewport: { width: 800, height: 900 } });
+
+const TOKEN = "e2e-find-md-token";
+const REPO_NAME = "find-md-repo";
+const BRANCH = "main";
+const FILE_PATH = "GUIDE.md";
+
+// Three occurrences of "needle" across H1, body, and a deeper section
+// so we can verify wrap-around navigation as well as match counting.
+const MARKDOWN_CONTENT = [
+  "# Test Document",
+  "",
+  "This is a paragraph mentioning the needle in passing.",
+  "",
+  "## Section A",
+  "",
+  "Lorem ipsum dolor sit amet. The needle is here again.",
+  "",
+  "Some unrelated prose without the search term.",
+  "",
+  "## Section B",
+  "",
+  "Final occurrence of needle at the end.",
+  "",
+].join("\n");
+
+let server: ServerHandle;
+let tmpHome: string;
+let workspaceId: string;
+
+const gitEnv = {
+  ...process.env,
+  GIT_AUTHOR_NAME: "Test",
+  GIT_AUTHOR_EMAIL: "test@test.com",
+  GIT_COMMITTER_NAME: "Test",
+  GIT_COMMITTER_EMAIL: "test@test.com",
+};
+
+function git(cwd: string, args: string[]): void {
+  execFileSync("git", args, { cwd, env: gitEnv });
+}
+
+test.beforeAll(async () => {
+  tmpHome = createTmpHome();
+  const repoPath = join(tmpHome, REPO_NAME);
+  mkdirSync(repoPath, { recursive: true });
+
+  // A bare metadata seed isn't enough — `workspace.getFile` reads the
+  // file off disk, so we need a real worktree with the markdown file
+  // committed. One commit is enough; the find bar doesn't care about
+  // branch state.
+  git(repoPath, ["init", "-b", BRANCH]);
+  writeFileSync(join(repoPath, FILE_PATH), MARKDOWN_CONTENT);
+  git(repoPath, ["add", "."]);
+  git(repoPath, ["commit", "-m", "initial"]);
+
+  seedState(tmpHome, {
+    projects: [
+      {
+        name: REPO_NAME,
+        path: repoPath,
+        defaultBranch: BRANCH,
+        worktrees: [{ branch: BRANCH, path: repoPath }],
+      },
+    ],
+  });
+  seedSettings(tmpHome, { tokenSecret: TOKEN });
+  server = await startServer({ tmpHome });
+  workspaceId = toWorkspaceId(REPO_NAME, BRANCH);
+});
+
+test.afterAll(async () => {
+  await server.close();
+  rmSync(tmpHome, { recursive: true, force: true });
+});
+
+/**
+ * Deep-link the browser straight at the workspace's code view with the
+ * markdown file selected. Bypasses the file-tree click path so the test
+ * is focused on the preview itself.
+ */
+async function openMarkdownPreview(page: Page): Promise<void> {
+  const url =
+    `${server.url}/workspace/${encodeURIComponent(workspaceId)}` +
+    `/code/${FILE_PATH}?token=${TOKEN}`;
+  await page.goto(url);
+  // The markdown renders into a sticky heading — when it appears, the
+  // preview is laid out and ready for the find bar to attach its keybind.
+  await expect(page.getByRole("heading", { level: 1, name: "Test Document" })).toBeVisible({
+    timeout: 20_000,
+  });
+}
+
+test("Cmd+F opens the find bar, counts and steps through matches, Esc closes", async ({ page }) => {
+  await openMarkdownPreview(page);
+
+  const findInput = page.getByPlaceholder("Find in preview...");
+  await expect(findInput).toHaveCount(0);
+
+  // The capture-phase keydown listener in MarkdownPreview should pick
+  // this up regardless of which element currently has focus, as long as
+  // the preview is in the layout. Use the modifier the host platform
+  // would actually emit.
+  const modifier = process.platform === "darwin" ? "Meta" : "Control";
+  await page.keyboard.press(`${modifier}+f`);
+
+  await expect(findInput).toBeVisible();
+  await expect(findInput).toBeFocused();
+
+  await findInput.fill("needle");
+
+  // "needle" appears 3× in the fixture — once in the first paragraph,
+  // once under Section A, and once under Section B. The counter starts
+  // on the first match.
+  await expect(page.getByText("1 of 3")).toBeVisible();
+
+  // Enter advances to the next match.
+  await findInput.press("Enter");
+  await expect(page.getByText("2 of 3")).toBeVisible();
+
+  await findInput.press("Enter");
+  await expect(page.getByText("3 of 3")).toBeVisible();
+
+  // Wrap-around: another Enter cycles back to the first match.
+  await findInput.press("Enter");
+  await expect(page.getByText("1 of 3")).toBeVisible();
+
+  // Shift+Enter walks backwards.
+  await findInput.press("Shift+Enter");
+  await expect(page.getByText("3 of 3")).toBeVisible();
+
+  // No-result query updates the counter to "No results" (the SearchBar
+  // renders this string when matchInfo.total === 0 and there is a
+  // query).
+  await findInput.fill("xyzzzzzzzzzzzz");
+  await expect(page.getByText("No results")).toBeVisible();
+
+  // Escape closes the bar.
+  await findInput.press("Escape");
+  await expect(findInput).toHaveCount(0);
+});
