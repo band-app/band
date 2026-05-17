@@ -41,6 +41,12 @@ import { streamdownComponents, streamdownPlugins } from "./streamdown-components
 
 // Names registered with `CSS.highlights` for the paint layer. The
 // stylesheet in `styles/globals.css` keys off these.
+//
+// NOTE: these are document-level singleton slots — only one
+// `MarkdownPreview` instance can paint at a time. That's fine for the
+// current dockview layout (the Files panel shows one file at a time),
+// but if a split-pane preview is ever added, each instance will need a
+// unique suffix or both will overwrite the other's highlights.
 const HIGHLIGHT_NAME = "band-md-find";
 const HIGHLIGHT_ACTIVE_NAME = "band-md-find-active";
 
@@ -259,10 +265,13 @@ export const MarkdownPreview = forwardRef<MarkdownPreviewHandle, MarkdownPreview
     return (
       <div
         ref={contentRef}
-        // `band-md-preview` is the hook the Custom Highlight stylesheet
-        // uses to scope `::highlight()` to the preview pane — without
-        // it, a stray highlight registration would also paint inside
-        // unrelated parts of the page (chat messages, settings panes).
+        // Highlight scoping is enforced by the *Range geometry*, not by
+        // this class. `findRanges(root, …)` only walks inside
+        // `contentRef`, so no `::highlight()` paint can land outside the
+        // preview. (Browsers don't honour ancestor selectors on the
+        // `::highlight()` pseudo-element — `.band-md-preview
+        // ::highlight(name)` would be a no-op.) The class is kept as a
+        // hook for non-highlight styles only.
         className="band-md-preview"
       >
         <Streamdown
@@ -286,7 +295,14 @@ function buildPattern(query: string, options: SearchOptions): RegExp | null {
   if (!query) return null;
   try {
     let source = options.regex ? query : escapeRegex(query);
-    if (options.wholeWord) source = `\\b(?:${source})\\b`;
+    // Skip the word-boundary wrap when the user is already in regex mode:
+    // their pattern can end in an anchor (`$`, `\b`, …) and wrapping it
+    // in `\b(?:…)\b` produces a malformed expression like
+    // `\b(?:(foo|bar)$)\b`. RegExp construction throws and we'd silently
+    // fall back to "no matches" with no feedback.
+    if (options.wholeWord && !options.regex) {
+      source = `\\b(?:${source})\\b`;
+    }
     const flags = options.caseSensitive ? "gm" : "gim";
     return new RegExp(source, flags);
   } catch {

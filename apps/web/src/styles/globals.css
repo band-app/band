@@ -150,6 +150,11 @@ pre {
  * Highlight API silently ignore these rules; the find bar still
  * navigates and counts matches, just without paint.
  */
+/* Light-mode tints; `::highlight()` pseudo-elements can't inherit from
+ * the originating element's `color-scheme`, so a future dark-theme
+ * pass will need explicit overrides (likely a `.dark` body class that
+ * re-declares both rules — `prefers-color-scheme` alone won't catch
+ * Band's manual theme toggle). */
 ::highlight(band-md-find) {
   background-color: rgba(255, 213, 0, 0.4);
 }

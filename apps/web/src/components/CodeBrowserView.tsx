@@ -762,10 +762,14 @@ export function CodeBrowserView({
     handle.search(search.searchQuery, search.searchOptions);
   }, [isMarkdownPreviewActive, search.searchOpen, search.searchQuery, search.searchOptions]);
 
-  // Switching modes (preview ↔ source) or closing the bar must clear
-  // the preview's highlights — leaving stale paint behind would surface
-  // again the next time the user re-opens the bar with a different
-  // query.
+  // Implicit close: mode switch (preview ↔ source) or file change while
+  // the bar is open. Explicit close (X button / Esc) goes through
+  // `handleSearchClose`, which clears synchronously to avoid a paint
+  // frame where the bar is gone but the highlights still show; this
+  // effect then re-clears on the same React batch when `searchOpen`
+  // flips. The double call is intentional and idempotent — both
+  // `registry.delete` and `setMdMatchInfo({ total: 0, current: 0 })`
+  // are no-ops on the second run.
   useEffect(() => {
     if (isMarkdownPreviewActive && search.searchOpen) return;
     markdownPreviewRef.current?.clear();
