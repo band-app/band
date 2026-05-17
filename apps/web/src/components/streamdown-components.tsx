@@ -43,8 +43,10 @@ export const streamdownComponents = { a: ExternalLink };
  * across call sites.
  *
  * `singleDollarTextMath: true` opts into `remark-math`'s `$…$` inline syntax.
- * The closing `$` must be followed by whitespace or punctuation, so prose
- * containing literal dollar amounts like "\$5" still renders correctly.
+ * `remark-math` won't open a math span when the character after `$` is
+ * whitespace, and won't close one when the character before `$` is whitespace,
+ * so prose like `costs $5 and $10` is not parsed as math. Authors who want to
+ * be extra defensive can still escape with `\$`.
  */
 export const streamdownPlugins = {
   cjk,
