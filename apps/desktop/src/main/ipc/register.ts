@@ -171,6 +171,17 @@ export function registerIpc(opts: RegisterOptions): () => void {
   handle(Channels.browserClearCertError, (args: BrowserKeyArg) =>
     browserHandlers.clearCertError(bm, args),
   );
+  // Generic "This site can't be reached" page flow (DNS, refused,
+  // timeout, …). See `browser/load-error.ts`.
+  handle(Channels.browserGetLoadErrorForView, (args: BrowserKeyArg) =>
+    browserHandlers.getLoadErrorForView(bm, args),
+  );
+  handle(Channels.browserClearLoadError, (args: BrowserKeyArg) =>
+    browserHandlers.clearLoadError(bm, args),
+  );
+  handle(Channels.browserRetryLoadError, (args: BrowserKeyArg) =>
+    browserHandlers.retryLoadError(bm, args),
+  );
 
   return () => {
     for (const [channel] of handlers) {

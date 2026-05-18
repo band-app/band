@@ -82,6 +82,10 @@ const ALLOWED_INVOKE_CHANNELS = new Set<string>([
   "browser_proceed_with_cert_error",
   "browser_get_cert_error_for_view",
   "browser_clear_cert_error",
+  // Chrome-style "This site can't be reached" page (issue #444 follow-up)
+  "browser_get_load_error_for_view",
+  "browser_clear_load_error",
+  "browser_retry_load_error",
 ]);
 
 const ALLOWED_EVENT_NAMES = new Set<string>([
@@ -92,6 +96,7 @@ const ALLOWED_EVENT_NAMES = new Set<string>([
   "browser-find-shortcut",
   "browser-new-tab-shortcut",
   "browser-cert-error",
+  "browser-load-error",
   "window-fullscreen-changed",
   "updater-status-changed",
 ]);

@@ -5,6 +5,7 @@
  */
 
 import type { BrowserCertErrorPayload } from "../../browser/cert-error.js";
+import type { BrowserLoadErrorPayload } from "../../browser/load-error.js";
 import type { BrowserViewManager } from "../../browser/view-manager.js";
 import type {
   BrowserBoundsArgs,
@@ -61,4 +62,12 @@ export const browserHandlers = {
   ): BrowserCertErrorPayload | null => ctx.manager.getCertErrorForView(args),
   clearCertError: (ctx: BrowserIpcContext, args: BrowserKeyArg): void =>
     ctx.manager.clearCertError(args),
+  getLoadErrorForView: (
+    ctx: BrowserIpcContext,
+    args: BrowserKeyArg,
+  ): BrowserLoadErrorPayload | null => ctx.manager.getLoadErrorForView(args),
+  clearLoadError: (ctx: BrowserIpcContext, args: BrowserKeyArg): void =>
+    ctx.manager.clearLoadError(args),
+  retryLoadError: (ctx: BrowserIpcContext, args: BrowserKeyArg): void =>
+    ctx.manager.retryLoadError(args),
 };

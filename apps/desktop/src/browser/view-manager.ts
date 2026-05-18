@@ -43,6 +43,11 @@ import {
 import { type BrowserCertErrorPayload, buildCertErrorPayload } from "./cert-error.js";
 import { type CertExceptionStore, partitionForSession } from "./cert-exceptions.js";
 import { splitTabBounds } from "./layout.js";
+import {
+  type BrowserLoadErrorPayload,
+  buildLoadErrorPayload,
+  isMainFrameFailure,
+} from "./load-error.js";
 
 const MAX_BROWSER_VIEWS = 10;
 
@@ -153,6 +158,14 @@ export class BrowserViewManager {
    * an invalid-cert load) can still draw the interstitial.
    */
   private readonly pendingCertErrors = new Map<string, BrowserCertErrorPayload>();
+  /**
+   * Pending generic navigation error per tab (DNS, refused, timeout,
+   * …), captured from Chromium's `did-fail-load` event. Parallel to
+   * `pendingCertErrors`; the cert variant takes precedence so the
+   * two never coexist (the `did-fail-load` listener filters codes in
+   * the cert-error range).
+   */
+  private readonly pendingLoadErrors = new Map<string, BrowserLoadErrorPayload>();
 
   constructor(private readonly opts: ViewManagerOptions) {}
 
@@ -603,6 +616,49 @@ export class BrowserViewManager {
   }
 
   /**
+   * Return the pending generic-load error for a tab, or `null` if
+   * none. Catch-up hook for renderers that mount after the event
+   * fired (issue #444 follow-up).
+   */
+  getLoadErrorForView(args: BrowserKeyArg): BrowserLoadErrorPayload | null {
+    const key = browserKey(args);
+    return this.pendingLoadErrors.get(key) ?? null;
+  }
+
+  /**
+   * Drop the pending generic-load error without retrying. Used by
+   * the renderer's "Back" action on the error page so the next
+   * legitimate navigation doesn't keep the stale error on screen.
+   */
+  clearLoadError(args: BrowserKeyArg): void {
+    const key = browserKey(args);
+    this.pendingLoadErrors.delete(key);
+  }
+
+  /**
+   * Re-attempt the failing navigation captured in the pending
+   * load-error entry. Used by the renderer's "Reload" action.
+   * Like `proceedWithCertError`, we cannot use `webContents.reload()`
+   * because a failed navigation never commits — `getURL()` would
+   * reload `about:blank` or the previous URL. Instead we re-`loadURL`
+   * the originally failing URL. Falls back to `reload()` if the
+   * pending entry was concurrently cleared.
+   */
+  retryLoadError(args: BrowserKeyArg): void {
+    const key = browserKey(args);
+    const view = this.views.get(key);
+    if (!view) return;
+    const pending = this.pendingLoadErrors.get(key);
+    this.pendingLoadErrors.delete(key);
+    if (view.webContents.isDestroyed()) return;
+    if (pending?.url) {
+      void view.webContents.loadURL(pending.url);
+    } else {
+      view.webContents.reload();
+    }
+  }
+
+  /**
    * Toggle Chromium DevTools for the matching tab, docked **inside the
    * tab area** (bottom split) — not as a detached OS window.
    *
@@ -742,6 +798,7 @@ export class BrowserViewManager {
     this.lastBoundsByKey.delete(key);
     this.visibleByKey.delete(key);
     this.pendingCertErrors.delete(key);
+    this.pendingLoadErrors.delete(key);
     const idx = this.order.indexOf(key);
     if (idx >= 0) this.order.splice(idx, 1);
     // Notify the renderer (which forwards to the web server's
@@ -1014,6 +1071,7 @@ export class BrowserViewManager {
       // result.
       if (!details.isSameDocument) {
         this.pendingCertErrors.delete(key);
+        this.pendingLoadErrors.delete(key);
       }
       emitUrl(details.url, !details.isSameDocument);
     });
@@ -1096,6 +1154,29 @@ export class BrowserViewManager {
     // `did-stop-loading`. Clearing on host mismatch there would race
     // ahead of the renderer's listener and the user would never see
     // the interstitial.
+
+    // ---- Generic load-failure error page ----
+    // Companion to the cert flow above: catches `did-fail-load` for
+    // main-frame DNS / connection / timeout / etc. failures and
+    // forwards the metadata so the renderer can paint a Chrome-style
+    // "This site can't be reached" page. Filters out user-aborted
+    // navigations and the cert error range — the per-tab
+    // `certificate-error` listener above is the source of truth for
+    // those, and we don't want both events to fight over the same
+    // tab. See `browser/load-error.ts` for the filter rules.
+    view.webContents.on(
+      "did-fail-load",
+      (_event, errorCode, _errorDescription, validatedURL, isMainFrame) => {
+        if (!isMainFrameFailure({ errorCode, isMainFrame })) return;
+        const payload = buildLoadErrorPayload({
+          key,
+          url: validatedURL,
+          errorCode,
+        });
+        this.pendingLoadErrors.set(key, payload);
+        this.emit(Events.browserLoadError, payload);
+      },
+    );
 
     // ---- Find in page: stream results back to the renderer ----
     // Chromium emits at least one `found-in-page` per `findInPage(text)`

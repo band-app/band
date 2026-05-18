@@ -92,6 +92,15 @@ export const Channels = {
   // when the user picks "Back to safety" so the next legitimate
   // navigation doesn't re-show the stale interstitial.
   browserClearCertError: "browser_clear_cert_error",
+  // Generic navigation-failure page (DNS, refused, timeout, …) — the
+  // `did-fail-load` companion to the cert-error flow above. Same
+  // shape: emit the metadata as an event, expose
+  // get/clear/retry IPCs so the renderer can paint the Chrome-style
+  // "This site can't be reached" page in place of the blank
+  // WebContentsView. See `browser/load-error.ts`.
+  browserGetLoadErrorForView: "browser_get_load_error_for_view",
+  browserClearLoadError: "browser_clear_load_error",
+  browserRetryLoadError: "browser_retry_load_error",
 } as const;
 
 export type ChannelName = (typeof Channels)[keyof typeof Channels];
@@ -126,6 +135,12 @@ export const Events = {
    *  renderer can render the Chrome-style interstitial overlay
    *  (issue #444). */
   browserCertError: "browser-cert-error",
+  /** Pushed on `did-fail-load` for the main frame, except for
+   *  expected cases (user-aborted navigations, cert errors —
+   *  which the cert-error pipeline above handles). Drives the
+   *  Chrome-style "This site can't be reached" page in
+   *  `BrowserPanel.tsx`. See `browser/load-error.ts`. */
+  browserLoadError: "browser-load-error",
   windowFullscreenChanged: "window-fullscreen-changed",
   /** Pushed by the main process when the background updater detects (or
    *  clears) a pending app update. Payload: `PendingUpdate` from
