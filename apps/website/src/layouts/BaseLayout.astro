@@ -1,6 +1,7 @@
 ---
 import Header from "../components/Header.astro";
 import Footer from "../components/Footer.astro";
+import Analytics from "../components/Analytics.astro";
 import "../styles/global.css";
 
 interface Props {
@@ -33,6 +34,8 @@ const { title, description = "Band is the agent-first IDE — a desktop app desi
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 
     <title>{title}</title>
+
+    <Analytics />
   </head>
   <body class="min-h-screen">
     <Header />

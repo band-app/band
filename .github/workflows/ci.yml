@@ -257,6 +257,14 @@ jobs:
       - name: Build docs
         if: steps.changes.outputs.changed == 'true'
         run: pnpm --filter @band-app/docs build
+        env:
+          # PostHog analytics — public-by-design project key, safe to expose in
+          # the built bundle but kept in secrets for parity with other config.
+          # Astro inlines PUBLIC_* env vars at build time, so they must be set
+          # here (Cloudflare Pages dashboard vars do NOT apply — we only upload
+          # the prebuilt dist/ to Pages, we don't build on Pages).
+          PUBLIC_POSTHOG_KEY: ${{ secrets.PUBLIC_POSTHOG_KEY }}
+          PUBLIC_POSTHOG_HOST: ${{ secrets.PUBLIC_POSTHOG_HOST }}
 
       - name: Deploy to Cloudflare Pages
         if: steps.changes.outputs.changed == 'true'
