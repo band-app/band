@@ -40,7 +40,7 @@ import {
   type BrowserZoomArgs,
   browserKey,
 } from "../shared/types.js";
-import { type BrowserCertErrorPayload, buildCertErrorPayload, hostFromUrl } from "./cert-error.js";
+import { type BrowserCertErrorPayload, buildCertErrorPayload } from "./cert-error.js";
 import { type CertExceptionStore, partitionForSession } from "./cert-exceptions.js";
 import { splitTabBounds } from "./layout.js";
 
@@ -1070,32 +1070,17 @@ export class BrowserViewManager {
       callback(false);
     });
 
-    // Clear the pending cert-error once the tab successfully reaches
-    // a new page. Two cases lead here:
-    //
-    //   - The user clicked "Back to safety" → renderer navigated
-    //     away → `did-stop-loading` fires for the new URL → no
-    //     interstitial should remain.
-    //   - The user clicked "Proceed" → an exception was recorded →
-    //     Chromium retried the load → `did-stop-loading` fires on
-    //     the now-loaded page → again no pending error.
-    //
-    // The `did-start-navigation` clear above handles the
-    // navigation-start case; this one is the safety net for direct
-    // loads (no `did-start-navigation` fired).
-    view.webContents.on("did-stop-loading", () => {
-      const pending = this.pendingCertErrors.get(key);
-      if (!pending) return;
-      // Only clear if the tab is now showing a URL whose host
-      // differs from the failing one. Same host + same cert = the
-      // override succeeded; same host + new cert (fingerprint changed)
-      // would already have re-fired the `certificate-error` listener
-      // above and overwritten the entry.
-      const currentHost = hostFromUrl(view.webContents.getURL());
-      if (currentHost && currentHost !== pending.host) {
-        this.pendingCertErrors.delete(key);
-      }
-    });
+    // Note: the pending cert-error is cleared by `did-start-navigation`
+    // above (covers Back-to-safety navigating away and Proceed
+    // triggering a reload), by `proceedWithCertError` (covers the
+    // optimistic clear before the reload races back through here),
+    // and by `destroy` on teardown. We DO NOT clear in
+    // `did-stop-loading` — when Chromium blocks a cert load it
+    // typically leaves the tab pointing at the previous URL (or
+    // `about:blank` for a fresh tab) and then immediately fires
+    // `did-stop-loading`. Clearing on host mismatch there would race
+    // ahead of the renderer's listener and the user would never see
+    // the interstitial.
 
     // ---- Find in page: stream results back to the renderer ----
     // Chromium emits at least one `found-in-page` per `findInPage(text)`

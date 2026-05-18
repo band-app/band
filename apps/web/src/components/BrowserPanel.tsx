@@ -352,6 +352,36 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
     }
   }, [params.wsActive, api, created, getBounds, invoke, workspaceId]);
 
+  // ------- cert-error interstitial visibility (issue #444) -------
+  // The native `WebContentsView` is an OS-level compositor layer that
+  // paints on top of the React DOM, so a `<div class="absolute inset-0
+  // z-50">` overlay alone is hidden behind it — the user sees
+  // Chromium's blank cert-blocked page instead of our interstitial.
+  //
+  // Mirror the freeze-on-overlay pattern: while a cert error is
+  // pending, force the WebContentsView to `setVisible(false)` so the
+  // React-rendered interstitial in `placeholderRef` becomes the
+  // top-most surface. When the user proceeds (state clears via the
+  // hook), restore visibility from the same rules the
+  // `wsActive`/`isActive` effect above uses, so the reloaded page
+  // shows up.
+  const certShowing = certError.state !== null;
+  useEffect(() => {
+    if (!isDesktop || !created) return;
+    if (certShowing) {
+      invoke("browser_hide", { workspaceId }).catch(() => {});
+      return;
+    }
+    const wsActive = params.wsActive !== false;
+    if (wsActive && api.isActive) {
+      invoke("browser_show", { workspaceId }).catch(() => {});
+      const bounds = getBounds();
+      if (bounds && bounds.width > 0 && bounds.height > 0) {
+        invoke("browser_set_bounds", { workspaceId, ...bounds }).catch(() => {});
+      }
+    }
+  }, [certShowing, params.wsActive, api, created, getBounds, invoke, workspaceId]);
+
   // ------- keep webview bounds in sync on resize -------
 
   useEffect(() => {
@@ -988,6 +1018,28 @@ export function BrowserPaneComponent({
       }
     }
   }, [params.wsActive, api, created, getBounds, invoke, browserId]);
+
+  // ------- cert-error interstitial visibility (issue #444) -------
+  // See identical block in `BrowserPanelComponent` above for the
+  // rationale: the OS-level `WebContentsView` would otherwise
+  // composite over our React interstitial and the user would see a
+  // blank cert-blocked page instead of the warning.
+  const certShowingPane = certError.state !== null;
+  useEffect(() => {
+    if (!isDesktop || !created) return;
+    if (certShowingPane) {
+      invoke("browser_hide", { browserId }).catch(() => {});
+      return;
+    }
+    const wsActive = params.wsActive !== false;
+    if (wsActive && api.isVisible) {
+      invoke("browser_show", { browserId }).catch(() => {});
+      const bounds = getBounds();
+      if (bounds && bounds.width > 0 && bounds.height > 0) {
+        invoke("browser_set_bounds", { browserId, ...bounds }).catch(() => {});
+      }
+    }
+  }, [certShowingPane, params.wsActive, api, created, getBounds, invoke, browserId]);
 
   // ------- keep webview bounds in sync on resize -------
   useEffect(() => {
