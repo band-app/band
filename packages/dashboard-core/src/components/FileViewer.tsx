@@ -585,18 +585,26 @@ export function FileViewer({
       const detail = (e as CustomEvent).detail as
         | { workspaceId?: string; filePath?: string | null }
         | undefined;
-      // Same filter as the format-current-file listener — only the
-      // matching FileViewer responds. Untitled tabs are workspace-
-      // scoped (their synthetic path lives only in the current
-      // workspace's tab list), so the workspaceId guard is the right
-      // selector.
+      // Only one FileViewer is mounted per workspace at a time, so the
+      // workspaceId guard is sufficient. We deliberately do NOT filter
+      // by `detail.filePath`:
+      //
+      // The dispatcher (DockviewWorkspaceLayout) reads
+      // `currentFileRef.current`, which is only updated through
+      // `notifySelectFile` — and that path filters out untitled and
+      // external tabs (their synthetic / absolute paths can't round-
+      // trip through the workspace-relative URL). So `detail.filePath`
+      // will be undefined for never-selected tabs AND stale (pointing
+      // at the previously viewed real file) whenever the user is
+      // currently viewing an untitled tab. A `detail.filePath !==
+      // filePath` check would reject the legitimate "open picker for
+      // the currently visible untitled tab" case.
       if (!detail || detail.workspaceId !== workspaceId) return;
-      if (detail.filePath != null && detail.filePath !== filePath) return;
       setLanguagePickerOpen(true);
     };
     window.addEventListener("band:open-language-picker", handler);
     return () => window.removeEventListener("band:open-language-picker", handler);
-  }, [workspaceId, filePath]);
+  }, [workspaceId]);
 
   const handlePickLanguage = useCallback(
     (languageId: string) => {
