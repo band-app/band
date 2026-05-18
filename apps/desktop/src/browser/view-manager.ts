@@ -39,7 +39,7 @@ import {
   type BrowserZoomArgs,
   browserKey,
 } from "../shared/types.js";
-import { type BrowserCertErrorPayload, buildCertErrorPayload } from "./cert-error.js";
+import { type BrowserCertErrorPayload, buildCertErrorPayload, hostFromUrl } from "./cert-error.js";
 import { type CertExceptionStore, partitionForSession } from "./cert-exceptions.js";
 import {
   type BandAction,
@@ -98,12 +98,12 @@ export interface ViewManagerOptions {
    */
   hiddenWindow?: BrowserWindow;
   /**
-   * Session-scoped exception store for the Chrome-style cert-error
-   * interstitial (issue #444). Owned by the bootstrap so the same
-   * map is shared with the process-wide `app.on("certificate-error")`
-   * override hook. The view manager records exceptions here when the
-   * user clicks "Proceed" in the interstitial; the override hook
-   * reads it back to decide whether to bypass the block.
+   * Session-scoped TLS exception store for the in-view cert
+   * interstitial (issue #444). Owned by the bootstrap so the manager
+   * can be re-created without losing accepted exceptions during the
+   * session. The per-`webContents` `certificate-error` listener
+   * reads from this store to decide whether to silently trust a cert
+   * (matched triple) or paint the interstitial.
    */
   certExceptions: CertExceptionStore;
 }
@@ -1110,22 +1110,36 @@ export class BrowserViewManager {
 
     // ---- TLS interstitial (issue #444) ----
     // Chromium's default behaviour for an invalid cert is to silently
-    // block the load. We intercept here, build the Chrome-style
-    // interstitial HTML, and load it directly into the
-    // WebContentsView via a `data:` URI. Rendering inside the view
-    // (rather than as a React overlay above it) makes the error
-    // page part of any screencast capture — without that, a remote
-    // viewer of a cast tab would see Chromium's blank cert-blocked
-    // page and have no way to Proceed.
+    // block the load. We intercept here and decide:
     //
-    // The process-wide `app.on("certificate-error")` override hook
-    // installed in `main/index.ts` consults the shared
-    // `certExceptions` store first; for hosts the user has already
-    // proceeded to, that hook calls `callback(true)` and this
-    // per-tab listener never fires. So reaching this code means the
-    // user has *not* yet accepted the cert for this host.
+    //   - If the user has already proceeded for this exact triple
+    //     in this session (matched in the shared `certExceptions`
+    //     store), `callback(true)` ⇒ Chromium trusts and the load
+    //     proceeds normally.
+    //   - Otherwise `callback(false)` ⇒ keep blocking, and load an
+    //     in-view Chrome-style interstitial via a `data:` URI so the
+    //     user can Proceed / Back. Rendering inside the view (rather
+    //     than as a React overlay above it) is what makes the error
+    //     page part of any CDP screencast — remote cast viewers can
+    //     see it and click through.
+    //
+    // SINGLE source of truth for the cert decision. We deliberately
+    // do NOT also register an app-level `certificate-error` listener:
+    // Electron fires both, and `callback` is a one-time function —
+    // calling it from both throws
+    // `TypeError: One-time callback was called more than once`.
     view.webContents.on("certificate-error", (event, url, errorCode, certificate, callback) => {
       event.preventDefault();
+      const host = hostFromUrl(url);
+      const fingerprint = certificate.fingerprint;
+      const partition = partitionForSession(view.webContents.session);
+      // Honoured session exception: trust + return without showing
+      // the interstitial. Same condition the renderer's "Not Secure"
+      // badge is keyed off of.
+      if (host && fingerprint && this.opts.certExceptions.has({ partition, host, fingerprint })) {
+        callback(true);
+        return;
+      }
       const payload = buildCertErrorPayload({
         key,
         url,
@@ -1146,13 +1160,10 @@ export class BrowserViewManager {
       // skips — without this explicit emit the renderer would be
       // stuck in loading=true.
       emitUrl(url, false);
-      // `callback(false)` ⇒ keep blocking the cert. The user is
-      // offered the override via the in-view interstitial; we never
-      // auto-accept.
       callback(false);
       // Paint the interstitial directly into the WebContentsView.
       // Button clicks navigate to `band-action://…` which the
-      // `will-navigate` interceptor above dispatches back to
+      // `did-start-navigation` interceptor above dispatches back to
       // `handleBandAction`.
       const html = buildCertErrorHtml({
         url,

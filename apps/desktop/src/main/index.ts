@@ -14,8 +14,7 @@
  */
 
 import { app, BrowserWindow } from "electron";
-import { hostFromUrl } from "../browser/cert-error.js";
-import { CertExceptionStore, partitionForSession } from "../browser/cert-exceptions.js";
+import { CertExceptionStore } from "../browser/cert-exceptions.js";
 import { BrowserViewManager } from "../browser/view-manager.js";
 import { createHiddenBrowserWindow } from "./hidden-browser-window.js";
 import { resolveAppIcon } from "./icon.js";
@@ -220,38 +219,18 @@ async function bootstrap(): Promise<void> {
     certExceptions: state.certExceptions,
   });
 
-  // ---- App-level TLS exception override (issue #444) ----
-  //
-  // Chromium fires `certificate-error` against every webContents in
-  // the process, not just our browser tabs. We register a single
-  // app-level handler that consults the shared session-scoped
-  // exception store and overrides Chromium's silent block for any
-  // (partition, host, fingerprint) triple the user has explicitly
-  // accepted. For everything else we leave the default behaviour
-  // (no override) so the per-tab listener in `view-manager.ts`
-  // captures the metadata and the renderer can draw the
-  // interstitial.
-  //
-  // Note on event ordering: Electron's docs note that the per-
-  // `webContents` listener fires *if-and-only-if* the app-level
-  // listener does not call `event.preventDefault()`. So when an
-  // exception matches we both `preventDefault()` and `callback(true)`,
-  // which prevents the interstitial UI from re-appearing for that
-  // session. When no exception matches we fall through silently —
-  // the per-tab listener then handles the metadata + the
-  // `callback(false)` block.
-  app.on("certificate-error", (event, webContents, url, _errorCode, certificate, callback) => {
-    const host = hostFromUrl(url);
-    if (!host) return; // can't safely scope an override to ""
-    const fingerprint = certificate.fingerprint;
-    if (!fingerprint) return;
-    const partition = partitionForSession(webContents?.session);
-    if (!state.certExceptions.has({ partition, host, fingerprint })) {
-      return;
-    }
-    event.preventDefault();
-    callback(true);
-  });
+  // Note on TLS overrides (issue #444): we deliberately do NOT
+  // register an app-level `certificate-error` listener here. Both the
+  // app-level and the per-`webContents` listeners fire for every
+  // cert error, and Electron's `callback` is a one-time function —
+  // calling it from both listeners throws
+  // `TypeError: One-time callback was called more than once`. The
+  // per-tab listener in `view-manager.ts` is the single source of
+  // truth: it checks the shared `certExceptions` store, calls
+  // `callback(true)` for matched (partition, host, fingerprint)
+  // triples, and `callback(false)` plus an in-view interstitial
+  // for unmatched ones. The `partitionForSession` helper still
+  // lives in `cert-exceptions.ts` (the per-tab listener uses it).
 
   state.unregisterIpc = registerIpc({
     mainWindow: state.mainWindow,
