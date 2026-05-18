@@ -268,6 +268,9 @@ function FileTreeToolbar({ onNewFile, onNewFolder, onOpenFile }: FileTreeToolbar
               <DropdownMenuItem onSelect={() => queueMenuAction(onOpenFile)}>
                 <FileInput className="size-4" />
                 Open File…
+                <kbd className="ml-auto rounded border border-popover-foreground/25 bg-popover-foreground/10 px-1 py-0.5 font-mono text-[10px]">
+                  ⌘O
+                </kbd>
               </DropdownMenuItem>
             )}
           </DropdownMenuContent>

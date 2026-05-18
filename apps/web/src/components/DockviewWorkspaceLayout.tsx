@@ -1017,6 +1017,15 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
         } else {
           window.dispatchEvent(new CustomEvent("band:find-in-file"));
         }
+      } else if (key === "o" && !e.shiftKey && !e.altKey) {
+        // ⌘O → Open File… (OS file picker for files outside the workspace).
+        // The actual picker invocation lives in CodeBrowserView and is
+        // gated by `capabilities.pickFile`, so the event is a no-op in
+        // the plain web build — preventDefault here still suppresses the
+        // browser's own Cmd+O, which would otherwise pop a confusing
+        // "Open File" dialog over the SPA.
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent("band:open-file-external"));
       } else if (key === "i" && e.ctrlKey && e.metaKey && api) {
         // ⌃⌘I → Chat (matches VS Code "Toggle Chat")
         // Both Ctrl AND Cmd held — distinguished from any plain ⌘I /

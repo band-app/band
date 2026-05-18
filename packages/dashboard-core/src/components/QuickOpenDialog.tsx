@@ -284,8 +284,11 @@ export function QuickOpenDialog({
                     <CommandItem value="__band_open_file_external__" onSelect={handleOpenExternal}>
                       <FileInput className="size-4 shrink-0 text-muted-foreground" />
                       <span className="text-sm">Open File…</span>
-                      <span className="ml-auto text-xs text-muted-foreground">
+                      <span className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
                         Pick a file outside this workspace
+                        <kbd className="rounded border border-popover-foreground/25 bg-popover-foreground/10 px-1 py-0.5 font-mono text-[10px]">
+                          ⌘O
+                        </kbd>
                       </span>
                     </CommandItem>
                   </CommandGroup>
