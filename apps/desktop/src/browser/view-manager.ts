@@ -579,6 +579,19 @@ export class BrowserViewManager {
     const pending = this.pendingCertErrors.get(key);
     this.pendingCertErrors.delete(key);
     if (view.webContents.isDestroyed()) return;
+    // Wake the WebContentsView's compositor BEFORE kicking off the
+    // retry. The renderer's error-page visibility effect parked it
+    // via `setVisible(false)` while the interstitial was up; if we
+    // call `loadURL` with the compositor still parked, the new page
+    // commits but the user sees no paint until the renderer's
+    // state-change effect races back to call `browser_show`. By
+    // restoring visibility here we close the race and the page
+    // renders the moment Chromium has pixels. Also re-apply the
+    // last known bounds so a window that resized during the
+    // interstitial doesn't end up with a stale geometry.
+    this.setTabVisibility(key, true);
+    const lastBounds = this.lastBoundsByKey.get(key);
+    if (lastBounds) this.applyTabLayout(key, lastBounds);
     if (pending?.url) {
       void view.webContents.loadURL(pending.url);
     } else {
@@ -651,6 +664,12 @@ export class BrowserViewManager {
     const pending = this.pendingLoadErrors.get(key);
     this.pendingLoadErrors.delete(key);
     if (view.webContents.isDestroyed()) return;
+    // Wake the compositor + re-apply bounds before kicking off the
+    // retry — see the matching block in `proceedWithCertError` for
+    // the full rationale.
+    this.setTabVisibility(key, true);
+    const lastBounds = this.lastBoundsByKey.get(key);
+    if (lastBounds) this.applyTabLayout(key, lastBounds);
     if (pending?.url) {
       void view.webContents.loadURL(pending.url);
     } else {
