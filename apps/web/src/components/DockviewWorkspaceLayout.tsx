@@ -804,7 +804,7 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
   // Mirror currentFile into a ref so the global keyboard handler — wired
   // once per workspace via useEffect and intentionally not re-subscribed on
   // every selection change — can read the latest value without a stale
-  // closure. Used by the ⇧⌘F "Format Current File" branch.
+  // closure. Used by the ⌥⌘F "Format Current File" branch.
   const currentFileRef = useRef<string | undefined>(undefined);
   currentFileRef.current = currentFile;
 
@@ -992,8 +992,8 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
       } else if (key === "p" && !e.shiftKey) {
         e.preventDefault();
         setQuickOpenOpen(true);
-      } else if (key === "f" && e.shiftKey) {
-        // ⇧⌘F → Format Current File. Always include `workspaceId` so the
+      } else if (key === "f" && e.altKey) {
+        // ⌥⌘F → Format Current File. Always include `workspaceId` so the
         // matching FileViewer can filter cross-workspace; `filePath` is
         // a best-effort hint — `currentFileRef.current` is `undefined`
         // for restored-but-never-switched-to tabs (see the palette
@@ -1005,12 +1005,12 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
             detail: { workspaceId, filePath },
           }),
         );
-      } else if (key === "h" && e.shiftKey) {
-        // ⇧⌘H → Search in Files (moved off ⇧⌘F to host the format binding
-        // above). Mirrors VS Code's "Replace in Files".
+      } else if (key === "f" && e.shiftKey) {
+        // ⇧⌘F → Search in Files (matches the shortcut already advertised
+        // by the file-tree tooltip and the Quick Open menu).
         e.preventDefault();
         setSearchFilesOpen(true);
-      } else if (key === "f" && !e.shiftKey) {
+      } else if (key === "f" && !e.shiftKey && !e.altKey) {
         e.preventDefault();
         if (findInFileRef.current) {
           findInFileRef.current();

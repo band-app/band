@@ -886,7 +886,7 @@ const workspaceRouter = t.router({
    *
    * Returns `{ skipped: true, reason }` when Prettier has no parser for
    * the file's extension (or it's covered by `.prettierignore`). Editors
-   * fire this off Cmd+Shift+F without checking the file type first, so a
+   * fire this off Cmd+Alt+F without checking the file type first, so a
    * soft skip is the right outcome for unsupported files rather than a
    * surfaced error.
    *
