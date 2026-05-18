@@ -15,7 +15,12 @@ import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAdapter } from "../context";
 import { type FilePreviewType, getFilePreviewType } from "../lib/file-type";
-import { extensionToLanguage, filenameToLanguage, languageLabel } from "../lib/language-map";
+import {
+  extensionToLanguage,
+  filenameToLanguage,
+  languageLabel,
+  languageToExtension,
+} from "../lib/language-map";
 import type { FileContentResult } from "../types";
 import { CodeMirrorEditor } from "./CodeMirrorEditor";
 import { CodeMirrorViewer } from "./CodeMirrorViewer";
@@ -461,7 +466,25 @@ export function FileViewer({
     setFormatting(true);
     setFormatStatus(null);
     try {
-      const result = await adapter.formatWorkspaceFile(workspaceId, filePath, sourceContent);
+      // Untitled tabs have no real extension for Prettier to dispatch
+      // on — synthesize a virtual filename inside the workspace from
+      // the user's language choice (`languageOverride`) so the server-
+      // side formatter picks the right parser. When the override is
+      // missing or maps to a language Prettier doesn't have a parser
+      // for (e.g. plain text, Rust), we fall back to the raw filePath
+      // and the formatter soft-skips with "no parser available" — same
+      // outcome the user would see for any non-formattable file.
+      let formatPath = filePath;
+      if (untitled) {
+        const ext = languageOverride ? languageToExtension(languageOverride) : undefined;
+        if (ext) {
+          // The server's formatter requires the path to resolve inside
+          // the worktree; using a leading "." filename keeps it inside
+          // the workspace root and doesn't clobber any real file.
+          formatPath = `.band-untitled${ext}`;
+        }
+      }
+      const result = await adapter.formatWorkspaceFile(workspaceId, formatPath, sourceContent);
       if (result.skipped) {
         setFormatStatus({ kind: "info", message: result.reason });
         return;
@@ -506,32 +529,29 @@ export function FileViewer({
       formattingRef.current = false;
       setFormatting(false);
     }
-  }, [adapter, workspaceId, filePath]);
+  }, [adapter, workspaceId, filePath, untitled, languageOverride]);
 
   // Listen for the global "Format Current File" event (⌘⇧F + palette).
-  // The dispatcher includes `{ workspaceId, filePath }` in detail when it
-  // knows them; we only respond when the event targets *this* viewer's
-  // file. Events with no detail (palette press without a known active
-  // file) are ignored so every mounted FileViewer doesn't format its own
-  // file in parallel.
+  // Only one FileViewer is mounted per workspace at a time, so the
+  // `workspaceId` guard is sufficient — we deliberately do NOT filter
+  // by `detail.filePath` for the same reason the language-picker
+  // listener doesn't: the dispatcher reads `currentFileRef.current`,
+  // which is only updated by `notifySelectFile` (which drops untitled
+  // and external paths). So when the user is viewing an untitled tab,
+  // `detail.filePath` is either undefined or stale (pointing at the
+  // previously-viewed real file), and a strict equality check would
+  // reject the legitimate "format this untitled tab" case.
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail as
         | { workspaceId?: string; filePath?: string | null }
         | undefined;
       if (!detail || detail.workspaceId !== workspaceId) return;
-      // When the dispatcher knows the active file path, match it. When
-      // it doesn't (e.g. the palette command fired before the active-tab
-      // tracker fed currentFile back up — happens for tabs restored from
-      // localStorage on dashboard boot), respond anyway: only one
-      // FileViewer is mounted at a time per workspace, so an
-      // unconstrained workspace-scoped fire is unambiguous.
-      if (detail.filePath != null && detail.filePath !== filePath) return;
       void handleFormat();
     };
     window.addEventListener("band:format-current-file", handler);
     return () => window.removeEventListener("band:format-current-file", handler);
-  }, [workspaceId, filePath, handleFormat]);
+  }, [workspaceId, handleFormat]);
 
   // Auto-clear the "Formatted" success flash so it doesn't linger next to
   // the filename. Errors stay until the user changes files or saves.

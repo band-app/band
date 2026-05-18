@@ -98,6 +98,7 @@ export {
   extensionToLanguage,
   filenameToLanguage,
   languageLabel,
+  languageToExtension,
   SUPPORTED_LANGUAGES,
   type SupportedLanguage,
 } from "./lib/language-map";

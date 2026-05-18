@@ -169,3 +169,65 @@ export function languageLabel(id: string): string {
   if (!id) return "Plain Text";
   return id.charAt(0).toUpperCase() + id.slice(1);
 }
+
+/**
+ * Canonical extension for a language id, used to synthesize a virtual
+ * filename for untitled tabs when an extension-driven tool (like the
+ * server-side Prettier formatter) needs one. Returns `undefined` for
+ * languages with no obvious canonical extension or for the
+ * `"plaintext"` default — neither has a Prettier parser, so callers
+ * should treat `undefined` as "skip extension-driven dispatch".
+ *
+ * Reverse of `EXTENSION_MAP`: where multiple extensions map to a
+ * single language (e.g. `.cjs` / `.mjs` / `.js` → javascript), we
+ * pick the most idiomatic one.
+ */
+const LANGUAGE_TO_EXTENSION: Record<string, string> = {
+  javascript: ".js",
+  jsx: ".jsx",
+  typescript: ".ts",
+  tsx: ".tsx",
+  json: ".json",
+  jsonc: ".jsonc",
+  html: ".html",
+  css: ".css",
+  scss: ".scss",
+  sass: ".sass",
+  less: ".less",
+  markdown: ".md",
+  mdx: ".mdx",
+  yaml: ".yaml",
+  xml: ".xml",
+  python: ".py",
+  ruby: ".rb",
+  rust: ".rs",
+  go: ".go",
+  java: ".java",
+  kotlin: ".kt",
+  swift: ".swift",
+  c: ".c",
+  cpp: ".cpp",
+  csharp: ".cs",
+  php: ".php",
+  bash: ".sh",
+  sql: ".sql",
+  graphql: ".graphql",
+  vue: ".vue",
+  svelte: ".svelte",
+  lua: ".lua",
+  r: ".r",
+  dart: ".dart",
+  elixir: ".ex",
+  erlang: ".erl",
+  haskell: ".hs",
+  scala: ".scala",
+  clojure: ".clj",
+  toml: ".toml",
+  hcl: ".hcl",
+  ini: ".ini",
+  diff: ".diff",
+};
+
+export function languageToExtension(id: string): string | undefined {
+  return LANGUAGE_TO_EXTENSION[id];
+}
