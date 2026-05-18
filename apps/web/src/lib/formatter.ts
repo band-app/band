@@ -1,5 +1,6 @@
 import { existsSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve as resolvePath } from "node:path";
+import type { FormatFileResult } from "@band-app/dashboard-core";
 import { createLogger } from "@band-app/logger";
 import prettier from "prettier";
 
@@ -34,21 +35,12 @@ export class FormatterError extends Error {
   }
 }
 
-export type FormatFileResult =
-  | {
-      skipped: true;
-      file: string;
-      reason: string;
-      durationMs: number;
-    }
-  | {
-      skipped: false;
-      file: string;
-      parser: string;
-      formatted: string;
-      changed: boolean;
-      durationMs: number;
-    };
+// `FormatFileResult` is defined in `@band-app/dashboard-core` because the
+// client-side adapter contract is the load-bearing public surface; the
+// server is the *implementer*, so it imports the shape rather than
+// re-declaring it. A future field addition (e.g. `warnings`) means
+// updating one place and TypeScript will fail this function's annotated
+// return type if the implementation drifts.
 
 // ---------------------------------------------------------------------------
 // Dispatcher
