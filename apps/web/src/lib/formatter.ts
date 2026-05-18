@@ -1,4 +1,5 @@
-import { isAbsolute, resolve as resolvePath } from "node:path";
+import { realpathSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, resolve as resolvePath } from "node:path";
 import { createLogger } from "@band-app/logger";
 import prettier from "prettier";
 
@@ -93,6 +94,14 @@ export async function formatFile(
 
   const start = Date.now();
 
+  // Clear Prettier's `resolveConfig` cache up-front so the user's latest
+  // `.prettierrc` (or `package.json::prettier`) is used for *both*
+  // `getFileInfo` (which honours `resolveConfig: true` to pick up plugin-
+  // supplied parsers) and the explicit `resolveConfig` call further down.
+  // Cost is one extra worktree walk per format — small, and the
+  // alternative (stale config) is far more confusing.
+  prettier.clearConfigCache();
+
   // `inferredParser` is null when Prettier has no built-in parser for the
   // file's extension (and no plugin registers one). That's our soft-skip
   // signal — explicitly preferred over `getSupportInfo` so any project-
@@ -115,12 +124,6 @@ export async function formatFile(
     };
   }
 
-  // Clear Prettier's `resolveConfig` cache so edits the user just made to
-  // `.prettierrc` (or to a `package.json::prettier` field) take effect on
-  // the next ⌘⇧F without restarting the server. The cost is small — a
-  // re-walk of the worktree — and the alternative (stale config) is far
-  // more confusing.
-  prettier.clearConfigCache();
   const config =
     options.configOverride !== undefined
       ? options.configOverride
@@ -165,6 +168,35 @@ export async function formatFile(
 // ---------------------------------------------------------------------------
 
 function isInsideWorktree(absFile: string, worktreePath: string): boolean {
-  const normalizedWorktree = worktreePath.endsWith("/") ? worktreePath : `${worktreePath}/`;
-  return absFile === worktreePath || absFile.startsWith(normalizedWorktree);
+  // A plain prefix check is symlink-naive: a symlink inside the worktree
+  // pointing at e.g. `/etc` would let `worktreePath/link/passwd` pass the
+  // guard even though `realpath` resolves it outside the worktree. The
+  // formatter is pure (never reads `absFile`), but `prettier.resolveConfig`
+  // walks up from the supplied path looking for `.prettierrc` — so a
+  // traversal could surface config from an unintended location. Harden by
+  // resolving real paths on both sides before comparing.
+  let realFile: string;
+  try {
+    realFile = realpathSync(absFile);
+  } catch {
+    // File doesn't exist on disk yet (untitled / unsaved buffer). Resolve
+    // the parent directory instead; the leaf is the user's choice and
+    // hasn't been materialized into a possibly-traversal-y symlink yet.
+    try {
+      realFile = join(realpathSync(dirname(absFile)), basename(absFile));
+    } catch {
+      // Parent doesn't exist either — fall back to the literal path. We
+      // can't reason about traversal without a real target, but Prettier
+      // will fail downstream if the path is genuinely bogus.
+      realFile = absFile;
+    }
+  }
+  let realWorktree: string;
+  try {
+    realWorktree = realpathSync(worktreePath);
+  } catch {
+    realWorktree = worktreePath;
+  }
+  const normalized = realWorktree.endsWith("/") ? realWorktree : `${realWorktree}/`;
+  return realFile === realWorktree || realFile.startsWith(normalized);
 }

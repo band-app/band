@@ -369,11 +369,11 @@ export class WebDashboardAdapter implements DashboardAdapter {
     filePath: string,
     content: string,
   ): Promise<FormatFileResult> {
-    return (await this.trpc.workspace.formatFile.mutate({
+    return await this.trpc.workspace.formatFile.mutate({
       workspaceId,
       filePath,
       content,
-    })) as FormatFileResult;
+    });
   }
 
   async createWorkspaceFile(workspaceId: string, path: string, content = ""): Promise<void> {

@@ -878,7 +878,11 @@ const workspaceRouter = t.router({
     }),
 
   /**
-   * Run Prettier against a single file inside the workspace.
+   * Format the supplied `content` using Prettier as if it were the file at
+   * `filePath` inside `workspaceId`. The procedure is pure — it does not
+   * read or write the file on disk. The client passes in the live editor
+   * buffer and applies the returned `formatted` string back to the editor.
+   * Persistence is the caller's responsibility via `workspace.saveFile`.
    *
    * Returns `{ skipped: true, reason }` when Prettier has no parser for
    * the file's extension (or it's covered by `.prettierignore`). Editors
@@ -890,19 +894,16 @@ const workspaceRouter = t.router({
    * the WebSocket upgrade and HTTP requests in start-server.ts) — same
    * pattern as the rest of `workspaceRouter`.
    */
-  /**
-   * Format the supplied `content` using Prettier as if it were the file at
-   * `filePath` inside `workspaceId`. The procedure is pure — it does not
-   * read or write the file on disk. The client passes in the live editor
-   * buffer and applies the returned `formatted` string back to the editor.
-   * Persistence is the caller's responsibility via `workspace.saveFile`.
-   */
   formatFile: publicProcedure
     .input(
       z.object({
         workspaceId: z.string(),
         filePath: z.string().min(1),
-        content: z.string(),
+        // 1 MB ceiling — covers every realistic source file (the largest
+        // human-authored .ts in the world is well under 500 KB) and stops a
+        // pathological caller from blocking the event loop with a multi-MB
+        // string while Prettier churns on it.
+        content: z.string().max(1_000_000),
       }),
     )
     .mutation(async ({ input }) => {

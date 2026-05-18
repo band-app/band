@@ -145,7 +145,13 @@ export function FileViewer({
     kind: "ok" | "error" | "info";
     message: string;
   } | null>(null);
+  // `formatting` drives the spinner in the toolbar; `formattingRef` is the
+  // re-entrancy guard. We can't use the React-state value as the guard —
+  // setState is async, so two ⇧⌘F presses inside the same React batch
+  // would both observe `formatting === false` and proceed in parallel. The
+  // ref flips synchronously on call entry and clears in `finally`.
   const [formatting, setFormatting] = useState(false);
+  const formattingRef = useRef(false);
 
   const editorViewRef = useRef<EditorView | null>(null);
   const dataRef = useRef(data);
@@ -309,7 +315,7 @@ export function FileViewer({
       setFormatStatus({ kind: "error", message: "Formatting not supported by this adapter" });
       return;
     }
-    if (formatting) return;
+    if (formattingRef.current) return;
 
     // Read the live buffer straight off the EditorView so we always
     // pick up unsaved keystrokes. Fall back to `editedContent` / `data`
@@ -323,6 +329,7 @@ export function FileViewer({
       return;
     }
 
+    formattingRef.current = true;
     setFormatting(true);
     setFormatStatus(null);
     try {
@@ -368,9 +375,10 @@ export function FileViewer({
         message: err instanceof Error ? err.message : "Failed to format",
       });
     } finally {
+      formattingRef.current = false;
       setFormatting(false);
     }
-  }, [adapter, workspaceId, filePath, formatting]);
+  }, [adapter, workspaceId, filePath]);
 
   // Listen for the global "Format Current File" event (⌘⇧F + palette).
   // The dispatcher includes `{ workspaceId, filePath }` in detail when it

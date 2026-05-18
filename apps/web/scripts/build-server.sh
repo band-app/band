@@ -103,6 +103,13 @@ if [ "${NPM_PUBLISH:-}" != "1" ]; then
   # the bundled output (SyntaxError: Identifier '__filename' has already
   # been declared). Marked `--external:prettier` and copied here so the
   # runtime `createRequire(...)` lookup resolves cleanly.
+  #
+  # Lives inside the NPM_PUBLISH guard because npm consumers install
+  # prettier from `apps/web/package.json::dependencies` instead — the
+  # bundled `--external:prettier` reference is resolved from the
+  # consumer's node_modules at install time. The copy here is purely for
+  # self-contained desktop / Electron builds where there is no
+  # `npm install` step on the user's machine.
   # -----------------------------------------------------------------------
   PRETTIER_REAL="$(cd node_modules/prettier && pwd -P)"
   mkdir -p dist/node_modules/prettier
