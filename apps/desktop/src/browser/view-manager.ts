@@ -1208,6 +1208,22 @@ export class BrowserViewManager {
       "did-fail-load",
       (_event, errorCode, _errorDescription, validatedURL, isMainFrame) => {
         if (!isMainFrameFailure({ errorCode, isMainFrame })) return;
+        // Skip failures for our own internal URLs:
+        //
+        //   - `band-action://…` is the sentinel scheme our in-view
+        //     buttons navigate to. Chromium has no handler for it
+        //     and emits `did-fail-load` with ERR_UNKNOWN_URL_SCHEME
+        //     (-300) — but the `did-start-navigation` interceptor
+        //     above already deferred the real proceed/back/retry
+        //     work via setImmediate. Reacting here too would queue
+        //     a SECOND setImmediate that races the first and
+        //     overwrites the loaded page with the load-error UI.
+        //   - `data:` URIs are how we paint our own error pages.
+        //     They shouldn't fail-load in normal operation, but if
+        //     Chromium ever reports one we don't want to recurse
+        //     into another error page.
+        if (validatedURL.startsWith("band-action://")) return;
+        if (validatedURL.startsWith("data:")) return;
         const payload = buildLoadErrorPayload({
           key,
           url: validatedURL,
