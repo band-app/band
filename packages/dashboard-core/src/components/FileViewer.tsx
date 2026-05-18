@@ -205,9 +205,27 @@ export function FileViewer({
     ? editedContent != null && editedContent !== ""
     : editedContent !== null && editedContent !== data?.content;
 
+  // Untitled tabs are *always* editable — the buffer lives entirely in
+  // the renderer, so typing into it has nothing to do with whether a
+  // save mechanism is available. `canSave` (below) gates the Save
+  // button separately, so in a web build (no `onSaveAs` because
+  // `capabilities.pickSaveFile` is undefined) the user can still draft
+  // text into an untitled tab; only persistence requires the desktop
+  // shell.
+  //
+  // Before this split, an untitled tab created from a non-desktop
+  // entry point fell through to `CodeMirrorViewer` (read-only), which
+  // looked like "the editor is empty and I can't type" — issue raised
+  // post-review and fixed here.
   const canEdit =
     editable &&
-    (untitled ? !!onSaveAs : external ? !!adapter.saveExternalFile : !!adapter.saveWorkspaceFile);
+    (untitled ? true : external ? !!adapter.saveExternalFile : !!adapter.saveWorkspaceFile);
+
+  const canSave = untitled
+    ? !!onSaveAs
+    : external
+      ? !!adapter.saveExternalFile
+      : !!adapter.saveWorkspaceFile;
 
   // Untitled tabs never have a backing file extension to drive the
   // preview-type heuristic — force "code" so the editor renders rather
@@ -668,7 +686,12 @@ export function FileViewer({
           {formatting && (
             <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
           )}
-          {canEdit && isDirty && (
+          {canSave && isDirty && (
+            // Gate on canSave (which requires a working save target —
+            // adapter method for file-backed tabs, `onSaveAs` for
+            // untitled ones) rather than canEdit, so an untitled tab in
+            // the web build still renders an editable surface even
+            // though no Save button can appear.
             <button
               type="button"
               onClick={handleSave}
