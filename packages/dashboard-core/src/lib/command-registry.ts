@@ -36,6 +36,14 @@ export interface CommandRegistryDeps {
   openSearchFiles: () => void;
   /** Trigger find-in-file for the active editor. */
   findInFile: () => void;
+  /**
+   * Format the file in the currently-active editor tab. Implementations
+   * read the current `{workspaceId, filePath}` from their own refs at call
+   * time and dispatch the `band:format-current-file` event with that detail
+   * — the keyboard shortcut handler in DockviewWorkspaceLayout does the
+   * same thing, so the palette and shortcut paths stay symmetric.
+   */
+  formatCurrentFile: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -98,9 +106,13 @@ export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
       action: () => deps.openQuickOpen(),
     },
     {
+      // Note: Cmd+Shift+F is owned by "Format Current File" (matches
+      // JetBrains' "Reformat Code" binding). Search-in-Files moves to
+      // Cmd+Shift+H — same key VS Code uses for "Replace in Files", which
+      // is conceptually close enough that the muscle memory transfers.
       id: "search-files",
       label: "Search in Files",
-      shortcut: "Cmd+Shift+F",
+      shortcut: "Cmd+Shift+H",
       action: () => deps.openSearchFiles(),
     },
     {
@@ -108,6 +120,18 @@ export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
       label: "Find in File",
       shortcut: "Cmd+F",
       action: () => deps.findInFile(),
+    },
+    {
+      // Format the file in the currently-active editor tab via Prettier.
+      // The deps callback (wired in DockviewWorkspaceLayout) reads the
+      // current `{workspaceId, filePath}` from refs and dispatches the
+      // event with detail, so the matching FileViewer responds. The
+      // keyboard handler dispatches the same event with the same detail
+      // shape — both paths funnel through one FileViewer listener.
+      id: "format-current-file",
+      label: "Format Current File",
+      shortcut: "Cmd+Shift+F",
+      action: () => deps.formatCurrentFile(),
     },
     {
       id: "show-chat",

@@ -14,6 +14,7 @@ esbuild start-server.ts \
   --external:./server/server.js \
   --external:node-pty \
   --external:@vscode/ripgrep \
+  --external:prettier \
   --banner:js="import{createRequire as __cr}from'module';import{fileURLToPath as __fu}from'url';import{dirname as __dn}from'path';const require=__cr(import.meta.url);const __filename=__fu(import.meta.url);const __dirname=__dn(__filename);"
 
 # Copy native modules into dist/ for self-contained builds (Electron app).
@@ -94,6 +95,25 @@ if [ "${NPM_PUBLISH:-}" != "1" ]; then
   # SQLite is provided by Node's built-in `node:sqlite` (Stability 1.2 RC,
   # available unflagged since Node 22.13). No native module ships in the
   # bundle for SQLite — the user's `node` binary supplies it.
+
+  # -----------------------------------------------------------------------
+  # Prettier — used by `workspace.formatFile` for in-process formatting.
+  # We can't bundle it: prettier's CJS shim redeclares `__filename`, which
+  # collides with the esbuild banner's `const __filename` at the top of
+  # the bundled output (SyntaxError: Identifier '__filename' has already
+  # been declared). Marked `--external:prettier` and copied here so the
+  # runtime `createRequire(...)` lookup resolves cleanly.
+  #
+  # Lives inside the NPM_PUBLISH guard because npm consumers install
+  # prettier from `apps/web/package.json::dependencies` instead — the
+  # bundled `--external:prettier` reference is resolved from the
+  # consumer's node_modules at install time. The copy here is purely for
+  # self-contained desktop / Electron builds where there is no
+  # `npm install` step on the user's machine.
+  # -----------------------------------------------------------------------
+  PRETTIER_REAL="$(cd node_modules/prettier && pwd -P)"
+  mkdir -p dist/node_modules/prettier
+  cp -RL "$PRETTIER_REAL"/* dist/node_modules/prettier/
 
   # -----------------------------------------------------------------------
   # Bundle typescript-language-server + typescript for LSP support.
