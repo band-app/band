@@ -469,20 +469,27 @@ export function FileViewer({
       // Untitled tabs have no real extension for Prettier to dispatch
       // on — synthesize a virtual filename inside the workspace from
       // the user's language choice (`languageOverride`) so the server-
-      // side formatter picks the right parser. When the override is
-      // missing or maps to a language Prettier doesn't have a parser
-      // for (e.g. plain text, Rust), we fall back to the raw filePath
-      // and the formatter soft-skips with "no parser available" — same
-      // outcome the user would see for any non-formattable file.
+      // side formatter picks the right parser. Untitled tabs default
+      // to plain text, which Prettier has no parser for; short-circuit
+      // with an actionable message instead of the generic "no parser
+      // available" soft-skip — first-run users were confused by it
+      // because the muted info-status easily reads as "format ran but
+      // did nothing" when in fact the formatter never even got the
+      // request.
       let formatPath = filePath;
       if (untitled) {
         const ext = languageOverride ? languageToExtension(languageOverride) : undefined;
-        if (ext) {
-          // The server's formatter requires the path to resolve inside
-          // the worktree; using a leading "." filename keeps it inside
-          // the workspace root and doesn't clobber any real file.
-          formatPath = `.band-untitled${ext}`;
+        if (!ext) {
+          setFormatStatus({
+            kind: "info",
+            message: "Set a language mode first to format this untitled tab",
+          });
+          return;
         }
+        // The server's formatter requires the path to resolve inside
+        // the worktree; using a leading "." filename keeps it inside
+        // the workspace root and doesn't clobber any real file.
+        formatPath = `.band-untitled${ext}`;
       }
       const result = await adapter.formatWorkspaceFile(workspaceId, formatPath, sourceContent);
       if (result.skipped) {
