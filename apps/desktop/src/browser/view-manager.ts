@@ -1036,10 +1036,33 @@ export class BrowserViewManager {
     //     the address bar follows the redirect — matches Chrome's UX.
     view.webContents.on("did-start-navigation", (details) => {
       if (!details.isMainFrame) return;
+      // ---- band-action://… interceptor (issue #444 cast follow-up) ----
+      // The in-view error pages encode button clicks as navigations
+      // to a sentinel `band-action://` URL. Chromium has no idea
+      // what that scheme is, so without intercepting it would commit
+      // the navigation, fail to load, and leave the tab on the
+      // unknown-scheme URL. We catch it the moment the navigation
+      // starts, abort the load with `stop()`, and dispatch the
+      // action ourselves — which immediately `loadURL`s a real URL
+      // so the user never lingers on `band-action://`.
+      //
+      // We previously did this via `will-navigate` + preventDefault,
+      // but on Electron 35 that event doesn't reliably fire for
+      // unknown URL schemes (Chromium's external-protocol handling
+      // appears to short-circuit it). `did-start-navigation` always
+      // fires, and `stop()` after the commit is enough — the
+      // address bar bobble is hidden by the `band-action://` filter
+      // in the URL emission below.
+      if (details.url.startsWith("band-action://")) {
+        view.webContents.stop();
+        const action = parseBandAction(details.url);
+        if (action) this.handleBandAction(key, action);
+        return;
+      }
       // Skip URL emissions for the in-view error pages we load via
-      // `data:` URIs (issue #444 cast follow-up). The renderer's
-      // address bar should keep showing the failing target URL,
-      // not the data URI we use to paint the interstitial.
+      // `data:` URIs. The renderer's address bar should keep showing
+      // the failing target URL, not the data URI we use to paint
+      // the interstitial.
       if (details.url.startsWith("data:")) return;
       // Clear any pending error as soon as a real main-frame
       // navigation starts. Covers Back-to-safety navigating away
@@ -1056,23 +1079,20 @@ export class BrowserViewManager {
     // finished" — flips the loading indicator off and re-emits the
     // (now-committed) URL, which corrects any drift if the final URL
     // differs from what `did-start-navigation` reported (e.g. a 3xx
-    // chain that resolved server-side). Same `data:` filter as
-    // above so error-page loads don't clobber the address bar.
+    // chain that resolved server-side). `data:` and `band-action`
+    // are filtered for the same reasons as above so error-page
+    // loads / action clicks don't clobber the address bar.
     view.webContents.on("did-stop-loading", () => {
       const url = view.webContents.getURL();
       if (url.startsWith("data:")) return;
+      if (url.startsWith("band-action://")) return;
       emitUrl(url, false);
     });
 
-    // ---- band-action://… interceptor ----
-    // The in-view error pages encode button clicks as navigations to
-    // a sentinel `band-action://` URL. We catch them on
-    // `will-navigate`, prevent the actual navigation (the URL doesn't
-    // exist on the network), and dispatch to the matching manager
-    // method. This is what lets the screencast workflow proceed
-    // through a cert error: the action lives inside the WebContentsView
-    // so cast viewers can click it; the receiver translates that
-    // click back into a real desktop-side state change.
+    // Primary `band-action://` interceptor — fires before the
+    // navigation commits when Electron honours it. The `did-start-
+    // navigation` block above is the safety net for the cases where
+    // it doesn't (e.g. unknown URL schemes on some Electron versions).
     view.webContents.on("will-navigate", (event, navUrl) => {
       const action = parseBandAction(navUrl);
       if (!action) return;
