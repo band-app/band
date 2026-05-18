@@ -315,6 +315,12 @@ export function FileViewer({
       setFormatStatus({ kind: "error", message: "Formatting not supported by this adapter" });
       return;
     }
+    // Re-entrancy guard. Intentionally silent: a second ⌘⇧F press while a
+    // format is in flight is a no-op rather than a queued retry. The
+    // existing spinner is still visible (`formatting` state hasn't been
+    // cleared), so the user sees "format is happening" from the first
+    // press — adding feedback for the dropped second press would mostly
+    // be noise.
     if (formattingRef.current) return;
 
     // Read the live buffer straight off the EditorView so we always

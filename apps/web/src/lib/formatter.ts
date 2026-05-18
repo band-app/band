@@ -1,4 +1,4 @@
-import { realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve as resolvePath } from "node:path";
 import { createLogger } from "@band-app/logger";
 import prettier from "prettier";
@@ -106,20 +106,32 @@ export async function formatFile(
   // file's extension (and no plugin registers one). That's our soft-skip
   // signal — explicitly preferred over `getSupportInfo` so any project-
   // level `plugins` config a user has set is honoured.
-  const info = await prettier.getFileInfo(absFile, { resolveConfig: true });
-  if (info.inferredParser === null) {
-    return {
-      skipped: true,
-      file: absFile,
-      reason: `Prettier has no parser for ${absFile}`,
-      durationMs: Date.now() - start,
-    };
-  }
+  //
+  // `ignorePath` has to be supplied explicitly: Prettier's programmatic API
+  // (unlike its CLI) does not auto-discover `.prettierignore`. Without
+  // this, `info.ignored` would always be `false` and the ignore-rule
+  // soft-skip path would never fire.
+  const ignorePath = resolvePath(worktreePath, ".prettierignore");
+  const info = await prettier.getFileInfo(absFile, {
+    resolveConfig: true,
+    ignorePath: existsSync(ignorePath) ? ignorePath : undefined,
+  });
+  // Order matters: `.prettierignore` matches set both `ignored: true` and
+  // `inferredParser: null`, so check `ignored` first to produce the more
+  // specific reason. Otherwise the no-parser branch swallows them.
   if (info.ignored) {
     return {
       skipped: true,
       file: absFile,
       reason: `Ignored by .prettierignore`,
+      durationMs: Date.now() - start,
+    };
+  }
+  if (info.inferredParser === null) {
+    return {
+      skipped: true,
+      file: absFile,
+      reason: `Prettier has no parser for ${absFile}`,
       durationMs: Date.now() - start,
     };
   }
@@ -185,9 +197,11 @@ function isInsideWorktree(absFile: string, worktreePath: string): boolean {
     try {
       realFile = join(realpathSync(dirname(absFile)), basename(absFile));
     } catch {
-      // Parent doesn't exist either — fall back to the literal path. We
-      // can't reason about traversal without a real target, but Prettier
-      // will fail downstream if the path is genuinely bogus.
+      // Neither the file nor its parent exists yet (e.g. a deep new path
+      // the user hasn't materialized). With nothing on disk there's no
+      // symlink to follow, so `absFile` is already the `resolvePath`-
+      // normalized canonical string — the prefix check below still
+      // correctly rejects any path that resolves outside the worktree.
       realFile = absFile;
     }
   }

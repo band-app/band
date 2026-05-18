@@ -167,4 +167,18 @@ describe("formatFile (Prettier dispatcher)", () => {
     if (result.skipped) throw new Error("unreachable");
     expect(result.formatted).toBe("const a = 1;\n");
   });
+
+  it("returns skipped=true for files covered by .prettierignore", async () => {
+    // `prettier.getFileInfo` honours `.prettierignore` when called with
+    // `resolveConfig: true` — exercised here to lock in the soft-skip
+    // path the dispatcher relies on.
+    writeFileSync(join(worktree, ".prettierignore"), "*.js\n");
+    const file = join(worktree, "ignored.js");
+
+    // Omit `configOverride` so the real config-resolution walk runs.
+    const result = await formatFile(worktree, file, "const   a=1\n");
+    expect(result.skipped).toBe(true);
+    if (!result.skipped) throw new Error("unreachable");
+    expect(result.reason).toMatch(/\.prettierignore/);
+  });
 });
