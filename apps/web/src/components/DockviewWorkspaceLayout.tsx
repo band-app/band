@@ -889,6 +889,25 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
             }),
           );
         },
+        newUntitledTab: () => {
+          // CodeBrowserView's listener calls `openTabUntitled` for the
+          // workspace it owns. No detail is needed — there's at most one
+          // CodeBrowserView mounted per workspace, and the file-tab
+          // state is per-workspace so a stray multi-handler fire would
+          // just create one untitled tab per workspace.
+          window.dispatchEvent(new CustomEvent("band:new-untitled-tab"));
+        },
+        changeLanguageMode: () => {
+          // Mirrors the format-current-file shape — only the matching
+          // FileViewer responds. `filePath` is optional for the same
+          // restored-tab race as the format command.
+          const filePath = currentFileRef.current;
+          window.dispatchEvent(
+            new CustomEvent("band:open-language-picker", {
+              detail: { workspaceId, filePath },
+            }),
+          );
+        },
       }),
     [workspaceId],
   );
@@ -986,6 +1005,15 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
       if (key === "n" && e.shiftKey) {
         e.preventDefault();
         window.dispatchEvent(new CustomEvent("band:new-chat-session"));
+      } else if (key === "n" && !e.shiftKey && !e.altKey) {
+        // ⌘N → New Untitled File (issue #434). Always preventDefault so
+        // the browser's own "New Window" doesn't fire over the SPA.
+        // CodeBrowserView listens for this event; the action is a no-op
+        // when there's no editor in the active workspace (the listener
+        // simply isn't attached), so binding the key here is safe even
+        // for workspaces with no Files panel.
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent("band:new-untitled-tab"));
       } else if (key === "p" && e.shiftKey) {
         e.preventDefault();
         setCommandPaletteOpen(true);

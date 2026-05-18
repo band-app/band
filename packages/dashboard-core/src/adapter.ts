@@ -255,6 +255,25 @@ export interface PlatformCapabilities {
    * callers must gate their UI on this capability being present.
    */
   pickFile?(): Promise<string | null>;
+  /**
+   * Open the OS "Save As" picker, persist `content` to the chosen path,
+   * and resolve with the absolute path (or `null` when the user cancels).
+   * Defined only when the renderer is running inside the Electron shell —
+   * the web build cannot write to an arbitrary filesystem location.
+   *
+   * Backs the editor's "Save untitled tab" flow. `defaultName` seeds the
+   * dialog's filename field (e.g. "Untitled-1.txt"); `defaultPath` seeds
+   * the starting directory (e.g. the active workspace root).
+   *
+   * Bundling the dialog + write into a single capability keeps the
+   * filesystem trust boundary inside the desktop shell — the renderer
+   * never receives a writable file handle.
+   */
+  pickSaveFile?(args: {
+    content: string;
+    defaultName?: string;
+    defaultPath?: string;
+  }): Promise<string | null>;
   openUrl?(url: string): Promise<void>;
   getWorkspaceHref?(workspaceId: string): string | undefined;
   /** Optional navigate function for client-side routing (avoids full page reload). */

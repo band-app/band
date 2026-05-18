@@ -16,6 +16,23 @@ export interface TabFileState {
   editorState?: unknown;
   /** Scroll position (scrollDOM.scrollTop) to restore after editor creation. */
   scrollTop?: number;
+  /**
+   * User-selected syntax highlighting language override (e.g.
+   * `"typescript"`, `"markdown"`, `"plaintext"`). When set, the editor
+   * uses this instead of auto-detecting from the file extension /
+   * filename. Survives saves (per issue #434: "Saving an untitled tab
+   * whose language was manually set keeps the override even if the
+   * chosen filename's extension would imply a different language").
+   *
+   * Out of scope for #434 — and intentionally so: the language picker
+   * is per-tab-lifetime, not cross-session. We persist into tab state
+   * (which is itself localStorage-backed) so it survives in-session
+   * tab switches; on workspace switch / reload tab state is loaded
+   * fresh from disk, but untitled tabs are filtered out at the
+   * `useFileTabs` boundary so a stale language entry has nothing to
+   * attach to.
+   */
+  language?: string;
 }
 
 function storageKey(workspaceId: string): string {
@@ -51,6 +68,10 @@ export interface UseTabStateReturn {
   getViewMode: (filePath: string) => "preview" | "source" | undefined;
   /** Store the view mode for a file. */
   setViewMode: (filePath: string, mode: "preview" | "source") => void;
+  /** Get the user-overridden language for a file (undefined when auto-detected). */
+  getLanguage: (filePath: string) => string | undefined;
+  /** Store a manual language override for a file. */
+  setLanguage: (filePath: string, language: string) => void;
   /** Check if a file has unsaved edits. */
   isDirty: (filePath: string) => boolean;
   /** Remove all stored state for a file (e.g. when tab is closed). */
@@ -101,6 +122,19 @@ export function useTabState(workspaceId: string): UseTabStateReturn {
     (filePath: string, mode: "preview" | "source") => {
       const entry = stateRef.current[filePath] ?? {};
       stateRef.current[filePath] = { ...entry, viewMode: mode };
+      saveState(workspaceId, stateRef.current);
+    },
+    [workspaceId],
+  );
+
+  const getLanguage = useCallback((filePath: string): string | undefined => {
+    return stateRef.current[filePath]?.language;
+  }, []);
+
+  const setLanguage = useCallback(
+    (filePath: string, language: string) => {
+      const entry = stateRef.current[filePath] ?? {};
+      stateRef.current[filePath] = { ...entry, language };
       saveState(workspaceId, stateRef.current);
     },
     [workspaceId],
@@ -163,6 +197,8 @@ export function useTabState(workspaceId: string): UseTabStateReturn {
     update,
     getViewMode,
     setViewMode,
+    getLanguage,
+    setLanguage,
     isDirty,
     removeFile,
     renameFile,

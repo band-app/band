@@ -85,3 +85,87 @@ export function extensionToLanguage(ext: string): string | undefined {
 export function filenameToLanguage(filename: string): string | undefined {
   return FILENAME_MAP[filename];
 }
+
+/**
+ * Catalogue of languages the editor (CodeMirror) can syntax-highlight,
+ * with the human-readable label shown in the language picker. Used by
+ * `LanguagePickerDialog` (and the editor's status-bar language
+ * indicator) to populate a searchable list.
+ *
+ * The `id` matches the lowercase canonical name accepted by
+ * `loadLanguage` in `codemirror-setup.ts` — "Plain Text" maps to
+ * `"plaintext"`, which `loadLanguage` resolves to `null` (no
+ * highlighting), matching VS Code's behaviour.
+ *
+ * Order matters for the picker: "Plain Text" first because it's the
+ * default for untitled tabs and the catch-all for unsupported
+ * extensions, then everything else alphabetised by label.
+ */
+export interface SupportedLanguage {
+  id: string;
+  label: string;
+}
+
+export const SUPPORTED_LANGUAGES: SupportedLanguage[] = [
+  { id: "plaintext", label: "Plain Text" },
+  { id: "bash", label: "Bash / Shell" },
+  { id: "c", label: "C" },
+  { id: "clojure", label: "Clojure" },
+  { id: "cpp", label: "C++" },
+  { id: "csharp", label: "C#" },
+  { id: "css", label: "CSS" },
+  { id: "dart", label: "Dart" },
+  { id: "diff", label: "Diff" },
+  { id: "dockerfile", label: "Dockerfile" },
+  { id: "elixir", label: "Elixir" },
+  { id: "erlang", label: "Erlang" },
+  { id: "go", label: "Go" },
+  { id: "graphql", label: "GraphQL" },
+  { id: "haskell", label: "Haskell" },
+  { id: "hcl", label: "HCL / Terraform" },
+  { id: "html", label: "HTML" },
+  { id: "ini", label: "INI" },
+  { id: "java", label: "Java" },
+  { id: "javascript", label: "JavaScript" },
+  { id: "json", label: "JSON" },
+  { id: "jsonc", label: "JSON with Comments" },
+  { id: "jsx", label: "JavaScript (JSX)" },
+  { id: "kotlin", label: "Kotlin" },
+  { id: "less", label: "Less" },
+  { id: "lua", label: "Lua" },
+  { id: "makefile", label: "Makefile" },
+  { id: "markdown", label: "Markdown" },
+  { id: "mdx", label: "MDX" },
+  { id: "php", label: "PHP" },
+  { id: "powershell", label: "PowerShell" },
+  { id: "python", label: "Python" },
+  { id: "r", label: "R" },
+  { id: "ruby", label: "Ruby" },
+  { id: "rust", label: "Rust" },
+  { id: "sass", label: "Sass" },
+  { id: "scala", label: "Scala" },
+  { id: "scss", label: "SCSS" },
+  { id: "sql", label: "SQL" },
+  { id: "svelte", label: "Svelte" },
+  { id: "swift", label: "Swift" },
+  { id: "toml", label: "TOML" },
+  { id: "typescript", label: "TypeScript" },
+  { id: "tsx", label: "TypeScript (TSX)" },
+  { id: "vue", label: "Vue" },
+  { id: "xml", label: "XML" },
+  { id: "yaml", label: "YAML" },
+];
+
+/**
+ * Resolve a language id to its human-readable label (e.g.
+ * `"typescript"` → `"TypeScript"`). Falls back to a Title-Cased
+ * version of the id when the language isn't in `SUPPORTED_LANGUAGES`
+ * — that happens for legacy / less-common languages that exist in
+ * `EXTENSION_MAP` but aren't surfaced in the picker.
+ */
+export function languageLabel(id: string): string {
+  const entry = SUPPORTED_LANGUAGES.find((l) => l.id === id);
+  if (entry) return entry.label;
+  if (!id) return "Plain Text";
+  return id.charAt(0).toUpperCase() + id.slice(1);
+}

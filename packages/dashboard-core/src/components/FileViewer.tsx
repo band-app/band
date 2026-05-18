@@ -15,11 +15,12 @@ import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAdapter } from "../context";
 import { type FilePreviewType, getFilePreviewType } from "../lib/file-type";
-import { extensionToLanguage, filenameToLanguage } from "../lib/language-map";
+import { extensionToLanguage, filenameToLanguage, languageLabel } from "../lib/language-map";
 import type { FileContentResult } from "../types";
 import { CodeMirrorEditor } from "./CodeMirrorEditor";
 import { CodeMirrorViewer } from "./CodeMirrorViewer";
 import { ImagePreview } from "./ImagePreview";
+import { LanguagePickerDialog } from "./LanguagePickerDialog";
 import { PdfPreview } from "./PdfPreview";
 
 interface FileViewerProps {
@@ -76,6 +77,41 @@ interface FileViewerProps {
    * are intentionally not wired for external files.
    */
   external?: boolean;
+  /**
+   * When true, the viewer renders an untitled (scratch) buffer that
+   * has no backing file. `filePath` carries the synthetic `untitled:N`
+   * key from `useFileTabs`; no remote IO happens (no `getWorkspaceFile`
+   * / `readExternalFile` call). Buffer state lives entirely in
+   * `initialEditedContent` / `onEditedContentChange` until the user
+   * picks a destination via `onSaveAs` — that callback is responsible
+   * for surfacing the OS save dialog (gated on
+   * `capabilities.pickSaveFile`) and transitioning the tab to a
+   * file-backed one.
+   */
+  untitled?: boolean;
+  /**
+   * Manual syntax-highlighting language override (e.g. `"typescript"`,
+   * `"markdown"`, `"plaintext"`). When set, takes precedence over
+   * file-extension auto-detection — the user's explicit choice in the
+   * language picker survives saves and tab restores.
+   */
+  languageOverride?: string;
+  /**
+   * Called when the user picks a language from the editor's language
+   * indicator dropdown / "Change Language Mode…" command. The caller
+   * persists the choice to tab state so it survives tab switches.
+   */
+  onLanguageOverrideChange?: (languageId: string) => void;
+  /**
+   * Save-as flow for untitled tabs. Called when the user hits Cmd+S on
+   * an untitled buffer (or the close-confirm "Save" button). Receives
+   * the live editor content and is expected to surface the OS save
+   * dialog, persist the bytes, and resolve with the chosen absolute
+   * path — at which point the caller transitions the tab to file-
+   * backed. Resolves with `null` when the user cancels the save dialog
+   * so the close path can keep the tab open.
+   */
+  onSaveAs?: (content: string) => Promise<string | null>;
 }
 
 function getFilename(path: string): string {
@@ -122,6 +158,10 @@ export function FileViewer({
   savedScrollTop,
   onEditedContentChange,
   external,
+  untitled,
+  languageOverride,
+  onLanguageOverrideChange,
+  onSaveAs,
 }: FileViewerProps) {
   const adapter = useAdapter();
   const [data, setData] = useState<FileContentResult | null>(null);
@@ -157,11 +197,22 @@ export function FileViewer({
   const dataRef = useRef(data);
   dataRef.current = data;
 
-  const isDirty = editedContent !== null && editedContent !== data?.content;
+  // Untitled tabs are "dirty" whenever they have any content typed in —
+  // there's no on-disk baseline to compare against. An empty buffer
+  // counts as clean so closing an untouched scratch tab doesn't pop
+  // the unsaved-changes confirmation.
+  const isDirty = untitled
+    ? editedContent != null && editedContent !== ""
+    : editedContent !== null && editedContent !== data?.content;
 
-  const canEdit = editable && (external ? !!adapter.saveExternalFile : !!adapter.saveWorkspaceFile);
+  const canEdit =
+    editable &&
+    (untitled ? !!onSaveAs : external ? !!adapter.saveExternalFile : !!adapter.saveWorkspaceFile);
 
-  const previewType: FilePreviewType = getFilePreviewType(filePath);
+  // Untitled tabs never have a backing file extension to drive the
+  // preview-type heuristic — force "code" so the editor renders rather
+  // than the image/PDF/markdown branches.
+  const previewType: FilePreviewType = untitled ? "code" : getFilePreviewType(filePath);
 
   // Reset editing state when switching files.
   // Edited content is initialized from the parent's tab state (via prop).
@@ -209,6 +260,19 @@ export function FileViewer({
   }, [previewType, viewMode, onEditorView]);
 
   useEffect(() => {
+    // Untitled tabs have no backing file — synthesise an empty
+    // content record so the rest of the render pipeline (canEdit
+    // check, CodeMirrorEditor mount, dirty-state diff against
+    // `data?.content`) keeps its existing shape. `initialEditedContent`
+    // (threaded by the parent from useTabState) carries any in-memory
+    // typing the user has done so far.
+    if (untitled) {
+      setData({ content: "", size: 0, binary: false, tooLarge: false });
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     // Images and PDFs are rendered via the raw file URL — no tRPC fetch needed.
     // External files don't have a workspace-relative URL; for the moment we
     // fall through to the text-content path (binary detection will catch
@@ -250,9 +314,19 @@ export function FileViewer({
     return () => {
       cancelled = true;
     };
-  }, [adapter, workspaceId, filePath, previewType, external]);
+  }, [adapter, workspaceId, filePath, previewType, external, untitled]);
 
-  const lang = data?.content ? detectLanguage(filePath, data.language) : "plaintext";
+  // The user's explicit choice from the language picker always wins over
+  // file-extension detection (issue #434: "manual override sticks for the
+  // lifetime of the tab"). Untitled tabs default to plain text; file-
+  // backed tabs fall through to the existing detection path.
+  const lang = languageOverride
+    ? languageOverride
+    : untitled
+      ? "plaintext"
+      : data?.content
+        ? detectLanguage(filePath, data.language)
+        : "plaintext";
 
   // External files don't have a workspace-relative raw URL endpoint, so
   // image/PDF rendering for external paths is intentionally not wired.
@@ -273,6 +347,36 @@ export function FileViewer({
   onEditedContentChangeRef.current = onEditedContentChange;
 
   const handleSave = useCallback(async () => {
+    // Untitled tabs route through the OS save dialog (`onSaveAs`).
+    // We use the *live* editor buffer rather than `editedContentRef`
+    // because an empty untitled buffer never sets edited content
+    // (isDirty filters out the empty string), so editedContentRef can
+    // legitimately be null even when the user wants to save an
+    // empty file from a fresh untitled tab.
+    if (untitled) {
+      if (!onSaveAs) return;
+      const content = editorViewRef.current?.state.doc.toString() ?? editedContentRef.current ?? "";
+      setSaving(true);
+      setSaveError(null);
+      try {
+        // `onSaveAs` is responsible for the OS dialog, the file
+        // write, and the tab transition. Cancellation resolves with
+        // null — keep the tab as-is.
+        const newPath = await onSaveAs(content);
+        if (newPath != null) {
+          // The parent has already swapped the tab key from
+          // `untitled:N` to the real path; this component will be
+          // remounted under the new filePath, so we don't need to
+          // clear local state.
+          window.dispatchEvent(new CustomEvent("band:dirty-change"));
+        }
+      } catch (err) {
+        setSaveError(err instanceof Error ? err.message : "Failed to save");
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
     if (editedContentRef.current === null) return;
     const save = external
       ? adapter.saveExternalFile && ((c: string) => adapter.saveExternalFile!(filePath, c))
@@ -295,7 +399,7 @@ export function FileViewer({
     } finally {
       setSaving(false);
     }
-  }, [adapter, workspaceId, filePath, external]);
+  }, [adapter, workspaceId, filePath, external, untitled, onSaveAs]);
 
   /**
    * Format the editor buffer in-place via Prettier.
@@ -453,6 +557,36 @@ export function FileViewer({
     onBack?.();
   }, [isDirty, onBack]);
 
+  // Searchable language-mode picker (issue #434). Opens from the
+  // status-bar language indicator or the "Change Language Mode…" palette
+  // entry; in both cases we dispatch / listen to a single event so the
+  // wiring stays symmetrical with Quick Open / Search in Files.
+  const [languagePickerOpen, setLanguagePickerOpen] = useState(false);
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as
+        | { workspaceId?: string; filePath?: string | null }
+        | undefined;
+      // Same filter as the format-current-file listener — only the
+      // matching FileViewer responds. Untitled tabs are workspace-
+      // scoped (their synthetic path lives only in the current
+      // workspace's tab list), so the workspaceId guard is the right
+      // selector.
+      if (!detail || detail.workspaceId !== workspaceId) return;
+      if (detail.filePath != null && detail.filePath !== filePath) return;
+      setLanguagePickerOpen(true);
+    };
+    window.addEventListener("band:open-language-picker", handler);
+    return () => window.removeEventListener("band:open-language-picker", handler);
+  }, [workspaceId, filePath]);
+
+  const handlePickLanguage = useCallback(
+    (languageId: string) => {
+      onLanguageOverrideChange?.(languageId);
+    },
+    [onLanguageOverrideChange],
+  );
+
   return (
     // min-w-0 prevents intrinsic-width content (CodeMirror's long unwrapped
     // lines, in particular) from forcing this box wider than its allocated
@@ -513,7 +647,7 @@ export function FileViewer({
             </div>
           )}
           <span className="min-w-0 flex-1 truncate font-mono text-xs">
-            {filePath}
+            {untitled ? "Untitled" : filePath}
             {isDirty && <span className="ml-1 text-muted-foreground">(modified)</span>}
           </span>
           {saveError && <span className="shrink-0 text-xs text-destructive">{saveError}</span>}
@@ -681,6 +815,37 @@ export function FileViewer({
           </div>
         )}
       </div>
+
+      {/* Status bar — language indicator (click to change). Rendered for
+          every editor tab (untitled and file-backed) so the picker
+          surface is always reachable; we gate on the picker callback
+          being wired rather than the file type so the host can opt
+          panels in/out. */}
+      {onLanguageOverrideChange && previewType === "code" && (
+        <div className="flex h-6 shrink-0 items-center justify-end gap-2 border-t border-border/50 bg-background px-2 text-xs">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={() => setLanguagePickerOpen(true)}
+                className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+              >
+                {languageLabel(lang)}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="text-xs">
+              Select Language Mode
+            </TooltipContent>
+          </Tooltip>
+        </div>
+      )}
+
+      <LanguagePickerDialog
+        open={languagePickerOpen}
+        onOpenChange={setLanguagePickerOpen}
+        currentLanguage={lang}
+        onSelect={handlePickLanguage}
+      />
     </div>
   );
 }

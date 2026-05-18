@@ -44,6 +44,20 @@ export interface CommandRegistryDeps {
    * same thing, so the palette and shortcut paths stay symmetric.
    */
   formatCurrentFile: () => void;
+  /**
+   * Open a new untitled (scratch) editor tab. Mirrors the ⌘N shortcut
+   * and the "New Untitled File" button in the Files toolbar; backed by
+   * the `band:new-untitled-tab` event so the action stays loosely
+   * coupled to whichever workspace happens to be active.
+   */
+  newUntitledTab: () => void;
+  /**
+   * Open the searchable language-mode picker for the currently-active
+   * editor tab. Implementations dispatch `band:open-language-picker`
+   * with `{workspaceId, filePath}` so the matching FileViewer listener
+   * opens the dialog (same pattern as `formatCurrentFile`).
+   */
+  changeLanguageMode: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -100,6 +114,16 @@ function activatePanel(deps: CommandRegistryDeps, panelId: string): void {
 export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
   return [
     {
+      // ⌘N — open a new untitled (scratch) editor tab. Listed first
+      // because it's the closest sibling to Quick Open ("create a new
+      // editing surface" vs "find an existing one") and the keybinding
+      // is one of the most discoverable in the app.
+      id: "new-untitled-tab",
+      label: "New Untitled File",
+      shortcut: "Cmd+N",
+      action: () => deps.newUntitledTab(),
+    },
+    {
       id: "quick-open",
       label: "Quick Open",
       shortcut: "Cmd+P",
@@ -132,6 +156,16 @@ export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
       label: "Format Current File",
       shortcut: "Cmd+Shift+F",
       action: () => deps.formatCurrentFile(),
+    },
+    {
+      // Searchable language-mode picker for the active editor tab
+      // (issue #434). No keyboard shortcut — VS Code's equivalent
+      // (Cmd+K M) is a chord we don't yet support; the status-bar
+      // language indicator and this palette entry are the two reachable
+      // surfaces.
+      id: "change-language-mode",
+      label: "Change Language Mode…",
+      action: () => deps.changeLanguageMode(),
     },
     {
       id: "show-chat",

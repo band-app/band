@@ -4,14 +4,45 @@ import { useCallback, useEffect, useRef, useState } from "react";
 // Types
 // ---------------------------------------------------------------------------
 
+/**
+ * Synthetic prefix used as the `filePath` of an untitled tab. The suffix
+ * is a per-workspace monotonic counter — `untitled:1`, `untitled:2`, …
+ * Two reasons we encode untitled-ness into the path itself rather than
+ * keying tabs by an opaque id:
+ *
+ *   1. Every tab consumer (FileTabBar, tab-state localStorage, editor
+ *      state cache, `band:dirty-change`/`band:discard-edits` listeners)
+ *      already indexes by `filePath`. Reusing that key avoids a parallel
+ *      "untitledTabs" data structure with its own activation pointer,
+ *      eviction, and persistence rules — every code path stays
+ *      symmetric with file-backed tabs.
+ *
+ *   2. The synthetic path is not a valid filesystem path on any OS
+ *      Band runs on (the `untitled:` scheme contains a colon, which
+ *      collides with neither POSIX nor Windows path syntax), so the
+ *      "is this an untitled tab" check is unambiguous: callers can
+ *      either inspect the `isUntitled` flag or just test the prefix.
+ *
+ * Untitled tabs are deliberately ephemeral (issue #434 "Out of scope"
+ * called out autosave / scratch persistence as a follow-up): they are
+ * filtered out of the localStorage save path so a reload doesn't
+ * resurrect empty buffers.
+ */
+export const UNTITLED_PREFIX = "untitled:";
+
+export function isUntitledPath(filePath: string): boolean {
+  return filePath.startsWith(UNTITLED_PREFIX);
+}
+
 export interface FileTab {
   /**
    * For workspace files this is the workspace-relative path
    * (`src/main.ts`). For external files this is the absolute
    * filesystem path returned by the OS file picker
-   * (`/Users/alice/notes/scratch.md`). The shape is the same so
-   * downstream tab plumbing (active-tab pointer, dedup, eviction)
-   * doesn't have to special-case the two flavours.
+   * (`/Users/alice/notes/scratch.md`). For untitled tabs it is the
+   * synthetic `untitled:N` key (see `UNTITLED_PREFIX`). The shape is
+   * the same so downstream tab plumbing (active-tab pointer, dedup,
+   * eviction) doesn't have to special-case the three flavours.
    */
   filePath: string;
   /** Preview tab — italic, single shared slot, replaced by next preview open. */
@@ -25,6 +56,19 @@ export interface FileTab {
    * glance that edits write to an out-of-workspace path.
    */
   isExternal?: boolean;
+  /**
+   * True when `filePath` is a synthetic `untitled:N` key (see
+   * `UNTITLED_PREFIX`). Untitled tabs live entirely in-renderer until
+   * the user picks a destination via the OS save dialog; on save the
+   * tab transitions to a regular file-backed tab (workspace or
+   * external) and this flag is cleared.
+   */
+  isUntitled?: boolean;
+  /**
+   * Display name for untitled tabs (e.g. "Untitled-1"). Unused for
+   * file-backed tabs — they derive the title from the basename.
+   */
+  untitledLabel?: string;
 }
 
 export interface UseFileTabsReturn {
@@ -43,6 +87,29 @@ export interface UseFileTabsReturn {
    * created.
    */
   openTabExternal: (absolutePath: string) => void;
+  /**
+   * Create a new untitled (scratch) tab and activate it. Returns the
+   * synthetic `untitled:N` path so the caller can seed editor state
+   * (initial content, language) under the same key the tab uses
+   * everywhere else.
+   *
+   * The counter is monotonic per workspace and never reused, so two
+   * "Untitled-1" tabs cannot coexist even if the first is closed —
+   * matching VS Code's behaviour. Persistence is intentionally not
+   * wired (issue #434 leaves scratch persistence to a follow-up):
+   * untitled tabs are filtered out of the localStorage save path so a
+   * reload doesn't resurrect empty buffers.
+   */
+  openTabUntitled: () => { filePath: string; label: string };
+  /**
+   * Convert an untitled tab into a file-backed tab once the user
+   * picks a destination via the OS save dialog. Removes the
+   * `untitled:N` entry and inserts a new tab at the same position so
+   * the tab order doesn't shuffle on save. `isExternal` controls
+   * whether the resulting tab is rendered with the external-file
+   * marker (chosen path lives outside the workspace root).
+   */
+  renameUntitledToFile: (untitledPath: string, newPath: string, isExternal: boolean) => void;
   /**
    * Open as a preview tab — replaces any existing preview tab.
    *
@@ -90,6 +157,8 @@ interface PersistedTab {
   filePath: string;
   isPreview?: boolean;
   isExternal?: boolean;
+  // Note: untitled tabs are intentionally NOT persisted — see the
+  // serialization filter in `saveTabState` below.
 }
 
 interface PersistedTabState {
@@ -141,8 +210,17 @@ function loadTabState(workspaceId: string): { tabs: FileTab[]; active: string | 
 
 function saveTabState(workspaceId: string, tabs: FileTab[], active: string | null): void {
   try {
+    // Untitled tabs are deliberately ephemeral — see UNTITLED_PREFIX docs
+    // and issue #434 ("Out of scope: autosave / scratch persistence
+    // across reloads"). Filter them out at the serialization boundary so
+    // the loader never sees a synthetic `untitled:N` key and tries to
+    // open it as a real file. The active-tab pointer is rewritten to
+    // null when it points at a dropped untitled tab.
+    const persistedTabs = tabs.filter((t) => !t.isUntitled);
+    const persistedActive =
+      active != null && persistedTabs.some((t) => t.filePath === active) ? active : null;
     const state: PersistedTabState = {
-      tabs: tabs.map((t) => {
+      tabs: persistedTabs.map((t) => {
         // Bare-string serialization is the legacy/compact form for plain
         // pinned workspace tabs. Anything carrying extra flags (preview,
         // external) is written as an object so the loader can re-hydrate
@@ -153,7 +231,7 @@ function saveTabState(workspaceId: string, tabs: FileTab[], active: string | nul
         if (t.isExternal) out.isExternal = true;
         return out;
       }),
-      active,
+      active: persistedActive,
     };
     localStorage.setItem(storageKey(workspaceId), JSON.stringify(state));
   } catch {
@@ -238,6 +316,52 @@ export function useFileTabs(workspaceId: string): UseFileTabsReturn {
     });
     setActiveTabPathState(filePath);
   }, []);
+
+  // Monotonic counter for "Untitled-N" labels. Per-workspace,
+  // intentionally never reused: closing Untitled-1 and creating a new
+  // untitled tab yields Untitled-2 (matching VS Code). The counter
+  // resets when the workspace switches because untitled tabs are
+  // ephemeral — see UNTITLED_PREFIX docs.
+  const untitledCounterRef = useRef(0);
+
+  const openTabUntitled = useCallback((): { filePath: string; label: string } => {
+    untitledCounterRef.current += 1;
+    const n = untitledCounterRef.current;
+    const filePath = `${UNTITLED_PREFIX}${n}`;
+    const label = `Untitled-${n}`;
+    setOpenTabs((prev) => [...prev, { filePath, isUntitled: true, untitledLabel: label }]);
+    setActiveTabPathState(filePath);
+    return { filePath, label };
+  }, []);
+
+  const renameUntitledToFile = useCallback(
+    (untitledPath: string, newPath: string, isExternal: boolean) => {
+      setOpenTabs((prev) => {
+        const idx = prev.findIndex((t) => t.filePath === untitledPath);
+        if (idx === -1) {
+          // Untitled tab vanished mid-save (closed concurrently?). Fall
+          // back to appending the new file-backed tab so the user still
+          // ends up with their saved file visible.
+          return [
+            ...prev,
+            isExternal ? { filePath: newPath, isExternal: true } : { filePath: newPath },
+          ];
+        }
+        // If a tab for `newPath` already exists elsewhere (rare, but
+        // possible when the user saves on top of an already-open file),
+        // drop the duplicate and keep only the one at the untitled slot.
+        const dedup = prev.filter((t, i) => i === idx || t.filePath !== newPath);
+        const slotIdx = dedup.findIndex((t) => t.filePath === untitledPath);
+        const next = dedup.slice();
+        next[slotIdx] = isExternal
+          ? { filePath: newPath, isExternal: true }
+          : { filePath: newPath };
+        return next;
+      });
+      setActiveTabPathState((current) => (current === untitledPath ? newPath : current));
+    },
+    [],
+  );
 
   const openTabExternal = useCallback((absolutePath: string) => {
     // External files are always opened pinned — they're a deliberate user
@@ -437,6 +561,8 @@ export function useFileTabs(workspaceId: string): UseFileTabsReturn {
     openTabPreview,
     openTabPinned,
     openTabExternal,
+    openTabUntitled,
+    renameUntitledToFile,
     pinTab,
     closeTab,
     setActiveTab,

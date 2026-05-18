@@ -23,6 +23,7 @@ import type {
   InstallCliArgs,
   OpenExternalArgs,
   OpenWithAppArgs,
+  PickSaveFileArgs,
   RevealInFinderArgs,
 } from "../../shared/types.js";
 import type { CliPathOptions } from "../services/cli-paths.js";
@@ -35,6 +36,7 @@ import {
   openWithApp,
   pickFile,
   pickFolder,
+  pickSaveFile,
   revealInFinder,
 } from "./macos-shell.js";
 import { getAppTitle } from "./window-title.js";
@@ -95,6 +97,7 @@ export function registerIpc(opts: RegisterOptions): () => void {
   // objects — Electron's IPC has no FFI-level case conversion.
   handle(Channels.pickFolder, () => pickFolder(opts.mainWindow));
   handle(Channels.pickFile, () => pickFile(opts.mainWindow));
+  handle(Channels.pickSaveFile, (args: PickSaveFileArgs) => pickSaveFile(opts.mainWindow, args));
   handle(Channels.revealInFinder, (args: RevealInFinderArgs) => revealInFinder(args.path));
   handle(Channels.checkAppExists, (args: CheckAppExistsArgs) => checkAppExists(args.appName));
   handle(Channels.openWithApp, (args: OpenWithAppArgs) => openWithApp(args.path, args.appName));

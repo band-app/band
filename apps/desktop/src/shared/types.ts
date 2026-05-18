@@ -208,3 +208,19 @@ export interface InstallCliArgs {
 export interface OpenExternalArgs {
   url: string;
 }
+
+/**
+ * Open the system "Save As" picker and persist `content` to the chosen
+ * path. `defaultName` seeds the filename field (e.g. "Untitled-1.txt");
+ * `defaultPath` seeds the directory (e.g. the active workspace root).
+ *
+ * Backs the editor's "Save untitled tab" flow — see `pickSaveFile` in
+ * `apps/desktop/src/main/ipc/macos-shell.ts`. The renderer never writes
+ * to disk directly: bundling the dialog + write into one IPC call keeps
+ * the file-system trust boundary inside the desktop shell.
+ */
+export interface PickSaveFileArgs {
+  content: string;
+  defaultName?: string;
+  defaultPath?: string;
+}

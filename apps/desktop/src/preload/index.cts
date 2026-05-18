@@ -42,6 +42,7 @@ const ALLOWED_INVOKE_CHANNELS = new Set<string>([
   // Phase 2 — macOS shell + open_external
   "pick_folder",
   "pick_file",
+  "pick_save_file",
   "reveal_in_finder",
   "check_app_exists",
   "open_with_app",
