@@ -32,7 +32,6 @@ import {
   type BrowserKeyArg,
   type BrowserNavigateArgs,
   type BrowserNewTabShortcutPayload,
-  type BrowserProceedWithCertErrorArgs,
   type BrowserStopFindInPageArgs,
   type BrowserTitleChangedPayload,
   type BrowserUrlChangedPayload,
@@ -42,6 +41,13 @@ import {
 } from "../shared/types.js";
 import { type BrowserCertErrorPayload, buildCertErrorPayload } from "./cert-error.js";
 import { type CertExceptionStore, partitionForSession } from "./cert-exceptions.js";
+import {
+  type BandAction,
+  buildCertErrorHtml,
+  buildLoadErrorHtml,
+  htmlToDataUrl,
+  parseBandAction,
+} from "./error-html.js";
 import { splitTabBounds } from "./layout.js";
 import {
   type BrowserLoadErrorPayload,
@@ -166,6 +172,17 @@ export class BrowserViewManager {
    * the cert-error range).
    */
   private readonly pendingLoadErrors = new Map<string, BrowserLoadErrorPayload>();
+  /**
+   * Lowercased hostnames the user has clicked Proceed on this
+   * session. Distinct from the `CertExceptionStore` (which is keyed
+   * by `(partition, host, fingerprint)` and is the source of truth
+   * for the `app.on("certificate-error")` override): this set is the
+   * host-only projection exposed to the renderer via the
+   * `getOverriddenHosts` IPC + the `browser-host-overridden` event,
+   * so the dashboard chrome can paint a "Not Secure" badge while
+   * the user is browsing a site with an overridden cert.
+   */
+  private readonly overriddenHosts = new Set<string>();
 
   constructor(private readonly opts: ViewManagerOptions) {}
 
@@ -540,140 +557,79 @@ export class BrowserViewManager {
   }
 
   /**
-   * Record a session-scoped TLS exception for `(host, fingerprint)`
-   * and re-load the failing URL on the matching tab. Used by the
-   * renderer's Chrome-style interstitial when the user clicks
-   * "Proceed to <host> (unsafe)" (issue #444).
+   * Return the lowercased hostnames the user has accepted a cert
+   * exception for in this session. Renderer-facing catch-up so a
+   * dashboard panel restored mid-session can immediately paint the
+   * "Not Secure" badge for hosts the user already proceeded to.
    *
-   * The actual override happens inside the process-wide
-   * `app.on("certificate-error")` handler installed by the
-   * bootstrap; it consults the same `certExceptions` store and calls
-   * `callback(true)` when the triple matches. So all this method has
-   * to do is:
-   *
-   *   1. Record the exception (keyed by `(partition, host, fp)` so
-   *      sibling sessions don't share overrides).
-   *   2. Re-`loadURL` the original failing URL — NOT `reload()`.
-   *      `reload()` would reload `webContents.getURL()`, but a
-   *      cert-blocked navigation never commits, so `getURL()`
-   *      returns `about:blank` (for fresh tabs) or the previous URL
-   *      — neither of which is what the user wants to retry. The
-   *      URL stored on the pending cert-error is the one Chromium
-   *      handed us in the event callback, so it's the authoritative
-   *      target.
-   *   3. Drop the pending entry AFTER capturing the URL so the
-   *      renderer's `browser_get_cert_error_for_view` poll no
-   *      longer reports the interstitial as active.
+   * The full exception store is keyed by `(partition, host,
+   * fingerprint)`, but the renderer only needs the host slice to
+   * decide whether to flag an address. Dropping partition and
+   * fingerprint from the projection keeps the IPC payload tight
+   * and avoids exposing the cert fingerprint to the renderer
+   * surface.
    */
-  proceedWithCertError(args: BrowserProceedWithCertErrorArgs): void {
-    const key = browserKey(args);
+  getOverriddenHosts(): string[] {
+    return Array.from(this.overriddenHosts);
+  }
+
+  /**
+   * Handle a `band-action://…` link click captured by the per-tab
+   * `will-navigate` interceptor. The error pages painted inside the
+   * WebContentsView encode all of their buttons as navigations to
+   * these URLs (see `browser/error-html.ts`); we never let the
+   * "navigation" actually happen — we read the action and dispatch
+   * to the matching internal method instead.
+   */
+  private handleBandAction(key: string, action: BandAction): void {
     const view = this.views.get(key);
     if (!view) return;
-    if (!args.host || !args.fingerprint) return;
-    const partition = partitionForSession(view.webContents.session);
-    this.opts.certExceptions.add({
-      partition,
-      host: args.host,
-      fingerprint: args.fingerprint,
-    });
-    const pending = this.pendingCertErrors.get(key);
-    this.pendingCertErrors.delete(key);
     if (view.webContents.isDestroyed()) return;
-    // Wake the WebContentsView's compositor BEFORE kicking off the
-    // retry. The renderer's error-page visibility effect parked it
-    // via `setVisible(false)` while the interstitial was up; if we
-    // call `loadURL` with the compositor still parked, the new page
-    // commits but the user sees no paint until the renderer's
-    // state-change effect races back to call `browser_show`. By
-    // restoring visibility here we close the race and the page
-    // renders the moment Chromium has pixels. Also re-apply the
-    // last known bounds so a window that resized during the
-    // interstitial doesn't end up with a stale geometry.
-    this.setTabVisibility(key, true);
-    const lastBounds = this.lastBoundsByKey.get(key);
-    if (lastBounds) this.applyTabLayout(key, lastBounds);
-    if (pending?.url) {
-      void view.webContents.loadURL(pending.url);
-    } else {
-      // Defensive fallback: if for some reason we lost the pending
-      // entry (e.g. a concurrent navigation cleared it), fall back
-      // to `reload()`. Worse case the user has to retype the URL,
-      // better than silently doing nothing.
-      view.webContents.reload();
-    }
-  }
-
-  /**
-   * Return the most recent cert-error captured for this tab, or
-   * `null` if no error is pending. Exposed via
-   * `browser_get_cert_error_for_view` so a renderer mounted *after*
-   * the event already fired (e.g. layout restore lands during the
-   * initial navigation) can still draw the interstitial.
-   */
-  getCertErrorForView(args: BrowserKeyArg): BrowserCertErrorPayload | null {
-    const key = browserKey(args);
-    return this.pendingCertErrors.get(key) ?? null;
-  }
-
-  /**
-   * Drop the pending cert-error for a tab without recording an
-   * exception. Called when the user picks "Back to safety" so the
-   * renderer's next state poll doesn't keep showing the stale
-   * interstitial. The tab itself is left blocked — the renderer is
-   * expected to navigate it away (or close it) as part of the same
-   * action.
-   */
-  clearCertError(args: BrowserKeyArg): void {
-    const key = browserKey(args);
-    this.pendingCertErrors.delete(key);
-  }
-
-  /**
-   * Return the pending generic-load error for a tab, or `null` if
-   * none. Catch-up hook for renderers that mount after the event
-   * fired (issue #444 follow-up).
-   */
-  getLoadErrorForView(args: BrowserKeyArg): BrowserLoadErrorPayload | null {
-    const key = browserKey(args);
-    return this.pendingLoadErrors.get(key) ?? null;
-  }
-
-  /**
-   * Drop the pending generic-load error without retrying. Used by
-   * the renderer's "Back" action on the error page so the next
-   * legitimate navigation doesn't keep the stale error on screen.
-   */
-  clearLoadError(args: BrowserKeyArg): void {
-    const key = browserKey(args);
-    this.pendingLoadErrors.delete(key);
-  }
-
-  /**
-   * Re-attempt the failing navigation captured in the pending
-   * load-error entry. Used by the renderer's "Reload" action.
-   * Like `proceedWithCertError`, we cannot use `webContents.reload()`
-   * because a failed navigation never commits — `getURL()` would
-   * reload `about:blank` or the previous URL. Instead we re-`loadURL`
-   * the originally failing URL. Falls back to `reload()` if the
-   * pending entry was concurrently cleared.
-   */
-  retryLoadError(args: BrowserKeyArg): void {
-    const key = browserKey(args);
-    const view = this.views.get(key);
-    if (!view) return;
-    const pending = this.pendingLoadErrors.get(key);
-    this.pendingLoadErrors.delete(key);
-    if (view.webContents.isDestroyed()) return;
-    // Wake the compositor + re-apply bounds before kicking off the
-    // retry — see the matching block in `proceedWithCertError` for
-    // the full rationale.
-    this.setTabVisibility(key, true);
-    const lastBounds = this.lastBoundsByKey.get(key);
-    if (lastBounds) this.applyTabLayout(key, lastBounds);
-    if (pending?.url) {
-      void view.webContents.loadURL(pending.url);
-    } else {
-      view.webContents.reload();
+    switch (action.kind) {
+      case "cert-proceed": {
+        const partition = partitionForSession(view.webContents.session);
+        this.opts.certExceptions.add({
+          partition,
+          host: action.host,
+          fingerprint: action.fingerprint,
+        });
+        this.overriddenHosts.add(action.host.toLowerCase());
+        // Tell the renderer so its address bar can paint the
+        // "Not Secure" badge for this host.
+        this.emit(Events.browserHostOverridden, { host: action.host.toLowerCase() });
+        const pending = this.pendingCertErrors.get(key);
+        this.pendingCertErrors.delete(key);
+        if (pending?.url) {
+          void view.webContents.loadURL(pending.url);
+        } else {
+          // Defensive fallback: lost the pending entry. `reload()`
+          // would reload the data: URI we're sitting on, which
+          // isn't useful — at least navigate to about:blank so the
+          // user is in a clean state.
+          void view.webContents.loadURL("about:blank");
+        }
+        return;
+      }
+      case "cert-back": {
+        this.pendingCertErrors.delete(key);
+        void view.webContents.loadURL("about:blank");
+        return;
+      }
+      case "load-retry": {
+        const pending = this.pendingLoadErrors.get(key);
+        this.pendingLoadErrors.delete(key);
+        if (pending?.url) {
+          void view.webContents.loadURL(pending.url);
+        } else {
+          void view.webContents.loadURL("about:blank");
+        }
+        return;
+      }
+      case "load-back": {
+        this.pendingLoadErrors.delete(key);
+        void view.webContents.loadURL("about:blank");
+        return;
+      }
     }
   }
 
@@ -1080,14 +1036,16 @@ export class BrowserViewManager {
     //     the address bar follows the redirect — matches Chrome's UX.
     view.webContents.on("did-start-navigation", (details) => {
       if (!details.isMainFrame) return;
-      // Clear any pending cert-error as soon as a main-frame
-      // navigation starts. The user has either chosen to navigate
-      // somewhere else (Back to safety) or the page is reloading on
-      // its own — either way, the previous interstitial is no longer
-      // authoritative. The renderer also wipes its local copy from
-      // the `browser-url-changed` listener, so this is belt-and-
-      // braces against a stale `browser_get_cert_error_for_view`
-      // result.
+      // Skip URL emissions for the in-view error pages we load via
+      // `data:` URIs (issue #444 cast follow-up). The renderer's
+      // address bar should keep showing the failing target URL,
+      // not the data URI we use to paint the interstitial.
+      if (details.url.startsWith("data:")) return;
+      // Clear any pending error as soon as a real main-frame
+      // navigation starts. Covers Back-to-safety navigating away
+      // and Proceed triggering a reload. The data: URI loads we do
+      // ourselves are filtered above, so they don't accidentally
+      // wipe the pending entries before the user has acted.
       if (!details.isSameDocument) {
         this.pendingCertErrors.delete(key);
         this.pendingLoadErrors.delete(key);
@@ -1098,9 +1056,28 @@ export class BrowserViewManager {
     // finished" — flips the loading indicator off and re-emits the
     // (now-committed) URL, which corrects any drift if the final URL
     // differs from what `did-start-navigation` reported (e.g. a 3xx
-    // chain that resolved server-side).
+    // chain that resolved server-side). Same `data:` filter as
+    // above so error-page loads don't clobber the address bar.
     view.webContents.on("did-stop-loading", () => {
-      emitUrl(view.webContents.getURL(), false);
+      const url = view.webContents.getURL();
+      if (url.startsWith("data:")) return;
+      emitUrl(url, false);
+    });
+
+    // ---- band-action://… interceptor ----
+    // The in-view error pages encode button clicks as navigations to
+    // a sentinel `band-action://` URL. We catch them on
+    // `will-navigate`, prevent the actual navigation (the URL doesn't
+    // exist on the network), and dispatch to the matching manager
+    // method. This is what lets the screencast workflow proceed
+    // through a cert error: the action lives inside the WebContentsView
+    // so cast viewers can click it; the receiver translates that
+    // click back into a real desktop-side state change.
+    view.webContents.on("will-navigate", (event, navUrl) => {
+      const action = parseBandAction(navUrl);
+      if (!action) return;
+      event.preventDefault();
+      this.handleBandAction(key, action);
     });
     view.webContents.on("page-title-updated", (_e, title) => {
       const payload: BrowserTitleChangedPayload = {
@@ -1113,35 +1090,21 @@ export class BrowserViewManager {
 
     // ---- TLS interstitial (issue #444) ----
     // Chromium's default behaviour for an invalid cert is to silently
-    // block the load. We intercept here with `event.preventDefault()`
-    // and `callback(false)` so Chromium still refuses to load the
-    // page itself, but the renderer gets a chance to draw the Chrome
-    // -style "Your connection is not private" interstitial.
+    // block the load. We intercept here, build the Chrome-style
+    // interstitial HTML, and load it directly into the
+    // WebContentsView via a `data:` URI. Rendering inside the view
+    // (rather than as a React overlay above it) makes the error
+    // page part of any screencast capture — without that, a remote
+    // viewer of a cast tab would see Chromium's blank cert-blocked
+    // page and have no way to Proceed.
     //
     // The process-wide `app.on("certificate-error")` override hook
     // installed in `main/index.ts` consults the shared
-    // `certExceptions` store first; for hosts the user has explicitly
-    // proceeded to, that hook calls `callback(true)` and the per-tab
-    // listener below never fires. So by the time this code runs, the
-    // user has *not* yet accepted the offending cert.
-    //
-    // Why both hooks? Per-`webContents` listeners can call
-    // `event.preventDefault()` to override the default block, but
-    // they don't get a chance to react if no listener is registered
-    // at all — Chromium uses the `app.on(...)` listener as the
-    // single source-of-truth for the "override" decision. We keep the
-    // per-tab one as the metadata pipeline (it has the `webContents`
-    // identity so we can route the event to the right LRU key) and
-    // the `app` one as the override gate.
+    // `certExceptions` store first; for hosts the user has already
+    // proceeded to, that hook calls `callback(true)` and this
+    // per-tab listener never fires. So reaching this code means the
+    // user has *not* yet accepted the cert for this host.
     view.webContents.on("certificate-error", (event, url, errorCode, certificate, callback) => {
-      // Always intervene: we never want Chromium's silent block.
-      // - If the renderer is going to draw an interstitial, we need
-      //   to capture the metadata first (this branch).
-      // - If a session exception exists, the `app.on(...)` hook
-      //   already called `callback(true)` before this listener was
-      //   invoked (Electron prefers app-level overrides for the
-      //   same event), so reaching this code means the user has
-      //   not yet accepted the cert for this host.
       event.preventDefault();
       const payload = buildCertErrorPayload({
         key,
@@ -1156,33 +1119,48 @@ export class BrowserViewManager {
         },
       });
       this.pendingCertErrors.set(key, payload);
-      this.emit(Events.browserCertError, payload);
-      // `callback(false)` ⇒ keep blocking. The user is offered the
-      // override via the interstitial; we never auto-accept.
+      // Tell the renderer the failing URL committed (with
+      // loading=false) so the address bar reflects it and the
+      // spinner stops. `loadURL(data:...)` below would otherwise
+      // fire its own did-start-navigation, which our filter above
+      // skips — without this explicit emit the renderer would be
+      // stuck in loading=true.
+      emitUrl(url, false);
+      // `callback(false)` ⇒ keep blocking the cert. The user is
+      // offered the override via the in-view interstitial; we never
+      // auto-accept.
       callback(false);
+      // Paint the interstitial directly into the WebContentsView.
+      // Button clicks navigate to `band-action://…` which the
+      // `will-navigate` interceptor above dispatches back to
+      // `handleBandAction`.
+      const html = buildCertErrorHtml({
+        url,
+        host: payload.host,
+        errorCode: payload.error_code,
+        errorDescription: payload.error_description,
+        certificate: {
+          fingerprint: certificate.fingerprint,
+          subjectName: certificate.subjectName,
+          issuerName: certificate.issuerName,
+          validStart: certificate.validStart,
+          validExpiry: certificate.validExpiry,
+        },
+      });
+      void view.webContents.loadURL(htmlToDataUrl(html));
     });
-
-    // Note: the pending cert-error is cleared by `did-start-navigation`
-    // above (covers Back-to-safety navigating away and Proceed
-    // triggering a reload), by `proceedWithCertError` (covers the
-    // optimistic clear before the reload races back through here),
-    // and by `destroy` on teardown. We DO NOT clear in
-    // `did-stop-loading` — when Chromium blocks a cert load it
-    // typically leaves the tab pointing at the previous URL (or
-    // `about:blank` for a fresh tab) and then immediately fires
-    // `did-stop-loading`. Clearing on host mismatch there would race
-    // ahead of the renderer's listener and the user would never see
-    // the interstitial.
 
     // ---- Generic load-failure error page ----
     // Companion to the cert flow above: catches `did-fail-load` for
     // main-frame DNS / connection / timeout / etc. failures and
-    // forwards the metadata so the renderer can paint a Chrome-style
-    // "This site can't be reached" page. Filters out user-aborted
-    // navigations and the cert error range — the per-tab
-    // `certificate-error` listener above is the source of truth for
-    // those, and we don't want both events to fight over the same
-    // tab. See `browser/load-error.ts` for the filter rules.
+    // paints a Chrome-style "This site can't be reached" page
+    // directly into the view. Same screencast-friendly rationale:
+    // remote viewers see the error and can click Reload / Back.
+    //
+    // Filters out user-aborted navigations and the cert error range
+    // — the per-tab `certificate-error` listener above owns those,
+    // and we don't want both pages to fight over the same tab. See
+    // `browser/load-error.ts` for the filter rules.
     view.webContents.on(
       "did-fail-load",
       (_event, errorCode, _errorDescription, validatedURL, isMainFrame) => {
@@ -1193,7 +1171,17 @@ export class BrowserViewManager {
           errorCode,
         });
         this.pendingLoadErrors.set(key, payload);
-        this.emit(Events.browserLoadError, payload);
+        // Keep the address bar pointing at the failing URL with
+        // loading=false; the data: URI load below is filtered.
+        emitUrl(validatedURL, false);
+        const html = buildLoadErrorHtml({
+          url: validatedURL,
+          errorCode,
+          errorName: payload.error_name,
+          headline: payload.headline,
+          description: payload.description,
+        });
+        void view.webContents.loadURL(htmlToDataUrl(html));
       },
     );
 

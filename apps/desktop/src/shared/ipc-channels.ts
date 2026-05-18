@@ -74,33 +74,20 @@ export const Channels = {
   // wired up with `setDevToolsWebContents` — not as a detached OS
   // window.
   browserToggleDevTools: "browser_toggle_dev_tools",
-  // Chrome-style "Your connection is not private" interstitial flow
-  // (issue #444). The desktop catches Chromium's `certificate-error`
-  // event per tab, emits a `browser-cert-error` event with the error
-  // details, and exposes these two IPCs so the renderer can:
+  // Chrome-style error pages for cert / load failures are rendered
+  // INSIDE the WebContentsView via a `data:` URI (issue #444 — see
+  // `browser/error-html.ts`). The user's button clicks become
+  // `band-action://…` navigations which the per-tab `will-navigate`
+  // interceptor in `view-manager.ts` translates into the matching
+  // manager call — no renderer-side IPC needed for the buttons
+  // themselves. The only renderer-facing surface is the
+  // `browser-host-overridden` event below, so the dashboard chrome
+  // can paint the "Not Secure" badge.
   //
-  //   - Record a session-scoped exception for (host, fingerprint)
-  //     and reload the tab after the user clicks "Proceed".
-  //   - Re-fetch the pending error for a tab if the renderer mounted
-  //     after the event already fired (race on initial load).
-  //
-  // The exception map lives in the main process; see
-  // `apps/desktop/src/browser/cert-exceptions.ts`.
-  browserProceedWithCertError: "browser_proceed_with_cert_error",
-  browserGetCertErrorForView: "browser_get_cert_error_for_view",
-  // Clear the pending cert-error for a tab without proceeding. Called
-  // when the user picks "Back to safety" so the next legitimate
-  // navigation doesn't re-show the stale interstitial.
-  browserClearCertError: "browser_clear_cert_error",
-  // Generic navigation-failure page (DNS, refused, timeout, …) — the
-  // `did-fail-load` companion to the cert-error flow above. Same
-  // shape: emit the metadata as an event, expose
-  // get/clear/retry IPCs so the renderer can paint the Chrome-style
-  // "This site can't be reached" page in place of the blank
-  // WebContentsView. See `browser/load-error.ts`.
-  browserGetLoadErrorForView: "browser_get_load_error_for_view",
-  browserClearLoadError: "browser_clear_load_error",
-  browserRetryLoadError: "browser_retry_load_error",
+  // Renderer-mounted-late catch-up: report which hosts already have
+  // an active session exception so the badge shows up correctly
+  // when a panel is restored after the user already proceeded.
+  browserGetOverriddenHosts: "browser_get_overridden_hosts",
 } as const;
 
 export type ChannelName = (typeof Channels)[keyof typeof Channels];
@@ -128,19 +115,14 @@ export const Events = {
    *  WebContentsView. The renderer's DockviewBrowserContainer reacts by
    *  opening a new tab in whichever container holds the source pane. */
   browserNewTabShortcut: "browser-new-tab-shortcut",
-  /** Pushed when Chromium rejects a TLS certificate while loading a
-   *  browser tab. The default Chromium behaviour is a silent block;
-   *  the per-tab `certificate-error` listener in `view-manager.ts`
-   *  intercepts that and forwards the error metadata here so the
-   *  renderer can render the Chrome-style interstitial overlay
-   *  (issue #444). */
-  browserCertError: "browser-cert-error",
-  /** Pushed on `did-fail-load` for the main frame, except for
-   *  expected cases (user-aborted navigations, cert errors —
-   *  which the cert-error pipeline above handles). Drives the
-   *  Chrome-style "This site can't be reached" page in
-   *  `BrowserPanel.tsx`. See `browser/load-error.ts`. */
-  browserLoadError: "browser-load-error",
+  /** Pushed when the user accepts a TLS exception (clicks Proceed
+   *  in the in-view cert interstitial). Carries the host so the
+   *  renderer can flag the address bar with a "Not Secure" badge
+   *  for that origin. The cert interstitial itself is rendered
+   *  inside the WebContentsView (see `browser/error-html.ts`) so
+   *  it stays visible during screencast — this event is only for
+   *  the surrounding dashboard chrome. */
+  browserHostOverridden: "browser-host-overridden",
   windowFullscreenChanged: "window-fullscreen-changed",
   /** Pushed by the main process when the background updater detects (or
    *  clears) a pending app update. Payload: `PendingUpdate` from

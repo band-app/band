@@ -1,18 +1,16 @@
 import type { IDockviewPanelProps } from "dockview";
 import { ArrowLeft, ArrowRight, RotateCw, Wrench, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { useBrowserCertError } from "../hooks/useBrowserCertError";
-import { useBrowserLoadError } from "../hooks/useBrowserLoadError";
 import { useBrowserPaneControls } from "../hooks/useBrowserPaneControls";
 import { useBrowserPaneFreeze } from "../hooks/useBrowserPaneFreeze";
+import { useOverriddenHosts } from "../hooks/useOverriddenHosts";
 import { invoke as desktopInvoke, listen as desktopListen } from "../lib/desktop-ipc";
 import { isDesktop } from "../lib/is-desktop";
 import { trpc } from "../lib/trpc-client";
 import { AddressBarAutocomplete } from "./AddressBarAutocomplete";
 import { BrowserFindBar } from "./BrowserFindBar";
-import { CertErrorInterstitial, NotSecureBadge } from "./CertErrorInterstitial";
 import { HistoryPopover } from "./HistoryPopover";
-import { LoadErrorPage } from "./LoadErrorPage";
+import { NotSecureBadge } from "./NotSecureBadge";
 
 const DEFAULT_URL = "";
 const BLANK_URL = "about:blank";
@@ -110,15 +108,12 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
     visible: api.isActive && params.wsActive !== false,
     ipcKeyRef,
   });
-  // Chrome-style TLS interstitial (issue #444). When Chromium rejects
-  // a cert for this tab, the hook surfaces `state`, which we render
-  // as an overlay over the placeholder; `proceed` records a session
-  // exception and `clear` is the Back-to-safety reset.
-  const certError = useBrowserCertError({ key: workspaceId, keyName: "workspaceId" });
-  // Generic "This site can't be reached" page (DNS / refused /
-  // timeout / etc.). Cert errors are filtered out of this stream
-  // on the desktop side so the two never coexist.
-  const loadError = useBrowserLoadError({ key: workspaceId, keyName: "workspaceId" });
+  // TLS interstitial + generic "site can't be reached" pages are
+  // painted INSIDE the WebContentsView via a data: URI (issue #444).
+  // The renderer just needs the set of hosts the user has overridden
+  // a cert error for, so the address bar can paint a "Not Secure"
+  // badge while the user is on those origins.
+  const { isOverriddenHost } = useOverriddenHosts();
   // `addressInputFocusedRef` is now owned by `useBrowserPaneControls`
   // — it's destructured back out below and read inside the
   // `browser-url-changed` listener to skip clobbering an in-progress
@@ -358,36 +353,6 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
     }
   }, [params.wsActive, api, created, getBounds, invoke, workspaceId]);
 
-  // ------- error-page visibility (issue #444) -------
-  // The native `WebContentsView` is an OS-level compositor layer that
-  // paints on top of the React DOM, so a `<div class="absolute inset-0
-  // z-50">` overlay alone is hidden behind it — the user sees
-  // Chromium's blank failed-load page instead of our interstitial.
-  //
-  // Mirror the freeze-on-overlay pattern: while EITHER a cert error
-  // OR a generic load error is pending, force the WebContentsView to
-  // `setVisible(false)` so the React-rendered page in
-  // `placeholderRef` becomes the top-most surface. When both clear
-  // (user proceeds / retries / dismisses), restore visibility from
-  // the same rules the `wsActive`/`isActive` effect above uses so
-  // the reloaded page shows up.
-  const errorShowing = certError.state !== null || loadError.state !== null;
-  useEffect(() => {
-    if (!isDesktop || !created) return;
-    if (errorShowing) {
-      invoke("browser_hide", { workspaceId }).catch(() => {});
-      return;
-    }
-    const wsActive = params.wsActive !== false;
-    if (wsActive && api.isActive) {
-      invoke("browser_show", { workspaceId }).catch(() => {});
-      const bounds = getBounds();
-      if (bounds && bounds.width > 0 && bounds.height > 0) {
-        invoke("browser_set_bounds", { workspaceId, ...bounds }).catch(() => {});
-      }
-    }
-  }, [errorShowing, params.wsActive, api, created, getBounds, invoke, workspaceId]);
-
   // ------- keep webview bounds in sync on resize -------
 
   useEffect(() => {
@@ -597,7 +562,7 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
             <RotateCw className="size-4" />
           </button>
         )}
-        {certError.isOverriddenHost(currentUrl) ? <NotSecureBadge /> : null}
+        {isOverriddenHost(currentUrl) ? <NotSecureBadge /> : null}
         <input
           type="text"
           value={inputUrl}
@@ -647,42 +612,13 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
        *  native WebContentsView. */}
       <BrowserFindBar find={find} />
 
-      {/* Placeholder – the native webview is positioned over this area */}
+      {/* Placeholder – the native webview is positioned over this area.
+       *  Error pages (cert / "site can't be reached") are painted
+       *  INSIDE the WebContentsView via a data: URI — see
+       *  apps/desktop/src/browser/error-html.ts. The only error-
+       *  related UI the renderer still owns is the "Not Secure"
+       *  badge in the address bar above. */}
       <div ref={placeholderRef} className="relative min-h-0 flex-1">
-        {certError.state ? (
-          // Chrome-style cert-error interstitial (issue #444). Drawn
-          // on top of the placeholder; while it's visible the freeze
-          // snapshot below also paints, keeping the WebContentsView
-          // from bleeding through the React DOM.
-          <CertErrorInterstitial
-            state={certError.state}
-            onProceed={() => {
-              void certError.proceed();
-            }}
-            onBack={() => {
-              void certError.clear();
-              // Navigate the tab away from the failing URL. An empty
-              // string triggers the `handleNavigate` short-circuit
-              // that loads about:blank and clears the address bar.
-              void handleNavigate("");
-            }}
-          />
-        ) : loadError.state ? (
-          // Chrome-style "This site can't be reached" page for
-          // non-cert failures (DNS / refused / timeout / etc.). Only
-          // rendered when there's no cert error — the cert error
-          // takes precedence and has its own UI.
-          <LoadErrorPage
-            state={loadError.state}
-            onRetry={() => {
-              void loadError.retry();
-            }}
-            onBack={() => {
-              void loadError.clear();
-              void handleNavigate("");
-            }}
-          />
-        ) : null}
         {snapshot ? (
           // Frozen raster shown while any overlay is open. See
           // `lib/browser-pane-freeze.ts`.
@@ -759,12 +695,11 @@ export function BrowserPaneComponent({
     visible: api.isVisible && params.wsActive !== false,
     ipcKeyRef,
   });
-  // Chrome-style TLS interstitial (issue #444). Same hook as the
-  // legacy `BrowserPanelComponent`; keyed by `browserId` here.
-  const certError = useBrowserCertError({ key: browserId, keyName: "browserId" });
-  // Generic "This site can't be reached" page — see identical block
-  // in `BrowserPanelComponent` for the rationale.
-  const loadError = useBrowserLoadError({ key: browserId, keyName: "browserId" });
+  // Error pages live INSIDE the WebContentsView (issue #444 +
+  // screencast follow-up); the renderer only tracks the host-override
+  // set for the "Not Secure" badge. Same hook + behaviour as
+  // `BrowserPanelComponent`.
+  const { isOverriddenHost } = useOverriddenHosts();
   // `addressInputFocusedRef` is destructured from
   // `useBrowserPaneControls` below and read inside the
   // `browser-url-changed` listener to skip clobbering an in-progress
@@ -1043,28 +978,6 @@ export function BrowserPaneComponent({
     }
   }, [params.wsActive, api, created, getBounds, invoke, browserId]);
 
-  // ------- error-page visibility (issue #444) -------
-  // See identical block in `BrowserPanelComponent` above for the
-  // rationale: the OS-level `WebContentsView` would otherwise
-  // composite over our React error UI and the user would see a
-  // blank failed-load page.
-  const errorShowingPane = certError.state !== null || loadError.state !== null;
-  useEffect(() => {
-    if (!isDesktop || !created) return;
-    if (errorShowingPane) {
-      invoke("browser_hide", { browserId }).catch(() => {});
-      return;
-    }
-    const wsActive = params.wsActive !== false;
-    if (wsActive && api.isVisible) {
-      invoke("browser_show", { browserId }).catch(() => {});
-      const bounds = getBounds();
-      if (bounds && bounds.width > 0 && bounds.height > 0) {
-        invoke("browser_set_bounds", { browserId, ...bounds }).catch(() => {});
-      }
-    }
-  }, [errorShowingPane, params.wsActive, api, created, getBounds, invoke, browserId]);
-
   // ------- keep webview bounds in sync on resize -------
   useEffect(() => {
     if (!isDesktop || !created) return;
@@ -1248,7 +1161,7 @@ export function BrowserPaneComponent({
             <RotateCw className="size-4" />
           </button>
         )}
-        {certError.isOverriddenHost(currentUrl) ? <NotSecureBadge /> : null}
+        {isOverriddenHost(currentUrl) ? <NotSecureBadge /> : null}
         <input
           type="text"
           value={inputUrl}
@@ -1291,34 +1204,9 @@ export function BrowserPaneComponent({
         <AddressBarAutocomplete state={autocomplete} onSelect={handleNavigate} />
       </div>
       <BrowserFindBar find={find} />
+      {/* Placeholder – error pages live inside the WebContentsView via
+       *  a data: URI; see the identical block in `BrowserPanelComponent`. */}
       <div ref={placeholderRef} className="relative min-h-0 flex-1">
-        {certError.state ? (
-          // Chrome-style cert-error interstitial — see the identical
-          // block in `BrowserPanelComponent` for the rationale.
-          <CertErrorInterstitial
-            state={certError.state}
-            onProceed={() => {
-              void certError.proceed();
-            }}
-            onBack={() => {
-              void certError.clear();
-              void handleNavigate("");
-            }}
-          />
-        ) : loadError.state ? (
-          // Chrome-style "This site can't be reached" page — see the
-          // identical block in `BrowserPanelComponent`.
-          <LoadErrorPage
-            state={loadError.state}
-            onRetry={() => {
-              void loadError.retry();
-            }}
-            onBack={() => {
-              void loadError.clear();
-              void handleNavigate("");
-            }}
-          />
-        ) : null}
         {snapshot ? (
           // `object-contain object-top` — see the identical block in
           // `BrowserPanelComponent` for the DevTools-aware rationale.

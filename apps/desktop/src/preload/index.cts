@@ -78,14 +78,10 @@ const ALLOWED_INVOKE_CHANNELS = new Set<string>([
   "browser_zoom",
   // Toggle Chromium DevTools for a browser tab
   "browser_toggle_dev_tools",
-  // Chrome-style cert-error interstitial (issue #444)
-  "browser_proceed_with_cert_error",
-  "browser_get_cert_error_for_view",
-  "browser_clear_cert_error",
-  // Chrome-style "This site can't be reached" page (issue #444 follow-up)
-  "browser_get_load_error_for_view",
-  "browser_clear_load_error",
-  "browser_retry_load_error",
+  // Chrome-style cert / load error pages (issue #444). Painted
+  // inside the WebContentsView; only the overridden-hosts catch-up
+  // crosses the IPC boundary.
+  "browser_get_overridden_hosts",
 ]);
 
 const ALLOWED_EVENT_NAMES = new Set<string>([
@@ -95,8 +91,7 @@ const ALLOWED_EVENT_NAMES = new Set<string>([
   "browser-found-in-page",
   "browser-find-shortcut",
   "browser-new-tab-shortcut",
-  "browser-cert-error",
-  "browser-load-error",
+  "browser-host-overridden",
   "window-fullscreen-changed",
   "updater-status-changed",
 ]);

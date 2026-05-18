@@ -102,16 +102,13 @@ export interface BrowserStopFindInPageArgs extends BrowserKeyArg {
 }
 
 /**
- * "Proceed past the cert-error interstitial" arg bag (issue #444).
- *
- * The renderer hands us the same (host, fingerprint) pair we already
- * pushed via the `browser-cert-error` event so we can register the
- * session exception without re-deriving them from a possibly-stale
- * stored error.
+ * Emitted when the user accepts a TLS exception in the in-view
+ * cert interstitial (issue #444). The host is what the dashboard
+ * chrome keys its "Not Secure" badge off of — `host` is already
+ * lowercased and port-stripped by the desktop side.
  */
-export interface BrowserProceedWithCertErrorArgs extends BrowserKeyArg {
+export interface BrowserHostOverriddenPayload {
   host: string;
-  fingerprint: string;
 }
 
 /**

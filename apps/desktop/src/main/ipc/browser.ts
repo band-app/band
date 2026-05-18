@@ -1,11 +1,9 @@
 /**
- * Thin IPC handler glue for the 12 `browser_*` commands.
+ * Thin IPC handler glue for the `browser_*` commands.
  * Delegates to `BrowserViewManager` (in `apps/desktop/src/browser/view-manager.ts`),
  * which holds the `WebContentsView` LRU and emits change events.
  */
 
-import type { BrowserCertErrorPayload } from "../../browser/cert-error.js";
-import type { BrowserLoadErrorPayload } from "../../browser/load-error.js";
 import type { BrowserViewManager } from "../../browser/view-manager.js";
 import type {
   BrowserBoundsArgs,
@@ -15,7 +13,6 @@ import type {
   BrowserFindInPageArgs,
   BrowserKeyArg,
   BrowserNavigateArgs,
-  BrowserProceedWithCertErrorArgs,
   BrowserStopFindInPageArgs,
   BrowserZoomArgs,
 } from "../../shared/types.js";
@@ -54,20 +51,12 @@ export const browserHandlers = {
   zoom: (ctx: BrowserIpcContext, args: BrowserZoomArgs): void => ctx.manager.zoom(args),
   toggleDevTools: (ctx: BrowserIpcContext, args: BrowserKeyArg): void =>
     ctx.manager.toggleDevTools(args),
-  proceedWithCertError: (ctx: BrowserIpcContext, args: BrowserProceedWithCertErrorArgs): void =>
-    ctx.manager.proceedWithCertError(args),
-  getCertErrorForView: (
-    ctx: BrowserIpcContext,
-    args: BrowserKeyArg,
-  ): BrowserCertErrorPayload | null => ctx.manager.getCertErrorForView(args),
-  clearCertError: (ctx: BrowserIpcContext, args: BrowserKeyArg): void =>
-    ctx.manager.clearCertError(args),
-  getLoadErrorForView: (
-    ctx: BrowserIpcContext,
-    args: BrowserKeyArg,
-  ): BrowserLoadErrorPayload | null => ctx.manager.getLoadErrorForView(args),
-  clearLoadError: (ctx: BrowserIpcContext, args: BrowserKeyArg): void =>
-    ctx.manager.clearLoadError(args),
-  retryLoadError: (ctx: BrowserIpcContext, args: BrowserKeyArg): void =>
-    ctx.manager.retryLoadError(args),
+  // Cert / load error pages are painted INSIDE the WebContentsView
+  // via a `data:` URI (issue #444). The user's button clicks become
+  // `band-action://…` navigations intercepted by the view manager,
+  // so the only renderer-facing surface is this catch-up call: the
+  // dashboard chrome reads it on mount to paint the "Not Secure"
+  // badge for any hosts the user already proceeded to in this
+  // session. See `browser/error-html.ts`.
+  getOverriddenHosts: (ctx: BrowserIpcContext): string[] => ctx.manager.getOverriddenHosts(),
 };
