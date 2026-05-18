@@ -1041,22 +1041,28 @@ export class BrowserViewManager {
       // to a sentinel `band-action://` URL. Chromium has no idea
       // what that scheme is, so without intercepting it would commit
       // the navigation, fail to load, and leave the tab on the
-      // unknown-scheme URL. We catch it the moment the navigation
-      // starts, abort the load with `stop()`, and dispatch the
-      // action ourselves — which immediately `loadURL`s a real URL
-      // so the user never lingers on `band-action://`.
+      // unknown-scheme URL.
       //
-      // We previously did this via `will-navigate` + preventDefault,
-      // but on Electron 35 that event doesn't reliably fire for
+      // CRITICAL: we DEFER the `stop()` + dispatch via setImmediate.
+      // Calling `webContents.stop()` or `webContents.loadURL()`
+      // synchronously from inside `did-start-navigation` re-enters
+      // Chromium's navigation pipeline while it's still processing
+      // the start of the current navigation — that reentrancy
+      // crashes the main process with `EXC_BREAKPOINT` deep inside
+      // V8 / `cppgc::internal::PersistentRegionBase::Iterate`. The
+      // setImmediate hop lets the current navigation event return
+      // first, so the abort + new loadURL happen from a clean stack.
+      //
+      // Why not `will-navigate`? On Electron 35 it doesn't fire for
       // unknown URL schemes (Chromium's external-protocol handling
-      // appears to short-circuit it). `did-start-navigation` always
-      // fires, and `stop()` after the commit is enough — the
-      // address bar bobble is hidden by the `band-action://` filter
-      // in the URL emission below.
+      // short-circuits it). `did-start-navigation` always fires.
       if (details.url.startsWith("band-action://")) {
-        view.webContents.stop();
         const action = parseBandAction(details.url);
-        if (action) this.handleBandAction(key, action);
+        setImmediate(() => {
+          if (view.webContents.isDestroyed()) return;
+          view.webContents.stop();
+          if (action) this.handleBandAction(key, action);
+        });
         return;
       }
       // Skip URL emissions for the in-view error pages we load via
@@ -1164,7 +1170,10 @@ export class BrowserViewManager {
       // Paint the interstitial directly into the WebContentsView.
       // Button clicks navigate to `band-action://…` which the
       // `did-start-navigation` interceptor above dispatches back to
-      // `handleBandAction`.
+      // `handleBandAction`. DEFER via setImmediate — calling
+      // `loadURL` synchronously from a Chromium event handler that
+      // still has navigation state on the stack has caused
+      // main-process crashes deep inside V8.
       const html = buildCertErrorHtml({
         url,
         host: payload.host,
@@ -1178,7 +1187,10 @@ export class BrowserViewManager {
           validExpiry: certificate.validExpiry,
         },
       });
-      void view.webContents.loadURL(htmlToDataUrl(html));
+      setImmediate(() => {
+        if (view.webContents.isDestroyed()) return;
+        void view.webContents.loadURL(htmlToDataUrl(html));
+      });
     });
 
     // ---- Generic load-failure error page ----
@@ -1212,7 +1224,11 @@ export class BrowserViewManager {
           headline: payload.headline,
           description: payload.description,
         });
-        void view.webContents.loadURL(htmlToDataUrl(html));
+        // DEFER — see the matching block in the cert-error handler.
+        setImmediate(() => {
+          if (view.webContents.isDestroyed()) return;
+          void view.webContents.loadURL(htmlToDataUrl(html));
+        });
       },
     );
 
