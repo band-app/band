@@ -106,6 +106,7 @@ import {
   loadCurrentStatuses,
   loadSettings,
   loadState,
+  type ProjectKind,
   saveSettings,
   saveState,
   upsertWorkspaceStatus,
@@ -163,33 +164,39 @@ const projectsRouter = t.router({
 
     const projects = await Promise.all(
       state.projects.map(async (project) => {
-        // state.json is the canonical "tracked workspaces" set — git's view
-        // is just used to enrich each entry with current path/head. We
-        // intersect the two so a workspace removed from state.json (e.g.
-        // by workspaces.remove, which updates state.json synchronously and
-        // defers the slow `git worktree remove` / `git branch -D` to a
-        // background task) disappears from the list immediately, even
-        // before the async cleanup has finished pruning the on-disk
-        // worktree. Without this filter, `projects.list` reads stale data
-        // from `git worktree list` and shows just-deleted workspaces until
-        // the background cleanup completes.
-        const trackedBranches = new Set(project.worktrees.map((wt) => wt.branch));
-        // Map by branch so we can preserve metadata (e.g. `pinned`) that git
-        // doesn't know about when merging git's view with our tracked state.
-        const trackedByBranch = new Map(project.worktrees.map((wt) => [wt.branch, wt]));
+        // Plain projects have a single implicit workspace whose path equals
+        // the project path. They don't have a `.git` directory, so we skip
+        // the `git worktree list` enrichment entirely and rely on the
+        // workspace row that `projects.add` synthesized into state.
         let worktrees = project.worktrees;
-        try {
-          const gitWorktrees = await listWorktrees(project.path);
-          worktrees = gitWorktrees
-            .filter((wt) => !wt.isBare && trackedBranches.has(wt.branch))
-            .map((wt) => ({
-              branch: wt.branch,
-              path: wt.path,
-              head: wt.head,
-              pinned: trackedByBranch.get(wt.branch)?.pinned ?? false,
-            }));
-        } catch {
-          // Fall back to state.json worktrees
+        if (project.kind === "git") {
+          // state.json is the canonical "tracked workspaces" set — git's view
+          // is just used to enrich each entry with current path/head. We
+          // intersect the two so a workspace removed from state.json (e.g.
+          // by workspaces.remove, which updates state.json synchronously and
+          // defers the slow `git worktree remove` / `git branch -D` to a
+          // background task) disappears from the list immediately, even
+          // before the async cleanup has finished pruning the on-disk
+          // worktree. Without this filter, `projects.list` reads stale data
+          // from `git worktree list` and shows just-deleted workspaces until
+          // the background cleanup completes.
+          const trackedBranches = new Set(project.worktrees.map((wt) => wt.branch));
+          // Map by branch so we can preserve metadata (e.g. `pinned`) that git
+          // doesn't know about when merging git's view with our tracked state.
+          const trackedByBranch = new Map(project.worktrees.map((wt) => [wt.branch, wt]));
+          try {
+            const gitWorktrees = await listWorktrees(project.path);
+            worktrees = gitWorktrees
+              .filter((wt) => !wt.isBare && trackedBranches.has(wt.branch))
+              .map((wt) => ({
+                branch: wt.branch,
+                path: wt.path,
+                head: wt.head,
+                pinned: trackedByBranch.get(wt.branch)?.pinned ?? false,
+              }));
+          } catch {
+            // Fall back to state.json worktrees
+          }
         }
 
         return {
@@ -197,6 +204,7 @@ const projectsRouter = t.router({
           path: project.path,
           defaultBranch: project.defaultBranch,
           label: project.label,
+          kind: project.kind,
           worktrees: worktrees.map((wt) => {
             const workspaceId = toWorkspaceId(project.name, wt.branch);
             const status = statusMap.get(workspaceId);
@@ -244,30 +252,49 @@ const projectsRouter = t.router({
         }
       }
 
-      let defaultBranch = "main";
-      try {
-        const env = { ...process.env };
-        if (env.PATH) {
-          env.PATH = `/opt/homebrew/bin:/usr/local/bin:${env.PATH}`;
-        }
-        const output = execFileSync("git", ["symbolic-ref", "--short", "HEAD"], {
-          cwd: input.path,
-          env,
-          encoding: "utf-8",
-        }).trim();
-        if (output) defaultBranch = output;
-      } catch {
-        // Fall back to "main"
-      }
+      // Detect project kind from the presence of `.git`. Plain (non-git)
+      // folders skip the symbolic-ref / listWorktrees probes entirely and
+      // get a single synthesized workspace pointing at the project path —
+      // this is the whole point of #427: lower the barrier for adding a
+      // scratch directory, design docs, or any folder that hasn't been
+      // `git init`-ed.
+      const resolvedPath = resolve(input.path);
+      const kind: ProjectKind = existsSync(join(resolvedPath, ".git")) ? "git" : "plain";
 
+      let defaultBranch = "main";
       let worktrees: { branch: string; path: string; head?: string; pinned: boolean }[] = [];
-      try {
-        const gitWorktrees = await listWorktrees(input.path);
-        worktrees = gitWorktrees
-          .filter((wt) => !wt.isBare)
-          .map((wt) => ({ branch: wt.branch, path: wt.path, head: wt.head, pinned: false }));
-      } catch {
-        // No worktrees
+
+      if (kind === "git") {
+        try {
+          const env = { ...process.env };
+          if (env.PATH) {
+            env.PATH = `/opt/homebrew/bin:/usr/local/bin:${env.PATH}`;
+          }
+          const output = execFileSync("git", ["symbolic-ref", "--short", "HEAD"], {
+            cwd: input.path,
+            env,
+            encoding: "utf-8",
+          }).trim();
+          if (output) defaultBranch = output;
+        } catch {
+          // Fall back to "main"
+        }
+
+        try {
+          const gitWorktrees = await listWorktrees(input.path);
+          worktrees = gitWorktrees
+            .filter((wt) => !wt.isBare)
+            .map((wt) => ({ branch: wt.branch, path: wt.path, head: wt.head, pinned: false }));
+        } catch {
+          // No worktrees
+        }
+      } else {
+        // Plain projects get exactly one implicit workspace whose path is
+        // the project path. We use "main" as the synthetic branch name so
+        // workspaceId stays deterministic (`{name}-main`), even though the
+        // folder has no actual branch. UI gating prevents the user from
+        // creating other workspaces or invoking branch/PR features.
+        worktrees = [{ branch: "main", path: input.path, pinned: false }];
       }
 
       const project = {
@@ -276,12 +303,50 @@ const projectsRouter = t.router({
         defaultBranch,
         worktrees,
         label: input.label ?? undefined,
+        kind,
       };
 
       state.projects.push(project);
       saveState(state);
 
       return project;
+    }),
+
+  /**
+   * Run `git init` inside a plain project and flip its kind to "git".
+   * The "promote to git" escape hatch from #427: lets a user start with a
+   * plain folder and later opt into branches/PRs without re-adding the
+   * project. After promotion, the existing implicit workspace becomes the
+   * project's default-branch worktree (its path is already the project
+   * path, which matches git's convention for the main worktree).
+   */
+  promoteToGit: publicProcedure
+    .input(z.object({ name: z.string() }))
+    .mutation(async ({ input }) => {
+      const state = loadState();
+      const project = state.projects.find((p) => p.name === input.name);
+      if (!project) {
+        throw new Error(`Project "${input.name}" not found`);
+      }
+      if (project.kind === "git") {
+        throw new Error(`Project "${input.name}" is already a git project`);
+      }
+
+      // `git init -b main` pins HEAD to refs/heads/main so the implicit
+      // "main" workspace's branch matches the repo's HEAD regardless of
+      // the user's `init.defaultBranch` config. Without this, a user whose
+      // git defaults to "master" would end up with a workspaceId
+      // (`{name}-main`) that doesn't correspond to any real branch.
+      // `git init` is idempotent — if `.git` somehow appeared between the
+      // initial `projects.add` probe and now, this is a no-op rather than
+      // an error.
+      await execGit(["init", "-b", "main"], project.path);
+
+      project.kind = "git";
+      project.defaultBranch = "main";
+      saveState(state);
+
+      return { ok: true, kind: project.kind, defaultBranch: project.defaultBranch };
     }),
 
   remove: publicProcedure.input(z.object({ name: z.string() })).mutation(({ input }) => {
@@ -351,6 +416,16 @@ const workspacesRouter = t.router({
         throw new Error(`Project "${input.project}" not found`);
       }
 
+      // Plain projects have exactly one implicit workspace, created at
+      // project-add time. Creating additional workspaces is meaningless
+      // without git worktrees, so reject the call as a backstop — the UI
+      // should already be hiding the "New workspace" button.
+      if (proj.kind === "plain") {
+        throw new Error(
+          `Project "${input.project}" is a plain (non-git) project and cannot have additional workspaces. Promote it to git first.`,
+        );
+      }
+
       const existing = proj.worktrees.find((wt) => wt.branch === input.branch);
       if (existing) {
         return { ok: true, path: existing.path };
@@ -412,6 +487,15 @@ const workspacesRouter = t.router({
       const proj = state.projects.find((p) => p.name === input.project);
       if (!proj) {
         throw new Error(`Project "${input.project}" not found`);
+      }
+
+      // Plain projects can't have their (single, implicit) workspace
+      // removed — the workspace is the project. The user must remove the
+      // project entirely instead.
+      if (proj.kind === "plain") {
+        throw new Error(
+          `Project "${input.project}" is a plain (non-git) project. Remove the project instead of the workspace.`,
+        );
       }
 
       const { command, env: gitEnv } = gitCmd();
@@ -599,6 +683,11 @@ const workspacesRouter = t.router({
       if (!workspace) {
         throw new Error("Workspace not found");
       }
+      if (workspace.project.kind === "plain") {
+        throw new Error(
+          `Project "${input.project}" is a plain (non-git) project. Git pull is not available.`,
+        );
+      }
       const cwd = workspace.worktree.path;
       try {
         await execGit(["pull", "--rebase"], cwd);
@@ -622,6 +711,11 @@ const workspacesRouter = t.router({
       const workspace = resolveWorkspace(workspaceId);
       if (!workspace) {
         throw new Error("Workspace not found");
+      }
+      if (workspace.project.kind === "plain") {
+        throw new Error(
+          `Project "${input.project}" is a plain (non-git) project. Git push is not available.`,
+        );
       }
       const cwd = workspace.worktree.path;
       try {

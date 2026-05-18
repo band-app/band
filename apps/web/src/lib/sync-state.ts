@@ -34,6 +34,10 @@ export async function syncWorktrees(): Promise<void> {
   let changed = false;
 
   for (const project of state.projects) {
+    // Plain projects have no .git directory, no worktrees, no remote —
+    // there's nothing to reconcile against, and `listWorktrees` would
+    // just throw on every tick.
+    if (project.kind === "plain") continue;
     let diskWorktrees: WorktreeState[];
     try {
       const gitWorktrees = await listWorktrees(project.path);

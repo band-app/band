@@ -38,6 +38,7 @@ import {
   Clipboard,
   Folder,
   FolderOpen,
+  GitBranch,
   ListMinus,
   Pin,
   Plus,
@@ -55,6 +56,7 @@ import {
 } from "../hooks/use-collapse-state";
 import { usePinnedWorkspaces } from "../hooks/use-pinned-workspaces";
 import {
+  usePromoteProjectToGit,
   useRemoveProject,
   useRemoveWorkspace,
   useReorderProjects,
@@ -83,6 +85,7 @@ interface SortableProjectProps {
   setupStatuses: Map<string, SetupStatus>;
   removeProject: (name: string) => void;
   updateProjectLabel: (name: string, label: string | null) => void;
+  promoteProjectToGit: (name: string) => void;
   labels: LabelDefinition[];
   setWorkspaceDialog: (name: string | null) => void;
   onShowDeleteDialog: (info: DeleteDialogInfo) => void;
@@ -106,6 +109,7 @@ function SortableProject({
   setupStatuses,
   removeProject,
   updateProjectLabel,
+  promoteProjectToGit,
   labels,
   setWorkspaceDialog,
   onShowDeleteDialog,
@@ -116,6 +120,7 @@ function SortableProject({
   hasPinnedSiblings,
   onTogglePinned,
 }: SortableProjectProps) {
+  const isPlain = project.kind === "plain";
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: project.name,
   });
@@ -179,22 +184,28 @@ function SortableProject({
               </Tooltip>
             </div>
             <div className="flex items-center gap-1">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    onPointerDown={(e) => e.stopPropagation()}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setWorkspaceDialog(project.name);
-                    }}
-                  >
-                    <Plus />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Add workspace</TooltipContent>
-              </Tooltip>
+              {/* Plain (non-git) projects have a single implicit workspace
+                  and don't support `git worktree add`, so the "+" button
+                  is hidden — see #427. The server also rejects
+                  `workspaces.create` as a backstop. */}
+              {!isPlain && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setWorkspaceDialog(project.name);
+                      }}
+                    >
+                      <Plus />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Add workspace</TooltipContent>
+                </Tooltip>
+              )}
             </div>
           </div>
         </ContextMenuTrigger>
@@ -232,6 +243,12 @@ function SortableProject({
               </ContextMenuPortal>
             </ContextMenuSub>
           )}
+          {isPlain && (
+            <ContextMenuItem onClick={() => promoteProjectToGit(project.name)}>
+              <GitBranch />
+              Promote to git
+            </ContextMenuItem>
+          )}
           {capabilities.copyPath && (
             <ContextMenuItem onClick={() => navigator.clipboard.writeText(project.path)}>
               <Clipboard />
@@ -267,6 +284,7 @@ function SortableProject({
                   worktree={wt}
                   projectName={project.name}
                   defaultBranch={project.defaultBranch}
+                  projectKind={project.kind}
                   status={statuses.get(wsId)}
                   branchStatus={branchStatuses.get(wsId)}
                   setupStatus={setupStatuses.get(wsId)}
@@ -357,6 +375,7 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
   const removeProjectMutation = useRemoveProject();
   const reorderProjectsMutation = useReorderProjects();
   const updateProjectLabelMutation = useUpdateProjectLabel();
+  const promoteProjectToGitMutation = usePromoteProjectToGit();
   const removeWorkspaceMutation = useRemoveWorkspace();
 
   const [workspaceDialog, setWorkspaceDialog] = useState<string | null>(null);
@@ -743,6 +762,7 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
                     worktree={worktree}
                     projectName={project.name}
                     defaultBranch={project.defaultBranch}
+                    projectKind={project.kind}
                     status={statuses.get(workspaceId)}
                     branchStatus={branchStatuses.get(workspaceId)}
                     setupStatus={setupStatuses.get(workspaceId)}
@@ -800,6 +820,7 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
                           updateProjectLabel={(name, label) =>
                             updateProjectLabelMutation.mutate({ name, label })
                           }
+                          promoteProjectToGit={(name) => promoteProjectToGitMutation.mutate(name)}
                           labels={labels}
                           setWorkspaceDialog={setWorkspaceDialog}
                           onShowDeleteDialog={setDeleteDialog}

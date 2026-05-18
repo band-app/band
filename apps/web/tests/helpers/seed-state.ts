@@ -20,6 +20,7 @@ interface ProjectData {
   defaultBranch: string;
   worktrees?: WorktreeData[];
   label?: string;
+  kind?: "git" | "plain";
 }
 
 interface StateData {
@@ -47,6 +48,7 @@ export function seedState(tmpHome: string, state: StateData): void {
           defaultBranch: project.defaultBranch,
           label: project.label ?? null,
           sortOrder: i,
+          kind: project.kind ?? "git",
         })
         .run();
 

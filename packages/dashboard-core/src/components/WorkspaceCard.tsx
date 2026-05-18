@@ -26,6 +26,7 @@ import { toWorkspaceId } from "../lib/workspace-id";
 import { useDashboardStore } from "../stores/index";
 import type {
   DeleteDialogInfo,
+  ProjectKind,
   SetupStatus,
   WorkspaceBranchStatus,
   WorkspaceStatus,
@@ -40,6 +41,13 @@ interface Props {
   worktree: WorktreeInfo;
   projectName: string;
   defaultBranch: string;
+  /**
+   * Project kind. Defaults to "git" when undefined so older adapters /
+   * fixtures keep their current behavior. Plain projects suppress git
+   * status indicators, the delete-workspace action, and git pull/push
+   * context-menu items — see #427.
+   */
+  projectKind?: ProjectKind;
   status?: WorkspaceStatus;
   branchStatus?: WorkspaceBranchStatus;
   setupStatus?: SetupStatus;
@@ -64,6 +72,7 @@ export const WorkspaceCard = memo(function WorkspaceCard({
   worktree,
   projectName,
   defaultBranch,
+  projectKind,
   status,
   branchStatus,
   setupStatus,
@@ -72,6 +81,7 @@ export const WorkspaceCard = memo(function WorkspaceCard({
   showProjectName,
   onTogglePinned,
 }: Props) {
+  const isPlain = projectKind === "plain";
   const cardRef = useRef<HTMLDivElement>(null);
   const capabilities = useCapabilities();
 
@@ -165,8 +175,11 @@ export const WorkspaceCard = memo(function WorkspaceCard({
           </Tooltip>
           <div className="hidden @[10rem]:flex group-hover:flex items-center gap-2 shrink-0 ml-auto pl-2">
             <SetupStatusIndicator setup={setupStatus} />
-            {branchStatus && <GitStatusIndicator git={branchStatus.git} />}
-            {branchStatus && <CIStatusIndicator ci={branchStatus.ci} />}
+            {/* Plain (non-git) projects have no branch state to surface —
+                no dirty/ahead/behind, no CI, no PR — so skip the indicators
+                entirely rather than render perpetually-empty badges. */}
+            {!isPlain && branchStatus && <GitStatusIndicator git={branchStatus.git} />}
+            {!isPlain && branchStatus && <CIStatusIndicator ci={branchStatus.ci} />}
           </div>
         </div>
       </ContextMenuTrigger>
@@ -200,15 +213,22 @@ export const WorkspaceCard = memo(function WorkspaceCard({
             Run teardown
           </ContextMenuItem>
         )}
-        <ContextMenuItem onClick={() => gitPull(projectName, worktree.branch)}>
-          <ArrowDownToLine />
-          Git pull
-        </ContextMenuItem>
-        <ContextMenuItem onClick={() => gitPush(projectName, worktree.branch)}>
-          <ArrowUpFromLine />
-          Git push
-        </ContextMenuItem>
-        {worktree.branch !== defaultBranch && (
+        {!isPlain && (
+          <ContextMenuItem onClick={() => gitPull(projectName, worktree.branch)}>
+            <ArrowDownToLine />
+            Git pull
+          </ContextMenuItem>
+        )}
+        {!isPlain && (
+          <ContextMenuItem onClick={() => gitPush(projectName, worktree.branch)}>
+            <ArrowUpFromLine />
+            Git push
+          </ContextMenuItem>
+        )}
+        {/* Plain projects have a single implicit workspace; removing it
+            would orphan the project, so the user is steered toward
+            removing the project itself instead. */}
+        {!isPlain && worktree.branch !== defaultBranch && (
           <ContextMenuItem variant="destructive" onClick={handleDelete}>
             <Trash2 />
             Delete workspace
