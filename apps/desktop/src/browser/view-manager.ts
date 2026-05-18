@@ -528,9 +528,9 @@ export class BrowserViewManager {
 
   /**
    * Record a session-scoped TLS exception for `(host, fingerprint)`
-   * and reload the matching tab. Used by the renderer's Chrome-style
-   * interstitial when the user clicks "Proceed to <host> (unsafe)"
-   * (issue #444).
+   * and re-load the failing URL on the matching tab. Used by the
+   * renderer's Chrome-style interstitial when the user clicks
+   * "Proceed to <host> (unsafe)" (issue #444).
    *
    * The actual override happens inside the process-wide
    * `app.on("certificate-error")` handler installed by the
@@ -540,12 +540,17 @@ export class BrowserViewManager {
    *
    *   1. Record the exception (keyed by `(partition, host, fp)` so
    *      sibling sessions don't share overrides).
-   *   2. Drop the pending error from the per-tab map so the
-   *      renderer's `browser_get_cert_error_for_view` poll no longer
-   *      reports the interstitial as active.
-   *   3. Trigger a reload so Chromium retries the load — this time
-   *      the `app.on("certificate-error")` handler sees the new
-   *      exception and lets it through.
+   *   2. Re-`loadURL` the original failing URL — NOT `reload()`.
+   *      `reload()` would reload `webContents.getURL()`, but a
+   *      cert-blocked navigation never commits, so `getURL()`
+   *      returns `about:blank` (for fresh tabs) or the previous URL
+   *      — neither of which is what the user wants to retry. The
+   *      URL stored on the pending cert-error is the one Chromium
+   *      handed us in the event callback, so it's the authoritative
+   *      target.
+   *   3. Drop the pending entry AFTER capturing the URL so the
+   *      renderer's `browser_get_cert_error_for_view` poll no
+   *      longer reports the interstitial as active.
    */
   proceedWithCertError(args: BrowserProceedWithCertErrorArgs): void {
     const key = browserKey(args);
@@ -558,8 +563,18 @@ export class BrowserViewManager {
       host: args.host,
       fingerprint: args.fingerprint,
     });
+    const pending = this.pendingCertErrors.get(key);
     this.pendingCertErrors.delete(key);
-    if (!view.webContents.isDestroyed()) view.webContents.reload();
+    if (view.webContents.isDestroyed()) return;
+    if (pending?.url) {
+      void view.webContents.loadURL(pending.url);
+    } else {
+      // Defensive fallback: if for some reason we lost the pending
+      // entry (e.g. a concurrent navigation cleared it), fall back
+      // to `reload()`. Worse case the user has to retype the URL,
+      // better than silently doing nothing.
+      view.webContents.reload();
+    }
   }
 
   /**
