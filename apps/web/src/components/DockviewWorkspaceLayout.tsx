@@ -801,6 +801,13 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
   const [openFilePath, setOpenFilePath] = useState<string | null>(null);
   const diffFileCount = useDiffFileCount(workspaceId, isActive);
 
+  // Mirror currentFile into a ref so the global keyboard handler — wired
+  // once per workspace via useEffect and intentionally not re-subscribed on
+  // every selection change — can read the latest value without a stale
+  // closure. Used by the ⇧⌘F "Format Current File" branch.
+  const currentFileRef = useRef<string | undefined>(undefined);
+  currentFileRef.current = currentFile;
+
   // Dialog state
   const [quickOpenOpen, setQuickOpenOpen] = useState(false);
   const [quickOpenQuery, setQuickOpenQuery] = useState<string | undefined>(undefined);
@@ -867,8 +874,23 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
             window.dispatchEvent(new CustomEvent("band:find-in-file"));
           }
         },
+        formatCurrentFile: () => {
+          // Always pass workspaceId so the matching FileViewer can filter
+          // across multi-workspace layouts. `filePath` is optional — the
+          // parent doesn't always know it (CodeBrowserView's initial-tab
+          // restoration intentionally skips firing `onSelectFile`, so
+          // `currentFileRef.current` can legitimately be `undefined` when
+          // the user first triggers format). The FileViewer falls back
+          // to its own `filePath` prop when detail.filePath is missing.
+          const filePath = currentFileRef.current;
+          window.dispatchEvent(
+            new CustomEvent("band:format-current-file", {
+              detail: { workspaceId, filePath },
+            }),
+          );
+        },
       }),
-    [],
+    [workspaceId],
   );
 
   // Global keyboard shortcuts (capture phase) — only active for the visible workspace
@@ -971,6 +993,21 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
         e.preventDefault();
         setQuickOpenOpen(true);
       } else if (key === "f" && e.shiftKey) {
+        // ⇧⌘F → Format Current File. Always include `workspaceId` so the
+        // matching FileViewer can filter cross-workspace; `filePath` is
+        // a best-effort hint — `currentFileRef.current` is `undefined`
+        // for restored-but-never-switched-to tabs (see the palette
+        // command for the longer explanation).
+        e.preventDefault();
+        const filePath = currentFileRef.current;
+        window.dispatchEvent(
+          new CustomEvent("band:format-current-file", {
+            detail: { workspaceId, filePath },
+          }),
+        );
+      } else if (key === "h" && e.shiftKey) {
+        // ⇧⌘H → Search in Files (moved off ⇧⌘F to host the format binding
+        // above). Mirrors VS Code's "Replace in Files".
         e.preventDefault();
         setSearchFilesOpen(true);
       } else if (key === "f" && !e.shiftKey) {
@@ -1052,7 +1089,7 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [isActive]);
+  }, [isActive, workspaceId]);
 
   // Listen for file link clicks from chat messages → open Quick Open with query
   useEffect(() => {

@@ -137,6 +137,15 @@ export function FileViewer({
   const [editedContent, setEditedContent] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Status banner for the ⇧⌘F "Format Current File" action. Kept separate
+  // from `saveError` so a successful format flash doesn't get swallowed by
+  // an unrelated stale save error. `kind: "info"` covers the soft-skip
+  // path (unsupported file extension); error covers Prettier syntax errors.
+  const [formatStatus, setFormatStatus] = useState<{
+    kind: "ok" | "error" | "info";
+    message: string;
+  } | null>(null);
+  const [formatting, setFormatting] = useState(false);
 
   const editorViewRef = useRef<EditorView | null>(null);
   const dataRef = useRef(data);
@@ -157,6 +166,7 @@ export function FileViewer({
     if (!controlledViewMode) setInternalViewMode("preview");
     setEditedContent(initialEditedContent ?? null);
     setSaveError(null);
+    setFormatStatus(null);
   }, [workspaceId, filePath]);
 
   // Listen for discard-edits events from handleTabClose.  When the parent
@@ -281,6 +291,120 @@ export function FileViewer({
     }
   }, [adapter, workspaceId, filePath, external]);
 
+  /**
+   * Format the editor buffer in-place via Prettier.
+   *
+   * Server-side is pure — it takes the current editor content as a
+   * string, formats it, and returns the result. Disk is untouched: any
+   * unsaved edits stay unsaved, and the formatted output replaces the
+   * editor buffer the same way a user-typed change would. The user
+   * decides when to save with Cmd+S.
+   *
+   * Soft-skip outcomes (no Prettier parser, `.prettierignore` match)
+   * render as a muted info message so editor save hooks can fire this
+   * indiscriminately without yelling at the user for `.png` files.
+   */
+  const handleFormat = useCallback(async (): Promise<void> => {
+    if (!adapter.formatWorkspaceFile) {
+      setFormatStatus({ kind: "error", message: "Formatting not supported by this adapter" });
+      return;
+    }
+    if (formatting) return;
+
+    // Read the live buffer straight off the EditorView so we always
+    // pick up unsaved keystrokes. Fall back to `editedContent` / `data`
+    // (read-only viewer case, or any timing edge where the view ref is
+    // null) so the in-memory shape stays canonical.
+    const view = editorViewRef.current;
+    const sourceContent =
+      view?.state.doc.toString() ?? editedContentRef.current ?? dataRef.current?.content ?? null;
+    if (sourceContent === null) {
+      setFormatStatus({ kind: "error", message: "No content to format" });
+      return;
+    }
+
+    setFormatting(true);
+    setFormatStatus(null);
+    try {
+      const result = await adapter.formatWorkspaceFile(workspaceId, filePath, sourceContent);
+      if (result.skipped) {
+        setFormatStatus({ kind: "info", message: result.reason });
+        return;
+      }
+
+      if (result.changed) {
+        const formatted = result.formatted;
+        if (view) {
+          // CodeMirrorEditor intentionally ignores `content` prop
+          // changes after initial creation (the editor owns its
+          // buffer), so we drive the update through the live
+          // EditorView. Tag it `band.format` so a single Cmd+Z reverts
+          // the format back to what the user had typed before.
+          const currentDoc = view.state.doc.toString();
+          if (currentDoc !== formatted) {
+            view.dispatch({
+              changes: { from: 0, to: view.state.doc.length, insert: formatted },
+              userEvent: "band.format",
+            });
+          }
+        } else {
+          // Read-only viewer / no live editor (e.g. markdown preview
+          // pane). The CodeMirrorViewer keys its document on the
+          // `content` prop, so swapping `editedContent` here is enough
+          // to re-render it with the formatted bytes.
+          setEditedContent(formatted);
+          onEditedContentChangeRef.current?.(formatted);
+          window.dispatchEvent(new CustomEvent("band:dirty-change"));
+        }
+      }
+
+      setFormatStatus({
+        kind: "ok",
+        message: result.changed ? "Formatted" : "Already formatted",
+      });
+    } catch (err) {
+      setFormatStatus({
+        kind: "error",
+        message: err instanceof Error ? err.message : "Failed to format",
+      });
+    } finally {
+      setFormatting(false);
+    }
+  }, [adapter, workspaceId, filePath, formatting]);
+
+  // Listen for the global "Format Current File" event (⌘⇧F + palette).
+  // The dispatcher includes `{ workspaceId, filePath }` in detail when it
+  // knows them; we only respond when the event targets *this* viewer's
+  // file. Events with no detail (palette press without a known active
+  // file) are ignored so every mounted FileViewer doesn't format its own
+  // file in parallel.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as
+        | { workspaceId?: string; filePath?: string | null }
+        | undefined;
+      if (!detail || detail.workspaceId !== workspaceId) return;
+      // When the dispatcher knows the active file path, match it. When
+      // it doesn't (e.g. the palette command fired before the active-tab
+      // tracker fed currentFile back up — happens for tabs restored from
+      // localStorage on dashboard boot), respond anyway: only one
+      // FileViewer is mounted at a time per workspace, so an
+      // unconstrained workspace-scoped fire is unambiguous.
+      if (detail.filePath != null && detail.filePath !== filePath) return;
+      void handleFormat();
+    };
+    window.addEventListener("band:format-current-file", handler);
+    return () => window.removeEventListener("band:format-current-file", handler);
+  }, [workspaceId, filePath, handleFormat]);
+
+  // Auto-clear the "Formatted" success flash so it doesn't linger next to
+  // the filename. Errors stay until the user changes files or saves.
+  useEffect(() => {
+    if (formatStatus?.kind !== "ok") return;
+    const timer = window.setTimeout(() => setFormatStatus(null), 2500);
+    return () => window.clearTimeout(timer);
+  }, [formatStatus]);
+
   const handleContentChange = useCallback((newContent: string) => {
     // When undo brings the content back to the on-disk version, clear
     // the edited state entirely so the dirty indicators (title bar +
@@ -379,6 +503,23 @@ export function FileViewer({
             {isDirty && <span className="ml-1 text-muted-foreground">(modified)</span>}
           </span>
           {saveError && <span className="shrink-0 text-xs text-destructive">{saveError}</span>}
+          {formatStatus && (
+            <span
+              className={`shrink-0 truncate text-xs ${
+                formatStatus.kind === "error"
+                  ? "text-destructive"
+                  : formatStatus.kind === "ok"
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : "text-muted-foreground"
+              }`}
+              title={formatStatus.message}
+            >
+              {formatStatus.kind === "error" ? "Format failed" : formatStatus.message}
+            </span>
+          )}
+          {formatting && (
+            <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+          )}
           {canEdit && isDirty && (
             <button
               type="button"

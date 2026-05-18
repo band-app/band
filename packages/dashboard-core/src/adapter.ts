@@ -6,6 +6,7 @@ import type {
   FileContentResult,
   FileDiffResult,
   FileListResult,
+  FormatFileResult,
   GitStatus,
   HooksStatus,
   ProjectInfo,
@@ -129,6 +130,21 @@ export interface DashboardAdapter {
   /** Write a file by absolute filesystem path. Mirror of `saveWorkspaceFile`
    *  for external files. */
   saveExternalFile?(absolutePath: string, content: string): Promise<void>;
+
+  /**
+   * Format `content` using Prettier as if it were the file at `filePath`
+   * inside `workspaceId`. Pure function — the server doesn't read or write
+   * the file. Returns `{ skipped: true, reason }` when Prettier has no
+   * parser for the file's extension (or it's covered by `.prettierignore`).
+   * The caller is responsible for applying the returned `formatted` string
+   * back to its editor and for persisting the result via
+   * `saveWorkspaceFile` when the user explicitly saves.
+   */
+  formatWorkspaceFile?(
+    workspaceId: string,
+    filePath: string,
+    content: string,
+  ): Promise<FormatFileResult>;
 
   /**
    * Create a new file at the given workspace-relative path. The file's

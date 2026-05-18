@@ -9,6 +9,7 @@ import type {
   FileContentResult,
   FileDiffResult,
   FileListResult,
+  FormatFileResult,
   GitStatus,
   HooksStatus,
   ProjectInfo,
@@ -361,6 +362,18 @@ export class WebDashboardAdapter implements DashboardAdapter {
 
   async saveExternalFile(absolutePath: string, content: string): Promise<void> {
     await this.trpc.host.saveFile.mutate({ absolutePath, content });
+  }
+
+  async formatWorkspaceFile(
+    workspaceId: string,
+    filePath: string,
+    content: string,
+  ): Promise<FormatFileResult> {
+    return (await this.trpc.workspace.formatFile.mutate({
+      workspaceId,
+      filePath,
+      content,
+    })) as FormatFileResult;
   }
 
   async createWorkspaceFile(workspaceId: string, path: string, content = ""): Promise<void> {

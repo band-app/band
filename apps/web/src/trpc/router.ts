@@ -76,6 +76,7 @@ import {
 } from "../lib/cronjob-store";
 import type { CronjobDefinition } from "../lib/cronjob-types";
 import { subscribeToFileChanges } from "../lib/file-watcher";
+import { FormatterError, formatFile } from "../lib/formatter";
 import { fuzzyScore } from "../lib/fuzzy-score";
 import { execGit, gitCmd, listWorktrees } from "../lib/git";
 import { checkHooks, installHooks } from "../lib/hooks";
@@ -874,6 +875,56 @@ const workspaceRouter = t.router({
       if (!workspace) return { config: null };
       const config = loadWorkspaceTerminalConfig(workspace.worktree.path, workspace.project.path);
       return { config };
+    }),
+
+  /**
+   * Run Prettier against a single file inside the workspace.
+   *
+   * Returns `{ skipped: true, reason }` when Prettier has no parser for
+   * the file's extension (or it's covered by `.prettierignore`). Editors
+   * fire this off Cmd+Shift+F without checking the file type first, so a
+   * soft skip is the right outcome for unsupported files rather than a
+   * surfaced error.
+   *
+   * Auth: enforced at the transport layer (the `band_token` cookie gates
+   * the WebSocket upgrade and HTTP requests in start-server.ts) — same
+   * pattern as the rest of `workspaceRouter`.
+   */
+  /**
+   * Format the supplied `content` using Prettier as if it were the file at
+   * `filePath` inside `workspaceId`. The procedure is pure — it does not
+   * read or write the file on disk. The client passes in the live editor
+   * buffer and applies the returned `formatted` string back to the editor.
+   * Persistence is the caller's responsibility via `workspace.saveFile`.
+   */
+  formatFile: publicProcedure
+    .input(
+      z.object({
+        workspaceId: z.string(),
+        filePath: z.string().min(1),
+        content: z.string(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      const workspace = resolveWorkspace(input.workspaceId);
+      if (!workspace) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `Workspace ${input.workspaceId} not found`,
+        });
+      }
+      try {
+        return await formatFile(workspace.worktree.path, input.filePath, input.content);
+      } catch (err) {
+        if (err instanceof FormatterError) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: err.message,
+            cause: err,
+          });
+        }
+        throw err;
+      }
     }),
 
   /**

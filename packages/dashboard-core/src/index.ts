@@ -125,6 +125,7 @@ export type {
   FileEntry,
   FileListResult,
   FileStatus,
+  FormatFileResult,
   GitStatus,
   GitSyncState,
   HooksStatus,
