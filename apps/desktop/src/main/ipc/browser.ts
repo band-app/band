@@ -4,6 +4,7 @@
  * which holds the `WebContentsView` LRU and emits change events.
  */
 
+import type { BrowserCertErrorPayload } from "../../browser/cert-error.js";
 import type { BrowserViewManager } from "../../browser/view-manager.js";
 import type {
   BrowserBoundsArgs,
@@ -13,6 +14,7 @@ import type {
   BrowserFindInPageArgs,
   BrowserKeyArg,
   BrowserNavigateArgs,
+  BrowserProceedWithCertErrorArgs,
   BrowserStopFindInPageArgs,
   BrowserZoomArgs,
 } from "../../shared/types.js";
@@ -51,4 +53,12 @@ export const browserHandlers = {
   zoom: (ctx: BrowserIpcContext, args: BrowserZoomArgs): void => ctx.manager.zoom(args),
   toggleDevTools: (ctx: BrowserIpcContext, args: BrowserKeyArg): void =>
     ctx.manager.toggleDevTools(args),
+  proceedWithCertError: (ctx: BrowserIpcContext, args: BrowserProceedWithCertErrorArgs): void =>
+    ctx.manager.proceedWithCertError(args),
+  getCertErrorForView: (
+    ctx: BrowserIpcContext,
+    args: BrowserKeyArg,
+  ): BrowserCertErrorPayload | null => ctx.manager.getCertErrorForView(args),
+  clearCertError: (ctx: BrowserIpcContext, args: BrowserKeyArg): void =>
+    ctx.manager.clearCertError(args),
 };

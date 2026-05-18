@@ -78,6 +78,10 @@ const ALLOWED_INVOKE_CHANNELS = new Set<string>([
   "browser_zoom",
   // Toggle Chromium DevTools for a browser tab
   "browser_toggle_dev_tools",
+  // Chrome-style cert-error interstitial (issue #444)
+  "browser_proceed_with_cert_error",
+  "browser_get_cert_error_for_view",
+  "browser_clear_cert_error",
 ]);
 
 const ALLOWED_EVENT_NAMES = new Set<string>([
@@ -87,6 +91,7 @@ const ALLOWED_EVENT_NAMES = new Set<string>([
   "browser-found-in-page",
   "browser-find-shortcut",
   "browser-new-tab-shortcut",
+  "browser-cert-error",
   "window-fullscreen-changed",
   "updater-status-changed",
 ]);

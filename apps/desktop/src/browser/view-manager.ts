@@ -32,6 +32,7 @@ import {
   type BrowserKeyArg,
   type BrowserNavigateArgs,
   type BrowserNewTabShortcutPayload,
+  type BrowserProceedWithCertErrorArgs,
   type BrowserStopFindInPageArgs,
   type BrowserTitleChangedPayload,
   type BrowserUrlChangedPayload,
@@ -39,6 +40,8 @@ import {
   type BrowserZoomArgs,
   browserKey,
 } from "../shared/types.js";
+import { type BrowserCertErrorPayload, buildCertErrorPayload, hostFromUrl } from "./cert-error.js";
+import { type CertExceptionStore, partitionForSession } from "./cert-exceptions.js";
 import { splitTabBounds } from "./layout.js";
 
 const MAX_BROWSER_VIEWS = 10;
@@ -83,6 +86,15 @@ export interface ViewManagerOptions {
    * BrowserWindow + the per-tab compositor cost while inactive.
    */
   hiddenWindow?: BrowserWindow;
+  /**
+   * Session-scoped exception store for the Chrome-style cert-error
+   * interstitial (issue #444). Owned by the bootstrap so the same
+   * map is shared with the process-wide `app.on("certificate-error")`
+   * override hook. The view manager records exceptions here when the
+   * user clicks "Proceed" in the interstitial; the override hook
+   * reads it back to decide whether to bypass the block.
+   */
+  certExceptions: CertExceptionStore;
 }
 
 type Parent = "main" | "hidden";
@@ -130,6 +142,17 @@ export class BrowserViewManager {
    * cycle.
    */
   private readonly preFreezeMutedByKey = new Map<string, boolean>();
+  /**
+   * Pending cert-error per tab, captured when Chromium fires the
+   * per-webContents `certificate-error` event. Lives until either the
+   * user clicks "Proceed" (which records an exception, reloads the
+   * tab, and clears this entry) or "Back to safety" (which clears
+   * without proceeding). Exposed to the renderer via the
+   * `browser_get_cert_error_for_view` IPC so a renderer that mounts
+   * after the event already fired (e.g. layout restore right after
+   * an invalid-cert load) can still draw the interstitial.
+   */
+  private readonly pendingCertErrors = new Map<string, BrowserCertErrorPayload>();
 
   constructor(private readonly opts: ViewManagerOptions) {}
 
@@ -504,6 +527,67 @@ export class BrowserViewManager {
   }
 
   /**
+   * Record a session-scoped TLS exception for `(host, fingerprint)`
+   * and reload the matching tab. Used by the renderer's Chrome-style
+   * interstitial when the user clicks "Proceed to <host> (unsafe)"
+   * (issue #444).
+   *
+   * The actual override happens inside the process-wide
+   * `app.on("certificate-error")` handler installed by the
+   * bootstrap; it consults the same `certExceptions` store and calls
+   * `callback(true)` when the triple matches. So all this method has
+   * to do is:
+   *
+   *   1. Record the exception (keyed by `(partition, host, fp)` so
+   *      sibling sessions don't share overrides).
+   *   2. Drop the pending error from the per-tab map so the
+   *      renderer's `browser_get_cert_error_for_view` poll no longer
+   *      reports the interstitial as active.
+   *   3. Trigger a reload so Chromium retries the load — this time
+   *      the `app.on("certificate-error")` handler sees the new
+   *      exception and lets it through.
+   */
+  proceedWithCertError(args: BrowserProceedWithCertErrorArgs): void {
+    const key = browserKey(args);
+    const view = this.views.get(key);
+    if (!view) return;
+    if (!args.host || !args.fingerprint) return;
+    const partition = partitionForSession(view.webContents.session);
+    this.opts.certExceptions.add({
+      partition,
+      host: args.host,
+      fingerprint: args.fingerprint,
+    });
+    this.pendingCertErrors.delete(key);
+    if (!view.webContents.isDestroyed()) view.webContents.reload();
+  }
+
+  /**
+   * Return the most recent cert-error captured for this tab, or
+   * `null` if no error is pending. Exposed via
+   * `browser_get_cert_error_for_view` so a renderer mounted *after*
+   * the event already fired (e.g. layout restore lands during the
+   * initial navigation) can still draw the interstitial.
+   */
+  getCertErrorForView(args: BrowserKeyArg): BrowserCertErrorPayload | null {
+    const key = browserKey(args);
+    return this.pendingCertErrors.get(key) ?? null;
+  }
+
+  /**
+   * Drop the pending cert-error for a tab without recording an
+   * exception. Called when the user picks "Back to safety" so the
+   * renderer's next state poll doesn't keep showing the stale
+   * interstitial. The tab itself is left blocked — the renderer is
+   * expected to navigate it away (or close it) as part of the same
+   * action.
+   */
+  clearCertError(args: BrowserKeyArg): void {
+    const key = browserKey(args);
+    this.pendingCertErrors.delete(key);
+  }
+
+  /**
    * Toggle Chromium DevTools for the matching tab, docked **inside the
    * tab area** (bottom split) — not as a detached OS window.
    *
@@ -642,6 +726,7 @@ export class BrowserViewManager {
     this.parentByKey.delete(key);
     this.lastBoundsByKey.delete(key);
     this.visibleByKey.delete(key);
+    this.pendingCertErrors.delete(key);
     const idx = this.order.indexOf(key);
     if (idx >= 0) this.order.splice(idx, 1);
     // Notify the renderer (which forwards to the web server's
@@ -904,6 +989,17 @@ export class BrowserViewManager {
     //     the address bar follows the redirect — matches Chrome's UX.
     view.webContents.on("did-start-navigation", (details) => {
       if (!details.isMainFrame) return;
+      // Clear any pending cert-error as soon as a main-frame
+      // navigation starts. The user has either chosen to navigate
+      // somewhere else (Back to safety) or the page is reloading on
+      // its own — either way, the previous interstitial is no longer
+      // authoritative. The renderer also wipes its local copy from
+      // the `browser-url-changed` listener, so this is belt-and-
+      // braces against a stale `browser_get_cert_error_for_view`
+      // result.
+      if (!details.isSameDocument) {
+        this.pendingCertErrors.delete(key);
+      }
       emitUrl(details.url, !details.isSameDocument);
     });
     // `did-stop-loading` is still the right signal for "the load
@@ -921,6 +1017,84 @@ export class BrowserViewManager {
         title,
       };
       this.emit(Events.browserTitleChanged, payload);
+    });
+
+    // ---- TLS interstitial (issue #444) ----
+    // Chromium's default behaviour for an invalid cert is to silently
+    // block the load. We intercept here with `event.preventDefault()`
+    // and `callback(false)` so Chromium still refuses to load the
+    // page itself, but the renderer gets a chance to draw the Chrome
+    // -style "Your connection is not private" interstitial.
+    //
+    // The process-wide `app.on("certificate-error")` override hook
+    // installed in `main/index.ts` consults the shared
+    // `certExceptions` store first; for hosts the user has explicitly
+    // proceeded to, that hook calls `callback(true)` and the per-tab
+    // listener below never fires. So by the time this code runs, the
+    // user has *not* yet accepted the offending cert.
+    //
+    // Why both hooks? Per-`webContents` listeners can call
+    // `event.preventDefault()` to override the default block, but
+    // they don't get a chance to react if no listener is registered
+    // at all — Chromium uses the `app.on(...)` listener as the
+    // single source-of-truth for the "override" decision. We keep the
+    // per-tab one as the metadata pipeline (it has the `webContents`
+    // identity so we can route the event to the right LRU key) and
+    // the `app` one as the override gate.
+    view.webContents.on("certificate-error", (event, url, errorCode, certificate, callback) => {
+      // Always intervene: we never want Chromium's silent block.
+      // - If the renderer is going to draw an interstitial, we need
+      //   to capture the metadata first (this branch).
+      // - If a session exception exists, the `app.on(...)` hook
+      //   already called `callback(true)` before this listener was
+      //   invoked (Electron prefers app-level overrides for the
+      //   same event), so reaching this code means the user has
+      //   not yet accepted the cert for this host.
+      event.preventDefault();
+      const payload = buildCertErrorPayload({
+        key,
+        url,
+        errorCode,
+        certificate: {
+          fingerprint: certificate.fingerprint,
+          subjectName: certificate.subjectName,
+          issuerName: certificate.issuerName,
+          validStart: certificate.validStart,
+          validExpiry: certificate.validExpiry,
+        },
+      });
+      this.pendingCertErrors.set(key, payload);
+      this.emit(Events.browserCertError, payload);
+      // `callback(false)` ⇒ keep blocking. The user is offered the
+      // override via the interstitial; we never auto-accept.
+      callback(false);
+    });
+
+    // Clear the pending cert-error once the tab successfully reaches
+    // a new page. Two cases lead here:
+    //
+    //   - The user clicked "Back to safety" → renderer navigated
+    //     away → `did-stop-loading` fires for the new URL → no
+    //     interstitial should remain.
+    //   - The user clicked "Proceed" → an exception was recorded →
+    //     Chromium retried the load → `did-stop-loading` fires on
+    //     the now-loaded page → again no pending error.
+    //
+    // The `did-start-navigation` clear above handles the
+    // navigation-start case; this one is the safety net for direct
+    // loads (no `did-start-navigation` fired).
+    view.webContents.on("did-stop-loading", () => {
+      const pending = this.pendingCertErrors.get(key);
+      if (!pending) return;
+      // Only clear if the tab is now showing a URL whose host
+      // differs from the failing one. Same host + same cert = the
+      // override succeeded; same host + new cert (fingerprint changed)
+      // would already have re-fired the `certificate-error` listener
+      // above and overwritten the entry.
+      const currentHost = hostFromUrl(view.webContents.getURL());
+      if (currentHost && currentHost !== pending.host) {
+        this.pendingCertErrors.delete(key);
+      }
     });
 
     // ---- Find in page: stream results back to the renderer ----

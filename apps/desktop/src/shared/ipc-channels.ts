@@ -74,6 +74,24 @@ export const Channels = {
   // wired up with `setDevToolsWebContents` — not as a detached OS
   // window.
   browserToggleDevTools: "browser_toggle_dev_tools",
+  // Chrome-style "Your connection is not private" interstitial flow
+  // (issue #444). The desktop catches Chromium's `certificate-error`
+  // event per tab, emits a `browser-cert-error` event with the error
+  // details, and exposes these two IPCs so the renderer can:
+  //
+  //   - Record a session-scoped exception for (host, fingerprint)
+  //     and reload the tab after the user clicks "Proceed".
+  //   - Re-fetch the pending error for a tab if the renderer mounted
+  //     after the event already fired (race on initial load).
+  //
+  // The exception map lives in the main process; see
+  // `apps/desktop/src/browser/cert-exceptions.ts`.
+  browserProceedWithCertError: "browser_proceed_with_cert_error",
+  browserGetCertErrorForView: "browser_get_cert_error_for_view",
+  // Clear the pending cert-error for a tab without proceeding. Called
+  // when the user picks "Back to safety" so the next legitimate
+  // navigation doesn't re-show the stale interstitial.
+  browserClearCertError: "browser_clear_cert_error",
 } as const;
 
 export type ChannelName = (typeof Channels)[keyof typeof Channels];
@@ -101,6 +119,13 @@ export const Events = {
    *  WebContentsView. The renderer's DockviewBrowserContainer reacts by
    *  opening a new tab in whichever container holds the source pane. */
   browserNewTabShortcut: "browser-new-tab-shortcut",
+  /** Pushed when Chromium rejects a TLS certificate while loading a
+   *  browser tab. The default Chromium behaviour is a silent block;
+   *  the per-tab `certificate-error` listener in `view-manager.ts`
+   *  intercepts that and forwards the error metadata here so the
+   *  renderer can render the Chrome-style interstitial overlay
+   *  (issue #444). */
+  browserCertError: "browser-cert-error",
   windowFullscreenChanged: "window-fullscreen-changed",
   /** Pushed by the main process when the background updater detects (or
    *  clears) a pending app update. Payload: `PendingUpdate` from

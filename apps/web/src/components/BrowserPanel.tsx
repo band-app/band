@@ -1,6 +1,7 @@
 import type { IDockviewPanelProps } from "dockview";
 import { ArrowLeft, ArrowRight, RotateCw, Wrench, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useBrowserCertError } from "../hooks/useBrowserCertError";
 import { useBrowserPaneControls } from "../hooks/useBrowserPaneControls";
 import { useBrowserPaneFreeze } from "../hooks/useBrowserPaneFreeze";
 import { invoke as desktopInvoke, listen as desktopListen } from "../lib/desktop-ipc";
@@ -8,6 +9,7 @@ import { isDesktop } from "../lib/is-desktop";
 import { trpc } from "../lib/trpc-client";
 import { AddressBarAutocomplete } from "./AddressBarAutocomplete";
 import { BrowserFindBar } from "./BrowserFindBar";
+import { CertErrorInterstitial, NotSecureBadge } from "./CertErrorInterstitial";
 import { HistoryPopover } from "./HistoryPopover";
 
 const DEFAULT_URL = "";
@@ -106,6 +108,11 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
     visible: api.isActive && params.wsActive !== false,
     ipcKeyRef,
   });
+  // Chrome-style TLS interstitial (issue #444). When Chromium rejects
+  // a cert for this tab, the hook surfaces `state`, which we render
+  // as an overlay over the placeholder; `proceed` records a session
+  // exception and `clear` is the Back-to-safety reset.
+  const certError = useBrowserCertError({ key: workspaceId, keyName: "workspaceId" });
   // `addressInputFocusedRef` is now owned by `useBrowserPaneControls`
   // — it's destructured back out below and read inside the
   // `browser-url-changed` listener to skip clobbering an in-progress
@@ -554,6 +561,7 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
             <RotateCw className="size-4" />
           </button>
         )}
+        {certError.isOverriddenHost(currentUrl) ? <NotSecureBadge /> : null}
         <input
           type="text"
           value={inputUrl}
@@ -605,6 +613,25 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
 
       {/* Placeholder – the native webview is positioned over this area */}
       <div ref={placeholderRef} className="relative min-h-0 flex-1">
+        {certError.state ? (
+          // Chrome-style cert-error interstitial (issue #444). Drawn
+          // on top of the placeholder; while it's visible the freeze
+          // snapshot below also paints, keeping the WebContentsView
+          // from bleeding through the React DOM.
+          <CertErrorInterstitial
+            state={certError.state}
+            onProceed={() => {
+              void certError.proceed();
+            }}
+            onBack={() => {
+              void certError.clear();
+              // Navigate the tab away from the failing URL. An empty
+              // string triggers the `handleNavigate` short-circuit
+              // that loads about:blank and clears the address bar.
+              void handleNavigate("");
+            }}
+          />
+        ) : null}
         {snapshot ? (
           // Frozen raster shown while any overlay is open. See
           // `lib/browser-pane-freeze.ts`.
@@ -681,6 +708,9 @@ export function BrowserPaneComponent({
     visible: api.isVisible && params.wsActive !== false,
     ipcKeyRef,
   });
+  // Chrome-style TLS interstitial (issue #444). Same hook as the
+  // legacy `BrowserPanelComponent`; keyed by `browserId` here.
+  const certError = useBrowserCertError({ key: browserId, keyName: "browserId" });
   // `addressInputFocusedRef` is destructured from
   // `useBrowserPaneControls` below and read inside the
   // `browser-url-changed` listener to skip clobbering an in-progress
@@ -1142,6 +1172,7 @@ export function BrowserPaneComponent({
             <RotateCw className="size-4" />
           </button>
         )}
+        {certError.isOverriddenHost(currentUrl) ? <NotSecureBadge /> : null}
         <input
           type="text"
           value={inputUrl}
@@ -1185,6 +1216,20 @@ export function BrowserPaneComponent({
       </div>
       <BrowserFindBar find={find} />
       <div ref={placeholderRef} className="relative min-h-0 flex-1">
+        {certError.state ? (
+          // Chrome-style cert-error interstitial — see the identical
+          // block in `BrowserPanelComponent` for the rationale.
+          <CertErrorInterstitial
+            state={certError.state}
+            onProceed={() => {
+              void certError.proceed();
+            }}
+            onBack={() => {
+              void certError.clear();
+              void handleNavigate("");
+            }}
+          />
+        ) : null}
         {snapshot ? (
           // `object-contain object-top` — see the identical block in
           // `BrowserPanelComponent` for the DevTools-aware rationale.

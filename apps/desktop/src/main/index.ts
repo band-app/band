@@ -14,7 +14,8 @@
  */
 
 import { app, BrowserWindow } from "electron";
-
+import { hostFromUrl } from "../browser/cert-error.js";
+import { CertExceptionStore, partitionForSession } from "../browser/cert-exceptions.js";
 import { BrowserViewManager } from "../browser/view-manager.js";
 import { createHiddenBrowserWindow } from "./hidden-browser-window.js";
 import { resolveAppIcon } from "./icon.js";
@@ -38,6 +39,14 @@ interface AppState {
   mainWindow: BrowserWindow | null;
   managed: ManagedProcess;
   browserManager: BrowserViewManager | null;
+  /**
+   * Session-scoped TLS exception store, shared between the
+   * `BrowserViewManager` (which records exceptions on user proceed)
+   * and the process-wide `app.on("certificate-error")` override hook
+   * installed below (which reads them back to decide whether to
+   * call `callback(true)`). See `browser/cert-exceptions.ts`.
+   */
+  certExceptions: CertExceptionStore;
   unregisterIpc: (() => void) | null;
   cancelStartupUpdateCheck: (() => void) | null;
   cancelPeriodicUpdateCheck: (() => void) | null;
@@ -57,6 +66,7 @@ const state: AppState = {
   mainWindow: null,
   managed: new ManagedProcess(),
   browserManager: null,
+  certExceptions: new CertExceptionStore(),
   unregisterIpc: null,
   cancelStartupUpdateCheck: null,
   cancelPeriodicUpdateCheck: null,
@@ -207,6 +217,40 @@ async function bootstrap(): Promise<void> {
   state.browserManager = new BrowserViewManager({
     mainWindow: state.mainWindow,
     hiddenWindow: hiddenBrowserWindow,
+    certExceptions: state.certExceptions,
+  });
+
+  // ---- App-level TLS exception override (issue #444) ----
+  //
+  // Chromium fires `certificate-error` against every webContents in
+  // the process, not just our browser tabs. We register a single
+  // app-level handler that consults the shared session-scoped
+  // exception store and overrides Chromium's silent block for any
+  // (partition, host, fingerprint) triple the user has explicitly
+  // accepted. For everything else we leave the default behaviour
+  // (no override) so the per-tab listener in `view-manager.ts`
+  // captures the metadata and the renderer can draw the
+  // interstitial.
+  //
+  // Note on event ordering: Electron's docs note that the per-
+  // `webContents` listener fires *if-and-only-if* the app-level
+  // listener does not call `event.preventDefault()`. So when an
+  // exception matches we both `preventDefault()` and `callback(true)`,
+  // which prevents the interstitial UI from re-appearing for that
+  // session. When no exception matches we fall through silently —
+  // the per-tab listener then handles the metadata + the
+  // `callback(false)` block.
+  app.on("certificate-error", (event, webContents, url, _errorCode, certificate, callback) => {
+    const host = hostFromUrl(url);
+    if (!host) return; // can't safely scope an override to ""
+    const fingerprint = certificate.fingerprint;
+    if (!fingerprint) return;
+    const partition = partitionForSession(webContents?.session);
+    if (!state.certExceptions.has({ partition, host, fingerprint })) {
+      return;
+    }
+    event.preventDefault();
+    callback(true);
   });
 
   state.unregisterIpc = registerIpc({

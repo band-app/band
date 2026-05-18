@@ -17,6 +17,7 @@ import type {
   BrowserFindInPageArgs,
   BrowserKeyArg,
   BrowserNavigateArgs,
+  BrowserProceedWithCertErrorArgs,
   BrowserStopFindInPageArgs,
   BrowserZoomArgs,
   CheckAppExistsArgs,
@@ -156,6 +157,19 @@ export function registerIpc(opts: RegisterOptions): () => void {
   // Toggle DevTools for a browser tab
   handle(Channels.browserToggleDevTools, (args: BrowserKeyArg) =>
     browserHandlers.toggleDevTools(bm, args),
+  );
+  // Cert-error interstitial flow (issue #444). See
+  // `browser/cert-exceptions.ts` for the exception-store design and
+  // `view-manager.ts::wireEvents` for the per-tab listener that
+  // captures the metadata pushed via `browser-cert-error`.
+  handle(Channels.browserProceedWithCertError, (args: BrowserProceedWithCertErrorArgs) =>
+    browserHandlers.proceedWithCertError(bm, args),
+  );
+  handle(Channels.browserGetCertErrorForView, (args: BrowserKeyArg) =>
+    browserHandlers.getCertErrorForView(bm, args),
+  );
+  handle(Channels.browserClearCertError, (args: BrowserKeyArg) =>
+    browserHandlers.clearCertError(bm, args),
   );
 
   return () => {

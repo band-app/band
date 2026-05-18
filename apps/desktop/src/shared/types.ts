@@ -102,6 +102,19 @@ export interface BrowserStopFindInPageArgs extends BrowserKeyArg {
 }
 
 /**
+ * "Proceed past the cert-error interstitial" arg bag (issue #444).
+ *
+ * The renderer hands us the same (host, fingerprint) pair we already
+ * pushed via the `browser-cert-error` event so we can register the
+ * session exception without re-deriving them from a possibly-stale
+ * stored error.
+ */
+export interface BrowserProceedWithCertErrorArgs extends BrowserKeyArg {
+  host: string;
+  fingerprint: string;
+}
+
+/**
  * Per-tab zoom adjustment.
  *
  *   - `"in"` / `"out"` step the existing `webContents.zoomFactor` by a
