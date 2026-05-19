@@ -180,9 +180,11 @@ function SortableProject({
   // workspaces under the project above them. Plain projects also gain
   // the WorkspaceCard hover/active/focus treatment because the header
   // itself is clickable — but the inner text styling stays project-bold
-  // (see the `<h2>` block below).
+  // (see the `<h2>` block below). `py-1.5` gives a taller hit target
+  // than a workspace card (`py-1`) so the row reads as a project, not
+  // a nested workspace.
   const headerClassName = isPlain
-    ? `group flex items-center justify-between mb-0.5 pl-1 pr-1 py-0.5 min-w-0 overflow-hidden cursor-pointer select-none touch-pan-y transition-colors hover:bg-accent/50 ${
+    ? `group flex items-center justify-between mb-0.5 pl-1 pr-1 py-1.5 min-w-0 overflow-hidden cursor-pointer select-none touch-pan-y transition-colors hover:bg-accent/50 ${
         plainIsActive ? "bg-accent/50 border-l-2 border-l-primary" : ""
       } ${plainIsFocused ? "ring-2 ring-inset ring-ring" : ""}`
     : "group flex items-center justify-between mb-0.5 pl-1 pr-0 select-none touch-pan-y";
