@@ -60,3 +60,34 @@ export function dashLog(msg: string): void {
   process.stderr.write(`${msg}\n`);
   logToFile(msg);
 }
+
+/**
+ * Lazily-evaluated debug-level toggle. Reads `BAND_LOG_LEVEL` once on
+ * first call and caches the result — toggling the env var requires a
+ * restart, same convention as the rest of the desktop bootstrap.
+ *
+ * Recognised values (case-insensitive): `debug`, `trace`. Anything
+ * else (including unset) suppresses `dashDebug` output.
+ */
+let debugEnabled: boolean | null = null;
+function isDebugEnabled(): boolean {
+  if (debugEnabled === null) {
+    const level = (process.env.BAND_LOG_LEVEL ?? "").toLowerCase();
+    debugEnabled = level === "debug" || level === "trace";
+  }
+  return debugEnabled;
+}
+
+/**
+ * Debug-level log, gated on `BAND_LOG_LEVEL=debug` (or `trace`). Goes
+ * to stderr AND the rotating file when enabled, otherwise silently
+ * dropped — same surface as `dashLog` but suppressed in normal
+ * operation so the per-cert-event diagnostic spam doesn't fill the
+ * log file. Used by the issue #444 TLS interstitial pipeline for
+ * tracing the proceed flow when something goes wrong.
+ */
+export function dashDebug(msg: string): void {
+  if (!isDebugEnabled()) return;
+  process.stderr.write(`${msg}\n`);
+  logToFile(`[debug] ${msg}`);
+}

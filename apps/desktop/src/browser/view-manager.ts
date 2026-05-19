@@ -20,7 +20,7 @@
  */
 
 import { type BrowserWindow, WebContentsView } from "electron";
-import { dashLog } from "../main/services/log.js";
+import { dashDebug } from "../main/services/log.js";
 import { Events } from "../shared/ipc-channels.js";
 import {
   type BrowserBoundsArgs,
@@ -585,11 +585,11 @@ export class BrowserViewManager {
   private handleBandAction(key: string, action: BandAction): void {
     const view = this.views.get(key);
     if (!view) {
-      dashLog(`handleBandAction: no view for key=${key}`);
+      dashDebug(`handleBandAction: no view for key=${key}`);
       return;
     }
     if (view.webContents.isDestroyed()) {
-      dashLog(`handleBandAction: webContents destroyed for key=${key}`);
+      dashDebug(`handleBandAction: webContents destroyed for key=${key}`);
       return;
     }
     switch (action.kind) {
@@ -606,7 +606,7 @@ export class BrowserViewManager {
         this.emit(Events.browserHostOverridden, { host: action.host.toLowerCase() });
         const pending = this.pendingCertErrors.get(key);
         this.pendingCertErrors.delete(key);
-        dashLog(
+        dashDebug(
           `cert-proceed: host=${action.host} fp=${action.fingerprint} pendingUrl=${pending?.url ?? "(none)"} partition=${partition}`,
         );
         if (pending?.url) {
@@ -1079,7 +1079,7 @@ export class BrowserViewManager {
       // short-circuits it). `did-start-navigation` always fires.
       if (details.url.startsWith("band-action:")) {
         const action = parseBandAction(details.url);
-        dashLog(
+        dashDebug(
           `band-action did-start-navigation url=${details.url} parsed=${action ? action.kind : "null"}`,
         );
         setImmediate(() => {
@@ -1161,7 +1161,7 @@ export class BrowserViewManager {
       const fingerprint = certificate.fingerprint;
       const partition = partitionForSession(view.webContents.session);
       if (host && fingerprint && this.opts.certExceptions.has({ partition, host, fingerprint })) {
-        dashLog(`cert-error: ${host} fp=${fingerprint} → override-trust`);
+        dashDebug(`cert-error: ${host} fp=${fingerprint} → override-trust`);
         callback(true);
         return;
       }
@@ -1178,7 +1178,7 @@ export class BrowserViewManager {
         },
       });
       this.pendingCertErrors.set(key, payload);
-      dashLog(`cert-error: ${payload.host} fp=${payload.fingerprint} → interstitial`);
+      dashDebug(`cert-error: ${payload.host} fp=${payload.fingerprint} → interstitial`);
       // Tell the renderer the failing URL committed (with
       // loading=false) so the address bar reflects it and the
       // spinner stops. The `data:` URI load below is filtered.
