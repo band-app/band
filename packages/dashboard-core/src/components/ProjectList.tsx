@@ -41,6 +41,7 @@ import {
   GitBranch,
   ListMinus,
   Pin,
+  PinOff,
   Plus,
   Tag,
 } from "lucide-react";
@@ -74,6 +75,7 @@ import type {
   WorkspaceBranchStatus,
   WorkspaceStatus,
 } from "../types";
+import { AgentStatusIndicator } from "./AgentStatusIndicator";
 import { DeleteWorkspaceDialog } from "./DeleteWorkspaceDialog";
 import { NewWorkspaceDialog } from "./NewWorkspaceForm";
 import { WorkspaceCard } from "./WorkspaceCard";
@@ -139,44 +141,89 @@ function SortableProject({
     opacity: isDragging ? 0.5 : undefined,
   };
 
+  // Plain projects flatten: the project header IS the implicit workspace's
+  // card. There's no nested "main" row, no collapse chevron, no "+" Add
+  // workspace button — see #427. The header inherits everything the
+  // WorkspaceCard would have done: agent-status dot, click-to-open,
+  // focus/active highlighting, pin toggle, etc.
+  const openWorkspace = useDashboardStore((s) => s.openWorkspace);
+  const clearNeedsAttention = useDashboardStore((s) => s.clearNeedsAttention);
+  const plainWorkspaceId = isPlain ? toWorkspaceId(project.name, project.worktrees[0].branch) : "";
+  const plainIsActive = useDashboardStore(
+    (s) => isPlain && s.activeWorkspaceId === plainWorkspaceId,
+  );
+  const plainHref = isPlain ? capabilities.getWorkspaceHref?.(plainWorkspaceId) : undefined;
+  const plainAgent = isPlain ? statuses.get(plainWorkspaceId)?.agent : undefined;
+  const plainIsPinned = isPlain ? (project.worktrees[0].pinned ?? false) : false;
+  const plainIsFocused = isPlain && workspaceIndexStart === focusedIndex;
+
+  // Single onClick / onKeyDown for the plain-project header (mirrors the
+  // navigate-or-open dance WorkspaceCard does). For git projects the same
+  // div toggles collapse — branched below.
+  const handlePlainOpen = () => {
+    if (!isPlain) return;
+    clearNeedsAttention(plainWorkspaceId);
+    if (plainHref && capabilities.navigate) {
+      capabilities.navigate(plainHref);
+    } else if (!plainHref) {
+      openWorkspace(plainWorkspaceId);
+    }
+  };
+
   let workspaceIndex = workspaceIndexStart;
+
+  // Header className. Git projects keep the old "row of muted text + +
+  // button" treatment. Plain projects style the row like a WorkspaceCard
+  // (hover/active background, left border on active, focus ring) so the
+  // user can tell at a glance that it's a clickable workspace.
+  const headerClassName = isPlain
+    ? `group flex items-center justify-between mb-0.5 pl-1 pr-1 py-1 select-none touch-pan-y rounded-sm cursor-pointer transition-colors hover:bg-accent/50 ${
+        plainIsActive ? "bg-accent/50 border-l-2 border-l-primary" : ""
+      } ${plainIsFocused ? "ring-2 ring-inset ring-ring" : ""}`
+    : "group flex items-center justify-between mb-0.5 pl-1 pr-0 select-none touch-pan-y";
 
   return (
     <div ref={setNodeRef} style={style} className="min-w-0 px-2">
       <ContextMenu>
         <ContextMenuTrigger asChild>
-          {/* The header is a click/tap-to-toggle target on both desktop and
-              mobile. We don't add tabIndex/keyboard handlers here because
-              keyboard navigation lives one level down (workspace cards).
-              Keyboard users can toggle collapse via the right-click context
-              menu's Collapse/Expand entry, which is reachable with Shift+F10
-              or the Menu key. */}
-          {/* biome-ignore lint/a11y/useKeyWithClickEvents: keyboard path is the context menu (see comment above) */}
+          {/* The header is a click/tap target on both desktop and mobile.
+              For git projects it toggles collapse; for plain projects it
+              opens the implicit workspace (the project IS the workspace).
+              Keyboard nav lives at the workspace-card level for git
+              projects; for plain projects the same role moves up here. */}
+          {/* biome-ignore lint/a11y/useKeyWithClickEvents: keyboard path is the container-level handler on the ProjectList (see "KEYBOARD NAVIGATION — READ BEFORE MODIFYING" below) */}
           <div
-            // touch-pan-y lets touch devices scroll the list vertically with
-            // a finger over the project header — the TouchSensor still gets
-            // long-presses (delay activation) but stops blocking page scroll.
-            className="group flex items-center justify-between mb-0.5 pl-1 pr-0 select-none touch-pan-y"
-            onClick={() => onToggleCollapse(project.name)}
+            className={headerClassName}
+            onClick={() => (isPlain ? handlePlainOpen() : onToggleCollapse(project.name))}
           >
             {/* Drag listeners live on the title (folder icon + project name)
                 so the project name itself is the drag handle. The 8px
                 MouseSensor / 250ms TouchSensor thresholds mean a still
-                click/tap bubbles up to the outer onClick (which toggles
-                collapse) without starting a drag. */}
+                click/tap bubbles up to the outer onClick without starting
+                a drag. */}
             <div
               className="flex items-center gap-2 min-w-0 cursor-grab"
               {...attributes}
               {...listeners}
             >
-              {collapsed ? (
+              {isPlain ? (
+                <AgentStatusIndicator agent={plainAgent} isActive={plainIsActive} />
+              ) : collapsed ? (
                 <Folder className="size-4 shrink-0 text-muted-foreground" />
               ) : (
                 <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
               )}
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <h2 className="text-sm font-semibold text-foreground/80 truncate">
+                  <h2
+                    className={`text-sm truncate ${
+                      isPlain
+                        ? plainIsActive
+                          ? "font-semibold text-foreground"
+                          : "font-medium text-muted-foreground"
+                        : "font-semibold text-foreground/80"
+                    }`}
+                  >
                     {project.name}
                   </h2>
                 </TooltipTrigger>
@@ -185,9 +232,9 @@ function SortableProject({
             </div>
             <div className="flex items-center gap-1">
               {/* Plain (non-git) projects have a single implicit workspace
-                  and don't support `git worktree add`, so the "+" button
-                  is hidden — see #427. The server also rejects
-                  `workspaces.create` as a backstop. */}
+                  and don't support `git worktree add`, so the "+" Add
+                  workspace button is hidden — see #427. The server also
+                  rejects `workspaces.create` as a backstop. */}
               {!isPlain && (
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -210,10 +257,28 @@ function SortableProject({
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent>
-          <ContextMenuItem onClick={() => onToggleCollapse(project.name)}>
-            <ChevronRight className={collapsed ? "" : "rotate-90"} />
-            {collapsed ? "Expand" : "Collapse"}
-          </ContextMenuItem>
+          {/* Git projects toggle collapse from this menu (keyboard fallback
+              for users who can't reach the header click target). Plain
+              projects have nothing to collapse — they're already flat. */}
+          {!isPlain && (
+            <ContextMenuItem onClick={() => onToggleCollapse(project.name)}>
+              <ChevronRight className={collapsed ? "" : "rotate-90"} />
+              {collapsed ? "Expand" : "Collapse"}
+            </ContextMenuItem>
+          )}
+          {/* Pin/unpin the implicit workspace for plain projects — for git
+              projects pinning lives on the per-worktree WorkspaceCard
+              context menu instead. */}
+          {isPlain && (
+            <ContextMenuItem
+              onClick={() =>
+                onTogglePinned(project.name, project.worktrees[0].branch, plainIsPinned)
+              }
+            >
+              {plainIsPinned ? <PinOff /> : <Pin />}
+              {plainIsPinned ? "Unpin workspace" : "Pin workspace"}
+            </ContextMenuItem>
+          )}
           {labels.length > 0 && (
             <ContextMenuSub>
               <ContextMenuSubTrigger>
@@ -268,7 +333,9 @@ function SortableProject({
         </ContextMenuContent>
       </ContextMenu>
 
-      {!collapsed && (
+      {/* Nested workspaces section — only meaningful for git projects.
+          Plain projects are flat: the header above IS the workspace. */}
+      {!isPlain && !collapsed && (
         <div className="flex flex-col gap-0.5 overflow-hidden">
           {project.worktrees.length === 0 ? (
             hasPinnedSiblings ? null : (
@@ -718,7 +785,7 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
         <p className="text-lg mb-2">No projects registered</p>
-        <p className="text-sm">Click the + button to register a git repository</p>
+        <p className="text-sm">Click the + button to register a folder</p>
       </div>
     );
   }
