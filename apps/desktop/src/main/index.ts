@@ -14,7 +14,7 @@
  */
 
 import { app, BrowserWindow, protocol, session } from "electron";
-import { CertExceptionStore, partitionForSession } from "../browser/cert-exceptions.js";
+import { CertExceptionStore } from "../browser/cert-exceptions.js";
 import { BrowserViewManager } from "../browser/view-manager.js";
 import { createHiddenBrowserWindow } from "./hidden-browser-window.js";
 import { resolveAppIcon } from "./icon.js";
@@ -234,42 +234,18 @@ async function bootstrap(): Promise<void> {
     certExceptions: state.certExceptions,
   });
 
-  // ---- TLS exception override (issue #444) ----
-  //
-  // We use `session.setCertificateVerifyProc` rather than reacting
-  // to the `certificate-error` event because the verify proc is the
-  // canonical Electron API for cert overrides: it intercepts BEFORE
-  // Chromium decides the cert is bad, and the override sticks
-  // immediately for the next loadURL — whereas the event-based
-  // override path was observed to leave the next navigation blank
-  // even after `callback(true)` (likely because Chromium had
-  // already started tearing the connection down by the time the
-  // event handler fired).
-  //
-  // Decision matrix:
-  //   - errorCode 0 (cert is valid) → callback(0) trusts as normal
-  //   - exception matches our store → callback(0) trusts (override)
-  //   - otherwise → callback(-3) defers to Chromium, which fires
-  //     the per-`webContents` `certificate-error` event our view
-  //     manager catches to paint the in-view interstitial.
-  session.defaultSession.setCertificateVerifyProc((request, callback) => {
-    const hostname = request.hostname.toLowerCase();
-    const fingerprint = request.certificate.fingerprint;
-    if (request.errorCode === 0) {
-      callback(0);
-      return;
-    }
-    const partition = partitionForSession(session.defaultSession);
-    if (fingerprint && state.certExceptions.has({ partition, host: hostname, fingerprint })) {
-      dashLog(`cert-verify: override-trust ${hostname} (${fingerprint})`);
-      callback(0);
-      return;
-    }
-    dashLog(
-      `cert-verify: default-deny ${hostname} fp=${fingerprint} errorCode=${request.errorCode}`,
-    );
-    callback(-3);
-  });
+  // NOTE on TLS overrides (issue #444): the trust decision is made
+  // in `BrowserViewManager.wireEvents` via the per-`webContents`
+  // `certificate-error` event, not here via
+  // `session.setCertificateVerifyProc`. The verify proc is the
+  // documented Electron API for cert overrides, but empirical
+  // testing showed it gets bypassed by Chromium's internal
+  // per-host bad-cert cache on retry attempts after a denial — the
+  // proc fires for the FIRST connection that fails, but then for
+  // subsequent reconnects within the same session Chromium reuses
+  // its cached "deny" decision and never re-invokes the proc.
+  // `certificate-error` does fire on those retries, so that's the
+  // hook the view manager uses for the override.
 
   // No-op handler for `band-action://` so Chromium accepts the
   // navigation and doesn't fall back to the OS external-protocol

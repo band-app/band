@@ -40,7 +40,7 @@ import {
   type BrowserZoomArgs,
   browserKey,
 } from "../shared/types.js";
-import { type BrowserCertErrorPayload, buildCertErrorPayload } from "./cert-error.js";
+import { type BrowserCertErrorPayload, buildCertErrorPayload, hostFromUrl } from "./cert-error.js";
 import { type CertExceptionStore, partitionForSession } from "./cert-exceptions.js";
 import {
   type BandAction,
@@ -1140,20 +1140,31 @@ export class BrowserViewManager {
     });
 
     // ---- TLS interstitial (issue #444) ----
-    // The session-wide `setCertificateVerifyProc` registered in
-    // `main/index.ts` is the single source of truth for cert
-    // override decisions. It returns `callback(0)` (trust) for
-    // hosts the user has accepted in this session, so by the time
-    // THIS event fires, we know the cert was NOT in the exception
-    // store and the user needs to see the interstitial.
+    // We do the cert-override decision HERE rather than in the
+    // session-wide `setCertificateVerifyProc` because Chromium has
+    // a per-host short-term bad-cert cache that bypasses the
+    // verify proc on retry attempts after a denial — observed via
+    // diagnostic dashLog(): after the first denial the verify
+    // proc never fires again for that host, but `certificate-error`
+    // DOES, so this is the only event we can reliably hook to
+    // honour a freshly-added exception.
     //
-    // Our job here is purely UI: capture the metadata, stash it
-    // so the band-action://cert-proceed link can read host +
-    // fingerprint, emit a URL change so the address bar shows the
-    // failing target with loading=false, and (deferred) loadURL
-    // the interstitial HTML into the WebContentsView.
+    // Decision:
+    //   - Exception matches our store → callback(true) — trust the
+    //     cert for THIS connection. Chromium proceeds with the
+    //     load and the page commits normally. No interstitial.
+    //   - Otherwise → callback(false) + paint the in-view
+    //     interstitial via a `data:` URI so the user can Proceed.
     view.webContents.on("certificate-error", (event, url, errorCode, certificate, callback) => {
       event.preventDefault();
+      const host = hostFromUrl(url);
+      const fingerprint = certificate.fingerprint;
+      const partition = partitionForSession(view.webContents.session);
+      if (host && fingerprint && this.opts.certExceptions.has({ partition, host, fingerprint })) {
+        dashLog(`cert-error: ${host} fp=${fingerprint} → override-trust`);
+        callback(true);
+        return;
+      }
       const payload = buildCertErrorPayload({
         key,
         url,
