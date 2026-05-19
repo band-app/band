@@ -236,6 +236,80 @@ describe("tRPC — plain projects (add)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// projects.list self-heals `kind` from the filesystem
+// ---------------------------------------------------------------------------
+//
+// The schema migration for #427 set `DEFAULT 'git'` for every pre-existing
+// row, so a project added before this PR shipped — and sitting in a plain
+// folder — would otherwise stay incorrectly tagged. `projects.list` must
+// re-detect kind from the on-disk state and persist the correction.
+
+describe("tRPC — plain projects (self-heal kind)", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+  let plainPath: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    plainPath = createPlainDir(tmpHome, "scratch");
+
+    // Seed the row as it would look post-migration: kind="git" (the default
+    // applied by the ALTER TABLE) but empty worktrees (the pre-PR add code
+    // couldn't enumerate git worktrees in a non-git folder).
+    seedState(tmpHome, {
+      projects: [
+        {
+          name: "scratch",
+          path: plainPath,
+          defaultBranch: "main",
+          kind: "git",
+          worktrees: [],
+        },
+      ],
+    });
+    seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
+    server = await startServer({ tmpHome });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("re-detects kind=plain when the folder has no .git", async () => {
+    const res = await trpcQuery(server.url, "projects.list");
+    expect(res.status).toBe(200);
+    const data = await trpcData<{
+      projects: Array<{
+        name: string;
+        kind: "git" | "plain";
+        worktrees: Array<{ branch: string; path: string }>;
+      }>;
+    }>(res);
+    const scratch = data.projects.find((p) => p.name === "scratch")!;
+    expect(scratch.kind).toBe("plain");
+    // Self-heal also synthesizes the implicit workspace that pre-PR rows
+    // would have lacked, so the flattened plain UI has something to render.
+    expect(scratch.worktrees).toHaveLength(1);
+    expect(scratch.worktrees[0].branch).toBe("main");
+    expect(scratch.worktrees[0].path).toBe(plainPath);
+  });
+
+  it("workspace mutations on the self-healed project are now plain-gated", async () => {
+    // Confirm the heal persisted: a workspace mutation that checks
+    // `project.kind === "plain"` must now reject (it wouldn't have before
+    // the heal, because the stored kind was "git").
+    const res = await trpcMutate(server.url, "workspaces.create", {
+      project: "scratch",
+      branch: "feature-1",
+    });
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toMatch(/plain.*non-git/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Workspace mutations on a plain project should be rejected.
 // ---------------------------------------------------------------------------
 

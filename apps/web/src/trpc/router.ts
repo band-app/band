@@ -162,6 +162,38 @@ const projectsRouter = t.router({
     const statuses = loadCurrentStatuses();
     const statusMap = new Map(statuses.map((s) => [s.workspaceId, s]));
 
+    // Self-heal `kind` against the filesystem. The schema migration for
+    // #427 defaulted every pre-existing row to `kind: "git"` regardless of
+    // whether the folder actually had a `.git` directory — so a project
+    // added before this PR shipped, sitting in a plain folder, would
+    // otherwise stay incorrectly tagged. Same reconciliation also catches
+    // a user who ran `git init` (or `rm -rf .git`) in the folder outside
+    // the dashboard. Re-detect on every list, persist when the detected
+    // kind disagrees with the stored one. The fs call is cheap (single
+    // existsSync per project); saveState only fires on actual mismatch.
+    let kindReconciled = false;
+    for (const project of state.projects) {
+      // Skip rows whose path no longer exists — leave kind alone rather
+      // than synthesize a workspace under a missing directory.
+      if (!existsSync(project.path)) continue;
+      const detectedKind: ProjectKind = existsSync(join(project.path, ".git")) ? "git" : "plain";
+      if (detectedKind !== project.kind) {
+        project.kind = detectedKind;
+        // Stale rows commonly have `worktrees: []` because the pre-PR
+        // `projects.add` code couldn't list git worktrees in a non-git
+        // folder and gave up with an empty array. Synthesize the implicit
+        // workspace that the new add() would have created so the UI has
+        // something to flatten to.
+        if (detectedKind === "plain" && project.worktrees.length === 0) {
+          project.worktrees = [{ branch: "main", path: project.path, pinned: false }];
+        }
+        kindReconciled = true;
+      }
+    }
+    if (kindReconciled) {
+      saveState(state);
+    }
+
     const projects = await Promise.all(
       state.projects.map(async (project) => {
         // Plain projects have a single implicit workspace whose path equals
@@ -1244,7 +1276,16 @@ const workspaceRouter = t.router({
       // Plain (non-git) projects have no diff to compute. Return an empty
       // summary instead of throwing so the UI can show a calm message
       // rather than a raw git error — see #427.
-      if (workspace.project.kind === "plain") {
+      //
+      // Also short-circuit when the worktree's `.git` is missing on disk
+      // regardless of the recorded kind. The kind field can lag reality
+      // (e.g. a project added before the migration shipped, or a folder
+      // whose `.git` was deleted from a terminal) — in either case
+      // running `execGit(...)` would surface as a raw error in the
+      // Changes view. The next `projects.list` self-heals kind, but
+      // until then we still want a graceful empty diff.
+      const hasGit = existsSync(join(workspace.worktree.path, ".git"));
+      if (workspace.project.kind === "plain" || !hasGit) {
         const defaultBranch = workspace.project.defaultBranch;
         return {
           stats: { filesChanged: 0, insertions: 0, deletions: 0 },
