@@ -114,11 +114,8 @@ describe("cert-error integration (real self-signed HTTPS server)", () => {
   before(async () => {
     tmpDir = await mkdtemp(join(tmpdir(), "band-cert-test-"));
     const { keyPath, certPath } = generateSelfSigned(tmpDir, "localhost");
-    const [keyPem, _certPem] = await Promise.all([
-      readFile(keyPath, "utf8"),
-      readFile(certPath, "utf8"),
-    ]);
-    certPem = _certPem;
+    let keyPem: string;
+    [keyPem, certPem] = await Promise.all([readFile(keyPath, "utf8"), readFile(certPath, "utf8")]);
     server = https.createServer({ key: keyPem, cert: certPem }, (_req, res) => {
       res.writeHead(200, { "content-type": "text/plain" });
       res.end("ok");
