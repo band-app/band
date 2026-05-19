@@ -13,8 +13,8 @@
  *      free port 3456 (release builds only — same gate as Tauri).
  */
 
-import { app, BrowserWindow } from "electron";
-import { CertExceptionStore } from "../browser/cert-exceptions.js";
+import { app, BrowserWindow, session } from "electron";
+import { CertExceptionStore, partitionForSession } from "../browser/cert-exceptions.js";
 import { BrowserViewManager } from "../browser/view-manager.js";
 import { createHiddenBrowserWindow } from "./hidden-browser-window.js";
 import { resolveAppIcon } from "./icon.js";
@@ -219,18 +219,42 @@ async function bootstrap(): Promise<void> {
     certExceptions: state.certExceptions,
   });
 
-  // Note on TLS overrides (issue #444): we deliberately do NOT
-  // register an app-level `certificate-error` listener here. Both the
-  // app-level and the per-`webContents` listeners fire for every
-  // cert error, and Electron's `callback` is a one-time function —
-  // calling it from both listeners throws
-  // `TypeError: One-time callback was called more than once`. The
-  // per-tab listener in `view-manager.ts` is the single source of
-  // truth: it checks the shared `certExceptions` store, calls
-  // `callback(true)` for matched (partition, host, fingerprint)
-  // triples, and `callback(false)` plus an in-view interstitial
-  // for unmatched ones. The `partitionForSession` helper still
-  // lives in `cert-exceptions.ts` (the per-tab listener uses it).
+  // ---- TLS exception override (issue #444) ----
+  //
+  // We use `session.setCertificateVerifyProc` rather than reacting
+  // to the `certificate-error` event because the verify proc is the
+  // canonical Electron API for cert overrides: it intercepts BEFORE
+  // Chromium decides the cert is bad, and the override sticks
+  // immediately for the next loadURL — whereas the event-based
+  // override path was observed to leave the next navigation blank
+  // even after `callback(true)` (likely because Chromium had
+  // already started tearing the connection down by the time the
+  // event handler fired).
+  //
+  // Decision matrix:
+  //   - errorCode 0 (cert is valid) → callback(0) trusts as normal
+  //   - exception matches our store → callback(0) trusts (override)
+  //   - otherwise → callback(-3) defers to Chromium, which fires
+  //     the per-`webContents` `certificate-error` event our view
+  //     manager catches to paint the in-view interstitial.
+  session.defaultSession.setCertificateVerifyProc((request, callback) => {
+    const hostname = request.hostname.toLowerCase();
+    const fingerprint = request.certificate.fingerprint;
+    if (request.errorCode === 0) {
+      callback(0);
+      return;
+    }
+    const partition = partitionForSession(session.defaultSession);
+    if (fingerprint && state.certExceptions.has({ partition, host: hostname, fingerprint })) {
+      dashLog(`cert-verify: override-trust ${hostname} (${fingerprint})`);
+      callback(0);
+      return;
+    }
+    dashLog(
+      `cert-verify: default-deny ${hostname} fp=${fingerprint} errorCode=${request.errorCode}`,
+    );
+    callback(-3);
+  });
 
   state.unregisterIpc = registerIpc({
     mainWindow: state.mainWindow,

@@ -20,6 +20,7 @@
  */
 
 import { type BrowserWindow, WebContentsView } from "electron";
+import { dashLog } from "../main/services/log.js";
 import { Events } from "../shared/ipc-channels.js";
 import {
   type BrowserBoundsArgs,
@@ -39,7 +40,7 @@ import {
   type BrowserZoomArgs,
   browserKey,
 } from "../shared/types.js";
-import { type BrowserCertErrorPayload, buildCertErrorPayload, hostFromUrl } from "./cert-error.js";
+import { type BrowserCertErrorPayload, buildCertErrorPayload } from "./cert-error.js";
 import { type CertExceptionStore, partitionForSession } from "./cert-exceptions.js";
 import {
   type BandAction,
@@ -583,8 +584,14 @@ export class BrowserViewManager {
    */
   private handleBandAction(key: string, action: BandAction): void {
     const view = this.views.get(key);
-    if (!view) return;
-    if (view.webContents.isDestroyed()) return;
+    if (!view) {
+      dashLog(`handleBandAction: no view for key=${key}`);
+      return;
+    }
+    if (view.webContents.isDestroyed()) {
+      dashLog(`handleBandAction: webContents destroyed for key=${key}`);
+      return;
+    }
     switch (action.kind) {
       case "cert-proceed": {
         const partition = partitionForSession(view.webContents.session);
@@ -599,6 +606,9 @@ export class BrowserViewManager {
         this.emit(Events.browserHostOverridden, { host: action.host.toLowerCase() });
         const pending = this.pendingCertErrors.get(key);
         this.pendingCertErrors.delete(key);
+        dashLog(
+          `cert-proceed: host=${action.host} fp=${action.fingerprint} pendingUrl=${pending?.url ?? "(none)"} partition=${partition}`,
+        );
         if (pending?.url) {
           void view.webContents.loadURL(pending.url);
         } else {
@@ -1069,6 +1079,9 @@ export class BrowserViewManager {
       // short-circuits it). `did-start-navigation` always fires.
       if (details.url.startsWith("band-action:")) {
         const action = parseBandAction(details.url);
+        dashLog(
+          `band-action did-start-navigation url=${details.url} parsed=${action ? action.kind : "null"}`,
+        );
         setImmediate(() => {
           if (view.webContents.isDestroyed()) return;
           if (action) this.handleBandAction(key, action);
@@ -1126,37 +1139,20 @@ export class BrowserViewManager {
     });
 
     // ---- TLS interstitial (issue #444) ----
-    // Chromium's default behaviour for an invalid cert is to silently
-    // block the load. We intercept here and decide:
+    // The session-wide `setCertificateVerifyProc` registered in
+    // `main/index.ts` is the single source of truth for cert
+    // override decisions. It returns `callback(0)` (trust) for
+    // hosts the user has accepted in this session, so by the time
+    // THIS event fires, we know the cert was NOT in the exception
+    // store and the user needs to see the interstitial.
     //
-    //   - If the user has already proceeded for this exact triple
-    //     in this session (matched in the shared `certExceptions`
-    //     store), `callback(true)` ⇒ Chromium trusts and the load
-    //     proceeds normally.
-    //   - Otherwise `callback(false)` ⇒ keep blocking, and load an
-    //     in-view Chrome-style interstitial via a `data:` URI so the
-    //     user can Proceed / Back. Rendering inside the view (rather
-    //     than as a React overlay above it) is what makes the error
-    //     page part of any CDP screencast — remote cast viewers can
-    //     see it and click through.
-    //
-    // SINGLE source of truth for the cert decision. We deliberately
-    // do NOT also register an app-level `certificate-error` listener:
-    // Electron fires both, and `callback` is a one-time function —
-    // calling it from both throws
-    // `TypeError: One-time callback was called more than once`.
+    // Our job here is purely UI: capture the metadata, stash it
+    // so the band-action://cert-proceed link can read host +
+    // fingerprint, emit a URL change so the address bar shows the
+    // failing target with loading=false, and (deferred) loadURL
+    // the interstitial HTML into the WebContentsView.
     view.webContents.on("certificate-error", (event, url, errorCode, certificate, callback) => {
       event.preventDefault();
-      const host = hostFromUrl(url);
-      const fingerprint = certificate.fingerprint;
-      const partition = partitionForSession(view.webContents.session);
-      // Honoured session exception: trust + return without showing
-      // the interstitial. Same condition the renderer's "Not Secure"
-      // badge is keyed off of.
-      if (host && fingerprint && this.opts.certExceptions.has({ partition, host, fingerprint })) {
-        callback(true);
-        return;
-      }
       const payload = buildCertErrorPayload({
         key,
         url,
@@ -1170,21 +1166,12 @@ export class BrowserViewManager {
         },
       });
       this.pendingCertErrors.set(key, payload);
+      dashLog(`cert-error: ${payload.host} fp=${payload.fingerprint} → interstitial`);
       // Tell the renderer the failing URL committed (with
       // loading=false) so the address bar reflects it and the
-      // spinner stops. `loadURL(data:...)` below would otherwise
-      // fire its own did-start-navigation, which our filter above
-      // skips — without this explicit emit the renderer would be
-      // stuck in loading=true.
+      // spinner stops. The `data:` URI load below is filtered.
       emitUrl(url, false);
       callback(false);
-      // Paint the interstitial directly into the WebContentsView.
-      // Button clicks navigate to `band-action://…` which the
-      // `did-start-navigation` interceptor above dispatches back to
-      // `handleBandAction`. DEFER via setImmediate — calling
-      // `loadURL` synchronously from a Chromium event handler that
-      // still has navigation state on the stack has caused
-      // main-process crashes deep inside V8.
       const html = buildCertErrorHtml({
         url,
         host: payload.host,
@@ -1198,6 +1185,10 @@ export class BrowserViewManager {
           validExpiry: certificate.validExpiry,
         },
       });
+      // DEFER via setImmediate — calling `loadURL` synchronously
+      // from a Chromium event handler that still has navigation
+      // state on the stack has caused main-process crashes deep
+      // inside V8.
       setImmediate(() => {
         if (view.webContents.isDestroyed()) return;
         void view.webContents.loadURL(htmlToDataUrl(html));
