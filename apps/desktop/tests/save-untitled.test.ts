@@ -131,24 +131,55 @@ describe("writeSavedFile", () => {
   });
 
   test("does not leave a temp file behind when the rename target's directory is missing", async () => {
-    // The write-to-temp + rename path can fail in two phases: the
-    // writeFile (parent missing), or the rename itself (very rare on
-    // normal filesystems but possible across mounts). Either way we
-    // shouldn't leak a `.band-save-*.tmp` next to the target.
+    // First failure mode: `writeFile(tmp, ...)` itself fails because
+    // the target's parent dir doesn't exist. The temp file is never
+    // created on disk, so the `unlink(tmp)` in the catch block is a
+    // no-op — but we still assert no leftover litter, which would
+    // surface a future regression where the temp path is computed
+    // before the parent dir is validated.
     const dir = await mkdtemp(join(tmpdir(), "band-save-untitled-cleanup-"));
     try {
       const bogus = join(dir, "nonexistent-subdir", "x.txt");
       await assert.rejects(writeSavedFile(bogus, "should fail"), /ENOENT/);
-      // The temp file lives in the same directory as the target, which
-      // doesn't exist — nothing to assert on a subdir that was never
-      // created. The point is the call threw and didn't leave a temp
-      // file in the parent directory.
       const { readdir } = await import("node:fs/promises");
       const entries = await readdir(dir);
       assert.equal(
         entries.filter((e) => e.startsWith(".band-save-")).length,
         0,
         "expected no .band-save-*.tmp files left in the parent directory",
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("removes the temp file when the rename itself fails", async () => {
+    // Second (harder) failure mode: `writeFile(tmp, ...)` succeeds —
+    // a temp file actually exists on disk — and then `rename(tmp,
+    // target)` throws. This is the path the cleanup guard was
+    // designed for, and the test the previous one doesn't actually
+    // exercise (since there `writeFile` itself failed before any temp
+    // file could be created).
+    //
+    // We force the rename failure by pointing `target` at an existing
+    // *directory*: `rename(<file>, <dir>)` fails with EISDIR on
+    // POSIX. The writeFile to the temp still succeeds because the
+    // temp lives in `dirname(target)`, which is the directory's
+    // parent — a real, writable location.
+    const dir = await mkdtemp(join(tmpdir(), "band-save-untitled-rename-fail-"));
+    try {
+      const { mkdir, readdir } = await import("node:fs/promises");
+      // target IS an existing directory — the rename will refuse it.
+      const target = join(dir, "some-existing-dir");
+      await mkdir(target);
+      await assert.rejects(writeSavedFile(target, "content"), /EISDIR|ENOTDIR|EPERM/);
+      // The temp file is created in `dirname(target)` (= `dir`), so
+      // any leftover `.band-save-*.tmp` would surface here.
+      const entries = await readdir(dir);
+      assert.equal(
+        entries.filter((e) => e.startsWith(".band-save-")).length,
+        0,
+        "expected the temp file to be cleaned up after a failed rename",
       );
     } finally {
       await rm(dir, { recursive: true, force: true });

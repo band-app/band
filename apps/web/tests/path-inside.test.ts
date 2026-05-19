@@ -65,4 +65,16 @@ describe("pathInside", () => {
     // child as "inside" it.
     expect(pathInside("", "/anything")).toBeNull();
   });
+
+  it("operates on already-normalised POSIX paths (Windows is normalised upstream)", () => {
+    // pathInside itself is POSIX-only. The Windows save flow
+    // normalises `chosen` to forward slashes BEFORE calling here —
+    // see `handleSaveUntitled` in CodeBrowserView. This test
+    // documents that contract by asserting backslash-bearing input
+    // never matches even when the segments look right, so a future
+    // change to skip the upstream normalisation surfaces as a test
+    // failure rather than a silently broken Windows save.
+    expect(pathInside("C:/Users/alice/band", "C:\\Users\\alice\\band\\src\\x.ts")).toBeNull();
+    expect(pathInside("C:/Users/alice/band", "C:/Users/alice/band/src/x.ts")).toBe("src/x.ts");
+  });
 });

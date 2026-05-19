@@ -73,6 +73,21 @@ export async function pickFile(parent: BrowserWindow | null): Promise<string | n
 // ---------------------------------------------------------------------------
 
 /**
+ * Defensive ceiling on the buffer the renderer can hand off in a
+ * single save call. The Electron model is trusted (the renderer is
+ * Band's own code), so this isn't a security boundary — it's a UX
+ * safety net for accidental pastes (multi-MB log files, an image
+ * dropped in as base64, a minified bundle) that would otherwise
+ * sit in IPC shared memory, the main-process heap, and the temp
+ * file concurrently while the disk write stalls the event loop.
+ *
+ * 100 MB matches the rough ceiling above which the OS save dialog
+ * itself becomes the bottleneck rather than the IPC. The renderer
+ * receives the rejection cleanly through the existing error path.
+ */
+const SAVE_CONTENT_MAX_BYTES = 100 * 1024 * 1024;
+
+/**
  * Open the system "Save As" picker and write the supplied `content` to the
  * chosen path. Returns the absolute path of the saved file, or `null` when
  * the user cancels.
@@ -91,21 +106,6 @@ export async function pickFile(parent: BrowserWindow | null): Promise<string | n
  * dialog's starting location and filename (e.g. "Untitled-1.txt") so the
  * user only has to type when overriding.
  */
-/**
- * Defensive ceiling on the buffer the renderer can hand off in a
- * single save call. The Electron model is trusted (the renderer is
- * Band's own code), so this isn't a security boundary — it's a UX
- * safety net for accidental pastes (multi-MB log files, an image
- * dropped in as base64, a minified bundle) that would otherwise
- * sit in IPC shared memory, the main-process heap, and the temp
- * file concurrently while the disk write stalls the event loop.
- *
- * 100 MB matches the rough ceiling above which the OS save dialog
- * itself becomes the bottleneck rather than the IPC. The renderer
- * receives the rejection cleanly through the existing error path.
- */
-const SAVE_CONTENT_MAX_BYTES = 100 * 1024 * 1024;
-
 export async function pickSaveFile(
   parent: BrowserWindow | null,
   args: { content: string; defaultName?: string; defaultPath?: string },

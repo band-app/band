@@ -107,15 +107,38 @@ export function FileTabBar({
   const activeRef = useRef<HTMLButtonElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // State for the unsaved-changes confirmation dialog
+  // State for the unsaved-changes confirmation dialog. We latch
+  // `confirmCloseIsUntitled` at dialog-open time instead of deriving
+  // it from `tabs` on every render. The Save… flow calls
+  // `renameUntitledToFile` upstream, which removes the `untitled:N`
+  // entry from `tabs` BEFORE this component's
+  // `setConfirmClosePath(null)` runs — and during that render window
+  // a `tabs.some(...)` lookup would observe the renamed (no-longer-
+  // untitled) tab and flip the button row from "Discard / Save…" to
+  // "Close Without Saving" momentarily, producing a flicker. Latching
+  // at open time pins the variant for the dialog's whole lifetime.
   const [confirmClosePath, setConfirmClosePath] = useState<string | null>(null);
-  // Track whether the tab the close-confirm dialog is showing for is
-  // an untitled buffer — drives the three-button (Save / Discard / Cancel)
-  // layout from issue #434 instead of the default two-button shape used
-  // for file-backed tabs (where dirty content already has a path to save
-  // to, so the user picks Save/Cancel from the editor toolbar instead).
-  const confirmCloseIsUntitled =
-    confirmClosePath != null && tabs.some((t) => t.filePath === confirmClosePath && t.isUntitled);
+  const [confirmCloseIsUntitled, setConfirmCloseIsUntitled] = useState(false);
+  const [confirmCloseLabel, setConfirmCloseLabel] = useState<string>("");
+  const openConfirmClose = useCallback(
+    (filePath: string) => {
+      const tab = tabs.find((t) => t.filePath === filePath);
+      setConfirmClosePath(filePath);
+      setConfirmCloseIsUntitled(!!tab?.isUntitled);
+      // Pin the display name at open time too — the renamed (now
+      // file-backed) tab keeps a workspace path, but the dialog should
+      // still announce the original "Untitled-N" the user clicked.
+      setConfirmCloseLabel(
+        tab?.isUntitled ? (tab.untitledLabel ?? "Untitled") : getBasename(filePath),
+      );
+    },
+    [tabs],
+  );
+  const closeConfirmDialog = useCallback(() => {
+    setConfirmClosePath(null);
+    setConfirmCloseIsUntitled(false);
+    setConfirmCloseLabel("");
+  }, []);
 
   // Re-render when dirty state changes (FileViewer dispatches "band:dirty-change")
   const [, forceUpdate] = useReducer((x: number) => x + 1, 0);
@@ -149,20 +172,20 @@ export function FileTabBar({
   const handleClose = useCallback(
     (filePath: string) => {
       if (isDirtyFn?.(filePath)) {
-        setConfirmClosePath(filePath);
+        openConfirmClose(filePath);
         return;
       }
       onCloseTab(filePath);
     },
-    [onCloseTab, isDirtyFn],
+    [onCloseTab, isDirtyFn, openConfirmClose],
   );
 
   const handleConfirmClose = useCallback(() => {
     if (confirmClosePath) {
       onCloseTab(confirmClosePath);
-      setConfirmClosePath(null);
+      closeConfirmDialog();
     }
-  }, [confirmClosePath, onCloseTab]);
+  }, [confirmClosePath, onCloseTab, closeConfirmDialog]);
 
   // Save-then-close for untitled tabs. Runs the OS save dialog via
   // `onSaveUntitled`; if the user picks a path we close the (now file-
@@ -185,14 +208,14 @@ export function FileTabBar({
         // The save flow renamed the tab to the saved path — the
         // original untitled key is gone, so closing it is a no-op.
         // Just dismiss the dialog.
-        setConfirmClosePath(null);
+        closeConfirmDialog();
       }
       // Cancelled: leave the dialog open so the user can pick
       // Discard or Cancel without re-clicking the X.
     } finally {
       setSaveAndClosePending(false);
     }
-  }, [confirmClosePath, onSaveUntitled, saveAndClosePending]);
+  }, [confirmClosePath, onSaveUntitled, saveAndClosePending, closeConfirmDialog]);
 
   const handleMouseDown = useCallback(
     (e: React.MouseEvent, filePath: string) => {
@@ -449,23 +472,18 @@ export function FileTabBar({
       {/* Unsaved changes confirmation dialog */}
       <Dialog
         open={confirmClosePath !== null}
-        onOpenChange={(open) => !open && setConfirmClosePath(null)}
+        onOpenChange={(open) => !open && closeConfirmDialog()}
       >
         <DialogContent showCloseButton={false}>
           <DialogHeader>
             <DialogTitle>Unsaved Changes</DialogTitle>
             <DialogDescription>
-              &ldquo;
-              {confirmClosePath
-                ? confirmCloseIsUntitled
-                  ? (tabs.find((t) => t.filePath === confirmClosePath)?.untitledLabel ?? "Untitled")
-                  : getBasename(confirmClosePath)
-                : ""}
-              &rdquo; has unsaved changes that will be lost if you close it.
+              &ldquo;{confirmCloseLabel}&rdquo; has unsaved changes that will be lost if you close
+              it.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmClosePath(null)}>
+            <Button variant="outline" onClick={closeConfirmDialog}>
               Cancel
             </Button>
             <Button variant="destructive" onClick={handleConfirmClose}>

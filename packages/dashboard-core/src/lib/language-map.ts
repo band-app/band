@@ -157,6 +157,16 @@ export const SUPPORTED_LANGUAGES: SupportedLanguage[] = [
 ];
 
 /**
+ * Pre-built lookup so `languageLabel` is O(1) rather than O(n) over
+ * `SUPPORTED_LANGUAGES`. The label is read on every render of the
+ * status-bar language indicator, so although the list is small (~50
+ * entries) and the per-call cost is negligible, the Map avoids a
+ * scan-per-render and matches the style used by `EXTENSION_MAP` /
+ * `FILENAME_MAP` above.
+ */
+const LANGUAGE_LABEL_BY_ID = new Map(SUPPORTED_LANGUAGES.map((l) => [l.id, l.label]));
+
+/**
  * Resolve a language id to its human-readable label (e.g.
  * `"typescript"` → `"TypeScript"`). Falls back to a Title-Cased
  * version of the id when the language isn't in `SUPPORTED_LANGUAGES`
@@ -168,8 +178,8 @@ export const SUPPORTED_LANGUAGES: SupportedLanguage[] = [
  * recognisable string rather than masking a missing-language bug.
  */
 export function languageLabel(id: string): string {
-  const entry = SUPPORTED_LANGUAGES.find((l) => l.id === id);
-  if (entry) return entry.label;
+  const label = LANGUAGE_LABEL_BY_ID.get(id);
+  if (label) return label;
   return id.charAt(0).toUpperCase() + id.slice(1);
 }
 

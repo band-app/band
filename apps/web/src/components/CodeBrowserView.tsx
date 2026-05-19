@@ -1355,6 +1355,17 @@ export function CodeBrowserView({
       });
       if (!chosen) return null;
 
+      // Normalise to POSIX-style separators before the containment
+      // check — on Windows, Electron's `dialog.showSaveDialog` returns
+      // native paths like `C:\Users\alice\band\src\x.ts`, but Band's
+      // workspace registry stores worktree paths with forward slashes.
+      // `pathInside` is a string-segment comparison, so without this
+      // rewrite every Windows save would slip past it and be
+      // classified as external regardless of where the user actually
+      // saved. macOS / Linux paths are POSIX already, so the regex
+      // is a no-op there.
+      const chosenPosix = chosen.replace(/\\/g, "/");
+
       // Decide whether the chosen path lives inside the workspace.
       // When it does we transition to a normal workspace tab; otherwise
       // it becomes an external tab (per issue #433). `pathInside`
@@ -1363,9 +1374,9 @@ export function CodeBrowserView({
       // prefix-collision edge case (`/a/band` vs `/a/band-fork`) by
       // requiring an exact path-segment match rather than a raw string
       // prefix.
-      const relative = workspacePath != null ? pathInside(workspacePath, chosen) : null;
+      const relative = workspacePath != null ? pathInside(workspacePath, chosenPosix) : null;
       const isExternal = relative === null;
-      const newPath = relative ?? chosen;
+      const newPath = relative ?? chosenPosix;
 
       // Carry the manual language override (if any) from the untitled
       // key to the new path so the user's choice survives the rename
@@ -1403,7 +1414,10 @@ export function CodeBrowserView({
       setViewColumn(undefined);
       if (!isExternal) notifySelectFile(newPath);
       window.dispatchEvent(new CustomEvent("band:dirty-change"));
-      return chosen;
+      // Return the POSIX-normalised path so downstream callers (the
+      // FileViewer save handler, primarily) see a consistent shape
+      // across platforms — the same rewrite as `chosenPosix` above.
+      return chosenPosix;
     },
     [pickSaveFile, workspacePath, fileTabs.renameUntitledToFile, notifySelectFile, tabState],
   );
