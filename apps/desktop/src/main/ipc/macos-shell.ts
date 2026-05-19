@@ -79,10 +79,12 @@ export async function pickFile(parent: BrowserWindow | null): Promise<string | n
  *
  * Backs the editor's "Save untitled tab" flow: an untitled buffer lives
  * entirely in the renderer until the user picks a destination — this
- * bridge surfaces the native save dialog and persists the buffer to the
- * chosen location atomically (one IPC round-trip = one user-visible Save
- * operation). The renderer then transitions the tab from "untitled" to
- * file-backed using the returned path.
+ * bridge surfaces the native save dialog and persists the buffer in a
+ * single IPC round-trip (one user-visible Save operation). The renderer
+ * then transitions the tab from "untitled" to file-backed using the
+ * returned path. The write itself goes through `writeSavedFile`, which
+ * uses a write-to-temp + rename pattern to avoid mid-write truncation —
+ * see that function for the atomicity contract.
  *
  * Anchored to `parent` so the dialog is sheet-style on macOS and modal-
  * relative on other platforms. `defaultPath` and `defaultName` seed the
@@ -108,8 +110,10 @@ export async function pickSaveFile(
 
   // `dialog.showSaveDialog` with `showOverwriteConfirmation` already
   // handled the overwrite prompt, so we trust the path and persist
-  // the bytes. Errors propagate up through the IPC chain.
-  writeSavedFile(result.filePath, args.content);
+  // the bytes. Errors propagate up through the IPC chain. `await` is
+  // load-bearing — `writeSavedFile` is async to keep the Electron main
+  // process event loop responsive during the disk write.
+  await writeSavedFile(result.filePath, args.content);
   return result.filePath;
 }
 

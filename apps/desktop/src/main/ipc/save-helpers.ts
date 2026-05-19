@@ -9,8 +9,9 @@
  * default-seed computation are isolated here.
  */
 
-import { writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { randomBytes } from "node:crypto";
+import { rename, unlink, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 
 /**
  * Compute the default seed path for the OS save dialog from caller-
@@ -37,15 +38,48 @@ export function resolveSaveDialogSeed(args: {
 }
 
 /**
- * Persist `content` to `filePath` using a UTF-8 write. The IPC handler
- * invokes this once Electron's save dialog returns a path; the
- * separation lets the integration tests exercise the on-disk path
- * directly without driving the native dialog.
+ * Persist `content` to `filePath` using an atomic write-to-temp +
+ * rename pattern. Three guarantees that follow from the layout:
  *
- * Throws on filesystem errors (permission denied, parent missing) so
- * the error surfaces through the IPC invoke chain rather than silently
- * succeeding and losing the user's work.
+ *   1. **Async.** The IPC handler runs on the Electron main process —
+ *      a synchronous `writeFileSync` would freeze the event loop and
+ *      every renderer IPC call until the write completes (visible as
+ *      app stalls on slow disks or large buffers). `fs/promises`
+ *      yields between syscalls.
+ *
+ *   2. **Atomic at the filesystem level.** `writeFile` truncates the
+ *      destination before streaming bytes, so a crash / SIGKILL /
+ *      power loss mid-write would zero the file. We write to a sibling
+ *      `.band-save-<rand>.tmp` first, then `rename(2)` — which is
+ *      atomic on POSIX and best-effort on Windows (NTFS implements it
+ *      via MoveFileEx with `REPLACE_EXISTING`). Either the user sees
+ *      the previous contents or the new contents, never a truncated
+ *      file.
+ *
+ *   3. **Errors propagate.** Filesystem failures (permission denied,
+ *      parent missing, disk full mid-rename) throw so the IPC chain
+ *      surfaces them to the renderer; we still try to remove the temp
+ *      file on the error path so a failed save doesn't litter the
+ *      worktree.
  */
-export function writeSavedFile(filePath: string, content: string): void {
-  writeFileSync(filePath, content, "utf8");
+export async function writeSavedFile(filePath: string, content: string): Promise<void> {
+  // 12 hex chars (6 random bytes) is more than enough for a temp name —
+  // collision probability inside a single save is astronomically low,
+  // and the temp lives in the same directory as the target so any
+  // overlap with an existing dotfile would be coincidental.
+  const tmp = join(dirname(filePath), `.band-save-${randomBytes(6).toString("hex")}.tmp`);
+  try {
+    await writeFile(tmp, content, "utf8");
+    await rename(tmp, filePath);
+  } catch (err) {
+    try {
+      await unlink(tmp);
+    } catch {
+      // Ignore cleanup error — the original error is what the caller
+      // cares about. The temp file may legitimately not exist yet (the
+      // `writeFile` itself failed) or the unlink may race with another
+      // process; neither should mask the real failure.
+    }
+    throw err;
+  }
 }
