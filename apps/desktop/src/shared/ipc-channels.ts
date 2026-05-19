@@ -75,6 +75,20 @@ export const Channels = {
   // wired up with `setDevToolsWebContents` — not as a detached OS
   // window.
   browserToggleDevTools: "browser_toggle_dev_tools",
+  // Chrome-style error pages for cert / load failures are rendered
+  // INSIDE the WebContentsView via a `data:` URI (issue #444 — see
+  // `browser/error-html.ts`). The user's button clicks become
+  // `band-action://…` navigations which the per-tab `will-navigate`
+  // interceptor in `view-manager.ts` translates into the matching
+  // manager call — no renderer-side IPC needed for the buttons
+  // themselves. The only renderer-facing surface is the
+  // `browser-host-overridden` event below, so the dashboard chrome
+  // can paint the "Not Secure" badge.
+  //
+  // Renderer-mounted-late catch-up: report which hosts already have
+  // an active session exception so the badge shows up correctly
+  // when a panel is restored after the user already proceeded.
+  browserGetOverriddenHosts: "browser_get_overridden_hosts",
 } as const;
 
 export type ChannelName = (typeof Channels)[keyof typeof Channels];
@@ -102,6 +116,14 @@ export const Events = {
    *  WebContentsView. The renderer's DockviewBrowserContainer reacts by
    *  opening a new tab in whichever container holds the source pane. */
   browserNewTabShortcut: "browser-new-tab-shortcut",
+  /** Pushed when the user accepts a TLS exception (clicks Proceed
+   *  in the in-view cert interstitial). Carries the host so the
+   *  renderer can flag the address bar with a "Not Secure" badge
+   *  for that origin. The cert interstitial itself is rendered
+   *  inside the WebContentsView (see `browser/error-html.ts`) so
+   *  it stays visible during screencast — this event is only for
+   *  the surrounding dashboard chrome. */
+  browserHostOverridden: "browser-host-overridden",
   windowFullscreenChanged: "window-fullscreen-changed",
   /** Pushed by the main process when the background updater detects (or
    *  clears) a pending app update. Payload: `PendingUpdate` from

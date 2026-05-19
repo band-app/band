@@ -3,12 +3,14 @@ import { ArrowLeft, ArrowRight, RotateCw, Wrench, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useBrowserPaneControls } from "../hooks/useBrowserPaneControls";
 import { useBrowserPaneFreeze } from "../hooks/useBrowserPaneFreeze";
+import { useOverriddenHosts } from "../hooks/useOverriddenHosts";
 import { invoke as desktopInvoke, listen as desktopListen } from "../lib/desktop-ipc";
 import { isDesktop } from "../lib/is-desktop";
 import { trpc } from "../lib/trpc-client";
 import { AddressBarAutocomplete } from "./AddressBarAutocomplete";
 import { BrowserFindBar } from "./BrowserFindBar";
 import { HistoryPopover } from "./HistoryPopover";
+import { NotSecureBadge } from "./NotSecureBadge";
 
 const DEFAULT_URL = "";
 const BLANK_URL = "about:blank";
@@ -106,6 +108,12 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
     visible: api.isActive && params.wsActive !== false,
     ipcKeyRef,
   });
+  // TLS interstitial + generic "site can't be reached" pages are
+  // painted INSIDE the WebContentsView via a data: URI (issue #444).
+  // The renderer just needs the set of hosts the user has overridden
+  // a cert error for, so the address bar can paint a "Not Secure"
+  // badge while the user is on those origins.
+  const { isOverriddenHost } = useOverriddenHosts();
   // `addressInputFocusedRef` is now owned by `useBrowserPaneControls`
   // — it's destructured back out below and read inside the
   // `browser-url-changed` listener to skip clobbering an in-progress
@@ -554,6 +562,7 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
             <RotateCw className="size-4" />
           </button>
         )}
+        {isOverriddenHost(currentUrl) ? <NotSecureBadge /> : null}
         <input
           type="text"
           value={inputUrl}
@@ -603,7 +612,12 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
        *  native WebContentsView. */}
       <BrowserFindBar find={find} />
 
-      {/* Placeholder – the native webview is positioned over this area */}
+      {/* Placeholder – the native webview is positioned over this area.
+       *  Error pages (cert / "site can't be reached") are painted
+       *  INSIDE the WebContentsView via a data: URI — see
+       *  apps/desktop/src/browser/error-html.ts. The only error-
+       *  related UI the renderer still owns is the "Not Secure"
+       *  badge in the address bar above. */}
       <div ref={placeholderRef} className="relative min-h-0 flex-1">
         {snapshot ? (
           // Frozen raster shown while any overlay is open. See
@@ -681,6 +695,11 @@ export function BrowserPaneComponent({
     visible: api.isVisible && params.wsActive !== false,
     ipcKeyRef,
   });
+  // Error pages live INSIDE the WebContentsView (issue #444 +
+  // screencast follow-up); the renderer only tracks the host-override
+  // set for the "Not Secure" badge. Same hook + behaviour as
+  // `BrowserPanelComponent`.
+  const { isOverriddenHost } = useOverriddenHosts();
   // `addressInputFocusedRef` is destructured from
   // `useBrowserPaneControls` below and read inside the
   // `browser-url-changed` listener to skip clobbering an in-progress
@@ -1142,6 +1161,7 @@ export function BrowserPaneComponent({
             <RotateCw className="size-4" />
           </button>
         )}
+        {isOverriddenHost(currentUrl) ? <NotSecureBadge /> : null}
         <input
           type="text"
           value={inputUrl}
@@ -1184,6 +1204,8 @@ export function BrowserPaneComponent({
         <AddressBarAutocomplete state={autocomplete} onSelect={handleNavigate} />
       </div>
       <BrowserFindBar find={find} />
+      {/* Placeholder – error pages live inside the WebContentsView via
+       *  a data: URI; see the identical block in `BrowserPanelComponent`. */}
       <div ref={placeholderRef} className="relative min-h-0 flex-1">
         {snapshot ? (
           // `object-contain object-top` — see the identical block in

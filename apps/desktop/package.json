@@ -23,6 +23,8 @@
     "typescript": "^5.7.0"
   },
   "dependencies": {
-    "electron-updater": "^6.8.3"
+    "@band-app/logger": "workspace:^",
+    "electron-updater": "^6.8.3",
+    "pino": "^9.6.0"
   }
 }

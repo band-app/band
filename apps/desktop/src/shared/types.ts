@@ -102,6 +102,16 @@ export interface BrowserStopFindInPageArgs extends BrowserKeyArg {
 }
 
 /**
+ * Emitted when the user accepts a TLS exception in the in-view
+ * cert interstitial (issue #444). The host is what the dashboard
+ * chrome keys its "Not Secure" badge off of — `host` is already
+ * lowercased and port-stripped by the desktop side.
+ */
+export interface BrowserHostOverriddenPayload {
+  host: string;
+}
+
+/**
  * Per-tab zoom adjustment.
  *
  *   - `"in"` / `"out"` step the existing `webContents.zoomFactor` by a

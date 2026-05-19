@@ -35,7 +35,9 @@
 // Type-only imports erase at compile time — these don't trigger module
 // loading at runtime, even under plain Node.
 import type { BrowserWindow } from "electron";
-import { dashLog } from "./services/log.js";
+import { createLogger } from "./services/log.js";
+
+const log = createLogger("updater");
 
 /**
  * The "we've seen a newer version" carrier shared between the background
@@ -247,7 +249,7 @@ export async function checkForUpdate(
   // same `electron-updater` listener bus. If a background tick or another
   // menu click is already in flight, no-op rather than cross-wiring events.
   if (inFlightCheck) {
-    dashLog("updater: check already in flight, skipping");
+    log.info("check already in flight, skipping");
     if (interactive) {
       await showInfo("Checking for Updates", "An update check is already in progress.");
     }
@@ -260,7 +262,7 @@ export async function checkForUpdate(
       updater = deps.updater ?? (await loadDefaultUpdater());
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      dashLog(`updater: failed to create updater: ${msg}`);
+      log.error({ err: msg }, "failed to create updater");
       if (interactive) {
         await showInfo("Update Error", `Failed to check for updates: ${msg}`);
       }
@@ -270,7 +272,7 @@ export async function checkForUpdate(
     const result = await performCheck(updater);
 
     if (result.kind === "error") {
-      dashLog(`updater: check failed: ${result.error.message}`);
+      log.error({ err: result.error.message }, "check failed");
       if (interactive) {
         await showInfo("Update Error", "Failed to check for updates. Please try again later.");
       }
@@ -278,7 +280,7 @@ export async function checkForUpdate(
     }
 
     if (result.kind === "not-available") {
-      dashLog("updater: no update available");
+      log.info("no update available");
       if (interactive) {
         await showInfo("No Updates Available", "You're running the latest version of Band.");
       }
@@ -286,7 +288,7 @@ export async function checkForUpdate(
     }
 
     const { version } = result;
-    dashLog(`updater: update available — v${version}`);
+    log.info({ version }, "update available");
 
     const accepted = await showConfirm(
       "Update Available",
@@ -299,12 +301,12 @@ export async function checkForUpdate(
     const installed = await performDownload(updater);
 
     if (!installed.ok) {
-      dashLog(`updater: install failed: ${installed.error.message}`);
+      log.error({ err: installed.error.message }, "install failed");
       await showInfo("Update Failed", `Failed to install the update: ${installed.error.message}`);
       return;
     }
 
-    dashLog(`updater: installed v${version}, restarting…`);
+    log.info({ version }, "installed, restarting");
     if (deps.restart) {
       deps.restart();
     } else {
@@ -393,10 +395,10 @@ async function performDownload(
         const transferred = Math.round(info.transferred);
         const total = Math.round(info.total);
         const pct = info.percent.toFixed(1);
-        dashLog(`updater: progress — ${transferred}/${total} bytes (${pct}%)`);
+        log.info({ transferred, total, pct }, "progress");
       });
       updater.on("update-downloaded", () => {
-        dashLog("updater: download finished, installing…");
+        log.info("download finished, installing");
         settle({ ok: true });
       });
       updater.on("error", (err) => {
@@ -429,7 +431,7 @@ export async function checkForUpdateBackground(
   deps: CheckForUpdateDeps = ZERO_DEPS,
 ): Promise<PendingUpdate> {
   if (inFlightCheck) {
-    dashLog("updater: background check skipped (check already in flight)");
+    log.info("background check skipped (check already in flight)");
     return null;
   }
   inFlightCheck = true;
@@ -439,19 +441,19 @@ export async function checkForUpdateBackground(
       updater = deps.updater ?? (await loadDefaultUpdater());
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      dashLog(`updater: failed to create updater (background): ${msg}`);
+      log.error({ err: msg }, "failed to create updater (background)");
       return null;
     }
 
     const result = await performCheck(updater);
     if (result.kind === "available") {
-      dashLog(`updater: background check found v${result.version}`);
+      log.info({ version: result.version }, "background check found update");
       return { version: result.version };
     }
     if (result.kind === "error") {
-      dashLog(`updater: background check failed: ${result.error.message}`);
+      log.error({ err: result.error.message }, "background check failed");
     } else {
-      dashLog("updater: background check — no update");
+      log.info("background check: no update");
     }
     return null;
   } finally {
@@ -473,7 +475,7 @@ export async function checkForUpdateBackground(
  */
 export async function installPendingUpdate(deps: CheckForUpdateDeps = ZERO_DEPS): Promise<void> {
   if (inFlightInstall) {
-    dashLog("updater: install already in flight, skipping");
+    log.info("install already in flight, skipping");
     return;
   }
   inFlightInstall = true;
@@ -483,7 +485,7 @@ export async function installPendingUpdate(deps: CheckForUpdateDeps = ZERO_DEPS)
       updater = deps.updater ?? (await loadDefaultUpdater());
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      dashLog(`updater: failed to create updater (install): ${msg}`);
+      log.error({ err: msg }, "failed to create updater (install)");
       throw e instanceof Error ? e : new Error(msg);
     }
     updater.autoDownload = false;
@@ -491,11 +493,11 @@ export async function installPendingUpdate(deps: CheckForUpdateDeps = ZERO_DEPS)
 
     const installed = await performDownload(updater);
     if (!installed.ok) {
-      dashLog(`updater: install failed: ${installed.error.message}`);
+      log.error({ err: installed.error.message }, "install failed");
       throw installed.error;
     }
 
-    dashLog("updater: install complete, restarting…");
+    log.info("install complete, restarting");
     if (deps.restart) {
       deps.restart();
       return;
@@ -543,7 +545,7 @@ export function scheduleStartupCheck(
     void checkForUpdateBackground(opts)
       .then((pending) => opts.onResult?.(pending))
       .catch((err) => {
-        dashLog(`updater: startup check threw: ${String(err)}`);
+        log.error({ err: String(err) }, "startup check threw");
       });
   }, opts.delayMs ?? 10_000);
 
@@ -578,7 +580,7 @@ export function schedulePeriodicCheck(
     void checkForUpdateBackground(opts)
       .then((pending) => opts.onResult?.(pending))
       .catch((err) => {
-        dashLog(`updater: periodic check threw: ${String(err)}`);
+        log.error({ err: String(err) }, "periodic check threw");
       });
   }, intervalMs);
 

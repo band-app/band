@@ -13,15 +13,15 @@
  *      free port 3456 (release builds only — same gate as Tauri).
  */
 
-import { app, BrowserWindow } from "electron";
-
+import { app, BrowserWindow, protocol, session } from "electron";
+import { CertExceptionStore } from "../browser/cert-exceptions.js";
 import { BrowserViewManager } from "../browser/view-manager.js";
 import { createHiddenBrowserWindow } from "./hidden-browser-window.js";
 import { resolveAppIcon } from "./icon.js";
 import { registerIpc } from "./ipc/register.js";
 import { installAppMenu } from "./menu.js";
 import { type ActivityMonitorHandle, startActivityMonitor } from "./services/activity-monitor.js";
-import { dashLog, logToFile } from "./services/log.js";
+import { createLogger } from "./services/log.js";
 import { killPort } from "./services/port.js";
 import { getConfiguredPort, getWebBrowserCdpEnabled } from "./services/settings.js";
 import { resolveWebDir } from "./services/web-paths.js";
@@ -34,10 +34,20 @@ import {
 } from "./updater.js";
 import { createMainWindow } from "./window.js";
 
+const log = createLogger("desktop");
+
 interface AppState {
   mainWindow: BrowserWindow | null;
   managed: ManagedProcess;
   browserManager: BrowserViewManager | null;
+  /**
+   * Session-scoped TLS exception store, shared between the
+   * `BrowserViewManager` (which records exceptions on user proceed)
+   * and the process-wide `app.on("certificate-error")` override hook
+   * installed below (which reads them back to decide whether to
+   * call `callback(true)`). See `browser/cert-exceptions.ts`.
+   */
+  certExceptions: CertExceptionStore;
   unregisterIpc: (() => void) | null;
   cancelStartupUpdateCheck: (() => void) | null;
   cancelPeriodicUpdateCheck: (() => void) | null;
@@ -57,6 +67,7 @@ const state: AppState = {
   mainWindow: null,
   managed: new ManagedProcess(),
   browserManager: null,
+  certExceptions: new CertExceptionStore(),
   unregisterIpc: null,
   cancelStartupUpdateCheck: null,
   cancelPeriodicUpdateCheck: null,
@@ -86,10 +97,10 @@ function setPendingUpdate(next: PendingUpdate): void {
 function installCrashHandlers(): void {
   process.on("uncaughtException", (err) => {
     const stack = err.stack ?? String(err);
-    dashLog(`uncaughtException: ${stack}`);
+    log.fatal({ err: stack }, "uncaughtException");
   });
   process.on("unhandledRejection", (reason) => {
-    dashLog(`unhandledRejection: ${String(reason)}`);
+    log.error({ reason: String(reason) }, "unhandledRejection");
   });
 }
 
@@ -146,7 +157,7 @@ async function cleanupOnce(): Promise<void> {
 
 async function bootstrap(): Promise<void> {
   installCrashHandlers();
-  logToFile("dashboard starting (electron)");
+  log.info("dashboard starting (electron)");
 
   // CDP screencast experiment: when the user has the feature enabled
   // (settings.webBrowserCdpEnabled, default false — opt-in), expose
@@ -163,6 +174,21 @@ async function bootstrap(): Promise<void> {
   if (cdpEnabled) {
     app.commandLine.appendSwitch("remote-debugging-port", "9223");
   }
+
+  // Make `band-action://` a known scheme so Chromium handles it
+  // internally instead of falling back to the OS external-protocol
+  // handler (issue #444). Without this registration, clicking a
+  // `band-action://cert-proceed?…` link inside the in-view cert
+  // interstitial pops the macOS "no application set to open the
+  // URL" dialog because no app is registered for the scheme. With
+  // it, Chromium routes the request to the no-op
+  // `protocol.handle("band-action", …)` we register after app
+  // ready — and our per-tab `did-start-navigation` listener does
+  // the actual action dispatch. MUST be called before
+  // `app.whenReady()`.
+  protocol.registerSchemesAsPrivileged([
+    { scheme: "band-action", privileges: { standard: false, supportFetchAPI: false } },
+  ]);
 
   await app.whenReady();
 
@@ -181,19 +207,19 @@ async function bootstrap(): Promise<void> {
       try {
         app.dock.setIcon(iconPath);
       } catch (err) {
-        dashLog(`failed to set dock icon: ${String(err)}`);
+        log.warn({ err: String(err) }, "failed to set dock icon");
       }
     }
   }
 
   const url = await resolveDashboardUrl();
-  dashLog(`loading url: ${url}`);
+  log.info({ url }, "loading url");
   state.mainWindow = createMainWindow({ url });
 
   // Surface preload load failures, which otherwise fail silently and leave
   // `__BAND_DESKTOP__` undefined on `window` (collapses isDesktop everywhere).
   state.mainWindow.webContents.on("preload-error", (_e, preloadPath, error) => {
-    dashLog(`preload-error: ${preloadPath} → ${error.stack ?? error.message}`);
+    log.error({ preloadPath, err: error.stack ?? error.message }, "preload-error");
   });
 
   // Hidden BrowserWindow that hosts WebContentsViews ensure'd by the web
@@ -207,6 +233,46 @@ async function bootstrap(): Promise<void> {
   state.browserManager = new BrowserViewManager({
     mainWindow: state.mainWindow,
     hiddenWindow: hiddenBrowserWindow,
+    certExceptions: state.certExceptions,
+  });
+
+  // NOTE on TLS overrides (issue #444): the trust decision is made
+  // in `BrowserViewManager.wireEvents` via the per-`webContents`
+  // `certificate-error` event, not here via
+  // `session.setCertificateVerifyProc`. The verify proc is the
+  // documented Electron API for cert overrides, but empirical
+  // testing showed it gets bypassed by Chromium's internal
+  // per-host bad-cert cache on retry attempts after a denial — the
+  // proc fires for the FIRST connection that fails, but then for
+  // subsequent reconnects within the same session Chromium reuses
+  // its cached "deny" decision and never re-invokes the proc.
+  // `certificate-error` does fire on those retries, so that's the
+  // hook the view manager uses for the override.
+
+  // No-op handler for `band-action://` so Chromium accepts the
+  // navigation and doesn't fall back to the OS external-protocol
+  // handler. The scheme is registered as privileged before
+  // `app.whenReady()` above. The actual action dispatch (record
+  // cert exception, loadURL the real URL, etc.) happens in the
+  // per-tab `did-start-navigation` listener in `view-manager.ts`,
+  // which fires synchronously when the user clicks an in-view
+  // band-action link. By the time Chromium asks this handler for
+  // a response we've already kicked off the real navigation in a
+  // setImmediate, so we just return an empty no-content response
+  // and Chromium quietly throws away the result.
+  //
+  // **Default session only.** `BrowserViewManager.createView()`
+  // constructs every `WebContentsView` without `webPreferences.
+  // partition` or `webPreferences.session`, so they all share
+  // `session.defaultSession`. If a future feature introduces named
+  // partitions (e.g. `persist:workspace-<id>`), each new partition's
+  // `Session` is a separate object and would need this handler
+  // re-registered on it — otherwise band-action navigations in
+  // those tabs would still pop the macOS "no application set to
+  // open this URL" dialog before our setImmediate fires. Add the
+  // call to whatever code creates the partition.
+  session.defaultSession.protocol.handle("band-action", () => {
+    return new Response(null, { status: 204 });
   });
 
   state.unregisterIpc = registerIpc({
@@ -283,6 +349,6 @@ app.on("activate", () => {
 
 bootstrap().catch((err) => {
   const message = err instanceof Error ? (err.stack ?? err.message) : String(err);
-  dashLog(`bootstrap failed: ${message}`);
+  log.fatal({ err: message }, "bootstrap failed");
   app.exit(1);
 });

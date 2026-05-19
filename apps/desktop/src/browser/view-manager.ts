@@ -20,6 +20,7 @@
  */
 
 import { type BrowserWindow, WebContentsView } from "electron";
+import { createLogger } from "../main/services/log.js";
 import { Events } from "../shared/ipc-channels.js";
 import {
   type BrowserBoundsArgs,
@@ -39,7 +40,23 @@ import {
   type BrowserZoomArgs,
   browserKey,
 } from "../shared/types.js";
+import { type BrowserCertErrorPayload, buildCertErrorPayload, hostFromUrl } from "./cert-error.js";
+import { type CertExceptionStore, partitionForSession } from "./cert-exceptions.js";
+import {
+  type BandAction,
+  buildCertErrorHtml,
+  buildLoadErrorHtml,
+  htmlToDataUrl,
+  parseBandAction,
+} from "./error-html.js";
 import { splitTabBounds } from "./layout.js";
+import {
+  type BrowserLoadErrorPayload,
+  buildLoadErrorPayload,
+  isMainFrameFailure,
+} from "./load-error.js";
+
+const log = createLogger("view-manager");
 
 const MAX_BROWSER_VIEWS = 10;
 
@@ -83,6 +100,15 @@ export interface ViewManagerOptions {
    * BrowserWindow + the per-tab compositor cost while inactive.
    */
   hiddenWindow?: BrowserWindow;
+  /**
+   * Session-scoped TLS exception store for the in-view cert
+   * interstitial (issue #444). Owned by the bootstrap so the manager
+   * can be re-created without losing accepted exceptions during the
+   * session. The per-`webContents` `certificate-error` listener
+   * reads from this store to decide whether to silently trust a cert
+   * (matched triple) or paint the interstitial.
+   */
+  certExceptions: CertExceptionStore;
 }
 
 type Parent = "main" | "hidden";
@@ -130,6 +156,36 @@ export class BrowserViewManager {
    * cycle.
    */
   private readonly preFreezeMutedByKey = new Map<string, boolean>();
+  /**
+   * Pending cert-error per tab, captured when Chromium fires the
+   * per-webContents `certificate-error` event. Lives until either the
+   * user clicks "Proceed" (which records an exception, reloads the
+   * tab, and clears this entry) or "Back to safety" (which clears
+   * without proceeding). Exposed to the renderer via the
+   * `browser_get_cert_error_for_view` IPC so a renderer that mounts
+   * after the event already fired (e.g. layout restore right after
+   * an invalid-cert load) can still draw the interstitial.
+   */
+  private readonly pendingCertErrors = new Map<string, BrowserCertErrorPayload>();
+  /**
+   * Pending generic navigation error per tab (DNS, refused, timeout,
+   * …), captured from Chromium's `did-fail-load` event. Parallel to
+   * `pendingCertErrors`; the cert variant takes precedence so the
+   * two never coexist (the `did-fail-load` listener filters codes in
+   * the cert-error range).
+   */
+  private readonly pendingLoadErrors = new Map<string, BrowserLoadErrorPayload>();
+  /**
+   * Lowercased hostnames the user has clicked Proceed on this
+   * session. Distinct from the `CertExceptionStore` (which is keyed
+   * by `(partition, host, fingerprint)` and is the source of truth
+   * for the `app.on("certificate-error")` override): this set is the
+   * host-only projection exposed to the renderer via the
+   * `getOverriddenHosts` IPC + the `browser-host-overridden` event,
+   * so the dashboard chrome can paint a "Not Secure" badge while
+   * the user is browsing a site with an overridden cert.
+   */
+  private readonly overriddenHosts = new Set<string>();
 
   constructor(private readonly opts: ViewManagerOptions) {}
 
@@ -504,6 +560,125 @@ export class BrowserViewManager {
   }
 
   /**
+   * Return the lowercased hostnames the user has accepted a cert
+   * exception for in this session. Renderer-facing catch-up so a
+   * dashboard panel restored mid-session can immediately paint the
+   * "Not Secure" badge for hosts the user already proceeded to.
+   *
+   * The full exception store is keyed by `(partition, host,
+   * fingerprint)`, but the renderer only needs the host slice to
+   * decide whether to flag an address. Dropping partition and
+   * fingerprint from the projection keeps the IPC payload tight
+   * and avoids exposing the cert fingerprint to the renderer
+   * surface.
+   */
+  getOverriddenHosts(): string[] {
+    return Array.from(this.overriddenHosts);
+  }
+
+  /**
+   * Handle a `band-action://…` link click captured by the per-tab
+   * `will-navigate` interceptor. The error pages painted inside the
+   * WebContentsView encode all of their buttons as navigations to
+   * these URLs (see `browser/error-html.ts`); we never let the
+   * "navigation" actually happen — we read the action and dispatch
+   * to the matching internal method instead.
+   */
+  private handleBandAction(key: string, action: BandAction): void {
+    const view = this.views.get(key);
+    if (!view) {
+      log.debug({ key }, "handleBandAction: no view for key");
+      return;
+    }
+    if (view.webContents.isDestroyed()) {
+      log.debug({ key }, "handleBandAction: webContents destroyed");
+      return;
+    }
+    switch (action.kind) {
+      case "cert-proceed": {
+        // Security: validate the action against the pending cert-
+        // error for this tab BEFORE writing to the exception store.
+        // The host + fingerprint come from query parameters on a
+        // `band-action://` URL that any page loaded in a Band tab
+        // could craft (XSS-loaded HTML in a navigated page, an
+        // attacker-controlled redirect, etc.). Without this guard
+        // an attacker page could silently register a session
+        // exception for an arbitrary (host, fingerprint) triple
+        // and turn off the interstitial for the next visit to
+        // that host.
+        //
+        // The legitimate proceed flow only navigates to a
+        // `band-action://cert-proceed?…` URL from inside our own
+        // in-view interstitial HTML, which we generated against
+        // the pending entry — so the (host, fingerprint) the link
+        // carries are guaranteed to match the pending entry. Any
+        // mismatch is by definition not coming from our UI; reject
+        // and log loudly.
+        const pending = this.pendingCertErrors.get(key);
+        if (
+          !pending ||
+          pending.host !== action.host ||
+          pending.fingerprint !== action.fingerprint
+        ) {
+          log.warn(
+            {
+              key,
+              actionHost: action.host,
+              actionFingerprint: action.fingerprint,
+              pendingHost: pending?.host ?? null,
+              pendingFingerprint: pending?.fingerprint ?? null,
+            },
+            "cert-proceed: ignoring action that doesn't match pending cert-error",
+          );
+          return;
+        }
+        const partition = partitionForSession(view.webContents.session);
+        this.opts.certExceptions.add({
+          partition,
+          host: action.host,
+          fingerprint: action.fingerprint,
+        });
+        this.overriddenHosts.add(action.host.toLowerCase());
+        // Tell the renderer so its address bar can paint the
+        // "Not Secure" badge for this host.
+        this.emit(Events.browserHostOverridden, { host: action.host.toLowerCase() });
+        this.pendingCertErrors.delete(key);
+        log.debug(
+          {
+            host: action.host,
+            fingerprint: action.fingerprint,
+            pendingUrl: pending.url,
+            partition,
+          },
+          "cert-proceed",
+        );
+        void view.webContents.loadURL(pending.url);
+        return;
+      }
+      case "cert-back": {
+        this.pendingCertErrors.delete(key);
+        void view.webContents.loadURL("about:blank");
+        return;
+      }
+      case "load-retry": {
+        const pending = this.pendingLoadErrors.get(key);
+        this.pendingLoadErrors.delete(key);
+        if (pending?.url) {
+          void view.webContents.loadURL(pending.url);
+        } else {
+          void view.webContents.loadURL("about:blank");
+        }
+        return;
+      }
+      case "load-back": {
+        this.pendingLoadErrors.delete(key);
+        void view.webContents.loadURL("about:blank");
+        return;
+      }
+    }
+  }
+
+  /**
    * Toggle Chromium DevTools for the matching tab, docked **inside the
    * tab area** (bottom split) — not as a detached OS window.
    *
@@ -642,6 +817,8 @@ export class BrowserViewManager {
     this.parentByKey.delete(key);
     this.lastBoundsByKey.delete(key);
     this.visibleByKey.delete(key);
+    this.pendingCertErrors.delete(key);
+    this.pendingLoadErrors.delete(key);
     const idx = this.order.indexOf(key);
     if (idx >= 0) this.order.splice(idx, 1);
     // Notify the renderer (which forwards to the web server's
@@ -904,16 +1081,96 @@ export class BrowserViewManager {
     //     the address bar follows the redirect — matches Chrome's UX.
     view.webContents.on("did-start-navigation", (details) => {
       if (!details.isMainFrame) return;
+      // ---- band-action:… interceptor (issue #444 cast follow-up) ----
+      // The in-view error pages encode button clicks as navigations
+      // to a sentinel `band-action://` URL. Chromium has no idea
+      // what that scheme is, so without intercepting it would commit
+      // the navigation, fail to load, and leave the tab on the
+      // unknown-scheme URL.
+      //
+      // Lenient prefix match: Chromium normalises non-standard
+      // schemes inconsistently — sometimes drops the authority
+      // slashes (so `band-action:cert-proceed?…`), sometimes adds
+      // a trailing slash. The check + parser tolerate both.
+      //
+      // CRITICAL: we DEFER the new loadURL via setImmediate.
+      // Calling `webContents.loadURL()` synchronously from inside
+      // `did-start-navigation` re-enters Chromium's navigation
+      // pipeline while it's still processing the start of the
+      // current navigation — that reentrancy crashes the main
+      // process with `EXC_BREAKPOINT` deep inside V8. setImmediate
+      // lets the event handler return first.
+      //
+      // We deliberately do NOT call `webContents.stop()` here.
+      // Chromium fires `did-fail-load` for `band-action://` almost
+      // immediately (unknown scheme → ERR_UNKNOWN_URL_SCHEME), so
+      // by the time setImmediate fires the navigation has already
+      // aborted on its own. Calling stop() risked cancelling the
+      // brand-new loadURL we're about to issue and was observed to
+      // leave the WebContentsView blank after Proceed.
+      //
+      // Why not `will-navigate`? Empirically (issue #444 review),
+      // `will-navigate` DOES fire for `band-action://` on Electron
+      // 35, but so does `did-start-navigation` — registering both
+      // listeners produced a double-dispatch of `handleBandAction`
+      // that broke Proceed. Picking just `did-start-navigation` is
+      // the cleanest single source of truth for this scheme.
+      if (details.url.startsWith("band-action:")) {
+        const action = parseBandAction(details.url);
+        log.debug(
+          { url: details.url, parsed: action?.kind ?? null },
+          "band-action did-start-navigation",
+        );
+        setImmediate(() => {
+          if (view.webContents.isDestroyed()) return;
+          if (action) this.handleBandAction(key, action);
+        });
+        return;
+      }
+      // Skip URL emissions for the in-view error pages we load via
+      // `data:` URIs. The renderer's address bar should keep showing
+      // the failing target URL, not the data URI we use to paint
+      // the interstitial.
+      if (details.url.startsWith("data:")) return;
+      // Clear any pending error as soon as a real main-frame
+      // navigation starts. Covers Back-to-safety navigating away
+      // and Proceed triggering a reload. The data: URI loads we do
+      // ourselves are filtered above, so they don't accidentally
+      // wipe the pending entries before the user has acted.
+      if (!details.isSameDocument) {
+        this.pendingCertErrors.delete(key);
+        this.pendingLoadErrors.delete(key);
+      }
       emitUrl(details.url, !details.isSameDocument);
     });
     // `did-stop-loading` is still the right signal for "the load
     // finished" — flips the loading indicator off and re-emits the
     // (now-committed) URL, which corrects any drift if the final URL
     // differs from what `did-start-navigation` reported (e.g. a 3xx
-    // chain that resolved server-side).
+    // chain that resolved server-side). `data:` and `band-action`
+    // are filtered for the same reasons as above so error-page
+    // loads / action clicks don't clobber the address bar.
     view.webContents.on("did-stop-loading", () => {
-      emitUrl(view.webContents.getURL(), false);
+      const url = view.webContents.getURL();
+      if (url.startsWith("data:")) return;
+      // Lenient `band-action:` match — see did-start-navigation block.
+      if (url.startsWith("band-action:")) return;
+      emitUrl(url, false);
     });
+
+    // NOTE: we deliberately do NOT register a `will-navigate`
+    // listener for `band-action://` URLs. Empirically, on Electron
+    // 35 `will-navigate` DOES fire for unknown schemes (contrary to
+    // my earlier hypothesis), and the navigation also fires
+    // `did-start-navigation` immediately after. Having both
+    // listeners dispatch `handleBandAction` meant cert-proceed ran
+    // twice — the first call loaded the target URL with the
+    // exception, the second call (with `pendingCertErrors` already
+    // cleared) fell through to `loadURL("about:blank")` and the
+    // user ended up on a blank page. `did-start-navigation` alone
+    // is sufficient — confirmed empirically by tracing both events
+    // through the pino debug logger during the cert-interstitial
+    // implementation (issue #444).
     view.webContents.on("page-title-updated", (_e, title) => {
       const payload: BrowserTitleChangedPayload = {
         browser_id: key,
@@ -922,6 +1179,134 @@ export class BrowserViewManager {
       };
       this.emit(Events.browserTitleChanged, payload);
     });
+
+    // ---- TLS interstitial (issue #444) ----
+    // We do the cert-override decision HERE rather than in the
+    // session-wide `setCertificateVerifyProc` because Chromium has
+    // a per-host short-term bad-cert cache that bypasses the
+    // verify proc on retry attempts after a denial — observed
+    // empirically while tracing both events through the pino debug
+    // logger: after the first denial the verify proc never fires
+    // again for that host, but `certificate-error` DOES, so this
+    // is the only event we can reliably hook to honour a
+    // freshly-added exception.
+    //
+    // Decision:
+    //   - Exception matches our store → callback(true) — trust the
+    //     cert for THIS connection. Chromium proceeds with the
+    //     load and the page commits normally. No interstitial.
+    //   - Otherwise → callback(false) + paint the in-view
+    //     interstitial via a `data:` URI so the user can Proceed.
+    view.webContents.on("certificate-error", (event, url, errorCode, certificate, callback) => {
+      event.preventDefault();
+      const host = hostFromUrl(url);
+      const fingerprint = certificate.fingerprint;
+      const partition = partitionForSession(view.webContents.session);
+      if (host && fingerprint && this.opts.certExceptions.has({ partition, host, fingerprint })) {
+        log.debug({ host, fingerprint }, "cert-error: override-trust");
+        callback(true);
+        return;
+      }
+      const payload = buildCertErrorPayload({
+        key,
+        url,
+        errorCode,
+        certificate: {
+          fingerprint: certificate.fingerprint,
+          subjectName: certificate.subjectName,
+          issuerName: certificate.issuerName,
+          validStart: certificate.validStart,
+          validExpiry: certificate.validExpiry,
+        },
+      });
+      this.pendingCertErrors.set(key, payload);
+      log.debug(
+        { host: payload.host, fingerprint: payload.fingerprint },
+        "cert-error: interstitial",
+      );
+      // Tell the renderer the failing URL committed (with
+      // loading=false) so the address bar reflects it and the
+      // spinner stops. The `data:` URI load below is filtered.
+      emitUrl(url, false);
+      callback(false);
+      const html = buildCertErrorHtml({
+        url,
+        host: payload.host,
+        errorCode: payload.error_code,
+        errorDescription: payload.error_description,
+        certificate: {
+          fingerprint: certificate.fingerprint,
+          subjectName: certificate.subjectName,
+          issuerName: certificate.issuerName,
+          validStart: certificate.validStart,
+          validExpiry: certificate.validExpiry,
+        },
+      });
+      // DEFER via setImmediate — calling `loadURL` synchronously
+      // from a Chromium event handler that still has navigation
+      // state on the stack has caused main-process crashes deep
+      // inside V8.
+      setImmediate(() => {
+        if (view.webContents.isDestroyed()) return;
+        void view.webContents.loadURL(htmlToDataUrl(html));
+      });
+    });
+
+    // ---- Generic load-failure error page ----
+    // Companion to the cert flow above: catches `did-fail-load` for
+    // main-frame DNS / connection / timeout / etc. failures and
+    // paints a Chrome-style "This site can't be reached" page
+    // directly into the view. Same screencast-friendly rationale:
+    // remote viewers see the error and can click Reload / Back.
+    //
+    // Filters out user-aborted navigations and the cert error range
+    // — the per-tab `certificate-error` listener above owns those,
+    // and we don't want both pages to fight over the same tab. See
+    // `browser/load-error.ts` for the filter rules.
+    view.webContents.on(
+      "did-fail-load",
+      (_event, errorCode, _errorDescription, validatedURL, isMainFrame) => {
+        if (!isMainFrameFailure({ errorCode, isMainFrame })) return;
+        // Skip failures for our own internal URLs:
+        //
+        //   - `band-action://…` is the sentinel scheme our in-view
+        //     buttons navigate to. Chromium has no handler for it
+        //     and emits `did-fail-load` with ERR_UNKNOWN_URL_SCHEME
+        //     (-300) — but the `did-start-navigation` interceptor
+        //     above already deferred the real proceed/back/retry
+        //     work via setImmediate. Reacting here too would queue
+        //     a SECOND setImmediate that races the first and
+        //     overwrites the loaded page with the load-error UI.
+        //   - `data:` URIs are how we paint our own error pages.
+        //     They shouldn't fail-load in normal operation, but if
+        //     Chromium ever reports one we don't want to recurse
+        //     into another error page.
+        // Lenient `band-action:` match — see did-start-navigation block.
+        if (validatedURL.startsWith("band-action:")) return;
+        if (validatedURL.startsWith("data:")) return;
+        const payload = buildLoadErrorPayload({
+          key,
+          url: validatedURL,
+          errorCode,
+        });
+        this.pendingLoadErrors.set(key, payload);
+        // Keep the address bar pointing at the failing URL with
+        // loading=false; the data: URI load below is filtered.
+        emitUrl(validatedURL, false);
+        const html = buildLoadErrorHtml({
+          url: validatedURL,
+          errorCode,
+          errorName: payload.error_name,
+          headline: payload.headline,
+          description: payload.description,
+        });
+        // DEFER — see the matching block in the cert-error handler.
+        setImmediate(() => {
+          if (view.webContents.isDestroyed()) return;
+          void view.webContents.loadURL(htmlToDataUrl(html));
+        });
+      },
+    );
 
     // ---- Find in page: stream results back to the renderer ----
     // Chromium emits at least one `found-in-page` per `findInPage(text)`

@@ -38,9 +38,15 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@band-app/logger':
+        specifier: workspace:^
+        version: link:../../packages/logger
       electron-updater:
         specifier: ^6.8.3
         version: 6.8.3
+      pino:
+        specifier: ^9.6.0
+        version: 9.14.0
     devDependencies:
       '@types/node':
         specifier: ^22.19.13

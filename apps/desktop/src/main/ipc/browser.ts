@@ -1,5 +1,5 @@
 /**
- * Thin IPC handler glue for the 12 `browser_*` commands.
+ * Thin IPC handler glue for the `browser_*` commands.
  * Delegates to `BrowserViewManager` (in `apps/desktop/src/browser/view-manager.ts`),
  * which holds the `WebContentsView` LRU and emits change events.
  */
@@ -51,4 +51,12 @@ export const browserHandlers = {
   zoom: (ctx: BrowserIpcContext, args: BrowserZoomArgs): void => ctx.manager.zoom(args),
   toggleDevTools: (ctx: BrowserIpcContext, args: BrowserKeyArg): void =>
     ctx.manager.toggleDevTools(args),
+  // Cert / load error pages are painted INSIDE the WebContentsView
+  // via a `data:` URI (issue #444). The user's button clicks become
+  // `band-action://…` navigations intercepted by the view manager,
+  // so the only renderer-facing surface is this catch-up call: the
+  // dashboard chrome reads it on mount to paint the "Not Secure"
+  // badge for any hosts the user already proceeded to in this
+  // session. See `browser/error-html.ts`.
+  getOverriddenHosts: (ctx: BrowserIpcContext): string[] => ctx.manager.getOverriddenHosts(),
 };

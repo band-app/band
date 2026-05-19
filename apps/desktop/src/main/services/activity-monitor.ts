@@ -17,8 +17,10 @@
  */
 
 import { type BrowserWindow, powerMonitor } from "electron";
-import { dashLog } from "./log.js";
+import { createLogger } from "./log.js";
 import { getConfiguredPort, tryGetToken } from "./settings.js";
+
+const log = createLogger("activity-monitor");
 
 type ActivityLevel = "active" | "idle" | "background";
 
@@ -61,11 +63,11 @@ async function postActivity(port: number, activity: ActivityLevel): Promise<void
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     if (!res.ok) {
-      dashLog(`activity-monitor: setActivity(${activity}) → HTTP ${res.status}`);
+      log.warn({ activity, status: res.status }, "setActivity HTTP error");
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    dashLog(`activity-monitor: setActivity(${activity}) failed: ${msg}`);
+    log.warn({ activity, err: msg }, "setActivity failed");
   }
 }
 

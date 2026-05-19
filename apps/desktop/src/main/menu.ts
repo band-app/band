@@ -21,8 +21,10 @@
 
 import { app, BrowserWindow, Menu, type MenuItemConstructorOptions } from "electron";
 import type { BrowserViewManager } from "../browser/view-manager.js";
-import { dashLog } from "./services/log.js";
+import { createLogger } from "./services/log.js";
 import { checkForUpdate, isUpdaterEnabled } from "./updater.js";
+
+const log = createLogger("menu");
 
 /**
  * Resolved at menu-click time so the menu can be installed before the
@@ -72,7 +74,7 @@ async function callRendererGlobal(name: string): Promise<void> {
     BrowserWindow.getAllWindows().find((w) => !w.isDestroyed()) ??
     null;
   if (!target) {
-    dashLog(`menu: no window to invoke ${name}`);
+    log.warn({ name }, "no window to invoke");
     return;
   }
   // Run a probe expression that returns whether the global was present and
@@ -90,13 +92,13 @@ async function callRendererGlobal(name: string): Promise<void> {
         "'__BAND_DESKTOP__' in window",
         true,
       );
-      dashLog(
-        `menu: ${name} not registered. __BAND_DESKTOP__ in window: ${present}. ` +
-          `If false, the preload didn't load; if true, the renderer hasn't mounted yet.`,
+      log.warn(
+        { name, bandDesktopPresent: present },
+        "renderer global not registered (if bandDesktopPresent=false the preload didn't load; if true the renderer hasn't mounted yet)",
       );
     }
   } catch (err) {
-    dashLog(`menu: failed to invoke ${name}: ${String(err)}`);
+    log.error({ name, err: String(err) }, "failed to invoke renderer global");
   }
 }
 
@@ -143,7 +145,7 @@ async function reloadFocused(deps: MenuDeps): Promise<void> {
     const handled = await target.webContents.executeJavaScript(js, true);
     if (!handled) target.webContents.reload();
   } catch (err) {
-    dashLog(`menu: __bandReload invocation failed: ${String(err)}`);
+    log.error({ err: String(err) }, "__bandReload invocation failed");
     target.webContents.reload();
   }
 }
@@ -163,7 +165,7 @@ export function buildAppMenu(deps: MenuDeps): Menu {
           label: "Check for Updates…",
           click: () => {
             void checkForUpdate(true).catch((err) => {
-              dashLog(`menu: check for updates failed: ${String(err)}`);
+              log.error({ err: String(err) }, "check for updates failed");
             });
           },
         },

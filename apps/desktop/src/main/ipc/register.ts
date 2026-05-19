@@ -160,6 +160,13 @@ export function registerIpc(opts: RegisterOptions): () => void {
   handle(Channels.browserToggleDevTools, (args: BrowserKeyArg) =>
     browserHandlers.toggleDevTools(bm, args),
   );
+  // Cert / load error pages are rendered inside the WebContentsView
+  // via a `data:` URI (issue #444); button clicks become
+  // `band-action://` navigations intercepted by the view manager. The
+  // only renderer-facing surface is this catch-up call so the
+  // dashboard chrome can paint the "Not Secure" badge for hosts the
+  // user already proceeded to in this session.
+  handle(Channels.browserGetOverriddenHosts, () => browserHandlers.getOverriddenHosts(bm));
 
   return () => {
     for (const [channel] of handlers) {
