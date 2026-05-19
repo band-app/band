@@ -1,4 +1,5 @@
 import {
+  AUTO_DETECT_LANGUAGE_ID,
   buildLspWsUrl,
   createLspExtension,
   FileBrowser,
@@ -100,6 +101,38 @@ function saveFileTreeCollapsed(wsId: string, collapsed: boolean): void {
   } catch {
     // storage unavailable
   }
+}
+
+/**
+ * Returns the path of `child` relative to `parent` when `child` is
+ * inside `parent`, or `null` when it isn't. Workspace paths in Band
+ * are always POSIX-style (forward slashes), so we operate on raw
+ * string segments rather than pulling in `node:path` — this file
+ * runs in the browser where `path` isn't available natively, and a
+ * Vite polyfill would be overkill for one comparison.
+ *
+ * Implemented as a segment-aware prefix check rather than a raw
+ * `startsWith`:
+ *
+ *   pathInside("/a/band",      "/a/band/src/x.ts")    → "src/x.ts"
+ *   pathInside("/a/band",      "/a/band")             → ""
+ *   pathInside("/a/band",      "/a/band-fork/src/x")  → null   ← prefix-safe
+ *   pathInside("/a/band/",     "/a/band/src/x.ts")    → "src/x.ts"
+ *   pathInside("/a/band",      "/elsewhere/x.ts")     → null
+ *
+ * The prefix-collision case is what every code review keeps flagging:
+ * a naive `chosen.startsWith(root)` would treat `/a/band-fork/...`
+ * as inside `/a/band`. We strip trailing slashes from `parent` first,
+ * then require either an exact match or a `${parent}/` prefix — the
+ * required `/` separator after the parent is what blocks the
+ * collision.
+ */
+function pathInside(parent: string, child: string): string | null {
+  const root = parent.replace(/\/+$/, "");
+  if (child === root) return "";
+  const prefix = `${root}/`;
+  if (!child.startsWith(prefix)) return null;
+  return child.slice(prefix.length);
 }
 
 // ---------------------------------------------------------------------------
@@ -1350,16 +1383,15 @@ export function CodeBrowserView({
 
       // Decide whether the chosen path lives inside the workspace.
       // When it does we transition to a normal workspace tab; otherwise
-      // it becomes an external tab (per issue #433). The trailing-
-      // slash strip + `${root}/` prefix check is prefix-collision-safe:
-      // `/a/band` vs `/a/band-fork` differ at the trailing `/`, so a
-      // file saved under `/a/band-fork/...` never matches `/a/band/`.
-      const normalizedRoot = workspacePath?.replace(/\/+$/, "");
-      const inWorkspace =
-        normalizedRoot != null &&
-        (chosen === normalizedRoot || chosen.startsWith(`${normalizedRoot}/`));
-      const isExternal = !inWorkspace;
-      const newPath = inWorkspace ? chosen.slice(normalizedRoot!.length + 1) : chosen;
+      // it becomes an external tab (per issue #433). `pathInside`
+      // returns the workspace-relative path when `chosen` is under
+      // `workspacePath`, and `null` when it isn't — handles the
+      // prefix-collision edge case (`/a/band` vs `/a/band-fork`) by
+      // requiring an exact path-segment match rather than a raw string
+      // prefix.
+      const relative = workspacePath != null ? pathInside(workspacePath, chosen) : null;
+      const isExternal = relative === null;
+      const newPath = relative ?? chosen;
 
       // Carry the manual language override (if any) from the untitled
       // key to the new path so the user's choice survives the rename
@@ -1426,8 +1458,25 @@ export function CodeBrowserView({
   // the band:dirty-change event so the tab bar's language indicator
   // (if any) re-renders. The override survives saves — see
   // handleSaveUntitled for the carry-over.
+  //
+  // The picker also delivers an `AUTO_DETECT_LANGUAGE_ID` sentinel
+  // when the user explicitly reverts to extension-based detection;
+  // we treat that as a remove so the next render falls through to
+  // the FileViewer's auto-detect branch. Without this affordance, a
+  // user who manually set a `.ts` file to Python "just to see" would
+  // be stuck with that override until they closed the tab — closing
+  // is the only thing that clears the persisted `language` entry.
   const handleLanguageOverride = useCallback(
     (filePath: string, languageId: string) => {
+      if (languageId === AUTO_DETECT_LANGUAGE_ID) {
+        // Clear the override by writing `undefined` — `tabState.update`
+        // spreads the patch, JSON.stringify drops undefined properties,
+        // and the next `getLanguage` read sees no entry. Net effect:
+        // FileViewer reverts to extension-based detection on the next
+        // render.
+        tabState.update(filePath, { language: undefined });
+        return;
+      }
       tabState.setLanguage(filePath, languageId);
     },
     [tabState],

@@ -8,12 +8,18 @@
  *
  * Both paths open this dialog, the user picks a language, and the
  * selection propagates to the FileViewer through the parent's
- * `onSelect` callback. The override persists for the lifetime of the
- * tab via `useTabState.setLanguage` — see the `language` field on
- * `TabFileState`.
+ * `onSelect` callback. The override is persisted to `useTabState`
+ * (localStorage-backed), and survives reloads — see the `language`
+ * field on `TabFileState`.
  *
  * Mirrors the shape of `CommandPaletteDialog` and `QuickOpenDialog`:
  * one searchable `Command` over a flat list of `SUPPORTED_LANGUAGES`.
+ *
+ * "Auto Detect" is a special leading entry that clears the manual
+ * override and reverts to file-extension auto-detection — the only
+ * non-close-and-reopen way to undo a previous explicit choice. Passes
+ * the sentinel `AUTO_DETECT_LANGUAGE_ID` via `onSelect` so the parent
+ * can branch on it.
  */
 
 import {
@@ -23,22 +29,45 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
+  CommandSeparator,
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@band-app/ui";
-import { Check } from "lucide-react";
+import { Check, Wand2 } from "lucide-react";
 import { useCallback } from "react";
 import { SUPPORTED_LANGUAGES } from "../lib/language-map";
+
+/**
+ * Sentinel value passed to `onSelect` when the user picks "Auto
+ * Detect" — tells the parent to clear any manual override and revert
+ * to extension-based detection. Chosen to be impossible as a real
+ * language id (no language uses double-underscore wrapping).
+ */
+export const AUTO_DETECT_LANGUAGE_ID = "__auto__";
 
 interface LanguagePickerDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Currently-active language id, used to render the check mark. */
+  /**
+   * Currently-active language id, used to render the check mark on
+   * the matching row.
+   */
   currentLanguage: string;
-  /** Called with the chosen language id when the user picks one. */
+  /**
+   * Whether the active language is the result of a manual override
+   * (vs. extension auto-detection). Drives whether the "Auto Detect"
+   * row shows the active check mark and whether it's even surfaced —
+   * if no override is active, picking Auto Detect is a no-op.
+   */
+  hasOverride?: boolean;
+  /**
+   * Called with the chosen language id when the user picks one, or
+   * with `AUTO_DETECT_LANGUAGE_ID` when they pick the "Auto Detect"
+   * row to clear an existing override.
+   */
   onSelect: (languageId: string) => void;
 }
 
@@ -46,6 +75,7 @@ export function LanguagePickerDialog({
   open,
   onOpenChange,
   currentLanguage,
+  hasOverride,
   onSelect,
 }: LanguagePickerDialogProps) {
   const handleSelect = useCallback(
@@ -70,6 +100,25 @@ export function LanguagePickerDialog({
           <CommandInput placeholder="Select language mode…" autoFocus />
           <CommandList className="max-h-[360px]">
             <CommandEmpty>No languages found.</CommandEmpty>
+            {/* "Auto Detect" only shows up when a manual override is
+                in effect — otherwise it's a no-op row and would just
+                add visual noise. The check mark uses `hasOverride` as
+                a stand-in for "currently in override mode," matching
+                how VS Code surfaces the same affordance. */}
+            {hasOverride && (
+              <>
+                <CommandGroup>
+                  <CommandItem
+                    value="Auto Detect"
+                    onSelect={() => handleSelect(AUTO_DETECT_LANGUAGE_ID)}
+                  >
+                    <Wand2 className="size-3.5" />
+                    <span className="flex-1 text-sm">Auto Detect</span>
+                  </CommandItem>
+                </CommandGroup>
+                <CommandSeparator />
+              </>
+            )}
             <CommandGroup>
               {SUPPORTED_LANGUAGES.map((lang) => (
                 <CommandItem

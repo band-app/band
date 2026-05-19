@@ -17,7 +17,10 @@ export { FileBrowser, type FileBrowserHandle } from "./components/FileBrowser";
 export { FileViewer } from "./components/FileViewer";
 export { GitStatusIndicator } from "./components/GitStatusIndicator";
 export { ImagePreview } from "./components/ImagePreview";
-export { LanguagePickerDialog } from "./components/LanguagePickerDialog";
+export {
+  AUTO_DETECT_LANGUAGE_ID,
+  LanguagePickerDialog,
+} from "./components/LanguagePickerDialog";
 export { NewWorkspaceDialog } from "./components/NewWorkspaceForm";
 export { PdfPreview } from "./components/PdfPreview";
 export { ProjectList } from "./components/ProjectList";

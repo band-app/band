@@ -101,10 +101,16 @@ export interface UseFileTabsReturn {
    *
    * The counter is monotonic per workspace and never reused, so two
    * "Untitled-1" tabs cannot coexist even if the first is closed —
-   * matching VS Code's behaviour. Persistence is intentionally not
-   * wired (issue #434 leaves scratch persistence to a follow-up):
-   * untitled tabs are filtered out of the localStorage save path so a
-   * reload doesn't resurrect empty buffers.
+   * matching VS Code's behaviour. **The counter survives reloads** via
+   * `initialUntitledCounter`, which scans the persisted tab list for
+   * the highest existing `untitled:N` so a freshly-created tab after
+   * a reload doesn't collide with an already-rehydrated one.
+   *
+   * Untitled tabs are also persisted across reloads (the typed buffer
+   * already lives in `useTabState.editedContent`, so dropping the tab
+   * would leak content into localStorage with no visible surface — see
+   * `UNTITLED_PREFIX`). The original "out of scope" note in #434 was
+   * superseded by reusing the existing tab-state plumbing.
    */
   openTabUntitled: () => { filePath: string; label: string };
   /**
@@ -176,10 +182,20 @@ function storageKey(workspaceId: string): string {
   return `band-open-tabs:${workspaceId}`;
 }
 
-function loadTabState(workspaceId: string): { tabs: FileTab[]; active: string | null } | null {
+/**
+ * Pure parse-half of `loadTabState`, exported for testing. Accepts the
+ * raw JSON string (or `null` for an absent localStorage entry) and
+ * returns the validated `{ tabs, active }` shape — or `null` when the
+ * input is missing or malformed. Exposed separately because the
+ * localStorage layer isn't available under `vitest`'s default node
+ * environment, but the parsing logic (defensive type checks, untitled
+ * tab rehydration, prefix-safety) is non-trivial and worth unit-testing.
+ */
+export function parseTabState(
+  raw: string | null,
+): { tabs: FileTab[]; active: string | null } | null {
+  if (!raw) return null;
   try {
-    const raw = localStorage.getItem(storageKey(workspaceId));
-    if (!raw) return null;
     // Don't trust the cast — older builds (or hand-edited localStorage) may
     // have written a different shape, e.g. an array of `{ filePath }` objects
     // instead of bare strings. Filter to strings so downstream code that
@@ -234,29 +250,48 @@ function loadTabState(workspaceId: string): { tabs: FileTab[]; active: string | 
   }
 }
 
+function loadTabState(workspaceId: string): { tabs: FileTab[]; active: string | null } | null {
+  try {
+    return parseTabState(localStorage.getItem(storageKey(workspaceId)));
+  } catch {
+    // localStorage unavailable (private mode, SSR, etc.)
+    return null;
+  }
+}
+
+/**
+ * Pure serialize-half of `saveTabState`, exported for testing. Builds
+ * the JSON string with the compact / object-form heuristics (bare
+ * strings for plain pinned tabs, objects for preview / external /
+ * untitled). Also normalises the active-tab pointer to `null` when it
+ * names a tab that isn't in the list.
+ */
+export function serializeTabState(tabs: FileTab[], active: string | null): string {
+  const persistedActive = active != null && tabs.some((t) => t.filePath === active) ? active : null;
+  const state: PersistedTabState = {
+    tabs: tabs.map((t) => {
+      // Bare-string serialization is the legacy/compact form for plain
+      // pinned workspace tabs. Anything carrying extra flags (preview,
+      // external, untitled) is written as an object so the loader can
+      // re-hydrate the flag set.
+      if (!t.isPreview && !t.isExternal && !t.isUntitled) return t.filePath;
+      const out: PersistedTab = { filePath: t.filePath };
+      if (t.isPreview) out.isPreview = true;
+      if (t.isExternal) out.isExternal = true;
+      if (t.isUntitled) {
+        out.isUntitled = true;
+        if (t.untitledLabel) out.untitledLabel = t.untitledLabel;
+      }
+      return out;
+    }),
+    active: persistedActive,
+  };
+  return JSON.stringify(state);
+}
+
 function saveTabState(workspaceId: string, tabs: FileTab[], active: string | null): void {
   try {
-    const persistedActive =
-      active != null && tabs.some((t) => t.filePath === active) ? active : null;
-    const state: PersistedTabState = {
-      tabs: tabs.map((t) => {
-        // Bare-string serialization is the legacy/compact form for plain
-        // pinned workspace tabs. Anything carrying extra flags (preview,
-        // external, untitled) is written as an object so the loader can
-        // re-hydrate the flag set.
-        if (!t.isPreview && !t.isExternal && !t.isUntitled) return t.filePath;
-        const out: PersistedTab = { filePath: t.filePath };
-        if (t.isPreview) out.isPreview = true;
-        if (t.isExternal) out.isExternal = true;
-        if (t.isUntitled) {
-          out.isUntitled = true;
-          if (t.untitledLabel) out.untitledLabel = t.untitledLabel;
-        }
-        return out;
-      }),
-      active: persistedActive,
-    };
-    localStorage.setItem(storageKey(workspaceId), JSON.stringify(state));
+    localStorage.setItem(storageKey(workspaceId), serializeTabState(tabs, active));
   } catch {
     // storage unavailable
   }
@@ -271,8 +306,10 @@ function saveTabState(workspaceId: string, tabs: FileTab[], active: string | nul
  *
  * `useTabState.editedContent` is keyed on filePath, so a collision
  * would silently splice the new tab on top of the old buffer.
+ *
+ * Exported for testing.
  */
-function initialUntitledCounter(tabs: FileTab[]): number {
+export function initialUntitledCounter(tabs: FileTab[]): number {
   let max = 0;
   for (const t of tabs) {
     if (!t.isUntitled) continue;

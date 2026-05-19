@@ -148,16 +148,25 @@ function detectLanguage(filePath: string, serverHint?: string): string {
  * untitled / external paths (they can't round-trip through the
  * workspace-relative URL). So:
  *
- *   - For a regular workspace tab, `detail.filePath` is the authoritative
- *     active file — we accept iff it's absent or matches our path, and
- *     reject when it's present but targets a *different* path (which
- *     keeps the existing cross-workspace / future-split-pane safety
- *     net intact).
- *   - For untitled / external tabs, `detail.filePath` is either absent
- *     (never-selected tab) or stale (pointing at the previously-viewed
- *     real file). Strict equality would reject the user's legitimate
- *     "format this untitled tab" intent — accept unconditionally and
- *     rely on the workspaceId guard for disambiguation.
+ *   - **No hint sent** — accept. The dispatcher couldn't read a path
+ *     (e.g. restored-on-boot tab that hasn't been activated yet, or
+ *     the user is currently viewing an untitled / external tab whose
+ *     path was filtered out of the ref). Workspace ID alone scopes
+ *     the response.
+ *   - **Hint matches our viewer path** — accept. Authoritative match.
+ *   - **Hint is a non-matching real path** — depends on the viewer:
+ *       - Regular workspace viewer: REJECT. Some other file-backed
+ *         viewer in this workspace (split-pane future) is the
+ *         intended recipient; we shouldn't double-handle.
+ *       - Untitled / external viewer: ACCEPT. The hint is a stale ref
+ *         from the dispatcher (the previously-viewed real file) —
+ *         the user pressed format/picker *while looking at* this
+ *         untitled/external tab, so it's the intended target.
+ *
+ * Order matters: the untitled/external branch runs AFTER the hint
+ * equality check so a future split-pane setup with both a file-backed
+ * and an untitled viewer can still route a non-null hint specifically
+ * at the file-backed one without also triggering the untitled one.
  *
  * Extracted so the format and language-picker listeners stay in lockstep.
  */
@@ -167,9 +176,12 @@ function matchesFilePathHint(
   viewerUntitled: boolean | undefined,
   viewerExternal: boolean | undefined,
 ): boolean {
-  if (viewerUntitled || viewerExternal) return true;
   if (hint == null) return true;
-  return hint === viewerPath;
+  if (hint === viewerPath) return true;
+  // Hint is present and doesn't match. Accept only when our path
+  // can't round-trip through the dispatcher's ref — in those cases
+  // the hint is necessarily stale, not targeted.
+  return Boolean(viewerUntitled || viewerExternal);
 }
 
 export function FileViewer({
@@ -932,12 +944,17 @@ export function FileViewer({
           when surfacing the status-bar indicator above, so dropping
           the dialog when the callback is missing keeps the two
           surfaces in sync — neither appears in adapters that don't
-          wire the override (none today, but the prop is optional). */}
+          wire the override (none today, but the prop is optional).
+          The `AUTO_DETECT_LANGUAGE_ID` sentinel passed through this
+          callback's contract means "drop the override"; the caller
+          (CodeBrowserView's `handleLanguageOverride`) treats it as a
+          `removeLanguage` and falls back to extension detection. */}
       {onLanguageOverrideChange && (
         <LanguagePickerDialog
           open={languagePickerOpen}
           onOpenChange={setLanguagePickerOpen}
           currentLanguage={lang}
+          hasOverride={languageOverride != null}
           onSelect={onLanguageOverrideChange}
         />
       )}
