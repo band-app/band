@@ -210,7 +210,15 @@ function SortableProject({
               {...listeners}
             >
               {isPlain ? (
-                <AgentStatusIndicator agent={plainAgent} isActive={plainIsActive} />
+                // Folder icon as the fallback (instead of the default
+                // GitBranch) since plain projects have no branch. The
+                // agent dot still wins when the agent is actively working
+                // or needs attention — see AgentStatusIndicator.
+                <AgentStatusIndicator
+                  agent={plainAgent}
+                  isActive={plainIsActive}
+                  fallbackIcon={Folder}
+                />
               ) : collapsed ? (
                 <Folder className="size-4 shrink-0 text-muted-foreground" />
               ) : (
