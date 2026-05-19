@@ -8,8 +8,9 @@
  *      from a node:test worker would either block on user input or
  *      require mocking Electron itself, neither of which matches the
  *      "no mocks, real filesystem" rule in `CLAUDE.md`.
- *   2. `writeSavedFile` — a plain `fs.writeFileSync` call that
- *      persists the renderer's buffer once a path is chosen.
+ *   2. `writeSavedFile` — an async write-to-temp + rename pair
+ *      (`fs/promises.writeFile` → `rename`) that atomically persists
+ *      the renderer's buffer once a path is chosen.
  *
  * Piece (2) is the part the IPC handler is responsible for ON BEHALF
  * of the renderer (the renderer never touches disk directly — the

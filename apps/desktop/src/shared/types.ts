@@ -218,6 +218,11 @@ export interface OpenExternalArgs {
  * `apps/desktop/src/main/ipc/macos-shell.ts`. The renderer never writes
  * to disk directly: bundling the dialog + write into one IPC call keeps
  * the file-system trust boundary inside the desktop shell.
+ *
+ * **Size limit:** `content` is capped at 100 MB UTF-8 bytes (see
+ * `SAVE_CONTENT_MAX_BYTES` in `macos-shell.ts`). Exceeding this rejects
+ * before the dialog appears so the renderer surfaces a clear error
+ * rather than stalling the main-process event loop on a huge write.
  */
 export interface PickSaveFileArgs {
   content: string;

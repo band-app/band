@@ -53,6 +53,7 @@ import { Group, Panel, Separator, usePanelRef } from "react-resizable-panels";
 import { isUntitledPath, useFileTabs } from "../hooks/useFileTabs";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useTabState } from "../hooks/useTabState";
+import { pathInside } from "../lib/path-inside";
 import { FileTabBar } from "./FileTabBar";
 import type { MarkdownPreviewHandle, MarkdownPreviewMatchInfo } from "./MarkdownPreview";
 import { MarkdownPreview } from "./MarkdownPreview";
@@ -103,37 +104,10 @@ function saveFileTreeCollapsed(wsId: string, collapsed: boolean): void {
   }
 }
 
-/**
- * Returns the path of `child` relative to `parent` when `child` is
- * inside `parent`, or `null` when it isn't. Workspace paths in Band
- * are always POSIX-style (forward slashes), so we operate on raw
- * string segments rather than pulling in `node:path` — this file
- * runs in the browser where `path` isn't available natively, and a
- * Vite polyfill would be overkill for one comparison.
- *
- * Implemented as a segment-aware prefix check rather than a raw
- * `startsWith`:
- *
- *   pathInside("/a/band",      "/a/band/src/x.ts")    → "src/x.ts"
- *   pathInside("/a/band",      "/a/band")             → ""
- *   pathInside("/a/band",      "/a/band-fork/src/x")  → null   ← prefix-safe
- *   pathInside("/a/band/",     "/a/band/src/x.ts")    → "src/x.ts"
- *   pathInside("/a/band",      "/elsewhere/x.ts")     → null
- *
- * The prefix-collision case is what every code review keeps flagging:
- * a naive `chosen.startsWith(root)` would treat `/a/band-fork/...`
- * as inside `/a/band`. We strip trailing slashes from `parent` first,
- * then require either an exact match or a `${parent}/` prefix — the
- * required `/` separator after the parent is what blocks the
- * collision.
- */
-function pathInside(parent: string, child: string): string | null {
-  const root = parent.replace(/\/+$/, "");
-  if (child === root) return "";
-  const prefix = `${root}/`;
-  if (!child.startsWith(prefix)) return null;
-  return child.slice(prefix.length);
-}
+// `pathInside` lives in `../lib/path-inside.ts` so it can be unit-
+// tested without dragging in the React/CodeMirror runtime — see
+// `apps/web/tests/path-inside.test.ts` for the test cases that lock
+// in the security-adjacent prefix-collision invariant.
 
 // ---------------------------------------------------------------------------
 // Props
@@ -1437,6 +1411,14 @@ export function CodeBrowserView({
   // FileTabBar version — looks up the latest editor content for the
   // tab being closed and resolves with a boolean so the dialog knows
   // whether to dismiss itself.
+  //
+  // Catches and swallows save errors here so the FileTabBar dialog's
+  // "Save…" handler (which awaits this) never produces an unhandled
+  // promise rejection. The IPC chain surfaces disk-full / permission-
+  // denied / etc. as exceptions; logging them to the console keeps
+  // them debuggable, while returning `false` keeps the close-confirm
+  // dialog open so the user can retry, discard, or cancel. Without
+  // this guard the dialog appears to hang silently on failure.
   const handleSaveUntitledForClose = useCallback(
     async (untitledPath: string): Promise<boolean> => {
       // Prefer the live CodeMirror buffer (current edits) when the
@@ -1448,8 +1430,13 @@ export function CodeBrowserView({
       } else {
         content = tabState.get(untitledPath)?.editedContent ?? "";
       }
-      const saved = await handleSaveUntitled(untitledPath, content);
-      return saved != null;
+      try {
+        const saved = await handleSaveUntitled(untitledPath, content);
+        return saved != null;
+      } catch (err) {
+        console.error("[band] Save-as failed for untitled tab:", err);
+        return false;
+      }
     },
     [handleSaveUntitled, tabState],
   );

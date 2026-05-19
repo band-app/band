@@ -161,12 +161,15 @@ export const SUPPORTED_LANGUAGES: SupportedLanguage[] = [
  * `"typescript"` → `"TypeScript"`). Falls back to a Title-Cased
  * version of the id when the language isn't in `SUPPORTED_LANGUAGES`
  * — that happens for legacy / less-common languages that exist in
- * `EXTENSION_MAP` but aren't surfaced in the picker.
+ * `EXTENSION_MAP` but aren't surfaced in the picker. Callers always
+ * pass a non-empty `id` (either `languageOverride`, `"plaintext"`,
+ * or a `detectLanguage` result), so no empty-string guard is needed
+ * — the title-case fallback handles unknown ids by surfacing a
+ * recognisable string rather than masking a missing-language bug.
  */
 export function languageLabel(id: string): string {
   const entry = SUPPORTED_LANGUAGES.find((l) => l.id === id);
   if (entry) return entry.label;
-  if (!id) return "Plain Text";
   return id.charAt(0).toUpperCase() + id.slice(1);
 }
 

@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useMemo, useRef } from "react";
 
 // ---------------------------------------------------------------------------
 // localStorage-backed store for per-tab state
@@ -205,16 +205,40 @@ export function useTabState(workspaceId: string): UseTabStateReturn {
     [workspaceId],
   );
 
-  return {
-    get,
-    update,
-    getViewMode,
-    setViewMode,
-    getLanguage,
-    setLanguage,
-    isDirty,
-    removeFile,
-    renameFile,
-    removePath,
-  };
+  // Memoise the returned shape so callers that include the hook
+  // result in a useCallback / useEffect dependency array see a stable
+  // reference. Each method is already wrapped in `useCallback`, so the
+  // `useMemo` deps form a transitively-stable set — the returned
+  // object's identity only changes when the workspace switches (which
+  // is exactly when downstream callbacks should re-bind). Without
+  // this, every render produced a fresh object literal, causing every
+  // CodeBrowserView callback that depended on `tabState` to churn
+  // and propagate that churn into `onSaveAs` / `onSaveUntitled` /
+  // `onLanguageOverrideChange` props on every render of every tab.
+  return useMemo(
+    () => ({
+      get,
+      update,
+      getViewMode,
+      setViewMode,
+      getLanguage,
+      setLanguage,
+      isDirty,
+      removeFile,
+      renameFile,
+      removePath,
+    }),
+    [
+      get,
+      update,
+      getViewMode,
+      setViewMode,
+      getLanguage,
+      setLanguage,
+      isDirty,
+      removeFile,
+      renameFile,
+      removePath,
+    ],
+  );
 }

@@ -91,10 +91,35 @@ export async function pickFile(parent: BrowserWindow | null): Promise<string | n
  * dialog's starting location and filename (e.g. "Untitled-1.txt") so the
  * user only has to type when overriding.
  */
+/**
+ * Defensive ceiling on the buffer the renderer can hand off in a
+ * single save call. The Electron model is trusted (the renderer is
+ * Band's own code), so this isn't a security boundary — it's a UX
+ * safety net for accidental pastes (multi-MB log files, an image
+ * dropped in as base64, a minified bundle) that would otherwise
+ * sit in IPC shared memory, the main-process heap, and the temp
+ * file concurrently while the disk write stalls the event loop.
+ *
+ * 100 MB matches the rough ceiling above which the OS save dialog
+ * itself becomes the bottleneck rather than the IPC. The renderer
+ * receives the rejection cleanly through the existing error path.
+ */
+const SAVE_CONTENT_MAX_BYTES = 100 * 1024 * 1024;
+
 export async function pickSaveFile(
   parent: BrowserWindow | null,
   args: { content: string; defaultName?: string; defaultPath?: string },
 ): Promise<string | null> {
+  // Defensive size check — see `SAVE_CONTENT_MAX_BYTES`. Using
+  // `Buffer.byteLength` (not `string.length`) so the cap reflects
+  // the on-disk UTF-8 byte count, not the JS string code-unit count.
+  if (Buffer.byteLength(args.content, "utf8") > SAVE_CONTENT_MAX_BYTES) {
+    throw new Error(
+      `File is too large to save via this flow (over ${SAVE_CONTENT_MAX_BYTES / (1024 * 1024)} MB). ` +
+        "Split the content into smaller files or save through a terminal.",
+    );
+  }
+
   const seed = resolveSaveDialogSeed(args);
   const opts = {
     title: "Save As",

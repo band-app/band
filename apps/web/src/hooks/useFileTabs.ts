@@ -33,6 +33,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
  * after a reload. Issue #434 originally listed scratch persistence as
  * out-of-scope, but reusing the existing tab-state plumbing makes the
  * scope creep small and the UX win large (no accidental data loss).
+ *
+ * See `openTabUntitled`'s docblock for the counter / collision
+ * rationale, and `parseTabState` / `serializeTabState` for the wire
+ * shape the rehydration relies on.
  */
 export const UNTITLED_PREFIX = "untitled:";
 
