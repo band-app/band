@@ -1168,7 +1168,9 @@ export class BrowserViewManager {
     // exception, the second call (with `pendingCertErrors` already
     // cleared) fell through to `loadURL("about:blank")` and the
     // user ended up on a blank page. `did-start-navigation` alone
-    // is sufficient and observed via diagnostic the pino debug logger.
+    // is sufficient — confirmed empirically by tracing both events
+    // through the pino debug logger during the cert-interstitial
+    // implementation (issue #444).
     view.webContents.on("page-title-updated", (_e, title) => {
       const payload: BrowserTitleChangedPayload = {
         browser_id: key,

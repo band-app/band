@@ -39,7 +39,7 @@ import type { CertificateLike } from "./cert-error.js";
  * `&` must come first to avoid double-encoding ampersands the other
  * replacements introduce.
  */
-function escapeHtml(s: string | undefined): string {
+function escapeHtml(s: string | null | undefined): string {
   if (s === undefined || s === null) return "";
   return String(s)
     .replace(/&/g, "&amp;")

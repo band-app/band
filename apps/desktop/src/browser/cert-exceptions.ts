@@ -57,13 +57,8 @@ export interface CertExceptionTriple {
  * host so `Example.COM` and `example.com` collapse to the same
  * entry. Fingerprint and partition are passed through verbatim
  * (Electron's fingerprint strings are already canonical, and
- * partition is opaque to us).
- *
- * Uses a literal pipe (`|`) as the separator. The previous version
- * used what looked like ASCII spaces but were actually embedded NUL
- * bytes (an artifact of the file's original write); NULs trip git's
- * binary-file detector and rendered the diff invisible to PR
- * reviewers - see #449 review feedback.
+ * partition is opaque to us). The pipe separator is unambiguous
+ * — none of the three components contain it.
  */
 export function exceptionKey(triple: CertExceptionTriple): string {
   return [triple.partition, triple.host.toLowerCase(), triple.fingerprint].join("|");

@@ -126,11 +126,3 @@ export function createLogger(name: string): Logger {
 
 /** Re-export the underlying type so callers don't need a separate import. */
 export type { Logger };
-
-/**
- * Shared "desktop" logger for bootstrap-level / non-namespaced
- * messages (crash handlers, the initial "dashboard starting" line,
- * etc.). Modules should prefer their own `createLogger("module-name")`
- * for filtering granularity.
- */
-export const log: Logger = createLogger("desktop");
