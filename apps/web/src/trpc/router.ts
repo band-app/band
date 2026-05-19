@@ -1231,6 +1231,21 @@ const workspaceRouter = t.router({
         throw new Error("Workspace not found");
       }
 
+      // Plain (non-git) projects have no diff to compute. Return an empty
+      // summary instead of throwing so the UI can show a calm message
+      // rather than a raw git error — see #427.
+      if (workspace.project.kind === "plain") {
+        const defaultBranch = workspace.project.defaultBranch;
+        return {
+          stats: { filesChanged: 0, insertions: 0, deletions: 0 },
+          compareBranch: defaultBranch,
+          defaultBranch,
+          headBranch: defaultBranch,
+          fileStatuses: {},
+          mergeBase: "",
+        };
+      }
+
       const cwd = workspace.worktree.path;
       const defaultBranch = workspace.project.defaultBranch;
       const { compareBranch, headBranch, mergeBase } = await resolveDiffContext(

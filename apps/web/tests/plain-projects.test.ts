@@ -318,6 +318,24 @@ describe("tRPC — plain projects (workspace mutations rejected)", () => {
     const body = (await res.json()) as { error: { message: string } };
     expect(body.error.message).toMatch(/plain.*non-git/i);
   });
+
+  it("workspace.getDiffSummary returns an empty summary for plain projects", async () => {
+    // The DiffView fetches this on mount. For plain projects we don't want
+    // to surface a git error — return an empty result so the UI renders its
+    // "folder is not a git repo" message instead.
+    const res = await trpcQuery(server.url, "workspace.getDiffSummary", {
+      workspaceId: "scratch-main",
+    });
+    expect(res.status).toBe(200);
+    const data = await trpcData<{
+      stats: { filesChanged: number; insertions: number; deletions: number };
+      fileStatuses: Record<string, string>;
+      defaultBranch: string;
+    }>(res);
+    expect(data.stats).toEqual({ filesChanged: 0, insertions: 0, deletions: 0 });
+    expect(data.fileStatuses).toEqual({});
+    expect(data.defaultBranch).toBe("main");
+  });
 });
 
 // ---------------------------------------------------------------------------
