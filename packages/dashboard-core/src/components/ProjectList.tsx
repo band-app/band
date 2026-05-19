@@ -41,7 +41,6 @@ import {
   GitBranch,
   ListMinus,
   Pin,
-  PinOff,
   Plus,
   Tag,
 } from "lucide-react";
@@ -143,18 +142,22 @@ function SortableProject({
 
   // Plain projects flatten: the project header IS the implicit workspace's
   // card. There's no nested "main" row, no collapse chevron, no "+" Add
-  // workspace button — see #427. The header inherits everything the
-  // WorkspaceCard would have done: agent-status dot, click-to-open,
-  // focus/active highlighting, pin toggle, etc.
+  // workspace button, and crucially no pinning (the workspace is already
+  // at the project level — there's nothing to "pull up to the top"). See
+  // #427. Use optional access on worktrees[0] because the parent's
+  // displayProjects could theoretically hand us an empty array; defaulting
+  // to "main" keeps the header functional even if the implicit row was
+  // somehow filtered out (e.g. legacy `pinned=true` state from an earlier
+  // build that allowed the menu item).
   const openWorkspace = useDashboardStore((s) => s.openWorkspace);
   const clearNeedsAttention = useDashboardStore((s) => s.clearNeedsAttention);
-  const plainWorkspaceId = isPlain ? toWorkspaceId(project.name, project.worktrees[0].branch) : "";
+  const plainBranch = isPlain ? (project.worktrees[0]?.branch ?? "main") : "";
+  const plainWorkspaceId = isPlain ? toWorkspaceId(project.name, plainBranch) : "";
   const plainIsActive = useDashboardStore(
     (s) => isPlain && s.activeWorkspaceId === plainWorkspaceId,
   );
   const plainHref = isPlain ? capabilities.getWorkspaceHref?.(plainWorkspaceId) : undefined;
   const plainAgent = isPlain ? statuses.get(plainWorkspaceId)?.agent : undefined;
-  const plainIsPinned = isPlain ? (project.worktrees[0].pinned ?? false) : false;
   const plainIsFocused = isPlain && workspaceIndexStart === focusedIndex;
 
   // Single onClick / onKeyDown for the plain-project header (mirrors the
@@ -266,19 +269,12 @@ function SortableProject({
               {collapsed ? "Expand" : "Collapse"}
             </ContextMenuItem>
           )}
-          {/* Pin/unpin the implicit workspace for plain projects — for git
-              projects pinning lives on the per-worktree WorkspaceCard
-              context menu instead. */}
-          {isPlain && (
-            <ContextMenuItem
-              onClick={() =>
-                onTogglePinned(project.name, project.worktrees[0].branch, plainIsPinned)
-              }
-            >
-              {plainIsPinned ? <PinOff /> : <Pin />}
-              {plainIsPinned ? "Unpin workspace" : "Pin workspace"}
-            </ContextMenuItem>
-          )}
+          {/* Pinning is intentionally omitted for plain projects: the
+              project header IS the workspace, already at the top of its
+              own project block. There's no nested card to surface in the
+              Pinned section, and adding the menu item created a footgun
+              where pin → filter → empty worktrees → crash. To reorder
+              plain projects, drag the project header. */}
           {labels.length > 0 && (
             <ContextMenuSub>
               <ContextMenuSubTrigger>
@@ -455,7 +451,15 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
   const projectCollapse = useCollapseState(PROJECTS_COLLAPSE_KEY);
   const labelCollapse = useCollapseState(LABELS_COLLAPSE_KEY);
   const pinnedCollapse = useCollapseState(PINNED_COLLAPSE_KEY);
-  const { pinned: pinnedEntries, toggle: togglePinned } = usePinnedWorkspaces();
+  const { pinned: pinnedEntriesRaw, toggle: togglePinned } = usePinnedWorkspaces();
+  // Plain (non-git) projects have no separate workspace card to pull up
+  // to a Pinned section — they're already flat at the project level. Drop
+  // them from the pinned list so a stale `pinned=true` row doesn't show
+  // a confusing duplicate entry at the top of the tree.
+  const pinnedEntries = useMemo(
+    () => pinnedEntriesRaw.filter((e) => e.project.kind !== "plain"),
+    [pinnedEntriesRaw],
+  );
 
   // Two sensors so reorder works without an explicit "edit" toggle:
   //  • MouseSensor — desktop pointers can drag immediately; an 8px distance
@@ -472,9 +476,17 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
   // had any pinned worktrees so SortableProject can hide the misleading
   // "No workspaces yet" copy when the only reason a project looks empty is
   // that everything got pinned.
+  //
+  // Plain (non-git) projects are flat — the project header IS the implicit
+  // workspace, with no nested card to pull up to a separate "Pinned"
+  // section. Skip the filter for them so a stray `pinned=true` row (e.g.
+  // pinned before the feature was disabled for plain projects) doesn't
+  // strand SortableProject with an empty `worktrees: []` and crash on
+  // `worktrees[0].branch`.
   const { displayProjects, projectsWithPinned } = useMemo(() => {
     const withPinned = new Set<string>();
     const display = projects.map((p) => {
+      if (p.kind === "plain") return p;
       const filtered = p.worktrees.filter((w) => !w.pinned);
       if (filtered.length !== p.worktrees.length) withPinned.add(p.name);
       return { ...p, worktrees: filtered };

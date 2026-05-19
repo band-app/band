@@ -666,6 +666,16 @@ const workspacesRouter = t.router({
       if (!proj) {
         throw new Error(`Project "${input.project}" not found`);
       }
+      // Plain (non-git) projects don't surface in the Pinned section —
+      // they're already flat at the project level — so pinning has no
+      // visible effect and accidentally leaving `pinned=true` strands the
+      // UI with an empty `worktrees` array. Reject the call as a backstop;
+      // the UI also omits the menu item.
+      if (proj.kind === "plain") {
+        throw new Error(
+          `Project "${input.project}" is a plain (non-git) project. Pinning is not available.`,
+        );
+      }
       const wt = proj.worktrees.find((w) => w.branch === input.branch);
       if (!wt) {
         throw new Error(`Workspace "${input.branch}" not found`);

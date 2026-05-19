@@ -319,6 +319,21 @@ describe("tRPC — plain projects (workspace mutations rejected)", () => {
     expect(body.error.message).toMatch(/plain.*non-git/i);
   });
 
+  it("workspaces.setPinned rejects on a plain project", async () => {
+    // The flattened UI omits the Pin menu item, but the server also rejects
+    // the call as a backstop. Without this guard, a CLI/API caller could
+    // strand `pinned=true` on the implicit worktree, which used to crash
+    // the project tree because `displayProjects` filtered the row out.
+    const res = await trpcMutate(server.url, "workspaces.setPinned", {
+      project: "scratch",
+      branch: "main",
+      pinned: true,
+    });
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toMatch(/plain.*non-git/i);
+  });
+
   it("workspace.getDiffSummary returns an empty summary for plain projects", async () => {
     // The DiffView fetches this on mount. For plain projects we don't want
     // to surface a git error — return an empty result so the UI renders its
