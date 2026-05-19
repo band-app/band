@@ -211,6 +211,28 @@ describe("parseBandAction", () => {
 
   test("malformed URLs don't throw", () => {
     assert.equal(parseBandAction("band-action://"), null);
+    assert.equal(parseBandAction("band-action:"), null);
     assert.equal(parseBandAction("not a url"), null);
+    assert.equal(parseBandAction(undefined as unknown as string), null);
+  });
+
+  test("tolerates Chromium normalising the authority-slashes away", () => {
+    // Some Chromium versions report `band-action://cert-back` as
+    // `band-action:cert-back` to `did-start-navigation`. We must
+    // recognise both.
+    assert.deepEqual(parseBandAction("band-action:cert-back"), { kind: "cert-back" });
+    assert.deepEqual(
+      parseBandAction("band-action:cert-proceed?host=example.com&fingerprint=sha256%2Fabc"),
+      { kind: "cert-proceed", host: "example.com", fingerprint: "sha256/abc" },
+    );
+  });
+
+  test("tolerates a trailing slash on the action name", () => {
+    assert.deepEqual(parseBandAction("band-action://cert-back/"), { kind: "cert-back" });
+    assert.deepEqual(parseBandAction("band-action://load-retry/"), { kind: "load-retry" });
+    assert.deepEqual(
+      parseBandAction("band-action://cert-proceed/?host=example.com&fingerprint=sha256%2Fabc"),
+      { kind: "cert-proceed", host: "example.com", fingerprint: "sha256/abc" },
+    );
   });
 });

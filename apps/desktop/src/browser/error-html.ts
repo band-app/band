@@ -284,22 +284,47 @@ export type BandAction =
  * Returns `null` for missing or empty `host` / `fingerprint`
  * parameters on `cert-proceed` so a malformed link can't trigger
  * an incomplete exception write.
+ *
+ * **Tolerant parsing.** Chromium can normalise non-standard URL
+ * schemes inconsistently between the version we author the HTML
+ * link as (`band-action://cert-proceed?…`) and the version
+ * `did-start-navigation` reports back to us — observed
+ * normalisations include dropping the authority slashes
+ * (`band-action:cert-proceed?…`) and adding a trailing slash to
+ * the path (`band-action://cert-proceed/?…`). We don't rely on
+ * `new URL()` because for unknown schemes its host/pathname split
+ * is platform-dependent and on some Chromium versions returns an
+ * empty host — instead we slice the scheme prefix, split on `?`,
+ * strip slashes from the action name, and parse the query
+ * manually.
  */
 export function parseBandAction(rawUrl: string): BandAction | null {
-  if (!rawUrl.startsWith("band-action://")) return null;
-  let parsed: URL;
+  if (typeof rawUrl !== "string") return null;
+  let body: string;
+  if (rawUrl.startsWith("band-action://")) {
+    body = rawUrl.slice("band-action://".length);
+  } else if (rawUrl.startsWith("band-action:")) {
+    body = rawUrl.slice("band-action:".length);
+  } else {
+    return null;
+  }
+  const queryStart = body.indexOf("?");
+  const rawAction = queryStart === -1 ? body : body.slice(0, queryStart);
+  const queryString = queryStart === -1 ? "" : body.slice(queryStart + 1);
+  // Strip leading + trailing `/` so `cert-proceed` and
+  // `cert-proceed/` both match.
+  const action = rawAction.replace(/^\/+|\/+$/g, "");
+  if (!action) return null;
+  let params: URLSearchParams;
   try {
-    parsed = new URL(rawUrl);
+    params = new URLSearchParams(queryString);
   } catch {
     return null;
   }
-  // URL splits `band-action://cert-proceed?host=foo` as
-  // host="cert-proceed", pathname="". Use host as the action name.
-  const action = parsed.host;
   switch (action) {
     case "cert-proceed": {
-      const host = parsed.searchParams.get("host");
-      const fingerprint = parsed.searchParams.get("fingerprint");
+      const host = params.get("host");
+      const fingerprint = params.get("fingerprint");
       if (!host || !fingerprint) return null;
       return { kind: "cert-proceed", host, fingerprint };
     }

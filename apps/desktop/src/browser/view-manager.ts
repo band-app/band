@@ -1036,31 +1036,41 @@ export class BrowserViewManager {
     //     the address bar follows the redirect — matches Chrome's UX.
     view.webContents.on("did-start-navigation", (details) => {
       if (!details.isMainFrame) return;
-      // ---- band-action://… interceptor (issue #444 cast follow-up) ----
+      // ---- band-action:… interceptor (issue #444 cast follow-up) ----
       // The in-view error pages encode button clicks as navigations
       // to a sentinel `band-action://` URL. Chromium has no idea
       // what that scheme is, so without intercepting it would commit
       // the navigation, fail to load, and leave the tab on the
       // unknown-scheme URL.
       //
-      // CRITICAL: we DEFER the `stop()` + dispatch via setImmediate.
-      // Calling `webContents.stop()` or `webContents.loadURL()`
-      // synchronously from inside `did-start-navigation` re-enters
-      // Chromium's navigation pipeline while it's still processing
-      // the start of the current navigation — that reentrancy
-      // crashes the main process with `EXC_BREAKPOINT` deep inside
-      // V8 / `cppgc::internal::PersistentRegionBase::Iterate`. The
-      // setImmediate hop lets the current navigation event return
-      // first, so the abort + new loadURL happen from a clean stack.
+      // Lenient prefix match: Chromium normalises non-standard
+      // schemes inconsistently — sometimes drops the authority
+      // slashes (so `band-action:cert-proceed?…`), sometimes adds
+      // a trailing slash. The check + parser tolerate both.
+      //
+      // CRITICAL: we DEFER the new loadURL via setImmediate.
+      // Calling `webContents.loadURL()` synchronously from inside
+      // `did-start-navigation` re-enters Chromium's navigation
+      // pipeline while it's still processing the start of the
+      // current navigation — that reentrancy crashes the main
+      // process with `EXC_BREAKPOINT` deep inside V8. setImmediate
+      // lets the event handler return first.
+      //
+      // We deliberately do NOT call `webContents.stop()` here.
+      // Chromium fires `did-fail-load` for `band-action://` almost
+      // immediately (unknown scheme → ERR_UNKNOWN_URL_SCHEME), so
+      // by the time setImmediate fires the navigation has already
+      // aborted on its own. Calling stop() risked cancelling the
+      // brand-new loadURL we're about to issue and was observed to
+      // leave the WebContentsView blank after Proceed.
       //
       // Why not `will-navigate`? On Electron 35 it doesn't fire for
       // unknown URL schemes (Chromium's external-protocol handling
       // short-circuits it). `did-start-navigation` always fires.
-      if (details.url.startsWith("band-action://")) {
+      if (details.url.startsWith("band-action:")) {
         const action = parseBandAction(details.url);
         setImmediate(() => {
           if (view.webContents.isDestroyed()) return;
-          view.webContents.stop();
           if (action) this.handleBandAction(key, action);
         });
         return;
@@ -1091,7 +1101,8 @@ export class BrowserViewManager {
     view.webContents.on("did-stop-loading", () => {
       const url = view.webContents.getURL();
       if (url.startsWith("data:")) return;
-      if (url.startsWith("band-action://")) return;
+      // Lenient `band-action:` match — see did-start-navigation block.
+      if (url.startsWith("band-action:")) return;
       emitUrl(url, false);
     });
 
@@ -1222,7 +1233,8 @@ export class BrowserViewManager {
         //     They shouldn't fail-load in normal operation, but if
         //     Chromium ever reports one we don't want to recurse
         //     into another error page.
-        if (validatedURL.startsWith("band-action://")) return;
+        // Lenient `band-action:` match — see did-start-navigation block.
+        if (validatedURL.startsWith("band-action:")) return;
         if (validatedURL.startsWith("data:")) return;
         const payload = buildLoadErrorPayload({
           key,
