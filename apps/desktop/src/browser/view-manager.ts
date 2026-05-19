@@ -1184,11 +1184,12 @@ export class BrowserViewManager {
     // We do the cert-override decision HERE rather than in the
     // session-wide `setCertificateVerifyProc` because Chromium has
     // a per-host short-term bad-cert cache that bypasses the
-    // verify proc on retry attempts after a denial — observed via
-    // diagnostic the pino debug logger: after the first denial the verify
-    // proc never fires again for that host, but `certificate-error`
-    // DOES, so this is the only event we can reliably hook to
-    // honour a freshly-added exception.
+    // verify proc on retry attempts after a denial — observed
+    // empirically while tracing both events through the pino debug
+    // logger: after the first denial the verify proc never fires
+    // again for that host, but `certificate-error` DOES, so this
+    // is the only event we can reliably hook to honour a
+    // freshly-added exception.
     //
     // Decision:
     //   - Exception matches our store → callback(true) — trust the
