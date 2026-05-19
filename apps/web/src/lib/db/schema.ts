@@ -31,6 +31,13 @@ export const projects = sqliteTable("projects", {
   defaultBranch: text("default_branch").notNull(),
   label: text("label"),
   sortOrder: integer("sort_order").notNull(),
+  // Discriminates between git-backed projects (worktree-per-workspace,
+  // branches, PR/CI features) and plain folders (single implicit workspace,
+  // no isolation, git features disabled). Defaults to "git" so existing
+  // rows keep their behavior unchanged after migration.
+  kind: text("kind", { enum: ["git", "plain"] })
+    .notNull()
+    .default("git"),
 });
 
 export const worktrees = sqliteTable("worktrees", {

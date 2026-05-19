@@ -70,6 +70,10 @@ export class WebDashboardAdapter implements DashboardAdapter {
     await this.trpc.projects.gitInit.mutate({ path });
   }
 
+  async promoteProjectToGit(name: string): Promise<void> {
+    await this.trpc.projects.promoteToGit.mutate({ name });
+  }
+
   async createWorkspace(
     project: string,
     branch: string,

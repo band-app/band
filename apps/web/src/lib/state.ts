@@ -12,12 +12,20 @@ import {
   worktrees as worktreesTable,
 } from "./db/schema";
 
+export type ProjectKind = "git" | "plain";
+
 export interface ProjectState {
   name: string;
   path: string;
   defaultBranch: string;
   worktrees: WorktreeState[];
   label?: string;
+  /**
+   * "git" projects use git worktrees for per-workspace isolation.
+   * "plain" projects have a single implicit workspace whose path equals the
+   *  project path — no isolation, no branch, git-specific features disabled.
+   */
+  kind: ProjectKind;
 }
 
 export interface WorktreeState {
@@ -121,6 +129,7 @@ export function loadState(): AppState {
       path: row.path,
       defaultBranch: row.defaultBranch,
       label: row.label ?? undefined,
+      kind: (row.kind ?? "git") as ProjectKind,
       worktrees: wtByProject.get(row.name) ?? [],
     })),
   };
@@ -142,6 +151,7 @@ export function saveState(state: AppState): void {
           defaultBranch: project.defaultBranch,
           label: project.label ?? null,
           sortOrder: i,
+          kind: project.kind ?? "git",
         })
         .run();
 

@@ -43,6 +43,35 @@ band projects list --output json | jq -r '.projects[] | "\(.name)\t\(.path)"'
 
 Pick the project whose `path` is the cwd or one of its ancestors. If no match or the cwd is ambiguous (multiple registered projects under the same root), ask the user to pick one.
 
+### 1a. Plain (non-git) projects: short-circuit
+
+A Band project can be either a git repo (the normal case) or a "plain" folder (no `.git`). Plain projects have a single implicit workspace whose path equals the project path — there are no branches, no PRs, no `workspaces create`.
+
+After step 1, check the project's `kind` field:
+
+```sh
+band projects list --output json | jq -r --arg name "$project_name" '.projects[] | select(.name == $name) | .kind'
+```
+
+If `kind` is `"plain"`:
+
+- **Skip steps 2–6 entirely.** No ticket detection, no branch-name generation, no `workspaces create`.
+- The workspace already exists. Its `branch` is the literal string `"main"` and its `workspaceId` is `"{project-name}-main"`.
+- Resolve the chat ID (see step 7) against that existing workspace and submit the prompt with `band chats send`:
+
+  ```sh
+  ws_id="${project_name}-main"
+  ws_path=$(band workspaces list "$project_name" --output json \
+    | jq -r '.workspaces[0].path')
+  # `chats send` lazy-creates a chat pane on the first call if none exists
+  band chats send "$ws_id" --prompt "<user prompt>" --output json
+  chat_id=$(band chats list "$ws_id" --output json | jq -r '.chats[0].id')
+  ```
+
+- Skip ahead to step 8 (report the result) with the resolved `chat_id`.
+
+If `kind` is `"git"` (or absent — older servers default to git), continue with steps 2–6 below.
+
 ### 2. Detect a ticket reference in the prompt
 
 Scan the prompt for either format:
