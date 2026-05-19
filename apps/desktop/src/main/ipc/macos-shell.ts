@@ -3,6 +3,7 @@
  *
  *   - `pickFolder` — system folder picker (cross-platform via Electron's `dialog`).
  *   - `pickFile` — system file picker for opening external files (cross-platform).
+ *   - `pickSaveFile` — system "Save As" picker for writing a new file to disk.
  *   - `revealInFinder` — open the path in the platform's file manager.
  *   - `checkAppExists` — look in /Applications and friends, fall back to `which`.
  *   - `openWithApp` — `open -a <app> <path>` (macOS only).
@@ -17,6 +18,7 @@ import { join } from "node:path";
 import { type BrowserWindow, dialog, shell } from "electron";
 
 import { type CliPathOptions, resolveCliBinary } from "../services/cli-paths.js";
+import { resolveSaveDialogSeed, writeSavedFile } from "./save-helpers.js";
 
 const NOT_SUPPORTED = "Not supported on this platform";
 
@@ -64,6 +66,80 @@ export async function pickFile(parent: BrowserWindow | null): Promise<string | n
     : await dialog.showOpenDialog(opts);
   if (result.canceled || result.filePaths.length === 0) return null;
   return result.filePaths[0] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// pickSaveFile
+// ---------------------------------------------------------------------------
+
+/**
+ * Defensive ceiling on the buffer the renderer can hand off in a
+ * single save call. The Electron model is trusted (the renderer is
+ * Band's own code), so this isn't a security boundary — it's a UX
+ * safety net for accidental pastes (multi-MB log files, an image
+ * dropped in as base64, a minified bundle) that would otherwise
+ * sit in IPC shared memory, the main-process heap, and the temp
+ * file concurrently while the disk write stalls the event loop.
+ *
+ * 100 MB matches the rough ceiling above which the OS save dialog
+ * itself becomes the bottleneck rather than the IPC. The renderer
+ * receives the rejection cleanly through the existing error path.
+ */
+const SAVE_CONTENT_MAX_BYTES = 100 * 1024 * 1024;
+
+/**
+ * Open the system "Save As" picker and write the supplied `content` to the
+ * chosen path. Returns the absolute path of the saved file, or `null` when
+ * the user cancels.
+ *
+ * Backs the editor's "Save untitled tab" flow: an untitled buffer lives
+ * entirely in the renderer until the user picks a destination — this
+ * bridge surfaces the native save dialog and persists the buffer in a
+ * single IPC round-trip (one user-visible Save operation). The renderer
+ * then transitions the tab from "untitled" to file-backed using the
+ * returned path. The write itself goes through `writeSavedFile`, which
+ * uses a write-to-temp + rename pattern to avoid mid-write truncation —
+ * see that function for the atomicity contract.
+ *
+ * Anchored to `parent` so the dialog is sheet-style on macOS and modal-
+ * relative on other platforms. `defaultPath` and `defaultName` seed the
+ * dialog's starting location and filename (e.g. "Untitled-1.txt") so the
+ * user only has to type when overriding.
+ */
+export async function pickSaveFile(
+  parent: BrowserWindow | null,
+  args: { content: string; defaultName?: string; defaultPath?: string },
+): Promise<string | null> {
+  // Defensive size check — see `SAVE_CONTENT_MAX_BYTES`. Using
+  // `Buffer.byteLength` (not `string.length`) so the cap reflects
+  // the on-disk UTF-8 byte count, not the JS string code-unit count.
+  if (Buffer.byteLength(args.content, "utf8") > SAVE_CONTENT_MAX_BYTES) {
+    throw new Error(
+      `File is too large to save via this flow (over ${SAVE_CONTENT_MAX_BYTES / (1024 * 1024)} MB). ` +
+        "Split the content into smaller files or save through a terminal.",
+    );
+  }
+
+  const seed = resolveSaveDialogSeed(args);
+  const opts = {
+    title: "Save As",
+    defaultPath: seed,
+    properties: ["createDirectory", "showOverwriteConfirmation"] as Array<
+      "createDirectory" | "showOverwriteConfirmation"
+    >,
+  };
+  const result = parent
+    ? await dialog.showSaveDialog(parent, opts)
+    : await dialog.showSaveDialog(opts);
+  if (result.canceled || !result.filePath) return null;
+
+  // `dialog.showSaveDialog` with `showOverwriteConfirmation` already
+  // handled the overwrite prompt, so we trust the path and persist
+  // the bytes. Errors propagate up through the IPC chain. `await` is
+  // load-bearing — `writeSavedFile` is async to keep the Electron main
+  // process event loop responsive during the disk write.
+  await writeSavedFile(result.filePath, args.content);
+  return result.filePath;
 }
 
 // ---------------------------------------------------------------------------

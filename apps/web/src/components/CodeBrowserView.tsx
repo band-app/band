@@ -1,4 +1,5 @@
 import {
+  AUTO_DETECT_LANGUAGE_ID,
   buildLspWsUrl,
   createLspExtension,
   FileBrowser,
@@ -7,6 +8,7 @@ import {
   getFilePreviewType,
   getLspLanguageId,
   hasPendingNavigation,
+  languageToExtension,
   parseFileLocation,
   releaseLspClient,
   resolveNavigation,
@@ -48,9 +50,10 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Group, Panel, Separator, usePanelRef } from "react-resizable-panels";
-import { useFileTabs } from "../hooks/useFileTabs";
+import { isUntitledPath, useFileTabs } from "../hooks/useFileTabs";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useTabState } from "../hooks/useTabState";
+import { pathInside } from "../lib/path-inside";
 import { FileTabBar } from "./FileTabBar";
 import type { MarkdownPreviewHandle, MarkdownPreviewMatchInfo } from "./MarkdownPreview";
 import { MarkdownPreview } from "./MarkdownPreview";
@@ -101,6 +104,11 @@ function saveFileTreeCollapsed(wsId: string, collapsed: boolean): void {
   }
 }
 
+// `pathInside` lives in `../lib/path-inside.ts` so it can be unit-
+// tested without dragging in the React/CodeMirror runtime — see
+// `apps/web/tests/path-inside.test.ts` for the test cases that lock
+// in the security-adjacent prefix-collision invariant.
+
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
@@ -134,6 +142,12 @@ interface FileTreeToolbarProps {
    * flow.
    */
   onOpenFile?: () => void;
+  /**
+   * Open a new untitled (scratch) editor tab. Always defined — works in
+   * both desktop and web builds; the OS save dialog only surfaces when
+   * the user actually saves (`capabilities.pickSaveFile`).
+   */
+  onNewUntitled?: () => void;
 }
 
 // Below this width (px), the toolbar collapses its action buttons into a
@@ -168,7 +182,12 @@ const touchPointerUp = (fn?: () => void) => (e: React.PointerEvent<HTMLButtonEle
 const fireOpenQuickOpen = () => window.dispatchEvent(new CustomEvent("band:open-quick-open"));
 const fireOpenSearchFiles = () => window.dispatchEvent(new CustomEvent("band:open-search-files"));
 
-function FileTreeToolbar({ onNewFile, onNewFolder, onOpenFile }: FileTreeToolbarProps) {
+function FileTreeToolbar({
+  onNewFile,
+  onNewFolder,
+  onOpenFile,
+  onNewUntitled,
+}: FileTreeToolbarProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [compact, setCompact] = useState(false);
 
@@ -237,6 +256,15 @@ function FileTreeToolbar({ onNewFile, onNewFolder, onOpenFile }: FileTreeToolbar
             className="min-w-[10rem]"
             onCloseAutoFocus={flushMenuAction}
           >
+            {onNewUntitled && (
+              <DropdownMenuItem onSelect={() => queueMenuAction(onNewUntitled)}>
+                <FilePlus className="size-4" />
+                New Untitled File
+                <kbd className="ml-auto rounded border border-popover-foreground/25 bg-popover-foreground/10 px-1 py-0.5 font-mono text-[10px]">
+                  ⌘N
+                </kbd>
+              </DropdownMenuItem>
+            )}
             {onNewFile && (
               <DropdownMenuItem onSelect={() => queueMenuAction(onNewFile)}>
                 <FilePlus className="size-4" />
@@ -249,7 +277,7 @@ function FileTreeToolbar({ onNewFile, onNewFolder, onOpenFile }: FileTreeToolbar
                 New Folder
               </DropdownMenuItem>
             )}
-            {(onNewFile || onNewFolder) && <DropdownMenuSeparator />}
+            {(onNewUntitled || onNewFile || onNewFolder) && <DropdownMenuSeparator />}
             <DropdownMenuItem onSelect={() => queueMenuAction(fireOpenQuickOpen)}>
               <Search className="size-4" />
               Quick Open
@@ -517,6 +545,10 @@ export function CodeBrowserView({
   const notifySelectFile = useCallback(
     (filePath: string | null) => {
       if (isExternalPath(filePath)) return;
+      // Untitled tabs use a synthetic `untitled:N` key that isn't a
+      // valid workspace-relative path — pushing it into the URL would
+      // break route parsing the same way external absolute paths would.
+      if (filePath !== null && isUntitledPath(filePath)) return;
       onSelectFile?.(filePath);
     },
     [isExternalPath, onSelectFile],
@@ -1266,6 +1298,192 @@ export function CodeBrowserView({
   }, [pickFile, handleOpenExternalFile]);
 
   // -------------------------------------------------------------------------
+  // Untitled tabs (issue #434) — empty scratch buffer with save-as flow.
+  // -------------------------------------------------------------------------
+  const pickSaveFile = capabilities.pickSaveFile;
+
+  const handleNewUntitled = useCallback(() => {
+    const { filePath } = fileTabs.openTabUntitled();
+    setViewFilePath(filePath);
+    setViewLine(undefined);
+    setViewLineEnd(undefined);
+    setViewColumn(undefined);
+    // Untitled tabs are workspace-relative only in the tab list; the
+    // route doesn't know about them. Don't notifySelectFile (the route
+    // would push an unparseable `untitled:N` into the URL).
+  }, [fileTabs.openTabUntitled]);
+
+  useEffect(() => {
+    const handler = () => handleNewUntitled();
+    window.addEventListener("band:new-untitled-tab", handler);
+    return () => window.removeEventListener("band:new-untitled-tab", handler);
+  }, [handleNewUntitled]);
+
+  // Stable ref to the latest openTabs list so `handleSaveUntitled`
+  // can look up the tab being saved (for its untitledLabel) without
+  // depending on the array — otherwise the callback (and the
+  // `onSaveAs` prop derived from it) would churn on every tab open
+  // / pin / preview transition, forcing every FileViewer to re-bind
+  // its save handler.
+  const openTabsRef = useRef(fileTabs.openTabs);
+  openTabsRef.current = fileTabs.openTabs;
+
+  // Save-as flow for untitled tabs. Threaded into FileViewer via the
+  // `onSaveAs` prop, and into FileTabBar's close-confirm dialog via
+  // `onSaveUntitled` — both routes call this. Returns the chosen
+  // absolute path on success and null on user-cancel so the caller
+  // can decide whether to close the tab.
+  const handleSaveUntitled = useCallback(
+    async (untitledPath: string, content: string): Promise<string | null> => {
+      if (!pickSaveFile) return null;
+      const tab = openTabsRef.current.find((t) => t.filePath === untitledPath);
+      // Seed the dialog with both a sensible filename AND the right
+      // extension — if the user has manually set the language to e.g.
+      // TypeScript, suggest `.ts` so they don't have to delete `.txt`
+      // and retype. Falls through to `.txt` for plain text (the
+      // untitled default) and for any language without a canonical
+      // extension. `languageToExtension` already returns `undefined`
+      // for unsupported languages so the fallback is implicit.
+      const override = tabState.getLanguage(untitledPath);
+      const ext = (override ? languageToExtension(override) : undefined) ?? ".txt";
+      const stem = tab?.untitledLabel ?? "Untitled";
+      const defaultName = `${stem}${ext}`;
+      const chosen = await pickSaveFile({
+        content,
+        defaultName,
+        defaultPath: workspacePath,
+      });
+      if (!chosen) return null;
+
+      // Normalise to POSIX-style separators before the containment
+      // check — on Windows, Electron's `dialog.showSaveDialog` returns
+      // native paths like `C:\Users\alice\band\src\x.ts`, but Band's
+      // workspace registry stores worktree paths with forward slashes.
+      // `pathInside` is a string-segment comparison, so without this
+      // rewrite every Windows save would slip past it and be
+      // classified as external regardless of where the user actually
+      // saved. macOS / Linux paths are POSIX already, so the regex
+      // is a no-op there.
+      const chosenPosix = chosen.replace(/\\/g, "/");
+
+      // Decide whether the chosen path lives inside the workspace.
+      // When it does we transition to a normal workspace tab; otherwise
+      // it becomes an external tab (per issue #433). `pathInside`
+      // returns the workspace-relative path when `chosen` is under
+      // `workspacePath`, and `null` when it isn't — handles the
+      // prefix-collision edge case (`/a/band` vs `/a/band-fork`) by
+      // requiring an exact path-segment match rather than a raw string
+      // prefix.
+      const relative = workspacePath != null ? pathInside(workspacePath, chosenPosix) : null;
+      const isExternal = relative === null;
+      const newPath = relative ?? chosenPosix;
+
+      // Carry the manual language override (if any) from the untitled
+      // key to the new path so the user's choice survives the rename
+      // — issue #434: "Saving an untitled tab whose language was
+      // manually set keeps the override even if the chosen filename's
+      // extension would imply a different language."
+      if (override) tabState.setLanguage(newPath, override);
+
+      // Carry view-mode / scroll state in case the user keeps editing
+      // the just-saved file. editedContent is dropped because the
+      // bytes are now on disk and the FileViewer reloads via the
+      // adapter on remount under the new key.
+      const oldState = tabState.get(untitledPath);
+      tabState.update(newPath, {
+        viewMode: oldState?.viewMode,
+        editorState: oldState?.editorState,
+        scrollTop: oldState?.scrollTop,
+      });
+      tabState.removeFile(untitledPath);
+
+      // Rewrite in-memory editor state cache so the FileViewer mount
+      // under the new path picks up undo history / scroll position.
+      if (savedEditorStatesRef.current[untitledPath]) {
+        savedEditorStatesRef.current[newPath] = savedEditorStatesRef.current[untitledPath];
+        delete savedEditorStatesRef.current[untitledPath];
+      }
+
+      // Transition the tab and viewFilePath together so the FileViewer
+      // remounts on the new key in the same React batch.
+      fileTabs.renameUntitledToFile(untitledPath, newPath, isExternal);
+      skipFileEffectRef.current = true;
+      setViewFilePath(newPath);
+      setViewLine(undefined);
+      setViewLineEnd(undefined);
+      setViewColumn(undefined);
+      if (!isExternal) notifySelectFile(newPath);
+      window.dispatchEvent(new CustomEvent("band:dirty-change"));
+      // Return the POSIX-normalised path so downstream callers (the
+      // FileViewer save handler, primarily) see a consistent shape
+      // across platforms — the same rewrite as `chosenPosix` above.
+      return chosenPosix;
+    },
+    [pickSaveFile, workspacePath, fileTabs.renameUntitledToFile, notifySelectFile, tabState],
+  );
+
+  // FileTabBar version — looks up the latest editor content for the
+  // tab being closed and resolves with a boolean so the dialog knows
+  // whether to dismiss itself.
+  //
+  // Catches and swallows save errors here so the FileTabBar dialog's
+  // "Save…" handler (which awaits this) never produces an unhandled
+  // promise rejection. The IPC chain surfaces disk-full / permission-
+  // denied / etc. as exceptions; logging them to the console keeps
+  // them debuggable, while returning `false` keeps the close-confirm
+  // dialog open so the user can retry, discard, or cancel. Without
+  // this guard the dialog appears to hang silently on failure.
+  const handleSaveUntitledForClose = useCallback(
+    async (untitledPath: string): Promise<boolean> => {
+      // Prefer the live CodeMirror buffer (current edits) when the
+      // untitled tab is the one being viewed; otherwise fall back to
+      // any persisted editedContent in tab state.
+      let content: string;
+      if (viewFilePathRef.current === untitledPath && editorViewRef.current) {
+        content = editorViewRef.current.state.doc.toString();
+      } else {
+        content = tabState.get(untitledPath)?.editedContent ?? "";
+      }
+      try {
+        const saved = await handleSaveUntitled(untitledPath, content);
+        return saved != null;
+      } catch (err) {
+        console.error("[band] Save-as failed for untitled tab:", err);
+        return false;
+      }
+    },
+    [handleSaveUntitled, tabState],
+  );
+
+  // Language-mode override: persist per-tab via tabState, and dispatch
+  // the band:dirty-change event so the tab bar's language indicator
+  // (if any) re-renders. The override survives saves — see
+  // handleSaveUntitled for the carry-over.
+  //
+  // The picker also delivers an `AUTO_DETECT_LANGUAGE_ID` sentinel
+  // when the user explicitly reverts to extension-based detection;
+  // we treat that as a remove so the next render falls through to
+  // the FileViewer's auto-detect branch. Without this affordance, a
+  // user who manually set a `.ts` file to Python "just to see" would
+  // be stuck with that override until they closed the tab — closing
+  // is the only thing that clears the persisted `language` entry.
+  const handleLanguageOverride = useCallback(
+    (filePath: string, languageId: string) => {
+      if (languageId === AUTO_DETECT_LANGUAGE_ID) {
+        // Clear the override by writing `undefined` — `tabState.update`
+        // spreads the patch, JSON.stringify drops undefined properties,
+        // and the next `getLanguage` read sees no entry. Net effect:
+        // FileViewer reverts to extension-based detection on the next
+        // render.
+        tabState.update(filePath, { language: undefined });
+        return;
+      }
+      tabState.setLanguage(filePath, languageId);
+    },
+    [tabState],
+  );
+
+  // -------------------------------------------------------------------------
   // Keep tabs + editor state in sync with rename / delete in the file tree.
   // -------------------------------------------------------------------------
 
@@ -1454,9 +1672,18 @@ export function CodeBrowserView({
         // Mobile / narrow container: toggle between file browser and viewer
         viewFilePath ? (
           <FileViewer
+            // Scoped re-mount: force a clean mount only when crossing
+            // the untitled boundary (file → untitled, untitled → file,
+            // or untitled-1 → untitled-2). Plain file-to-file
+            // navigation keeps the existing FileViewer instance —
+            // CodeMirrorEditor handles content swaps internally, and
+            // remounting on every tab click would re-trigger LSP /
+            // language-loader work for no reason.
+            key={isUntitledPath(viewFilePath) ? viewFilePath : "file"}
             workspaceId={workspaceId}
             filePath={viewFilePath}
             external={viewIsExternal}
+            untitled={isUntitledPath(viewFilePath)}
             line={viewLine}
             lineEnd={viewLineEnd}
             column={viewColumn}
@@ -1469,8 +1696,9 @@ export function CodeBrowserView({
             renderMarkdown={renderMarkdown}
             editable
             // LSP is workspace-scoped — external files have no project root,
-            // so we deliberately skip the extension for them.
-            lspExtension={viewIsExternal ? null : lspExtension}
+            // so we deliberately skip the extension for them. Untitled tabs
+            // also skip LSP — there's no file URI for the language server.
+            lspExtension={viewIsExternal || isUntitledPath(viewFilePath) ? null : lspExtension}
             initialEditedContent={tabState.get(viewFilePath)?.editedContent ?? null}
             savedEditorState={
               savedEditorStatesRef.current[viewFilePath]?.editorState ??
@@ -1481,6 +1709,13 @@ export function CodeBrowserView({
               tabState.get(viewFilePath)?.scrollTop
             }
             onEditedContentChange={handleEditedContentChange}
+            languageOverride={tabState.getLanguage(viewFilePath)}
+            onLanguageOverrideChange={(id) => handleLanguageOverride(viewFilePath, id)}
+            onSaveAs={
+              isUntitledPath(viewFilePath) && pickSaveFile
+                ? (content) => handleSaveUntitled(viewFilePath, content)
+                : undefined
+            }
             toolbar={
               search.searchOpen ? (
                 <SearchBar
@@ -1510,6 +1745,7 @@ export function CodeBrowserView({
               onNewFile={handleNewFile}
               onNewFolder={handleNewFolder}
               onOpenFile={pickFile ? handleOpenExternalFile : undefined}
+              onNewUntitled={handleNewUntitled}
             />
             <div className="min-h-0 flex-1 overflow-hidden">
               <FileBrowser
@@ -1551,6 +1787,7 @@ export function CodeBrowserView({
                 onNewFile={handleNewFile}
                 onNewFolder={handleNewFolder}
                 onOpenFile={pickFile ? handleOpenExternalFile : undefined}
+                onNewUntitled={handleNewUntitled}
               />
               <div className="min-h-0 flex-1 overflow-hidden">
                 <FileBrowser
@@ -1597,6 +1834,7 @@ export function CodeBrowserView({
                 canGoBack={editorHistory.canGoBack}
                 canGoForward={editorHistory.canGoForward}
                 isDirty={tabState.isDirty}
+                onSaveUntitled={pickSaveFile ? handleSaveUntitledForClose : undefined}
                 treeCollapsed={treeCollapsed}
                 onToggleTree={toggleTree}
                 actions={
@@ -1647,9 +1885,18 @@ export function CodeBrowserView({
               <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
                 {viewFilePath ? (
                   <FileViewer
+                    // Scoped re-mount: force a clean mount only when
+                    // crossing the untitled boundary (file → untitled,
+                    // untitled → file, or untitled-1 → untitled-2).
+                    // Plain file-to-file navigation keeps the existing
+                    // FileViewer instance — remounting on every tab
+                    // click would re-trigger LSP / language-loader
+                    // work for no reason.
+                    key={isUntitledPath(viewFilePath) ? viewFilePath : "file"}
                     workspaceId={workspaceId}
                     filePath={viewFilePath}
                     external={viewIsExternal}
+                    untitled={isUntitledPath(viewFilePath)}
                     line={viewLine}
                     lineEnd={viewLineEnd}
                     column={viewColumn}
@@ -1660,7 +1907,11 @@ export function CodeBrowserView({
                     hideTitleBar
                     // LSP is workspace-scoped — external files have no project
                     // root, so we deliberately skip the extension for them.
-                    lspExtension={viewIsExternal ? null : lspExtension}
+                    // Untitled tabs also skip LSP — there's no file URI for
+                    // the language server to anchor to.
+                    lspExtension={
+                      viewIsExternal || isUntitledPath(viewFilePath) ? null : lspExtension
+                    }
                     viewMode={isMarkdown ? mdViewMode : undefined}
                     onViewModeChange={isMarkdown ? setMdViewMode : undefined}
                     initialEditedContent={tabState.get(viewFilePath)?.editedContent ?? null}
@@ -1673,6 +1924,13 @@ export function CodeBrowserView({
                       tabState.get(viewFilePath)?.scrollTop
                     }
                     onEditedContentChange={handleEditedContentChange}
+                    languageOverride={tabState.getLanguage(viewFilePath)}
+                    onLanguageOverrideChange={(id) => handleLanguageOverride(viewFilePath, id)}
+                    onSaveAs={
+                      isUntitledPath(viewFilePath) && pickSaveFile
+                        ? (content) => handleSaveUntitled(viewFilePath, content)
+                        : undefined
+                    }
                     toolbar={
                       search.searchOpen ? (
                         <SearchBar

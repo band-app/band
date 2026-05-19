@@ -156,6 +156,32 @@ export class NativeShellCapabilities implements PlatformCapabilities {
     return desktopInvoke<string | null>("pick_file");
   }
 
+  /**
+   * Open the OS "Save As" picker and persist `content` to the chosen
+   * path. Returns the absolute path (or `null` when the user cancels).
+   *
+   * Backs the editor's "Save untitled tab" flow — the renderer holds an
+   * in-memory buffer until the user picks a destination; this bridge
+   * runs the dialog and the write in a single IPC round-trip so the
+   * file-system trust boundary stays inside the Electron main process.
+   *
+   * Only meaningful inside the Electron shell; plain browser tabs return
+   * `null` and callers gate the UI on `capabilities.pickSaveFile` being
+   * defined (same pattern `pickFile` uses).
+   */
+  async pickSaveFile(args: {
+    content: string;
+    defaultName?: string;
+    defaultPath?: string;
+  }): Promise<string | null> {
+    if (!isDesktopShell()) return null;
+    return desktopInvoke<string | null>("pick_save_file", {
+      content: args.content,
+      defaultName: args.defaultName,
+      defaultPath: args.defaultPath,
+    });
+  }
+
   async openUrl(url: string): Promise<void> {
     if (!isDesktopShell()) {
       window.open(url, "_blank");

@@ -17,6 +17,10 @@ export { FileBrowser, type FileBrowserHandle } from "./components/FileBrowser";
 export { FileViewer } from "./components/FileViewer";
 export { GitStatusIndicator } from "./components/GitStatusIndicator";
 export { ImagePreview } from "./components/ImagePreview";
+export {
+  AUTO_DETECT_LANGUAGE_ID,
+  LanguagePickerDialog,
+} from "./components/LanguagePickerDialog";
 export { NewWorkspaceDialog } from "./components/NewWorkspaceForm";
 export { PdfPreview } from "./components/PdfPreview";
 export { ProjectList } from "./components/ProjectList";
@@ -93,7 +97,14 @@ export {
 export { getFileIcon } from "./lib/file-icon";
 export { type FileLocation, formatFileLocation, parseFileLocation } from "./lib/file-location";
 export { type FilePreviewType, getFilePreviewType } from "./lib/file-type";
-export { extensionToLanguage, filenameToLanguage } from "./lib/language-map";
+export {
+  extensionToLanguage,
+  filenameToLanguage,
+  languageLabel,
+  languageToExtension,
+  SUPPORTED_LANGUAGES,
+  type SupportedLanguage,
+} from "./lib/language-map";
 export { getRecentWorkspaceOrder, recordWorkspaceAccess } from "./lib/recent-workspaces";
 export type { SelectionToChatDetail } from "./lib/selection-to-chat";
 export { isServiceHealthy, type ServiceHealth } from "./lib/service-health";

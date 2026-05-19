@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useMemo, useRef } from "react";
 
 // ---------------------------------------------------------------------------
 // localStorage-backed store for per-tab state
@@ -16,6 +16,36 @@ export interface TabFileState {
   editorState?: unknown;
   /** Scroll position (scrollDOM.scrollTop) to restore after editor creation. */
   scrollTop?: number;
+  /**
+   * User-selected syntax highlighting language override (e.g.
+   * `"typescript"`, `"markdown"`, `"plaintext"`). When set, the editor
+   * uses this instead of auto-detecting from the file extension /
+   * filename. Survives saves (per issue #434: "Saving an untitled tab
+   * whose language was manually set keeps the override even if the
+   * chosen filename's extension would imply a different language").
+   *
+   * **Persists across sessions** for file-backed tabs — `TabFileState`
+   * is the localStorage-backed per-tab record, and the `language`
+   * field rides along. Treating the override as session-persistent is
+   * deliberate: the user explicitly chose Python for their `.txt`
+   * file, and silently reverting that choice on reload would surprise
+   * them more than letting it stick. Reverting paths:
+   *
+   *   - **Auto Detect** entry in the language picker — clears the
+   *     override (`update({ language: undefined })`) so the next
+   *     render falls back to extension-based detection. Shown in the
+   *     picker only when an override is currently active.
+   *   - **Close the tab** — `removeFile` drops the whole `TabFileState`
+   *     entry including the language field. The next open of the same
+   *     file starts fresh.
+   *
+   * Untitled tabs are also persisted now (issue #434's "scratch
+   * persistence" follow-up landed in the same PR), so their overrides
+   * survive reloads too. The synthetic `untitled:N` keys mean
+   * collisions are scoped to the same monotonic-N counter — see
+   * `useFileTabs.initialUntitledCounter`.
+   */
+  language?: string;
 }
 
 function storageKey(workspaceId: string): string {
@@ -51,6 +81,10 @@ export interface UseTabStateReturn {
   getViewMode: (filePath: string) => "preview" | "source" | undefined;
   /** Store the view mode for a file. */
   setViewMode: (filePath: string, mode: "preview" | "source") => void;
+  /** Get the user-overridden language for a file (undefined when auto-detected). */
+  getLanguage: (filePath: string) => string | undefined;
+  /** Store a manual language override for a file. */
+  setLanguage: (filePath: string, language: string) => void;
   /** Check if a file has unsaved edits. */
   isDirty: (filePath: string) => boolean;
   /** Remove all stored state for a file (e.g. when tab is closed). */
@@ -101,6 +135,19 @@ export function useTabState(workspaceId: string): UseTabStateReturn {
     (filePath: string, mode: "preview" | "source") => {
       const entry = stateRef.current[filePath] ?? {};
       stateRef.current[filePath] = { ...entry, viewMode: mode };
+      saveState(workspaceId, stateRef.current);
+    },
+    [workspaceId],
+  );
+
+  const getLanguage = useCallback((filePath: string): string | undefined => {
+    return stateRef.current[filePath]?.language;
+  }, []);
+
+  const setLanguage = useCallback(
+    (filePath: string, language: string) => {
+      const entry = stateRef.current[filePath] ?? {};
+      stateRef.current[filePath] = { ...entry, language };
       saveState(workspaceId, stateRef.current);
     },
     [workspaceId],
@@ -158,14 +205,40 @@ export function useTabState(workspaceId: string): UseTabStateReturn {
     [workspaceId],
   );
 
-  return {
-    get,
-    update,
-    getViewMode,
-    setViewMode,
-    isDirty,
-    removeFile,
-    renameFile,
-    removePath,
-  };
+  // Memoise the returned shape so callers that include the hook
+  // result in a useCallback / useEffect dependency array see a stable
+  // reference. Each method is already wrapped in `useCallback`, so the
+  // `useMemo` deps form a transitively-stable set — the returned
+  // object's identity only changes when the workspace switches (which
+  // is exactly when downstream callbacks should re-bind). Without
+  // this, every render produced a fresh object literal, causing every
+  // CodeBrowserView callback that depended on `tabState` to churn
+  // and propagate that churn into `onSaveAs` / `onSaveUntitled` /
+  // `onLanguageOverrideChange` props on every render of every tab.
+  return useMemo(
+    () => ({
+      get,
+      update,
+      getViewMode,
+      setViewMode,
+      getLanguage,
+      setLanguage,
+      isDirty,
+      removeFile,
+      renameFile,
+      removePath,
+    }),
+    [
+      get,
+      update,
+      getViewMode,
+      setViewMode,
+      getLanguage,
+      setLanguage,
+      isDirty,
+      removeFile,
+      renameFile,
+      removePath,
+    ],
+  );
 }
