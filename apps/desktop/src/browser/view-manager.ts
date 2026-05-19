@@ -596,6 +596,42 @@ export class BrowserViewManager {
     }
     switch (action.kind) {
       case "cert-proceed": {
+        // Security: validate the action against the pending cert-
+        // error for this tab BEFORE writing to the exception store.
+        // The host + fingerprint come from query parameters on a
+        // `band-action://` URL that any page loaded in a Band tab
+        // could craft (XSS-loaded HTML in a navigated page, an
+        // attacker-controlled redirect, etc.). Without this guard
+        // an attacker page could silently register a session
+        // exception for an arbitrary (host, fingerprint) triple
+        // and turn off the interstitial for the next visit to
+        // that host.
+        //
+        // The legitimate proceed flow only navigates to a
+        // `band-action://cert-proceed?…` URL from inside our own
+        // in-view interstitial HTML, which we generated against
+        // the pending entry — so the (host, fingerprint) the link
+        // carries are guaranteed to match the pending entry. Any
+        // mismatch is by definition not coming from our UI; reject
+        // and log loudly.
+        const pending = this.pendingCertErrors.get(key);
+        if (
+          !pending ||
+          pending.host !== action.host ||
+          pending.fingerprint !== action.fingerprint
+        ) {
+          log.warn(
+            {
+              key,
+              actionHost: action.host,
+              actionFingerprint: action.fingerprint,
+              pendingHost: pending?.host ?? null,
+              pendingFingerprint: pending?.fingerprint ?? null,
+            },
+            "cert-proceed: ignoring action that doesn't match pending cert-error",
+          );
+          return;
+        }
         const partition = partitionForSession(view.webContents.session);
         this.opts.certExceptions.add({
           partition,
@@ -606,26 +642,17 @@ export class BrowserViewManager {
         // Tell the renderer so its address bar can paint the
         // "Not Secure" badge for this host.
         this.emit(Events.browserHostOverridden, { host: action.host.toLowerCase() });
-        const pending = this.pendingCertErrors.get(key);
         this.pendingCertErrors.delete(key);
         log.debug(
           {
             host: action.host,
             fingerprint: action.fingerprint,
-            pendingUrl: pending?.url ?? null,
+            pendingUrl: pending.url,
             partition,
           },
           "cert-proceed",
         );
-        if (pending?.url) {
-          void view.webContents.loadURL(pending.url);
-        } else {
-          // Defensive fallback: lost the pending entry. `reload()`
-          // would reload the data: URI we're sitting on, which
-          // isn't useful — at least navigate to about:blank so the
-          // user is in a clean state.
-          void view.webContents.loadURL("about:blank");
-        }
+        void view.webContents.loadURL(pending.url);
         return;
       }
       case "cert-back": {
@@ -1082,9 +1109,12 @@ export class BrowserViewManager {
       // brand-new loadURL we're about to issue and was observed to
       // leave the WebContentsView blank after Proceed.
       //
-      // Why not `will-navigate`? On Electron 35 it doesn't fire for
-      // unknown URL schemes (Chromium's external-protocol handling
-      // short-circuits it). `did-start-navigation` always fires.
+      // Why not `will-navigate`? Empirically (issue #444 review),
+      // `will-navigate` DOES fire for `band-action://` on Electron
+      // 35, but so does `did-start-navigation` — registering both
+      // listeners produced a double-dispatch of `handleBandAction`
+      // that broke Proceed. Picking just `did-start-navigation` is
+      // the cleanest single source of truth for this scheme.
       if (details.url.startsWith("band-action:")) {
         const action = parseBandAction(details.url);
         log.debug(

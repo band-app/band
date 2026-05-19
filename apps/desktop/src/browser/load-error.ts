@@ -168,8 +168,13 @@ export function describeLoadError(errorCode: number): {
         description: "The server sent an invalid response.",
       };
     default:
+      // Chromium net error codes are negative integers (see
+      // `net_error_list.h`), so a raw template like `ERR_${errorCode}`
+      // produces visually odd strings like `ERR_-42`. Render as
+      // `ERR_UNKNOWN_<positive>` so the error-details code block looks
+      // like a real net-error token.
       return {
-        name: `ERR_${errorCode}`,
+        name: `ERR_UNKNOWN_${Math.abs(errorCode)}`,
         headline: "This site can't be reached",
         description: "An unexpected error occurred while loading the page.",
       };

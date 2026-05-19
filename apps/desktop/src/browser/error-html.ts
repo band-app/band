@@ -128,10 +128,14 @@ function shell(title: string, bodyHtml: string): string {
   .icon.danger { color: var(--danger); }
   .icon.muted { color: var(--muted); }
   .actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 20px 0; }
-  button { font: inherit; padding: 8px 16px; border-radius: 6px; cursor: pointer; transition: filter 0.1s; }
-  button:hover { filter: brightness(0.95); }
-  button.primary { background: var(--primary); color: var(--primary-fg); border: 1px solid var(--primary); }
-  button.secondary { background: var(--bg); color: var(--fg); border: 1px solid var(--border); }
+  /* .btn is applied to both <button> (the in-page toggle for the
+     Advanced section) and <a> (links that navigate to band-action://
+     URLs). HTML5 forbids interactive content nested inside an <a>,
+     so we cannot use the simpler <a><button>...</button></a> form. */
+  .btn, button { font: inherit; padding: 8px 16px; border-radius: 6px; cursor: pointer; transition: filter 0.1s; display: inline-block; text-decoration: none; }
+  .btn:hover, button:hover { filter: brightness(0.95); }
+  .btn.primary, button.primary { background: var(--primary); color: var(--primary-fg); border: 1px solid var(--primary); }
+  .btn.secondary, button.secondary { background: var(--bg); color: var(--fg); border: 1px solid var(--border); }
   .details { display: none; border: 1px solid var(--border); border-radius: 6px; padding: 16px; background: var(--surface); margin-top: 12px; }
   .details.open { display: block; }
   .details .warning { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 12px; }
@@ -208,7 +212,7 @@ export function buildCertErrorHtml(args: {
     <p class="body">${escapeHtml(args.errorDescription)}</p>
     <p><code>${escapeHtml(args.errorCode)}</code></p>
     <div class="actions">
-      <a href="${escapeHtml(backHref)}"><button type="button" class="primary">Back to safety</button></a>
+      <a href="${escapeHtml(backHref)}" class="btn primary">Back to safety</a>
       <button type="button" id="advanced" class="secondary" aria-expanded="false">Advanced</button>
     </div>
     <section id="details" class="details">
@@ -248,8 +252,8 @@ export function buildLoadErrorHtml(args: {
     <p class="body">${escapeHtml(args.description)}</p>
     <p><code>${escapeHtml(args.errorName)}</code></p>
     <div class="actions">
-      <a href="band-action://load-retry"><button type="button" class="primary">Reload</button></a>
-      <a href="band-action://load-back"><button type="button" class="secondary">Back</button></a>
+      <a href="band-action://load-retry" class="btn primary">Reload</a>
+      <a href="band-action://load-back" class="btn secondary">Back</a>
     </div>
   `;
 

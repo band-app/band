@@ -29,11 +29,18 @@ export function useOverriddenHosts() {
   const [hosts, setHosts] = useState<Set<string>>(() => new Set());
 
   // ---- Subscribe to the host-overridden event ----
+  // Guard against the component unmounting while `desktopListen` is
+  // still resolving (e.g. fast tab close): we capture the unlisten
+  // fn into a closed-over `unlisten` variable, but the cleanup may
+  // run before the await completes — set a `cancelled` flag so the
+  // post-await assignment knows to immediately tear down what it
+  // just subscribed to.
   useEffect(() => {
     if (!isDesktop) return;
+    let cancelled = false;
     let unlisten: (() => void) | undefined;
     (async () => {
-      unlisten = await desktopListen<{ host: string }>("browser-host-overridden", (event) => {
+      const fn = await desktopListen<{ host: string }>("browser-host-overridden", (event) => {
         const h = event.payload.host?.toLowerCase();
         if (!h) return;
         setHosts((prev) => {
@@ -43,8 +50,14 @@ export function useOverriddenHosts() {
           return next;
         });
       });
+      if (cancelled) {
+        fn();
+        return;
+      }
+      unlisten = fn;
     })();
     return () => {
+      cancelled = true;
       unlisten?.();
     };
   }, []);
@@ -69,7 +82,12 @@ export function useOverriddenHosts() {
           return changed ? next : prev;
         });
       })
-      .catch(() => {});
+      .catch((err) => {
+        // Don't silently swallow — the most likely cause is an
+        // outdated preload allowlist (version skew on update). Log
+        // so the missing badge has a breadcrumb to chase.
+        console.error("browser_get_overridden_hosts failed:", err);
+      });
     return () => {
       cancelled = true;
     };

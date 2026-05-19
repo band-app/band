@@ -60,16 +60,31 @@ import { CertExceptionStore, partitionForSession } from "../src/browser/cert-exc
  * available (verified on macOS / Linux runners; the test will skip
  * if it ever isn't, with a clear error).
  */
+/** Sentinel thrown by `generateSelfSigned` when openssl isn't on PATH;
+ *  the `before` hook catches it and skips the suite cleanly. */
+class OpensslMissingError extends Error {}
+
 function generateSelfSigned(dir: string, commonName: string) {
   const keyPath = join(dir, "key.pem");
   const certPath = join(dir, "cert.pem");
   // `-nodes` disables passphrase. RSA 2048 + SHA-256 ⇒ Chromium
   // accepts it as a valid (but untrusted) cert, which is exactly the
   // case the interstitial is designed for.
-  execSync(
-    `openssl req -x509 -newkey rsa:2048 -nodes -days 1 -keyout "${keyPath}" -out "${certPath}" -subj "/CN=${commonName}"`,
-    { stdio: ["ignore", "ignore", "ignore"] },
-  );
+  try {
+    execSync(
+      `openssl req -x509 -newkey rsa:2048 -nodes -days 1 -keyout "${keyPath}" -out "${certPath}" -subj "/CN=${commonName}"`,
+      { stdio: ["ignore", "ignore", "ignore"] },
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    // ENOENT (openssl not on PATH) reads as `Command failed: openssl …`
+    // with code ENOENT on Node's child_process — surface it as a
+    // clean skip sentinel rather than the default ECP-flavoured spew.
+    if (/ENOENT|not found|spawn openssl/i.test(msg)) {
+      throw new OpensslMissingError("openssl is not available on PATH");
+    }
+    throw err;
+  }
   return { keyPath, certPath };
 }
 
@@ -110,10 +125,25 @@ describe("cert-error integration (real self-signed HTTPS server)", () => {
   let server: https.Server;
   let port: number;
   let certPem: string;
+  /** Set when `before` discovers openssl isn't installed — every test
+   *  in the suite returns immediately so the suite reports as skipped
+   *  rather than the whole runner failing with a cryptic exec error. */
+  let opensslMissing = false;
 
   before(async () => {
     tmpDir = await mkdtemp(join(tmpdir(), "band-cert-test-"));
-    const { keyPath, certPath } = generateSelfSigned(tmpDir, "localhost");
+    let keyPath: string;
+    let certPath: string;
+    try {
+      ({ keyPath, certPath } = generateSelfSigned(tmpDir, "localhost"));
+    } catch (err) {
+      if (err instanceof OpensslMissingError) {
+        opensslMissing = true;
+        console.warn("openssl not on PATH — skipping cert-error integration suite");
+        return;
+      }
+      throw err;
+    }
     let keyPem: string;
     [keyPem, certPem] = await Promise.all([readFile(keyPath, "utf8"), readFile(certPath, "utf8")]);
     server = https.createServer({ key: keyPem, cert: certPem }, (_req, res) => {
@@ -127,11 +157,15 @@ describe("cert-error integration (real self-signed HTTPS server)", () => {
   });
 
   after(async () => {
-    await new Promise<void>((resolve) => server.close(() => resolve()));
-    await rm(tmpDir, { recursive: true, force: true });
+    if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
+    if (tmpDir) await rm(tmpDir, { recursive: true, force: true });
   });
 
-  test("self-signed HTTPS rejects a default fetch — confirms the test exercises the right path", async () => {
+  test("self-signed HTTPS rejects a default fetch — confirms the test exercises the right path", async (t) => {
+    if (opensslMissing) {
+      t.skip();
+      return;
+    }
     // `fetch` honours the system trust store; a self-signed cert is
     // outside it by definition. If this assertion ever fails, the
     // cert generator produced something the OS already trusts and
@@ -163,7 +197,11 @@ describe("cert-error integration (real self-signed HTTPS server)", () => {
     );
   });
 
-  test("our fingerprint matches the one a real TLS handshake observes", async () => {
+  test("our fingerprint matches the one a real TLS handshake observes", async (t) => {
+    if (opensslMissing) {
+      t.skip();
+      return;
+    }
     const peer = await fetchPeerCert("127.0.0.1", port);
     // Electron's `Certificate.fingerprint` format is `sha256/<hex>`
     // computed over the DER bytes — match that here so the assertion
@@ -177,7 +215,11 @@ describe("cert-error integration (real self-signed HTTPS server)", () => {
     assert.equal(ours, node);
   });
 
-  test("exception store accepts the original triple and rejects a rotated cert", async () => {
+  test("exception store accepts the original triple and rejects a rotated cert", async (t) => {
+    if (opensslMissing) {
+      t.skip();
+      return;
+    }
     const peer = await fetchPeerCert("127.0.0.1", port);
     const fingerprint = `sha256/${peer.fingerprint256.replace(/:/g, "").toLowerCase()}`;
     const partition = partitionForSession(undefined); // default
@@ -206,7 +248,11 @@ describe("cert-error integration (real self-signed HTTPS server)", () => {
     }
   });
 
-  test("payload built from a real self-signed cert carries the host + fingerprint + explanation", async () => {
+  test("payload built from a real self-signed cert carries the host + fingerprint + explanation", async (t) => {
+    if (opensslMissing) {
+      t.skip();
+      return;
+    }
     const peer = await fetchPeerCert("127.0.0.1", port);
     const fingerprint = `sha256/${peer.fingerprint256.replace(/:/g, "").toLowerCase()}`;
     const payload = buildCertErrorPayload({
@@ -232,7 +278,11 @@ describe("cert-error integration (real self-signed HTTPS server)", () => {
     assert.equal(payload.browser_id, payload.workspace_id);
   });
 
-  test("describeCertError surfaces a meaningful string for a real-network self-signed scenario", () => {
+  test("describeCertError surfaces a meaningful string for a real-network self-signed scenario", (t) => {
+    if (opensslMissing) {
+      t.skip();
+      return;
+    }
     // The error code Chromium emits for `DEPTH_ZERO_SELF_SIGNED_CERT`
     // is `net::ERR_CERT_AUTHORITY_INVALID`. Verify the renderer-
     // visible string mentions self-signed or untrusted authority so

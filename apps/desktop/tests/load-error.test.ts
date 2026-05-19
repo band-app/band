@@ -97,7 +97,7 @@ describe("describeLoadError", () => {
 
   test("unknown codes get a generic fallback (no crash)", () => {
     const d = describeLoadError(-9999);
-    assert.equal(d.name, "ERR_-9999");
+    assert.equal(d.name, "ERR_UNKNOWN_9999");
     assert.match(d.headline, /can't be reached/i);
     assert.match(d.description, /unexpected/i);
   });
@@ -126,7 +126,7 @@ describe("buildLoadErrorPayload", () => {
       errorCode: -42,
     });
     assert.equal(payload.error_code, -42);
-    assert.equal(payload.error_name, "ERR_-42");
+    assert.equal(payload.error_name, "ERR_UNKNOWN_42");
     assert.match(payload.headline, /can't be reached/i);
   });
 });
