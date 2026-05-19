@@ -37,7 +37,7 @@
  */
 
 import { strict as assert } from "node:assert";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import * as https from "node:https";
@@ -71,8 +71,28 @@ function generateSelfSigned(dir: string, commonName: string) {
   // accepts it as a valid (but untrusted) cert, which is exactly the
   // case the interstitial is designed for.
   try {
-    execSync(
-      `openssl req -x509 -newkey rsa:2048 -nodes -days 1 -keyout "${keyPath}" -out "${certPath}" -subj "/CN=${commonName}"`,
+    // `execFileSync` (not `execSync`) — args are passed as an array,
+    // no shell interpolation, so a CN containing `"`, `$()`, or
+    // similar can't break out. Today `commonName` is only ever
+    // `"localhost"` from this file, but the safer call shape is
+    // free to write and keeps the function reusable.
+    execFileSync(
+      "openssl",
+      [
+        "req",
+        "-x509",
+        "-newkey",
+        "rsa:2048",
+        "-nodes",
+        "-days",
+        "1",
+        "-keyout",
+        keyPath,
+        "-out",
+        certPath,
+        "-subj",
+        `/CN=${commonName}`,
+      ],
       { stdio: ["ignore", "ignore", "ignore"] },
     );
   } catch (err) {

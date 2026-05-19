@@ -52,8 +52,9 @@ describe("log rotation", () => {
     const log = createLogger("log-rotation-test");
     log.info("post-rotation entry");
     // pino flushes synchronously for in-process destinations on a
-    // single info call, but give the runtime one microtask to settle
-    // any pending writes before we stat.
+    // single info call, but give the runtime one event-loop turn
+    // (a `setImmediate` macrotask, after I/O callbacks have run)
+    // to settle any pending writes before we stat.
     await new Promise<void>((resolve) => setImmediate(resolve));
 
     assert.equal(existsSync(oldPath), true, ".old should exist after rotation");

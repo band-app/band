@@ -59,8 +59,10 @@ export function isMainFrameFailure(args: { errorCode: number; isMainFrame: boole
   if (args.errorCode === -3) return false; // ERR_ABORTED
   // Cert errors get the interstitial pipeline; skip here. Range
   // covers `ERR_CERT_COMMON_NAME_INVALID` (-200) through every
-  // `ERR_CERT_*` value Chromium currently defines.
-  if (args.errorCode <= -200 && args.errorCode >= -299) return false;
+  // `ERR_CERT_*` value Chromium currently defines. Written
+  // smallest-to-largest so the reader can verify -201, -202, …
+  // are in-range without holding two inverted inequalities in head.
+  if (args.errorCode >= -299 && args.errorCode <= -200) return false;
   return true;
 }
 

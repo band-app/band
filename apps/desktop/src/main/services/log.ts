@@ -22,8 +22,7 @@
  * carries information (e.g. `log.info({ host, fingerprint }, "msg")`).
  */
 
-import { appendFileSync, renameSync, statSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { appendFileSync, mkdirSync, renameSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Logger } from "@band-app/logger";
@@ -42,12 +41,18 @@ export function desktopLogPath(): string {
 let dirEnsured = false;
 function ensureDirSync(): void {
   if (dirEnsured) return;
-  // Best-effort sync mkdir on first write — keeps the file-write
-  // path simple. The async variant on the original module returned
-  // a promise we then discarded, so this matches the same
-  // best-effort semantics.
-  void mkdir(bandHome(), { recursive: true }).catch(() => undefined);
-  dirEnsured = true;
+  // Sync mkdir on first write — the file destination is itself
+  // synchronous (`appendFileSync`), so a synchronous mkdir is the
+  // honest match. Only set `dirEnsured` on success so a transient
+  // failure (permissions race, disk full) is retried next call
+  // rather than silently dropped forever.
+  try {
+    mkdirSync(bandHome(), { recursive: true });
+    dirEnsured = true;
+  } catch {
+    // best-effort — don't take down the app, but leave the flag
+    // unset so the next log line will retry.
+  }
 }
 
 function rotateIfNeeded(path: string): void {
