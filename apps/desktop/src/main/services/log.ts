@@ -1,15 +1,33 @@
 /**
- * Lightweight logger that writes to `~/.band/desktop.log` with 5MB rotation.
+ * Pino-backed logger for the Electron main process.
  *
- * Mirrors `apps/dashboard/src-tauri/src/lib.rs::log_to_file` and the
- * `dash_log!` macro. Used by the panic/uncaughtException handler and any
- * service that wants persistent logs across app launches.
+ * Mirrors the rest of the codebase (`apps/web/src/lib/*`) which uses
+ * `@band-app/logger`'s `createLogger(name)` factory. Filters with
+ * `LOG_LEVEL=debug` (or `trace`/`info`/`warn`/`error`) — same env
+ * var the web server reads, so a single `LOG_LEVEL=debug pnpm dev`
+ * lights up structured debug output across the whole process tree.
+ *
+ * Output destinations:
+ *
+ *   - **stderr** — same as the rest of the codebase, picked up by the
+ *     dev orchestrator and shown in the Electron terminal.
+ *   - **`~/.band/desktop.log`** — rotated at 5MB. Mirrors the
+ *     pre-pino persistent log path so existing user docs / debug
+ *     instructions ("`tail ~/.band/desktop.log`") keep working.
+ *
+ * The pre-pino `dashLog` / `dashDebug` / `logToFile` plain-string
+ * API is intentionally gone — every callsite was migrated to a
+ * per-module pino child logger (`const log = createLogger("…")`).
+ * Use structured fields instead of string interpolation where it
+ * carries information (e.g. `log.info({ host, fingerprint }, "msg")`).
  */
 
 import { appendFileSync, renameSync, statSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type { Logger } from "@band-app/logger";
+import pino from "pino";
 
 const MAX_LOG_BYTES = 5 * 1024 * 1024;
 
@@ -22,9 +40,13 @@ export function desktopLogPath(): string {
 }
 
 let dirEnsured = false;
-async function ensureDir(): Promise<void> {
+function ensureDirSync(): void {
   if (dirEnsured) return;
-  await mkdir(bandHome(), { recursive: true });
+  // Best-effort sync mkdir on first write — keeps the file-write
+  // path simple. The async variant on the original module returned
+  // a promise we then discarded, so this matches the same
+  // best-effort semantics.
+  void mkdir(bandHome(), { recursive: true }).catch(() => undefined);
   dirEnsured = true;
 }
 
@@ -40,54 +62,70 @@ function rotateIfNeeded(path: string): void {
 }
 
 /**
- * Append a single log line. Best-effort: silently swallows errors so a full
- * disk doesn't take down the app.
+ * Custom pino destination that mirrors every log line to
+ * `~/.band/desktop.log`. pino streams writes via a `write(chunk)`
+ * interface; we satisfy it with an `appendFileSync` plus the same
+ * 5MB rotation the pre-pino implementation used. Errors are
+ * swallowed so a full disk doesn't take down the app.
  */
-export function logToFile(msg: string): void {
-  void ensureDir().catch(() => undefined);
-  const path = desktopLogPath();
-  rotateIfNeeded(path);
-  const stamp = new Date().toISOString();
-  try {
-    appendFileSync(path, `[${stamp}] ${msg}\n`);
-  } catch {
-    // ignore — best-effort persistent logging
-  }
-}
-
-/** Mirror of Tauri's `dash_log!` macro: log to stderr AND the rotating file. */
-export function dashLog(msg: string): void {
-  process.stderr.write(`${msg}\n`);
-  logToFile(msg);
-}
+const fileDestination: pino.DestinationStream = {
+  write(chunk: string): void {
+    ensureDirSync();
+    const path = desktopLogPath();
+    rotateIfNeeded(path);
+    try {
+      appendFileSync(path, chunk);
+    } catch {
+      // best-effort persistent logging
+    }
+  },
+};
 
 /**
- * Lazily-evaluated debug-level toggle. Reads `BAND_LOG_LEVEL` once on
- * first call and caches the result — toggling the env var requires a
- * restart, same convention as the rest of the desktop bootstrap.
+ * Composite stream: writes to BOTH stderr (for live development)
+ * AND the rotating file. pino routes every record through both.
+ * The `level` floor here is `trace` so per-logger levels take
+ * precedence — `createLogger` below sets the actual filter.
+ */
+const multiStream = pino.multistream([
+  { level: "trace", stream: process.stderr },
+  { level: "trace", stream: fileDestination },
+]);
+
+/**
+ * Create a named pino logger for a desktop module. Sets the level
+ * from `LOG_LEVEL` (default `"info"`) and writes through the
+ * stderr + file multistream above. Matches the API used by every
+ * pino caller in `apps/web/src/lib/*` so log lines look identical
+ * across the process tree.
  *
- * Recognised values (case-insensitive): `debug`, `trace`. Anything
- * else (including unset) suppresses `dashDebug` output.
+ * Use this at the top of each module:
+ *
+ *     const log = createLogger("view-manager");
+ *     log.info({ host, fingerprint }, "cert exception added");
  */
-let debugEnabled: boolean | null = null;
-function isDebugEnabled(): boolean {
-  if (debugEnabled === null) {
-    const level = (process.env.BAND_LOG_LEVEL ?? "").toLowerCase();
-    debugEnabled = level === "debug" || level === "trace";
-  }
-  return debugEnabled;
+export function createLogger(name: string): Logger {
+  // pino's `(options, stream)` form is the canonical way to attach
+  // a custom destination. `@band-app/logger`'s default factory
+  // wouldn't let us inject the file-mirroring stream, so we
+  // re-create the logger here with the same shape (name, env-
+  // sourced level) but pointed at our multistream.
+  return pino(
+    {
+      name,
+      level: process.env.LOG_LEVEL || "info",
+    },
+    multiStream,
+  );
 }
 
+/** Re-export the underlying type so callers don't need a separate import. */
+export type { Logger };
+
 /**
- * Debug-level log, gated on `BAND_LOG_LEVEL=debug` (or `trace`). Goes
- * to stderr AND the rotating file when enabled, otherwise silently
- * dropped — same surface as `dashLog` but suppressed in normal
- * operation so the per-cert-event diagnostic spam doesn't fill the
- * log file. Used by the issue #444 TLS interstitial pipeline for
- * tracing the proceed flow when something goes wrong.
+ * Shared "desktop" logger for bootstrap-level / non-namespaced
+ * messages (crash handlers, the initial "dashboard starting" line,
+ * etc.). Modules should prefer their own `createLogger("module-name")`
+ * for filtering granularity.
  */
-export function dashDebug(msg: string): void {
-  if (!isDebugEnabled()) return;
-  process.stderr.write(`${msg}\n`);
-  logToFile(`[debug] ${msg}`);
-}
+export const log: Logger = createLogger("desktop");

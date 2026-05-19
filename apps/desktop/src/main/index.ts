@@ -21,7 +21,7 @@ import { resolveAppIcon } from "./icon.js";
 import { registerIpc } from "./ipc/register.js";
 import { installAppMenu } from "./menu.js";
 import { type ActivityMonitorHandle, startActivityMonitor } from "./services/activity-monitor.js";
-import { dashLog, logToFile } from "./services/log.js";
+import { createLogger } from "./services/log.js";
 import { killPort } from "./services/port.js";
 import { getConfiguredPort, getWebBrowserCdpEnabled } from "./services/settings.js";
 import { resolveWebDir } from "./services/web-paths.js";
@@ -33,6 +33,8 @@ import {
   scheduleStartupCheck,
 } from "./updater.js";
 import { createMainWindow } from "./window.js";
+
+const log = createLogger("desktop");
 
 interface AppState {
   mainWindow: BrowserWindow | null;
@@ -95,10 +97,10 @@ function setPendingUpdate(next: PendingUpdate): void {
 function installCrashHandlers(): void {
   process.on("uncaughtException", (err) => {
     const stack = err.stack ?? String(err);
-    dashLog(`uncaughtException: ${stack}`);
+    log.fatal({ err: stack }, "uncaughtException");
   });
   process.on("unhandledRejection", (reason) => {
-    dashLog(`unhandledRejection: ${String(reason)}`);
+    log.error({ reason: String(reason) }, "unhandledRejection");
   });
 }
 
@@ -155,7 +157,7 @@ async function cleanupOnce(): Promise<void> {
 
 async function bootstrap(): Promise<void> {
   installCrashHandlers();
-  logToFile("dashboard starting (electron)");
+  log.info("dashboard starting (electron)");
 
   // CDP screencast experiment: when the user has the feature enabled
   // (settings.webBrowserCdpEnabled, default false — opt-in), expose
@@ -205,19 +207,19 @@ async function bootstrap(): Promise<void> {
       try {
         app.dock.setIcon(iconPath);
       } catch (err) {
-        dashLog(`failed to set dock icon: ${String(err)}`);
+        log.warn({ err: String(err) }, "failed to set dock icon");
       }
     }
   }
 
   const url = await resolveDashboardUrl();
-  dashLog(`loading url: ${url}`);
+  log.info({ url }, "loading url");
   state.mainWindow = createMainWindow({ url });
 
   // Surface preload load failures, which otherwise fail silently and leave
   // `__BAND_DESKTOP__` undefined on `window` (collapses isDesktop everywhere).
   state.mainWindow.webContents.on("preload-error", (_e, preloadPath, error) => {
-    dashLog(`preload-error: ${preloadPath} → ${error.stack ?? error.message}`);
+    log.error({ preloadPath, err: error.stack ?? error.message }, "preload-error");
   });
 
   // Hidden BrowserWindow that hosts WebContentsViews ensure'd by the web
@@ -336,6 +338,6 @@ app.on("activate", () => {
 
 bootstrap().catch((err) => {
   const message = err instanceof Error ? (err.stack ?? err.message) : String(err);
-  dashLog(`bootstrap failed: ${message}`);
+  log.fatal({ err: message }, "bootstrap failed");
   app.exit(1);
 });

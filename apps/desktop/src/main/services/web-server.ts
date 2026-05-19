@@ -17,10 +17,12 @@ import { mkdir, rename, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
-import { bandHome, dashLog } from "./log.js";
+import { bandHome, createLogger } from "./log.js";
 import { killPort } from "./port.js";
 import { getConfiguredPort, tryGetToken } from "./settings.js";
 import { shellPath } from "./shell-path.js";
+
+const log = createLogger("web-server");
 
 const HEALTH_TIMEOUT_MS = 15_000;
 const HEALTH_POLL_INTERVAL_MS = 200;
@@ -252,8 +254,14 @@ export async function spawnWebServer(opts: SpawnWebServerOptions): Promise<Child
     // script* can still happen if the web bundle is missing or
     // corrupted, hence `script=` in the diagnostic below. Either way,
     // we no longer tell users to install Node.
-    dashLog(
-      `Failed to start web server: ${err.message} (execPath=${process.execPath}, cwd=${opts.webDir}, script=${startScript})`,
+    log.error(
+      {
+        err: err.message,
+        execPath: process.execPath,
+        cwd: opts.webDir,
+        script: startScript,
+      },
+      "failed to start web server",
     );
   });
   return child;

@@ -16,7 +16,9 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, screen } from "electron";
 import { resolveAppIcon } from "./icon.js";
-import { dashLog } from "./services/log.js";
+import { createLogger } from "./services/log.js";
+
+const log = createLogger("window");
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -40,7 +42,7 @@ export function createMainWindow(opts: CreateMainWindowOptions): BrowserWindow {
   const preload = preloadPath();
   // Diagnostic: log the resolved preload path AND whether the file exists.
   // The most common preload-not-loading cause is a path mismatch.
-  dashLog(`preload path: ${preload} (exists=${existsSync(preload)})`);
+  log.info({ preload, exists: existsSync(preload) }, "preload path");
   const win = new BrowserWindow({
     title: "Band",
     width: 1200,
