@@ -169,18 +169,30 @@ export function FileTabBar({
   // backed) tab, if they cancel we keep the dialog and the tab open —
   // matches the acceptance criterion "cancelling the save dialog
   // cancels the close".
+  //
+  // `saveAndClosePending` guards the brief window between the dialog
+  // resolving and React processing `setConfirmClosePath(null)`. Without
+  // it a second click on "Save…" (impatient user / a touchpad double-
+  // tap) would launch a second save with the same content, surfacing
+  // two save dialogs in sequence.
+  const [saveAndClosePending, setSaveAndClosePending] = useState(false);
   const handleSaveAndClose = useCallback(async () => {
-    if (!confirmClosePath || !onSaveUntitled) return;
-    const saved = await onSaveUntitled(confirmClosePath);
-    if (saved) {
-      // The save flow renamed the tab to the saved path — the original
-      // untitled key is gone, so closing it is a no-op. Just dismiss
-      // the dialog.
-      setConfirmClosePath(null);
+    if (!confirmClosePath || !onSaveUntitled || saveAndClosePending) return;
+    setSaveAndClosePending(true);
+    try {
+      const saved = await onSaveUntitled(confirmClosePath);
+      if (saved) {
+        // The save flow renamed the tab to the saved path — the
+        // original untitled key is gone, so closing it is a no-op.
+        // Just dismiss the dialog.
+        setConfirmClosePath(null);
+      }
+      // Cancelled: leave the dialog open so the user can pick
+      // Discard or Cancel without re-clicking the X.
+    } finally {
+      setSaveAndClosePending(false);
     }
-    // Cancelled: leave the dialog open so the user can pick Discard
-    // or Cancel without re-clicking the X.
-  }, [confirmClosePath, onSaveUntitled]);
+  }, [confirmClosePath, onSaveUntitled, saveAndClosePending]);
 
   const handleMouseDown = useCallback(
     (e: React.MouseEvent, filePath: string) => {
@@ -287,13 +299,15 @@ export function FileTabBar({
             // generic FileText. Existing tabs keep their extension-
             // based icon (TypeScript, Markdown, etc.).
             const Icon = isUntitled ? FileText : getFileIcon(basename);
-            // External tabs already carry the absolute path; workspace tabs
-            // join with the worktree root for the "Copy Absolute Path" item.
-            // Untitled tabs have no on-disk path; reuse the basename so
-            // "Copy Absolute Path" is a no-op rather than a leak of the
-            // synthetic key.
-            const absolutePath = isUntitled
-              ? basename
+            // External tabs already carry the absolute path; workspace
+            // tabs join with the worktree root for the "Copy Absolute
+            // Path" item. Untitled tabs have no on-disk path, so we
+            // leave `absolutePath` as `null` — the context-menu render
+            // below omits the "Copy Absolute Path" entry entirely (VS
+            // Code's behaviour for unsaved buffers) rather than copy a
+            // bare label that looks like a path but isn't.
+            const absolutePath: string | null = isUntitled
+              ? null
               : isExternal
                 ? tab.filePath
                 : workspacePath
@@ -302,9 +316,11 @@ export function FileTabBar({
             // Tooltip / native title: external tabs surface the full
             // absolute path so the user can tell at a glance where edits
             // will be written. Untitled tabs show a hint that the buffer
-            // hasn't been saved.
+            // hasn't been saved — phrased without a platform-specific
+            // shortcut since Band's Electron shell runs on macOS,
+            // Windows, and Linux (Cmd on macOS / Ctrl elsewhere).
             const tabTitle = isUntitled
-              ? `${basename} (unsaved — Cmd+S to save)`
+              ? `${basename} (unsaved — Save to write to disk)`
               : isExternal
                 ? `${tab.filePath} (external file)`
                 : isPreview
@@ -394,15 +410,28 @@ export function FileTabBar({
                       <ContextMenuSeparator />
                     </>
                   )}
-                  <ContextMenuItem onClick={() => copyToClipboard(tab.filePath)}>
-                    <Copy className="size-4" />
-                    Copy Relative Path
-                  </ContextMenuItem>
-                  <ContextMenuItem onClick={() => copyToClipboard(absolutePath)}>
-                    <Clipboard className="size-4" />
-                    Copy Absolute Path
-                  </ContextMenuItem>
-                  <ContextMenuSeparator />
+                  {/* "Copy Relative Path" is meaningless for an
+                      untitled buffer (the path is a synthetic
+                      `untitled:N` key, not a real workspace-relative
+                      path). Match VS Code's behaviour for unsaved
+                      editors and hide the item in that case. */}
+                  {!isUntitled && (
+                    <ContextMenuItem onClick={() => copyToClipboard(tab.filePath)}>
+                      <Copy className="size-4" />
+                      Copy Relative Path
+                    </ContextMenuItem>
+                  )}
+                  {/* Untitled tabs leave `absolutePath` as `null`, so
+                      the "Copy Absolute Path" item is dropped entirely
+                      — pasting `"Untitled-1"` somewhere would look
+                      like a valid path and fail confusingly. */}
+                  {absolutePath !== null && (
+                    <ContextMenuItem onClick={() => copyToClipboard(absolutePath)}>
+                      <Clipboard className="size-4" />
+                      Copy Absolute Path
+                    </ContextMenuItem>
+                  )}
+                  {!isUntitled && <ContextMenuSeparator />}
                   <ContextMenuItem onClick={() => handleClose(tab.filePath)}>
                     <X className="size-4" />
                     Close
@@ -447,7 +476,9 @@ export function FileTabBar({
               // tab). On success the untitled tab is renamed to the
               // chosen path and the close completes; on cancel we
               // leave both the dialog and the tab open.
-              <Button onClick={handleSaveAndClose}>Save…</Button>
+              <Button onClick={handleSaveAndClose} disabled={saveAndClosePending}>
+                Save…
+              </Button>
             )}
           </DialogFooter>
         </DialogContent>

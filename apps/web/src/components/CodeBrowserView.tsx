@@ -7,6 +7,7 @@ import {
   getFilePreviewType,
   getLspLanguageId,
   hasPendingNavigation,
+  languageToExtension,
   parseFileLocation,
   releaseLspClient,
   resolveNavigation,
@@ -1311,6 +1312,15 @@ export function CodeBrowserView({
     return () => window.removeEventListener("band:new-untitled-tab", handler);
   }, [handleNewUntitled]);
 
+  // Stable ref to the latest openTabs list so `handleSaveUntitled`
+  // can look up the tab being saved (for its untitledLabel) without
+  // depending on the array — otherwise the callback (and the
+  // `onSaveAs` prop derived from it) would churn on every tab open
+  // / pin / preview transition, forcing every FileViewer to re-bind
+  // its save handler.
+  const openTabsRef = useRef(fileTabs.openTabs);
+  openTabsRef.current = fileTabs.openTabs;
+
   // Save-as flow for untitled tabs. Threaded into FileViewer via the
   // `onSaveAs` prop, and into FileTabBar's close-confirm dialog via
   // `onSaveUntitled` — both routes call this. Returns the chosen
@@ -1319,10 +1329,18 @@ export function CodeBrowserView({
   const handleSaveUntitled = useCallback(
     async (untitledPath: string, content: string): Promise<string | null> => {
       if (!pickSaveFile) return null;
-      const tab = fileTabs.openTabs.find((t) => t.filePath === untitledPath);
-      // Seed the dialog filename with the untitled label so the user
-      // doesn't have to delete the OS-default suggestion.
-      const defaultName = tab?.untitledLabel ? `${tab.untitledLabel}.txt` : "Untitled.txt";
+      const tab = openTabsRef.current.find((t) => t.filePath === untitledPath);
+      // Seed the dialog with both a sensible filename AND the right
+      // extension — if the user has manually set the language to e.g.
+      // TypeScript, suggest `.ts` so they don't have to delete `.txt`
+      // and retype. Falls through to `.txt` for plain text (the
+      // untitled default) and for any language without a canonical
+      // extension. `languageToExtension` already returns `undefined`
+      // for unsupported languages so the fallback is implicit.
+      const override = tabState.getLanguage(untitledPath);
+      const ext = (override ? languageToExtension(override) : undefined) ?? ".txt";
+      const stem = tab?.untitledLabel ?? "Untitled";
+      const defaultName = `${stem}${ext}`;
       const chosen = await pickSaveFile({
         content,
         defaultName,
@@ -1332,21 +1350,22 @@ export function CodeBrowserView({
 
       // Decide whether the chosen path lives inside the workspace.
       // When it does we transition to a normal workspace tab; otherwise
-      // it becomes an external tab (per issue #433).
+      // it becomes an external tab (per issue #433). The trailing-
+      // slash strip + `${root}/` prefix check is prefix-collision-safe:
+      // `/a/band` vs `/a/band-fork` differ at the trailing `/`, so a
+      // file saved under `/a/band-fork/...` never matches `/a/band/`.
+      const normalizedRoot = workspacePath?.replace(/\/+$/, "");
       const inWorkspace =
-        workspacePath != null &&
-        (chosen === workspacePath || chosen.startsWith(`${workspacePath.replace(/\/$/, "")}/`));
+        normalizedRoot != null &&
+        (chosen === normalizedRoot || chosen.startsWith(`${normalizedRoot}/`));
       const isExternal = !inWorkspace;
-      const newPath = inWorkspace
-        ? chosen.slice(workspacePath!.replace(/\/$/, "").length + 1)
-        : chosen;
+      const newPath = inWorkspace ? chosen.slice(normalizedRoot!.length + 1) : chosen;
 
       // Carry the manual language override (if any) from the untitled
       // key to the new path so the user's choice survives the rename
       // — issue #434: "Saving an untitled tab whose language was
       // manually set keeps the override even if the chosen filename's
       // extension would imply a different language."
-      const override = tabState.getLanguage(untitledPath);
       if (override) tabState.setLanguage(newPath, override);
 
       // Carry view-mode / scroll state in case the user keeps editing
@@ -1380,14 +1399,7 @@ export function CodeBrowserView({
       window.dispatchEvent(new CustomEvent("band:dirty-change"));
       return chosen;
     },
-    [
-      pickSaveFile,
-      workspacePath,
-      fileTabs.openTabs,
-      fileTabs.renameUntitledToFile,
-      notifySelectFile,
-      tabState,
-    ],
+    [pickSaveFile, workspacePath, fileTabs.renameUntitledToFile, notifySelectFile, tabState],
   );
 
   // FileTabBar version — looks up the latest editor content for the
@@ -1610,8 +1622,14 @@ export function CodeBrowserView({
         // Mobile / narrow container: toggle between file browser and viewer
         viewFilePath ? (
           <FileViewer
-            // Re-mount on path change — see desktop block for rationale.
-            key={viewFilePath}
+            // Scoped re-mount: force a clean mount only when crossing
+            // the untitled boundary (file → untitled, untitled → file,
+            // or untitled-1 → untitled-2). Plain file-to-file
+            // navigation keeps the existing FileViewer instance —
+            // CodeMirrorEditor handles content swaps internally, and
+            // remounting on every tab click would re-trigger LSP /
+            // language-loader work for no reason.
+            key={isUntitledPath(viewFilePath) ? viewFilePath : "file"}
             workspaceId={workspaceId}
             filePath={viewFilePath}
             external={viewIsExternal}
@@ -1817,12 +1835,14 @@ export function CodeBrowserView({
               <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
                 {viewFilePath ? (
                   <FileViewer
-                    // Re-mount when transitioning between untitled / file-
-                    // backed paths so the FileViewer's internal data/state
-                    // re-initialises against the new key. Without this, an
-                    // untitled tab that just got saved would still carry
-                    // its `untitled` branch render flags.
-                    key={viewFilePath}
+                    // Scoped re-mount: force a clean mount only when
+                    // crossing the untitled boundary (file → untitled,
+                    // untitled → file, or untitled-1 → untitled-2).
+                    // Plain file-to-file navigation keeps the existing
+                    // FileViewer instance — remounting on every tab
+                    // click would re-trigger LSP / language-loader
+                    // work for no reason.
+                    key={isUntitledPath(viewFilePath) ? viewFilePath : "file"}
                     workspaceId={workspaceId}
                     filePath={viewFilePath}
                     external={viewIsExternal}

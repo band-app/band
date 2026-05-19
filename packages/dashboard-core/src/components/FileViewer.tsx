@@ -138,6 +138,40 @@ function detectLanguage(filePath: string, serverHint?: string): string {
   return fromName || "plaintext";
 }
 
+/**
+ * Should this FileViewer respond to a workspace-scoped event whose
+ * `detail.filePath` may or may not match the currently-viewed file?
+ *
+ * The dispatcher in `DockviewWorkspaceLayout` reads
+ * `currentFileRef.current`, which is updated only through
+ * `notifySelectFile` — and that path deliberately filters out
+ * untitled / external paths (they can't round-trip through the
+ * workspace-relative URL). So:
+ *
+ *   - For a regular workspace tab, `detail.filePath` is the authoritative
+ *     active file — we accept iff it's absent or matches our path, and
+ *     reject when it's present but targets a *different* path (which
+ *     keeps the existing cross-workspace / future-split-pane safety
+ *     net intact).
+ *   - For untitled / external tabs, `detail.filePath` is either absent
+ *     (never-selected tab) or stale (pointing at the previously-viewed
+ *     real file). Strict equality would reject the user's legitimate
+ *     "format this untitled tab" intent — accept unconditionally and
+ *     rely on the workspaceId guard for disambiguation.
+ *
+ * Extracted so the format and language-picker listeners stay in lockstep.
+ */
+function matchesFilePathHint(
+  hint: string | null | undefined,
+  viewerPath: string,
+  viewerUntitled: boolean | undefined,
+  viewerExternal: boolean | undefined,
+): boolean {
+  if (viewerUntitled || viewerExternal) return true;
+  if (hint == null) return true;
+  return hint === viewerPath;
+}
+
 export function FileViewer({
   workspaceId,
   filePath,
@@ -488,8 +522,15 @@ export function FileViewer({
         }
         // The server's formatter requires the path to resolve inside
         // the worktree; using a leading "." filename keeps it inside
-        // the workspace root and doesn't clobber any real file.
-        formatPath = `.band-untitled${ext}`;
+        // the workspace root and doesn't clobber any real file. Include
+        // the synthetic tab key (`untitled:N` → `untitled-N`) so two
+        // simultaneously-formatting untitled tabs of the same language
+        // don't collide on the virtual filename — relevant if any
+        // future formatter caches by path. The character substitution
+        // strips the colon so the resulting filename is portable
+        // across POSIX and Windows.
+        const tabKey = filePath.replace(/[^a-z0-9]/gi, "-");
+        formatPath = `.band-${tabKey}${ext}`;
       }
       const result = await adapter.formatWorkspaceFile(workspaceId, formatPath, sourceContent);
       if (result.skipped) {
@@ -539,26 +580,29 @@ export function FileViewer({
   }, [adapter, workspaceId, filePath, untitled, languageOverride]);
 
   // Listen for the global "Format Current File" event (⌘⇧F + palette).
-  // Only one FileViewer is mounted per workspace at a time, so the
-  // `workspaceId` guard is sufficient — we deliberately do NOT filter
-  // by `detail.filePath` for the same reason the language-picker
-  // listener doesn't: the dispatcher reads `currentFileRef.current`,
-  // which is only updated by `notifySelectFile` (which drops untitled
-  // and external paths). So when the user is viewing an untitled tab,
-  // `detail.filePath` is either undefined or stale (pointing at the
-  // previously-viewed real file), and a strict equality check would
-  // reject the legitimate "format this untitled tab" case.
+  // The dispatcher reads `currentFileRef.current`, which is only
+  // updated by `notifySelectFile` — and that path filters out untitled
+  // / external tabs (their paths can't round-trip through the
+  // workspace-relative URL). So when the user is currently viewing an
+  // untitled or external tab, `detail.filePath` is either absent or
+  // stale (the previously-viewed real file). We accept those cases
+  // here, but still reject when a non-matching filePath is sent and
+  // the current viewer is a regular workspace tab — that preserves
+  // the original cross-workspace / future-split-pane safety net
+  // (workspaceId alone would silently double-format if two file-backed
+  // FileViewers were ever mounted concurrently).
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail as
         | { workspaceId?: string; filePath?: string | null }
         | undefined;
       if (!detail || detail.workspaceId !== workspaceId) return;
+      if (!matchesFilePathHint(detail.filePath, filePath, untitled, external)) return;
       void handleFormat();
     };
     window.addEventListener("band:format-current-file", handler);
     return () => window.removeEventListener("band:format-current-file", handler);
-  }, [workspaceId, handleFormat]);
+  }, [workspaceId, filePath, untitled, external, handleFormat]);
 
   // Auto-clear the "Formatted" success flash so it doesn't linger next to
   // the filename. Errors stay until the user changes files or saves.
@@ -605,40 +649,25 @@ export function FileViewer({
   // Searchable language-mode picker (issue #434). Opens from the
   // status-bar language indicator or the "Change Language Mode…" palette
   // entry; in both cases we dispatch / listen to a single event so the
-  // wiring stays symmetrical with Quick Open / Search in Files.
+  // wiring stays symmetrical with Quick Open / Search in Files. Same
+  // filePath-hint rules as the format listener (see
+  // `matchesFilePathHint`): accept when the hint is absent / matches /
+  // we're an untitled or external viewer (the dispatcher's ref is
+  // stale or never set for those), reject only when a mismatched hint
+  // targets a different file-backed viewer.
   const [languagePickerOpen, setLanguagePickerOpen] = useState(false);
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail as
         | { workspaceId?: string; filePath?: string | null }
         | undefined;
-      // Only one FileViewer is mounted per workspace at a time, so the
-      // workspaceId guard is sufficient. We deliberately do NOT filter
-      // by `detail.filePath`:
-      //
-      // The dispatcher (DockviewWorkspaceLayout) reads
-      // `currentFileRef.current`, which is only updated through
-      // `notifySelectFile` — and that path filters out untitled and
-      // external tabs (their synthetic / absolute paths can't round-
-      // trip through the workspace-relative URL). So `detail.filePath`
-      // will be undefined for never-selected tabs AND stale (pointing
-      // at the previously viewed real file) whenever the user is
-      // currently viewing an untitled tab. A `detail.filePath !==
-      // filePath` check would reject the legitimate "open picker for
-      // the currently visible untitled tab" case.
       if (!detail || detail.workspaceId !== workspaceId) return;
+      if (!matchesFilePathHint(detail.filePath, filePath, untitled, external)) return;
       setLanguagePickerOpen(true);
     };
     window.addEventListener("band:open-language-picker", handler);
     return () => window.removeEventListener("band:open-language-picker", handler);
-  }, [workspaceId]);
-
-  const handlePickLanguage = useCallback(
-    (languageId: string) => {
-      onLanguageOverrideChange?.(languageId);
-    },
-    [onLanguageOverrideChange],
-  );
+  }, [workspaceId, filePath, untitled, external]);
 
   return (
     // min-w-0 prevents intrinsic-width content (CodeMirror's long unwrapped
@@ -898,12 +927,20 @@ export function FileViewer({
         </div>
       )}
 
-      <LanguagePickerDialog
-        open={languagePickerOpen}
-        onOpenChange={setLanguagePickerOpen}
-        currentLanguage={lang}
-        onSelect={handlePickLanguage}
-      />
+      {/* Only render the picker when there's a callback to receive
+          its selection. The dialog is also gated on `onLanguageOverrideChange`
+          when surfacing the status-bar indicator above, so dropping
+          the dialog when the callback is missing keeps the two
+          surfaces in sync — neither appears in adapters that don't
+          wire the override (none today, but the prop is optional). */}
+      {onLanguageOverrideChange && (
+        <LanguagePickerDialog
+          open={languagePickerOpen}
+          onOpenChange={setLanguagePickerOpen}
+          currentLanguage={lang}
+          onSelect={onLanguageOverrideChange}
+        />
+      )}
     </div>
   );
 }

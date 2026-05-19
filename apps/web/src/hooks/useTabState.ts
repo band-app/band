@@ -24,13 +24,21 @@ export interface TabFileState {
    * whose language was manually set keeps the override even if the
    * chosen filename's extension would imply a different language").
    *
-   * Out of scope for #434 — and intentionally so: the language picker
-   * is per-tab-lifetime, not cross-session. We persist into tab state
-   * (which is itself localStorage-backed) so it survives in-session
-   * tab switches; on workspace switch / reload tab state is loaded
-   * fresh from disk, but untitled tabs are filtered out at the
-   * `useFileTabs` boundary so a stale language entry has nothing to
-   * attach to.
+   * **Persists across sessions** for file-backed tabs — `TabFileState`
+   * is the localStorage-backed per-tab record, and the `language`
+   * field rides along. Treating the override as session-persistent is
+   * deliberate: the user explicitly chose Python for their `.txt`
+   * file, and silently reverting that choice on reload would surprise
+   * them more than letting it stick. Closing the tab clears the
+   * record via `removeFile`, so a user who wants to drop the override
+   * can close-and-reopen the file (or pick a different language and
+   * close-and-reopen, depending on which behaviour they want).
+   *
+   * Untitled tabs are also persisted now (issue #434's "scratch
+   * persistence" follow-up landed in the same PR), so their overrides
+   * survive reloads too. The synthetic `untitled:N` keys mean
+   * collisions are scoped to the same monotonic-N counter — see
+   * `useFileTabs.initialUntitledCounter`.
    */
   language?: string;
 }
