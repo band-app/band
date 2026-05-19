@@ -173,11 +173,11 @@ function SortableProject({
   let workspaceIndex = workspaceIndexStart;
 
   // Header className. Git projects keep the old "row of muted text + +
-  // button" treatment. Plain projects style the row like a WorkspaceCard
-  // (hover/active background, left border on active, focus ring) so the
-  // user can tell at a glance that it's a clickable workspace.
+  // button" treatment. Plain projects mirror WorkspaceCard pixel-for-pixel
+  // (square corners, same padding, same hover/active/focus treatment) so
+  // the highlight is visually identical to a nested workspace card.
   const headerClassName = isPlain
-    ? `group flex items-center justify-between mb-0.5 pl-1 pr-1 py-1 select-none touch-pan-y rounded-sm cursor-pointer transition-colors hover:bg-accent/50 ${
+    ? `group flex items-center justify-between mb-0.5 pl-3 pr-2 py-1 min-w-0 overflow-hidden cursor-pointer select-none touch-pan-y transition-colors hover:bg-accent/50 ${
         plainIsActive ? "bg-accent/50 border-l-2 border-l-primary" : ""
       } ${plainIsFocused ? "ring-2 ring-inset ring-ring" : ""}`
     : "group flex items-center justify-between mb-0.5 pl-1 pr-0 select-none touch-pan-y";
