@@ -175,12 +175,14 @@ function SortableProject({
 
   let workspaceIndex = workspaceIndexStart;
 
-  // Header className. Git projects keep the old "row of muted text + +
-  // button" treatment. Plain projects mirror WorkspaceCard pixel-for-pixel
-  // (square corners, same padding, same hover/active/focus treatment) so
-  // the highlight is visually identical to a nested workspace card.
+  // Header className. Both kinds keep the project-level indent (`pl-1`)
+  // so plain projects read as standalone projects, not as nested
+  // workspaces under the project above them. Plain projects also gain
+  // the WorkspaceCard hover/active/focus treatment because the header
+  // itself is clickable — but the inner text styling stays project-bold
+  // (see the `<h2>` block below).
   const headerClassName = isPlain
-    ? `group flex items-center justify-between mb-0.5 pl-3 pr-2 py-1 min-w-0 overflow-hidden cursor-pointer select-none touch-pan-y transition-colors hover:bg-accent/50 ${
+    ? `group flex items-center justify-between mb-0.5 pl-1 pr-1 py-0.5 min-w-0 overflow-hidden cursor-pointer select-none touch-pan-y transition-colors hover:bg-accent/50 ${
         plainIsActive ? "bg-accent/50 border-l-2 border-l-primary" : ""
       } ${plainIsFocused ? "ring-2 ring-inset ring-ring" : ""}`
     : "group flex items-center justify-between mb-0.5 pl-1 pr-0 select-none touch-pan-y";
@@ -210,15 +212,19 @@ function SortableProject({
               {...listeners}
             >
               {isPlain ? (
-                // Folder icon as the fallback (instead of the default
-                // GitBranch) since plain projects have no branch. The
-                // agent dot still wins when the agent is actively working
-                // or needs attention — see AgentStatusIndicator.
-                <AgentStatusIndicator
-                  agent={plainAgent}
-                  isActive={plainIsActive}
-                  fallbackIcon={Folder}
-                />
+                // Plain project: agent-status dot when the agent is
+                // working / needs attention, otherwise a project-sized
+                // (size-4) Folder icon. Inlined rather than routing
+                // through AgentStatusIndicator's fallback so the idle
+                // icon can match a git project's folder size — using the
+                // indicator's size-3 fallback would make plain headers
+                // read as nested workspace cards (see #427 review).
+                plainAgent &&
+                (plainAgent.status === "working" || plainAgent.status === "needs_attention") ? (
+                  <AgentStatusIndicator agent={plainAgent} isActive={plainIsActive} />
+                ) : (
+                  <Folder className="size-4 shrink-0 text-muted-foreground" />
+                )
               ) : collapsed ? (
                 <Folder className="size-4 shrink-0 text-muted-foreground" />
               ) : (
@@ -226,13 +232,14 @@ function SortableProject({
               )}
               <Tooltip>
                 <TooltipTrigger asChild>
+                  {/* Same project-bold treatment regardless of kind so a
+                      plain project reads as a top-level project rather
+                      than a nested branch row. Active plain projects
+                      bump to full-foreground for the same emphasis a
+                      WorkspaceCard would get. */}
                   <h2
-                    className={`text-sm truncate ${
-                      isPlain
-                        ? plainIsActive
-                          ? "font-semibold text-foreground"
-                          : "font-medium text-muted-foreground"
-                        : "font-semibold text-foreground/80"
+                    className={`text-sm font-semibold truncate ${
+                      isPlain && plainIsActive ? "text-foreground" : "text-foreground/80"
                     }`}
                   >
                     {project.name}

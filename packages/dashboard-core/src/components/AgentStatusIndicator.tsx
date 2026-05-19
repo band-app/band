@@ -1,24 +1,18 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@band-app/ui";
-import { GitBranch, type LucideIcon } from "lucide-react";
+import { GitBranch } from "lucide-react";
 import type { AgentInfo } from "../types";
 
 interface Props {
   agent?: AgentInfo;
   isActive?: boolean;
-  /**
-   * Icon to render when no agent is actively `working` / `needs_attention`.
-   * Defaults to `GitBranch` (the original behavior for git-backed
-   * workspaces). Plain (non-git) projects pass `Folder` since they have
-   * no branch — see #427.
-   */
-  fallbackIcon?: LucideIcon;
 }
 
-export function AgentStatusIndicator({ agent, isActive, fallbackIcon }: Props) {
+export function AgentStatusIndicator({ agent, isActive }: Props) {
   if (!agent || (agent.status !== "working" && agent.status !== "needs_attention")) {
-    const Icon = fallbackIcon ?? GitBranch;
     return (
-      <Icon className={`size-3 shrink-0 ${isActive ? "text-primary" : "text-muted-foreground"}`} />
+      <GitBranch
+        className={`size-3 shrink-0 ${isActive ? "text-primary" : "text-muted-foreground"}`}
+      />
     );
   }
 
