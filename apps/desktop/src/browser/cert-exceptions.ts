@@ -129,20 +129,18 @@ export interface SessionLike {
 /**
  * Derive a stable partition identifier from an Electron `Session`.
  *
- * Today every Band browser tab uses the default session, so this is
- * a no-op in practice - the function returns `"default"` for any
- * session whose `storagePath` matches the supplied default, and
- * falls back to the storagePath verbatim (or `"in-memory"` when
- * null) otherwise. Keeps the exception store correct if a future
- * feature introduces per-workspace partitions.
+ * Returns `"default"` when no session is supplied, `"in-memory"` for
+ * sessions without on-disk storage, or the `storagePath` verbatim
+ * otherwise. The exception store keys on this string, so the only
+ * requirement is that it's stable across calls for the same session.
+ *
+ * Keeps the cert-exception store partition-aware if a future
+ * feature introduces named partitions (e.g. per-workspace storage
+ * isolation) without needing to plumb anything else through.
  */
-export function partitionForSession(
-  session: SessionLike | undefined | null,
-  defaultStoragePath?: string | null,
-): string {
+export function partitionForSession(session: SessionLike | undefined | null): string {
   if (!session) return "default";
   const path = session.storagePath ?? null;
   if (path === null) return "in-memory";
-  if (defaultStoragePath !== undefined && path === defaultStoragePath) return "default";
   return path;
 }

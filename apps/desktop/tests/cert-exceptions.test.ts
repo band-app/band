@@ -162,14 +162,13 @@ describe("partitionForSession", () => {
     assert.equal(partitionForSession({ storagePath: null }), "in-memory");
   });
 
-  test("default storagePath ⇒ 'default'", () => {
-    const defaultPath = "/users/me/Library/Application Support/Band";
-    assert.equal(partitionForSession({ storagePath: defaultPath }, defaultPath), "default");
+  test("session with storagePath ⇒ the path verbatim", () => {
+    const path = "/users/me/Library/Application Support/Band";
+    assert.equal(partitionForSession({ storagePath: path }), path);
   });
 
   test("named partition ⇒ its own storagePath", () => {
-    const defaultPath = "/users/me/Library/Application Support/Band";
     const named = "/users/me/Library/Application Support/Band/Partitions/work";
-    assert.equal(partitionForSession({ storagePath: named }, defaultPath), named);
+    assert.equal(partitionForSession({ storagePath: named }), named);
   });
 });
