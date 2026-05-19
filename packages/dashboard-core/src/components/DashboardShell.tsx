@@ -197,7 +197,7 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar, hideMenu }: Das
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [labels]);
+  }, [labels, setLabelFilter]);
 
   return (
     <div
