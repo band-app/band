@@ -23,10 +23,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
  *      "is this an untitled tab" check is unambiguous: callers can
  *      either inspect the `isUntitled` flag or just test the prefix.
  *
- * Untitled tabs are deliberately ephemeral (issue #434 "Out of scope"
- * called out autosave / scratch persistence as a follow-up): they are
- * filtered out of the localStorage save path so a reload doesn't
- * resurrect empty buffers.
+ * Untitled tabs **are** persisted across reloads: the buffer content
+ * already lives in `useTabState`'s `editedContent` (keyed by
+ * filePath), so dropping the tab on serialization would leak content
+ * into localStorage with no visible surface to reach it. The tab list
+ * carries `isUntitled` + `untitledLabel` so the loader can rehydrate
+ * the tab cleanly, and `initialUntitledCounter` ensures the
+ * monotonic-N counter doesn't collide with already-open scratch tabs
+ * after a reload. Issue #434 originally listed scratch persistence as
+ * out-of-scope, but reusing the existing tab-state plumbing makes the
+ * scope creep small and the UX win large (no accidental data loss).
  */
 export const UNTITLED_PREFIX = "untitled:";
 
@@ -157,8 +163,8 @@ interface PersistedTab {
   filePath: string;
   isPreview?: boolean;
   isExternal?: boolean;
-  // Note: untitled tabs are intentionally NOT persisted — see the
-  // serialization filter in `saveTabState` below.
+  isUntitled?: boolean;
+  untitledLabel?: string;
 }
 
 interface PersistedTabState {
@@ -181,9 +187,10 @@ function loadTabState(workspaceId: string): { tabs: FileTab[]; active: string | 
     const parsed = JSON.parse(raw) as { tabs?: unknown; active?: unknown };
     if (!Array.isArray(parsed.tabs)) return null;
     // Accept either a bare string (legacy / pinned tab) or a
-    // `{ filePath: string, isPreview?: boolean }` object (preview tab).
-    // Anything else is dropped — `.split("/")` on a non-string path
-    // would crash the whole workspace.
+    // `{ filePath: string, isPreview?: boolean, isExternal?: boolean,
+    // isUntitled?: boolean, untitledLabel?: string }` object. Anything
+    // else is dropped — `.split("/")` on a non-string path would crash
+    // the whole workspace.
     const tabs: FileTab[] = [];
     for (const t of parsed.tabs) {
       if (typeof t === "string") {
@@ -194,10 +201,29 @@ function loadTabState(workspaceId: string): { tabs: FileTab[]; active: string | 
         "filePath" in t &&
         typeof (t as { filePath: unknown }).filePath === "string"
       ) {
-        const obj = t as { filePath: string; isPreview?: unknown; isExternal?: unknown };
+        const obj = t as {
+          filePath: string;
+          isPreview?: unknown;
+          isExternal?: unknown;
+          isUntitled?: unknown;
+          untitledLabel?: unknown;
+        };
         const tab: FileTab = { filePath: obj.filePath };
         if (obj.isPreview === true) tab.isPreview = true;
         if (obj.isExternal === true) tab.isExternal = true;
+        // Re-hydrate untitled tabs (issue #434 originally treated them
+        // as ephemeral; rehydration was added so reloads don't lose the
+        // typed buffer — `useTabState` already persists `editedContent`
+        // per filePath, so dropping the tab leaked content into
+        // localStorage with no visible surface). Defensive check that
+        // the path actually carries the `untitled:N` shape so a
+        // mis-flagged real file can't masquerade as untitled.
+        if (obj.isUntitled === true && obj.filePath.startsWith(UNTITLED_PREFIX)) {
+          tab.isUntitled = true;
+          if (typeof obj.untitledLabel === "string") {
+            tab.untitledLabel = obj.untitledLabel;
+          }
+        }
         tabs.push(tab);
       }
     }
@@ -210,25 +236,22 @@ function loadTabState(workspaceId: string): { tabs: FileTab[]; active: string | 
 
 function saveTabState(workspaceId: string, tabs: FileTab[], active: string | null): void {
   try {
-    // Untitled tabs are deliberately ephemeral — see UNTITLED_PREFIX docs
-    // and issue #434 ("Out of scope: autosave / scratch persistence
-    // across reloads"). Filter them out at the serialization boundary so
-    // the loader never sees a synthetic `untitled:N` key and tries to
-    // open it as a real file. The active-tab pointer is rewritten to
-    // null when it points at a dropped untitled tab.
-    const persistedTabs = tabs.filter((t) => !t.isUntitled);
     const persistedActive =
-      active != null && persistedTabs.some((t) => t.filePath === active) ? active : null;
+      active != null && tabs.some((t) => t.filePath === active) ? active : null;
     const state: PersistedTabState = {
-      tabs: persistedTabs.map((t) => {
+      tabs: tabs.map((t) => {
         // Bare-string serialization is the legacy/compact form for plain
         // pinned workspace tabs. Anything carrying extra flags (preview,
-        // external) is written as an object so the loader can re-hydrate
-        // the flag.
-        if (!t.isPreview && !t.isExternal) return t.filePath;
+        // external, untitled) is written as an object so the loader can
+        // re-hydrate the flag set.
+        if (!t.isPreview && !t.isExternal && !t.isUntitled) return t.filePath;
         const out: PersistedTab = { filePath: t.filePath };
         if (t.isPreview) out.isPreview = true;
         if (t.isExternal) out.isExternal = true;
+        if (t.isUntitled) {
+          out.isUntitled = true;
+          if (t.untitledLabel) out.untitledLabel = t.untitledLabel;
+        }
         return out;
       }),
       active: persistedActive,
@@ -237,6 +260,26 @@ function saveTabState(workspaceId: string, tabs: FileTab[], active: string | nul
   } catch {
     // storage unavailable
   }
+}
+
+/**
+ * Initial value for the per-workspace untitled-tab counter. Reads the
+ * highest `N` from any persisted `untitled:N` tab so a reload doesn't
+ * collide with already-open scratch tabs — without this, creating a
+ * new untitled tab after a reload would reuse `untitled:1` even if a
+ * persisted Untitled-1 already occupies that slot.
+ *
+ * `useTabState.editedContent` is keyed on filePath, so a collision
+ * would silently splice the new tab on top of the old buffer.
+ */
+function initialUntitledCounter(tabs: FileTab[]): number {
+  let max = 0;
+  for (const t of tabs) {
+    if (!t.isUntitled) continue;
+    const n = Number.parseInt(t.filePath.slice(UNTITLED_PREFIX.length), 10);
+    if (Number.isFinite(n) && n > max) max = n;
+  }
+  return max;
 }
 
 // ---------------------------------------------------------------------------
@@ -288,9 +331,14 @@ export function useFileTabs(workspaceId: string): UseFileTabsReturn {
       if (saved) {
         setOpenTabs(saved.tabs);
         setActiveTabPathState(saved.active);
+        // Reseed the untitled counter from the new workspace's saved
+        // tabs so a new untitled tab in this workspace doesn't collide
+        // with an already-restored Untitled-1.
+        untitledCounterRef.current = initialUntitledCounter(saved.tabs);
       } else {
         setOpenTabs([]);
         setActiveTabPathState(null);
+        untitledCounterRef.current = 0;
       }
     }
   }, [workspaceId]);
@@ -319,10 +367,11 @@ export function useFileTabs(workspaceId: string): UseFileTabsReturn {
 
   // Monotonic counter for "Untitled-N" labels. Per-workspace,
   // intentionally never reused: closing Untitled-1 and creating a new
-  // untitled tab yields Untitled-2 (matching VS Code). The counter
-  // resets when the workspace switches because untitled tabs are
-  // ephemeral — see UNTITLED_PREFIX docs.
-  const untitledCounterRef = useRef(0);
+  // untitled tab yields Untitled-2 (matching VS Code). Initialised from
+  // the highest `N` in any persisted untitled tab so a new tab after a
+  // reload doesn't collide with an already-open Untitled-1 — see
+  // `initialUntitledCounter`.
+  const untitledCounterRef = useRef(initialUntitledCounter(openTabs));
 
   const openTabUntitled = useCallback((): { filePath: string; label: string } => {
     untitledCounterRef.current += 1;
