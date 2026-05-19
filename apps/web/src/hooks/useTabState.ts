@@ -29,10 +29,15 @@ export interface TabFileState {
    * field rides along. Treating the override as session-persistent is
    * deliberate: the user explicitly chose Python for their `.txt`
    * file, and silently reverting that choice on reload would surprise
-   * them more than letting it stick. Closing the tab clears the
-   * record via `removeFile`, so a user who wants to drop the override
-   * can close-and-reopen the file (or pick a different language and
-   * close-and-reopen, depending on which behaviour they want).
+   * them more than letting it stick. Reverting paths:
+   *
+   *   - **Auto Detect** entry in the language picker — clears the
+   *     override (`update({ language: undefined })`) so the next
+   *     render falls back to extension-based detection. Shown in the
+   *     picker only when an override is currently active.
+   *   - **Close the tab** — `removeFile` drops the whole `TabFileState`
+   *     entry including the language field. The next open of the same
+   *     file starts fresh.
    *
    * Untitled tabs are also persisted now (issue #434's "scratch
    * persistence" follow-up landed in the same PR), so their overrides
