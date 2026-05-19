@@ -1119,16 +1119,17 @@ export class BrowserViewManager {
       emitUrl(url, false);
     });
 
-    // Primary `band-action://` interceptor — fires before the
-    // navigation commits when Electron honours it. The `did-start-
-    // navigation` block above is the safety net for the cases where
-    // it doesn't (e.g. unknown URL schemes on some Electron versions).
-    view.webContents.on("will-navigate", (event, navUrl) => {
-      const action = parseBandAction(navUrl);
-      if (!action) return;
-      event.preventDefault();
-      this.handleBandAction(key, action);
-    });
+    // NOTE: we deliberately do NOT register a `will-navigate`
+    // listener for `band-action://` URLs. Empirically, on Electron
+    // 35 `will-navigate` DOES fire for unknown schemes (contrary to
+    // my earlier hypothesis), and the navigation also fires
+    // `did-start-navigation` immediately after. Having both
+    // listeners dispatch `handleBandAction` meant cert-proceed ran
+    // twice — the first call loaded the target URL with the
+    // exception, the second call (with `pendingCertErrors` already
+    // cleared) fell through to `loadURL("about:blank")` and the
+    // user ended up on a blank page. `did-start-navigation` alone
+    // is sufficient and observed via diagnostic dashLog().
     view.webContents.on("page-title-updated", (_e, title) => {
       const payload: BrowserTitleChangedPayload = {
         browser_id: key,
