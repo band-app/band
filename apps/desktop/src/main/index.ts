@@ -13,7 +13,7 @@
  *      free port 3456 (release builds only — same gate as Tauri).
  */
 
-import { app, BrowserWindow, session } from "electron";
+import { app, BrowserWindow, protocol, session } from "electron";
 import { CertExceptionStore, partitionForSession } from "../browser/cert-exceptions.js";
 import { BrowserViewManager } from "../browser/view-manager.js";
 import { createHiddenBrowserWindow } from "./hidden-browser-window.js";
@@ -173,6 +173,21 @@ async function bootstrap(): Promise<void> {
     app.commandLine.appendSwitch("remote-debugging-port", "9223");
   }
 
+  // Make `band-action://` a known scheme so Chromium handles it
+  // internally instead of falling back to the OS external-protocol
+  // handler (issue #444). Without this registration, clicking a
+  // `band-action://cert-proceed?…` link inside the in-view cert
+  // interstitial pops the macOS "no application set to open the
+  // URL" dialog because no app is registered for the scheme. With
+  // it, Chromium routes the request to the no-op
+  // `protocol.handle("band-action", …)` we register after app
+  // ready — and our per-tab `did-start-navigation` listener does
+  // the actual action dispatch. MUST be called before
+  // `app.whenReady()`.
+  protocol.registerSchemesAsPrivileged([
+    { scheme: "band-action", privileges: { standard: false, supportFetchAPI: false } },
+  ]);
+
   await app.whenReady();
 
   // Install the application menu (Edit/View/Settings + accelerators) before
@@ -254,6 +269,21 @@ async function bootstrap(): Promise<void> {
       `cert-verify: default-deny ${hostname} fp=${fingerprint} errorCode=${request.errorCode}`,
     );
     callback(-3);
+  });
+
+  // No-op handler for `band-action://` so Chromium accepts the
+  // navigation and doesn't fall back to the OS external-protocol
+  // handler. The scheme is registered as privileged before
+  // `app.whenReady()` above. The actual action dispatch (record
+  // cert exception, loadURL the real URL, etc.) happens in the
+  // per-tab `did-start-navigation` listener in `view-manager.ts`,
+  // which fires synchronously when the user clicks an in-view
+  // band-action link. By the time Chromium asks this handler for
+  // a response we've already kicked off the real navigation in a
+  // setImmediate, so we just return an empty no-content response
+  // and Chromium quietly throws away the result.
+  session.defaultSession.protocol.handle("band-action", () => {
+    return new Response(null, { status: 204 });
   });
 
   state.unregisterIpc = registerIpc({
