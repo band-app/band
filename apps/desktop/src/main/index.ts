@@ -260,6 +260,17 @@ async function bootstrap(): Promise<void> {
   // a response we've already kicked off the real navigation in a
   // setImmediate, so we just return an empty no-content response
   // and Chromium quietly throws away the result.
+  //
+  // **Default session only.** `BrowserViewManager.createView()`
+  // constructs every `WebContentsView` without `webPreferences.
+  // partition` or `webPreferences.session`, so they all share
+  // `session.defaultSession`. If a future feature introduces named
+  // partitions (e.g. `persist:workspace-<id>`), each new partition's
+  // `Session` is a separate object and would need this handler
+  // re-registered on it — otherwise band-action navigations in
+  // those tabs would still pop the macOS "no application set to
+  // open this URL" dialog before our setImmediate fires. Add the
+  // call to whatever code creates the partition.
   session.defaultSession.protocol.handle("band-action", () => {
     return new Response(null, { status: 204 });
   });
