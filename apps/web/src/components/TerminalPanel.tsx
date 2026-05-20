@@ -730,6 +730,13 @@ export function TerminalPanel({
       // Send a PTY resize over the websocket. Coalesced via a small helper
       // because both the ResizeObserver and the zoom-change handler need to
       // notify the server after fitAddon.fit() settles.
+      //
+      // Synchrony note: callers invoke this immediately after
+      // `fitAddon.fit()`, which xterm executes synchronously (it reads
+      // `CharSizeService` after a layout pass and writes the new
+      // `terminal.cols/rows` before returning). If a future xterm version
+      // defers that work, this assumption would need to move to a
+      // post-fit `onResize` listener instead.
       const sendPtyResize = () => {
         if (ws.readyState !== WebSocket.OPEN) return;
         if (terminal.cols <= 0 || terminal.rows <= 0) return;
@@ -764,9 +771,13 @@ export function TerminalPanel({
       const remeasureAndReattach = (opts: { newFontSize?: number } = {}): void => {
         const { newFontSize } = opts;
         if (newFontSize !== undefined) {
-          // Zoom path: assign the new value directly. xterm's options proxy
-          // skips the change event if the new value equals the old, so we
-          // only assign when it's actually different.
+          // Zoom path: assign the new value directly. xterm's options
+          // proxy skips the change event if the new value equals the old,
+          // so we only assign when it's actually different. This is
+          // defensive — the only current caller (`handleZoomChange`)
+          // already early-returns on equality, so in practice this
+          // branch is always taken. Keep the guard so future callers
+          // can't accidentally trigger a no-op WebGL dispose/reattach.
           if (terminal.options.fontSize !== newFontSize) {
             terminal.options.fontSize = newFontSize;
           }
@@ -789,19 +800,26 @@ export function TerminalPanel({
       // run the re-measure dance. DOM renderer is a no-op (CSS sizing
       // handles DPR natively) — `remeasureAndReattach` already handles
       // that by skipping the addon dispose/reattach when none is mounted.
-      const handleDprChange = () => {
+      // Returns true when it actually re-measured so the ResizeObserver
+      // caller can skip its own follow-up `fitAddon.fit()` (the re-measure
+      // already called fit, and a double-call here is more expensive than
+      // it looks because remeasureAndReattach disposes+reattaches the
+      // WebGL addon).
+      const handleDprChange = (): boolean => {
         const currentDpr = window.devicePixelRatio;
-        if (currentDpr === lastDpr) return;
+        if (currentDpr === lastDpr) return false;
         lastDpr = currentDpr;
         remeasureAndReattach();
+        return true;
       };
       const resizeObserver = new ResizeObserver((entries) => {
         const entry = entries[0];
         if (!entry || entry.contentRect.width === 0 || entry.contentRect.height === 0) return;
         // Check DPR before fit so the re-attached addon picks up the right
-        // cell dimensions.
-        handleDprChange();
-        fitAddon.fit();
+        // cell dimensions. When DPR changed, `handleDprChange` already
+        // ran a full re-measure + fit, so skip the extra fit here.
+        const dprChanged = handleDprChange();
+        if (!dprChanged) fitAddon.fit();
         sendPtyResize();
       });
       resizeObserver.observe(containerRef.current!);

@@ -38,7 +38,14 @@ import { useZoom } from "../hooks/useZoom";
 import { getElectronBridge } from "../lib/desktop-ipc";
 import { isDesktop } from "../lib/is-desktop";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
-import { applyZoomLevel, loadZoomLevel, zoomIn, zoomOut, zoomReset } from "../lib/zoom";
+import {
+  applyZoomLevel,
+  applyZoomLevelToDom,
+  loadZoomLevel,
+  zoomIn,
+  zoomOut,
+  zoomReset,
+} from "../lib/zoom";
 import "../styles/globals.css";
 
 const adapter = isDesktop ? new DesktopDashboardAdapter() : new WebDashboardAdapter();
@@ -242,16 +249,19 @@ function ZoomSync() {
 
   // Cross-window zoom sync via the storage event.
   // When another window updates "band:zoom-level" in localStorage,
-  // apply the change immediately to this window's DOM. Use `applyZoomLevel`
-  // (rather than poking `style.zoom` directly) so the `--app-zoom` CSS
-  // variable and the `band:zoom-changed` window event stay in sync — the
-  // TerminalPanel relies on both to update xterm's fontSize.
+  // apply the change immediately to this window's DOM. Use the DOM-only
+  // helper (no localStorage write) since the originating window already
+  // persisted the value — re-saving here would be a redundant write that
+  // relies on Chromium's same-value-write behaviour not echoing a storage
+  // event (the spec doesn't require that). The helper still updates the
+  // `--app-zoom` CSS variable and dispatches the `band:zoom-changed`
+  // window event, which is what TerminalPanel subscribes to.
   useEffect(() => {
     const handleStorage = (e: StorageEvent) => {
       if (e.key !== "band:zoom-level" || !e.newValue) return;
       const level = Number.parseFloat(e.newValue);
       if (!Number.isNaN(level) && level >= 0.5 && level <= 2) {
-        applyZoomLevel(level);
+        applyZoomLevelToDom(level);
       }
     };
 

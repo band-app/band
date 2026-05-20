@@ -47,12 +47,20 @@ export function saveZoomLevel(level: number): void {
 }
 
 /**
- * Apply a zoom level to the document root, mirror it onto the
- * {@link ZOOM_CSS_VAR} custom property, dispatch the
- * {@link ZOOM_CHANGE_EVENT} so subscribers (e.g. TerminalPanel) can react, and
- * persist the level to localStorage.
+ * DOM-only zoom application: updates `<html>` `zoom`, mirrors the value onto
+ * the {@link ZOOM_CSS_VAR} CSS variable, and dispatches the
+ * {@link ZOOM_CHANGE_EVENT}. Does NOT persist to localStorage — call this
+ * from contexts where the value is already persisted elsewhere (e.g. the
+ * cross-window `storage` event handler in `ZoomSync`, where the originating
+ * window already wrote the value). Returns the clamped/rounded level it
+ * actually applied so callers can save it without re-clamping.
+ *
+ * Prefer {@link applyZoomLevel} for user-driven zoom changes; this lower-
+ * level helper exists only for the sync path that must avoid the
+ * (currently benign in Chromium, but spec-non-guaranteed) cross-window
+ * storage echo.
  */
-export function applyZoomLevel(level: number): void {
+export function applyZoomLevelToDom(level: number): number {
   const clamped = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, level));
   const rounded = Math.round(clamped * 100) / 100;
   const root = document.documentElement;
@@ -61,14 +69,31 @@ export function applyZoomLevel(level: number): void {
   // (TerminalPanel's xterm container) can do
   // `zoom: calc(1 / var(--app-zoom, 1))` without touching JS.
   root.style.setProperty(ZOOM_CSS_VAR, String(rounded));
-  saveZoomLevel(rounded);
-  // Fire the change event AFTER the DOM/storage are up to date so subscribers
-  // can read the post-update state synchronously.
+  // Fire the change event AFTER the DOM is up to date so subscribers can
+  // read the post-update state synchronously. We surface dispatch failures
+  // in dev so a regression doesn't silently swallow zoom updates — the
+  // CustomEvent constructor and `dispatchEvent` have full cross-browser
+  // support so this branch should never fire, but if it ever does we want
+  // a console signal rather than a mystery missing update.
   try {
     window.dispatchEvent(new CustomEvent<number>(ZOOM_CHANGE_EVENT, { detail: rounded }));
-  } catch {
-    // CustomEvent is widely supported; this catch only guards exotic test envs.
+  } catch (err) {
+    if (process.env.NODE_ENV !== "production") {
+      console.error("[zoom] failed to dispatch zoom-changed event", err);
+    }
   }
+  return rounded;
+}
+
+/**
+ * Apply a zoom level to the document root, mirror it onto the
+ * {@link ZOOM_CSS_VAR} custom property, dispatch the
+ * {@link ZOOM_CHANGE_EVENT} so subscribers (e.g. TerminalPanel) can react, and
+ * persist the level to localStorage.
+ */
+export function applyZoomLevel(level: number): void {
+  const applied = applyZoomLevelToDom(level);
+  saveZoomLevel(applied);
 }
 
 /**
