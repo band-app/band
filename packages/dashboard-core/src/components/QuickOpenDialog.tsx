@@ -218,9 +218,19 @@ export function QuickOpenDialog({
     // Dispatch via the same event pattern Quick Open / Search in Files
     // use — CodeBrowserView owns the OS-picker invocation and tab plumbing,
     // so this dialog stays free of workspace-state knowledge.
+    //
+    // Address the event to *this* workspace: multiple CodeBrowserView
+    // instances may be mounted (the workspace dockview is LRU-cached),
+    // and an undelimited broadcast would race every cached instance to
+    // open its own picker — the file would land in whichever instance
+    // won, not the one the user is looking at.
     onOpenChange(false);
-    window.dispatchEvent(new CustomEvent("band:open-file-external"));
-  }, [onOpenChange]);
+    window.dispatchEvent(
+      new CustomEvent("band:open-file-external", {
+        detail: { workspaceId },
+      }),
+    );
+  }, [onOpenChange, workspaceId]);
 
   // The list of files to render: recent files when query is empty, search results otherwise
   const displayFiles = showRecent ? recentFiles : files;

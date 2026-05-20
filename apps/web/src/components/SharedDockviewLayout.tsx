@@ -986,8 +986,23 @@ export function SharedDockviewLayout() {
           window.dispatchEvent(new CustomEvent("band:find-in-file"));
         }
       } else if (key === "o" && !e.shiftKey && !e.altKey) {
+        // ⌘O → Open File… The actual picker invocation lives in
+        // CodeBrowserView and is gated by `capabilities.pickFile`, so
+        // the event is a no-op in the plain web build — preventDefault
+        // here still suppresses the browser's own Cmd+O.
+        //
+        // Address the event to the active workspace: the per-panel
+        // content cache keeps multiple CodeBrowserView instances alive
+        // at once, and an undelimited broadcast would race every
+        // cached instance to open its own picker (the file landed in
+        // the wrong workspace). Same shape as `band:format-current-file`.
         e.preventDefault();
-        window.dispatchEvent(new CustomEvent("band:open-file-external"));
+        if (!ws) return;
+        window.dispatchEvent(
+          new CustomEvent("band:open-file-external", {
+            detail: { workspaceId: ws },
+          }),
+        );
       } else if (key === "i" && e.ctrlKey && e.metaKey && api) {
         e.preventDefault();
         if (!hiddenPanelsRef.current.includes("chat")) {

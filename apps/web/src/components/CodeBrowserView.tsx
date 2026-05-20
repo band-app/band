@@ -1331,14 +1331,27 @@ export function CodeBrowserView({
   // Surface the action via the same command-palette event pattern as
   // Quick Open / Search in Files. Listened to here so the desktop-shell
   // capability check stays local.
+  //
+  // Multiple workspaces can be alive at once (the per-panel content
+  // cache in MultiWorkspacePanelHost keeps up to `maxCachedWorkspaces`
+  // CodeBrowserView instances mounted), so every mounted instance would
+  // otherwise receive this window event and race to open its own OS
+  // picker — the file would land in whichever instance won the race,
+  // not necessarily the active workspace. Mirror the
+  // `band:format-current-file` pattern: dispatchers attach
+  // `{ workspaceId }` to the event detail and we ignore everything
+  // that isn't addressed to us. A missing detail (older dispatcher)
+  // falls through so the action still works while migrations roll out.
   useEffect(() => {
     if (!pickFile) return;
-    const handler = () => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ workspaceId?: string } | undefined>).detail;
+      if (detail?.workspaceId && detail.workspaceId !== workspaceId) return;
       void handleOpenExternalFile();
     };
     window.addEventListener("band:open-file-external", handler);
     return () => window.removeEventListener("band:open-file-external", handler);
-  }, [pickFile, handleOpenExternalFile]);
+  }, [pickFile, handleOpenExternalFile, workspaceId]);
 
   // -------------------------------------------------------------------------
   // Untitled tabs (issue #434) — empty scratch buffer with save-as flow.
