@@ -187,7 +187,7 @@ describe("pointToCell", () => {
   // additional coverage in re-running the same assertion across
   // arbitrary scale factors (every parameterized iteration would feed
   // identical inputs).
-  it("regression #463: maps a click to the target cell under counter-zoom", () => {
+  it("regression #463: maps a click coordinate to the expected cell (scale-invariant math underpins the counter-zoom fix)", () => {
     function clickAtCell(
       col: number,
       row: number,
