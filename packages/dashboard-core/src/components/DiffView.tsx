@@ -1665,11 +1665,11 @@ export function DiffView({
   const fileStatuses = hasChanges ? (summary?.fileStatuses ?? {}) : {};
   const filenames = flattenFileTreeOrder(buildFileTree(fileStatuses));
   filenamesRef.current = filenames;
-  // `hasChanges` already implies `summary !== null`, but TypeScript can't
-  // narrow `summary` through a stored boolean. Pull `stats` out once so the
-  // JSX downstream doesn't need a redundant `&& summary` guard for type
-  // narrowing on every `summary.stats.*` access.
-  const stats = hasChanges ? (summary?.stats ?? null) : null;
+  // `hasChanges` already implies `summary !== null`. Assert it with `!` so
+  // the JSX downstream doesn't need a redundant `&& summary` guard for
+  // type narrowing on every `summary.stats.*` access. (TypeScript can't
+  // narrow through the stored boolean.)
+  const stats = hasChanges ? summary!.stats : null;
 
   return (
     <div ref={rootRef} className="@container/diff flex h-full overflow-hidden">
@@ -1923,7 +1923,20 @@ export function DiffView({
           />
         )}
         {!hasChanges && (
-          <div className="flex min-h-0 flex-1 items-center justify-center">
+          // role="status" implies aria-live="polite" — spell both out as a
+          // defensive pattern. aria-atomic ensures the whole label is
+          // re-read on each transition (e.g. "Loading changes…" → "No
+          // changes" after a ref switch). `<output>` would be biome's
+          // preferred semantic element but it's specifically for the
+          // result of a form computation; a generic status region is
+          // a better fit here.
+          // biome-ignore lint/a11y/useSemanticElements: see comment above.
+          <div
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+            className="flex min-h-0 flex-1 items-center justify-center"
+          >
             <span className={`text-sm ${error ? "text-destructive" : "text-muted-foreground"}`}>
               {loading ? "Loading changes..." : error ? error : "No changes"}
             </span>
