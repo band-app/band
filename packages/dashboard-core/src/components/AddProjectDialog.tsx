@@ -87,6 +87,11 @@ export function AddProjectDialog({ open, onOpenChange, defaultLabel }: Props) {
 
   const handlePathChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setPath(e.target.value);
+    // Clear the "branch features disabled" note immediately when the path
+    // changes. Without this, the note lingers for the full 300 ms
+    // debounce window after the user starts typing a corrected path,
+    // displaying stale state for the wrong input.
+    setIsGitRepo(null);
   };
 
   const handleBrowse = async () => {
@@ -95,6 +100,7 @@ export function AddProjectDialog({ open, onOpenChange, defaultLabel }: Props) {
       const selected = await capabilities.pickFolder();
       if (selected) {
         setPath(selected);
+        setIsGitRepo(null);
       }
     } catch {
       // Dialog cancelled

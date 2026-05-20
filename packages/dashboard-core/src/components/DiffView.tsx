@@ -1486,6 +1486,11 @@ export function DiffView({
     diffMode,
     compareBranch,
     fetchFileDiff,
+    // `isPlain` and `projectKind` are both listed even though the
+    // former is derived from the latter — required to keep
+    // react/exhaustive-deps quiet. The body references both: `isPlain`
+    // drives the short-circuit, `projectKind` gates the
+    // undefined-during-load early return.
     isPlain,
     projectKind,
   ]);
