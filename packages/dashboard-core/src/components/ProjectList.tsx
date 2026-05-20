@@ -153,11 +153,7 @@ function SortableProject({
   // card. There's no nested "main" row, no collapse chevron, no "+" Add
   // workspace button, and crucially no pinning (the workspace is already
   // at the project level — there's nothing to "pull up to the top"). See
-  // #427. Use optional access on worktrees[0] because the parent's
-  // displayProjects could theoretically hand us an empty array; defaulting
-  // to "main" keeps the header functional even if the implicit row was
-  // somehow filtered out (e.g. legacy `pinned=true` state from an earlier
-  // build that allowed the menu item).
+  // #427.
   const openWorkspace = useDashboardStore((s) => s.openWorkspace);
   const clearNeedsAttention = useDashboardStore((s) => s.clearNeedsAttention);
   // Plain projects are guaranteed to have exactly one worktree (the
@@ -996,10 +992,16 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
           if (!open) setPromoteDialog(null);
         }}
         onConfirm={() => {
-          if (promoteDialog) {
-            promoteProjectToGitMutation.mutate(promoteDialog);
-            setPromoteDialog(null);
-          }
+          if (!promoteDialog) return;
+          // Wait for the mutation to settle before dismissing the
+          // dialog. If the server errors (path deleted, already a git
+          // project, etc.) we want the dialog to stay open so the
+          // user can see the error toast in context; closing
+          // synchronously hides the trigger before the failure is
+          // visible.
+          promoteProjectToGitMutation.mutate(promoteDialog, {
+            onSettled: () => setPromoteDialog(null),
+          });
         }}
         projectName={promoteDialog ?? ""}
       />

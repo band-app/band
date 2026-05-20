@@ -689,6 +689,25 @@ describe("tRPC — plain projects (promote to git)", () => {
     expect(body.error.message).toMatch(/not found/i);
   });
 
+  it("projects.promoteToGit on a project whose folder was deleted returns 404", async () => {
+    // Add a plain project whose folder we then delete from under the
+    // server (simulates the user `rm -rf`'ing the project directory
+    // outside the dashboard, then clicking Promote in a stale UI).
+    // Server pre-flight `existsSync(project.path)` must catch this
+    // before invoking `execGit`, so the user gets a clear "no longer
+    // exists, remove and re-add" message rather than a raw ENOENT
+    // from git.
+    const ghost = createPlainDir(tmpHome, "ghost");
+    const addRes = await trpcMutate(server.url, "projects.add", { path: ghost });
+    expect(addRes.status).toBe(200);
+    rmSync(ghost, { recursive: true, force: true });
+
+    const res = await trpcMutate(server.url, "projects.promoteToGit", { name: "ghost" });
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toMatch(/no longer exists/i);
+  });
+
   it("after promotion, workspaces.create is no longer blocked by the plain-kind backstop", async () => {
     // We can't actually exercise `git worktree add` end-to-end here because
     // a freshly-promoted plain project has zero commits — `git worktree add
