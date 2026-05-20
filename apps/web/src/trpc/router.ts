@@ -107,6 +107,7 @@ import {
   loadSettings,
   loadState,
   type ProjectKind,
+  reconcileKindForProject,
   saveSettings,
   saveState,
   upsertWorkspaceStatus,
@@ -162,29 +163,18 @@ const projectsRouter = t.router({
     const statuses = loadCurrentStatuses();
     const statusMap = new Map(statuses.map((s) => [s.workspaceId, s]));
 
-    // Inline, read-only kind re-detection. Persistence lives in
-    // `syncWorktrees` (called on every branch-status-poller tick) so
-    // this query doesn't write to the DB — but the response still needs
-    // to reflect on-disk reality, otherwise a freshly-booted dashboard
-    // showing pre-migration "git" rows would render incorrectly until
-    // the first poller tick fires AND the next 30 s refetch lands. The
-    // existsSync probe is cheap and the loop only touches in-memory
-    // state; downstream `kind === "plain"` branching below sees the
-    // corrected value immediately.
+    // Inline, read-only kind re-detection via the shared helper.
+    // Persistence lives in `syncWorktrees` (called on every branch-
+    // status-poller tick and once at boot from `runFirstTimeSetup`) so
+    // this query doesn't write to the DB — but the response still
+    // needs to reflect on-disk reality, otherwise a freshly-booted
+    // dashboard showing pre-migration "git" rows would render
+    // incorrectly until the first poller tick fires AND the next 30 s
+    // refetch lands. We discard the return value (not persisting) and
+    // just rely on the helper to mutate `project.kind` /
+    // `project.worktrees` in place.
     for (const project of state.projects) {
-      if (!existsSync(project.path)) continue;
-      const detectedKind: ProjectKind = existsSync(join(project.path, ".git")) ? "git" : "plain";
-      if (detectedKind !== project.kind) {
-        project.kind = detectedKind;
-        if (detectedKind === "plain") {
-          // Stale `feat/foo` rows are now orphaned; replace with the
-          // implicit `main` workspace so the flattened plain UI has a
-          // single workspace at the project path to render. The
-          // canonical version of this fix-up lives in syncWorktrees,
-          // which also persists; we just mirror it in-memory here.
-          project.worktrees = [{ branch: "main", path: project.path, pinned: false }];
-        }
-      }
+      reconcileKindForProject(project);
     }
 
     const projects = await Promise.all(
@@ -944,12 +934,19 @@ const compareBranchSchema = z
 const EMPTY_TREE_ARGS = ["hash-object", "-t", "tree", "/dev/null"];
 
 /**
- * The canonical SHA of git's empty tree object — present in every git
- * repository. We use it as the `mergeBase` sentinel for non-git
- * workspaces so the field always carries a real 40-char SHA shape
- * (downstream callers expecting `mergeBase` to be a commit-ish stay
- * happy) and so `git diff <sha>` against it would semantically mean
- * "everything is new" if anyone ever passed it through.
+ * The canonical SHA of git's empty *tree* object — built into git
+ * itself (every git version exposes this hash whether or not any
+ * objects have been created locally). We use it as the `mergeBase`
+ * sentinel for non-git workspaces so the field always carries a real
+ * 40-char SHA shape, which a downstream consumer that does string
+ * validation (length / hex check) on `mergeBase` won't choke on.
+ *
+ * Note this is a tree, not a commit — `git diff` accepts either, but
+ * callers that strictly expect a commit-ish (e.g. `git merge-base
+ * <sha> HEAD`) will reject it. The DiffView guards against ever
+ * passing this through for a plain project via its `isPlain` check;
+ * other potential consumers should treat this as "empty diff,
+ * intentionally" rather than a usable commit reference.
  */
 const EMPTY_TREE_SHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 

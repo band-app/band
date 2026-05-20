@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { toWorkspaceId } from "@band-app/dashboard-core";
@@ -13,6 +13,45 @@ import {
 } from "./db/schema";
 
 export type ProjectKind = "git" | "plain";
+
+/**
+ * Re-detect `kind` from the filesystem and reconcile the in-memory
+ * project row. Shared between the read-only inline re-detection in
+ * `projects.list` (which doesn't persist — queries shouldn't write)
+ * and the persistence path in `syncWorktrees` (which calls
+ * `saveState` when `changed === true`). Centralising the logic keeps
+ * the two callers from drifting.
+ *
+ * Returns `true` when the row was mutated, so the caller can decide
+ * whether to persist.
+ */
+export function reconcileKindForProject(project: ProjectState): boolean {
+  // Skip rows whose path no longer exists — leave kind alone rather
+  // than synthesize a workspace under a missing directory.
+  if (!existsSync(project.path)) return false;
+  // `existsSync(.git)` returns true for both directories AND files. Git
+  // submodules and secondary worktrees embed a `.git` file (rather
+  // than a directory) that points at the parent repo — we want those
+  // classified as "git" too.
+  const detectedKind: ProjectKind = existsSync(join(project.path, ".git")) ? "git" : "plain";
+  if (detectedKind === project.kind) return false;
+
+  project.kind = detectedKind;
+  // On a `git → plain` flip (`.git` disappeared from under us — e.g. a
+  // `rm -rf .git` from a terminal), replace any existing worktree
+  // rows with the implicit `{branch: "main", path: project.path}`
+  // workspace. We do this unconditionally for `plain` (not only when
+  // worktrees is empty) because a real git project flipping to plain
+  // will still have its old `feat/foo` / `fix/bar` entries; leaving
+  // them would orphan the rows (their worktree paths under
+  // `worktreesDir/{project}/{branch}` are now broken git worktrees
+  // with no `.git` to reach back to) and the flattened plain UI would
+  // render the wrong branch label.
+  if (detectedKind === "plain") {
+    project.worktrees = [{ branch: "main", path: project.path, pinned: false }];
+  }
+  return true;
+}
 
 export interface ProjectState {
   name: string;

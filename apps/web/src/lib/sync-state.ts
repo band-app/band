@@ -1,7 +1,5 @@
-import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { execGit, listWorktrees } from "./git";
-import { loadState, type ProjectKind, saveState, type WorktreeState } from "./state";
+import { loadState, reconcileKindForProject, saveState, type WorktreeState } from "./state";
 
 /**
  * Detect the remote's default branch from the local origin/HEAD ref.
@@ -44,32 +42,14 @@ export async function syncWorktrees(): Promise<void> {
   // reconciliation also catches a user who ran `git init` (or `rm -rf
   // .git`) in the folder outside the dashboard.
   //
-  // This logic used to live inside `projects.list`, but writing to the
-  // DB from a tRPC query is a contract violation (queries should be
-  // side-effect-free) and made two concurrent list requests race. Moved
-  // here so it runs on the existing branch-status-poller tick (every
-  // 5-60 s depending on activity) plus once at server boot. The
-  // dashboard's projects query refetches at 30 s, so the user sees the
-  // healed state within ~30 s of the next sync tick.
+  // The actual fix-up logic lives in `reconcileKindForProject`
+  // (state.ts) so the inline read-only re-detection inside
+  // `projects.list` can call the exact same code path. Here we just
+  // propagate any mutations to `changed` so saveState fires at the
+  // end of this function — `projects.list` discards the return value
+  // since queries shouldn't write to the DB.
   for (const project of state.projects) {
-    // Skip rows whose path no longer exists — leave kind alone rather
-    // than synthesize a workspace under a missing directory.
-    if (!existsSync(project.path)) continue;
-    const detectedKind: ProjectKind = existsSync(join(project.path, ".git")) ? "git" : "plain";
-    if (detectedKind !== project.kind) {
-      project.kind = detectedKind;
-      // On a `git → plain` flip (`.git` disappeared from under us — e.g.
-      // a `rm -rf .git` from a terminal), replace any existing worktree
-      // rows with the implicit `{branch: "main", path: project.path}`
-      // workspace. A real git project flipping to plain will still have
-      // its old `feat/foo` / `fix/bar` entries; leaving them would
-      // orphan the rows (their worktree paths under
-      // `worktreesDir/{project}/{branch}` are now broken git worktrees
-      // with no `.git` to reach back to) and the flattened plain UI
-      // would render the wrong branch label.
-      if (detectedKind === "plain") {
-        project.worktrees = [{ branch: "main", path: project.path, pinned: false }];
-      }
+    if (reconcileKindForProject(project)) {
       changed = true;
     }
   }

@@ -751,11 +751,11 @@ describe("tRPC — plain projects (syncWorktrees self-heal persistence)", () => 
     });
     seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
     server = await startServer({ tmpHome });
-    // `startBranchStatusPoller` fires its first tick synchronously, but
-    // the inner async chain (syncWorktrees + saveState) is awaited off
-    // the call stack. 250 ms is comfortable headroom — the work itself
-    // is sub-10 ms locally.
-    await new Promise((r) => setTimeout(r, 250));
+    // `runFirstTimeSetup` (which awaits `syncWorktrees` →
+    // `saveState`) is awaited inside `start-server.ts` BEFORE the
+    // "listening" log line that `startServer` blocks on, so by the
+    // time this promise resolves the kind heal has already flushed
+    // to SQLite — no setTimeout race needed.
   });
 
   afterAll(async () => {
@@ -763,7 +763,7 @@ describe("tRPC — plain projects (syncWorktrees self-heal persistence)", () => 
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  it("syncWorktrees persists kind=plain to disk after the first poller tick", () => {
+  it("syncWorktrees persists kind=plain to disk at boot", () => {
     // Read directly from the SQLite DB rather than via projects.list
     // (which has its own inline re-detection that would mask a
     // persistence failure).
@@ -793,10 +793,6 @@ describe("tRPC — plain projects (branch-status-poller skips)", () => {
     });
     seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
     server = await startServer({ tmpHome });
-    // Same timing as the persistence test — wait one full tick beyond
-    // the immediate-first-tick window to give the poller every chance
-    // to write a stray branch-status row if the skip logic regresses.
-    await new Promise((r) => setTimeout(r, 500));
   });
 
   afterAll(async () => {
