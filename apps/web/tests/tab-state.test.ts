@@ -383,6 +383,20 @@ describe("useTabState – language override", () => {
   // render; this test pins the contract by reproducing the same
   // pattern at the hook level and asserting the child renders with the
   // new value.
+  //
+  // Placement note: this test exercises the wiring contract between
+  // `useTabState` (a ref store) and the React render loop (driven by a
+  // `useReducer` bump in the consumer). Strictly it lives at the
+  // CodeBrowserView layer, not at the hook layer — but Band doesn't
+  // have a CodeBrowserView-level test suite (the component is heavy
+  // and not currently mount-tested), and `useTabState` is the closest
+  // available seam where this contract can be pinned in isolation.
+  // The minimal `Parent → Child` rig below is the smallest reproduction
+  // of the bug — reproducing it at the full-component level would
+  // require mounting CodeBrowserView with its workspace/adapter/dockview
+  // dependencies, well past the value of the regression guard. Move
+  // this test (and only this test) if/when CodeBrowserView grows its
+  // own integration-style suite.
   it("setLanguage + useReducer bump causes the child render to see the new value", () => {
     const renders: { language: string | undefined }[] = [];
 

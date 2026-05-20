@@ -1080,6 +1080,17 @@ export function CodeBrowserView({
     // hang around and could resurrect the old buffer when the user
     // reopens the workspace. FileViewer.handleBack has already run its
     // unsaved-changes confirm by the time we get here.
+    //
+    // We deliberately skip the `setViewFilePath("") / notifySelectFile(null)`
+    // pair the file-backed branch below runs. `handleTabClose` calls
+    // `fileTabs.closeTab`, which updates `activeTabPath`, which fires
+    // the "Sync viewFilePath when active tab changes due to a close"
+    // useEffect lower in this component — that effect is the
+    // authoritative source for the post-close view state and runs both
+    // `setViewFilePath` and `notifySelectFile` itself (with the new
+    // active tab, or null + empty viewFilePath when the last tab
+    // closed). Running them here too would race with the effect; the
+    // effect-driven path is the single source of truth.
     if (viewFilePath && isUntitledPath(viewFilePath)) {
       handleTabClose(viewFilePath);
       return;
@@ -1523,6 +1534,14 @@ export function CodeBrowserView({
       }
       bumpLanguageOverrideVersion();
     },
+    // `bumpLanguageOverrideVersion` is the dispatch returned by
+    // `useReducer`, which React guarantees is referentially stable —
+    // both biome's `useExhaustiveDependencies` rule and
+    // `eslint-plugin-react-hooks` recognise the stable-dispatch
+    // contract and treat its omission as correct (in fact biome flags
+    // its inclusion as over-specifying). If a future refactor swaps
+    // the bump source for something less stable (e.g. a regular
+    // useState setter wrapped in a closure), add it to this array.
     [tabState],
   );
 
