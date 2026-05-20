@@ -492,7 +492,7 @@ const workspacesRouter = t.router({
       // should already be hiding the "New workspace" button.
       if (proj.kind === "plain") {
         throw new Error(
-          `Project "${input.project}" is a plain (non-git) project and cannot have additional workspaces. To enable multiple workspaces, first promote it to git via projects.promoteToGit, then re-issue workspaces.create.`,
+          `Project "${input.project}" is a plain (non-git) folder and cannot have additional workspaces. Promote it to git (right-click the project → "Promote to git") to enable branches.`,
         );
       }
 

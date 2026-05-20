@@ -545,6 +545,68 @@ describe("tRPC — plain projects (workspace mutations rejected)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Defensive guard: getDiffSummary short-circuits when .git is missing on
+// disk regardless of the recorded kind.
+// ---------------------------------------------------------------------------
+//
+// Race scenario: the user deletes `.git` from a terminal AFTER a
+// `projects.list` cached a kind="git" classification. A subsequent
+// `getDiffSummary` call lands before the next list refresh self-heals
+// kind. Without the existsSync belt-and-braces in the server, that call
+// would invoke `git diff` against a non-git folder and surface a raw
+// subprocess error in the Changes view.
+describe("tRPC — plain projects (getDiffSummary defensive .git guard)", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+  let plainPath: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    plainPath = createPlainDir(tmpHome, "stale-git");
+
+    // Stale state: row claims kind="git" with a "main" worktree at the
+    // project path, but the folder has no `.git`. This is exactly the
+    // window between a terminal `rm -rf .git` and the next
+    // projects.list self-heal tick.
+    seedState(tmpHome, {
+      projects: [
+        {
+          name: "stale-git",
+          path: plainPath,
+          defaultBranch: "main",
+          kind: "git",
+          worktrees: [{ branch: "main", path: plainPath }],
+        },
+      ],
+    });
+    seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
+    server = await startServer({ tmpHome });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("getDiffSummary on a stale-git workspace returns empty stats (no git error)", async () => {
+    // Call getDiffSummary directly via the workspace endpoint. Without
+    // the `!hasGit` short-circuit on the server, this would `execGit`
+    // against a folder with no `.git` and throw — surfacing as the wall
+    // of red text in the Changes view that motivated #427's hardening.
+    const res = await trpcQuery(server.url, "workspace.getDiffSummary", {
+      workspaceId: "stale-git-main",
+    });
+    expect(res.status).toBe(200);
+    const data = await trpcData<{
+      stats: { filesChanged: number; insertions: number; deletions: number };
+      fileStatuses: Record<string, string>;
+    }>(res);
+    expect(data.stats).toEqual({ filesChanged: 0, insertions: 0, deletions: 0 });
+    expect(data.fileStatuses).toEqual({});
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Promotion: plain -> git. The escape hatch from the spec — runs git init
 // in the folder and flips `kind`. The existing implicit workspace stays in
 // place (its branch and workspaceId don't change).

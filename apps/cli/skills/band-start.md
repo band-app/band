@@ -61,7 +61,11 @@ If `kind` is `"plain"`:
 
   ```sh
   ws_id=$(band workspaces list "$project_name" --output json \
-    | jq -r '.workspaces[0].workspaceId')
+    | jq -r '.workspaces[0].workspaceId // empty')
+  if [ -z "$ws_id" ]; then
+    echo "error: no implicit workspace found for project '$project_name' — check that the server is running and the project is registered" >&2
+    exit 1
+  fi
   # `chats send` lazy-creates a chat pane on the first call if none exists
   band chats send "$ws_id" --prompt "<user prompt>" --output json
   chat_id=$(band chats list "$ws_id" --output json | jq -r '.chats[0].id')
