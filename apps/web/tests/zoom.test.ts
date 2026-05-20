@@ -9,6 +9,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   applyZoomLevel,
+  applyZoomLevelToDom,
   DEFAULT_ZOOM,
   getCurrentZoomLevel,
   MAX_ZOOM,
@@ -31,6 +32,40 @@ function resetZoomState() {
 
 beforeEach(resetZoomState);
 afterEach(resetZoomState);
+
+describe("applyZoomLevelToDom", () => {
+  // The contract that distinguishes this helper from `applyZoomLevel` is
+  // exactly the absence of a localStorage write — pin it so a future
+  // refactor can't accidentally re-introduce the save without a test
+  // failure. The cross-window `storage` event handler in `ZoomSync`
+  // depends on this.
+  it("updates the DOM and CSS variable but does NOT persist to localStorage", () => {
+    expect(localStorage.getItem("band:zoom-level")).toBeNull();
+    applyZoomLevelToDom(1.4);
+    expect(document.documentElement.style.zoom).toBe("1.4");
+    expect(document.documentElement.style.getPropertyValue(ZOOM_CSS_VAR)).toBe("1.4");
+    // Crucially, no localStorage write.
+    expect(localStorage.getItem("band:zoom-level")).toBeNull();
+  });
+
+  it("dispatches the zoom-changed event with the applied level", () => {
+    const events: number[] = [];
+    const listener = (e: Event) => events.push((e as CustomEvent<number>).detail);
+    window.addEventListener(ZOOM_CHANGE_EVENT, listener);
+    try {
+      applyZoomLevelToDom(0.8);
+    } finally {
+      window.removeEventListener(ZOOM_CHANGE_EVENT, listener);
+    }
+    expect(events).toEqual([0.8]);
+  });
+
+  it("returns the clamped/rounded value it actually applied", () => {
+    expect(applyZoomLevelToDom(10)).toBe(MAX_ZOOM);
+    expect(applyZoomLevelToDom(0)).toBe(MIN_ZOOM);
+    expect(applyZoomLevelToDom(1.234567)).toBe(1.23);
+  });
+});
 
 describe("applyZoomLevel", () => {
   it("writes `zoom` and `--app-zoom` to <html>", () => {

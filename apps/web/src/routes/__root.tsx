@@ -94,7 +94,14 @@ const THEME_INIT_SCRIPT = `(function(){try{var t=localStorage.getItem("band-them
  *  to counter-zoom xterm out of the document-level zoom coordinate space — see
  *  ZOOM_CSS_VAR in zoom.ts. We always set the var (defaulting to 1) so the
  *  counter-zoom `calc(1 / var(--app-zoom, 1))` resolves cleanly even when no
- *  zoom override is persisted. */
+ *  zoom override is persisted.
+ *
+ *  Note: this also means `<html>` always gets an inline `zoom: 1` on first
+ *  boot (the previous script left `zoom` unset in that case). This is
+ *  functionally identical to the browser default, but `getComputedStyle`
+ *  on `<html>` now reports `zoom: "1"` instead of `""` — do not use a
+ *  truthiness check on `style.zoom` to detect "has the user ever changed
+ *  zoom"; read the persisted value via `loadZoomLevel()` instead. */
 const ZOOM_INIT_SCRIPT = `(function(){try{var z=localStorage.getItem("band:zoom-level");var n=1;if(z){var p=parseFloat(z);if(!isNaN(p)&&p>=0.5&&p<=2)n=p;}var d=document.documentElement;d.style.zoom=String(n);d.style.setProperty("--app-zoom",String(n));}catch(e){}})()`;
 
 /** Applies a theme value ("dark", "light", or "system") to the document root. */

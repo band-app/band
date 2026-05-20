@@ -70,18 +70,13 @@ export function applyZoomLevelToDom(level: number): number {
   // `zoom: calc(1 / var(--app-zoom, 1))` without touching JS.
   root.style.setProperty(ZOOM_CSS_VAR, String(rounded));
   // Fire the change event AFTER the DOM is up to date so subscribers can
-  // read the post-update state synchronously. We surface dispatch failures
-  // in dev so a regression doesn't silently swallow zoom updates — the
-  // CustomEvent constructor and `dispatchEvent` have full cross-browser
-  // support so this branch should never fire, but if it ever does we want
-  // a console signal rather than a mystery missing update.
-  try {
-    window.dispatchEvent(new CustomEvent<number>(ZOOM_CHANGE_EVENT, { detail: rounded }));
-  } catch (err) {
-    if (process.env.NODE_ENV !== "production") {
-      console.error("[zoom] failed to dispatch zoom-changed event", err);
-    }
-  }
+  // read the post-update state synchronously. `CustomEvent` and
+  // `dispatchEvent` have universal cross-browser support and cannot throw
+  // with a `number` detail, so we deliberately do NOT wrap this in a
+  // try/catch — a silent swallow would only mask a real regression (the
+  // event failing to fire means TerminalPanel would stop reacting to
+  // zoom, and we'd rather see the exception loudly).
+  window.dispatchEvent(new CustomEvent<number>(ZOOM_CHANGE_EVENT, { detail: rounded }));
   return rounded;
 }
 
