@@ -117,9 +117,10 @@ async function readListState(page: Page): Promise<{
         url: location.pathname,
       };
     }
-    // The active card has the "bg-accent/50 border-l-2 border-l-primary"
-    // classes applied via the `isActive` styling in WorkspaceCard.
-    const activeCard = vp.querySelector<HTMLElement>(".bg-accent\\/50.border-l-2");
+    // The active card carries `data-active="true"` (set by WorkspaceCard's
+    // `isActive` styling) — much more stable than keying off Tailwind class
+    // strings, which can churn with design-token / dark-mode tweaks.
+    const activeCard = vp.querySelector<HTMLElement>('[data-active="true"]');
     const vpRect = vp.getBoundingClientRect();
     const cardRect = activeCard?.getBoundingClientRect();
     return {
@@ -152,7 +153,7 @@ test("direct URL nav centers the active workspace card in the project list", asy
   // Wait for the active card to be in the DOM. The styling kicks in once
   // the projects query resolves AND the Zustand store sees the active
   // workspace id from the route.
-  const activeCard = page.locator(".bg-accent\\/50.border-l-2");
+  const activeCard = page.locator('[data-active="true"]');
   await expect(activeCard).toBeVisible({ timeout: 10_000 });
 
   const state = await readListState(page);
@@ -177,7 +178,7 @@ test("clicking a card in the list preserves the scroll position (no auto-scroll)
   await page.goto(`${server.url}/workspace/${encodeURIComponent(LAST_WORKSPACE)}?token=${TOKEN}`);
 
   // Wait for the list to settle on the last workspace.
-  await expect(page.locator(".bg-accent\\/50.border-l-2")).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('[data-active="true"]')).toBeVisible({ timeout: 10_000 });
 
   // Manually scroll the list to the top — simulates a user who wants to
   // explore other projects without losing their scroll context.
@@ -217,7 +218,7 @@ test("browser back navigation re-centers the active card", async ({ page }) => {
 
   // Start at the LAST workspace — direct URL nav centers it.
   await page.goto(`${server.url}/workspace/${encodeURIComponent(LAST_WORKSPACE)}?token=${TOKEN}`);
-  await expect(page.locator(".bg-accent\\/50.border-l-2")).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('[data-active="true"]')).toBeVisible({ timeout: 10_000 });
   const initial = await readListState(page);
   const initialScrollTop = initial.scrollTop;
 

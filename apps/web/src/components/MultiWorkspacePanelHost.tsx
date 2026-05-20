@@ -1,6 +1,6 @@
 import { useSettingsQuery } from "@band-app/dashboard-core";
 import { useRouterState } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
 import { clearPerWorkspaceState } from "./per-workspace-state-store";
 
@@ -86,7 +86,12 @@ export function MultiWorkspacePanelHost({ emptyState, children }: MultiWorkspace
         lastAccessed: Date.now(),
       });
 
-      // LRU eviction: remove the oldest entry (excluding current)
+      // LRU eviction: remove the oldest entry (excluding current). The
+      // cross-panel state for the evicted workspace is cleaned up below
+      // in a post-commit effect — NOT here in the updater, because React
+      // is allowed to invoke the updater multiple times (StrictMode
+      // double-invoke, concurrent interruptions) and side effects inside
+      // it would fire more than once per actual eviction.
       if (next.size > maxCachedWorkspaces) {
         let oldestKey: string | null = null;
         let oldestTime = Number.POSITIVE_INFINITY;
@@ -96,13 +101,7 @@ export function MultiWorkspacePanelHost({ emptyState, children }: MultiWorkspace
             oldestKey = key;
           }
         }
-        if (oldestKey) {
-          next.delete(oldestKey);
-          // The evicted workspace's panel child will unmount on the next
-          // commit; drop its cross-panel state so the map doesn't grow
-          // unbounded across a long session.
-          clearPerWorkspaceState(oldestKey);
-        }
+        if (oldestKey) next.delete(oldestKey);
       }
 
       return next;
@@ -123,6 +122,19 @@ export function MultiWorkspacePanelHost({ emptyState, children }: MultiWorkspace
       return next;
     });
   }, [activeWorkspaceId]);
+
+  // Detect evictions by diffing the cache key set across commits and clear
+  // the dropped workspaces' cross-panel state. Lives in an effect (not the
+  // setState updater) so React-driven double-invocations don't repeatedly
+  // call `clearPerWorkspaceState` for the same workspaceId.
+  const lastCacheKeysRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const current = new Set(cache.keys());
+    for (const prev of lastCacheKeysRef.current) {
+      if (!current.has(prev)) clearPerWorkspaceState(prev);
+    }
+    lastCacheKeysRef.current = current;
+  }, [cache]);
 
   // No workspace selected: render the empty state. Cached entries stay alive
   // in `cache` so navigating back to a workspace remains instant; they're

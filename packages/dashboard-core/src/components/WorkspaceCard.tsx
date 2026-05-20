@@ -171,6 +171,12 @@ export const WorkspaceCard = memo(function WorkspaceCard({
     ref: cardRef,
     className,
     tabIndex: 0,
+    // Semantic markers — let tests, screen readers, and future styling
+    // changes target the active card without depending on the Tailwind
+    // class string. `aria-current="page"` is the standard ARIA pattern for
+    // "currently-active link in a list of related links".
+    "data-active": isActive || undefined,
+    "aria-current": isActive ? ("page" as const) : undefined,
     onClick: (e: React.MouseEvent) => {
       e.stopPropagation();
       handleClick();
