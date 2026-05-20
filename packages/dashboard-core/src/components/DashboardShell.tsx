@@ -220,8 +220,16 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar, hideMenu }: Das
       // NOTE: `--app-zoom` is hardcoded here because `packages/dashboard-core`
       // can't import from `apps/web/src/lib/zoom.ts` without inverting the
       // package dependency graph. Keep this string in sync with the
-      // `ZOOM_CSS_VAR` constant exported from that module.
-      style={hideTitleBar ? undefined : { height: "calc(100dvh / var(--app-zoom, 1))" }}
+      // `ZOOM_CSS_VAR` constant exported from that module — grep for
+      // `ZOOM_CSS_VAR` in `apps/web/src/lib/zoom.ts` if renaming.
+      style={
+        hideTitleBar
+          ? undefined
+          : {
+              // sync-with: ZOOM_CSS_VAR in apps/web/src/lib/zoom.ts
+              height: "calc(100dvh / var(--app-zoom, 1))",
+            }
+      }
     >
       {isDesktop && !hideTitleBar && (
         <div
