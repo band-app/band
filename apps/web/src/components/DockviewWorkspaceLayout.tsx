@@ -804,7 +804,7 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
   // Mirror currentFile into a ref so the global keyboard handler — wired
   // once per workspace via useEffect and intentionally not re-subscribed on
   // every selection change — can read the latest value without a stale
-  // closure. Used by the ⌥⌘F "Format Current File" branch.
+  // closure. Used by the ⇧⌥F "Format Current File" branch.
   const currentFileRef = useRef<string | undefined>(undefined);
   currentFileRef.current = currentFile;
 
@@ -993,6 +993,35 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
         return;
       }
 
+      // ⇧⌥F → Format Current File (VS Code parity). This is the only
+      // shortcut in the handler that intentionally omits Cmd/Ctrl, so
+      // it has to sit above the mod gate below; otherwise the
+      // early-return swallows it. We still bail on a focused terminal
+      // so the keystroke passes through to whatever the user is
+      // running there (some shells / editors bind it themselves).
+      //
+      // We match on `e.code === "KeyF"` rather than `e.key === "f"`
+      // because macOS applies the Option-layer character map on
+      // keydown: ⌥⇧F produces the dead-key character "Ï", not "F", so
+      // a key-string check silently misses every press. `e.code` is
+      // the physical-key identifier (unaffected by modifiers or the
+      // Option layer) and is what VS Code uses for the same reason.
+      // The trade-off — non-QWERTY layouts trigger off the physical
+      // KeyF position rather than the "F" character — matches every
+      // other IDE; users on alternative layouts re-bind in the same
+      // place they would in VS Code.
+      if (e.code === "KeyF" && e.altKey && e.shiftKey && !e.metaKey && !e.ctrlKey) {
+        if (terminalFocused) return;
+        e.preventDefault();
+        const filePath = currentFileRef.current;
+        window.dispatchEvent(
+          new CustomEvent("band:format-current-file", {
+            detail: { workspaceId, filePath },
+          }),
+        );
+        return;
+      }
+
       // When terminal is focused, only handle Meta/Cmd-modified shortcuts.
       // All plain Ctrl+key combos pass through to the terminal.
       const mod = e.metaKey || e.ctrlKey;
@@ -1020,22 +1049,10 @@ export const DockviewWorkspaceLayout = memo(function DockviewWorkspaceLayout({
       } else if (key === "p" && !e.shiftKey) {
         e.preventDefault();
         setQuickOpenOpen(true);
-      } else if (key === "f" && e.altKey) {
-        // ⌥⌘F → Format Current File. Always include `workspaceId` so the
-        // matching FileViewer can filter cross-workspace; `filePath` is
-        // a best-effort hint — `currentFileRef.current` is `undefined`
-        // for restored-but-never-switched-to tabs (see the palette
-        // command for the longer explanation).
-        e.preventDefault();
-        const filePath = currentFileRef.current;
-        window.dispatchEvent(
-          new CustomEvent("band:format-current-file", {
-            detail: { workspaceId, filePath },
-          }),
-        );
-      } else if (key === "f" && e.shiftKey) {
+      } else if (key === "f" && e.shiftKey && !e.altKey) {
         // ⇧⌘F → Search in Files (matches the shortcut already advertised
-        // by the file-tree tooltip and the Quick Open menu).
+        // by the file-tree tooltip and the Quick Open menu). Format
+        // lives at ⇧⌥F above the mod gate — see the comment there.
         e.preventDefault();
         setSearchFilesOpen(true);
       } else if (key === "f" && !e.shiftKey && !e.altKey) {

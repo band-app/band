@@ -19,7 +19,7 @@ const log = createLogger("formatter");
 //
 // `skipped: true` is the soft-skip path: Prettier has no parser for the
 // file's extension (or it's covered by `.prettierignore`). Editors fire
-// format on every Cmd+Alt+F regardless of file type, so unsupported
+// format on every Shift+Alt+F regardless of file type, so unsupported
 // files need to be a no-op, not an error.
 
 export type FormatErrorCode = "FILE_NOT_IN_WORKTREE" | "PRETTIER_FAILED";

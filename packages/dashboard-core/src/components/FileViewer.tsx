@@ -228,7 +228,7 @@ export function FileViewer({
   const [editedContent, setEditedContent] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  // Status banner for the ⇧⌘F "Format Current File" action. Kept separate
+  // Status banner for the ⇧⌥F "Format Current File" action. Kept separate
   // from `saveError` so a successful format flash doesn't get swallowed by
   // an unrelated stale save error. `kind: "info"` covers the soft-skip
   // path (unsupported file extension); error covers Prettier syntax errors.
@@ -238,7 +238,7 @@ export function FileViewer({
   } | null>(null);
   // `formatting` drives the spinner in the toolbar; `formattingRef` is the
   // re-entrancy guard. We can't use the React-state value as the guard —
-  // setState is async, so two ⇧⌘F presses inside the same React batch
+  // setState is async, so two ⇧⌥F presses inside the same React batch
   // would both observe `formatting === false` and proceed in parallel. The
   // ref flips synchronously on call entry and clears in `finally`.
   const [formatting, setFormatting] = useState(false);
@@ -591,7 +591,7 @@ export function FileViewer({
     }
   }, [adapter, workspaceId, filePath, untitled, languageOverride]);
 
-  // Listen for the global "Format Current File" event (⌘⇧F + palette).
+  // Listen for the global "Format Current File" event (⇧⌥F + palette).
   // The dispatcher reads `currentFileRef.current`, which is only
   // updated by `notifySelectFile` — and that path filters out untitled
   // / external tabs (their paths can't round-trip through the
