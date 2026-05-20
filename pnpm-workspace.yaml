@@ -10,3 +10,24 @@ onlyBuiltDependencies:
   - esbuild
   - node-pty
   - sharp
+
+# Force pnpm to install optional dependencies for the off-host architectures
+# we ship in the Electron desktop bundle. The release workflow runs on
+# `macos-latest` (Apple Silicon → darwin-arm64), but `electron-builder` emits
+# both x64 and arm64 DMGs from the same `apps/web/dist`. Without this list,
+# pnpm only installs `@vscode/ripgrep-darwin-arm64` and the x64 DMG starts up
+# missing its ripgrep binary (see apps/web/scripts/build-server.sh).
+#
+# `current` keeps the host platform/arch installed; the extra entries make
+# pnpm also install x64 binaries so build-server.sh can copy them into the
+# bundle. Adding linux entries is cheap and keeps the npm package usable on
+# Intel and ARM Linux hosts.
+supportedArchitectures:
+  os:
+    - current
+    - darwin
+    - linux
+  cpu:
+    - current
+    - x64
+    - arm64

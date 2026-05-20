@@ -60,12 +60,20 @@ if [ "${NPM_PUBLISH:-}" != "1" ]; then
   fi
 
   # -----------------------------------------------------------------------
-  # Copy @vscode/ripgrep wrapper + platform-specific binary into dist/.
+  # Copy @vscode/ripgrep wrapper + platform-specific binaries into dist/.
   # The wrapper (lib/index.js) does:
   #   createRequire(import.meta.url).resolve(`@vscode/ripgrep-${platform}-${arch}/bin/rg`)
   # so the platform package must be resolvable as a sibling in node_modules.
-  # We only ship the binary for the host platform to keep the bundle small;
-  # cross-platform builds will need to vendor binaries for each target.
+  #
+  # `electron-builder` emits both x64 and arm64 macOS artifacts from the same
+  # `apps/web/dist`, so we must ship binaries for BOTH architectures of the
+  # host OS — otherwise the off-arch DMG dies at startup with
+  # "Could not find @vscode/ripgrep-darwin-x64". pnpm is told to install
+  # cross-arch optional deps via `supportedArchitectures` in
+  # `pnpm-workspace.yaml`; if the off-arch package is still missing here
+  # (older pnpm install, fork without the workspace setting) we warn loudly
+  # but don't fail — the host-arch binary alone keeps single-arch builds
+  # working.
   # -----------------------------------------------------------------------
 
   RG_REAL="$(cd node_modules/@vscode/ripgrep && pwd -P)"
@@ -74,23 +82,46 @@ if [ "${NPM_PUBLISH:-}" != "1" ]; then
   cp "$RG_REAL/lib/index.js" dist/node_modules/@vscode/ripgrep/lib/
   cp "$RG_REAL/lib/index.d.ts" dist/node_modules/@vscode/ripgrep/lib/ 2>/dev/null || true
 
-  RG_PLATFORM="$(node -e 'console.log(process.platform)')"
-  RG_ARCH="$(node -e 'console.log(process.arch)')"
-  RG_PLATFORM_PKG="@vscode/ripgrep-${RG_PLATFORM}-${RG_ARCH}"
-  # Under pnpm's strict layout, the platform-specific package is hoisted
-  # only into `@vscode/ripgrep`'s own sandbox, not into the workspace's
-  # top-level node_modules — so we resolve it from the wrapper's directory.
-  RG_PLATFORM_BIN="$(cd "$RG_REAL" && node -e "console.log(require.resolve('${RG_PLATFORM_PKG}/package.json'))" 2>/dev/null || true)"
-  if [ -n "$RG_PLATFORM_BIN" ]; then
-    RG_PLATFORM_DIR="$(dirname "$RG_PLATFORM_BIN")"
-    RG_BIN="$([ "$RG_PLATFORM" = "win32" ] && echo "rg.exe" || echo "rg")"
-    mkdir -p "dist/node_modules/${RG_PLATFORM_PKG}/bin"
-    cp "$RG_PLATFORM_DIR/package.json" "dist/node_modules/${RG_PLATFORM_PKG}/"
-    cp "$RG_PLATFORM_DIR/bin/$RG_BIN" "dist/node_modules/${RG_PLATFORM_PKG}/bin/"
-    chmod +x "dist/node_modules/${RG_PLATFORM_PKG}/bin/$RG_BIN"
-  else
-    echo "WARNING: ${RG_PLATFORM_PKG} not found; find-in-files will not work in this build" >&2
-  fi
+  RG_HOST_PLATFORM="$(node -e 'console.log(process.platform)')"
+  RG_HOST_ARCH="$(node -e 'console.log(process.arch)')"
+
+  # Pick the arch matrix to ship for the current build OS. Electron desktop
+  # builds (`apps/desktop/electron-builder.yml`) target macOS only and emit
+  # both x64 + arm64 DMGs, so on darwin we MUST ship both archs. Linux is
+  # included for symmetry — `apps/web` advertises `"os": ["darwin", "linux"]`
+  # in package.json and consumers of the npm package may run on either arch.
+  case "$RG_HOST_PLATFORM" in
+    darwin) RG_ARCHES="x64 arm64" ;;
+    linux)  RG_ARCHES="x64 arm64" ;;
+    win32)  RG_ARCHES="x64 arm64" ;;
+    *)      RG_ARCHES="$RG_HOST_ARCH" ;;
+  esac
+
+  RG_BIN_NAME="$([ "$RG_HOST_PLATFORM" = "win32" ] && echo "rg.exe" || echo "rg")"
+
+  for arch in $RG_ARCHES; do
+    pkg="@vscode/ripgrep-${RG_HOST_PLATFORM}-${arch}"
+    # Under pnpm's strict layout, the platform-specific package is hoisted
+    # only into `@vscode/ripgrep`'s own sandbox, not into the workspace's
+    # top-level node_modules — so we resolve it from the wrapper's directory.
+    pkg_json="$(cd "$RG_REAL" && node -e "try{console.log(require.resolve('${pkg}/package.json'))}catch{}" 2>/dev/null || true)"
+    if [ -z "$pkg_json" ]; then
+      if [ "$arch" = "$RG_HOST_ARCH" ]; then
+        # Missing host arch is fatal on darwin/linux/win32 builds — find-in-files
+        # would break for every user of the bundle.
+        echo "ERROR: host-arch ripgrep package ${pkg} not found; aborting build" >&2
+        exit 1
+      else
+        echo "WARNING: cross-arch ripgrep package ${pkg} not found; ${RG_HOST_PLATFORM}-${arch} users of this bundle will fail at startup. Re-run \`pnpm install\` after pulling pnpm-workspace.yaml changes." >&2
+        continue
+      fi
+    fi
+    pkg_dir="$(dirname "$pkg_json")"
+    mkdir -p "dist/node_modules/${pkg}/bin"
+    cp "$pkg_dir/package.json" "dist/node_modules/${pkg}/"
+    cp "$pkg_dir/bin/$RG_BIN_NAME" "dist/node_modules/${pkg}/bin/"
+    chmod +x "dist/node_modules/${pkg}/bin/$RG_BIN_NAME"
+  done
 
   # SQLite is provided by Node's built-in `node:sqlite` (Stability 1.2 RC,
   # available unflagged since Node 22.13). No native module ships in the

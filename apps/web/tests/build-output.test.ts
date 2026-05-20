@@ -48,6 +48,26 @@ describe("build output", () => {
     expect(existsSync(join(dist, "node_modules", platformPkg, "bin", binName))).toBe(true);
   });
 
+  it("contains ripgrep binaries for both archs on macOS builds", () => {
+    // electron-builder emits both x64 and arm64 macOS artifacts from the same
+    // `apps/web/dist`, so the off-host arch binary must also be present —
+    // otherwise the off-arch DMG dies at startup with "Could not find
+    // @vscode/ripgrep-darwin-x64". This regression was shipped in v0.x: the
+    // build host was Apple Silicon (`runs-on: macos-latest` on Actions) and
+    // the bundle only carried the arm64 ripgrep, breaking every Intel Mac
+    // install. See pnpm-workspace.yaml::supportedArchitectures and
+    // apps/web/scripts/build-server.sh for the matching install/copy logic.
+    if (process.platform !== "darwin") return;
+    if (skipSdkChecks) return; // npm publish path skips native-module copy
+    for (const arch of ["x64", "arm64"]) {
+      const pkg = `@vscode/ripgrep-darwin-${arch}`;
+      expect(
+        existsSync(join(dist, "node_modules", pkg, "bin", "rg")),
+        `missing ${pkg}/bin/rg`,
+      ).toBe(true);
+    }
+  });
+
   it("does NOT bundle a SQLite native module", () => {
     // SQLite is provided by Node's built-in `node:sqlite` (RC since 22.13).
     // Nothing for SQLite should ship under dist/node_modules/.
