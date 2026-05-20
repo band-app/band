@@ -182,7 +182,7 @@ const touchPointerUp = (fn?: () => void) => (e: React.PointerEvent<HTMLButtonEle
 /**
  * Open Quick Open via a window event. The active workspace layout
  * (MobileWorkspaceLayout in `workspace.$workspaceId.tsx` or
- * DockviewWorkspaceLayout when desktop) listens for this event and
+ * SharedDockviewLayout when desktop) listens for this event and
  * opens its locally-owned dialog. Using an event avoids threading the
  * setter through a React context across multiple route levels, which
  * proved unreliable in practice on the iOS Simulator.
@@ -853,7 +853,7 @@ export function CodeBrowserView({
   // imperative ref. The bar's open/close state and input still live on
   // `useSearch` — only the *target* of each operation switches based on
   // `mdViewMode`. This keeps the keybind path (the find-in-file
-  // callback wired by `DockviewWorkspaceLayout`) intact, and stops
+  // callback wired by `SharedDockviewLayout`) intact, and stops
   // duplicate bars from stacking on top of each other in markdown
   // tabs.
   const getViews = useCallback(() => (editorViewRef.current ? [editorViewRef.current] : []), []);
@@ -1213,7 +1213,7 @@ export function CodeBrowserView({
     if (entry) navigateToEntry(entry);
   }, [editorHistory.goForward, navigateToEntry]);
 
-  // Listen for keyboard shortcut events dispatched from DockviewWorkspaceLayout
+  // Listen for keyboard shortcut events dispatched from SharedDockviewLayout
   useEffect(() => {
     const handleGoBack = () => handleEditorGoBack();
     const handleGoForward = () => handleEditorGoForward();

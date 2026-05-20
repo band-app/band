@@ -59,7 +59,7 @@ export function useFindInFileContext() {
 
 // (Removed CodeToolbarContext — the toolbar now dispatches `band:open-quick-open`
 // and `band:open-search-files` window events that this layout and
-// DockviewWorkspaceLayout each listen for. Context proved unreliable
+// SharedDockviewLayout each listen for. Context proved unreliable
 // to thread through multiple route levels on the iOS Simulator.)
 
 // ---------------------------------------------------------------------------
@@ -205,9 +205,10 @@ function DesktopWorkspaceLayout({
   workspaceId: string;
   encodedId: string;
 }) {
-  // Dockview is now managed by DockviewInstanceManager in __root.tsx.
-  // Each workspace gets its own persistent DockviewReact instance that is
-  // shown/hidden via CSS rather than destroyed/recreated on workspace switch.
+  // Dockview is owned by SharedDockviewLayout in __root.tsx — a SINGLE
+  // dockview instance for the whole app. Per-workspace content is cached
+  // inside each panel via MultiWorkspacePanelHost, so a workspace switch
+  // never tears down dockview.
   return null;
 }
 

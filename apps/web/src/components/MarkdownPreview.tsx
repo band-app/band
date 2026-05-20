@@ -6,7 +6,7 @@
  * and preview modes and drives this component through an imperative
  * ref. Two reasons:
  *
- *   1. Avoid duplicate find bars on `Cmd+F`. `DockviewWorkspaceLayout`
+ *   1. Avoid duplicate find bars on `Cmd+F`. `SharedDockviewLayout`
  *      and `useSearch` both register window-level keybinds, and any
  *      preview-local handler we add ends up running alongside (not
  *      instead of) the one routed to the editor — last time we shipped

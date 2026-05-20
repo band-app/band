@@ -78,7 +78,7 @@ import { AgentStatusIndicator } from "./AgentStatusIndicator";
 import { DeleteWorkspaceDialog } from "./DeleteWorkspaceDialog";
 import { NewWorkspaceDialog } from "./NewWorkspaceForm";
 import { PromoteToGitDialog } from "./PromoteToGitDialog";
-import { WorkspaceCard } from "./WorkspaceCard";
+import { markRecentActivation, WorkspaceCard } from "./WorkspaceCard";
 
 interface SortableProjectProps {
   project: ProjectInfo;
@@ -748,6 +748,9 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
   // ──────────────────────────────────────────────────────────────────────────
   const selectWorkspace = useCallback(
     (wsId: string) => {
+      // Mark as in-list activation so WorkspaceCard's scrollIntoView effect
+      // bails out — keyboard focus is already on the chosen card.
+      markRecentActivation(wsId);
       const href = capabilities.getWorkspaceHref?.(wsId);
       if (href && capabilities.navigate) {
         capabilities.navigate(href);

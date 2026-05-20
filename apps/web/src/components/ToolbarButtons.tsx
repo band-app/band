@@ -14,7 +14,7 @@ interface ToolbarOverflowContextValue {
   /** Tunnel state hint for the menu item (so we can show running/error coloring). */
   tunnelStatus: "idle" | "running" | "error";
   /** True when any toolbar dialog (Tasks, Cronjobs, Tunnel, Prereq) is open.
-   *  DockviewWorkspaceLayout merges this with its own dialog state to hide
+   *  SharedDockviewLayout merges this with its own dialog state to hide
    *  Electron BrowserView webviews that would otherwise render on top. */
   anyDialogOpen: boolean;
 }
