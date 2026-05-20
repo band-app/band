@@ -1639,6 +1639,21 @@ export function DiffView({
     </>
   );
 
+  // Manual "reload changes" button — shared between the populated and empty
+  // toolbars so users watching a busy branch can always force a refresh,
+  // even when the current ref has no diff.
+  const renderReloadButton = () => (
+    <button
+      type="button"
+      onClick={() => fetchSummaryRef.current?.(true)}
+      className={ghostBtnAlwaysClass}
+      title="Reload changes"
+      aria-label="Reload changes"
+    >
+      <RefreshCw className="size-3.5" />
+    </button>
+  );
+
   // The loading / error / "no changes" / populated states all share the
   // outer layout (file tree + toolbar + status banner) so switching the
   // changes selector between refs (including a ref with no diff) doesn't
@@ -1650,6 +1665,11 @@ export function DiffView({
   const fileStatuses = hasChanges ? (summary?.fileStatuses ?? {}) : {};
   const filenames = flattenFileTreeOrder(buildFileTree(fileStatuses));
   filenamesRef.current = filenames;
+  // `hasChanges` already implies `summary !== null`, but TypeScript can't
+  // narrow `summary` through a stored boolean. Pull `stats` out once so the
+  // JSX downstream doesn't need a redundant `&& summary` guard for type
+  // narrowing on every `summary.stats.*` access.
+  const stats = hasChanges ? (summary?.stats ?? null) : null;
 
   return (
     <div ref={rootRef} className="@container/diff flex h-full overflow-hidden">
@@ -1665,7 +1685,13 @@ export function DiffView({
             <span className="text-xs font-medium text-muted-foreground">Files</span>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto py-1 pl-px">
+            {/* Key on workspaceId so switching workspaces remounts the tree
+                and clears its internal "seen directories" memo. Without
+                this, collapsed-directory state from one workspace would
+                bleed into the next when the parent route reuses this
+                DiffView instance across workspace switches. */}
             <ChangesFileTree
+              key={workspaceId}
               fileStatuses={fileStatuses}
               onSelectFile={handleScrollToFile}
               activeFile={activeFile}
@@ -1690,11 +1716,17 @@ export function DiffView({
             {renderSidebarToggle()}
             {renderBranchIndicator(summary?.headBranch)}
           </div>
-          {/* When there are no changes the toolbar collapses to just the
-              pull / push controls (the "just fetch upstream" case). The
-              commit / search / expand / view-mode buttons all operate on
-              a non-empty diff and would be no-ops otherwise. */}
-          {!hasChanges && <div className="flex items-center gap-1">{renderGitSyncButtons()}</div>}
+          {/* When there are no changes the toolbar collapses to the
+              pull / push + reload controls. The commit / search / expand /
+              view-mode buttons all operate on a non-empty diff and would
+              be no-ops, but reload stays so users watching a busy branch
+              can still force a refresh. */}
+          {!hasChanges && (
+            <div className="flex items-center gap-1">
+              {renderGitSyncButtons()}
+              {renderReloadButton()}
+            </div>
+          )}
           {/* Inline action icons — collapsed into the kebab menu below 44rem.
               The threshold is wider than the branch-label one (32rem) because
               the right-side cluster now carries up to eight icons (commit,
@@ -1747,15 +1779,7 @@ export function DiffView({
                   )}
                 </button>
               )}
-              <button
-                type="button"
-                onClick={() => fetchSummaryRef.current?.(true)}
-                className={ghostBtnAlwaysClass}
-                title="Reload changes"
-                aria-label="Reload changes"
-              >
-                <RefreshCw className="size-3.5" />
-              </button>
+              {renderReloadButton()}
               <button
                 type="button"
                 onClick={search.handleOpenSearch}
@@ -1999,31 +2023,25 @@ export function DiffView({
         {/* Bottom status bar — totals for the current diff. Hidden when
             there are no changes; the centered "No changes" message in the
             content area already conveys the empty state. */}
-        {hasChanges && summary && (
+        {stats && (
           <div className="flex h-9 shrink-0 items-center border-t border-border px-3 text-sm text-muted-foreground">
-            <span className="font-medium text-foreground">{summary.stats.filesChanged}</span>
-            <span className="ml-1">
-              {summary.stats.filesChanged === 1 ? "file" : "files"} changed
-            </span>
-            {summary.stats.insertions > 0 && (
-              <span className="ml-2 text-green-600 dark:text-green-400">
-                +{summary.stats.insertions}
-              </span>
+            <span className="font-medium text-foreground">{stats.filesChanged}</span>
+            <span className="ml-1">{stats.filesChanged === 1 ? "file" : "files"} changed</span>
+            {stats.insertions > 0 && (
+              <span className="ml-2 text-green-600 dark:text-green-400">+{stats.insertions}</span>
             )}
-            {summary.stats.deletions > 0 && (
-              <span className="ml-1 text-red-600 dark:text-red-400">
-                -{summary.stats.deletions}
-              </span>
+            {stats.deletions > 0 && (
+              <span className="ml-1 text-red-600 dark:text-red-400">-{stats.deletions}</span>
             )}
           </div>
         )}
       </div>
-      {canCommit && hasChanges && summary && (
+      {canCommit && stats && (
         <CommitDialog
           open={commitDialogOpen}
           onOpenChange={setCommitDialogOpen}
           workspaceId={workspaceId}
-          filesChanged={summary.stats.filesChanged}
+          filesChanged={stats.filesChanged}
           onCommitted={() => {
             // Force a fresh diff fetch — after a commit the working-tree
             // diff (uncommitted) is empty, but the branch diff updates too.
