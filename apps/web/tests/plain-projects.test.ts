@@ -310,6 +310,123 @@ describe("tRPC — plain projects (self-heal kind)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// `git → plain` self-heal with pre-existing worktrees
+// ---------------------------------------------------------------------------
+//
+// A user `rm -rf .git`-ing a real git project: the self-heal must replace
+// the (now-orphaned) git-style worktrees with the implicit `main` workspace,
+// not just leave them as stale rows pointing at broken paths under
+// `worktreesDir/{project}/{branch}`.
+
+describe("tRPC — plain projects (self-heal replaces stale git worktrees)", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+  let plainPath: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    plainPath = createPlainDir(tmpHome, "ex-git");
+
+    // Seed the row as if it WAS a real git project (had `feat/foo` and
+    // `fix/bar` worktrees under worktreesDir). The user has now deleted
+    // `.git` outside the dashboard, so the folder is plain, but the DB
+    // still records the old worktrees.
+    seedState(tmpHome, {
+      projects: [
+        {
+          name: "ex-git",
+          path: plainPath,
+          defaultBranch: "main",
+          kind: "git",
+          worktrees: [
+            { branch: "main", path: plainPath },
+            {
+              branch: "feat/foo",
+              path: join(tmpHome, ".band", "worktrees", "ex-git", "feat-foo"),
+            },
+            {
+              branch: "fix/bar",
+              path: join(tmpHome, ".band", "worktrees", "ex-git", "fix-bar"),
+            },
+          ],
+        },
+      ],
+    });
+    seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
+    server = await startServer({ tmpHome });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("self-heal replaces orphaned git worktrees with the implicit main workspace", async () => {
+    const res = await trpcQuery(server.url, "projects.list");
+    expect(res.status).toBe(200);
+    const data = await trpcData<{
+      projects: Array<{
+        name: string;
+        kind: "git" | "plain";
+        worktrees: Array<{ branch: string; path: string }>;
+      }>;
+    }>(res);
+    const proj = data.projects.find((p) => p.name === "ex-git")!;
+    expect(proj.kind).toBe("plain");
+    // The stale `feat/foo` and `fix/bar` rows are gone — only the
+    // implicit "main" workspace at the project path remains.
+    expect(proj.worktrees).toHaveLength(1);
+    expect(proj.worktrees[0].branch).toBe("main");
+    expect(proj.worktrees[0].path).toBe(plainPath);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// `.git` as a file (git submodule / secondary worktree)
+// ---------------------------------------------------------------------------
+//
+// Git submodules and secondary worktrees embed a `.git` *file* (not a
+// directory) that points at the parent repo. `existsSync` returns true
+// for both, so they should be classified as `kind: "git"`.
+
+describe("tRPC — plain projects (.git as file → kind: git)", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+  let submodulePath: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    // Simulate a git submodule / secondary worktree: a folder where
+    // `.git` is a file containing `gitdir: ...` rather than a directory.
+    submodulePath = join(tmpHome, "as-submodule");
+    mkdirSync(submodulePath, { recursive: true });
+    writeFileSync(join(submodulePath, ".git"), "gitdir: ../parent/.git/modules/sub\n");
+
+    seedState(tmpHome, { projects: [] });
+    seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
+    server = await startServer({ tmpHome });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("projects.add classifies a folder with a `.git` *file* as kind=git", async () => {
+    const res = await trpcMutate(server.url, "projects.add", { path: submodulePath });
+    // The git probes inside the add() path may fail because the gitdir
+    // pointer is fake, but the kind classification is purely
+    // existsSync-based and must still come back as "git". The
+    // `defaultBranch` falls back to "main" when symbolic-ref fails,
+    // which is fine.
+    expect(res.status).toBe(200);
+    const data = await trpcData<{ name: string; kind: "git" | "plain" }>(res);
+    expect(data.name).toBe("as-submodule");
+    expect(data.kind).toBe("git");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Workspace mutations on a plain project should be rejected.
 // ---------------------------------------------------------------------------
 

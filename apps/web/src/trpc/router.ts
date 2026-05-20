@@ -179,12 +179,17 @@ const projectsRouter = t.router({
       const detectedKind: ProjectKind = existsSync(join(project.path, ".git")) ? "git" : "plain";
       if (detectedKind !== project.kind) {
         project.kind = detectedKind;
-        // Stale rows commonly have `worktrees: []` because the pre-PR
-        // `projects.add` code couldn't list git worktrees in a non-git
-        // folder and gave up with an empty array. Synthesize the implicit
-        // workspace that the new add() would have created so the UI has
-        // something to flatten to.
-        if (detectedKind === "plain" && project.worktrees.length === 0) {
+        // On a `git → plain` flip (`.git` disappeared from under us — e.g.
+        // a `rm -rf .git` from a terminal), replace any existing worktree
+        // rows with the implicit `{branch: "main", path: project.path}`
+        // workspace. We do this unconditionally for `plain` (not only
+        // when worktrees is empty) because a real git project flipping
+        // to plain will still have its old `feat/foo` / `fix/bar`
+        // entries; leaving them would orphan the rows (their worktree
+        // paths under `worktreesDir/{project}/{branch}` are now broken
+        // git worktrees with no `.git` to reach back to) and the
+        // flattened plain UI would render the wrong branch label.
+        if (detectedKind === "plain") {
           project.worktrees = [{ branch: "main", path: project.path, pinned: false }];
         }
         kindReconciled = true;
