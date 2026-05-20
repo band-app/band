@@ -37,6 +37,48 @@ import { CIStatusIndicator } from "./CIStatusIndicator";
 import { GitStatusIndicator } from "./GitStatusIndicator";
 import { SetupStatusIndicator } from "./SetupStatusIndicator";
 
+// ---------------------------------------------------------------------------
+// Recent-user-activation marker (used to suppress auto-scroll on in-list nav)
+// ---------------------------------------------------------------------------
+//
+// The active card auto-scrolls into view ONLY when the navigation came from
+// OUTSIDE the project list — direct URL navigation, browser back/forward,
+// or the Ctrl+R workspace picker. When the user clicked a card or pressed
+// Enter on a focused card inside the list, the card is already where their
+// cursor / keyboard focus is, so the scroll is unwanted.
+//
+// The two in-list entry points (`WorkspaceCard.handleClick` and
+// `ProjectList.selectWorkspace`) mark the workspaceId before navigating.
+// The post-navigation `scrollIntoView` effect consumes the marker and bails
+// out instead of scrolling. The marker auto-expires after a short window
+// so a stale value can't accidentally suppress a legitimate scroll on a
+// later URL navigation to the same workspace.
+// ---------------------------------------------------------------------------
+
+const RECENT_ACTIVATION_WINDOW_MS = 300;
+
+let recentlyActivatedWorkspaceId: string | null = null;
+let recentlyActivatedTimer: ReturnType<typeof setTimeout> | null = null;
+
+export function markRecentActivation(workspaceId: string): void {
+  recentlyActivatedWorkspaceId = workspaceId;
+  if (recentlyActivatedTimer) clearTimeout(recentlyActivatedTimer);
+  recentlyActivatedTimer = setTimeout(() => {
+    recentlyActivatedWorkspaceId = null;
+    recentlyActivatedTimer = null;
+  }, RECENT_ACTIVATION_WINDOW_MS);
+}
+
+function consumeRecentActivation(workspaceId: string): boolean {
+  if (recentlyActivatedWorkspaceId !== workspaceId) return false;
+  recentlyActivatedWorkspaceId = null;
+  if (recentlyActivatedTimer) {
+    clearTimeout(recentlyActivatedTimer);
+    recentlyActivatedTimer = null;
+  }
+  return true;
+}
+
 interface Props {
   worktree: WorktreeInfo;
   projectName: string;
@@ -85,12 +127,6 @@ export const WorkspaceCard = memo(function WorkspaceCard({
   const cardRef = useRef<HTMLDivElement>(null);
   const capabilities = useCapabilities();
 
-  useEffect(() => {
-    if (isFocused) {
-      cardRef.current?.scrollIntoView({ block: "nearest" });
-    }
-  }, [isFocused]);
-
   const openWorkspace = useDashboardStore((s) => s.openWorkspace);
   const clearNeedsAttention = useDashboardStore((s) => s.clearNeedsAttention);
   const runScript = useDashboardStore((s) => s.runScript);
@@ -103,8 +139,25 @@ export const WorkspaceCard = memo(function WorkspaceCard({
   const isActive = useDashboardStore((s) => s.activeWorkspaceId === workspaceId);
   const href = capabilities.getWorkspaceHref?.(workspaceId);
 
+  // Scroll this card into view when it becomes the active workspace via
+  // OUTSIDE-the-list navigation (direct URL, browser back/forward, Ctrl+R
+  // workspace picker). The in-list paths (click or keyboard Enter) mark
+  // the workspaceId via `markRecentActivation` before they navigate, and
+  // we consume that marker here to bail out — the card is already where
+  // the user's cursor / keyboard focus is, so the scroll would be a jolt.
+  //
+  // Tied to `isActive` (URL-derived) rather than `isFocused` (keyboard
+  // navigation ring) so arrow-key navigation in the list doesn't trigger
+  // scroll, only an actual workspace change does.
+  useEffect(() => {
+    if (!isActive) return;
+    if (consumeRecentActivation(workspaceId)) return;
+    cardRef.current?.scrollIntoView({ block: "center" });
+  }, [isActive, workspaceId]);
+
   const handleClick = () => {
     clearNeedsAttention(workspaceId);
+    markRecentActivation(workspaceId);
     if (href && capabilities.navigate) {
       capabilities.navigate(href);
     } else if (!href) {

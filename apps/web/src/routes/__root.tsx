@@ -30,7 +30,7 @@ import {
 import { useCallback, useEffect, useMemo } from "react";
 import { BrowserHostBridge } from "../components/BrowserHostBridge";
 import { DesktopTitleBar, type PanelItem } from "../components/DesktopTitleBar";
-import { DockviewInstanceManager } from "../components/DockviewInstanceManager";
+import { SharedDockviewLayout } from "../components/SharedDockviewLayout";
 import { ToolbarOverflowMenuItems, ToolbarOverflowProvider } from "../components/ToolbarButtons";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useNavigationHistory } from "../hooks/useNavigationHistory";
@@ -401,7 +401,7 @@ function AppShell() {
         <div className="flex-1 min-h-0 overflow-hidden">
           <div className="h-full min-w-0 overflow-hidden relative">
             <Outlet />
-            <DockviewInstanceManager />
+            <SharedDockviewLayout />
             <BrowserHostBridge />
           </div>
         </div>
