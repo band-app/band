@@ -160,7 +160,12 @@ function SortableProject({
   // build that allowed the menu item).
   const openWorkspace = useDashboardStore((s) => s.openWorkspace);
   const clearNeedsAttention = useDashboardStore((s) => s.clearNeedsAttention);
-  const plainBranch = isPlain ? (project.worktrees[0]?.branch ?? "main") : "";
+  // Plain projects are guaranteed to have exactly one worktree (the
+  // implicit `main` synthesized by projects.add and re-synthesized by
+  // `reconcileKindForProject` on any git → plain flip). Read
+  // `worktrees[0].branch` directly rather than `?.branch ?? "main"`;
+  // the optional chain would mask a real state-corruption bug.
+  const plainBranch = isPlain ? project.worktrees[0].branch : "";
   const plainWorkspaceId = isPlain ? toWorkspaceId(project.name, plainBranch) : "";
   const plainIsActive = useDashboardStore(
     (s) => isPlain && s.activeWorkspaceId === plainWorkspaceId,
@@ -170,10 +175,9 @@ function SortableProject({
   const plainIsFocused = isPlain && workspaceIndexStart === focusedIndex;
 
   // Single onClick / onKeyDown for the plain-project header (mirrors the
-  // navigate-or-open dance WorkspaceCard does). For git projects the same
-  // div toggles collapse — branched below.
+  // navigate-or-open dance WorkspaceCard does). For git projects the
+  // header onClick toggles collapse — branched at the call site.
   const handlePlainOpen = () => {
-    if (!isPlain) return;
     clearNeedsAttention(plainWorkspaceId);
     if (plainHref && capabilities.navigate) {
       capabilities.navigate(plainHref);

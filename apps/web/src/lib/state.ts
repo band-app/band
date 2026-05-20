@@ -190,7 +190,7 @@ export function saveState(state: AppState): void {
           defaultBranch: project.defaultBranch,
           label: project.label ?? null,
           sortOrder: i,
-          kind: project.kind ?? "git",
+          kind: project.kind,
         })
         .run();
 

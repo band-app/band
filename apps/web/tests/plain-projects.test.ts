@@ -837,7 +837,6 @@ describe("tRPC — plain projects (sync-state worktree reconcile skips)", () => 
     });
     seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
     server = await startServer({ tmpHome });
-    await new Promise((r) => setTimeout(r, 500));
   });
 
   afterAll(async () => {
