@@ -38,7 +38,14 @@ import { useZoom } from "../hooks/useZoom";
 import { getElectronBridge } from "../lib/desktop-ipc";
 import { isDesktop } from "../lib/is-desktop";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
-import { applyZoomLevel, loadZoomLevel, zoomIn, zoomOut, zoomReset } from "../lib/zoom";
+import {
+  applyZoomLevel,
+  applyZoomLevelToDom,
+  loadZoomLevel,
+  zoomIn,
+  zoomOut,
+  zoomReset,
+} from "../lib/zoom";
 import "../styles/globals.css";
 
 const adapter = isDesktop ? new DesktopDashboardAdapter() : new WebDashboardAdapter();
@@ -82,8 +89,20 @@ function NotFound() {
 const THEME_INIT_SCRIPT = `(function(){try{var t=localStorage.getItem("band-theme")||"dark";var d=document.documentElement;if(t==="system"){if(window.matchMedia("(prefers-color-scheme:dark)").matches)d.classList.add("dark");else d.classList.remove("dark")}else if(t==="dark"){d.classList.add("dark")}else{d.classList.remove("dark")}}catch(e){document.documentElement.classList.add("dark")}})()`;
 
 /** Blocking script injected into <head> to apply the zoom level before first paint.
- *  Reads a cached zoom value from localStorage (written by ZoomSync / zoom.ts). */
-const ZOOM_INIT_SCRIPT = `(function(){try{var z=localStorage.getItem("band:zoom-level");if(z){var n=parseFloat(z);if(!isNaN(n)&&n>=0.5&&n<=2)document.documentElement.style.zoom=String(n)}}catch(e){}})()`;
+ *  Reads a cached zoom value from localStorage (written by ZoomSync / zoom.ts).
+ *  Also seeds the `--app-zoom` CSS custom property the TerminalPanel relies on
+ *  to counter-zoom xterm out of the document-level zoom coordinate space — see
+ *  ZOOM_CSS_VAR in zoom.ts. We always set the var (defaulting to 1) so the
+ *  counter-zoom `calc(1 / var(--app-zoom, 1))` resolves cleanly even when no
+ *  zoom override is persisted.
+ *
+ *  Note: this also means `<html>` always gets an inline `zoom: 1` on first
+ *  boot (the previous script left `zoom` unset in that case). This is
+ *  functionally identical to the browser default, but `getComputedStyle`
+ *  on `<html>` now reports `zoom: "1"` instead of `""` — do not use a
+ *  truthiness check on `style.zoom` to detect "has the user ever changed
+ *  zoom"; read the persisted value via `loadZoomLevel()` instead. */
+const ZOOM_INIT_SCRIPT = `(function(){try{var z=localStorage.getItem("band:zoom-level");var n=1;if(z){var p=parseFloat(z);if(!isNaN(p)&&p>=0.5&&p<=2)n=p;}var d=document.documentElement;d.style.zoom=String(n);d.style.setProperty("--app-zoom",String(n));}catch(e){}})()`;
 
 /** Applies a theme value ("dark", "light", or "system") to the document root. */
 function applyTheme(theme: string) {
@@ -237,13 +256,19 @@ function ZoomSync() {
 
   // Cross-window zoom sync via the storage event.
   // When another window updates "band:zoom-level" in localStorage,
-  // apply the change immediately to this window's DOM.
+  // apply the change immediately to this window's DOM. Use the DOM-only
+  // helper (no localStorage write) since the originating window already
+  // persisted the value — re-saving here would be a redundant write that
+  // relies on Chromium's same-value-write behaviour not echoing a storage
+  // event (the spec doesn't require that). The helper still updates the
+  // `--app-zoom` CSS variable and dispatches the `band:zoom-changed`
+  // window event, which is what TerminalPanel subscribes to.
   useEffect(() => {
     const handleStorage = (e: StorageEvent) => {
       if (e.key !== "band:zoom-level" || !e.newValue) return;
       const level = Number.parseFloat(e.newValue);
       if (!Number.isNaN(level) && level >= 0.5 && level <= 2) {
-        document.documentElement.style.zoom = String(level);
+        applyZoomLevelToDom(level);
       }
     };
 

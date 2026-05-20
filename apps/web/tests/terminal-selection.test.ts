@@ -170,6 +170,50 @@ describe("pointToCell", () => {
     const screen = makeScreenEl(0, 0);
     expect(pointToCell(100, 100, terminal, screen)).toEqual({ col: 0, row: 7 });
   });
+
+  // Smoke test for the math underpinning the #463 counter-zoom fix.
+  //
+  // The actual bug — `clientX/Y` and `getBoundingClientRect()` living in
+  // *different* coordinate spaces under CSS `zoom` — can't be observed
+  // in jsdom (no `zoom` impl), so this test is unavoidably a round-trip
+  // identity: `clickAtCell` is defined as the inverse of `pointToCell`,
+  // so feeding the output of one into the other passes by construction.
+  // Keeping it because it exercises the `makeScreenEl` rect setup and
+  // catches gross regressions in the math itself (e.g. swapped axes,
+  // wrong viewportY handling). But this does NOT pin the fix — reverting
+  // the `zoom: calc(1 / var(--app-zoom, 1))` style on the xterm
+  // container would let #463 regress without failing this test. The
+  // real verification lives in the manual test plan on the PR.
+  it("round-trips a click coordinate through pointToCell", () => {
+    function clickAtCell(
+      col: number,
+      row: number,
+      cols: number,
+      rows: number,
+      rectWidth: number,
+      rectHeight: number,
+      rectLeft = 0,
+      rectTop = 0,
+    ): { clientX: number; clientY: number } {
+      // Pick the middle of the target cell so off-by-one in either floor()
+      // or the half-pixel rect boundary doesn't slip us into a neighbor.
+      const cellW = rectWidth / cols;
+      const cellH = rectHeight / rows;
+      return {
+        clientX: rectLeft + (col + 0.5) * cellW,
+        clientY: rectTop + (row + 0.5) * cellH,
+      };
+    }
+
+    const terminal = makeTerminal({ cols: 80, rows: 24 });
+    const screen = makeScreenEl(800, 480, 50, 30);
+    // The (800, 480, 50, 30) below MUST match makeScreenEl above — the
+    // round-trip only proves anything if both sides use the same rect
+    // geometry. If `makeScreenEl`'s argument order ever changes, this
+    // helper call has to change with it.
+    const { clientX, clientY } = clickAtCell(42, 10, 80, 24, 800, 480, 50, 30);
+    expect(pointToCell(clientX, clientY, terminal, screen)).toEqual({ col: 42, row: 10 });
+  });
 });
 
 // ---------------------------------------------------------------------------

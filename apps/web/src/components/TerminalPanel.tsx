@@ -20,7 +20,17 @@ import {
   pointToCell,
   wordSelectionAt,
 } from "../lib/terminal-selection";
+import { getCurrentZoomLevel, subscribeToZoomChanges, ZOOM_CSS_VAR } from "../lib/zoom";
 import { TerminalToolbar } from "./TerminalToolbar";
+
+/** Base xterm font size at zoom = 1.0. The terminal lives in a counter-zoomed
+ *  container (`zoom: calc(1 / var(--app-zoom, 1))` — see render below) so its
+ *  internal hit-testing math runs in unzoomed pixels regardless of the app
+ *  zoom level. To keep the terminal text visually scaled with the rest of the
+ *  UI, we drive xterm's own `fontSize` instead, multiplying by the live zoom
+ *  factor whenever it changes. See band-app/band#463 for the motivating bug
+ *  (clicks landing on the wrong cell under CSS `zoom`). */
+const BASE_FONT_SIZE = 13;
 
 /** How long a finger must rest on the terminal to trigger word-selection. */
 const LONG_PRESS_MS = 500;
@@ -263,7 +273,11 @@ export function TerminalPanel({
         // first-party xterm.js addons that depend on these APIs.
         allowProposedApi: true,
         cursorBlink: true,
-        fontSize: 13,
+        // Initial font size scales with the persisted app zoom level so the
+        // terminal opens already matching the user's previously-set zoom — the
+        // subscription below keeps it in sync as zoom changes at runtime. See
+        // BASE_FONT_SIZE above for the rationale (xterm lives in counter-zoom).
+        fontSize: BASE_FONT_SIZE * getCurrentZoomLevel(),
         fontFamily: "'SF Mono', Menlo, Monaco, 'Courier New', monospace",
         // iTerm-style row spacing — only safe with the WebGL renderer.
         // The WebGL addon redraws box-drawing (U+2500-U+257F), block
@@ -707,24 +721,44 @@ export function TerminalPanel({
       // Auto-fit on container resize (skip zero-size to avoid killing server PTY).
       // Also handles devicePixelRatio changes (Chrome DevTools mobile-emulation
       // toggle, dragging the window between a retina and non-retina monitor,
-      // OS zoom changes). On DPR change the WebGL canvas's backing store is
-      // mismatched with its CSS display size — the text balloons to fill the
-      // stretched canvas. Re-attaching the addon resizes the backing store and
-      // re-measures cell dimensions at the new DPR; same recovery path as
-      // `onContextLoss`.
+      // OS zoom changes) and app zoom changes. In all three cases the WebGL
+      // canvas's backing store is mismatched with its CSS display size — the
+      // text balloons or shrinks to fill the stretched canvas. Re-attaching
+      // the addon resizes the backing store and re-measures cell dimensions;
+      // same recovery path as `onContextLoss`.
       let lastDpr = window.devicePixelRatio;
-      // Shared DPR-change handler. The WebGL canvas's backing store was
-      // sized for the old DPR; without intervention, the browser stretches
-      // it to fit the new CSS dimensions and the terminal text balloons
-      // by a factor of (newDPR/oldDPR). Two things have to happen:
+      // Send a PTY resize over the websocket. Coalesced via a small helper
+      // because both the ResizeObserver and the zoom-change handler need to
+      // notify the server after fitAddon.fit() settles.
+      //
+      // Synchrony note: callers invoke this immediately after
+      // `fitAddon.fit()`, which xterm executes synchronously (it reads
+      // `CharSizeService` after a layout pass and writes the new
+      // `terminal.cols/rows` before returning). If a future xterm version
+      // defers that work, this assumption would need to move to a
+      // post-fit `onResize` listener instead.
+      const sendPtyResize = () => {
+        if (ws.readyState !== WebSocket.OPEN) return;
+        if (terminal.cols <= 0 || terminal.rows <= 0) return;
+        ws.send(
+          JSON.stringify({
+            type: "resize",
+            cols: terminal.cols,
+            rows: terminal.rows,
+          }),
+        );
+      };
+      // Shared "force xterm to re-measure cell size & re-attach the WebGL
+      // backing store" routine. Two things have to happen:
       //
       // 1) xterm's CharSizeService must re-measure. Its cache feeds the
-      //    WebGL addon's `_updateDimensions`. Toggling `fontSize` is the
-      //    public-API way to force a re-measure — the options proxy fires
-      //    `onSpecificOptionChange("fontSize")` when the new value differs,
-      //    and CharSizeService is subscribed to that. Perturb-by-one then
-      //    restore so the integer delta fires the event without leaving
-      //    the terminal at the wrong size.
+      //    WebGL addon's `_updateDimensions`. Reassigning `fontSize` to a
+      //    distinct value is the public-API way to force a re-measure —
+      //    the options proxy fires `onSpecificOptionChange("fontSize")`
+      //    when the new value differs, and CharSizeService is subscribed
+      //    to that. For the DPR-change path the font size doesn't change,
+      //    so we perturb-by-one and restore; for the zoom path the new
+      //    font size IS the new value and a single assignment suffices.
       //
       // 2) The WebGL addon's `_devicePixelRatio` cache must update. It's
       //    set once at activation and only refreshed via the private
@@ -734,17 +768,25 @@ export function TerminalPanel({
       //    `window.devicePixelRatio`). We do this AFTER the font toggle so
       //    the new addon picks up the freshly measured CharSizeService
       //    values.
-      //
-      // No-op when no addon is mounted (DOM renderer — CSS sizing handles
-      // DPR natively).
-      const handleDprChange = () => {
-        const currentDpr = window.devicePixelRatio;
-        if (currentDpr === lastDpr) return;
-        lastDpr = currentDpr;
-        const fs = terminal.options.fontSize;
-        if (typeof fs === "number") {
-          terminal.options.fontSize = fs + 1;
-          terminal.options.fontSize = fs;
+      const remeasureAndReattach = (opts: { newFontSize?: number } = {}): void => {
+        const { newFontSize } = opts;
+        if (newFontSize !== undefined) {
+          // Zoom path: assign the new value directly. xterm's options
+          // proxy skips the change event if the new value equals the old,
+          // so we only assign when it's actually different. This is
+          // defensive — the only current caller (`handleZoomChange`)
+          // already early-returns on equality, so in practice this
+          // branch is always taken. Keep the guard so future callers
+          // can't accidentally trigger a no-op WebGL dispose/reattach.
+          if (terminal.options.fontSize !== newFontSize) {
+            terminal.options.fontSize = newFontSize;
+          }
+        } else {
+          const fs = terminal.options.fontSize;
+          if (typeof fs === "number") {
+            terminal.options.fontSize = fs + 1;
+            terminal.options.fontSize = fs;
+          }
         }
         const addon = webglAddonRef.current;
         if (addon) {
@@ -754,24 +796,62 @@ export function TerminalPanel({
         }
         fitAddon.fit();
       };
+      // DPR-only path: bail out if DPR didn't actually change; otherwise
+      // run the re-measure dance. DOM renderer is a no-op (CSS sizing
+      // handles DPR natively) — `remeasureAndReattach` already handles
+      // that by skipping the addon dispose/reattach when none is mounted.
+      // Returns true when it actually re-measured so the ResizeObserver
+      // caller can skip its own follow-up `fitAddon.fit()` (the re-measure
+      // already called fit, and a double-call here is more expensive than
+      // it looks because remeasureAndReattach disposes+reattaches the
+      // WebGL addon).
+      const handleDprChange = (): boolean => {
+        const currentDpr = window.devicePixelRatio;
+        if (currentDpr === lastDpr) return false;
+        lastDpr = currentDpr;
+        remeasureAndReattach();
+        return true;
+      };
       const resizeObserver = new ResizeObserver((entries) => {
         const entry = entries[0];
         if (!entry || entry.contentRect.width === 0 || entry.contentRect.height === 0) return;
         // Check DPR before fit so the re-attached addon picks up the right
-        // cell dimensions.
-        handleDprChange();
-        fitAddon.fit();
-        if (ws.readyState === WebSocket.OPEN && terminal.cols > 0 && terminal.rows > 0) {
-          ws.send(
-            JSON.stringify({
-              type: "resize",
-              cols: terminal.cols,
-              rows: terminal.rows,
-            }),
-          );
-        }
+        // cell dimensions. When DPR changed, `handleDprChange` already
+        // ran a full re-measure + fit, so skip the extra fit here.
+        const dprChanged = handleDprChange();
+        if (!dprChanged) fitAddon.fit();
+        sendPtyResize();
       });
       resizeObserver.observe(containerRef.current!);
+
+      // App-zoom (Cmd+= / Cmd+-) handler. The terminal container is
+      // counter-zoomed via CSS (`zoom: calc(1 / var(--app-zoom, 1))`, see
+      // the render block) so xterm itself lives in unzoomed pixel space —
+      // that's what makes `pointToCell`, drag-select, double-click word,
+      // triple-click line, and link clicks land under the cursor. To keep
+      // the visible terminal text scaled with the rest of the UI we drive
+      // xterm's own `fontSize` here instead. Same re-measure-and-refit
+      // dance as the DPR path, then a PTY resize so the shell sees the
+      // new col/row count. See band-app/band#463 for the bug this fixes.
+      const handleZoomChange = (zoom: number) => {
+        // Round to 2-decimal precision. `BASE_FONT_SIZE * zoom` produces
+        // IEEE-754 noise at several real zoom levels — e.g.
+        // `13 * 0.6 = 7.800000000000001`, `13 * 0.9 = 11.700000000000001`.
+        // If xterm ever normalises or rounds the stored `fontSize`, the
+        // `===` no-op guard below would silently miss the equality and
+        // we'd dispose+reattach the WebGL addon on every duplicate event
+        // (e.g. cross-window storage echo). Two decimals matches the
+        // precision we already apply to the zoom level itself in
+        // `applyZoomLevelToDom`, so this never throws away meaningful
+        // granularity.
+        const target = Math.round(BASE_FONT_SIZE * zoom * 100) / 100;
+        // Bail out if nothing meaningful changed (avoids a redundant
+        // WebGL re-attach on no-op events fired by cross-window sync).
+        if (terminal.options.fontSize === target) return;
+        remeasureAndReattach({ newFontSize: target });
+        sendPtyResize();
+      };
+      const unsubscribeZoom = subscribeToZoomChanges(handleZoomChange);
 
       // Belt-and-suspenders: also listen for DPR changes that don't cause a
       // container size change (rare — e.g. an external display unplug, or
@@ -798,6 +878,7 @@ export function TerminalPanel({
         if (selectionRafId !== null) cancelAnimationFrame(selectionRafId);
         webglContextLossDisposable?.dispose();
         dprMql?.removeEventListener("change", onDprMediaChange);
+        unsubscribeZoom();
         cancelLongPress();
         containerEl.removeEventListener("touchstart", onTouchStart);
         containerEl.removeEventListener("touchmove", onTouchMove);
@@ -940,7 +1021,22 @@ export function TerminalPanel({
           // `bottom = base gap + toolbar reservation`. Inline style instead of
           // a Tailwind class so the reservation can be 0 on desktop without an
           // extra conditional class.
-          style={{ bottom: 8 + contentBottomInset }}
+          //
+          // `zoom: calc(1 / var(--app-zoom, 1))` counter-zooms the terminal
+          // out of the document-level CSS `zoom` coordinate space — see
+          // `applyZoomLevel` in lib/zoom.ts for the `--app-zoom` CSS variable.
+          // The `<html>` `zoom` multiplied by the counter-zoom is 1, so xterm
+          // renders into unzoomed pixels. That keeps `getBoundingClientRect`,
+          // pointer `clientX/Y`, xterm's internal `CharSizeService`, and the
+          // WebGL canvas backing store all in the same coordinate system —
+          // which is what makes clicks land on the cell under the cursor at
+          // any zoom level. The visible terminal size still scales with zoom
+          // because we drive `terminal.options.fontSize` from the live zoom
+          // factor (see handleZoomChange above). See band-app/band#463.
+          style={{
+            bottom: 8 + contentBottomInset,
+            zoom: `calc(1 / var(${ZOOM_CSS_VAR}, 1))`,
+          }}
         />
       </div>
       {/* iOS / touch keyboard accessory toolbar. Renders nothing on desktop
