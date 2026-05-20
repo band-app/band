@@ -48,7 +48,15 @@ import {
   Search,
   TextSearch,
 } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 import { Group, Panel, Separator, usePanelRef } from "react-resizable-panels";
 import { isUntitledPath, useFileTabs } from "../hooks/useFileTabs";
 import { useIsDesktop } from "../hooks/useIsDesktop";
@@ -1035,17 +1043,65 @@ export function CodeBrowserView({
     [notifySelectFile, pushDepartureAndArrival, fileTabs.openTabPinned, viewFilePath],
   );
 
+  // -------------------------------------------------------------------------
+  // Tab handlers
+  // -------------------------------------------------------------------------
+
+  // Hoisted above `handleBack` so the untitled-back-arrow path can route
+  // through it without duplicating the cleanup. Its deps are stable
+  // (both come from hooks defined further up), so the position change
+  // is purely organisational — no behavioural impact on the existing
+  // FileTabBar close path that already calls it.
+  const handleTabClose = useCallback(
+    (filePath: string) => {
+      // Remove all stored state for this tab (view mode, edited content,
+      // editorState, scrollTop, language override). `removeFile` deletes
+      // the full localStorage entry, not just `editedContent` — that's
+      // important for untitled tabs, where any leftover `editorState`
+      // would resurrect the doc on reload even after the user discarded
+      // their typing.
+      tabState.removeFile(filePath);
+      // Remove in-memory editor state (cursor, selection, undo history, scroll)
+      delete savedEditorStatesRef.current[filePath];
+      // Notify listeners (FileTabBar) that dirty state changed
+      window.dispatchEvent(new CustomEvent("band:dirty-change"));
+      fileTabs.closeTab(filePath);
+    },
+    [fileTabs.closeTab, tabState.removeFile],
+  );
+
   const handleBack = useCallback(() => {
+    // Untitled tabs have no on-disk file to "go back to" — the back
+    // arrow is the user's only close affordance in the mobile / narrow
+    // dockview-panel layout (where the FileTabBar with its X button
+    // isn't rendered). Route the discard through the full close path so
+    // the localStorage entry is fully wiped; otherwise the per-tab
+    // `editorState` (or any other field besides `editedContent`) would
+    // hang around and could resurrect the old buffer when the user
+    // reopens the workspace. FileViewer.handleBack has already run its
+    // unsaved-changes confirm by the time we get here.
+    //
+    // We deliberately skip the `setViewFilePath("") / notifySelectFile(null)`
+    // pair the file-backed branch below runs. `handleTabClose` calls
+    // `fileTabs.closeTab`, which updates `activeTabPath`, which fires
+    // the "Sync viewFilePath when active tab changes due to a close"
+    // useEffect lower in this component — that effect is the
+    // authoritative source for the post-close view state and runs both
+    // `setViewFilePath` and `notifySelectFile` itself (with the new
+    // active tab, or null + empty viewFilePath when the last tab
+    // closed). Running them here too would race with the effect; the
+    // effect-driven path is the single source of truth.
+    if (viewFilePath && isUntitledPath(viewFilePath)) {
+      handleTabClose(viewFilePath);
+      return;
+    }
     setViewFilePath("");
     setViewLine(undefined);
     setViewLineEnd(undefined);
     setViewColumn(undefined);
     notifySelectFile(null);
-  }, [notifySelectFile]);
+  }, [viewFilePath, handleTabClose, notifySelectFile]);
 
-  // -------------------------------------------------------------------------
-  // Tab handlers
-  // -------------------------------------------------------------------------
   const handleTabSelect = useCallback(
     (filePath: string) => {
       // Save full editor state for the departing file (doc, selection, undo history, scroll)
@@ -1077,19 +1133,6 @@ export function CodeBrowserView({
       notifySelectFile(filePath);
     },
     [fileTabs.setActiveTab, notifySelectFile, viewFilePath, tabState.update],
-  );
-
-  const handleTabClose = useCallback(
-    (filePath: string) => {
-      // Remove all stored state for this tab (view mode, edited content)
-      tabState.removeFile(filePath);
-      // Remove in-memory editor state (cursor, selection, undo history, scroll)
-      delete savedEditorStatesRef.current[filePath];
-      // Notify listeners (FileTabBar) that dirty state changed
-      window.dispatchEvent(new CustomEvent("band:dirty-change"));
-      fileTabs.closeTab(filePath);
-    },
-    [fileTabs.closeTab, tabState.removeFile],
   );
 
   // Sync viewFilePath when active tab changes due to a close.
@@ -1455,10 +1498,19 @@ export function CodeBrowserView({
     [handleSaveUntitled, tabState],
   );
 
-  // Language-mode override: persist per-tab via tabState, and dispatch
-  // the band:dirty-change event so the tab bar's language indicator
-  // (if any) re-renders. The override survives saves — see
-  // handleSaveUntitled for the carry-over.
+  // Language-mode override: persist per-tab via tabState and force this
+  // component to re-render so the new override flows down to FileViewer
+  // as a prop. `useTabState` is deliberately a ref-backed side-channel
+  // (writes never trigger React re-renders, which keeps editor-state
+  // persistence out of the render loop), so the picker's write to
+  // `setLanguage` alone is invisible to React — the `languageOverride`
+  // prop in the JSX below is computed from `tabState.getLanguage`, and
+  // without a re-render here the new value is only read the next time
+  // CodeBrowserView happens to render for an unrelated reason (tab
+  // switch, edit, etc.). Bumping `languageOverrideVersion` is the
+  // cheapest way to drive that re-render; the value isn't read
+  // anywhere, it just invalidates the render cache. The override
+  // survives saves — see handleSaveUntitled for the carry-over.
   //
   // The picker also delivers an `AUTO_DETECT_LANGUAGE_ID` sentinel
   // when the user explicitly reverts to extension-based detection;
@@ -1467,6 +1519,7 @@ export function CodeBrowserView({
   // user who manually set a `.ts` file to Python "just to see" would
   // be stuck with that override until they closed the tab — closing
   // is the only thing that clears the persisted `language` entry.
+  const [, bumpLanguageOverrideVersion] = useReducer((x: number) => x + 1, 0);
   const handleLanguageOverride = useCallback(
     (filePath: string, languageId: string) => {
       if (languageId === AUTO_DETECT_LANGUAGE_ID) {
@@ -1476,10 +1529,19 @@ export function CodeBrowserView({
         // FileViewer reverts to extension-based detection on the next
         // render.
         tabState.update(filePath, { language: undefined });
-        return;
+      } else {
+        tabState.setLanguage(filePath, languageId);
       }
-      tabState.setLanguage(filePath, languageId);
+      bumpLanguageOverrideVersion();
     },
+    // `bumpLanguageOverrideVersion` is the dispatch returned by
+    // `useReducer`, which React guarantees is referentially stable —
+    // both biome's `useExhaustiveDependencies` rule and
+    // `eslint-plugin-react-hooks` recognise the stable-dispatch
+    // contract and treat its omission as correct (in fact biome flags
+    // its inclusion as over-specifying). If a future refactor swaps
+    // the bump source for something less stable (e.g. a regular
+    // useState setter wrapped in a closure), add it to this array.
     [tabState],
   );
 

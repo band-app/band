@@ -308,3 +308,60 @@ describe("useFileTabs — openTabPinned", () => {
     unmount();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Untitled tab close / reopen — make sure a fresh tab is fresh
+// ---------------------------------------------------------------------------
+describe("useFileTabs — untitled close+reopen", () => {
+  it("closing an untitled tab clears it from openTabs and persisted state", () => {
+    const { result, unmount } = renderHook("ws-1");
+    let firstPath: string;
+    act(() => {
+      firstPath = result.current.openTabUntitled().filePath;
+    });
+    expect(result.current.openTabs).toEqual([
+      { filePath: "untitled:1", isUntitled: true, untitledLabel: "Untitled-1" },
+    ]);
+    expect(result.current.activeTabPath).toBe("untitled:1");
+
+    act(() => {
+      result.current.closeTab(firstPath);
+    });
+    expect(result.current.openTabs).toEqual([]);
+    expect(result.current.activeTabPath).toBeNull();
+    // The persisted tab list also has to drop the closed untitled — if
+    // it survives, a reload would resurrect the tab pointing at the
+    // (now stale) untitled:1 key, which is half of the bug the
+    // back-arrow discard path was leaking.
+    const persisted = JSON.parse(localStorage.getItem("band-open-tabs:ws-1") ?? "null");
+    expect(persisted).toEqual({ tabs: [], active: null });
+    unmount();
+  });
+
+  it("openTabUntitled after closing one returns a fresh monotonic key", () => {
+    // The counter is intentionally monotonic — closing untitled:1 and
+    // creating another scratch tab must NOT reuse the `untitled:1`
+    // key, even though that slot is now free. Reusing it would let any
+    // residual `band-tab-state:ws-1.untitled:1` entry (e.g. from a
+    // pre-fix build that left `editorState` behind on discard) leak
+    // into the new tab. This test pins the contract so the bug-fix's
+    // assumption ("a new untitled tab is always a fresh key") can't
+    // silently regress if the counter logic gets refactored.
+    const { result, unmount } = renderHook("ws-1");
+    act(() => {
+      result.current.openTabUntitled();
+    });
+    act(() => {
+      result.current.closeTab("untitled:1");
+    });
+    let secondPath: string;
+    act(() => {
+      secondPath = result.current.openTabUntitled().filePath;
+    });
+    expect(secondPath!).toBe("untitled:2");
+    expect(result.current.openTabs).toEqual([
+      { filePath: "untitled:2", isUntitled: true, untitledLabel: "Untitled-2" },
+    ]);
+    unmount();
+  });
+});

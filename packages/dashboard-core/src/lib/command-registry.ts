@@ -130,13 +130,13 @@ export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
       action: () => deps.openQuickOpen(),
     },
     {
-      // Note: Cmd+Shift+F is owned by "Format Current File" (matches
-      // JetBrains' "Reformat Code" binding). Search-in-Files moves to
-      // Cmd+Shift+H — same key VS Code uses for "Replace in Files", which
-      // is conceptually close enough that the muscle memory transfers.
+      // ⇧⌘F → Search in Files (matches VS Code's "Search in Files" /
+      // "Find in Files" binding, the same kbd hint advertised by the
+      // file-tree tooltip and the file-toolbar dropdown). Format
+      // Current File lives at ⇧⌥F (also VS Code parity, see below).
       id: "search-files",
       label: "Search in Files",
-      shortcut: "Cmd+Shift+H",
+      shortcut: "Cmd+Shift+F",
       action: () => deps.openSearchFiles(),
     },
     {
@@ -152,9 +152,14 @@ export function buildCommands(deps: CommandRegistryDeps): PaletteCommand[] {
       // event with detail, so the matching FileViewer responds. The
       // keyboard handler dispatches the same event with the same detail
       // shape — both paths funnel through one FileViewer listener.
+      //
+      // ⇧⌥F mirrors VS Code's default "Format Document" binding. Note
+      // it's the only entry in this registry without Cmd/Ctrl in the
+      // chord — the keyboard handler special-cases it above its mod
+      // gate so the keystroke reaches us in the first place.
       id: "format-current-file",
       label: "Format Current File",
-      shortcut: "Cmd+Shift+F",
+      shortcut: "Shift+Alt+F",
       action: () => deps.formatCurrentFile(),
     },
     {
