@@ -171,23 +171,20 @@ describe("pointToCell", () => {
     expect(pointToCell(100, 100, terminal, screen)).toEqual({ col: 0, row: 7 });
   });
 
-  // Regression coverage for band-app/band#463. We fix the bug by taking
-  // the xterm container out of the document-level CSS `zoom` coordinate
-  // space (counter-zoom on the container — see TerminalPanel render
-  // block). Once that's in place both `clientX/Y` and
-  // `getBoundingClientRect()` report values in unzoomed CSS pixels, and
-  // `pointToCell`'s math depends only on the relative position of the
-  // click within the rect.
+  // Smoke test for the math underpinning the #463 counter-zoom fix.
   //
-  // The single assertion below pins that property: the helper computes
-  // the click coordinate from a target cell + rect, so passing those
-  // back into `pointToCell` MUST recover the target cell. The math is
-  // scale-invariant by construction, which is exactly what the
-  // counter-zoom approach guarantees at runtime — there's no useful
-  // additional coverage in re-running the same assertion across
-  // arbitrary scale factors (every parameterized iteration would feed
-  // identical inputs).
-  it("regression #463: maps a click coordinate to the expected cell (scale-invariant math underpins the counter-zoom fix)", () => {
+  // The actual bug — `clientX/Y` and `getBoundingClientRect()` living in
+  // *different* coordinate spaces under CSS `zoom` — can't be observed
+  // in jsdom (no `zoom` impl), so this test is unavoidably a round-trip
+  // identity: `clickAtCell` is defined as the inverse of `pointToCell`,
+  // so feeding the output of one into the other passes by construction.
+  // Keeping it because it exercises the `makeScreenEl` rect setup and
+  // catches gross regressions in the math itself (e.g. swapped axes,
+  // wrong viewportY handling). But this does NOT pin the fix — reverting
+  // the `zoom: calc(1 / var(--app-zoom, 1))` style on the xterm
+  // container would let #463 regress without failing this test. The
+  // real verification lives in the manual test plan on the PR.
+  it("round-trips a click coordinate through pointToCell", () => {
     function clickAtCell(
       col: number,
       row: number,

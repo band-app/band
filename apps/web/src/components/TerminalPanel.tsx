@@ -834,7 +834,17 @@ export function TerminalPanel({
       // dance as the DPR path, then a PTY resize so the shell sees the
       // new col/row count. See band-app/band#463 for the bug this fixes.
       const handleZoomChange = (zoom: number) => {
-        const target = BASE_FONT_SIZE * zoom;
+        // Round to 2-decimal precision. `BASE_FONT_SIZE * zoom` produces
+        // IEEE-754 noise at several real zoom levels — e.g.
+        // `13 * 0.6 = 7.800000000000001`, `13 * 0.9 = 11.700000000000001`.
+        // If xterm ever normalises or rounds the stored `fontSize`, the
+        // `===` no-op guard below would silently miss the equality and
+        // we'd dispose+reattach the WebGL addon on every duplicate event
+        // (e.g. cross-window storage echo). Two decimals matches the
+        // precision we already apply to the zoom level itself in
+        // `applyZoomLevelToDom`, so this never throws away meaningful
+        // granularity.
+        const target = Math.round(BASE_FONT_SIZE * zoom * 100) / 100;
         // Bail out if nothing meaningful changed (avoids a redundant
         // WebGL re-attach on no-op events fired by cross-window sync).
         if (terminal.options.fontSize === target) return;

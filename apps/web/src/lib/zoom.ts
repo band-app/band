@@ -86,10 +86,20 @@ export function applyZoomLevelToDom(level: number): number {
  * {@link ZOOM_CSS_VAR} custom property, dispatch the
  * {@link ZOOM_CHANGE_EVENT} so subscribers (e.g. TerminalPanel) can react, and
  * persist the level to localStorage.
+ *
+ * Ordering: clamp/round once at the top, persist FIRST, then apply to the
+ * DOM (which dispatches the event last). `dispatchEvent` propagates
+ * synchronous exceptions from listeners — if a buggy subscriber throws,
+ * we'd rather leave both localStorage and the live DOM updated than have
+ * the persisted value drift behind the rendered one. The dispatch is the
+ * last step in `applyZoomLevelToDom`, so even a throw there leaves the
+ * caller-visible state consistent.
  */
 export function applyZoomLevel(level: number): void {
-  const applied = applyZoomLevelToDom(level);
-  saveZoomLevel(applied);
+  const clamped = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, level));
+  const rounded = Math.round(clamped * 100) / 100;
+  saveZoomLevel(rounded);
+  applyZoomLevelToDom(rounded);
 }
 
 /**
