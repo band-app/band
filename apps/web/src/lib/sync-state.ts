@@ -1,5 +1,5 @@
 import { execGit, listWorktrees } from "./git";
-import { loadState, saveState, type WorktreeState } from "./state";
+import { loadState, reconcileKindForProject, saveState, type WorktreeState } from "./state";
 
 /**
  * Detect the remote's default branch from the local origin/HEAD ref.
@@ -33,7 +33,34 @@ export async function syncWorktrees(): Promise<void> {
   const state = loadState();
   let changed = false;
 
+  // ----- Step 1: Self-heal `kind` against the filesystem -----
+  //
+  // The schema migration for #427 defaulted every pre-existing row to
+  // `kind: "git"` regardless of whether the folder actually had a `.git`
+  // directory — so a project added before this PR shipped, sitting in a
+  // plain folder, would otherwise stay incorrectly tagged. Same
+  // reconciliation also catches a user who ran `git init` (or `rm -rf
+  // .git`) in the folder outside the dashboard.
+  //
+  // The actual fix-up logic lives in `reconcileKindForProject`
+  // (state.ts) so the inline read-only re-detection inside
+  // `projects.list` can call the exact same code path. Here we just
+  // propagate any mutations to `changed` so saveState fires at the
+  // end of this function — `projects.list` discards the return value
+  // since queries shouldn't write to the DB.
   for (const project of state.projects) {
+    if (reconcileKindForProject(project)) {
+      changed = true;
+    }
+  }
+
+  // ----- Step 2: Reconcile git worktrees -----
+
+  for (const project of state.projects) {
+    // Plain projects have no .git directory, no worktrees, no remote —
+    // there's nothing to reconcile against, and `listWorktrees` would
+    // just throw on every tick.
+    if (project.kind === "plain") continue;
     let diskWorktrees: WorktreeState[];
     try {
       const gitWorktrees = await listWorktrees(project.path);

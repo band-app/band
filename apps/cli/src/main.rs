@@ -638,14 +638,22 @@ fn cmd_projects_list() -> Result<CommandResult, String> {
         .unwrap_or_default();
 
     let mut json_projects = Vec::new();
-    let mut rows: Vec<[String; 3]> = Vec::new();
+    let mut rows: Vec<[String; 4]> = Vec::new();
     for proj in &projects {
         let name = proj.get("name").and_then(|n| n.as_str()).unwrap_or("");
         let path = proj.get("path").and_then(|p| p.as_str()).unwrap_or("");
+        // `kind` defaults to "git" — the server always sets it, but older
+        // servers (or test fixtures predating #427) may omit the field.
+        let kind = proj.get("kind").and_then(|k| k.as_str()).unwrap_or("git");
         let wt_count = proj
             .get("worktrees")
             .and_then(|w| w.as_array())
             .map_or(0, Vec::len);
+        // KIND is appended to the end of the column list (not inserted
+        // between NAME and PATH) so existing scripts that index the text
+        // output positionally — e.g. `awk '{print $2}'` to extract the
+        // path — keep working. The JSON output is keyed and order-
+        // insensitive, so the field placement there doesn't matter.
         rows.push([
             name.to_string(),
             path.to_string(),
@@ -654,15 +662,17 @@ fn cmd_projects_list() -> Result<CommandResult, String> {
                 wt_count,
                 if wt_count == 1 { "" } else { "s" }
             ),
+            kind.to_string(),
         ]);
         json_projects.push(serde_json::json!({
             "name": name,
             "path": path,
+            "kind": kind,
             "worktreeCount": wt_count,
         }));
     }
 
-    let text = format_table(&["NAME", "PATH", "WORKTREES"], &rows);
+    let text = format_table(&["NAME", "PATH", "WORKTREES", "KIND"], &rows);
 
     Ok(CommandResult {
         text,

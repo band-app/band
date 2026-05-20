@@ -4,6 +4,7 @@ import { installSkills } from "./cli-skills";
 import { checkHooks, installHooks } from "./hooks";
 import { whichBinary } from "./process-utils";
 import { type CodingAgentDefinition, loadSettings, saveSettings } from "./state";
+import { syncWorktrees } from "./sync-state";
 
 const log = createLogger("setup");
 
@@ -36,6 +37,49 @@ export async function runFirstTimeSetup(): Promise<void> {
   ensureNotificationDefaults();
   await ensureClaudeHooks();
   await ensureSkillsInstalled();
+  await ensureProjectStateInSync();
+}
+
+/**
+ * Reconcile every project row against the on-disk filesystem at boot:
+ * detect kind from the presence of `.git`, fix orphaned worktrees on
+ * `git → plain` flips, and sync the default branch from `origin/HEAD`.
+ *
+ * This used to live inside the `projects.list` query (so the first
+ * dashboard request triggered the reconcile), but writing to the DB
+ * from a tRPC query is a contract violation. The branch-status poller
+ * runs the same code on every tick, but the poller only starts when an
+ * SSE client connects (`watcher.subscribe`) — so a server boot with no
+ * dashboard attached would never persist kind self-heal corrections.
+ * Running it once at boot closes that gap without requiring a client.
+ *
+ * `syncWorktrees` runs `git worktree list --porcelain` per project,
+ * which can take a non-trivial amount of time on users with many
+ * projects on slow/network-mounted drives. We `await` it anyway
+ * because:
+ *   1. Most users have <10 projects and the call completes in <100 ms.
+ *   2. The dashboard's first `projects.list` fetch (which happens
+ *      immediately on connect) needs the in-memory state to be
+ *      reconciled. If we let the server start listening before the
+ *      sync finishes, the first response would show stale data and
+ *      the user would see a 30 s delay (next react-query refetch)
+ *      before things looked right.
+ *   3. The CLI tests' fixture rely on the seeded state being
+ *      reconciled before `band notify` lands.
+ *
+ * If this ever becomes a startup bottleneck, the better fix is to make
+ * the sync parallel-per-project rather than sequential — not to drop
+ * the await.
+ */
+async function ensureProjectStateInSync(): Promise<void> {
+  try {
+    await syncWorktrees();
+  } catch (err) {
+    log.warn(
+      "Failed to sync project state at boot: %s",
+      err instanceof Error ? err.message : String(err),
+    );
+  }
 }
 
 /**

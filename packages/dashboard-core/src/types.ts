@@ -15,12 +15,28 @@ export interface WorkspaceStatus {
   agent?: AgentInfo;
 }
 
+/**
+ * "git" projects use git worktrees for per-workspace isolation and have
+ * branch/PR/CI features enabled. "plain" projects have a single implicit
+ * workspace whose path equals the project path — no isolation, no branch,
+ * git-specific UI hidden. Plain projects can be promoted to "git" via
+ * `projects.promoteToGit`.
+ */
+export type ProjectKind = "git" | "plain";
+
 export interface ProjectInfo {
   name: string;
   path: string;
   defaultBranch: string;
   worktrees: WorktreeInfo[];
   label?: string;
+  /**
+   * Required: the server always sets it (migration defaults pre-existing
+   * rows to "git"), and the web adapter normalises any older API
+   * response that might omit it back to "git" at the response boundary.
+   * UI consumers can therefore branch on `kind` without `?? "git"` guards.
+   */
+  kind: ProjectKind;
 }
 
 export interface WorktreeInfo {

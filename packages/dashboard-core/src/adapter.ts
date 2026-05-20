@@ -27,6 +27,13 @@ export interface DashboardAdapter {
   updateProjectLabel(name: string, label: string | null): Promise<void>;
   checkPath(path: string): Promise<{ isGitRepo: boolean }>;
   gitInit(path: string): Promise<void>;
+  /**
+   * Promote a "plain" project to "git": runs `git init` in the project
+   * folder and flips the project's kind. Server-side rejects if the
+   * project is already a git project. After promotion, all branch/PR/CI
+   * features become available for the existing implicit workspace.
+   */
+  promoteProjectToGit?(name: string): Promise<void>;
 
   // Workspaces
   createWorkspace(project: string, branch: string, base?: string, prompt?: string): Promise<void>;

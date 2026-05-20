@@ -16,7 +16,7 @@ Unit tests with heavy mocking verify that your mocks work, not that your system 
 - **Black-box testing only.** Test through public interfaces: HTTP endpoints, CLI commands, file system outputs.
 - **Real infrastructure.** For databases use test containers, not mocks. For file-based state use temporary directories. Start real servers on random ports.
 - **MSW for external boundaries.** Mock only what you don't own (third-party APIs) using MSW at the network layer.
-- **Node.js built-in test runner.** Use `node:test` with `node:assert/strict`. Don't add test framework dependencies unless already present.
+- **Test framework: match the package.** `node:test` with `node:assert/strict` is the default for new code. The web app (`apps/web`) is the exception: it already standardised on **vitest** before this convention was written down (the existing test suite uses `describe`/`it`/`expect`/`beforeAll` from `vitest`), so new tests under `apps/web/tests/` should use vitest too rather than mix runners in one package. Don't add test framework dependencies elsewhere unless already present.
 
 See `.claude/skills/integration-tests.md` for the full set of rules and examples.
 

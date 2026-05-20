@@ -41,6 +41,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { useAdapter } from "../context";
 import { readStoredCompareBranch, useDiffTarget } from "../hooks/use-diff-target";
 import { useIsDark } from "../hooks/use-is-dark";
+import { useProjectKindForWorkspace } from "../hooks/use-project-kind";
 import { useSearch } from "../hooks/use-search";
 import { buildFileTree, flattenFileTreeOrder } from "../lib/build-file-tree";
 import { baseViewerExtensions, loadLanguage, searchHighlightOnly } from "../lib/codemirror-setup";
@@ -809,6 +810,16 @@ export function DiffView({
   onFindInFile,
 }: DiffViewProps) {
   const adapter = useAdapter();
+  // Look up the project's kind so we can short-circuit the diff fetch
+  // for plain (non-git) projects — `git diff` against a folder without
+  // a `.git` directory would otherwise surface as a raw error in the
+  // Changes view. The lookup is centralised in `useProjectKindMap` so
+  // multiple mounted DiffView instances share a single O(projects ×
+  // worktrees) scan; per-instance the cost is a Map.get(). Returns
+  // `undefined` while `useProjects()` is loading — the effect below
+  // skips the diff fetch in that window. See #427.
+  const projectKind = useProjectKindForWorkspace(workspaceId);
+  const isPlain = projectKind === "plain";
   const [summary, setSummary] = useState<WorkspaceDiffSummary | null>(null);
   const summaryRef = useRef<WorkspaceDiffSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1349,6 +1360,24 @@ export function DiffView({
   useEffect(() => {
     const getWorkspaceDiffSummary = adapter.getWorkspaceDiffSummary;
     if (!getWorkspaceDiffSummary) return;
+    // Plain (non-git) projects have no diff to fetch — the dedicated render
+    // branch below shows a calm "folder is not a git repo" message instead
+    // of bouncing the user off `git diff` errors from the server.
+    if (isPlain) {
+      setLoading(false);
+      setSummary(null);
+      summaryRef.current = null;
+      setError(null);
+      onStatsChange?.(null);
+      return;
+    }
+    // `projectKind` is `undefined` until `useProjects()` resolves. Without
+    // this guard the effect fires immediately on mount with `isPlain ===
+    // false` and issues a getDiffSummary call before we know whether this
+    // workspace's project is plain — the server now returns an empty
+    // summary in that case, but it's a wasted round-trip and a brief
+    // loading flicker. Skip until projects arrive.
+    if (projectKind === undefined) return;
 
     let cancelled = false;
     setLoading(true);
@@ -1442,7 +1471,22 @@ export function DiffView({
       fetchSummaryRef.current = null;
       unsubscribe?.();
     };
-  }, [adapter, workspaceId, active, onStatsChange, diffMode, compareBranch, fetchFileDiff]);
+  }, [
+    adapter,
+    workspaceId,
+    active,
+    onStatsChange,
+    diffMode,
+    compareBranch,
+    fetchFileDiff,
+    // `isPlain` and `projectKind` are both listed even though the
+    // former is derived from the latter — required to keep
+    // react/exhaustive-deps quiet. The body references both: `isPlain`
+    // drives the short-circuit, `projectKind` gates the
+    // undefined-during-load early return.
+    isPlain,
+    projectKind,
+  ]);
 
   // ---------------------------------------------------------------------------
   // Diff target dropdown — combines diff mode + branch selection into one menu.
@@ -1506,6 +1550,17 @@ export function DiffView({
       </SelectContent>
     </Select>
   );
+
+  // Plain (non-git) projects: render a calm, normal-text empty state. No
+  // toolbar, no error styling — the Changes tab simply isn't meaningful
+  // for a folder that isn't a git repo. See #427.
+  if (isPlain) {
+    return (
+      <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
+        This folder is not a git repository — changes are not tracked.
+      </div>
+    );
+  }
 
   if (loading) {
     return (

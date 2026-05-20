@@ -97,6 +97,29 @@ export function useGitInit() {
   });
 }
 
+export function usePromoteProjectToGit() {
+  const adapter = useAdapter();
+  const queryClient = useQueryClient();
+  const setError = useDashboardStore((s) => s.setError);
+
+  return useMutation({
+    mutationFn: (name: string) => {
+      if (!adapter.promoteProjectToGit) {
+        return Promise.reject(
+          new Error("This dashboard adapter doesn't support promoting plain projects to git."),
+        );
+      }
+      return adapter.promoteProjectToGit(name);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+    },
+    onError: (err) => {
+      setError(String(err));
+    },
+  });
+}
+
 export function useCreateWorkspace() {
   const adapter = useAdapter();
   const queryClient = useQueryClient();

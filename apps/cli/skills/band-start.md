@@ -43,6 +43,45 @@ band projects list --output json | jq -r '.projects[] | "\(.name)\t\(.path)"'
 
 Pick the project whose `path` is the cwd or one of its ancestors. If no match or the cwd is ambiguous (multiple registered projects under the same root), ask the user to pick one.
 
+### 1a. Plain (non-git) projects: short-circuit
+
+A Band project can be either a git repo (the normal case) or a "plain" folder (no `.git`). Plain projects have a single implicit workspace whose path equals the project path — there are no branches, no PRs, no `workspaces create`.
+
+After step 1, check the project's `kind` field:
+
+```sh
+band projects list --output json | jq -r --arg name "$project_name" '.projects[] | select(.name == $name) | .kind'
+```
+
+If `kind` is `"plain"`:
+
+- **Skip steps 2–6 entirely.** No ticket detection, no branch-name generation, no `workspaces create`.
+- The workspace already exists — its `workspaceId` and `path` are both surfaced by `band workspaces list`.
+- Resolve the workspace ID from the API rather than reconstructing it locally — that keeps the skill insensitive to future changes in the `toWorkspaceId` separator/escaping rules:
+
+  ```sh
+  ws_id=$(band workspaces list "$project_name" --output json \
+    | jq -r '.workspaces[0].workspaceId // empty')
+  if [ -z "$ws_id" ]; then
+    echo "error: no implicit workspace found for project '$project_name' — check that the server is running and the project is registered" >&2
+    exit 1
+  fi
+  # `chats send` lazy-creates a chat pane on the first call and returns
+  # the resolved chat ID in its JSON output — read it from there
+  # directly rather than re-listing (avoids races with concurrent chat
+  # creation and is stable across `chats list` sort-order changes).
+  chat_id=$(band chats send "$ws_id" --prompt "<user prompt>" --output json \
+    | jq -r '.chatId // empty')
+  if [ -z "$chat_id" ]; then
+    echo "error: chats send did not return a chat ID (older server?)" >&2
+    exit 1
+  fi
+  ```
+
+- Skip ahead to step 8 (report the result) with the resolved `chat_id`.
+
+If `kind` is `"git"` (or absent — older servers default to git), continue with steps 2–6 below.
+
 ### 2. Detect a ticket reference in the prompt
 
 Scan the prompt for either format:

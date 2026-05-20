@@ -38,13 +38,14 @@ import {
   Clipboard,
   Folder,
   FolderOpen,
+  GitBranch,
   ListMinus,
   Pin,
   Plus,
   Tag,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useCapabilities } from "../context";
+import { useAdapter, useCapabilities } from "../context";
 import {
   LABELS_COLLAPSE_KEY,
   PINNED_COLLAPSE_KEY,
@@ -55,6 +56,7 @@ import {
 } from "../hooks/use-collapse-state";
 import { usePinnedWorkspaces } from "../hooks/use-pinned-workspaces";
 import {
+  usePromoteProjectToGit,
   useRemoveProject,
   useRemoveWorkspace,
   useReorderProjects,
@@ -72,8 +74,10 @@ import type {
   WorkspaceBranchStatus,
   WorkspaceStatus,
 } from "../types";
+import { AgentStatusIndicator } from "./AgentStatusIndicator";
 import { DeleteWorkspaceDialog } from "./DeleteWorkspaceDialog";
 import { NewWorkspaceDialog } from "./NewWorkspaceForm";
+import { PromoteToGitDialog } from "./PromoteToGitDialog";
 import { WorkspaceCard } from "./WorkspaceCard";
 
 interface SortableProjectProps {
@@ -83,6 +87,8 @@ interface SortableProjectProps {
   setupStatuses: Map<string, SetupStatus>;
   removeProject: (name: string) => void;
   updateProjectLabel: (name: string, label: string | null) => void;
+  /** Opens the promote-to-git confirmation dialog for the given project. */
+  onPromoteToGit: (name: string) => void;
   labels: LabelDefinition[];
   setWorkspaceDialog: (name: string | null) => void;
   onShowDeleteDialog: (info: DeleteDialogInfo) => void;
@@ -106,6 +112,7 @@ function SortableProject({
   setupStatuses,
   removeProject,
   updateProjectLabel,
+  onPromoteToGit,
   labels,
   setWorkspaceDialog,
   onShowDeleteDialog,
@@ -116,10 +123,18 @@ function SortableProject({
   hasPinnedSiblings,
   onTogglePinned,
 }: SortableProjectProps) {
+  const isPlain = project.kind === "plain";
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: project.name,
   });
   const capabilities = useCapabilities();
+  // `adapter.promoteProjectToGit` is optional on the DashboardAdapter
+  // interface — only the web adapter implements it today. Hide the menu
+  // item when the active adapter lacks the method so the user can't click
+  // through to a runtime error (`use-project-mutations` rejects with a
+  // friendly message, but hiding the affordance is cleaner).
+  const adapter = useAdapter();
+  const canPromoteToGit = typeof adapter.promoteProjectToGit === "function";
   // `active` is the currently-dragged item (or null when nothing is being
   // dragged). We only honour dnd-kit's `transition` while a drag is in
   // progress: that keeps the smooth slide-out-of-the-way animation while
@@ -134,44 +149,110 @@ function SortableProject({
     opacity: isDragging ? 0.5 : undefined,
   };
 
+  // Plain projects flatten: the project header IS the implicit workspace's
+  // card. There's no nested "main" row, no collapse chevron, no "+" Add
+  // workspace button, and crucially no pinning (the workspace is already
+  // at the project level — there's nothing to "pull up to the top"). See
+  // #427.
+  const openWorkspace = useDashboardStore((s) => s.openWorkspace);
+  const clearNeedsAttention = useDashboardStore((s) => s.clearNeedsAttention);
+  // Plain projects are guaranteed to have exactly one worktree (the
+  // implicit `main` synthesized by projects.add and re-synthesized by
+  // `reconcileKindForProject` on any git → plain flip). Read
+  // `worktrees[0].branch` directly rather than `?.branch ?? "main"`;
+  // the optional chain would mask a real state-corruption bug.
+  const plainBranch = isPlain ? project.worktrees[0].branch : "";
+  const plainWorkspaceId = isPlain ? toWorkspaceId(project.name, plainBranch) : "";
+  const plainIsActive = useDashboardStore(
+    (s) => isPlain && s.activeWorkspaceId === plainWorkspaceId,
+  );
+  const plainHref = isPlain ? capabilities.getWorkspaceHref?.(plainWorkspaceId) : undefined;
+  const plainAgent = isPlain ? statuses.get(plainWorkspaceId)?.agent : undefined;
+  const plainIsFocused = isPlain && workspaceIndexStart === focusedIndex;
+
+  // Single onClick / onKeyDown for the plain-project header (mirrors the
+  // navigate-or-open dance WorkspaceCard does). For git projects the
+  // header onClick toggles collapse — branched at the call site.
+  const handlePlainOpen = () => {
+    clearNeedsAttention(plainWorkspaceId);
+    if (plainHref && capabilities.navigate) {
+      capabilities.navigate(plainHref);
+    } else if (!plainHref) {
+      openWorkspace(plainWorkspaceId);
+    }
+  };
+
   let workspaceIndex = workspaceIndexStart;
+
+  // Header className. Both kinds keep the project-level indent (`pl-1`)
+  // so plain projects read as standalone projects, not as nested
+  // workspaces under the project above them. Plain projects also gain
+  // the WorkspaceCard hover/active/focus treatment because the header
+  // itself is clickable — but the inner text styling stays project-bold
+  // (see the `<h2>` block below). `py-1.5` gives a taller hit target
+  // than a workspace card (`py-1`) so the row reads as a project, not
+  // a nested workspace.
+  const headerClassName = isPlain
+    ? `group flex items-center justify-between mb-0.5 pl-1 pr-1 py-1.5 min-w-0 overflow-hidden cursor-pointer select-none touch-pan-y transition-colors hover:bg-accent/50 ${
+        plainIsActive ? "bg-accent/50 border-l-2 border-l-primary" : ""
+      } ${plainIsFocused ? "ring-2 ring-inset ring-ring" : ""}`
+    : "group flex items-center justify-between mb-0.5 pl-1 pr-0 select-none touch-pan-y";
 
   return (
     <div ref={setNodeRef} style={style} className="min-w-0 px-2">
       <ContextMenu>
         <ContextMenuTrigger asChild>
-          {/* The header is a click/tap-to-toggle target on both desktop and
-              mobile. We don't add tabIndex/keyboard handlers here because
-              keyboard navigation lives one level down (workspace cards).
-              Keyboard users can toggle collapse via the right-click context
-              menu's Collapse/Expand entry, which is reachable with Shift+F10
-              or the Menu key. */}
-          {/* biome-ignore lint/a11y/useKeyWithClickEvents: keyboard path is the context menu (see comment above) */}
+          {/* The header is a click/tap target on both desktop and mobile.
+              For git projects it toggles collapse; for plain projects it
+              opens the implicit workspace (the project IS the workspace).
+              Keyboard nav lives at the workspace-card level for git
+              projects; for plain projects the same role moves up here. */}
+          {/* biome-ignore lint/a11y/useKeyWithClickEvents: keyboard path is the container-level handler on the ProjectList (see "KEYBOARD NAVIGATION — READ BEFORE MODIFYING" below) */}
           <div
-            // touch-pan-y lets touch devices scroll the list vertically with
-            // a finger over the project header — the TouchSensor still gets
-            // long-presses (delay activation) but stops blocking page scroll.
-            className="group flex items-center justify-between mb-0.5 pl-1 pr-0 select-none touch-pan-y"
-            onClick={() => onToggleCollapse(project.name)}
+            className={headerClassName}
+            onClick={() => (isPlain ? handlePlainOpen() : onToggleCollapse(project.name))}
           >
             {/* Drag listeners live on the title (folder icon + project name)
                 so the project name itself is the drag handle. The 8px
                 MouseSensor / 250ms TouchSensor thresholds mean a still
-                click/tap bubbles up to the outer onClick (which toggles
-                collapse) without starting a drag. */}
+                click/tap bubbles up to the outer onClick without starting
+                a drag. */}
             <div
               className="flex items-center gap-2 min-w-0 cursor-grab"
               {...attributes}
               {...listeners}
             >
-              {collapsed ? (
+              {isPlain ? (
+                // Plain project: agent-status dot when the agent is
+                // working / needs attention, otherwise a project-sized
+                // (size-4) Folder icon. Inlined rather than routing
+                // through AgentStatusIndicator's fallback so the idle
+                // icon can match a git project's folder size — using the
+                // indicator's size-3 fallback would make plain headers
+                // read as nested workspace cards (see #427 review).
+                plainAgent &&
+                (plainAgent.status === "working" || plainAgent.status === "needs_attention") ? (
+                  <AgentStatusIndicator agent={plainAgent} isActive={plainIsActive} />
+                ) : (
+                  <Folder className="size-4 shrink-0 text-muted-foreground" />
+                )
+              ) : collapsed ? (
                 <Folder className="size-4 shrink-0 text-muted-foreground" />
               ) : (
                 <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
               )}
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <h2 className="text-sm font-semibold text-foreground/80 truncate">
+                  {/* Same project-bold treatment regardless of kind so a
+                      plain project reads as a top-level project rather
+                      than a nested branch row. Active plain projects
+                      bump to full-foreground for the same emphasis a
+                      WorkspaceCard would get. */}
+                  <h2
+                    className={`text-sm font-semibold truncate ${
+                      isPlain && plainIsActive ? "text-foreground" : "text-foreground/80"
+                    }`}
+                  >
                     {project.name}
                   </h2>
                 </TooltipTrigger>
@@ -179,30 +260,47 @@ function SortableProject({
               </Tooltip>
             </div>
             <div className="flex items-center gap-1">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    onPointerDown={(e) => e.stopPropagation()}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setWorkspaceDialog(project.name);
-                    }}
-                  >
-                    <Plus />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Add workspace</TooltipContent>
-              </Tooltip>
+              {/* Plain (non-git) projects have a single implicit workspace
+                  and don't support `git worktree add`, so the "+" Add
+                  workspace button is hidden — see #427. The server also
+                  rejects `workspaces.create` as a backstop. */}
+              {!isPlain && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setWorkspaceDialog(project.name);
+                      }}
+                    >
+                      <Plus />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Add workspace</TooltipContent>
+                </Tooltip>
+              )}
             </div>
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent>
-          <ContextMenuItem onClick={() => onToggleCollapse(project.name)}>
-            <ChevronRight className={collapsed ? "" : "rotate-90"} />
-            {collapsed ? "Expand" : "Collapse"}
-          </ContextMenuItem>
+          {/* Git projects toggle collapse from this menu (keyboard fallback
+              for users who can't reach the header click target). Plain
+              projects have nothing to collapse — they're already flat. */}
+          {!isPlain && (
+            <ContextMenuItem onClick={() => onToggleCollapse(project.name)}>
+              <ChevronRight className={collapsed ? "" : "rotate-90"} />
+              {collapsed ? "Expand" : "Collapse"}
+            </ContextMenuItem>
+          )}
+          {/* Pinning is intentionally omitted for plain projects: the
+              project header IS the workspace, already at the top of its
+              own project block. There's no nested card to surface in the
+              Pinned section, and adding the menu item created a footgun
+              where pin → filter → empty worktrees → crash. To reorder
+              plain projects, drag the project header. */}
           {labels.length > 0 && (
             <ContextMenuSub>
               <ContextMenuSubTrigger>
@@ -232,6 +330,12 @@ function SortableProject({
               </ContextMenuPortal>
             </ContextMenuSub>
           )}
+          {isPlain && canPromoteToGit && (
+            <ContextMenuItem onClick={() => onPromoteToGit(project.name)}>
+              <GitBranch />
+              Promote to git…
+            </ContextMenuItem>
+          )}
           {capabilities.copyPath && (
             <ContextMenuItem onClick={() => navigator.clipboard.writeText(project.path)}>
               <Clipboard />
@@ -251,7 +355,9 @@ function SortableProject({
         </ContextMenuContent>
       </ContextMenu>
 
-      {!collapsed && (
+      {/* Nested workspaces section — only meaningful for git projects.
+          Plain projects are flat: the header above IS the workspace. */}
+      {!isPlain && !collapsed && (
         <div className="flex flex-col gap-0.5 overflow-hidden">
           {project.worktrees.length === 0 ? (
             hasPinnedSiblings ? null : (
@@ -267,6 +373,7 @@ function SortableProject({
                   worktree={wt}
                   projectName={project.name}
                   defaultBranch={project.defaultBranch}
+                  projectKind={project.kind}
                   status={statuses.get(wsId)}
                   branchStatus={branchStatuses.get(wsId)}
                   setupStatus={setupStatuses.get(wsId)}
@@ -357,10 +464,13 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
   const removeProjectMutation = useRemoveProject();
   const reorderProjectsMutation = useReorderProjects();
   const updateProjectLabelMutation = useUpdateProjectLabel();
+  const promoteProjectToGitMutation = usePromoteProjectToGit();
   const removeWorkspaceMutation = useRemoveWorkspace();
 
   const [workspaceDialog, setWorkspaceDialog] = useState<string | null>(null);
   const [deleteDialog, setDeleteDialog] = useState<DeleteDialogInfo | null>(null);
+  /** Project name whose "Promote to git" confirmation dialog is open. */
+  const [promoteDialog, setPromoteDialog] = useState<string | null>(null);
   const [focusedIndex, setFocusedIndex] = useState(-1);
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -369,7 +479,15 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
   const projectCollapse = useCollapseState(PROJECTS_COLLAPSE_KEY);
   const labelCollapse = useCollapseState(LABELS_COLLAPSE_KEY);
   const pinnedCollapse = useCollapseState(PINNED_COLLAPSE_KEY);
-  const { pinned: pinnedEntries, toggle: togglePinned } = usePinnedWorkspaces();
+  const { pinned: pinnedEntriesRaw, toggle: togglePinned } = usePinnedWorkspaces();
+  // Plain (non-git) projects have no separate workspace card to pull up
+  // to a Pinned section — they're already flat at the project level. Drop
+  // them from the pinned list so a stale `pinned=true` row doesn't show
+  // a confusing duplicate entry at the top of the tree.
+  const pinnedEntries = useMemo(
+    () => pinnedEntriesRaw.filter((e) => e.project.kind !== "plain"),
+    [pinnedEntriesRaw],
+  );
 
   // Two sensors so reorder works without an explicit "edit" toggle:
   //  • MouseSensor — desktop pointers can drag immediately; an 8px distance
@@ -386,9 +504,17 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
   // had any pinned worktrees so SortableProject can hide the misleading
   // "No workspaces yet" copy when the only reason a project looks empty is
   // that everything got pinned.
+  //
+  // Plain (non-git) projects are flat — the project header IS the implicit
+  // workspace, with no nested card to pull up to a separate "Pinned"
+  // section. Skip the filter for them so a stray `pinned=true` row (e.g.
+  // pinned before the feature was disabled for plain projects) doesn't
+  // strand SortableProject with an empty `worktrees: []` and crash on
+  // `worktrees[0].branch`.
   const { displayProjects, projectsWithPinned } = useMemo(() => {
     const withPinned = new Set<string>();
     const display = projects.map((p) => {
+      if (p.kind === "plain") return p;
       const filtered = p.worktrees.filter((w) => !w.pinned);
       if (filtered.length !== p.worktrees.length) withPinned.add(p.name);
       return { ...p, worktrees: filtered };
@@ -699,7 +825,7 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
         <p className="text-lg mb-2">No projects registered</p>
-        <p className="text-sm">Click the + button to register a git repository</p>
+        <p className="text-sm">Click the + button to register a folder</p>
       </div>
     );
   }
@@ -743,6 +869,7 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
                     worktree={worktree}
                     projectName={project.name}
                     defaultBranch={project.defaultBranch}
+                    projectKind={project.kind}
                     status={statuses.get(workspaceId)}
                     branchStatus={branchStatuses.get(workspaceId)}
                     setupStatus={setupStatuses.get(workspaceId)}
@@ -800,6 +927,7 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
                           updateProjectLabel={(name, label) =>
                             updateProjectLabelMutation.mutate({ name, label })
                           }
+                          onPromoteToGit={setPromoteDialog}
                           labels={labels}
                           setWorkspaceDialog={setWorkspaceDialog}
                           onShowDeleteDialog={setDeleteDialog}
@@ -856,6 +984,26 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
         isUnmerged={deleteDialog?.isUnmerged ?? false}
         isDirty={deleteDialog?.isDirty ?? false}
         hasUnpushedCommits={deleteDialog?.hasUnpushedCommits ?? false}
+      />
+
+      <PromoteToGitDialog
+        open={promoteDialog !== null}
+        onOpenChange={(open) => {
+          if (!open) setPromoteDialog(null);
+        }}
+        onConfirm={() => {
+          if (!promoteDialog) return;
+          // Wait for the mutation to settle before dismissing the
+          // dialog. If the server errors (path deleted, already a git
+          // project, etc.) we want the dialog to stay open so the
+          // user can see the error toast in context; closing
+          // synchronously hides the trigger before the failure is
+          // visible.
+          promoteProjectToGitMutation.mutate(promoteDialog, {
+            onSettled: () => setPromoteDialog(null),
+          });
+        }}
+        projectName={promoteDialog ?? ""}
       />
     </>
   );

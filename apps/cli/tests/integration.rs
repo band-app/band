@@ -32,8 +32,18 @@ impl TestEnv {
         fs::create_dir_all(band_dir.join("status")).unwrap();
         fs::create_dir_all(band_dir.join("worktrees")).unwrap();
 
-        // Create a real git repo
+        // Create a real git repo. Canonicalize the path immediately so it
+        // matches what `git worktree list --porcelain` reports — on
+        // macOS, `tempfile::tempdir()` gives `/var/folders/...` while
+        // git resolves the symlink to `/private/var/folders/...`. The
+        // server's syncWorktrees (now invoked at boot via
+        // runFirstTimeSetup) compares the seeded worktree path against
+        // git's canonical form with string equality, so without this
+        // shadowing the seeded row would be reconciled away on the very
+        // first boot, leaving `statuses.resolve` unable to map the
+        // CLI's cwd back to a workspaceId. See #427.
         fs::create_dir_all(&repo_path).unwrap();
+        let repo_path = fs::canonicalize(&repo_path).expect("canonicalize repo_path");
         git(&repo_path, &["init", "-b", "main"]);
         git(&repo_path, &["commit", "--allow-empty", "-m", "init"]);
 

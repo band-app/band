@@ -62,6 +62,10 @@ function getWorkspaces(): WorkspaceInfo[] {
   const state = loadState();
   const workspaces: WorkspaceInfo[] = [];
   for (const project of state.projects) {
+    // Plain (non-git) projects can't be polled for git/CI status —
+    // there's no .git, no remote, no branches. Skipping them here also
+    // avoids noisy `git status` / `gh` errors in the server log.
+    if (project.kind === "plain") continue;
     for (const wt of project.worktrees) {
       workspaces.push({
         workspaceId: toWorkspaceId(project.name, wt.branch),

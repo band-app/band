@@ -48,6 +48,7 @@ export {
 } from "./hooks/use-editor-history";
 export { type HooksSetupState, useHooksSetup } from "./hooks/use-hooks-setup";
 export { useIsDark } from "./hooks/use-is-dark";
+export { useProjectKindForWorkspace, useProjectKindMap } from "./hooks/use-project-kind";
 export {
   useAddProject,
   useCreateWorkspace,
@@ -143,6 +144,7 @@ export type {
   LabelDefinition,
   NotificationSettings,
   ProjectInfo,
+  ProjectKind,
   Settings,
   SetupState,
   SetupStatus,
