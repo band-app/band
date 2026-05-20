@@ -210,14 +210,35 @@ export function ChangesFileTree({
 }: ChangesFileTreeProps) {
   const tree = useMemo(() => buildFileTree(fileStatuses), [fileStatuses]);
 
+  // Track every directory path we've ever seen. Used so newly-appearing
+  // directories default to expanded, while preserving the user's explicit
+  // collapses for paths that were already in the tree on a previous render
+  // (including paths that temporarily disappeared, e.g. when switching the
+  // changes selector between branches with different file sets).
+  const seenDirPathsRef = useRef<Set<string>>(new Set());
+
   // All directories expanded by default (changed-file sets are typically small)
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => {
-    return new Set(collectDirPaths(tree));
+    const initial = collectDirPaths(tree);
+    seenDirPathsRef.current = new Set(initial);
+    return new Set(initial);
   });
 
-  // Re-expand all when tree changes (new diff summary)
+  // When the tree changes, expand any directories we haven't seen before
+  // and remember them for future renders. Directories the user has
+  // explicitly collapsed stay collapsed — we never overwrite an existing
+  // entry — so switching between branches (including one with no changes
+  // at all) doesn't reset the expansion state.
   useEffect(() => {
-    setExpandedPaths(new Set(collectDirPaths(tree)));
+    const currentDirs = collectDirPaths(tree);
+    const newDirs = currentDirs.filter((p) => !seenDirPathsRef.current.has(p));
+    if (newDirs.length === 0) return;
+    for (const p of newDirs) seenDirPathsRef.current.add(p);
+    setExpandedPaths((prev) => {
+      const next = new Set(prev);
+      for (const p of newDirs) next.add(p);
+      return next;
+    });
   }, [tree]);
 
   const handleToggle = (path: string) => {
@@ -282,13 +303,10 @@ export function ChangesFileTree({
 
   const canReset = Boolean(onRevertPaths);
 
-  if (tree.length === 0) {
-    return (
-      <div className="flex h-16 items-center justify-center text-[13px] text-muted-foreground">
-        No files
-      </div>
-    );
-  }
+  // When there are no changes the tree is empty — render nothing so the
+  // surrounding panel layout stays stable rather than collapsing or
+  // showing a placeholder that competes with the "No changes" message in
+  // the diff area.
 
   return (
     <>

@@ -1562,21 +1562,10 @@ export function DiffView({
     );
   }
 
-  if (loading) {
-    return (
-      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        Loading changes...
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="flex h-full items-center justify-center text-sm text-destructive">
-        {error}
-      </div>
-    );
-  }
+  // For git projects, loading / error / no-changes / populated states all
+  // share the unified layout below — see the comment above the `hasChanges`
+  // derivation. Don't add separate early returns for loading or error here;
+  // they'd reintroduce the layout shift this PR exists to fix.
 
   // Ghost-style classes shared across every toolbar action button. Variants
   // for the segmented view-mode toggle differ slightly because the active
@@ -1650,62 +1639,15 @@ export function DiffView({
     </>
   );
 
-  if (!summary || summary.stats.filesChanged === 0) {
-    return (
-      <div className="flex h-full flex-col overflow-hidden">
-        <div className="flex h-9 shrink-0 items-center justify-between gap-3 border-b border-border pl-3 pr-3">
-          {renderBranchIndicator(summary?.headBranch)}
-          <div className="flex items-center gap-1">{renderGitSyncButtons()}</div>
-        </div>
-        <div className="flex min-h-0 flex-1 items-center justify-center">
-          <span className="text-sm text-muted-foreground">No changes</span>
-        </div>
-        {gitOpStatus && (
-          <div
-            role={gitOpStatus.state === "error" ? "alert" : "status"}
-            className={`flex shrink-0 items-center gap-2 border-t px-3 py-1.5 text-xs ${
-              gitOpStatus.state === "error"
-                ? "border-destructive/40 bg-destructive/10 text-destructive"
-                : "border-border bg-muted/50 text-muted-foreground"
-            }`}
-          >
-            {gitOpStatus.state === "running" && (
-              <>
-                <Spinner className="size-3.5" />
-                <span>{gitOpStatus.op === "pull" ? "Pulling…" : "Pushing…"}</span>
-              </>
-            )}
-            {gitOpStatus.state === "success" && (
-              <>
-                <Check className="size-3.5 text-green-600 dark:text-green-400" />
-                <span>{gitOpStatus.op === "pull" ? "Pulled" : "Pushed"}</span>
-              </>
-            )}
-            {gitOpStatus.state === "error" && (
-              <>
-                <span className="font-medium">
-                  {gitOpStatus.op === "pull" ? "Pull failed" : "Push failed"}:
-                </span>
-                <span className="min-w-0 flex-1 truncate" title={gitOpStatus.message}>
-                  {gitOpStatus.message}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setGitOpStatus(null)}
-                  className="shrink-0 rounded px-1 text-destructive hover:bg-destructive/20"
-                  aria-label="Dismiss error"
-                >
-                  ×
-                </button>
-              </>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  const fileStatuses = summary.fileStatuses || {};
+  // The loading / error / "no changes" / populated states all share the
+  // outer layout (file tree + toolbar + status banner) so switching the
+  // changes selector between refs (including a ref with no diff) doesn't
+  // collapse the panel or shift the file-tree column out of the layout.
+  // Loading and error take precedence — when either is true we don't
+  // surface the file list even if `summary` still holds data from a
+  // previous fetch.
+  const hasChanges = Boolean(!loading && !error && summary && summary.stats.filesChanged > 0);
+  const fileStatuses = hasChanges ? (summary?.fileStatuses ?? {}) : {};
   const filenames = flattenFileTreeOrder(buildFileTree(fileStatuses));
   filenamesRef.current = filenames;
 
@@ -1746,189 +1688,203 @@ export function DiffView({
         <div className="flex h-9 shrink-0 items-center justify-between gap-3 border-b border-border pl-2 pr-3">
           <div className="flex min-w-0 items-center gap-1.5">
             {renderSidebarToggle()}
-            {renderBranchIndicator(summary.headBranch)}
+            {renderBranchIndicator(summary?.headBranch)}
           </div>
+          {/* When there are no changes the toolbar collapses to just the
+              pull / push controls (the "just fetch upstream" case). The
+              commit / search / expand / view-mode buttons all operate on
+              a non-empty diff and would be no-ops otherwise. */}
+          {!hasChanges && <div className="flex items-center gap-1">{renderGitSyncButtons()}</div>}
           {/* Inline action icons — collapsed into the kebab menu below 44rem.
               The threshold is wider than the branch-label one (32rem) because
               the right-side cluster now carries up to eight icons (commit,
               pull, push, reload, search, expand, unified, split) — squeezing
               them into a narrower toolbar makes the buttons overlap the
               branch indicator on the left. */}
-          <div className="hidden items-center gap-1 @[44rem]/diff:flex">
-            {canCommit && (
-              <button
-                type="button"
-                onClick={() => setCommitDialogOpen(true)}
-                className={ghostBtnAlwaysClass}
-                title="Commit changes"
-                aria-label="Commit changes"
-                disabled={gitOpBusy}
-              >
-                <GitCommit className="size-3.5" />
-              </button>
-            )}
-            {canPull && (
-              <button
-                type="button"
-                onClick={handleGitPull}
-                className={ghostBtnAlwaysClass}
-                title="Git pull"
-                aria-label="Git pull"
-                disabled={gitOpBusy}
-              >
-                {isPulling ? (
-                  <Spinner className="size-3.5" />
-                ) : (
-                  <ArrowDownToLine className="size-3.5" />
-                )}
-              </button>
-            )}
-            {canPush && (
-              <button
-                type="button"
-                onClick={handleGitPush}
-                className={ghostBtnAlwaysClass}
-                title="Git push"
-                aria-label="Git push"
-                disabled={gitOpBusy}
-              >
-                {isPushing ? (
-                  <Spinner className="size-3.5" />
-                ) : (
-                  <ArrowUpFromLine className="size-3.5" />
-                )}
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => fetchSummaryRef.current?.(true)}
-              className={ghostBtnAlwaysClass}
-              title="Reload changes"
-              aria-label="Reload changes"
-            >
-              <RefreshCw className="size-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={search.handleOpenSearch}
-              className={ghostBtnAlwaysClass}
-              title="Find in changes (⌘F)"
-              aria-label="Find in changes"
-            >
-              <Search className="size-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setExpandAll(!expandAll)}
-              className={`${ghostBtnAlwaysClass} ${expandAll ? "bg-accent text-foreground" : ""}`}
-              title={expandAll ? "Collapse all files" : "Expand all files"}
-              aria-label={expandAll ? "Collapse all files" : "Expand all files"}
-              aria-pressed={expandAll}
-            >
-              {expandAll ? (
-                <ChevronsDownUp className="size-3.5" />
-              ) : (
-                <ChevronsUpDown className="size-3.5" />
+          {hasChanges && (
+            <div className="hidden items-center gap-1 @[44rem]/diff:flex">
+              {canCommit && (
+                <button
+                  type="button"
+                  onClick={() => setCommitDialogOpen(true)}
+                  className={ghostBtnAlwaysClass}
+                  title="Commit changes"
+                  aria-label="Commit changes"
+                  disabled={gitOpBusy}
+                >
+                  <GitCommit className="size-3.5" />
+                </button>
               )}
-            </button>
-            <div className="hidden items-center @[40rem]/diff:flex">
+              {canPull && (
+                <button
+                  type="button"
+                  onClick={handleGitPull}
+                  className={ghostBtnAlwaysClass}
+                  title="Git pull"
+                  aria-label="Git pull"
+                  disabled={gitOpBusy}
+                >
+                  {isPulling ? (
+                    <Spinner className="size-3.5" />
+                  ) : (
+                    <ArrowDownToLine className="size-3.5" />
+                  )}
+                </button>
+              )}
+              {canPush && (
+                <button
+                  type="button"
+                  onClick={handleGitPush}
+                  className={ghostBtnAlwaysClass}
+                  title="Git push"
+                  aria-label="Git push"
+                  disabled={gitOpBusy}
+                >
+                  {isPushing ? (
+                    <Spinner className="size-3.5" />
+                  ) : (
+                    <ArrowUpFromLine className="size-3.5" />
+                  )}
+                </button>
+              )}
               <button
                 type="button"
-                onClick={() => setViewMode("unified")}
-                className={`${ghostBtnAlwaysClass} ${effectiveViewMode === "unified" ? "bg-accent text-foreground" : ""}`}
-                title="Unified view"
-                aria-label="Unified view"
-                aria-pressed={effectiveViewMode === "unified"}
+                onClick={() => fetchSummaryRef.current?.(true)}
+                className={ghostBtnAlwaysClass}
+                title="Reload changes"
+                aria-label="Reload changes"
               >
-                <Rows2 className="size-3.5" />
+                <RefreshCw className="size-3.5" />
               </button>
               <button
                 type="button"
-                onClick={() => setViewMode("split")}
-                className={`${ghostBtnAlwaysClass} ${effectiveViewMode === "split" ? "bg-accent text-foreground" : ""}`}
-                title="Split view"
-                aria-label="Split view"
-                aria-pressed={effectiveViewMode === "split"}
+                onClick={search.handleOpenSearch}
+                className={ghostBtnAlwaysClass}
+                title="Find in changes (⌘F)"
+                aria-label="Find in changes"
               >
-                <Columns2 className="size-3.5" />
+                <Search className="size-3.5" />
               </button>
+              <button
+                type="button"
+                onClick={() => setExpandAll(!expandAll)}
+                className={`${ghostBtnAlwaysClass} ${expandAll ? "bg-accent text-foreground" : ""}`}
+                title={expandAll ? "Collapse all files" : "Expand all files"}
+                aria-label={expandAll ? "Collapse all files" : "Expand all files"}
+                aria-pressed={expandAll}
+              >
+                {expandAll ? (
+                  <ChevronsDownUp className="size-3.5" />
+                ) : (
+                  <ChevronsUpDown className="size-3.5" />
+                )}
+              </button>
+              <div className="hidden items-center @[40rem]/diff:flex">
+                <button
+                  type="button"
+                  onClick={() => setViewMode("unified")}
+                  className={`${ghostBtnAlwaysClass} ${effectiveViewMode === "unified" ? "bg-accent text-foreground" : ""}`}
+                  title="Unified view"
+                  aria-label="Unified view"
+                  aria-pressed={effectiveViewMode === "unified"}
+                >
+                  <Rows2 className="size-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode("split")}
+                  className={`${ghostBtnAlwaysClass} ${effectiveViewMode === "split" ? "bg-accent text-foreground" : ""}`}
+                  title="Split view"
+                  aria-label="Split view"
+                  aria-pressed={effectiveViewMode === "split"}
+                >
+                  <Columns2 className="size-3.5" />
+                </button>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Compact "more actions" kebab menu — visible at narrow widths only.
               Mirrors the 44rem breakpoint above so exactly one of the inline
-              cluster / kebab is visible at any width. */}
-          <div className="flex items-center @[44rem]/diff:hidden">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  className={ghostBtnAlwaysClass}
-                  title="More actions"
-                  aria-label="More actions"
-                >
-                  <MoreVertical className="size-3.5" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {canCommit && (
-                  <DropdownMenuItem onSelect={() => setCommitDialogOpen(true)} disabled={gitOpBusy}>
-                    <GitCommit className="size-4" />
-                    Commit changes
-                  </DropdownMenuItem>
-                )}
-                {canPull && (
-                  <DropdownMenuItem onSelect={() => handleGitPull()} disabled={gitOpBusy}>
-                    {isPulling ? (
-                      <Spinner className="size-4" />
-                    ) : (
-                      <ArrowDownToLine className="size-4" />
-                    )}
-                    Git pull
-                  </DropdownMenuItem>
-                )}
-                {canPush && (
-                  <DropdownMenuItem onSelect={() => handleGitPush()} disabled={gitOpBusy}>
-                    {isPushing ? (
-                      <Spinner className="size-4" />
-                    ) : (
-                      <ArrowUpFromLine className="size-4" />
-                    )}
-                    Git push
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuItem onSelect={() => fetchSummaryRef.current?.(true)}>
-                  <RefreshCw className="size-4" />
-                  Reload changes
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={search.handleOpenSearch}>
-                  <Search className="size-4" />
-                  Find in changes
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => setExpandAll(!expandAll)}>
-                  {expandAll ? (
-                    <ChevronsDownUp className="size-4" />
-                  ) : (
-                    <ChevronsUpDown className="size-4" />
+              cluster / kebab is visible at any width. Hidden when there are
+              no changes — the simplified pull / push cluster is shown
+              unconditionally at every width instead. */}
+          {hasChanges && (
+            <div className="flex items-center @[44rem]/diff:hidden">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className={ghostBtnAlwaysClass}
+                    title="More actions"
+                    aria-label="More actions"
+                  >
+                    <MoreVertical className="size-3.5" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {canCommit && (
+                    <DropdownMenuItem
+                      onSelect={() => setCommitDialogOpen(true)}
+                      disabled={gitOpBusy}
+                    >
+                      <GitCommit className="size-4" />
+                      Commit changes
+                    </DropdownMenuItem>
                   )}
-                  {expandAll ? "Collapse all files" : "Expand all files"}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={() => setViewMode("unified")}>
-                  <Rows2 className="size-4" />
-                  Unified view
-                  {effectiveViewMode === "unified" && <Check className="ml-auto size-4" />}
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => setViewMode("split")}>
-                  <Columns2 className="size-4" />
-                  Split view
-                  {effectiveViewMode === "split" && <Check className="ml-auto size-4" />}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+                  {canPull && (
+                    <DropdownMenuItem onSelect={() => handleGitPull()} disabled={gitOpBusy}>
+                      {isPulling ? (
+                        <Spinner className="size-4" />
+                      ) : (
+                        <ArrowDownToLine className="size-4" />
+                      )}
+                      Git pull
+                    </DropdownMenuItem>
+                  )}
+                  {canPush && (
+                    <DropdownMenuItem onSelect={() => handleGitPush()} disabled={gitOpBusy}>
+                      {isPushing ? (
+                        <Spinner className="size-4" />
+                      ) : (
+                        <ArrowUpFromLine className="size-4" />
+                      )}
+                      Git push
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem onSelect={() => fetchSummaryRef.current?.(true)}>
+                    <RefreshCw className="size-4" />
+                    Reload changes
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={search.handleOpenSearch}>
+                    <Search className="size-4" />
+                    Find in changes
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => setExpandAll(!expandAll)}>
+                    {expandAll ? (
+                      <ChevronsDownUp className="size-4" />
+                    ) : (
+                      <ChevronsUpDown className="size-4" />
+                    )}
+                    {expandAll ? "Collapse all files" : "Expand all files"}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={() => setViewMode("unified")}>
+                    <Rows2 className="size-4" />
+                    Unified view
+                    {effectiveViewMode === "unified" && <Check className="ml-auto size-4" />}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => setViewMode("split")}>
+                    <Columns2 className="size-4" />
+                    Split view
+                    {effectiveViewMode === "split" && <Check className="ml-auto size-4" />}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          )}
         </div>
-        {search.searchOpen && (
+        {hasChanges && search.searchOpen && (
           <SearchBar
             ref={search.searchBarRef}
             query={search.searchQuery}
@@ -1942,51 +1898,60 @@ export function DiffView({
             onClose={search.handleCloseSearch}
           />
         )}
-        <div ref={scrollContainerRef} className="min-h-0 flex-1 overflow-y-auto">
-          <div className="flex flex-col gap-3 p-3">
-            {filenames.map((filename, index) => {
-              const isLast = index === filenames.length - 1;
-              const row = (
-                <LazyFileRow
-                  key={filename}
-                  filename={filename}
-                  status={fileStatuses[filename]}
-                  cacheEntry={diffCache.get(filename)}
-                  viewMode={effectiveViewMode}
-                  expandAll={expandAll}
-                  focusedFile={focusedFile}
-                  isActive={activeFile === filename}
-                  scrollContainerRef={scrollContainerRef}
-                  onToggleFile={handleToggleFile}
-                  onLoadMoreContext={handleLoadMoreContext}
-                  onShowFullFile={handleShowFullFile}
-                  onOpenFile={onOpenFile}
-                  onRevertFile={adapter.revertFile ? handleRevertFile : undefined}
-                  onEditorViews={handleEditorViews}
-                />
-              );
-              if (!isLast) return row;
-              // The last row is wrapped in a fake container that owns the
-              // trailing spacer. The wrapper's min-height keeps the bottom of
-              // the scroll content stable so the last row can always be
-              // scrolled to the top of the viewport. Toggling the row's
-              // accordion only resizes the spacer — the LazyFileRow itself
-              // keeps its natural size, so the bordered card hugs its content.
-              return (
-                <div
-                  key={`${filename}-last-wrapper`}
-                  className="flex flex-col"
-                  style={
-                    scrollContainerHeight > 0 ? { minHeight: scrollContainerHeight } : undefined
-                  }
-                >
-                  {row}
-                  <div aria-hidden className="flex-1" />
-                </div>
-              );
-            })}
+        {!hasChanges && (
+          <div className="flex min-h-0 flex-1 items-center justify-center">
+            <span className={`text-sm ${error ? "text-destructive" : "text-muted-foreground"}`}>
+              {loading ? "Loading changes..." : error ? error : "No changes"}
+            </span>
           </div>
-        </div>
+        )}
+        {hasChanges && (
+          <div ref={scrollContainerRef} className="min-h-0 flex-1 overflow-y-auto">
+            <div className="flex flex-col gap-3 p-3">
+              {filenames.map((filename, index) => {
+                const isLast = index === filenames.length - 1;
+                const row = (
+                  <LazyFileRow
+                    key={filename}
+                    filename={filename}
+                    status={fileStatuses[filename]}
+                    cacheEntry={diffCache.get(filename)}
+                    viewMode={effectiveViewMode}
+                    expandAll={expandAll}
+                    focusedFile={focusedFile}
+                    isActive={activeFile === filename}
+                    scrollContainerRef={scrollContainerRef}
+                    onToggleFile={handleToggleFile}
+                    onLoadMoreContext={handleLoadMoreContext}
+                    onShowFullFile={handleShowFullFile}
+                    onOpenFile={onOpenFile}
+                    onRevertFile={adapter.revertFile ? handleRevertFile : undefined}
+                    onEditorViews={handleEditorViews}
+                  />
+                );
+                if (!isLast) return row;
+                // The last row is wrapped in a fake container that owns the
+                // trailing spacer. The wrapper's min-height keeps the bottom of
+                // the scroll content stable so the last row can always be
+                // scrolled to the top of the viewport. Toggling the row's
+                // accordion only resizes the spacer — the LazyFileRow itself
+                // keeps its natural size, so the bordered card hugs its content.
+                return (
+                  <div
+                    key={`${filename}-last-wrapper`}
+                    className="flex flex-col"
+                    style={
+                      scrollContainerHeight > 0 ? { minHeight: scrollContainerHeight } : undefined
+                    }
+                  >
+                    {row}
+                    <div aria-hidden className="flex-1" />
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
         {/* Inline status banner for one-shot git operations (pull / push).
             Lives above the bottom status bar so it doesn't shift the diff
             viewport. Errors stay until dismissed; success is auto-cleared. */}
@@ -2031,23 +1996,29 @@ export function DiffView({
             )}
           </div>
         )}
-        {/* Bottom status bar — totals for the current diff */}
-        <div className="flex h-9 shrink-0 items-center border-t border-border px-3 text-sm text-muted-foreground">
-          <span className="font-medium text-foreground">{summary.stats.filesChanged}</span>
-          <span className="ml-1">
-            {summary.stats.filesChanged === 1 ? "file" : "files"} changed
-          </span>
-          {summary.stats.insertions > 0 && (
-            <span className="ml-2 text-green-600 dark:text-green-400">
-              +{summary.stats.insertions}
+        {/* Bottom status bar — totals for the current diff. Hidden when
+            there are no changes; the centered "No changes" message in the
+            content area already conveys the empty state. */}
+        {hasChanges && summary && (
+          <div className="flex h-9 shrink-0 items-center border-t border-border px-3 text-sm text-muted-foreground">
+            <span className="font-medium text-foreground">{summary.stats.filesChanged}</span>
+            <span className="ml-1">
+              {summary.stats.filesChanged === 1 ? "file" : "files"} changed
             </span>
-          )}
-          {summary.stats.deletions > 0 && (
-            <span className="ml-1 text-red-600 dark:text-red-400">-{summary.stats.deletions}</span>
-          )}
-        </div>
+            {summary.stats.insertions > 0 && (
+              <span className="ml-2 text-green-600 dark:text-green-400">
+                +{summary.stats.insertions}
+              </span>
+            )}
+            {summary.stats.deletions > 0 && (
+              <span className="ml-1 text-red-600 dark:text-red-400">
+                -{summary.stats.deletions}
+              </span>
+            )}
+          </div>
+        )}
       </div>
-      {canCommit && (
+      {canCommit && hasChanges && summary && (
         <CommitDialog
           open={commitDialogOpen}
           onOpenChange={setCommitDialogOpen}
