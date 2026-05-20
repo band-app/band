@@ -216,6 +216,11 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar, hideMenu }: Das
       // actual viewport. The `hideTitleBar` branch is sized by its parent
       // (a dockview panel with explicit pixel height) so it doesn't need
       // the compensation. See band-app/band#463.
+      //
+      // NOTE: `--app-zoom` is hardcoded here because `packages/dashboard-core`
+      // can't import from `apps/web/src/lib/zoom.ts` without inverting the
+      // package dependency graph. Keep this string in sync with the
+      // `ZOOM_CSS_VAR` constant exported from that module.
       style={hideTitleBar ? undefined : { height: "calc(100dvh / var(--app-zoom, 1))" }}
     >
       {isDesktop && !hideTitleBar && (

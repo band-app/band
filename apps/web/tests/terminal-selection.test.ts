@@ -207,6 +207,10 @@ describe("pointToCell", () => {
 
     const terminal = makeTerminal({ cols: 80, rows: 24 });
     const screen = makeScreenEl(800, 480, 50, 30);
+    // The (800, 480, 50, 30) below MUST match makeScreenEl above — the
+    // round-trip only proves anything if both sides use the same rect
+    // geometry. If `makeScreenEl`'s argument order ever changes, this
+    // helper call has to change with it.
     const { clientX, clientY } = clickAtCell(42, 10, 80, 24, 800, 480, 50, 30);
     expect(pointToCell(clientX, clientY, terminal, screen)).toEqual({ col: 42, row: 10 });
   });

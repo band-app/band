@@ -20,7 +20,7 @@ import {
   pointToCell,
   wordSelectionAt,
 } from "../lib/terminal-selection";
-import { getCurrentZoomLevel, subscribeToZoomChanges } from "../lib/zoom";
+import { getCurrentZoomLevel, subscribeToZoomChanges, ZOOM_CSS_VAR } from "../lib/zoom";
 import { TerminalToolbar } from "./TerminalToolbar";
 
 /** Base xterm font size at zoom = 1.0. The terminal lives in a counter-zoomed
@@ -1035,7 +1035,7 @@ export function TerminalPanel({
           // factor (see handleZoomChange above). See band-app/band#463.
           style={{
             bottom: 8 + contentBottomInset,
-            zoom: "calc(1 / var(--app-zoom, 1))",
+            zoom: `calc(1 / var(${ZOOM_CSS_VAR}, 1))`,
           }}
         />
       </div>

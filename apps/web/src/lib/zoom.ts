@@ -59,6 +59,13 @@ export function saveZoomLevel(level: number): void {
  * level helper exists only for the sync path that must avoid the
  * (currently benign in Chromium, but spec-non-guaranteed) cross-window
  * storage echo.
+ *
+ * Exception behaviour: `dispatchEvent` runs synchronously and propagates
+ * any exception thrown by a subscriber. If a subscriber throws, this
+ * function throws and the return value never reaches the caller — do not
+ * rely on the return value in contexts that need to recover from a
+ * subscriber error. The current call sites (`applyZoomLevel` discards
+ * the void path, `ZoomSync` doesn't use the return) are unaffected.
  */
 export function applyZoomLevelToDom(level: number): number {
   const clamped = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, level));
