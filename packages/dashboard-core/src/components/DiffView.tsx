@@ -37,11 +37,11 @@ import {
   SquareArrowOutUpRight,
   Undo2,
 } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useAdapter } from "../context";
 import { readStoredCompareBranch, useDiffTarget } from "../hooks/use-diff-target";
 import { useIsDark } from "../hooks/use-is-dark";
-import { useProjects } from "../hooks/use-projects";
+import { useProjectKindForWorkspace } from "../hooks/use-project-kind";
 import { useSearch } from "../hooks/use-search";
 import { buildFileTree, flattenFileTreeOrder } from "../lib/build-file-tree";
 import { baseViewerExtensions, loadLanguage, searchHighlightOnly } from "../lib/codemirror-setup";
@@ -49,7 +49,6 @@ import { formatFileLocation } from "../lib/file-location";
 import { extensionToLanguage, filenameToLanguage } from "../lib/language-map";
 import { selectionToChatExtension } from "../lib/selection-to-chat";
 import type { SSEEvent } from "../lib/sse";
-import { toWorkspaceId } from "../lib/workspace-id";
 import type { FileStatus, WorkspaceDiffSummary } from "../types";
 import { ChangesFileTree } from "./ChangesFileTree";
 import { CommitDialog } from "./CommitDialog";
@@ -811,21 +810,15 @@ export function DiffView({
   onFindInFile,
 }: DiffViewProps) {
   const adapter = useAdapter();
-  // Look up the project for this workspaceId so we can short-circuit the
-  // diff fetch for plain (non-git) projects — `git diff` against a folder
-  // without a .git directory would otherwise surface as a raw error in the
-  // Changes view. See #427.
-  const { projects } = useProjects();
-  const projectKind = useMemo(() => {
-    for (const p of projects) {
-      for (const wt of p.worktrees) {
-        if (toWorkspaceId(p.name, wt.branch) === workspaceId) {
-          return p.kind ?? "git";
-        }
-      }
-    }
-    return undefined;
-  }, [projects, workspaceId]);
+  // Look up the project's kind so we can short-circuit the diff fetch
+  // for plain (non-git) projects — `git diff` against a folder without
+  // a `.git` directory would otherwise surface as a raw error in the
+  // Changes view. The lookup is centralised in `useProjectKindMap` so
+  // multiple mounted DiffView instances share a single O(projects ×
+  // worktrees) scan; per-instance the cost is a Map.get(). Returns
+  // `undefined` while `useProjects()` is loading — the effect below
+  // skips the diff fetch in that window. See #427.
+  const projectKind = useProjectKindForWorkspace(workspaceId);
   const isPlain = projectKind === "plain";
   const [summary, setSummary] = useState<WorkspaceDiffSummary | null>(null);
   const summaryRef = useRef<WorkspaceDiffSummary | null>(null);

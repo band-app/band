@@ -30,8 +30,13 @@ export interface ProjectInfo {
   defaultBranch: string;
   worktrees: WorktreeInfo[];
   label?: string;
-  /** Defaults to "git" for backward compatibility with older adapters. */
-  kind?: ProjectKind;
+  /**
+   * Required: the server always sets it (migration defaults pre-existing
+   * rows to "git"), and the web adapter normalises any older API
+   * response that might omit it back to "git" at the response boundary.
+   * UI consumers can therefore branch on `kind` without `?? "git"` guards.
+   */
+  kind: ProjectKind;
 }
 
 export interface WorktreeInfo {

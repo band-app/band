@@ -162,41 +162,29 @@ const projectsRouter = t.router({
     const statuses = loadCurrentStatuses();
     const statusMap = new Map(statuses.map((s) => [s.workspaceId, s]));
 
-    // Self-heal `kind` against the filesystem. The schema migration for
-    // #427 defaulted every pre-existing row to `kind: "git"` regardless of
-    // whether the folder actually had a `.git` directory — so a project
-    // added before this PR shipped, sitting in a plain folder, would
-    // otherwise stay incorrectly tagged. Same reconciliation also catches
-    // a user who ran `git init` (or `rm -rf .git`) in the folder outside
-    // the dashboard. Re-detect on every list, persist when the detected
-    // kind disagrees with the stored one. The fs call is cheap (single
-    // existsSync per project); saveState only fires on actual mismatch.
-    let kindReconciled = false;
+    // Inline, read-only kind re-detection. Persistence lives in
+    // `syncWorktrees` (called on every branch-status-poller tick) so
+    // this query doesn't write to the DB — but the response still needs
+    // to reflect on-disk reality, otherwise a freshly-booted dashboard
+    // showing pre-migration "git" rows would render incorrectly until
+    // the first poller tick fires AND the next 30 s refetch lands. The
+    // existsSync probe is cheap and the loop only touches in-memory
+    // state; downstream `kind === "plain"` branching below sees the
+    // corrected value immediately.
     for (const project of state.projects) {
-      // Skip rows whose path no longer exists — leave kind alone rather
-      // than synthesize a workspace under a missing directory.
       if (!existsSync(project.path)) continue;
       const detectedKind: ProjectKind = existsSync(join(project.path, ".git")) ? "git" : "plain";
       if (detectedKind !== project.kind) {
         project.kind = detectedKind;
-        // On a `git → plain` flip (`.git` disappeared from under us — e.g.
-        // a `rm -rf .git` from a terminal), replace any existing worktree
-        // rows with the implicit `{branch: "main", path: project.path}`
-        // workspace. We do this unconditionally for `plain` (not only
-        // when worktrees is empty) because a real git project flipping
-        // to plain will still have its old `feat/foo` / `fix/bar`
-        // entries; leaving them would orphan the rows (their worktree
-        // paths under `worktreesDir/{project}/{branch}` are now broken
-        // git worktrees with no `.git` to reach back to) and the
-        // flattened plain UI would render the wrong branch label.
         if (detectedKind === "plain") {
+          // Stale `feat/foo` rows are now orphaned; replace with the
+          // implicit `main` workspace so the flattened plain UI has a
+          // single workspace at the project path to render. The
+          // canonical version of this fix-up lives in syncWorktrees,
+          // which also persists; we just mirror it in-memory here.
           project.worktrees = [{ branch: "main", path: project.path, pinned: false }];
         }
-        kindReconciled = true;
       }
-    }
-    if (kindReconciled) {
-      saveState(state);
     }
 
     const projects = await Promise.all(
@@ -380,19 +368,26 @@ const projectsRouter = t.router({
       const state = loadState();
       const project = state.projects.find((p) => p.name === input.name);
       if (!project) {
-        throw new Error(`Project "${input.name}" not found`);
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `Project "${input.name}" not found`,
+        });
       }
       if (project.kind === "git") {
-        throw new Error(`Project "${input.name}" is already a git project`);
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Project "${input.name}" is already a git project`,
+        });
       }
       // Pre-flight: if the folder was moved/deleted between `projects.add`
       // and the promote click, `execGit` would surface a raw subprocess
       // ENOENT ("cannot change to '...'") with no diagnostic context.
       // Bail with a clear message instead so the user knows to re-add.
       if (!existsSync(project.path)) {
-        throw new Error(
-          `Project path "${project.path}" no longer exists. Remove the project and re-add it.`,
-        );
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `Project path "${project.path}" no longer exists. Remove the project and re-add it.`,
+        });
       }
 
       // `git init -b main` pins HEAD to refs/heads/main so the implicit
@@ -491,9 +486,10 @@ const workspacesRouter = t.router({
       // without git worktrees, so reject the call as a backstop — the UI
       // should already be hiding the "New workspace" button.
       if (proj.kind === "plain") {
-        throw new Error(
-          `Project "${input.project}" is a plain (non-git) folder and cannot have additional workspaces. Promote it to git (right-click the project → "Promote to git") to enable branches.`,
-        );
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Project "${input.project}" is a plain (non-git) folder and cannot have additional workspaces. Promote it to git (right-click the project → "Promote to git") to enable branches.`,
+        });
       }
 
       const existing = proj.worktrees.find((wt) => wt.branch === input.branch);
@@ -563,9 +559,10 @@ const workspacesRouter = t.router({
       // removed — the workspace is the project. The user must remove the
       // project entirely instead.
       if (proj.kind === "plain") {
-        throw new Error(
-          `Project "${input.project}" is a plain (non-git) project. Remove the project instead of the workspace.`,
-        );
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Project "${input.project}" is a plain (non-git) project. Remove the project instead of the workspace.`,
+        });
       }
 
       const { command, env: gitEnv } = gitCmd();
@@ -742,9 +739,10 @@ const workspacesRouter = t.router({
       // UI with an empty `worktrees` array. Reject the call as a backstop;
       // the UI also omits the menu item.
       if (proj.kind === "plain") {
-        throw new Error(
-          `Project "${input.project}" is a plain (non-git) project. Pinning is not available.`,
-        );
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Project "${input.project}" is a plain (non-git) project. Pinning is not available.`,
+        });
       }
       const wt = proj.worktrees.find((w) => w.branch === input.branch);
       if (!wt) {
@@ -764,9 +762,10 @@ const workspacesRouter = t.router({
         throw new Error("Workspace not found");
       }
       if (workspace.project.kind === "plain") {
-        throw new Error(
-          `Project "${input.project}" is a plain (non-git) project. Git pull is not available.`,
-        );
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Project "${input.project}" is a plain (non-git) project. Git pull is not available.`,
+        });
       }
       const cwd = workspace.worktree.path;
       try {
@@ -793,9 +792,10 @@ const workspacesRouter = t.router({
         throw new Error("Workspace not found");
       }
       if (workspace.project.kind === "plain") {
-        throw new Error(
-          `Project "${input.project}" is a plain (non-git) project. Git push is not available.`,
-        );
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Project "${input.project}" is a plain (non-git) project. Git push is not available.`,
+        });
       }
       const cwd = workspace.worktree.path;
       try {
@@ -942,6 +942,16 @@ const compareBranchSchema = z
   .optional();
 
 const EMPTY_TREE_ARGS = ["hash-object", "-t", "tree", "/dev/null"];
+
+/**
+ * The canonical SHA of git's empty tree object — present in every git
+ * repository. We use it as the `mergeBase` sentinel for non-git
+ * workspaces so the field always carries a real 40-char SHA shape
+ * (downstream callers expecting `mergeBase` to be a commit-ish stay
+ * happy) and so `git diff <sha>` against it would semantically mean
+ * "everything is new" if anyone ever passed it through.
+ */
+const EMPTY_TREE_SHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 
 interface DiffContext {
   /** Resolved compare branch — defaults to project default. */
@@ -1331,7 +1341,7 @@ const workspaceRouter = t.router({
           defaultBranch,
           headBranch: defaultBranch,
           fileStatuses: {},
-          mergeBase: "",
+          mergeBase: EMPTY_TREE_SHA,
         };
       }
 

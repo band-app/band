@@ -66,9 +66,16 @@ If `kind` is `"plain"`:
     echo "error: no implicit workspace found for project '$project_name' — check that the server is running and the project is registered" >&2
     exit 1
   fi
-  # `chats send` lazy-creates a chat pane on the first call if none exists
-  band chats send "$ws_id" --prompt "<user prompt>" --output json
-  chat_id=$(band chats list "$ws_id" --output json | jq -r '.chats[0].id')
+  # `chats send` lazy-creates a chat pane on the first call and returns
+  # the resolved chat ID in its JSON output — read it from there
+  # directly rather than re-listing (avoids races with concurrent chat
+  # creation and is stable across `chats list` sort-order changes).
+  chat_id=$(band chats send "$ws_id" --prompt "<user prompt>" --output json \
+    | jq -r '.chatId // empty')
+  if [ -z "$chat_id" ]; then
+    echo "error: chats send did not return a chat ID (older server?)" >&2
+    exit 1
+  fi
   ```
 
 - Skip ahead to step 8 (report the result) with the resolved `chat_id`.

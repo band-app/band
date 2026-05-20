@@ -10,7 +10,12 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { seedSettings, seedState } from "./helpers/seed-state";
+import {
+  countBranchStatusRows,
+  readProjectKind,
+  seedSettings,
+  seedState,
+} from "./helpers/seed-state";
 import { SERVER_RUNTIME, SERVER_SCRIPT } from "./helpers/server-runtime";
 
 const PROJECT_ROOT = join(import.meta.dirname, "..");
@@ -303,7 +308,7 @@ describe("tRPC — plain projects (self-heal kind)", () => {
       project: "scratch",
       branch: "feature-1",
     });
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { message: string } };
     expect(body.error.message).toMatch(/plain.*non-git/i);
   });
@@ -467,7 +472,7 @@ describe("tRPC — plain projects (workspace mutations rejected)", () => {
       project: "scratch",
       branch: "feature-1",
     });
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { message: string } };
     expect(body.error.message).toMatch(/plain.*non-git.*workspace/i);
 
@@ -485,7 +490,7 @@ describe("tRPC — plain projects (workspace mutations rejected)", () => {
       project: "scratch",
       branch: "main",
     });
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { message: string } };
     expect(body.error.message).toMatch(/plain.*non-git/i);
   });
@@ -495,7 +500,7 @@ describe("tRPC — plain projects (workspace mutations rejected)", () => {
       project: "scratch",
       branch: "main",
     });
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { message: string } };
     expect(body.error.message).toMatch(/plain.*non-git/i);
   });
@@ -505,7 +510,7 @@ describe("tRPC — plain projects (workspace mutations rejected)", () => {
       project: "scratch",
       branch: "main",
     });
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { message: string } };
     expect(body.error.message).toMatch(/plain.*non-git/i);
   });
@@ -520,7 +525,7 @@ describe("tRPC — plain projects (workspace mutations rejected)", () => {
       branch: "main",
       pinned: true,
     });
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { message: string } };
     expect(body.error.message).toMatch(/plain.*non-git/i);
   });
@@ -670,16 +675,16 @@ describe("tRPC — plain projects (promote to git)", () => {
     expect(proj.worktrees.some((w) => w.workspaceId === "scratch-main")).toBe(true);
   });
 
-  it("projects.promoteToGit on an already-git project errors", async () => {
+  it("projects.promoteToGit on an already-git project returns 400", async () => {
     const res = await trpcMutate(server.url, "projects.promoteToGit", { name: "scratch" });
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { message: string } };
     expect(body.error.message).toMatch(/already a git project/i);
   });
 
-  it("projects.promoteToGit on a missing project errors", async () => {
+  it("projects.promoteToGit on a missing project returns 404", async () => {
     const res = await trpcMutate(server.url, "projects.promoteToGit", { name: "nonexistent" });
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(404);
     const body = (await res.json()) as { error: { message: string } };
     expect(body.error.message).toMatch(/not found/i);
   });
@@ -705,5 +710,161 @@ describe("tRPC — plain projects (promote to git)", () => {
     // project path — proving the project really is git-backed now.
     expect(data.path).not.toBe(plainPath);
     expect(data.path).toContain("feature-1");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Background process tests: `branch-status-poller` and `sync-state` skip
+// plain projects, and `syncWorktrees` persists the kind self-heal.
+// ---------------------------------------------------------------------------
+//
+// `projects.list` does an *inline, in-memory* re-detection of kind so the
+// dashboard response always reflects on-disk reality. Persistence of the
+// flip is the job of `syncWorktrees`, which runs as the first beat of
+// every `startBranchStatusPoller` tick (and at server boot before the
+// interval kicks in). These tests verify the persistence side
+// independently of the in-memory path by reading the SQLite DB directly
+// after the server has had a chance to tick once.
+
+describe("tRPC — plain projects (syncWorktrees self-heal persistence)", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+  let plainPath: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    plainPath = createPlainDir(tmpHome, "needs-heal");
+
+    // Stale row from the migration: kind="git" but the folder has no
+    // `.git`. The first poller tick should flip it to "plain" and write
+    // that change to disk via saveState.
+    seedState(tmpHome, {
+      projects: [
+        {
+          name: "needs-heal",
+          path: plainPath,
+          defaultBranch: "main",
+          kind: "git",
+          worktrees: [],
+        },
+      ],
+    });
+    seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
+    server = await startServer({ tmpHome });
+    // `startBranchStatusPoller` fires its first tick synchronously, but
+    // the inner async chain (syncWorktrees + saveState) is awaited off
+    // the call stack. 250 ms is comfortable headroom — the work itself
+    // is sub-10 ms locally.
+    await new Promise((r) => setTimeout(r, 250));
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("syncWorktrees persists kind=plain to disk after the first poller tick", () => {
+    // Read directly from the SQLite DB rather than via projects.list
+    // (which has its own inline re-detection that would mask a
+    // persistence failure).
+    const kind = readProjectKind(server.home, "needs-heal");
+    expect(kind).toBe("plain");
+  });
+});
+
+describe("tRPC — plain projects (branch-status-poller skips)", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+  let plainPath: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    plainPath = createPlainDir(tmpHome, "scratch");
+    seedState(tmpHome, {
+      projects: [
+        {
+          name: "scratch",
+          path: plainPath,
+          defaultBranch: "main",
+          kind: "plain",
+          worktrees: [{ branch: "main", path: plainPath }],
+        },
+      ],
+    });
+    seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
+    server = await startServer({ tmpHome });
+    // Same timing as the persistence test — wait one full tick beyond
+    // the immediate-first-tick window to give the poller every chance
+    // to write a stray branch-status row if the skip logic regresses.
+    await new Promise((r) => setTimeout(r, 500));
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("no branch_statuses row is created for a plain project's implicit workspace", () => {
+    // The poller iterates `state.projects`, skips `kind === "plain"`,
+    // and emits one branch-status row per surviving workspace. Plain
+    // projects must not produce one — verify by counting rows in the
+    // branch_statuses table for the implicit workspaceId.
+    const rows = countBranchStatusRows(server.home, "scratch-main");
+    expect(rows).toBe(0);
+  });
+});
+
+describe("tRPC — plain projects (sync-state worktree reconcile skips)", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+  let plainPath: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    plainPath = createPlainDir(tmpHome, "scratch");
+    // Seed a plain project with a `pinned: true` flag on its implicit
+    // workspace. (Pinning is server-rejected for new plain projects,
+    // but we're simulating a row that landed there via legacy state —
+    // a regression in syncWorktrees that ran `listWorktrees` against
+    // a plain folder would either throw, wipe the worktrees array, or
+    // strip pin metadata. The skip keeps it intact.)
+    seedState(tmpHome, {
+      projects: [
+        {
+          name: "scratch",
+          path: plainPath,
+          defaultBranch: "main",
+          kind: "plain",
+          worktrees: [{ branch: "main", path: plainPath, pinned: true }],
+        },
+      ],
+    });
+    seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
+    server = await startServer({ tmpHome });
+    await new Promise((r) => setTimeout(r, 500));
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("syncWorktrees doesn't mutate a plain project's worktree rows", async () => {
+    const res = await trpcQuery(server.url, "projects.list");
+    const data = await trpcData<{
+      projects: Array<{
+        name: string;
+        worktrees: Array<{ branch: string; path: string; pinned: boolean }>;
+      }>;
+    }>(res);
+    const proj = data.projects.find((p) => p.name === "scratch")!;
+    expect(proj.worktrees).toHaveLength(1);
+    expect(proj.worktrees[0].branch).toBe("main");
+    expect(proj.worktrees[0].path).toBe(plainPath);
+    // Pin metadata survived — meaning syncWorktrees didn't fall through
+    // to the `gitWorktrees` enrichment branch (which would have
+    // rebuilt the array from `git worktree list` output and lost the
+    // pinned flag).
+    expect(proj.worktrees[0].pinned).toBe(true);
   });
 });

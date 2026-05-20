@@ -120,3 +120,40 @@ export function seedSettings(tmpHome: string, settings: object): void {
   mkdirSync(bandDir, { recursive: true });
   writeFileSync(join(bandDir, "settings.json"), JSON.stringify(settings, null, 2), "utf-8");
 }
+
+/**
+ * Read a project's persisted `kind` directly from the SQLite DB. Used by
+ * the poller/sync-state integration tests to verify that
+ * `syncWorktrees` actually wrote the self-healed kind to disk (the
+ * inline re-detection inside `projects.list` returns the corrected
+ * value in-memory regardless of persistence — this lets us distinguish
+ * the two).
+ */
+export function readProjectKind(tmpHome: string, projectName: string): string | undefined {
+  const sqlite = new DatabaseSync(join(tmpHome, ".band", "band.db"));
+  try {
+    const row = sqlite.prepare("SELECT kind FROM projects WHERE name = ?").get(projectName) as
+      | { kind: string }
+      | undefined;
+    return row?.kind;
+  } finally {
+    sqlite.close();
+  }
+}
+
+/**
+ * Count rows in `branch_statuses` for a given workspaceId. Used to
+ * verify the `branch-status-poller` skips plain projects (so no
+ * branch-status row is ever written for their implicit workspace).
+ */
+export function countBranchStatusRows(tmpHome: string, workspaceId: string): number {
+  const sqlite = new DatabaseSync(join(tmpHome, ".band", "band.db"));
+  try {
+    const row = sqlite
+      .prepare("SELECT COUNT(*) as n FROM branch_statuses WHERE workspace_id = ?")
+      .get(workspaceId) as { n: number };
+    return row.n;
+  } finally {
+    sqlite.close();
+  }
+}

@@ -77,6 +77,7 @@ import type {
 import { AgentStatusIndicator } from "./AgentStatusIndicator";
 import { DeleteWorkspaceDialog } from "./DeleteWorkspaceDialog";
 import { NewWorkspaceDialog } from "./NewWorkspaceForm";
+import { PromoteToGitDialog } from "./PromoteToGitDialog";
 import { WorkspaceCard } from "./WorkspaceCard";
 
 interface SortableProjectProps {
@@ -86,7 +87,8 @@ interface SortableProjectProps {
   setupStatuses: Map<string, SetupStatus>;
   removeProject: (name: string) => void;
   updateProjectLabel: (name: string, label: string | null) => void;
-  promoteProjectToGit: (name: string) => void;
+  /** Opens the promote-to-git confirmation dialog for the given project. */
+  onPromoteToGit: (name: string) => void;
   labels: LabelDefinition[];
   setWorkspaceDialog: (name: string | null) => void;
   onShowDeleteDialog: (info: DeleteDialogInfo) => void;
@@ -110,7 +112,7 @@ function SortableProject({
   setupStatuses,
   removeProject,
   updateProjectLabel,
-  promoteProjectToGit,
+  onPromoteToGit,
   labels,
   setWorkspaceDialog,
   onShowDeleteDialog,
@@ -329,9 +331,9 @@ function SortableProject({
             </ContextMenuSub>
           )}
           {isPlain && canPromoteToGit && (
-            <ContextMenuItem onClick={() => promoteProjectToGit(project.name)}>
+            <ContextMenuItem onClick={() => onPromoteToGit(project.name)}>
               <GitBranch />
-              Promote to git
+              Promote to git…
             </ContextMenuItem>
           )}
           {capabilities.copyPath && (
@@ -467,6 +469,8 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
 
   const [workspaceDialog, setWorkspaceDialog] = useState<string | null>(null);
   const [deleteDialog, setDeleteDialog] = useState<DeleteDialogInfo | null>(null);
+  /** Project name whose "Promote to git" confirmation dialog is open. */
+  const [promoteDialog, setPromoteDialog] = useState<string | null>(null);
   const [focusedIndex, setFocusedIndex] = useState(-1);
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -923,7 +927,7 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
                           updateProjectLabel={(name, label) =>
                             updateProjectLabelMutation.mutate({ name, label })
                           }
-                          promoteProjectToGit={(name) => promoteProjectToGitMutation.mutate(name)}
+                          onPromoteToGit={setPromoteDialog}
                           labels={labels}
                           setWorkspaceDialog={setWorkspaceDialog}
                           onShowDeleteDialog={setDeleteDialog}
@@ -980,6 +984,20 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
         isUnmerged={deleteDialog?.isUnmerged ?? false}
         isDirty={deleteDialog?.isDirty ?? false}
         hasUnpushedCommits={deleteDialog?.hasUnpushedCommits ?? false}
+      />
+
+      <PromoteToGitDialog
+        open={promoteDialog !== null}
+        onOpenChange={(open) => {
+          if (!open) setPromoteDialog(null);
+        }}
+        onConfirm={() => {
+          if (promoteDialog) {
+            promoteProjectToGitMutation.mutate(promoteDialog);
+            setPromoteDialog(null);
+          }
+        }}
+        projectName={promoteDialog ?? ""}
       />
     </>
   );

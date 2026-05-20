@@ -43,7 +43,15 @@ export class WebDashboardAdapter implements DashboardAdapter {
 
   async listProjects(): Promise<ProjectInfo[]> {
     const data = await this.trpc.projects.list.query();
-    return data.projects;
+    // Normalise `kind` at the adapter boundary so downstream consumers
+    // can treat it as required. Newer servers always set it, but the
+    // dashboard may briefly run against an older server during a rolling
+    // upgrade — default to "git" in that case (matches the migration's
+    // DEFAULT 'git' for pre-existing rows).
+    return (data.projects as ProjectInfo[]).map((p) => ({
+      ...p,
+      kind: p.kind ?? "git",
+    }));
   }
 
   async addProject(path: string, label?: string): Promise<void> {
