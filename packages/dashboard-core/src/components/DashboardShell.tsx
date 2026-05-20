@@ -204,9 +204,19 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar, hideMenu }: Das
       ref={rootRef}
       className={cn(
         "w-full overflow-hidden flex flex-col bg-background text-foreground p-0",
-        hideTitleBar ? "h-full" : "h-dvh",
+        hideTitleBar && "h-full",
         !isDesktop && "pt-[env(safe-area-inset-top)]",
       )}
+      // CSS `zoom` does not scale viewport units (vh, dvh, svh, lvh) per
+      // spec, so `height: 100dvh` under `<html style="zoom: 0.5">` resolves
+      // to the viewport in CSS px and is then rendered at 50% — leaving the
+      // dashboard half the visible height with a gap at the bottom. Divide
+      // by the live app zoom factor (`--app-zoom`, set by applyZoomLevel in
+      // apps/web/src/lib/zoom.ts) so the rendered height always matches the
+      // actual viewport. The `hideTitleBar` branch is sized by its parent
+      // (a dockview panel with explicit pixel height) so it doesn't need
+      // the compensation. See band-app/band#463.
+      style={hideTitleBar ? undefined : { height: "calc(100dvh / var(--app-zoom, 1))" }}
     >
       {isDesktop && !hideTitleBar && (
         <div
