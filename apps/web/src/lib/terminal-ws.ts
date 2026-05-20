@@ -11,13 +11,58 @@ import {
 
 const log = createLogger("terminal-ws");
 
+// RFC 6455 (§5.5.1) caps WebSocket close reasons at 123 bytes (125 total
+// payload minus the 2-byte status code). `ws` enforces this in
+// `_Sender.close` and *throws* — asynchronously, as an Unhandled Rejection
+// that crashes the server — when we hand it a longer string. We pass
+// dynamic error messages here (e.g. `Workspace directory does not exist: <
+// long absolute path >`) which routinely cross the limit, so every
+// reason string is clamped to fit. We also send the full error as a JSON
+// frame *before* the close so the client still surfaces the real message
+// rather than the truncated tail.
+const MAX_CLOSE_REASON_BYTES = 123;
+
+function clampCloseReason(reason: string): string {
+  const enc = new TextEncoder();
+  const bytes = enc.encode(reason);
+  if (bytes.byteLength <= MAX_CLOSE_REASON_BYTES) return reason;
+  // Truncate at a codepoint boundary by re-decoding the byte slice with the
+  // fatal flag — TextDecoder defaults to replacing partial sequences with
+  // U+FFFD, which would silently widen the byte count again. We back off
+  // one byte at a time until the slice decodes cleanly.
+  const dec = new TextDecoder("utf-8", { fatal: true });
+  for (let end = MAX_CLOSE_REASON_BYTES; end > 0; end--) {
+    try {
+      return dec.decode(bytes.subarray(0, end));
+    } catch {
+      // partial multi-byte sequence at the boundary — back off
+    }
+  }
+  return "";
+}
+
+function safeClose(ws: WebSocket, code: number, reason: string): void {
+  // Surface the full reason as a JSON frame before closing so the client
+  // can display it. Closing immediately afterwards means the frame is sent
+  // in the same flush as the close frame (ws coalesces); if the socket
+  // happens to already be CLOSING/CLOSED, `send` is a no-op.
+  if (ws.readyState === ws.OPEN) {
+    try {
+      ws.send(JSON.stringify({ type: "error", message: reason }));
+    } catch {
+      // send failures aren't actionable here — fall through to close
+    }
+  }
+  ws.close(code, clampCloseReason(reason));
+}
+
 export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessage): Promise<void> {
   const url = new URL(req.url!, `http://${req.headers.host}`);
   const workspaceId = url.searchParams.get("workspaceId");
   const terminalId = url.searchParams.get("terminalId");
 
   if (!workspaceId || !terminalId) {
-    ws.close(4000, "Missing workspaceId or terminalId");
+    safeClose(ws, 4000, "Missing workspaceId or terminalId");
     return;
   }
 
@@ -67,7 +112,7 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       log.error("Failed to spawn terminal %s for workspace %s: %s", terminalId, workspaceId, msg);
-      ws.close(4001, msg);
+      safeClose(ws, 4001, msg);
       return;
     }
 
