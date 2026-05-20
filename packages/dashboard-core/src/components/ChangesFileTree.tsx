@@ -232,6 +232,12 @@ export function ChangesFileTree({
   // explicitly collapsed stay collapsed — we never overwrite an existing
   // entry — so switching between branches (including one with no changes
   // at all) doesn't reset the expansion state.
+  // `seenDirPathsRef` accumulates every directory path observed during the
+  // workspace session and is intentionally never pruned — that's how user
+  // collapses survive paths that disappear from the tree (e.g. switching
+  // selectors). Memory cost is negligible because changed-file sets are
+  // small; if a future "reset expansion to defaults" action is added it
+  // must clear this ref alongside `expandedPaths`.
   useEffect(() => {
     const currentDirs = collectDirPaths(tree);
     const newDirs = currentDirs.filter((p) => !seenDirPathsRef.current.has(p));

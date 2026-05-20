@@ -1942,7 +1942,13 @@ export function DiffView({
             aria-atomic="true"
             className="flex min-h-0 flex-1 items-center justify-center"
           >
-            <span className={`text-sm ${error ? "text-destructive" : "text-muted-foreground"}`}>
+            {/* Style follows the same priority as the displayed text:
+                `loading` wins over `error`, so a fresh fetch over a
+                previously-errored summary reads "Loading changes…" in
+                muted text rather than red. */}
+            <span
+              className={`text-sm ${!loading && error ? "text-destructive" : "text-muted-foreground"}`}
+            >
               {loading ? "Loading changes..." : error ? error : "No changes"}
             </span>
           </div>
@@ -2054,12 +2060,19 @@ export function DiffView({
           </div>
         )}
       </div>
-      {canCommit && stats && (
+      {/* Mounted whenever the platform supports commit, not only when
+          there are changes. Otherwise a background fetch failure or a
+          ref switch would unmount the dialog mid-typing and drop the
+          user's commit-message draft. Visibility is controlled by
+          `commitDialogOpen` — the commit button only fires from the
+          populated toolbar, so the dialog never opens with zero
+          changes during normal use. */}
+      {canCommit && (
         <CommitDialog
           open={commitDialogOpen}
           onOpenChange={setCommitDialogOpen}
           workspaceId={workspaceId}
-          filesChanged={stats.filesChanged}
+          filesChanged={stats?.filesChanged ?? 0}
           onCommitted={() => {
             // Force a fresh diff fetch — after a commit the working-tree
             // diff (uncommitted) is empty, but the branch diff updates too.
