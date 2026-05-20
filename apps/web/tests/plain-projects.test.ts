@@ -708,6 +708,30 @@ describe("tRPC — plain projects (promote to git)", () => {
     expect(body.error.message).toMatch(/no longer exists/i);
   });
 
+  it("after promotion, workspace.getDiffSummary returns real diff data, not the empty stub", async () => {
+    // The pre-promotion test in the plain-rejection block verifies
+    // that getDiffSummary returns an empty stub for plain projects.
+    // Once promoted, the same workspaceId should get real `git diff`
+    // output. The freshly-promoted repo has the existing `notes.md`
+    // file from createPlainDir as an untracked file, so the diff
+    // summary should report it.
+    const res = await trpcQuery(server.url, "workspace.getDiffSummary", {
+      workspaceId: "scratch-main",
+    });
+    expect(res.status).toBe(200);
+    const data = await trpcData<{
+      stats: { filesChanged: number; insertions: number; deletions: number };
+      fileStatuses: Record<string, string>;
+      mergeBase: string;
+    }>(res);
+    // Untracked `notes.md` from createPlainDir() should show up.
+    expect(data.fileStatuses["notes.md"]).toBe("U");
+    expect(data.stats.filesChanged).toBeGreaterThan(0);
+    // mergeBase is a real 40-char SHA now (the empty tree), not the
+    // synthetic sentinel we'd return for a non-git folder.
+    expect(data.mergeBase).toMatch(/^[0-9a-f]{40}$/);
+  });
+
   it("after promotion, workspaces.create is no longer blocked by the plain-kind backstop", async () => {
     // We can't actually exercise `git worktree add` end-to-end here because
     // a freshly-promoted plain project has zero commits — `git worktree add

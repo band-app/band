@@ -16,14 +16,17 @@ export type ProjectKind = "git" | "plain";
 
 /**
  * Re-detect `kind` from the filesystem and reconcile the in-memory
- * project row. Shared between the read-only inline re-detection in
- * `projects.list` (which doesn't persist — queries shouldn't write)
- * and the persistence path in `syncWorktrees` (which calls
- * `saveState` when `changed === true`). Centralising the logic keeps
- * the two callers from drifting.
+ * project row IN PLACE. The function always mutates `project.kind`
+ * (and `project.worktrees` on a `git → plain` flip) when the
+ * detected value disagrees with the stored one — the caller's only
+ * decision is whether to flush the mutated row to disk.
  *
- * Returns `true` when the row was mutated, so the caller can decide
- * whether to persist.
+ * Today two call sites share this: `syncWorktrees` propagates the
+ * return value into its `changed` flag and persists via `saveState`
+ * at the end of the loop; the inline path in `projects.list`
+ * discards the return value and lets the next sync tick persist.
+ *
+ * Returns `true` when the row was mutated, `false` otherwise.
  */
 export function reconcileKindForProject(project: ProjectState): boolean {
   // Skip rows whose path no longer exists — leave kind alone rather
