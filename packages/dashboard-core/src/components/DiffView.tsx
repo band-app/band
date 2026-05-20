@@ -1658,10 +1658,15 @@ export function DiffView({
   // outer layout (file tree + toolbar + status banner) so switching the
   // changes selector between refs (including a ref with no diff) doesn't
   // collapse the panel or shift the file-tree column out of the layout.
-  // Loading and error take precedence — when either is true we don't
-  // surface the file list even if `summary` still holds data from a
-  // previous fetch.
-  const hasChanges = Boolean(!loading && !error && summary && summary.stats.filesChanged > 0);
+  //
+  // `loading` is intentionally NOT part of `hasChanges`: keeping stale
+  // summary data visible during a refetch is preferable to blanking the
+  // file list, and the "Loading changes…" message only needs to appear
+  // when there's genuinely no data yet (initial mount; ref switch — both
+  // paired with `setSummary(null)` in the fetch effect). `!error` does
+  // gate it because a failed fetch supersedes whatever the previous
+  // summary held.
+  const hasChanges = Boolean(!error && summary && summary.stats.filesChanged > 0);
   const fileStatuses = hasChanges ? (summary?.fileStatuses ?? {}) : {};
   const filenames = flattenFileTreeOrder(buildFileTree(fileStatuses));
   filenamesRef.current = filenames;

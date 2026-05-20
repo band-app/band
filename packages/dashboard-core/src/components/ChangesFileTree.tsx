@@ -216,16 +216,16 @@ export function ChangesFileTree({
   // (including paths that temporarily disappeared, e.g. when switching the
   // changes selector between branches with different file sets).
   //
-  // Computed once via `useMemo([])` and shared with `expandedPaths` rather
-  // than via a side effect inside the `useState` lazy initializer —
-  // initializers should be pure, and React 18 Strict Mode calls them
-  // twice in dev to catch exactly that anti-pattern.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: initial-only — `tree` is read once on mount and intentionally not re-tracked; later updates flow through the `useEffect` below.
-  const initialDirs = useMemo(() => new Set(collectDirPaths(tree)), []);
-  const seenDirPathsRef = useRef<Set<string>>(initialDirs);
-
-  // All directories expanded by default (changed-file sets are typically small)
-  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => new Set(initialDirs));
+  // `useRef`'s initial value is only consumed on the first render; later
+  // updates flow through the `useEffect` below. The `expandedPaths`
+  // initialiser copies the set rather than aliasing it so a future
+  // mutation of `seenDirPathsRef.current` can't accidentally bleed into
+  // expansion state.
+  const seenDirPathsRef = useRef<Set<string>>(new Set(collectDirPaths(tree)));
+  // All directories expanded by default (changed-file sets are typically small).
+  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(
+    () => new Set(seenDirPathsRef.current),
+  );
 
   // When the tree changes, expand any directories we haven't seen before
   // and remember them for future renders. Directories the user has
