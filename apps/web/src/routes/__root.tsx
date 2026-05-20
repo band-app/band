@@ -82,8 +82,13 @@ function NotFound() {
 const THEME_INIT_SCRIPT = `(function(){try{var t=localStorage.getItem("band-theme")||"dark";var d=document.documentElement;if(t==="system"){if(window.matchMedia("(prefers-color-scheme:dark)").matches)d.classList.add("dark");else d.classList.remove("dark")}else if(t==="dark"){d.classList.add("dark")}else{d.classList.remove("dark")}}catch(e){document.documentElement.classList.add("dark")}})()`;
 
 /** Blocking script injected into <head> to apply the zoom level before first paint.
- *  Reads a cached zoom value from localStorage (written by ZoomSync / zoom.ts). */
-const ZOOM_INIT_SCRIPT = `(function(){try{var z=localStorage.getItem("band:zoom-level");if(z){var n=parseFloat(z);if(!isNaN(n)&&n>=0.5&&n<=2)document.documentElement.style.zoom=String(n)}}catch(e){}})()`;
+ *  Reads a cached zoom value from localStorage (written by ZoomSync / zoom.ts).
+ *  Also seeds the `--app-zoom` CSS custom property the TerminalPanel relies on
+ *  to counter-zoom xterm out of the document-level zoom coordinate space — see
+ *  ZOOM_CSS_VAR in zoom.ts. We always set the var (defaulting to 1) so the
+ *  counter-zoom `calc(1 / var(--app-zoom, 1))` resolves cleanly even when no
+ *  zoom override is persisted. */
+const ZOOM_INIT_SCRIPT = `(function(){try{var z=localStorage.getItem("band:zoom-level");var n=1;if(z){var p=parseFloat(z);if(!isNaN(p)&&p>=0.5&&p<=2)n=p;}var d=document.documentElement;d.style.zoom=String(n);d.style.setProperty("--app-zoom",String(n));}catch(e){}})()`;
 
 /** Applies a theme value ("dark", "light", or "system") to the document root. */
 function applyTheme(theme: string) {
@@ -237,13 +242,16 @@ function ZoomSync() {
 
   // Cross-window zoom sync via the storage event.
   // When another window updates "band:zoom-level" in localStorage,
-  // apply the change immediately to this window's DOM.
+  // apply the change immediately to this window's DOM. Use `applyZoomLevel`
+  // (rather than poking `style.zoom` directly) so the `--app-zoom` CSS
+  // variable and the `band:zoom-changed` window event stay in sync — the
+  // TerminalPanel relies on both to update xterm's fontSize.
   useEffect(() => {
     const handleStorage = (e: StorageEvent) => {
       if (e.key !== "band:zoom-level" || !e.newValue) return;
       const level = Number.parseFloat(e.newValue);
       if (!Number.isNaN(level) && level >= 0.5 && level <= 2) {
-        document.documentElement.style.zoom = String(level);
+        applyZoomLevel(level);
       }
     };
 

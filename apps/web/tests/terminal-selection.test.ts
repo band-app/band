@@ -170,6 +170,54 @@ describe("pointToCell", () => {
     const screen = makeScreenEl(0, 0);
     expect(pointToCell(100, 100, terminal, screen)).toEqual({ col: 0, row: 7 });
   });
+
+  // Regression coverage for band-app/band#463. We fix the bug by taking the
+  // xterm container out of the document-level CSS `zoom` coordinate space
+  // (counter-zoom on the container — see TerminalPanel render block). Once
+  // that's in place, both `clientX/Y` and `getBoundingClientRect()` report
+  // values in unzoomed CSS pixels, and `pointToCell`'s math is independent
+  // of the app zoom level: the cell under the cursor is always selected.
+  //
+  // These tests assert that property by feeding `pointToCell` rect+click
+  // pairs that are consistently scaled together — the cell index returned
+  // must not depend on the scale factor.
+  describe("regression: cell mapping is stable under counter-zoom", () => {
+    function clickAtCell(
+      col: number,
+      row: number,
+      cols: number,
+      rows: number,
+      rectWidth: number,
+      rectHeight: number,
+      rectLeft = 0,
+      rectTop = 0,
+    ): { clientX: number; clientY: number } {
+      // Pick the middle of the target cell so off-by-one in either floor()
+      // or the half-pixel rect boundary doesn't slip us into a neighbor.
+      const cellW = rectWidth / cols;
+      const cellH = rectHeight / rows;
+      return {
+        clientX: rectLeft + (col + 0.5) * cellW,
+        clientY: rectTop + (row + 0.5) * cellH,
+      };
+    }
+
+    for (const scale of [0.5, 0.75, 1.0, 1.25, 1.5, 2.0]) {
+      it(`maps a click at scale=${scale} to the expected cell`, () => {
+        const terminal = makeTerminal({ cols: 80, rows: 24 });
+        // At app zoom = `scale`, the terminal container is counter-zoomed
+        // to 1/scale so xterm sees an unzoomed rect. The font is driven
+        // from `BASE_FONT_SIZE * scale` (see TerminalPanel), which gives
+        // the same number of cols/rows as if zoom were 1.0. To simulate
+        // this we keep the rect dimensions IDENTICAL to the unzoomed
+        // case: that's the whole guarantee of the counter-zoom approach.
+        const screen = makeScreenEl(800, 480, 50, 30);
+        // Click on the cell at (col=42, row=10).
+        const { clientX, clientY } = clickAtCell(42, 10, 80, 24, 800, 480, 50, 30);
+        expect(pointToCell(clientX, clientY, terminal, screen)).toEqual({ col: 42, row: 10 });
+      });
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
