@@ -2,10 +2,10 @@ import {
   buildCommands,
   CommandPaletteDialog,
   DashboardShell,
-  type DiffStats,
   DiffView,
   parseFileLocation,
   QuickOpenDialog,
+  recordWorkspaceAccess,
   SearchFilesDialog,
   useDiffTarget,
   useSettingsQuery,
@@ -42,6 +42,12 @@ import { CodeBrowserView } from "./CodeBrowserView";
 import { DockviewBrowserContainer } from "./DockviewBrowserContainer";
 import { DockviewChatContainer } from "./DockviewChatContainer";
 import { MultiWorkspacePanelHost } from "./MultiWorkspacePanelHost";
+import {
+  getPerWorkspaceState,
+  setPerWorkspaceState,
+  subscribePerWorkspaceState,
+  usePerWorkspaceState,
+} from "./per-workspace-state-store";
 import { ScreencastPanel } from "./ScreencastPanel";
 import { useAnyToolbarDialogOpen } from "./ToolbarButtons";
 
@@ -117,14 +123,6 @@ const crossPanelHandlers: CrossPanelHandlers = {
   onFindInFile: () => {},
 };
 
-// Read state for a workspace: SharedDockviewLayout maintains the canonical
-// state via React state; these helpers are exposed as a ref for panel
-// children to subscribe to.
-interface PerWorkspaceState {
-  currentFile?: string;
-  openFilePath: string | null;
-}
-
 // ---------------------------------------------------------------------------
 // Panel wrapper components
 // ---------------------------------------------------------------------------
@@ -167,10 +165,7 @@ function ChatPanelComponent({ api }: IDockviewPanelProps) {
   }, [api]);
 
   return (
-    <MultiWorkspacePanelHost
-      panelType="chat"
-      emptyState={<NoWorkspaceMessage Icon={MessageSquare} />}
-    >
+    <MultiWorkspacePanelHost emptyState={<NoWorkspaceMessage Icon={MessageSquare} />}>
       {(workspaceId, wsActive) => (
         <DockviewChatContainer
           workspaceId={workspaceId}
@@ -184,10 +179,7 @@ function ChatPanelComponent({ api }: IDockviewPanelProps) {
 
 function ChangesPanelComponent(_props: IDockviewPanelProps) {
   return (
-    <MultiWorkspacePanelHost
-      panelType="changes"
-      emptyState={<NoWorkspaceMessage Icon={GitCompare} />}
-    >
+    <MultiWorkspacePanelHost emptyState={<NoWorkspaceMessage Icon={GitCompare} />}>
       {(workspaceId, wsActive) => (
         <DiffView
           workspaceId={workspaceId}
@@ -202,10 +194,7 @@ function ChangesPanelComponent(_props: IDockviewPanelProps) {
 
 function FilesPanelComponent(_props: IDockviewPanelProps) {
   return (
-    <MultiWorkspacePanelHost
-      panelType="files"
-      emptyState={<NoWorkspaceMessage Icon={FolderOpen} />}
-    >
+    <MultiWorkspacePanelHost emptyState={<NoWorkspaceMessage Icon={FolderOpen} />}>
       {(workspaceId, _wsActive) => <FilesPanelChild workspaceId={workspaceId} />}
     </MultiWorkspacePanelHost>
   );
@@ -235,10 +224,7 @@ function TerminalPanelComponent({ api }: IDockviewPanelProps) {
   }, [api]);
 
   return (
-    <MultiWorkspacePanelHost
-      panelType="terminal"
-      emptyState={<NoWorkspaceMessage Icon={TerminalIcon} />}
-    >
+    <MultiWorkspacePanelHost emptyState={<NoWorkspaceMessage Icon={TerminalIcon} />}>
       {(workspaceId, wsActive) => (
         <Suspense fallback={null}>
           <DockviewTerminalContainer
@@ -263,7 +249,7 @@ function BrowserPanelComponent({ api }: IDockviewPanelProps) {
   }, [api]);
 
   return (
-    <MultiWorkspacePanelHost panelType="browser" emptyState={<NoWorkspaceMessage Icon={Globe} />}>
+    <MultiWorkspacePanelHost emptyState={<NoWorkspaceMessage Icon={Globe} />}>
       {(workspaceId, wsActive) => {
         const visible = isVisible && wsActive;
         // On the web build the native webview path doesn't exist (no Electron
@@ -298,55 +284,6 @@ function BrowserPanelComponent({ api }: IDockviewPanelProps) {
       }}
     </MultiWorkspacePanelHost>
   );
-}
-
-// ---------------------------------------------------------------------------
-// Per-workspace state store
-// ---------------------------------------------------------------------------
-//
-// Tracks currentFile + openFilePath per workspaceId. Implemented as a tiny
-// pub-sub keyed by workspaceId so that flipping wsA's currentFile doesn't
-// re-render wsB / wsC's cached panel children.
-// ---------------------------------------------------------------------------
-
-const perWorkspaceStates = new Map<string, PerWorkspaceState>();
-const perWorkspaceListeners = new Map<string, Set<() => void>>();
-
-function getPerWorkspaceState(workspaceId: string): PerWorkspaceState {
-  return perWorkspaceStates.get(workspaceId) ?? { openFilePath: null };
-}
-
-function setPerWorkspaceState(workspaceId: string, patch: Partial<PerWorkspaceState>): void {
-  const prev = getPerWorkspaceState(workspaceId);
-  const next: PerWorkspaceState = { ...prev, ...patch };
-  if (prev.currentFile === next.currentFile && prev.openFilePath === next.openFilePath) return;
-  perWorkspaceStates.set(workspaceId, next);
-  const set = perWorkspaceListeners.get(workspaceId);
-  if (set) for (const cb of set) cb();
-}
-
-function subscribePerWorkspaceState(workspaceId: string, cb: () => void): () => void {
-  let set = perWorkspaceListeners.get(workspaceId);
-  if (!set) {
-    set = new Set();
-    perWorkspaceListeners.set(workspaceId, set);
-  }
-  set.add(cb);
-  return () => {
-    set?.delete(cb);
-    if (set && set.size === 0) perWorkspaceListeners.delete(workspaceId);
-  };
-}
-
-function usePerWorkspaceState(workspaceId: string): PerWorkspaceState {
-  // useSyncExternalStore-style subscription. Inlined to avoid a hook import
-  // dance: re-render this child only when ITS workspace's state changes.
-  const [, force] = useState(0);
-  useEffect(() => {
-    const unsub = subscribePerWorkspaceState(workspaceId, () => force((n) => n + 1));
-    return unsub;
-  }, [workspaceId]);
-  return getPerWorkspaceState(workspaceId);
 }
 
 // ---------------------------------------------------------------------------
@@ -786,6 +723,13 @@ export function SharedDockviewLayout() {
   // Active workspace id available to async callbacks without re-binding.
   const activeWorkspaceIdRef = useRef<string | null>(activeWorkspaceId);
   activeWorkspaceIdRef.current = activeWorkspaceId;
+
+  // Notify the "recent workspaces" picker on every workspace switch. Lives
+  // here (rather than inside each `MultiWorkspacePanelHost`) so the call
+  // fires exactly once per navigation instead of five times.
+  useEffect(() => {
+    if (activeWorkspaceId) recordWorkspaceAccess(activeWorkspaceId);
+  }, [activeWorkspaceId]);
 
   // Per-workspace cross-panel state lives in the module-level pub-sub above.
   // The recent files hook is workspace-keyed and survives remounts via its

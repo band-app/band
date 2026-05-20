@@ -1,7 +1,8 @@
-import { recordWorkspaceAccess, useSettingsQuery } from "@band-app/dashboard-core";
+import { useSettingsQuery } from "@band-app/dashboard-core";
 import { useRouterState } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
+import { clearPerWorkspaceState } from "./per-workspace-state-store";
 
 // ---------------------------------------------------------------------------
 // Per-panel LRU cache: keeps the content of recently-visited workspaces alive
@@ -21,11 +22,6 @@ const DEFAULT_MAX_CACHED_WORKSPACES = 3;
 const MIN_MAX_CACHED_WORKSPACES = 1;
 
 interface MultiWorkspacePanelHostProps {
-  /**
-   * Identifier for the panel type (e.g. "chat", "files"). Used only for
-   * diagnostics — kept as a prop so the React tree is easier to read.
-   */
-  panelType: string;
   /**
    * Rendered when no workspace is selected (index route). Each panel gets a
    * Lucide-icon empty state — see `NoWorkspaceMessage` in SharedDockviewLayout.
@@ -57,11 +53,7 @@ interface MultiWorkspacePanelHostProps {
  * subtrees (chat fetches, terminal scrollback, browser history…), which is
  * what makes the switch feel instant.
  */
-export function MultiWorkspacePanelHost({
-  panelType: _panelType,
-  emptyState,
-  children,
-}: MultiWorkspacePanelHostProps) {
+export function MultiWorkspacePanelHost({ emptyState, children }: MultiWorkspacePanelHostProps) {
   const [cache, setCache] = useState<Map<string, CachedEntry>>(new Map());
 
   const pathname = useRouterState({ select: (s) => s.location.pathname });
@@ -104,7 +96,13 @@ export function MultiWorkspacePanelHost({
             oldestKey = key;
           }
         }
-        if (oldestKey) next.delete(oldestKey);
+        if (oldestKey) {
+          next.delete(oldestKey);
+          // The evicted workspace's panel child will unmount on the next
+          // commit; drop its cross-panel state so the map doesn't grow
+          // unbounded across a long session.
+          clearPerWorkspaceState(oldestKey);
+        }
       }
 
       return next;
@@ -112,10 +110,11 @@ export function MultiWorkspacePanelHost({
   }
 
   // Bump lastAccessed in an effect (post-commit), so LRU ordering reflects
-  // the latest navigation. Also notify the global "recent workspaces" picker.
+  // the latest navigation. The global "recent workspaces" picker is now
+  // pinged once per navigation by `SharedDockviewLayout` (rather than once
+  // per panel host) so it's not duplicated here.
   useEffect(() => {
     if (!activeWorkspaceId) return;
-    recordWorkspaceAccess(activeWorkspaceId);
     setCache((prev) => {
       const existing = prev.get(activeWorkspaceId);
       if (!existing) return prev;
