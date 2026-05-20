@@ -56,13 +56,12 @@ band projects list --output json | jq -r --arg name "$project_name" '.projects[]
 If `kind` is `"plain"`:
 
 - **Skip steps 2–6 entirely.** No ticket detection, no branch-name generation, no `workspaces create`.
-- The workspace already exists. Its `branch` is the literal string `"main"` and its `workspaceId` is `"{project-name}-main"`.
-- Resolve the chat ID (see step 7) against that existing workspace and submit the prompt with `band chats send`:
+- The workspace already exists — its `workspaceId` and `path` are both surfaced by `band workspaces list`.
+- Resolve the workspace ID from the API rather than reconstructing it locally — that keeps the skill insensitive to future changes in the `toWorkspaceId` separator/escaping rules:
 
   ```sh
-  ws_id="${project_name}-main"
-  ws_path=$(band workspaces list "$project_name" --output json \
-    | jq -r '.workspaces[0].path')
+  ws_id=$(band workspaces list "$project_name" --output json \
+    | jq -r '.workspaces[0].workspaceId')
   # `chats send` lazy-creates a chat pane on the first call if none exists
   band chats send "$ws_id" --prompt "<user prompt>" --output json
   chat_id=$(band chats list "$ws_id" --output json | jq -r '.chats[0].id')

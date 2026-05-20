@@ -290,6 +290,12 @@ const projectsRouter = t.router({
       // this is the whole point of #427: lower the barrier for adding a
       // scratch directory, design docs, or any folder that hasn't been
       // `git init`-ed.
+      //
+      // Note: `existsSync(.git)` returns true for both directories AND
+      // files. Git submodules and secondary worktrees embed a `.git` file
+      // (rather than a directory) that points at the parent repo, and
+      // we want those classified as "git" too — so a directory-only
+      // check would be wrong here.
       const resolvedPath = resolve(input.path);
       const kind: ProjectKind = existsSync(join(resolvedPath, ".git")) ? "git" : "plain";
 
@@ -303,7 +309,7 @@ const projectsRouter = t.router({
             env.PATH = `/opt/homebrew/bin:/usr/local/bin:${env.PATH}`;
           }
           const output = execFileSync("git", ["symbolic-ref", "--short", "HEAD"], {
-            cwd: input.path,
+            cwd: resolvedPath,
             env,
             encoding: "utf-8",
           }).trim();
@@ -313,7 +319,7 @@ const projectsRouter = t.router({
         }
 
         try {
-          const gitWorktrees = await listWorktrees(input.path);
+          const gitWorktrees = await listWorktrees(resolvedPath);
           worktrees = gitWorktrees
             .filter((wt) => !wt.isBare)
             .map((wt) => ({ branch: wt.branch, path: wt.path, head: wt.head, pinned: false }));
@@ -326,12 +332,23 @@ const projectsRouter = t.router({
         // workspaceId stays deterministic (`{name}-main`), even though the
         // folder has no actual branch. UI gating prevents the user from
         // creating other workspaces or invoking branch/PR features.
-        worktrees = [{ branch: "main", path: input.path, pinned: false }];
+        //
+        // Use `resolvedPath` (not `input.path`) so paths with trailing
+        // slashes, `./` prefixes, or `..` segments are normalized — keeps
+        // the stored workspace path consistent with the `.git` probe and
+        // with the implicit assumption elsewhere that workspace paths are
+        // canonical.
+        worktrees = [{ branch: "main", path: resolvedPath, pinned: false }];
       }
 
       const project = {
         name,
-        path: input.path,
+        // Store the canonical path so downstream consumers
+        // (cronjob-scheduler, branch-status-poller, etc.) and the
+        // self-heal loop in projects.list can compare against
+        // `existsSync(project.path)` without false negatives from
+        // unnormalized input.
+        path: resolvedPath,
         defaultBranch,
         worktrees,
         label: input.label ?? undefined,
@@ -363,6 +380,15 @@ const projectsRouter = t.router({
       if (project.kind === "git") {
         throw new Error(`Project "${input.name}" is already a git project`);
       }
+      // Pre-flight: if the folder was moved/deleted between `projects.add`
+      // and the promote click, `execGit` would surface a raw subprocess
+      // ENOENT ("cannot change to '...'") with no diagnostic context.
+      // Bail with a clear message instead so the user knows to re-add.
+      if (!existsSync(project.path)) {
+        throw new Error(
+          `Project path "${project.path}" no longer exists. Remove the project and re-add it.`,
+        );
+      }
 
       // `git init -b main` pins HEAD to refs/heads/main so the implicit
       // "main" workspace's branch matches the repo's HEAD regardless of
@@ -372,6 +398,13 @@ const projectsRouter = t.router({
       // `git init` is idempotent — if `.git` somehow appeared between the
       // initial `projects.add` probe and now, this is a no-op rather than
       // an error.
+      //
+      // The on-disk `.git` is created BEFORE saveState persists `kind:
+      // "git"`. If the process crashes in this window, the next
+      // `projects.list` will self-heal (see the kind re-detection loop
+      // there): the folder has `.git` so the recorded kind flips to
+      // "git" automatically. So the non-atomic ordering is intentional
+      // and self-correcting; don't reorder.
       await execGit(["init", "-b", "main"], project.path);
 
       project.kind = "git";
@@ -454,7 +487,7 @@ const workspacesRouter = t.router({
       // should already be hiding the "New workspace" button.
       if (proj.kind === "plain") {
         throw new Error(
-          `Project "${input.project}" is a plain (non-git) project and cannot have additional workspaces. Promote it to git first.`,
+          `Project "${input.project}" is a plain (non-git) project and cannot have additional workspaces. To enable multiple workspaces, first promote it to git via projects.promoteToGit, then re-issue workspaces.create.`,
         );
       }
 

@@ -649,15 +649,20 @@ fn cmd_projects_list() -> Result<CommandResult, String> {
             .get("worktrees")
             .and_then(|w| w.as_array())
             .map_or(0, Vec::len);
+        // KIND is appended to the end of the column list (not inserted
+        // between NAME and PATH) so existing scripts that index the text
+        // output positionally — e.g. `awk '{print $2}'` to extract the
+        // path — keep working. The JSON output is keyed and order-
+        // insensitive, so the field placement there doesn't matter.
         rows.push([
             name.to_string(),
-            kind.to_string(),
             path.to_string(),
             format!(
                 "{} worktree{}",
                 wt_count,
                 if wt_count == 1 { "" } else { "s" }
             ),
+            kind.to_string(),
         ]);
         json_projects.push(serde_json::json!({
             "name": name,
@@ -667,7 +672,7 @@ fn cmd_projects_list() -> Result<CommandResult, String> {
         }));
     }
 
-    let text = format_table(&["NAME", "KIND", "PATH", "WORKTREES"], &rows);
+    let text = format_table(&["NAME", "PATH", "WORKTREES", "KIND"], &rows);
 
     Ok(CommandResult {
         text,

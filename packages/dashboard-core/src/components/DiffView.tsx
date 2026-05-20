@@ -1378,6 +1378,13 @@ export function DiffView({
       onStatsChange?.(null);
       return;
     }
+    // `projectKind` is `undefined` until `useProjects()` resolves. Without
+    // this guard the effect fires immediately on mount with `isPlain ===
+    // false` and issues a getDiffSummary call before we know whether this
+    // workspace's project is plain — the server now returns an empty
+    // summary in that case, but it's a wasted round-trip and a brief
+    // loading flicker. Skip until projects arrive.
+    if (projectKind === undefined) return;
 
     let cancelled = false;
     setLoading(true);
@@ -1480,6 +1487,7 @@ export function DiffView({
     compareBranch,
     fetchFileDiff,
     isPlain,
+    projectKind,
   ]);
 
   // ---------------------------------------------------------------------------

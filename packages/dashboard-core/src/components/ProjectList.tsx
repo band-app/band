@@ -45,7 +45,7 @@ import {
   Tag,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useCapabilities } from "../context";
+import { useAdapter, useCapabilities } from "../context";
 import {
   LABELS_COLLAPSE_KEY,
   PINNED_COLLAPSE_KEY,
@@ -126,6 +126,13 @@ function SortableProject({
     id: project.name,
   });
   const capabilities = useCapabilities();
+  // `adapter.promoteProjectToGit` is optional on the DashboardAdapter
+  // interface — only the web adapter implements it today. Hide the menu
+  // item when the active adapter lacks the method so the user can't click
+  // through to a runtime error (`use-project-mutations` rejects with a
+  // friendly message, but hiding the affordance is cleaner).
+  const adapter = useAdapter();
+  const canPromoteToGit = typeof adapter.promoteProjectToGit === "function";
   // `active` is the currently-dragged item (or null when nothing is being
   // dragged). We only honour dnd-kit's `transition` while a drag is in
   // progress: that keeps the smooth slide-out-of-the-way animation while
@@ -321,7 +328,7 @@ function SortableProject({
               </ContextMenuPortal>
             </ContextMenuSub>
           )}
-          {isPlain && (
+          {isPlain && canPromoteToGit && (
             <ContextMenuItem onClick={() => promoteProjectToGit(project.name)}>
               <GitBranch />
               Promote to git
