@@ -475,6 +475,14 @@ function resolveWorkspaceIdentity(
   //   `${project}-${branch.replaceAll("/", "-")}`
   // SQLite's `REPLACE(str, "/", "-")` is also a replace-all, so this
   // is bit-identical to the JS computation.
+  //
+  // TODO: `toWorkspaceId`'s encoding is not injective — project
+  // `foo-bar` + branch `main` and project `foo` + branch `bar/main`
+  // both serialize to `foo-bar-main`. `.get()` returns whichever row
+  // SQLite finds first, and the sanity check below cannot
+  // disambiguate (both candidates satisfy it). Fixing this requires
+  // changing the workspace-id encoding, which is a cross-cutting
+  // change tracked separately from this PR.
   const db = getDb();
   const row = db
     .select({

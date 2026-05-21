@@ -284,6 +284,10 @@ describe("upsertWorkspaceStatus — no-op write skip", () => {
       ],
     });
 
+    // Seed `updated_at` far in the past so any real write is
+    // observable without depending on wall-clock progression between
+    // the seed and the upsert (which on a loaded CI host can land on
+    // the same millisecond as `Date.now()` inside upsert).
     seedWorkspaceStatuses(tmp, [
       {
         workspaceId,
@@ -291,25 +295,16 @@ describe("upsertWorkspaceStatus — no-op write skip", () => {
         branch,
         worktreePath: wtPath,
         agentStatus: "waiting",
+        updatedAt: 0,
       },
     ]);
 
-    const before = readUpdatedAt(tmp, workspaceId)!;
-
-    // Ensure the wall clock has advanced past `before` so a real
-    // write would be observable. Date.now() has millisecond
-    // resolution on every supported platform, but back-to-back
-    // calls can land on the same tick.
-    const start = Date.now();
-    while (Date.now() <= before) {
-      // spin until next ms tick
-      if (Date.now() - start > 100) break;
-    }
+    expect(readUpdatedAt(tmp, workspaceId)).toBe(0);
 
     upsertWorkspaceStatus(workspaceId, { status: "working" });
 
     const after = readUpdatedAt(tmp, workspaceId)!;
-    expect(after).toBeGreaterThan(before);
+    expect(after).toBeGreaterThan(0);
   });
 });
 

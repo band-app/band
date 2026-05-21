@@ -79,6 +79,12 @@ export interface WorkspaceStatusData {
   agentLastActivity?: string;
   agentSummary?: string;
   codingAgentId?: string;
+  /**
+   * Override `updated_at`. Defaults to `Date.now()`. Tests that assert
+   * on `updated_at` advancement should seed an explicit value (e.g.
+   * `0`) so they can compare against it without timing dependencies.
+   */
+  updatedAt?: number;
 }
 
 export function seedWorkspaceStatuses(tmpHome: string, statuses: WorkspaceStatusData[]): void {
@@ -106,7 +112,7 @@ export function seedWorkspaceStatuses(tmpHome: string, statuses: WorkspaceStatus
           agentLastActivity: s.agentLastActivity ?? "",
           agentSummary: s.agentSummary ?? null,
           codingAgentId: s.codingAgentId ?? null,
-          updatedAt: now,
+          updatedAt: s.updatedAt ?? now,
         })
         .run();
     }
