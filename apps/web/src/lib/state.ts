@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { toWorkspaceId } from "@band-app/dashboard-core";
-import { eq, or } from "drizzle-orm";
+import { eq, or, sql } from "drizzle-orm";
 import { getDb } from "./db/connection";
 import {
   branchStatuses as branchStatusesTable,
@@ -344,6 +344,14 @@ export function upsertWorkspaceStatus(
     codingAgentId: agent.codingAgentId ?? existing?.codingAgentId ?? null,
   };
 
+  // Final identity to return. Starts from `existing` (UPDATE) or empty
+  // (INSERT); may be overridden by the patch / freshly-resolved values
+  // below so we can build the return value in-memory without a third
+  // round-trip to the DB.
+  let finalProject = existing?.project ?? "";
+  let finalBranch = existing?.branch ?? "";
+  let finalWorktreePath = existing?.worktreePath ?? "";
+
   if (existing) {
     // Self-heal stale rows whose identity fields are empty. Older rows
     // could be inserted with empty `project`/`branch`/`worktreePath`
@@ -359,31 +367,79 @@ export function upsertWorkspaceStatus(
     if (!existing.project || !existing.branch || !existing.worktreePath) {
       const ws = resolveWorkspaceIdentity(workspaceId);
       if (ws) {
-        if (!existing.project) identityPatch.project = ws.project;
-        if (!existing.branch) identityPatch.branch = ws.branch;
-        if (!existing.worktreePath) identityPatch.worktreePath = ws.worktreePath;
+        if (!existing.project) {
+          identityPatch.project = ws.project;
+          finalProject = ws.project;
+        }
+        if (!existing.branch) {
+          identityPatch.branch = ws.branch;
+          finalBranch = ws.branch;
+        }
+        if (!existing.worktreePath) {
+          identityPatch.worktreePath = ws.worktreePath;
+          finalWorktreePath = ws.worktreePath;
+        }
       }
     }
-    db.update(workspaceStatusesTable)
-      .set({ ...mergedAgent, ...identityPatch, updatedAt: now })
-      .where(eq(workspaceStatusesTable.workspaceId, workspaceId))
-      .run();
+
+    // Skip the write when the row is already in the desired state.
+    // The poller calls `upsertWorkspaceStatus(_, { status: "waiting" })`
+    // on every tick for every idle workspace; without this guard each
+    // tick produces a WAL frame just to bump `updatedAt`, which nothing
+    // reads. `agentName`/`agentSummary` are computed from `existing`
+    // and only differ on legacy rows where they were null, so we
+    // include them in the comparison too.
+    const agentChanged =
+      existing.agentName !== mergedAgent.agentName ||
+      existing.agentStatus !== mergedAgent.agentStatus ||
+      existing.agentLastActivity !== mergedAgent.agentLastActivity ||
+      existing.agentSummary !== mergedAgent.agentSummary ||
+      existing.codingAgentId !== mergedAgent.codingAgentId;
+    const identityChanged =
+      identityPatch.project !== undefined ||
+      identityPatch.branch !== undefined ||
+      identityPatch.worktreePath !== undefined;
+
+    if (agentChanged || identityChanged) {
+      db.update(workspaceStatusesTable)
+        .set({ ...mergedAgent, ...identityPatch, updatedAt: now })
+        .where(eq(workspaceStatusesTable.workspaceId, workspaceId))
+        .run();
+    }
   } else {
     // For new rows, resolve workspace identity from the worktrees DB
     const ws = resolveWorkspaceIdentity(workspaceId);
+    finalProject = ws?.project ?? "";
+    finalBranch = ws?.branch ?? "";
+    finalWorktreePath = ws?.worktreePath ?? "";
     db.insert(workspaceStatusesTable)
       .values({
         workspaceId,
-        project: ws?.project ?? "",
-        branch: ws?.branch ?? "",
-        worktreePath: ws?.worktreePath ?? "",
+        project: finalProject,
+        branch: finalBranch,
+        worktreePath: finalWorktreePath,
         ...mergedAgent,
         updatedAt: now,
       })
       .run();
   }
 
-  return getWorkspaceStatus(workspaceId)!;
+  // Build the return value in-memory — avoids a third SELECT after
+  // the write. `agentName` is always set (defaulted to "claude-code"),
+  // so the agent field is always populated after upsert.
+  return {
+    workspaceId,
+    project: finalProject,
+    branch: finalBranch,
+    worktreePath: finalWorktreePath,
+    agent: {
+      name: mergedAgent.agentName,
+      status: mergedAgent.agentStatus,
+      lastActivity: mergedAgent.agentLastActivity,
+      summary: mergedAgent.agentSummary ?? undefined,
+      codingAgentId: mergedAgent.codingAgentId ?? undefined,
+    },
+  };
 }
 
 /**
@@ -409,13 +465,32 @@ export function resetAgentStatuses(): number {
 function resolveWorkspaceIdentity(
   workspaceId: string,
 ): { project: string; branch: string; worktreePath: string } | null {
-  const state = loadState();
-  for (const proj of state.projects) {
-    for (const wt of proj.worktrees) {
-      if (toWorkspaceId(proj.name, wt.branch) === workspaceId) {
-        return { project: proj.name, branch: wt.branch, worktreePath: wt.path };
-      }
-    }
+  // Push the `toWorkspaceId` match down into SQL: scan the worktrees
+  // table directly, filter server-side, and read at most one row. The
+  // previous implementation called `loadState()`, which did
+  // `SELECT * FROM projects` + `SELECT * FROM worktrees` and built the
+  // full ProjectState[] tree just to find a single workspace.
+  //
+  // The match expression mirrors `toWorkspaceId(project, branch)`:
+  //   `${project}-${branch.replaceAll("/", "-")}`
+  // SQLite's `REPLACE(str, "/", "-")` is also a replace-all, so this
+  // is bit-identical to the JS computation.
+  const db = getDb();
+  const row = db
+    .select({
+      project: worktreesTable.projectName,
+      branch: worktreesTable.branch,
+      worktreePath: worktreesTable.path,
+    })
+    .from(worktreesTable)
+    .where(
+      sql`${worktreesTable.projectName} || '-' || REPLACE(${worktreesTable.branch}, '/', '-') = ${workspaceId}`,
+    )
+    .get();
+  // Use the `toWorkspaceId` helper as a runtime sanity check in case
+  // the helper's encoding ever evolves to disagree with the SQL above.
+  if (row && toWorkspaceId(row.project, row.branch) === workspaceId) {
+    return { project: row.project, branch: row.branch, worktreePath: row.worktreePath };
   }
   return null;
 }
