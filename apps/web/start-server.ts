@@ -180,17 +180,26 @@ let assets: StaticHandler | null = null;
 //
 // The cache is a `Promise<string>` rather than a `string` so concurrent
 // requests during the (slow) first generation share the same in-flight
-// work instead of running the analyser N times.
+// work instead of running the analyser N times. On rejection we null
+// the slot back out so the next request gets a fresh attempt — otherwise
+// one transient analyser error would pin `/api/openapi.json` to 500 for
+// the rest of the process's lifetime. Dev mode also wires up a Vite
+// watcher (after `viteServer` is created in `main()`) that nulls the
+// slot when a tRPC source file changes, matching the deleted
+// `trpcDevPlugin`'s behaviour.
 let _openApiSpec: Promise<string> | null = null;
 function getOpenApiSpec(): Promise<string> {
   if (_openApiSpec !== null) return _openApiSpec;
-  _openApiSpec = (async () => {
+  const pending = (async () => {
     if (isDev) {
       // Dynamic import so `@trpc/openapi` doesn't have to be reachable
       // in the prod bundle, where it's external.
       // biome-ignore lint/suspicious/noExplicitAny: untyped runtime import
       const { generateOpenAPIDocument } = (await import("@trpc/openapi")) as any;
-      const doc = await generateOpenAPIDocument("./src/trpc/router.ts", {
+      // Resolve the router path against this file's own directory rather
+      // than `process.cwd()` so running `tsx apps/web/start-server.ts`
+      // from the repo root still finds the source.
+      const doc = await generateOpenAPIDocument(join(SERVER_ROOT, "src", "trpc", "router.ts"), {
         title: "Band API",
         version: "1.0.0",
       });
@@ -200,7 +209,13 @@ function getOpenApiSpec(): Promise<string> {
     const openApiDoc = JSON.parse(readFileSync(join(SERVER_ROOT, "openapi.json"), "utf-8"));
     openApiDoc.servers = [{ url: "/trpc" }];
     return JSON.stringify(openApiDoc, null, 2);
-  })();
+  })().catch((err) => {
+    // Don't permanently cache a rejection — clear the slot so the next
+    // request retries instead of inheriting the same dead Promise.
+    if (_openApiSpec === pending) _openApiSpec = null;
+    throw err;
+  });
+  _openApiSpec = pending;
   return _openApiSpec;
 }
 
@@ -289,7 +304,12 @@ function serveWorkspaceFile(res: ServerResponse, workspaceId: string, rawPath: s
 // ---------------------------------------------------------------------------
 
 async function nodeRequestToWeb(req: IncomingMessage): Promise<Request> {
-  const url = new URL(req.url!, `http://${req.headers.host}`);
+  // `Host` is optional in HTTP/1.0 — without the fallback `new URL(...,
+  // "http://undefined")` would yield a bogus base. Default to localhost
+  // since this server is intended for local / internal use; the actual
+  // host doesn't matter for the SSR + tRPC paths that read the URL.
+  const host = req.headers.host ?? "localhost";
+  const url = new URL(req.url!, `http://${host}`);
   const headers = new Headers();
   for (const [key, value] of Object.entries(req.headers)) {
     if (value) {
@@ -318,7 +338,23 @@ async function nodeRequestToWeb(req: IncomingMessage): Promise<Request> {
 }
 
 function pipeWebResponseToNodeRes(response: Response, res: ServerResponse): void {
-  res.writeHead(response.status, Object.fromEntries(response.headers.entries()));
+  // Preserve multi-value headers (notably `Set-Cookie`). `Headers.entries()`
+  // emits the same key multiple times when a multi-value header is present,
+  // and `Object.fromEntries` would collapse duplicates to the last value
+  // only — silently dropping auth/analytics cookie pairs on SSR responses.
+  // `writeHead` accepts `string[]` values for these, so accumulate them.
+  const headersOut: Record<string, string | string[]> = {};
+  response.headers.forEach((value, key) => {
+    const existing = headersOut[key];
+    if (existing === undefined) {
+      headersOut[key] = value;
+    } else if (Array.isArray(existing)) {
+      existing.push(value);
+    } else {
+      headersOut[key] = [existing, value];
+    }
+  });
+  res.writeHead(response.status, headersOut);
   if (response.body) {
     const reader = response.body.getReader();
     const pump = async () => {
@@ -333,7 +369,21 @@ function pipeWebResponseToNodeRes(response: Response, res: ServerResponse): void
     };
     pump().catch(() => res.end());
   } else {
-    response.text().then((text) => res.end(text));
+    // `.catch` so a body-read failure (or already-consumed Response)
+    // doesn't bubble to the global `unhandledRejection` handler — that
+    // handler exits the process, so an SSR response with a closed
+    // socket would otherwise recycle the entire server.
+    response.text().then(
+      (text) => res.end(text),
+      () => {
+        if (!res.headersSent) res.writeHead(500);
+        try {
+          res.end();
+        } catch {
+          // Socket already closed.
+        }
+      },
+    );
   }
 }
 
@@ -415,7 +465,9 @@ async function main() {
     // either mode, so we answer it unconditionally before auth here.
     // Hostname is omitted to match the shape callers parse — they only
     // look at `status` and `app`.
-    if (isDev && req.url === "/api/health" && req.method === "GET") {
+    // Strip the query string before matching so probes that tack on
+    // cache-busters (`/api/health?_=1234`) still hit this branch.
+    if (isDev && req.url?.split("?")[0] === "/api/health" && req.method === "GET") {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ status: "ok", app: "band-web-server" }));
       return;
@@ -646,6 +698,19 @@ async function main() {
       const mod: any = await viteServer.ssrLoadModule("@tanstack/react-start/server-entry");
       return mod.default.fetch(request);
     };
+    // Invalidate the cached OpenAPI spec whenever a file under
+    // `src/trpc/` changes, so `/api/openapi.json` reflects router
+    // edits during a dev session without a server restart. Mirrors the
+    // `server.watcher.on("change")` hook the deleted `trpcDevPlugin`
+    // used to install — Vite's HMR handles SSR module invalidation
+    // separately, but the spec is generated by `@trpc/openapi`'s
+    // static analyser, which has its own cache that only this manual
+    // reset can reach.
+    viteServer.watcher.on("change", (file: string) => {
+      if (file.includes("/src/trpc/") || file.endsWith("router.ts")) {
+        _openApiSpec = null;
+      }
+    });
   } else {
     assets = sirv(clientDir, {
       maxAge: 31536000,
@@ -820,36 +885,44 @@ async function main() {
       console.log(`Reset ${resetCount} stale agent status(es) on startup`);
     }
 
-    // First-time setup: detect editor, write default config, install
-    // extension and CLI. Idempotent — skips if defaults already exist.
-    // Fire-and-forget; errors are logged but don't take the server
-    // down. We track the promise so the shutdown handler can give it a
-    // bounded amount of time to finish — otherwise long-running
-    // `execFile` calls inside `whichBinary` keep the event loop alive
-    // and `process.exit(0)` never fires.
-    phaseBSettlePromise = runFirstTimeSetup().catch((err) => {
-      console.error("First-time setup failed:", err);
-    });
+    // First-time setup → cron-scheduler binding → tunnel auto-start.
+    //
+    // Sequential by design: `runFirstTimeSetup` writes default settings
+    // (default-disable for cronjobs, notification defaults, etc.) that
+    // `startCronjobScheduler`'s first load needs to see. If we kicked
+    // them off concurrently — as an earlier iteration of this PR did —
+    // newly-installed cronjobs would fire before
+    // `runFirstTimeSetup` had a chance to flip them off, causing
+    // first-boot users to get spurious cron runs.
+    //
+    // Tracked on `phaseBSettlePromise` so the SIGTERM/SIGINT handler
+    // can wait (bounded) for the chain to settle before tearing the
+    // DB and sockets down. Otherwise the `execFile` calls inside
+    // `whichBinary`/`shellPath` keep the event loop alive past
+    // `process.exit(0)`'s call site.
+    phaseBSettlePromise = (async () => {
+      try {
+        await runFirstTimeSetup();
+      } catch (err) {
+        console.error("First-time setup failed:", err);
+      }
 
-    // Start cronjob scheduler — reads definitions and watches for
-    // changes. Bind the scheduler last so any setting tweaks
-    // `runFirstTimeSetup` applies (default-disable, etc.) are visible
-    // to the first scheduled load.
-    startCronjobScheduler();
+      // Start cronjob scheduler AFTER setup so any setting tweaks
+      // `runFirstTimeSetup` applied (default-disable etc.) are visible
+      // to the first scheduled load.
+      startCronjobScheduler();
 
-    // Auto-start tunnel if configured.
-    const settings = loadSettings() as Record<string, unknown>;
-    if (settings.autoStartTunnel) {
-      checkPrereqs()
-        .then((prereqs) => {
-          if (prereqs.cloudflared) {
-            return startTunnel({ port: boundPort });
-          }
-        })
-        .catch((err) => {
+      // Auto-start tunnel if configured.
+      const settings = loadSettings() as Record<string, unknown>;
+      if (settings.autoStartTunnel) {
+        try {
+          const prereqs = await checkPrereqs();
+          if (prereqs.cloudflared) await startTunnel({ port: boundPort });
+        } catch (err) {
           console.error("Failed to auto-start tunnel:", err);
-        });
-    }
+        }
+      }
+    })();
   });
 
   // Graceful shutdown

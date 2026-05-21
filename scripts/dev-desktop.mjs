@@ -75,6 +75,12 @@ const webServer = spawn("pnpm", ["dev:web"], {
   detached: true,
   env: { ...process.env, FORCE_COLOR: "0", NO_COLOR: "1" },
 });
+// Mirror the spawn option onto the ChildProcess instance so `killTree`
+// (below) can see it and do a process-group kill (`process.kill(-pid,
+// "SIGTERM")`). Node's `spawn({ detached: true })` does NOT copy the
+// option onto the returned `child.detached`; verified empirically —
+// without this assignment we'd fall back to single-process kill and
+// orphan pnpm's grandchildren (`tsx`, the actual web server).
 webServer.detached = true;
 webServer.stderr.on("data", (chunk) => process.stderr.write(chunk));
 

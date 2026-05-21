@@ -18,7 +18,7 @@
  *        - `/api/health` returns 200
  *        - `/api/openapi.json` returns the same shape as prod
  *        - `GET /` returns SSR'd HTML with `<title>Band</title>`
- *        - a seeded `running` task gets flipped to `idle` (cleanupStaleTasks ran)
+ *        - a seeded `running` task gets flipped to `failed` (cleanupStaleTasks ran)
  *        - the cronjob scheduler is bound (cronjobs.list works through tRPC)
  *
  *   2. **HMR through the unified server** — edit a route's title literal,
@@ -82,7 +82,14 @@ function createTmpHome(prefix: string): string {
  * I/O that takes 1-3 s on a populated $HOME.
  */
 async function startDevServer(tmpHome: string): Promise<ServerHandle> {
-  const port = await findFreePort();
+  // Ask `findFreePort` for a starting port, but expect `start-server.ts`
+  // to scan via `listenWithFallback` and actually bind some port — not
+  // necessarily this one. `findFreePort` releases its kernel-picked
+  // port before we spawn, so under CI load another process can grab it
+  // in the gap. Resolving against the actual bound port (parsed from
+  // the listen banner) keeps the test honest about which port subsequent
+  // fetches need to target.
+  const hintPort = await findFreePort();
 
   return new Promise((resolve, reject) => {
     const child = spawn("pnpm", ["exec", "tsx", "start-server.ts"], {
@@ -90,7 +97,7 @@ async function startDevServer(tmpHome: string): Promise<ServerHandle> {
       env: {
         ...process.env,
         HOME: tmpHome,
-        PORT: String(port),
+        PORT: String(hintPort),
         NODE_ENV: "development",
         // Silence the pnpm "deprecated" warnings that would otherwise
         // intersperse with our log parsing.
@@ -110,8 +117,10 @@ async function startDevServer(tmpHome: string): Promise<ServerHandle> {
     child.stdout!.on("data", (chunk: Buffer) => {
       const text = chunk.toString();
       stdout += text;
-      if (text.includes("Web server listening on") && !settled) {
+      const match = stdout.match(/Web server listening on https?:\/\/[^:\s]+:(\d+)/);
+      if (match && !settled) {
         settled = true;
+        const port = Number.parseInt(match[1], 10);
         resolve({
           url: `http://127.0.0.1:${port}`,
           port,
@@ -305,7 +314,7 @@ describe("dev server — parity with prod", () => {
     expect(html).toContain("$_TSR");
   });
 
-  it("seeded `running` task is flipped to `idle` after boot (cleanupStaleTasks ran)", async () => {
+  it("seeded `running` task is flipped to `failed` after boot (cleanupStaleTasks ran)", async () => {
     // Phase B (after listen()) runs cleanupStaleTasks asynchronously via
     // setImmediate. By the time we get here, the listen-callback's
     // setImmediate has long since fired. Poll briefly to absorb any
@@ -313,13 +322,13 @@ describe("dev server — parity with prod", () => {
     let status: string | undefined;
     for (let attempt = 0; attempt < 50; attempt++) {
       status = readTaskStatus(tmpHome, STALE_TASK_ID);
-      if (status && status !== "running") break;
+      if (status === "failed") break;
       await new Promise((r) => setTimeout(r, 100));
     }
-    // cleanupStaleTasks flips orphaned `running` rows to `failed` —
-    // either status is fine as long as it's not still `running`.
-    expect(status).toBeDefined();
-    expect(status).not.toBe("running");
+    // Tight assertion — `cleanupStaleTasks` is documented to mark
+    // orphaned `running` rows as `failed`, so anything else (including
+    // a still-`running` row) is a regression worth catching here.
+    expect(status).toBe("failed");
   });
 
   it("cronjob scheduler is bound — cronjobs CRUD works through tRPC", async () => {
@@ -364,6 +373,24 @@ describe("dev server — HMR through unified server", () => {
     // Capture the on-disk source BEFORE we mutate it so we can guarantee
     // restoration in the after-all hook, even on test failure.
     originalRootRoute = readFileSync(ROOT_ROUTE_PATH, "utf-8");
+
+    // Refuse to run if the route file has been left dirty by an
+    // earlier crashed test run. Mutating a committed file is the only
+    // way to exercise Vite's watcher → SSR-invalidation round-trip,
+    // but blindly capturing whatever happens to be on disk could
+    // anchor the post-test restore to the wrong baseline. The needle
+    // we're about to flip MUST be present at start; the wrong-needle
+    // case (any of our mutation suffixes already present) means a
+    // previous run left state behind and we should fail loud rather
+    // than carry on.
+    if (!originalRootRoute.includes('{ title: "Band" }')) {
+      throw new Error(
+        `${ROOT_ROUTE_PATH} doesn't contain the expected unmodified ` +
+          `title literal '{ title: "Band" }'. Either the test fixture is ` +
+          `stale (restore the file by hand from git) or an unrelated ` +
+          `refactor moved the title.`,
+      );
+    }
 
     server = await startDevServer(tmpHome);
   }, 90_000);
@@ -467,62 +494,31 @@ describe("dev server — WebSocket coexistence with Vite HMR", () => {
 
   it("opens /terminal and a tRPC subscription on the same http listener without interference", async () => {
     // ----- /terminal WebSocket -----
+    //
+    // The coexistence claim is "our `/terminal` upgrade handler and
+    // Vite's HMR upgrade handler don't fight over `httpServer.upgrade`
+    // events". To prove that the right way, assert that we actually
+    // received an HTTP 101 (Switching Protocols) response for our
+    // upgrade. PTY behaviour after the upgrade is a downstream concern
+    // — accepting `"errored"` as passing would let a regression that
+    // silently drops the upgrade slip through (the test was originally
+    // written that way and reviewer caught it).
     const workspaceId = "wstest-main";
     const terminalId = `dev-coexistence-${Date.now()}`;
     const termWs = new WebSocket(
       `ws://127.0.0.1:${server.port}/terminal?workspaceId=${workspaceId}&terminalId=${terminalId}`,
     );
 
-    const terminalOutcome = await new Promise<
-      { status: "spawned" } | { status: "errored"; message: string }
-    >((resolve, reject) => {
-      let resolved = false;
-
-      termWs.on("open", () => {
-        // Send a default init — the handler will spawn a real shell in
-        // the workspace's worktree directory. We don't care about the
-        // shell output, only that the upgrade negotiated cleanly without
-        // colliding with Vite's HMR upgrade listener.
-        termWs.send(JSON.stringify({ type: "init" }));
-      });
-
-      termWs.on("message", () => {
-        if (resolved) return;
-        resolved = true;
-        // Any data frame (binary PTY output or a control JSON) means
-        // the handler completed the upgrade and attached the session.
-        // We don't care about the payload — the upgrade itself is the
-        // proof that our `/terminal` listener and Vite's HMR listener
-        // coexist on the same http server.
-        resolve({ status: "spawned" });
-      });
-
-      termWs.on("error", (err) => {
-        if (resolved) return;
-        resolved = true;
-        reject(err);
-      });
-
-      termWs.on("close", (code, reason) => {
-        if (resolved) return;
-        // PTY couldn't be spawned (e.g. missing /bin/sh in CI) — that's a
-        // separate concern from upgrade coexistence. Surface it but
-        // don't fail the coexistence check.
-        resolve({ status: "errored", message: `${code}: ${reason.toString("utf8").slice(0, 80)}` });
-      });
-
-      setTimeout(() => {
-        if (!resolved) {
-          resolved = true;
-          reject(new Error("terminal WS produced no data within 8 s"));
-        }
-      }, 8_000);
+    const upgradeOk = await new Promise<boolean>((resolve) => {
+      // `upgrade` fires on the `ws` client when the server returns 101.
+      // If the server refuses the upgrade (handler missing, vite-hmr
+      // path wins, etc.) we get `close` or `error` instead.
+      termWs.on("upgrade", () => resolve(true));
+      termWs.on("error", () => resolve(false));
+      termWs.on("close", () => resolve(false));
+      setTimeout(() => resolve(false), 8_000);
     });
-
-    // The upgrade itself negotiated successfully — that's the
-    // coexistence proof. Whether the PTY then succeeded depends on the
-    // CI environment's shell availability.
-    expect(["spawned", "errored"]).toContain(terminalOutcome.status);
+    expect(upgradeOk, "expected /terminal upgrade to negotiate HTTP 101").toBe(true);
 
     termWs.close();
 

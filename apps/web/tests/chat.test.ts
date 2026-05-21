@@ -1086,10 +1086,22 @@ describe("tasks.cancel — orphaned task", () => {
     // Wait for Phase B's cleanupStaleTasks to flip the sentinel. With
     // it confirmed flipped, we know cleanup has run on this DB and
     // any future "running" row we seed below will survive untouched.
+    let sentinelStatus: unknown;
     for (let attempt = 0; attempt < 200; attempt++) {
-      const sentinel = readTask(tmpHome, "tsk_cleanup_sentinel");
-      if (sentinel.status === "failed") break;
+      sentinelStatus = readTask(tmpHome, "tsk_cleanup_sentinel").status;
+      if (sentinelStatus === "failed") break;
       await new Promise((r) => setTimeout(r, 50));
+    }
+    // Fail loudly if cleanup never ran. The whole point of the
+    // sentinel is to gate test setup on Phase B completion; falling
+    // through silently here would let the orphan-task tests below
+    // race a still-running cleanup and produce confusing flakes
+    // instead of a clear "Phase B never executed" signal.
+    if (sentinelStatus !== "failed") {
+      throw new Error(
+        `Phase-B cleanupStaleTasks did not flip the sentinel within 10 s ` +
+          `(observed status: ${String(sentinelStatus)}). Cleanup regression?`,
+      );
     }
   });
 
