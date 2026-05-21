@@ -18,6 +18,7 @@ import { runMigrations } from "./src/lib/db/migrate.ts";
 import { killAllServers } from "./src/lib/lsp-manager.ts";
 import { handleLspConnection } from "./src/lib/lsp-proxy.ts";
 import { mimeTypeFromFilename } from "./src/lib/mime-types.ts";
+import { listenWithFallback } from "./src/lib/port-utils.ts";
 import { checkPrereqs } from "./src/lib/process-utils.ts";
 import { runFirstTimeSetup } from "./src/lib/setup.ts";
 import { bandHome, getOrCreateToken, loadSettings, resetAgentStatuses } from "./src/lib/state.ts";
@@ -334,50 +335,6 @@ function pipeWebResponseToNodeRes(response: Response, res: ServerResponse): void
   } else {
     response.text().then((text) => res.end(text));
   }
-}
-
-/**
- * Call `httpServer.listen(port, "0.0.0.0")` and retry on `EADDRINUSE`,
- * advancing the port number by one each time, until we successfully
- * bind or exhaust the attempt budget. Returns the port that actually
- * got claimed.
- *
- * This lets us start a dev server when the packaged Band desktop app
- * is already on the default port — instead of crashing on bind, we
- * just move to the next free port and announce it. The dev-desktop
- * orchestrator and any external watcher pick up the actual port from
- * the `Web server listening on http://0.0.0.0:<port>` banner.
- */
-async function listenWithFallback(
-  server: import("node:http").Server,
-  startPort: number,
-  attempts = 20,
-): Promise<number> {
-  for (let port = startPort; port < startPort + attempts; port++) {
-    try {
-      await new Promise<void>((resolve, reject) => {
-        const onError = (err: NodeJS.ErrnoException) => {
-          server.removeListener("listening", onListening);
-          reject(err);
-        };
-        const onListening = () => {
-          server.removeListener("error", onError);
-          resolve();
-        };
-        server.once("error", onError);
-        server.once("listening", onListening);
-        server.listen(port, "0.0.0.0");
-      });
-      return port;
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "EADDRINUSE") throw err;
-      // Port busy — fall through and try the next one.
-    }
-  }
-  throw new Error(
-    `Failed to find a free port in range ${startPort}..${startPort + attempts - 1} ` +
-      `(all ${attempts} ports were in use).`,
-  );
 }
 
 async function main() {

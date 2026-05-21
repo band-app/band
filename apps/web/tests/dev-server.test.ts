@@ -36,7 +36,6 @@
 
 import { type ChildProcess, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -45,6 +44,7 @@ import { migrate } from "drizzle-orm/node-sqlite/migrator";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import * as schema from "../src/lib/db/schema";
+import { findFreePort } from "../src/lib/port-utils";
 import { seedSettings, seedState } from "./helpers/seed-state";
 
 const PROJECT_ROOT = join(import.meta.dirname, "..");
@@ -74,17 +74,6 @@ function createTmpHome(prefix: string): string {
   return tmp;
 }
 
-function getRandomPort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.listen(0, "127.0.0.1", () => {
-      const { port } = srv.address() as { port: number };
-      srv.close(() => resolve(port));
-    });
-    srv.on("error", reject);
-  });
-}
-
 /**
  * Boot start-server.ts in dev mode via `tsx`. Returns once the
  * "Web server listening on …" banner is emitted. The 60s timeout is
@@ -93,7 +82,7 @@ function getRandomPort(): Promise<number> {
  * I/O that takes 1-3 s on a populated $HOME.
  */
 async function startDevServer(tmpHome: string): Promise<ServerHandle> {
-  const port = await getRandomPort();
+  const port = await findFreePort();
 
   return new Promise((resolve, reject) => {
     const child = spawn("pnpm", ["exec", "tsx", "start-server.ts"], {
