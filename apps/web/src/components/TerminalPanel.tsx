@@ -382,7 +382,8 @@ export function TerminalPanel({
       // Custom key bindings:
       // - Cmd/Ctrl+F  → open find bar (intercept before xterm and before the
       //                 browser's native find-in-page in non-Electron contexts)
-      // - Shift+Enter → CSI u sequence so shells/tools receive a distinct keycode
+      // - Shift+Enter → LF (0x0A) so TUIs that distinguish Ctrl+J from Enter
+      //                 (e.g. Claude Code's chat:newline) insert a newline
       // - Alt+Arrow   → word navigation (ESC+b / ESC+f)
       terminal.attachCustomKeyEventHandler((e) => {
         if (e.type === "keydown") {
@@ -425,9 +426,16 @@ export function TerminalPanel({
             openSearchRef.current();
             return false;
           }
-          // Shift+Enter → send CSI 13;2u (kitty/fixterms keyboard protocol)
+          // Shift+Enter → LF so TUIs that bind ctrl+j to "newline" (e.g. Claude
+          // Code's chat:newline) insert one. preventDefault() is load-bearing:
+          // returning false from attachCustomKeyEventHandler only stops xterm's
+          // internal _keyDown; the browser still dispatches `keypress` for
+          // Enter, which xterm's hidden textarea translates into a plain `\r`.
+          // Without preventDefault the byte stream is `\n\r`, and the trailing
+          // `\r` re-submits — identical to plain Enter from the user's POV.
           if (e.key === "Enter" && e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
-            terminal.input("\x1b[13;2u");
+            e.preventDefault();
+            terminal.input("\n");
             return false;
           }
           if (e.altKey && !e.metaKey && !e.ctrlKey) {
