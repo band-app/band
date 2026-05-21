@@ -23,40 +23,55 @@ const AGENT_CHECKS: { id: string; type: string; label: string; binary: string }[
  *
  * Execution graph (warm boot — see issue #472 cold-start work):
  *
- *   ensureCliInstalled
- *        │
- *        ├─► ensureSettingsDefaults  (sequential RMW on ~/.band/settings.json)
- *        ├─► ensureClaudeHooks
- *        ├─► ensureSkillsInstalled
- *        └─► ensureProjectStateInSync
+ *   ensureProjectStateInSync ─────────────────────────────────┐
+ *                                                             │
+ *   ensureCliInstalled ──┬─► ensureSettingsDefaults  ──────── ─┤
+ *                        ├─► ensureClaudeHooks      ──────── ─┤
+ *                        └─► ensureSkillsInstalled  ──────── ─┘
+ *                                                             │
+ *                                                            await
  *
- * The CLI install gates the rest because:
- *   - Claude hooks register a `band notify …` command and need the binary
- *     resolvable on PATH (see `apps/web/src/lib/hooks.ts::installHooks`).
- *   - `installSkills` spawns `band generate-skills` to render the SKILL.md
- *     files from the live CLI schema.
+ * Two parallelism dimensions:
  *
- * On warm boots `ensureCliInstalled` is just a stat (the symlink already
- * exists) so the gate costs ~no wall time. The four downstream steps then
- * fan out concurrently because they touch entirely different parts of the
- * filesystem (settings.json, ~/.claude/, ~/.agents/skills/, the DB +
- * `git worktree list`) — running them sequentially serialised hundreds of
- * ms of independent I/O for no reason. The settings.json read-modify-write
- * group must stay internally sequential (one reader → mutate → writer can't
- * be interleaved with another), so `ensureSettingsDefaults` wraps that pair.
+ *   1. The CLI install gates `ensureClaudeHooks` and `ensureSkillsInstalled`
+ *      because both need `band` resolvable on PATH (the hooks register a
+ *      `band notify …` command; the skills install spawns
+ *      `band generate-skills`). `ensureSettingsDefaults` doesn't strictly
+ *      need the CLI, but it's grouped here for code clarity and the cost
+ *      is negligible on warm boots.
+ *   2. `ensureProjectStateInSync` (DB + `git worktree list`) doesn't touch
+ *      the band CLI at all — kick it off *before* the CLI gate so its
+ *      ~100 ms of git fork/exec overlaps with the CLI stat AND the
+ *      downstream group, instead of sitting in series after them. On the
+ *      author's 28-project host this is the longest single step in the
+ *      pipeline, so getting it off the critical path is the biggest win.
  *
- * `Promise.allSettled` (not `Promise.all`) so a single setup step failing
- * never poisons the others — every `ensureXxx` already has its own
- * try/catch and logs warns, but defense-in-depth is cheap here.
+ * Settings.json RMW must stay internally sequential (one reader → mutate →
+ * writer can't be interleaved with another), so `ensureSettingsDefaults`
+ * wraps that pair.
+ *
+ * `Promise.allSettled` (not `Promise.all`) so one failing step never
+ * poisons the others — every `ensureXxx` already has its own try/catch
+ * and logs warns, but defense-in-depth is cheap here. The
+ * `projectSync` promise is created before the CLI await; if
+ * `ensureCliInstalled` were to throw synchronously (it doesn't — internal
+ * try/catch), the project sync promise would still be in flight without
+ * a handler attached. That's fine because `ensureProjectStateInSync`
+ * itself has a try/catch and never rejects, so no unhandled-rejection
+ * risk exists today. If you ever drop that try/catch, attach a
+ * `.catch()` here to preserve the invariant.
  */
 export async function runFirstTimeSetup(): Promise<void> {
+  // Kick this off immediately — independent of CLI install and settings.
+  const projectSync = ensureProjectStateInSync();
+
   await ensureCliInstalled();
 
   const results = await Promise.allSettled([
+    projectSync,
     ensureSettingsDefaults(),
     ensureClaudeHooks(),
     ensureSkillsInstalled(),
-    ensureProjectStateInSync(),
   ]);
 
   // Surface any unexpected rejections — every `ensureXxx` is supposed to
