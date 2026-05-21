@@ -435,6 +435,15 @@ export function DockviewTerminalContainer({
 
     const panel = api.getPanel(terminalId);
     if (panel) {
+      // Pre-select the neighbour to the left (or the right if we're closing
+      // the first tab) so focus doesn't snap to the first tab in the group.
+      const group = panel.group;
+      const groupPanels = group?.panels ?? [];
+      const idx = groupPanels.findIndex((p) => p.id === terminalId);
+      if (idx >= 0 && groupPanels.length > 1) {
+        const neighbour = groupPanels[idx === 0 ? 1 : idx - 1];
+        neighbour?.api.setActive();
+      }
       api.removePanel(panel);
     }
 
