@@ -353,16 +353,20 @@ describe("cold-start — boot ordering + bulk UPDATE", () => {
     }
   });
 
-  it("bulk UPDATE stamps every chat row with an identical updated_at (one statement, not N)", async () => {
-    // The pre-#472 code did one UPDATE per row using a single
-    // `now = Date.now()` captured at the top of `loadChatsFromDb`, so
-    // the timestamps would have been identical there too — but with a
-    // single SQL statement this is structurally guaranteed by SQLite
-    // (the UPDATE binds one `?` for the whole rewrite). The
-    // strongest black-box check we can do without instrumenting
-    // production code is: every row updated in the bulk reset shares
-    // the same updated_at value AND that value is newer than the
-    // seed-time updated_at.
+  it("all reset rows share the same updated_at timestamp", async () => {
+    // Correctness check: every row updated in the reset shares the same
+    // `updated_at` value. This guards against a future refactor that
+    // accidentally writes per-row timestamps (e.g. recapturing
+    // `Date.now()` inside a loop) — which would re-introduce the WAL
+    // churn this PR is trying to eliminate.
+    //
+    // This assertion does NOT prove "one SQL statement vs N statements":
+    // the pre-#472 per-row UPDATE loop also captured `now = Date.now()`
+    // once at the top of `loadChatsFromDb` and reused it across all
+    // rows, so identical timestamps would have held there too. The
+    // single-statement guarantee is structural — it lives in
+    // `resetPanelStatesToIdle` — and belongs in code review, not in a
+    // runtime assertion.
     const updatedAts = new Set<number>();
     for (let i = 0; i < CHAT_COUNT; i++) {
       const row = readPanelState(tmpHome, `chat_seed_${i}`);

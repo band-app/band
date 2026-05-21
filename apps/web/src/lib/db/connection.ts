@@ -1,10 +1,13 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { createLogger } from "@band-app/logger";
 import { drizzle } from "drizzle-orm/node-sqlite";
 import { migrate } from "drizzle-orm/node-sqlite/migrator";
 import { bandHome } from "../state";
 import * as schema from "./schema";
+
+const log = createLogger("db");
 
 const migrationsFolder = join(import.meta.dirname, "migrations");
 
@@ -44,8 +47,17 @@ export function closeDb(): void {
     // slightly stale WAL.
     try {
       _sqlite.exec("PRAGMA wal_checkpoint(TRUNCATE)");
-    } catch {
-      // best-effort
+    } catch (err) {
+      // Best-effort: surface the failure so a stale WAL across restarts
+      // is observable in logs instead of leaving the user to notice
+      // `~/.band/band.db-wal` is still large after a clean shutdown.
+      // Common cause is a concurrent reader holding a shared lock (e.g.
+      // the desktop app's renderer reading the same DB), in which case
+      // the next graceful close will succeed and truncate.
+      log.warn(
+        "WAL checkpoint failed on close (best-effort): %s",
+        err instanceof Error ? err.message : String(err),
+      );
     }
     _sqlite.close();
     _sqlite = null;
