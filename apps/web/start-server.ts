@@ -90,11 +90,44 @@ process.on("uncaughtException", (error: Error) => {
 // which is the same path Vite uses as its `root` below.
 const SERVER_ROOT = import.meta.dirname;
 const clientDir = join(SERVER_ROOT, "client");
-const port = parseInt(process.env.PORT || "3456", 10);
+
+// Three-step resolution for the initial port the server will TRY to bind:
+//
+//   1. `process.env.PORT`      — explicit per-invocation override (used
+//                                 by the desktop shell, tests, and
+//                                 `PORT=… pnpm dev:web`).
+//   2. `settings.json` →
+//      `webServerPort`         — persisted user preference.
+//   3. Hardcoded `3456`        — historical default; the dev-desktop
+//                                 orchestrator and the desktop shell
+//                                 both look here when nothing else is
+//                                 set.
+//
+// Whatever value wins is just the *starting* port. `listenWithFallback`
+// inside `main()` then scans upwards from there until it finds a free
+// one, so a running Band desktop app on 3456 no longer wedges
+// `pnpm dev:web` with a silent `EADDRINUSE`.
+function resolveInitialPort(): number {
+  const fromEnv = Number.parseInt(process.env.PORT ?? "", 10);
+  if (Number.isFinite(fromEnv) && fromEnv > 0) return fromEnv;
+  try {
+    const settings = loadSettings() as { webServerPort?: unknown };
+    if (typeof settings.webServerPort === "number" && settings.webServerPort > 0) {
+      return settings.webServerPort;
+    }
+  } catch {
+    // Settings file missing or unreadable on a fresh install — fall
+    // through to the default. `getOrCreateToken()` below will create
+    // the file on first boot anyway.
+  }
+  return 3456;
+}
+
+const initialPort = resolveInitialPort();
 // Remove PORT so child processes don't inherit it (issue #269).
-// Store as BAND_PORT for internal re-reads (e.g. tunnel start).
+// `BAND_PORT` is set inside `main()` once `listenWithFallback` knows
+// which port actually got claimed — the value here was just a hint.
 delete process.env.PORT;
-process.env.BAND_PORT = String(port);
 
 // Scrub `ELECTRON_RUN_AS_NODE` from `process.env` once at boot — see
 // issue #406. The desktop shell spawns this web server via Electron's
@@ -301,6 +334,50 @@ function pipeWebResponseToNodeRes(response: Response, res: ServerResponse): void
   } else {
     response.text().then((text) => res.end(text));
   }
+}
+
+/**
+ * Call `httpServer.listen(port, "0.0.0.0")` and retry on `EADDRINUSE`,
+ * advancing the port number by one each time, until we successfully
+ * bind or exhaust the attempt budget. Returns the port that actually
+ * got claimed.
+ *
+ * This lets us start a dev server when the packaged Band desktop app
+ * is already on the default port — instead of crashing on bind, we
+ * just move to the next free port and announce it. The dev-desktop
+ * orchestrator and any external watcher pick up the actual port from
+ * the `Web server listening on http://0.0.0.0:<port>` banner.
+ */
+async function listenWithFallback(
+  server: import("node:http").Server,
+  startPort: number,
+  attempts = 20,
+): Promise<number> {
+  for (let port = startPort; port < startPort + attempts; port++) {
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const onError = (err: NodeJS.ErrnoException) => {
+          server.removeListener("listening", onListening);
+          reject(err);
+        };
+        const onListening = () => {
+          server.removeListener("error", onError);
+          resolve();
+        };
+        server.once("error", onError);
+        server.once("listening", onListening);
+        server.listen(port, "0.0.0.0");
+      });
+      return port;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EADDRINUSE") throw err;
+      // Port busy — fall through and try the next one.
+    }
+  }
+  throw new Error(
+    `Failed to find a free port in range ${startPort}..${startPort + attempts - 1} ` +
+      `(all ${attempts} ports were in use).`,
+  );
 }
 
 async function main() {
@@ -680,117 +757,121 @@ async function main() {
   // `afterAll` waiting until vitest's 30 s `hookTimeout` killed it.
   let phaseBSettlePromise: Promise<void> | null = null;
 
-  // Friendly diagnostic for the most common dev-mode failure: the
-  // packaged Band desktop app is already running on port 3456, so
-  // `pnpm dev:web` (which defaults to the same port) hits EADDRINUSE
-  // and otherwise just exits silently — the user sees "tsx watch
-  // start-server.ts" in their terminal and nothing else. Printing a
-  // pointer here before falling through to `uncaughtException` shaves
-  // minutes off the "why isn't dev starting?" debugging loop.
-  httpServer.once("error", (err: NodeJS.ErrnoException) => {
-    if (err.code === "EADDRINUSE") {
-      process.stderr.write(
-        `\nFailed to bind port ${port}: ${err.message}\n` +
-          `→ Another process is already listening on this port. If the Band desktop app is\n` +
-          `  running, quit it first (Cmd-Q) or set PORT to a different value, e.g.\n` +
-          `      PORT=3457 pnpm dev:web\n\n`,
-      );
-    }
-    // Re-throw so the uncaughtException handler logs the full stack
-    // and exits with code 1.
+  // Bind the http server, scanning upward from `initialPort` until we
+  // find a free port. Surfaces a clear error to stderr if every port
+  // in the scan range is taken — much friendlier than the silent
+  // EADDRINUSE we used to die with.
+  let boundPort: number;
+  try {
+    boundPort = await listenWithFallback(httpServer, initialPort, 20);
+  } catch (err) {
+    process.stderr.write(
+      `\nFailed to bind any port in ${initialPort}..${initialPort + 19}:\n` +
+        `  ${(err as Error).message}\n` +
+        `→ Quit the process holding these ports (typically the Band desktop app)\n` +
+        `  or set PORT to a different value, e.g. PORT=4000 pnpm dev:web\n\n`,
+    );
     throw err;
-  });
+  }
+  // Stash the actual bound port for downstream consumers
+  // (`src/trpc/router.ts::tunnel.start` reads BAND_PORT to know which
+  // port cloudflared should forward to). Set AFTER `listenWithFallback`
+  // because the value before then was just a hint, not a guarantee.
+  process.env.BAND_PORT = String(boundPort);
 
-  httpServer.listen(port, "0.0.0.0", () => {
-    console.log(`Web server listening on http://0.0.0.0:${port}`);
-    // Wall-time from Node process spawn (i.e. the moment the desktop
-    // shell or `pnpm start` forked this script) to the moment we're
-    // accepting requests. Single grep-able line so #472-style boot
-    // optimizations have a clean before/after number to point at;
-    // `process.uptime()` is preferred over a module-scope timer
-    // because it captures the bundle-load + module-evaluation cost
-    // too (the bundled `start-server.mjs` is ~5.5 MB).
-    console.log(`Web server boot took ${(process.uptime() * 1000).toFixed(0)} ms`);
+  console.log(`Web server listening on http://0.0.0.0:${boundPort}`);
+  if (boundPort !== initialPort) {
+    console.log(
+      `  (started looking at ${initialPort}; ports ${initialPort}..${boundPort - 1} were in use)`,
+    );
+  }
+  // Wall-time from Node process spawn (i.e. the moment the desktop
+  // shell or `pnpm start` forked this script) to the moment we're
+  // accepting requests. Single grep-able line so #472-style boot
+  // optimizations have a clean before/after number to point at;
+  // `process.uptime()` is preferred over a module-scope timer
+  // because it captures the bundle-load + module-evaluation cost
+  // too (the bundled `start-server.mjs` is ~5.5 MB).
+  console.log(`Web server boot took ${(process.uptime() * 1000).toFixed(0)} ms`);
 
-    // -----------------------------------------------------------------------
-    // Phase B — fire-and-forget bookkeeping that runs AFTER `listen()`.
+  // -----------------------------------------------------------------------
+  // Phase B — fire-and-forget bookkeeping that runs AFTER `listen()`.
+  //
+  // None of these steps gate the first request:
+  //   - `cleanupStaleTasks` flips persisted `running` rows to `failed` /
+  //     `idle` and runs immediately on the event-loop turn after the
+  //     listen callback. Until it does, the worst case is that
+  //     `tasks.list` reports a stale row as `running` for a few ms.
+  //   - `resetAgentStatuses` is similar — at-most a brief window where
+  //     `workspaceStatuses.agentStatus` looks busy.
+  //   - `startTaskPruneScheduler` and `startCronjobScheduler` just bind
+  //     interval timers; the user can wait the few ms before their
+  //     cron fires.
+  //   - `runFirstTimeSetup` does file-system bookkeeping (editor
+  //     detection, CLI install, hooks). Awaited in the old code path
+  //     was costing ~200-500 ms of `listen()` latency for absolutely
+  //     no first-request benefit.
+  //
+  // `setImmediate` (vs. spawning Promises directly) keeps these out of
+  // the current macrotask so they don't compete with the http server's
+  // own `listening` event handlers.
+  // -----------------------------------------------------------------------
+  setImmediate(() => {
+    // Mark any persisted "running" tasks as "failed" — no agent can be
+    // running if the server just started.
     //
-    // None of these steps gate the first request:
-    //   - `cleanupStaleTasks` flips persisted `running` rows to `failed` /
-    //     `idle` and runs immediately on the event-loop turn after the
-    //     listen callback. Until it does, the worst case is that
-    //     `tasks.list` reports a stale row as `running` for a few ms.
-    //   - `resetAgentStatuses` is similar — at-most a brief window where
-    //     `workspaceStatuses.agentStatus` looks busy.
-    //   - `startTaskPruneScheduler` and `startCronjobScheduler` just bind
-    //     interval timers; the user can wait the few ms before their
-    //     cron fires.
-    //   - `runFirstTimeSetup` does file-system bookkeeping (editor
-    //     detection, CLI install, hooks). Awaited in the old code path
-    //     was costing ~200-500 ms of `listen()` latency for absolutely
-    //     no first-request benefit.
-    //
-    // `setImmediate` (vs. spawning Promises directly) keeps these out of
-    // the current macrotask so they don't compete with the http server's
-    // own `listening` event handlers.
-    // -----------------------------------------------------------------------
-    setImmediate(() => {
-      // Mark any persisted "running" tasks as "failed" — no agent can be
-      // running if the server just started.
-      //
-      // ORDER MATTERS within Phase B: this must run BEFORE
-      // `startTaskPruneScheduler` below. The prune's `completedAt`-branch
-      // only matches non-null timestamps; stamping dangling `running`
-      // rows with `completedAt = now` here ensures they're evaluated
-      // against the cutoff via `completedAt` rather than relying on the
-      // fallback to `startedAt`. Swapping these two calls would leave
-      // very old in-flight rows wedged in `running` state for one extra
-      // boot cycle.
-      cleanupStaleTasks();
+    // ORDER MATTERS within Phase B: this must run BEFORE
+    // `startTaskPruneScheduler` below. The prune's `completedAt`-branch
+    // only matches non-null timestamps; stamping dangling `running`
+    // rows with `completedAt = now` here ensures they're evaluated
+    // against the cutoff via `completedAt` rather than relying on the
+    // fallback to `startedAt`. Swapping these two calls would leave
+    // very old in-flight rows wedged in `running` state for one extra
+    // boot cycle.
+    cleanupStaleTasks();
 
-      // Kick off the periodic task-history sweep (issue #416). Runs one
-      // pass immediately, then every 24h, deleting rows older than 30
-      // days. The timer is unref()'d so it doesn't block shutdown.
-      startTaskPruneScheduler();
+    // Kick off the periodic task-history sweep (issue #416). Runs one
+    // pass immediately, then every 24h, deleting rows older than 30
+    // days. The timer is unref()'d so it doesn't block shutdown.
+    startTaskPruneScheduler();
 
-      // Reset any "working" agent statuses — no agent is active on a
-      // fresh server start.
-      const resetCount = resetAgentStatuses();
-      if (resetCount > 0) {
-        console.log(`Reset ${resetCount} stale agent status(es) on startup`);
-      }
+    // Reset any "working" agent statuses — no agent is active on a
+    // fresh server start.
+    const resetCount = resetAgentStatuses();
+    if (resetCount > 0) {
+      console.log(`Reset ${resetCount} stale agent status(es) on startup`);
+    }
 
-      // First-time setup: detect editor, write default config, install
-      // extension and CLI. Idempotent — skips if defaults already exist.
-      // Fire-and-forget; errors are logged but don't take the server
-      // down. We track the promise so the shutdown handler can give it a
-      // bounded amount of time to finish — otherwise long-running
-      // `execFile` calls inside `whichBinary` keep the event loop alive
-      // and `process.exit(0)` never fires.
-      phaseBSettlePromise = runFirstTimeSetup().catch((err) => {
-        console.error("First-time setup failed:", err);
-      });
-
-      // Start cronjob scheduler — reads definitions and watches for
-      // changes. Bind the scheduler last so any setting tweaks
-      // `runFirstTimeSetup` applies (default-disable, etc.) are visible
-      // to the first scheduled load.
-      startCronjobScheduler();
-
-      // Auto-start tunnel if configured.
-      const settings = loadSettings() as Record<string, unknown>;
-      if (settings.autoStartTunnel) {
-        checkPrereqs()
-          .then((prereqs) => {
-            if (prereqs.cloudflared) {
-              return startTunnel({ port });
-            }
-          })
-          .catch((err) => {
-            console.error("Failed to auto-start tunnel:", err);
-          });
-      }
+    // First-time setup: detect editor, write default config, install
+    // extension and CLI. Idempotent — skips if defaults already exist.
+    // Fire-and-forget; errors are logged but don't take the server
+    // down. We track the promise so the shutdown handler can give it a
+    // bounded amount of time to finish — otherwise long-running
+    // `execFile` calls inside `whichBinary` keep the event loop alive
+    // and `process.exit(0)` never fires.
+    phaseBSettlePromise = runFirstTimeSetup().catch((err) => {
+      console.error("First-time setup failed:", err);
     });
+
+    // Start cronjob scheduler — reads definitions and watches for
+    // changes. Bind the scheduler last so any setting tweaks
+    // `runFirstTimeSetup` applies (default-disable, etc.) are visible
+    // to the first scheduled load.
+    startCronjobScheduler();
+
+    // Auto-start tunnel if configured.
+    const settings = loadSettings() as Record<string, unknown>;
+    if (settings.autoStartTunnel) {
+      checkPrereqs()
+        .then((prereqs) => {
+          if (prereqs.cloudflared) {
+            return startTunnel({ port: boundPort });
+          }
+        })
+        .catch((err) => {
+          console.error("Failed to auto-start tunnel:", err);
+        });
+    }
   });
 
   // Graceful shutdown
