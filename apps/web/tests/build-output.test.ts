@@ -1,8 +1,10 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
-const dist = join(import.meta.dirname, "../dist");
+const packageRoot = join(import.meta.dirname, "..");
+const dist = join(packageRoot, "dist");
 
 const skipSdkChecks = process.env.NPM_PUBLISH === "1";
 
@@ -95,5 +97,52 @@ describe("build output", () => {
 
   it.skipIf(skipSdkChecks)("contains Codex SDK package", () => {
     expect(existsSync(join(dist, "node_modules/@openai/codex/package.json"))).toBe(true);
+  });
+});
+
+describe("published npm tarball", () => {
+  // Regression for #475. The bug there was that `dist/openapi.json` was
+  // generated correctly into the build output but was missing from the
+  // `files` array in `package.json`, so npm stripped it from the published
+  // tarball. start-server.mjs then crashed at startup when it tried to read
+  // it (silently — the uncaughtException handler exited 1 before logging to
+  // the terminal). `npm pack --dry-run` exercises npm's real packing logic
+  // (files array + .npmignore + always-excluded paths), which is what we
+  // need to catch this class of bug. Asserting against dist/ contents alone
+  // is not enough — the previous "contains the OpenAPI spec" check above
+  // passed all along while the published package was broken.
+  let packedPaths: string[];
+
+  beforeAll(() => {
+    const output = execFileSync("npm", ["pack", "--dry-run", "--json"], {
+      cwd: packageRoot,
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const result = JSON.parse(output) as Array<{ files: Array<{ path: string }> }>;
+    packedPaths = result[0].files.map((f) => f.path);
+  });
+
+  // Files that start-server.mjs (or the bin shim) reads directly at runtime.
+  // If any of these go missing the published server crashes on startup, so
+  // they each get their own assertion to make the failure mode obvious.
+  it.each([
+    ["bin/band-server.mjs", "bin shim invoked by `npx @band-app/server`"],
+    ["dist/start-server.mjs", "the server bundle the bin shim spawns"],
+    ["dist/openapi.json", "read by start-server.mjs to serve /api/openapi.json (#475)"],
+  ])("publishes %s — %s", (path) => {
+    expect(packedPaths).toContain(path);
+  });
+
+  it("publishes at least one migration", () => {
+    // dist/migrations is a directory; we just need *something* under it so
+    // runMigrations() has work to do at boot.
+    const migrations = packedPaths.filter((p) => p.startsWith("dist/migrations/"));
+    expect(migrations.length).toBeGreaterThan(0);
+  });
+
+  it("publishes the client bundle", () => {
+    const clientFiles = packedPaths.filter((p) => p.startsWith("dist/client/"));
+    expect(clientFiles.length).toBeGreaterThan(0);
   });
 });
