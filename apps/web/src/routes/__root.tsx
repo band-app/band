@@ -27,10 +27,10 @@ import {
   Settings as SettingsIcon,
   Terminal as TerminalIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { BrowserHostBridge } from "../components/BrowserHostBridge";
 import { DesktopTitleBar, type PanelItem } from "../components/DesktopTitleBar";
-import { SharedDockviewLayout } from "../components/SharedDockviewLayout";
+import { crossPanelHandlers, SharedDockviewLayout } from "../components/SharedDockviewLayout";
 import { ToolbarOverflowMenuItems, ToolbarOverflowProvider } from "../components/ToolbarButtons";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useNavigationHistory } from "../hooks/useNavigationHistory";
@@ -334,18 +334,44 @@ function AppShell() {
   // Listen for `band open` events from the SSE stream and route the
   // dashboard to the requested file. The CLI calls
   // `editor.openFile` which fans out via `emit({kind: "open-file"})`;
-  // this listener closes the loop. Two flavours:
+  // this listener closes the loop.
   //
-  //   - In-workspace files: navigate to the splat route. The
-  //     CodeBrowserView's existing `_splat` handler opens the tab and
-  //     positions the cursor from the `:line:col` suffix.
-  //   - External files: route navigation can't carry absolute paths
-  //     (they'd corrupt the URL and the back/forward stack). Enqueue
-  //     the path into the pending-external-open store *before*
-  //     navigating, then navigate to the workspace's code index. When
-  //     `CodeBrowserView` mounts (or is already mounted), its effect
-  //     drains the queue synchronously — no event-timing race. See
-  //     `lib/pending-external-open.ts` for the rationale.
+  // Two rendering models, two dispatch paths:
+  //
+  //   - Desktop / wide-web (`useDesktopLayout` true): the dockview
+  //     overlays the route Outlet, and `DesktopWorkspaceLayout`
+  //     `returns null` — i.e. the `/workspace/$id/code/$splat`
+  //     subtree is matched by the router but never renders. URL
+  //     navigation alone does NOTHING visible here. We have to:
+  //       • write the file into the per-workspace state store
+  //         (so the dockview-hosted `CodeBrowserView` picks it up
+  //         via its `openFilePath` prop), AND
+  //       • flip the Files panel to `setActive()` so the user
+  //         actually sees the new tab instead of staying in
+  //         whichever panel they were in (typically Terminal,
+  //         because `band open` is most often run from the Band
+  //         terminal pane).
+  //     Both happen inside `crossPanelHandlers.onOpenFile`. For
+  //     external paths, we still enqueue (the `CodeBrowserView` in
+  //     the Files panel is always mounted in dockview and drains
+  //     the queue) but we additionally call
+  //     `onActivateFilesPanel` to surface it.
+  //
+  //   - Mobile / narrow web (`useDesktopLayout` false): pure URL-
+  //     driven. The `code/$splat` route mounts `CodeBrowserView`
+  //     directly via the workspace layout's `<Outlet />`, and tab
+  //     switching is also URL-driven via `WorkspaceTabNav`.
+  //
+  // Route navigation can't carry absolute paths (they'd corrupt the
+  // URL and the back/forward stack), so external files use a
+  // pre-mount-safe `pending-external-open` store regardless of
+  // layout — see `lib/pending-external-open.ts`.
+  //
+  // `useDesktopLayout` is read through a ref so a viewport resize
+  // doesn't tear down the SSE subscription; the listener picks up
+  // the current value at event time instead.
+  const useDesktopLayoutRef = useRef(useDesktopLayout);
+  useDesktopLayoutRef.current = useDesktopLayout;
   useEffect(() => {
     const unsubscribe = adapter.subscribeStatusEvents((event) => {
       if (event.kind !== "open-file") return;
@@ -353,22 +379,41 @@ function AppShell() {
       const filePath = typeof event.filePath === "string" ? event.filePath : undefined;
       if (!workspaceId || !filePath) return;
 
+      const isDockview = useDesktopLayoutRef.current;
+
       if (event.external === true) {
+        // External files always go through the pending-open queue.
+        // The CodeBrowserView (in the Files panel on desktop, in
+        // the route Outlet on mobile) drains it.
         enqueueExternalOpen(workspaceId, filePath);
-        router.navigate({
-          to: "/workspace/$workspaceId/code",
-          params: { workspaceId: encodeURIComponent(workspaceId) },
-        });
+        if (isDockview) {
+          crossPanelHandlers.onActivateFilesPanel(workspaceId);
+        } else {
+          router.navigate({
+            to: "/workspace/$workspaceId/code",
+            params: { workspaceId: encodeURIComponent(workspaceId) },
+          });
+        }
         return;
       }
 
-      router.navigate({
-        to: "/workspace/$workspaceId/code/$",
-        params: {
-          workspaceId: encodeURIComponent(workspaceId),
-          _splat: filePath,
-        },
-      });
+      // In-workspace path (workspace-relative, optionally suffixed
+      // with `:line[:col]` / `:line-end`).
+      if (isDockview) {
+        // `crossPanelHandlers.onOpenFile` does parseFileLocation
+        // internally, writes both `currentFile` (suffix-stripped)
+        // and `openFilePath` (suffix-preserved) to the per-workspace
+        // state, and activates the Files panel.
+        crossPanelHandlers.onOpenFile(workspaceId, filePath);
+      } else {
+        router.navigate({
+          to: "/workspace/$workspaceId/code/$",
+          params: {
+            workspaceId: encodeURIComponent(workspaceId),
+            _splat: filePath,
+          },
+        });
+      }
     });
     return unsubscribe;
   }, [router]);
