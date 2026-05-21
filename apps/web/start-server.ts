@@ -52,7 +52,16 @@ function logCrash(message: string): void {
 process.on("unhandledRejection", (reason: unknown) => {
   const timestamp = new Date().toISOString();
   const error = reason instanceof Error ? reason.stack || reason.message : String(reason);
-  logCrash(`[${timestamp}] Unhandled rejection:\n${error}\n\n`);
+  const payload = `[${timestamp}] Unhandled rejection:\n${error}\n\n`;
+  logCrash(payload);
+  // Always echo to stderr too. The DMG case pipes stderr to a log file
+  // (so this is a duplicate write there), but the dev case
+  // (`pnpm dev:web`) leaves the terminal as the only place a developer
+  // sees the failure — without this echo, a crash before `listen()`
+  // (e.g. `EADDRINUSE` when the Band desktop app already owns 3456)
+  // showed nothing in the terminal and the developer had to spelunk
+  // `~/.band/server.log` to find out why.
+  process.stderr.write(payload);
 
   // Don't crash the server for known recoverable SDK transport errors.
   // The Claude Code SDK can throw "ProcessTransport is not ready for writing"
@@ -66,7 +75,12 @@ process.on("unhandledRejection", (reason: unknown) => {
 
 process.on("uncaughtException", (error: Error) => {
   const timestamp = new Date().toISOString();
-  logCrash(`[${timestamp}] Uncaught exception:\n${error.stack || error.message}\n\n`);
+  const payload = `[${timestamp}] Uncaught exception:\n${error.stack || error.message}\n\n`;
+  logCrash(payload);
+  // Echo to stderr — see comment in the `unhandledRejection` handler
+  // above. `EADDRINUSE` surfaces here as a raw `listen` error and is
+  // the most common dev-mode silent failure we see.
+  process.stderr.write(payload);
   process.exit(1);
 });
 
@@ -665,6 +679,27 @@ async function main() {
   // interactive shell loaded with `-li`) kept the test harness's
   // `afterAll` waiting until vitest's 30 s `hookTimeout` killed it.
   let phaseBSettlePromise: Promise<void> | null = null;
+
+  // Friendly diagnostic for the most common dev-mode failure: the
+  // packaged Band desktop app is already running on port 3456, so
+  // `pnpm dev:web` (which defaults to the same port) hits EADDRINUSE
+  // and otherwise just exits silently — the user sees "tsx watch
+  // start-server.ts" in their terminal and nothing else. Printing a
+  // pointer here before falling through to `uncaughtException` shaves
+  // minutes off the "why isn't dev starting?" debugging loop.
+  httpServer.once("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EADDRINUSE") {
+      process.stderr.write(
+        `\nFailed to bind port ${port}: ${err.message}\n` +
+          `→ Another process is already listening on this port. If the Band desktop app is\n` +
+          `  running, quit it first (Cmd-Q) or set PORT to a different value, e.g.\n` +
+          `      PORT=3457 pnpm dev:web\n\n`,
+      );
+    }
+    // Re-throw so the uncaughtException handler logs the full stack
+    // and exits with code 1.
+    throw err;
+  });
 
   httpServer.listen(port, "0.0.0.0", () => {
     console.log(`Web server listening on http://0.0.0.0:${port}`);
