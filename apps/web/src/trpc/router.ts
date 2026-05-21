@@ -2963,9 +2963,10 @@ function canonicalizeMaybeMissing(p: string): string {
  * currently focused workspace" hint.
  *
  * The web UI calls `editor.setActiveWorkspace` whenever its active workspace
- * changes; the CLI's `band open` reads it via `editor.getActiveWorkspace` so
- * the user doesn't need to name the workspace explicitly when firing a file
- * at "wherever I'm currently looking at." The actual open is funnelled
+ * changes; the CLI's `band open` reads the same value implicitly via the
+ * `openFile` mutation's fallback (`input.workspaceId ?? getActiveWorkspace()`)
+ * so the user doesn't need to name the workspace explicitly when firing a
+ * file at "wherever I'm currently looking at." The actual open is funnelled
  * through `editor.openFile`, which:
  *   1. Resolves the target workspace (explicit `workspaceId` > active).
  *   2. Validates the file exists and is inside the workspace root —
@@ -2977,11 +2978,26 @@ function canonicalizeMaybeMissing(p: string): string {
  * Active-workspace tracking is process-local; the value resets when the
  * web server restarts. That's intentional — no UI mounted → no active
  * workspace, and the next focus event will repopulate it.
+ *
+ * Security / threat model:
+ *   - The `band_token` cookie/header is enforced at the transport layer
+ *     (see `start-server.ts`), gating both normal local-server requests
+ *     and Band's public tunnel. Only token-bearers can call these
+ *     procedures, same constraint as the rest of the router.
+ *   - A token-bearer can poison the active-workspace atom via
+ *     `setActiveWorkspace` and trigger `openFile` against any workspace
+ *     the daemon manages. That's the existing trust boundary: a holder
+ *     of the token is already trusted to read/write files via
+ *     `workspace.*` and `host.*`, so opening one in the editor is a
+ *     proper subset of what they can already do.
+ *   - If the desktop ever ships a "share my tunnel without my token"
+ *     mode, these (and every other) `publicProcedure` need re-auditing.
  */
 const editorRouter = t.router({
-  getActiveWorkspace: publicProcedure.query(() => {
-    return { workspaceId: getActiveWorkspace() };
-  }),
+  // Intentionally no `getActiveWorkspace` query — the only consumer is the
+  // CLI's `band open`, which reads the value implicitly through the
+  // `openFile` fallback in the same round-trip. Adding a separate query
+  // doubles the cost for no benefit.
 
   setActiveWorkspace: publicProcedure
     .input(z.object({ workspaceId: z.string().nullable() }))
@@ -3024,7 +3040,7 @@ const editorRouter = t.router({
       const targetWorkspaceId = input.workspaceId ?? getActiveWorkspace();
       if (!targetWorkspaceId) {
         throw new TRPCError({
-          code: "FAILED_PRECONDITION",
+          code: "PRECONDITION_FAILED",
           message:
             "No active workspace. Open a workspace in the Band dashboard or pass --workspace.",
         });
@@ -3123,7 +3139,6 @@ const editorRouter = t.router({
         workspaceId: targetWorkspaceId,
         filePath: formatted,
         external: !isInside,
-        worktreePath: root,
       };
     }),
 });

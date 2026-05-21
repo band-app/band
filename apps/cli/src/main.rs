@@ -2109,15 +2109,22 @@ fn cmd_open(
     }
 
     let data = client.trpc_mutate("editor.openFile", &input)?;
+    // Surface a clear error rather than printing "Opened <path> in " if
+    // the server's response shape ever drifts — the three fields below
+    // are part of the editor.openFile contract; an empty string here
+    // would be a silent bug.
     let workspace_id = data
         .get("workspaceId")
         .and_then(|v| v.as_str())
-        .unwrap_or("");
-    let resolved_path = data.get("filePath").and_then(|v| v.as_str()).unwrap_or("");
+        .ok_or_else(|| "server response missing workspaceId".to_string())?;
+    let resolved_path = data
+        .get("filePath")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "server response missing filePath".to_string())?;
     let external = data
         .get("external")
         .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false);
+        .ok_or_else(|| "server response missing external".to_string())?;
 
     let where_label = if external {
         format!("{workspace_id} (external)")

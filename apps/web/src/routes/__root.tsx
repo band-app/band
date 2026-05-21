@@ -38,6 +38,7 @@ import { useZoom } from "../hooks/useZoom";
 import { getElectronBridge } from "../lib/desktop-ipc";
 import { isDesktop } from "../lib/is-desktop";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
+import { enqueueExternalOpen } from "../lib/pending-external-open";
 import {
   applyZoomLevel,
   applyZoomLevelToDom,
@@ -339,12 +340,12 @@ function AppShell() {
   //     CodeBrowserView's existing `_splat` handler opens the tab and
   //     positions the cursor from the `:line:col` suffix.
   //   - External files: route navigation can't carry absolute paths
-  //     (they'd corrupt the URL and the back/forward stack). Navigate
-  //     to the workspace's code index instead so the CodeBrowserView
-  //     mounts, then dispatch a window event that the view's external-
-  //     open listener picks up. The event is dispatched on the next
-  //     microtask so the route mount has time to land its useEffect
-  //     subscribers before we fire.
+  //     (they'd corrupt the URL and the back/forward stack). Enqueue
+  //     the path into the pending-external-open store *before*
+  //     navigating, then navigate to the workspace's code index. When
+  //     `CodeBrowserView` mounts (or is already mounted), its effect
+  //     drains the queue synchronously — no event-timing race. See
+  //     `lib/pending-external-open.ts` for the rationale.
   useEffect(() => {
     const unsubscribe = adapter.subscribeStatusEvents((event) => {
       if (event.kind !== "open-file") return;
@@ -353,16 +354,10 @@ function AppShell() {
       if (!workspaceId || !filePath) return;
 
       if (event.external === true) {
+        enqueueExternalOpen(workspaceId, filePath);
         router.navigate({
           to: "/workspace/$workspaceId/code",
           params: { workspaceId: encodeURIComponent(workspaceId) },
-        });
-        queueMicrotask(() => {
-          window.dispatchEvent(
-            new CustomEvent("band:open-file-external-direct", {
-              detail: { workspaceId, filePath },
-            }),
-          );
         });
         return;
       }

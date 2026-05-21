@@ -3287,7 +3287,13 @@ fn open_without_active_workspace_errors_clearly() {
     // belt-and-braces).
     set_active_workspace(&env.band_dir, None);
 
-    let output = env.band(&["open", "some-file.txt"]);
+    // Use a fully-qualified non-existent path so the test asserts the
+    // "no active workspace" branch regardless of cwd. With a relative
+    // path like `some-file.txt`, `cmd_open` would resolve it against the
+    // test runner's cwd and — if that file happens to exist — the
+    // server's workspace-resolution guard would trip *before* the
+    // existence check, masking the branch we want to cover.
+    let output = env.band(&["open", "/nonexistent/path/some-file.txt"]);
     assert!(
         !output.status.success(),
         "expected failure, got stdout: {}",

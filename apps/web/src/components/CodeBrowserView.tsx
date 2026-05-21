@@ -62,6 +62,7 @@ import { isUntitledPath, useFileTabs } from "../hooks/useFileTabs";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useTabState } from "../hooks/useTabState";
 import { pathInside } from "../lib/path-inside";
+import { consumeExternalOpen, subscribeExternalOpens } from "../lib/pending-external-open";
 import { FileTabBar } from "./FileTabBar";
 import type { MarkdownPreviewHandle, MarkdownPreviewMatchInfo } from "./MarkdownPreview";
 import { MarkdownPreview } from "./MarkdownPreview";
@@ -1319,8 +1320,9 @@ export function CodeBrowserView({
    *
    * Shared by:
    *   - `handleOpenExternalFile` below (desktop Cmd+O → OS file picker)
-   *   - `band:open-file-external-direct` listener (CLI `band open <abs>`
-   *     for files outside the active workspace's root)
+   *   - The pending-external-open drain (CLI `band open <abs>` for files
+   *     outside the active workspace's root — see
+   *     `lib/pending-external-open.ts`)
    *
    * We deliberately do NOT call `onSelectFile` / push to editor history
    * — the route only carries workspace-relative paths, and pushing an
@@ -1371,28 +1373,36 @@ export function CodeBrowserView({
   }, [pickFile, handleOpenExternalFile, workspaceId]);
 
   // Direct external-open: the CLI's `band open <abs>` for files outside
-  // any workspace root fans out via the status SSE stream → __root.tsx
-  // listener → this window event. Unlike `band:open-file-external` above,
-  // there's no picker involved: the path is supplied in `detail` and we
-  // open it straight away. Not gated on `pickFile` — the path comes from
-  // a trusted server-side `editor.openFile` mutation, so the same
-  // `readExternalFile` capability the picker flow uses is enough.
+  // any workspace root fans out via the status SSE stream → __root.tsx,
+  // which enqueues into the pending-external-open store *before*
+  // navigating us into existence. We drain the queue synchronously here
+  // — once on mount (catches the pre-mount enqueue) and again from the
+  // subscriber callback (catches subsequent CLI calls while we're
+  // mounted). No event-timing race: the store is module-level so the
+  // payload survives between the navigate and our first effect tick.
+  //
+  // Not gated on `pickFile` — the path comes from a trusted server-side
+  // `editor.openFile` mutation, so the same `readExternalFile`
+  // capability the picker flow uses is enough.
   //
   // Filtered by workspaceId so multi-workspace dockview setups only
   // open the tab in the workspace the CLI targeted.
   useEffect(() => {
-    const handler = (e: Event) => {
-      const detail = (e as CustomEvent<{ workspaceId?: string; filePath?: string }>).detail;
-      if (!detail || detail.workspaceId !== workspaceId || !detail.filePath) return;
-      const loc = parseFileLocation(detail.filePath);
+    const drain = () => {
+      const pending = consumeExternalOpen(workspaceId);
+      if (!pending) return;
+      const loc = parseFileLocation(pending.filePath);
       openExternalPath(loc.filePath, {
         line: loc.line,
         lineEnd: loc.lineEnd,
         column: loc.column,
       });
     };
-    window.addEventListener("band:open-file-external-direct", handler);
-    return () => window.removeEventListener("band:open-file-external-direct", handler);
+    // Drain anything queued before we mounted (the common case for
+    // `band open` when the user wasn't already on the code route).
+    drain();
+    // And subscribe for subsequent enqueues while we're mounted.
+    return subscribeExternalOpens(drain);
   }, [workspaceId, openExternalPath]);
 
   // -------------------------------------------------------------------------
