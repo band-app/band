@@ -382,7 +382,8 @@ export function TerminalPanel({
       // Custom key bindings:
       // - Cmd/Ctrl+F  → open find bar (intercept before xterm and before the
       //                 browser's native find-in-page in non-Electron contexts)
-      // - Shift+Enter → CSI u sequence so shells/tools receive a distinct keycode
+      // - Shift+Enter → LF (0x0A) so TUIs that distinguish Ctrl+J from Enter
+      //                 (e.g. Claude Code's chat:newline) insert a newline
       // - Alt+Arrow   → word navigation (ESC+b / ESC+f)
       terminal.attachCustomKeyEventHandler((e) => {
         if (e.type === "keydown") {
@@ -425,9 +426,16 @@ export function TerminalPanel({
             openSearchRef.current();
             return false;
           }
-          // Shift+Enter → send CSI 13;2u (kitty/fixterms keyboard protocol)
+          // Shift+Enter → send LF (0x0A) so receivers see a distinct newline character.
+          // We previously sent the kitty/fixterms CSI u sequence (\x1b[13;2u), but
+          // bash readline, zsh zle, fish, and most TUIs (including Claude Code's chat
+          // input) don't decode the kitty keyboard protocol, so Shift+Enter ended up
+          // behaving like a plain Enter. LF is the lowest-common-denominator newline:
+          // TUIs that distinguish Ctrl+J from Enter (Claude Code's chat:newline is
+          // bound to ctrl+j = LF by default) will insert a newline, and plain shells
+          // fall back to submit — same as Enter, so no regression.
           if (e.key === "Enter" && e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
-            terminal.input("\x1b[13;2u");
+            terminal.input("\n");
             return false;
           }
           if (e.altKey && !e.metaKey && !e.ctrlKey) {
