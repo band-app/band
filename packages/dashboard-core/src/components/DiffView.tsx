@@ -1555,6 +1555,12 @@ export function DiffView({
   // because `prevActiveRef` would otherwise need to be coordinated
   // across the two sibling effects — collapsing the transition logic
   // into a single dedicated effect keeps that bookkeeping local.
+  // `workspaceId` is intentionally absent from the deps: each workspace
+  // has its own keyed DiffView instance in MultiWorkspacePanelHost, so
+  // `workspaceId` never changes within a single instance and threading it
+  // through would only invite a well-meaning future reset of
+  // `prevActiveRef` on workspace change — which has no defined behavior
+  // because workspace change tears down this instance.
   useEffect(() => {
     const wasInactive = prevActiveRef.current === false;
     prevActiveRef.current = active;

@@ -218,32 +218,23 @@ test("switch A → B → A keeps the Changes panel populated (no Loading flash)"
   await workspaceACard.click();
   await expect(page).toHaveURL(new RegExp(encodeURIComponent(WORKSPACE_A)));
 
-  // Wait until either the bug-path surfaces (observer flips `observed`) or
-  // the post-switch DOM has settled around B-card going inactive + A-card
-  // active. Polling on a behavioral predicate is sturdier under CI load
-  // than a wall-clock `waitForTimeout` — a slow runner doesn't get cut
-  // short, a fast one doesn't burn 400 ms for nothing.
-  await page.waitForFunction(
-    () => {
-      const w = window as unknown as { __loadingFlashRecorder: { observed: boolean } };
-      if (w.__loadingFlashRecorder.observed) return true;
-      // Settled = the active card is A's card AND no mutation has fired
-      // for at least one animation frame. We approximate the latter by
-      // requiring the active card to be present (i.e. URL+state synced).
-      return !!document.querySelector('[data-active="true"]');
-    },
-    { timeout: 5000 },
-  );
+  // Settle on a behavioral anchor: A's cached file row becomes VISIBLE
+  // again (its panel div flips from opacity:0 back to opacity:1 inside
+  // MultiWorkspacePanelHost). This is sturdier than a wall-clock
+  // `waitForTimeout` and avoids the `[data-active="true"]` race —
+  // `data-active` lives on workspace cards which can flip synchronously
+  // with the URL change, before React commits the loading state.
+  await expectChangesFileVisible(page, FILE_IN_A);
 
   const flashObserved = await page.evaluate(() => {
-    const w = window as unknown as { __loadingFlashRecorder: { observed: boolean } };
+    const w = window as unknown as {
+      __loadingFlashRecorder: { observed: boolean; observer: MutationObserver };
+    };
+    // Disconnect now that we're done — Playwright isolates page contexts
+    // per test so there's no cross-test leak, but the live observer
+    // shows up as DevTools noise during local debugging.
+    w.__loadingFlashRecorder.observer.disconnect();
     return w.__loadingFlashRecorder.observed;
   });
   expect(flashObserved).toBe(false);
-
-  // The file row is visible after the switch back. This is implied by
-  // the no-flash check (the cached DOM stays mounted) but kept as a
-  // belt-and-suspenders assertion that survives if the observer ever
-  // misses a textContent path.
-  await expectChangesFileVisible(page, FILE_IN_A);
 });
