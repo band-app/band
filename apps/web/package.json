@@ -9,6 +9,7 @@
     "dist/client",
     "dist/server",
     "dist/start-server.mjs",
+    "dist/openapi.json",
     "dist/migrations",
     "bin"
   ],
