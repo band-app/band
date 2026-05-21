@@ -425,13 +425,14 @@ describe("auto-prune tasks older than 30 days (issue #416)", () => {
     // assertion below.
     const EXPECTED_AFTER_PRUNE = ["tsk_recent_completed", "tsk_recent_orphan"] as const;
     async function waitForPrune(home: string): Promise<void> {
+      let lastIds: string[] = [];
       for (let attempt = 0; attempt < 100; attempt++) {
         const sqlite = openDb(home);
         try {
-          const ids = listTaskIds(sqlite).sort();
+          lastIds = listTaskIds(sqlite).sort();
           if (
-            ids.length === EXPECTED_AFTER_PRUNE.length &&
-            ids.every((id, i) => id === EXPECTED_AFTER_PRUNE[i])
+            lastIds.length === EXPECTED_AFTER_PRUNE.length &&
+            lastIds.every((id, i) => id === EXPECTED_AFTER_PRUNE[i])
           ) {
             return;
           }
@@ -440,6 +441,15 @@ describe("auto-prune tasks older than 30 days (issue #416)", () => {
         }
         await new Promise((r) => setTimeout(r, 50));
       }
+      // Throw with a descriptive message instead of letting the
+      // assertion below collapse to a generic "arrays don't match" —
+      // a silent timeout makes "prune scheduler never executed"
+      // indistinguishable from "prune executed but produced the wrong
+      // row set."
+      throw new Error(
+        `Phase-B startTaskPruneScheduler did not prune within 5 s ` +
+          `(last observed task ids: [${lastIds.join(", ")}]). Regression?`,
+      );
     }
 
     // ── First boot: the scheduler kicks off one prune pass on bind in
