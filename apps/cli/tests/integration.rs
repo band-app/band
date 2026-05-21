@@ -3454,6 +3454,49 @@ fn open_inverted_range_is_rejected_as_suffix() {
 }
 
 #[test]
+fn open_zero_column_falls_through_to_filename() {
+    // `file.rs:0:5` and `file.rs:5:0` would, naively, fail the
+    // `:line:col` guard (line/col must be ≥ 1) and then trip the
+    // `:line` branch on the rightmost `:5` or `:0`, mis-parsing the
+    // input as `(path="file.rs:0", line=5)` / similar. The
+    // `!contains(':')` guard on the `:line` branch ensures the whole
+    // colon-suffixed input falls through to the filename instead, so
+    // the user gets a clear "File not found" against the literal
+    // string they typed rather than a half-parsed surprise.
+    let env = TestEnv::new();
+    let create_out = env.band(&["workspaces", "create", "my-project", "feat/zerocol"]);
+    assert!(
+        create_out.status.success(),
+        "stderr: {}",
+        stderr(&create_out)
+    );
+    let workspace_path = stdout(&create_out);
+
+    // Seed a real `file.rs` so a regression that strips off `:0:5`
+    // would *succeed* instead of failing. Without this, the test
+    // could pass for the wrong reason (regressed parser strips
+    // suffix → opens real file.rs → success when we expect failure).
+    fs::write(Path::new(&workspace_path).join("file.rs"), "// real\n").unwrap();
+
+    let bogus = format!("{}/file.rs:0:5", &workspace_path);
+    let output = env.band(&["open", &bogus, "--workspace", "my-project-feat-zerocol"]);
+    assert!(
+        !output.status.success(),
+        "expected failure (file.rs:0:5 has no file on disk), got stdout: {}",
+        stdout(&output),
+    );
+    let err = stderr(&output);
+    assert!(
+        err.contains("not found") || err.contains("File not found"),
+        "expected 'not found' error mentioning the full input, got: {err}",
+    );
+    assert!(
+        err.contains("file.rs:0:5"),
+        "expected error to include literal input 'file.rs:0:5' (proves we didn't strip the suffix), got: {err}",
+    );
+}
+
+#[test]
 fn open_directory_is_rejected() {
     // `existsSync` returns true for directories, so without the
     // `statSync().isFile()` guard on the server, `band open <dir>`

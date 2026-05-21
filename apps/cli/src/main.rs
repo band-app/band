@@ -2073,11 +2073,23 @@ fn split_file_location(raw: &str) -> (String, Option<u32>, Option<u32>, Option<u
 
     // Try :line (single trailing numeric component). Same `> 0`
     // policy as above.
+    //
+    // The `!contains(':')` guard on the head is load-bearing: without
+    // it, an input like `file.rs:0:5` that fails the `:line:col` guard
+    // above would re-enter this branch, find the final `:5`, parse 5
+    // as the line, and return `path="file.rs:0", line=5` — which the
+    // server then surfaces as a confusing "File not found: file.rs:0".
+    // The guard skips this branch whenever a colon survives in the
+    // candidate path, so unmatched colon-suffix inputs keep the full
+    // raw string as the filename.
     if let Some(idx) = raw.rfind(':') {
+        let head = &raw[..idx];
         let tail = &raw[idx + 1..];
-        if let Ok(line) = tail.parse::<u32>() {
-            if line > 0 {
-                return (raw[..idx].to_string(), Some(line), None, None);
+        if !head.contains(':') {
+            if let Ok(line) = tail.parse::<u32>() {
+                if line > 0 {
+                    return (head.to_string(), Some(line), None, None);
+                }
             }
         }
     }

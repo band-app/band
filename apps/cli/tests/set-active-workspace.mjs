@@ -54,7 +54,11 @@ try {
 }
 
 if (parsed.error) {
-  console.error(`tRPC error: ${parsed.error.message ?? body}`);
+  // tRPC wraps mutation errors as `{ error: { json: { message, code, data } } }`,
+  // not `{ error: { message } }`, so the top-level `.message` is undefined.
+  // Reach into `.json.message` (and fall back to the raw body if the shape
+  // ever drifts) so error logs surface the actual server message.
+  console.error(`tRPC error: ${parsed.error?.json?.message ?? body}`);
   process.exit(1);
 }
 
