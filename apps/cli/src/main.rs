@@ -2055,12 +2055,16 @@ fn split_file_location(raw: &str) -> (String, Option<u32>, Option<u32>, Option<u
     // surprising edge case for the user but the alternative —
     // accepting zero as a sentinel — would let a typo silently
     // suppress positioning. Errs on the side of visibility.
+    // `rsplitn` walks right-to-left, so name the bindings to match the
+    // iterator order (rightmost = col, middle = line, head = path).
+    // Otherwise a future reader skimming `last`/`middle`/`head`
+    // left-to-right will swap line and col in their mental model.
     let mut parts = raw.rsplitn(3, ':');
-    let last = parts.next();
+    let rightmost = parts.next();
     let middle = parts.next();
     let head = parts.next();
-    if let (Some(head), Some(middle), Some(last)) = (head, middle, last) {
-        if let (Ok(line), Ok(col)) = (middle.parse::<u32>(), last.parse::<u32>()) {
+    if let (Some(head), Some(middle), Some(rightmost)) = (head, middle, rightmost) {
+        if let (Ok(line), Ok(col)) = (middle.parse::<u32>(), rightmost.parse::<u32>()) {
             if line > 0 && col > 0 {
                 return (head.to_string(), Some(line), None, Some(col));
             }

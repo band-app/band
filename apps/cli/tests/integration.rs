@@ -3454,6 +3454,46 @@ fn open_inverted_range_is_rejected_as_suffix() {
 }
 
 #[test]
+fn open_directory_is_rejected() {
+    // `existsSync` returns true for directories, so without the
+    // `statSync().isFile()` guard on the server, `band open <dir>`
+    // would treat the directory as an external file and the renderer
+    // would try to open it as a text buffer. This also covers the
+    // workspace-root edge case (`band open <workspace-root>` →
+    // directory → rejected here before the renderer's empty-splat
+    // logic fires).
+    let env = TestEnv::new();
+    let create_out = env.band(&["workspaces", "create", "my-project", "feat/dir"]);
+    assert!(
+        create_out.status.success(),
+        "stderr: {}",
+        stderr(&create_out)
+    );
+    let workspace_path = stdout(&create_out);
+
+    // Create a real subdirectory inside the workspace.
+    let dir_inside = Path::new(&workspace_path).join("src");
+    fs::create_dir_all(&dir_inside).unwrap();
+
+    let output = env.band(&[
+        "open",
+        dir_inside.to_str().unwrap(),
+        "--workspace",
+        "my-project-feat-dir",
+    ]);
+    assert!(
+        !output.status.success(),
+        "expected failure, got stdout: {}",
+        stdout(&output),
+    );
+    let err = stderr(&output);
+    assert!(
+        err.contains("Not a file") || err.contains("not a file"),
+        "expected 'not a file' error, got: {err}",
+    );
+}
+
+#[test]
 fn open_valid_line_range_is_parsed_and_round_tripped() {
     // Companion to `open_inverted_range_is_rejected_as_suffix`:
     // exercises the happy path of the `:line-lineEnd` branch. Without

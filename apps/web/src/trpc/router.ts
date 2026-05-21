@@ -1,6 +1,13 @@
 import { execFile, execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, constants as fsConstants, mkdirSync, realpathSync, unlinkSync } from "node:fs";
+import {
+  existsSync,
+  constants as fsConstants,
+  mkdirSync,
+  realpathSync,
+  statSync,
+  unlinkSync,
+} from "node:fs";
 import { cp, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
 import { promisify } from "node:util";
@@ -3088,10 +3095,30 @@ const editorRouter = t.router({
       // when the real problem is the file is just missing.
       const canonicalTarget = canonicalizeMaybeMissing(absoluteTarget);
 
-      if (!existsSync(canonicalTarget)) {
+      // `existsSync` is true for directories too. Without the `isFile`
+      // guard, `band open /path/to/some-dir` would pass through to the
+      // renderer as an external "file" and the editor would try to
+      // open the directory as a text buffer. Also covers the
+      // workspace-root edge case (`band open /path/to/workspace`):
+      // a directory there short-circuits before the empty-splat
+      // problem in the renderer.
+      let targetStat: import("node:fs").Stats | null = null;
+      try {
+        targetStat = statSync(canonicalTarget);
+      } catch {
+        // ENOENT or another IO error — surfaced as "File not found"
+        // below, same as a missing path.
+      }
+      if (!targetStat) {
         throw new TRPCError({
           code: "NOT_FOUND",
           message: `File not found: ${input.filePath}`,
+        });
+      }
+      if (!targetStat.isFile()) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Not a file: ${input.filePath}`,
         });
       }
 
