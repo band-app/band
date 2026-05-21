@@ -177,8 +177,17 @@ describe("published @band-app/server runs via the bin shim", () => {
     const port = await findFreePort();
     baseUrl = `http://127.0.0.1:${port}`;
 
+    // Build an explicit env rather than inheriting the test runner's. NODE_OPTIONS
+    // in particular can carry vitest loader flags (--import tsx/esm,
+    // --experimental-vm-modules) that break the server's ESM boot in subtle ways.
+    const serverEnv: NodeJS.ProcessEnv = {
+      PATH: process.env.PATH,
+      HOME: process.env.HOME,
+      PORT: String(port),
+      BAND_HOME: bandHome,
+    };
     server = spawn(process.execPath, [binPath], {
-      env: { ...process.env, PORT: String(port), BAND_HOME: bandHome },
+      env: serverEnv,
       stdio: ["ignore", "pipe", "pipe"],
     });
     server.on("exit", (code) => {
@@ -215,11 +224,11 @@ describe("published @band-app/server runs via the bin shim", () => {
     }
   });
 
-  it("bin shim process is still running", () => {
-    // The #475 regression was a silent process.exit(1) before any output.
-    // start-server.ts now reads dist/openapi.json lazily (issue #472), so
-    // the crash happens on first request rather than at boot — but boot
-    // crashes are still a valid invariant to lock in.
+  it("server boots without crashing", () => {
+    // Generic boot-crash invariant — not specifically a #475 guard. With
+    // lazy openapi.json reading (issue #472), the #475 failure mode now
+    // surfaces on the first /api/openapi.json request rather than at boot,
+    // so the fetch test below is what actually locks in the packaging fix.
     expect(exitCode).toBeNull();
   });
 
@@ -264,8 +273,13 @@ async function waitForServer(baseUrl: string, deadlineMs: number): Promise<void>
       const res = await fetch(`${baseUrl}/api/openapi.json`);
       // Any HTTP response (200, 401, etc.) means the server is up and
       // handling requests. We don't check the status here — auth is
-      // verified by the per-test fetch below.
-      if (res.status >= 100 && res.status < 600) return;
+      // verified by the per-test fetch below. Drain the body so undici
+      // doesn't leak ~150 keep-alive sockets across the polling loop.
+      if (res.status >= 100 && res.status < 600) {
+        await res.body?.cancel();
+        return;
+      }
+      await res.body?.cancel();
     } catch (err) {
       lastError = err;
     }
