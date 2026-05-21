@@ -3454,6 +3454,36 @@ fn open_inverted_range_is_rejected_as_suffix() {
 }
 
 #[test]
+fn open_with_nonexistent_workspace_errors_clearly() {
+    // The server resolves `--workspace <id>` via `resolveWorkspace` and
+    // throws `NOT_FOUND: Workspace '<id>' not found` when no row exists.
+    // Without an integration test, a regression that silently created
+    // a placeholder workspace (or swallowed the error and emitted an
+    // open-file event pointing at a non-existent worktree) would slip
+    // through.
+    let env = TestEnv::new();
+    let file = env.tmp.path().join("any.txt");
+    fs::write(&file, "hi\n").unwrap();
+
+    let output = env.band(&[
+        "open",
+        file.to_str().unwrap(),
+        "--workspace",
+        "definitely-not-a-real-workspace",
+    ]);
+    assert!(
+        !output.status.success(),
+        "expected failure, got stdout: {}",
+        stdout(&output),
+    );
+    let err = stderr(&output);
+    assert!(
+        err.contains("not found") || err.contains("Workspace"),
+        "expected 'workspace not found' error, got: {err}",
+    );
+}
+
+#[test]
 fn open_zero_column_falls_through_to_filename() {
     // `file.rs:0:5` and `file.rs:5:0` would, naively, fail the
     // `:line:col` guard (line/col must be ≥ 1) and then trip the

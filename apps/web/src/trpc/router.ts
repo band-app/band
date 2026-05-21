@@ -3021,33 +3021,46 @@ const editorRouter = t.router({
 
   openFile: publicProcedure
     .input(
-      z.object({
-        /**
-         * Workspace to open the file in. When omitted, falls back to the
-         * dashboard's currently active workspace.
-         */
-        workspaceId: z.string().optional(),
-        /**
-         * Either an absolute filesystem path or a workspace-relative
-         * path. Paths inside the workspace root open as normal editor
-         * tabs (routed via `/workspace/$id/code/$splat`); paths outside
-         * any workspace root open as external tabs (same surface as
-         * desktop Cmd+O / "Open File…"). May include a trailing
-         * line / column suffix in the standard `path:line[:column]` /
-         * `path:line-lineEnd` notation.
-         */
-        filePath: z.string().min(1),
-        line: z.number().int().positive().optional(),
-        lineEnd: z.number().int().positive().optional(),
-        column: z.number().int().positive().optional(),
-        /**
-         * Whether the renderer should bring the dashboard window to the
-         * foreground in addition to navigating to the file. Defaults to
-         * true. Passed through verbatim on the SSE event; the plain web
-         * build ignores it.
-         */
-        focus: z.boolean().optional(),
-      }),
+      z
+        .object({
+          /**
+           * Workspace to open the file in. When omitted, falls back to the
+           * dashboard's currently active workspace.
+           */
+          workspaceId: z.string().optional(),
+          /**
+           * Either an absolute filesystem path or a workspace-relative
+           * path. Paths inside the workspace root open as normal editor
+           * tabs (routed via `/workspace/$id/code/$splat`); paths outside
+           * any workspace root open as external tabs (same surface as
+           * desktop Cmd+O / "Open File…"). May include a trailing
+           * line / column suffix in the standard `path:line[:column]` /
+           * `path:line-lineEnd` notation.
+           */
+          filePath: z.string().min(1),
+          line: z.number().int().positive().optional(),
+          lineEnd: z.number().int().positive().optional(),
+          column: z.number().int().positive().optional(),
+          /**
+           * Whether the renderer should bring the dashboard window to the
+           * foreground in addition to navigating to the file. Defaults to
+           * true. Passed through verbatim on the SSE event; the plain web
+           * build ignores it.
+           */
+          focus: z.boolean().optional(),
+        })
+        .refine((v) => !(v.lineEnd !== undefined && v.line === undefined), {
+          message: "lineEnd requires line to be set",
+          path: ["lineEnd"],
+        })
+        .refine((v) => !(v.column !== undefined && v.line === undefined), {
+          message: "column requires line to be set",
+          path: ["column"],
+        })
+        .refine((v) => !(v.line !== undefined && v.lineEnd !== undefined && v.line > v.lineEnd), {
+          message: "lineEnd must be >= line",
+          path: ["lineEnd"],
+        }),
     )
     .mutation(({ input }) => {
       const targetWorkspaceId = input.workspaceId ?? getActiveWorkspace();
