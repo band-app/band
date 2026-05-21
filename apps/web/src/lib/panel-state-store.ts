@@ -7,7 +7,7 @@
  * requiring a dedicated table per type.
  */
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import { getDb } from "./db/connection";
 import { panelStates } from "./db/schema";
 
@@ -70,4 +70,35 @@ export function listPanelStatesForWorkspace(
     .from(panelStates)
     .where(and(eq(panelStates.workspaceId, workspaceId), eq(panelStates.panelType, panelType)))
     .all();
+}
+
+/**
+ * Reset the `status` field inside the JSON `state` blob to `"idle"` for every
+ * row of the given panel type whose current `status` is something else.
+ *
+ * Uses SQLite's `json_set` / `json_extract` so the rewrite happens in a
+ * single SQL `UPDATE` regardless of row count — replacing what used to be
+ * N per-row UPDATEs (each a separate WAL fsync) issued by the
+ * `loadChatsFromDb` / `loadBrowsersFromDb` boot path. The `!= 'idle'` guard
+ * avoids touching rows that are already idle so a clean reboot doesn't
+ * bump `updated_at` for the bulk of the panel registry.
+ *
+ * The in-memory hydration loop in the callers is responsible for forcing
+ * the local object's `status` to `"idle"` before indexing — we don't reread
+ * the rows after the UPDATE.
+ */
+export function resetPanelStatesToIdle(panelType: string, updatedAt: number): void {
+  const db = getDb();
+  db.update(panelStates)
+    .set({
+      state: sql`json_set(${panelStates.state}, '$.status', 'idle')`,
+      updatedAt,
+    })
+    .where(
+      and(
+        eq(panelStates.panelType, panelType),
+        ne(sql`json_extract(${panelStates.state}, '$.status')`, "idle"),
+      ),
+    )
+    .run();
 }
