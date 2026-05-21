@@ -13,10 +13,29 @@ import { resolveFolderIconName, resolveIconName, resolveIconPath } from "./file-
 // glob matches zero files — caught by the non-empty assertion below rather
 // than silently shipping blank icons.
 //
-// SSR-gated: import.meta.env.SSR constant-folds to a {} branch on the server
-// so Vite dead-code-eliminates the ~1.2k inlined SVG strings out of the SSR
-// bundle (the sprite is never injected server-side anyway).
-const iconSources: Record<string, string> = import.meta.env.SSR
+// SSR-gated via `typeof window === "undefined"` rather than Vite's
+// `import.meta.env.SSR`, because this module is bundled by two different
+// toolchains:
+//
+//   1. Vite — builds the client and SSR bundles for apps/web. Vite's
+//      `--platform=browser`/`--platform=node` esbuild minifier folds
+//      `typeof window` to a literal, so the dead branch (sprite injection
+//      in SSR, `{}` placeholder in client) is dead-code-eliminated and the
+//      ~1.2k inlined SVG strings stay out of the SSR bundle.
+//   2. esbuild (apps/web/scripts/build-server.sh) — bundles
+//      `apps/web/start-server.ts` into `dist/start-server.mjs`. esbuild
+//      does NOT define `import.meta.env`, so `import.meta.env.SSR` throws
+//      `TypeError: Cannot read properties of undefined (reading 'SSR')` at
+//      runtime. Switching to `typeof window` keeps esbuild's
+//      `--platform=node` constant-fold path working and makes this module
+//      safe under any bundler that knows the target platform.
+//
+// `IS_SSR` is intentionally a `const` initialised from a `typeof` literal
+// so both Vite's and esbuild's tree-shakers can constant-fold it without
+// extra hints.
+const IS_SSR = typeof window === "undefined";
+
+const iconSources: Record<string, string> = IS_SSR
   ? {}
   : import.meta.glob<string>("../../node_modules/material-icon-theme/icons/*.svg", {
       query: "?raw",
@@ -24,7 +43,7 @@ const iconSources: Record<string, string> = import.meta.env.SSR
       eager: true,
     });
 
-if (!import.meta.env.SSR && Object.keys(iconSources).length === 0) {
+if (!IS_SSR && Object.keys(iconSources).length === 0) {
   throw new Error(
     "[dashboard-core/file-icon] material-icon-theme SVG glob matched zero files. " +
       "Check packages/dashboard-core/node_modules/material-icon-theme/icons.",
