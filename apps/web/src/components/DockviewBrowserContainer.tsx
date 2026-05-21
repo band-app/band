@@ -486,8 +486,28 @@ export function DockviewBrowserContainer({
 
     const panel = api.getPanel(browserId);
     if (panel) {
+      // Pre-select the neighbour to the left (or the right if we're closing
+      // the first tab) so focus doesn't snap to the first tab in the group.
+      // Matches the behaviour in DockviewTerminalContainer.closeTab.
+      const group = panel.group;
+      const groupPanels = group?.panels ?? [];
+      const idx = groupPanels.findIndex((p) => p.id === browserId);
+      if (idx >= 0 && groupPanels.length > 1) {
+        const neighbour = groupPanels[idx === 0 ? 1 : idx - 1];
+        neighbour?.api.setActive();
+      }
       api.removePanel(panel);
     }
+
+    // After closing, focus the address bar in the newly active panel so the
+    // section-scoped keydown handler still sees Cmd+W on the next press.
+    requestAnimationFrame(() => {
+      const activePanel = api.activePanel;
+      if (!activePanel) return;
+      activePanel.view.content.element
+        .querySelector<HTMLInputElement>("[data-band-address-input]")
+        ?.focus();
+    });
 
     // Delete the server-side browser record so closed tabs don't linger.
     trpc.browsers.remove.mutate({ browserId }).catch((err) => {
@@ -496,15 +516,53 @@ export function DockviewBrowserContainer({
     // Layout change listeners will auto-persist
   }, []);
 
-  // Keyboard shortcuts:
-  // - Cmd/Ctrl+T → open a new browser tab
-  // - Cmd/Ctrl+W → close the active browser tab
-  // - Cmd/Ctrl+D → split right (vertical split)
-  // - Cmd/Ctrl+Shift+D → split down (horizontal split)
-  // - Cmd/Ctrl+R → reload the active browser tab (desktop only)
-  // - Ctrl+(Shift)+Tab → cycle through tabs in the active group
+  // Keyboard shortcuts (capture phase, scoped to this section's focus):
+  // - Cmd/Ctrl+T              → open a new browser tab
+  // - Cmd/Ctrl+W              → close the active browser tab
+  // - Cmd/Ctrl+D              → split right (vertical split)
+  // - Cmd/Ctrl+Shift+D        → split down (horizontal split)
+  // - Cmd/Ctrl+R              → reload the active browser tab (desktop only)
+  // - Ctrl+(Shift)+Tab        → cycle tabs in the active group
+  // - Cmd/Ctrl+[ / Cmd/Ctrl+] → cycle between split browser groups (panels)
+  // - Cmd/Ctrl+Shift+[/]      → cycle tabs in the active group
   useEffect(() => {
     if (!visible) return;
+
+    const focusActiveAddressBar = (api: DockviewApi) => {
+      requestAnimationFrame(() => {
+        const panel = api.activePanel;
+        if (!panel) return;
+        // `data-band-address-input` is set on the address-bar input in
+        // BrowserPanel.tsx — using the data attribute (rather than
+        // `input[type='text']`) avoids accidentally matching the find-bar
+        // input if it's mounted in the same panel.
+        panel.view.content.element
+          .querySelector<HTMLInputElement>("[data-band-address-input]")
+          ?.focus();
+      });
+    };
+
+    const cycleTabs = (direction: 1 | -1) => {
+      const api = apiRef.current;
+      const group = api?.activeGroup;
+      if (!api || !group) return;
+      if (direction === 1) group.model.moveToNext();
+      else group.model.moveToPrevious();
+      focusActiveAddressBar(api);
+    };
+
+    const cycleGroups = (direction: 1 | -1) => {
+      const api = apiRef.current;
+      if (!api) return;
+      const groups = api.groups.filter((g) => g.api.location.type === "grid");
+      if (groups.length < 2) return;
+      const current = api.activeGroup;
+      const idx = current ? groups.findIndex((g) => g.id === current.id) : -1;
+      const next = groups[(idx + direction + groups.length) % groups.length];
+      next?.activePanel?.api.setActive();
+      focusActiveAddressBar(api);
+    };
+
     const handler = (e: KeyboardEvent) => {
       // Only handle shortcut if this container (or a descendant) has focus
       if (!containerRef.current?.contains(document.activeElement)) return;
@@ -515,31 +573,28 @@ export function DockviewBrowserContainer({
       if (e.ctrlKey && !e.metaKey && key === "tab") {
         e.preventDefault();
         e.stopPropagation();
-        const api = apiRef.current;
-        const group = api?.activeGroup;
-        if (!group) return;
-        if (e.shiftKey) {
-          group.model.moveToPrevious();
-        } else {
-          group.model.moveToNext();
-        }
-        // Focus the address bar in the newly active panel.
-        requestAnimationFrame(() => {
-          const panel = api.activePanel;
-          if (!panel) return;
-          // `data-band-address-input` is set on the address-bar input in
-          // BrowserPanel.tsx — using the data attribute (rather than
-          // `input[type='text']`) avoids accidentally matching the
-          // find-bar input if it's mounted in the same panel.
-          panel.view.content.element
-            .querySelector<HTMLInputElement>("[data-band-address-input]")
-            ?.focus();
-        });
+        cycleTabs(e.shiftKey ? -1 : 1);
         return;
       }
 
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
+
+      // Cmd/Ctrl+Shift+[ / Cmd/Ctrl+Shift+] → cycle tabs in active group
+      if (e.shiftKey && (key === "[" || key === "]")) {
+        e.preventDefault();
+        e.stopPropagation();
+        cycleTabs(key === "]" ? 1 : -1);
+        return;
+      }
+
+      // Cmd/Ctrl+[ / Cmd/Ctrl+] → cycle between split groups (panels)
+      if (!e.shiftKey && (key === "[" || key === "]")) {
+        e.preventDefault();
+        e.stopPropagation();
+        cycleGroups(key === "]" ? 1 : -1);
+        return;
+      }
 
       if (key === "t" && !e.shiftKey) {
         e.preventDefault();
@@ -588,6 +643,22 @@ export function DockviewBrowserContainer({
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
   }, [visible, closeTab, handleSplit, handleAddTab]);
+
+  // Auto-focus the active browser pane's address bar whenever the section
+  // becomes visible (e.g. user clicked the outer "Browser" panel tab) so
+  // the section-scoped keydown handler above starts seeing events without
+  // the user having to click into a tab first.
+  useEffect(() => {
+    if (!visible) return;
+    const id = requestAnimationFrame(() => {
+      const panel = apiRef.current?.activePanel;
+      if (!panel) return;
+      panel.view.content.element
+        .querySelector<HTMLInputElement>("[data-band-address-input]")
+        ?.focus();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [visible]);
 
   // Cmd+T / Ctrl+T when the WebContentsView itself has focus.
   // The keydown listener above only fires when DOM focus is inside this

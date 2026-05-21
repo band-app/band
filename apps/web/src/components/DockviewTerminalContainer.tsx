@@ -463,15 +463,14 @@ export function DockviewTerminalContainer({
     });
   }, []);
 
-  // Keyboard shortcuts (capture phase so we preempt the global hotkey handler
-  // in useGlobalShortcuts while the terminal panel has focus):
+  // Keyboard shortcuts (capture phase, scoped to this section's focus):
   // - Cmd/Ctrl+T              → open a new terminal tab
   // - Cmd/Ctrl+W              → close the active terminal tab
   // - Cmd/Ctrl+D              → split right (vertical split)
   // - Cmd/Ctrl+Shift+D        → split down (horizontal split)
   // - Ctrl+(Shift)+Tab        → cycle tabs in the active group
-  // - Cmd/Ctrl+[ / Cmd/Ctrl+] → cycle tabs in the active group
-  // - Cmd/Ctrl+Shift+[/]      → cycle between split terminal groups
+  // - Cmd/Ctrl+[ / Cmd/Ctrl+] → cycle between split terminal groups (panels)
+  // - Cmd/Ctrl+Shift+[/]      → cycle tabs in the active group
   useEffect(() => {
     if (!visible) return;
 
@@ -523,19 +522,19 @@ export function DockviewTerminalContainer({
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
 
-      // Cmd/Ctrl+Shift+[ / Cmd/Ctrl+Shift+] → cycle split groups
+      // Cmd/Ctrl+Shift+[ / Cmd/Ctrl+Shift+] → cycle tabs in active group
       if (e.shiftKey && (key === "[" || key === "]")) {
         e.preventDefault();
         e.stopPropagation();
-        cycleGroups(key === "]" ? 1 : -1);
+        cycleTabs(key === "]" ? 1 : -1);
         return;
       }
 
-      // Cmd/Ctrl+[ / Cmd/Ctrl+] → cycle tabs in active group
+      // Cmd/Ctrl+[ / Cmd/Ctrl+] → cycle between split groups (panels)
       if (!e.shiftKey && (key === "[" || key === "]")) {
         e.preventDefault();
         e.stopPropagation();
-        cycleTabs(key === "]" ? 1 : -1);
+        cycleGroups(key === "]" ? 1 : -1);
         return;
       }
 
@@ -566,6 +565,23 @@ export function DockviewTerminalContainer({
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
   }, [visible, closeTab, handleSplit, handleAddTab]);
+
+  // Auto-focus the active terminal's xterm textarea whenever the section
+  // becomes visible (e.g. user clicked the outer "Terminal" panel tab).
+  // Without this, the section-scoped keydown handler above bails out because
+  // document.activeElement is outside containerRef — meaning shortcuts only
+  // worked after the user manually clicked into a tab.
+  useEffect(() => {
+    if (!visible) return;
+    const id = requestAnimationFrame(() => {
+      const panel = apiRef.current?.activePanel;
+      if (!panel) return;
+      panel.view.content.element
+        .querySelector<HTMLTextAreaElement>(".xterm-helper-textarea")
+        ?.focus();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [visible]);
 
   // Sync dockview panels when terminals are created/killed externally (e.g. CLI).
   useEffect(() => {

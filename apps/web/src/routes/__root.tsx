@@ -28,12 +28,10 @@ import {
   Terminal as TerminalIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { HotkeysProvider } from "react-hotkeys-hook";
 import { BrowserHostBridge } from "../components/BrowserHostBridge";
 import { DesktopTitleBar, type PanelItem } from "../components/DesktopTitleBar";
 import { crossPanelHandlers, SharedDockviewLayout } from "../components/SharedDockviewLayout";
 import { ToolbarOverflowMenuItems, ToolbarOverflowProvider } from "../components/ToolbarButtons";
-import { useGlobalShortcuts } from "../hooks/useGlobalShortcuts";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useNavigationHistory } from "../hooks/useNavigationHistory";
 import { useZoom } from "../hooks/useZoom";
@@ -312,9 +310,6 @@ function AppShell() {
   const routerNavigate = useCallback((href: string) => router.navigate({ to: href }), [router]);
   const navigationHistory = useNavigationHistory(routerNavigate, capabilities);
 
-  // Global keyboard shortcuts (Cmd+[/], Cmd+Shift+[/], Ctrl+Tab).
-  useGlobalShortcuts({ routerNavigate, capabilities });
-
   // Cmd+= / Cmd+- / Cmd+0 — zoom in/out/reset (browser mode only;
   // in the desktop shell the View menu accelerators handle these keys)
   useZoom();
@@ -486,9 +481,7 @@ function RootLayout() {
           <ZoomSync />
           <ReloadSync />
           <TooltipProvider>
-            <HotkeysProvider initiallyActiveScopes={["global"]}>
-              <AppShell />
-            </HotkeysProvider>
+            <AppShell />
           </TooltipProvider>
         </DashboardProvider>
         <Scripts />

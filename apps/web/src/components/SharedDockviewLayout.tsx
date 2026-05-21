@@ -42,7 +42,6 @@ import {
   extractActiveState,
   walkGridNode,
 } from "../lib/dockview-active-state";
-import { setDockviewApi } from "../lib/dockview-instance";
 import { isDesktop } from "../lib/is-desktop";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
 import { trpc } from "../lib/trpc-client";
@@ -1309,7 +1308,6 @@ export function SharedDockviewLayout() {
   const onReady = useCallback(
     (event: DockviewReadyEvent) => {
       apiRef.current = event.api;
-      setDockviewApi(event.api);
 
       // Drop orphaned keys from the old custom-collapse system.
       try {
@@ -1462,10 +1460,6 @@ export function SharedDockviewLayout() {
     },
     [buildDefaultLayout, addMissingPanel],
   );
-
-  useEffect(() => {
-    return () => setDockviewApi(null);
-  }, []);
 
   // ---------------------------------------------------------------------
   // Reactive: badge update on diff count change

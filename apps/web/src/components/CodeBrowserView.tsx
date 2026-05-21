@@ -1269,45 +1269,57 @@ export function CodeBrowserView({
     return () => window.removeEventListener("band:lsp-navigate", handleLspNavigate);
   }, [pushDepartureAndArrival, fileTabs.openTabPinned, notifySelectFile]);
 
-  // Ctrl+Tab / Ctrl+Shift+Tab to switch between file tabs
+  // Keyboard shortcuts (capture phase, scoped to this section's focus):
+  // - Cmd/Ctrl+W              → close the active file tab
+  // - Ctrl+(Shift)+Tab        → cycle file tabs
+  // - Cmd/Ctrl+Shift+[/]      → cycle file tabs (matches the per-section
+  //                             convention used by Terminal/Chats/Browser).
+  //
+  // The Code section has no sub-dockview groups, so Cmd/Ctrl+[/] is a no-op
+  // here — we still swallow it so it doesn't bubble up to anything else.
   useEffect(() => {
-    const handleNextTab = () => {
+    const cycleFileTabs = (direction: 1 | -1) => {
       const tabs = fileTabs.openTabs;
       if (tabs.length <= 1) return;
       const currentIndex = tabs.findIndex((t) => t.filePath === fileTabs.activeTabPath);
-      const nextIndex = (currentIndex + 1) % tabs.length;
+      const nextIndex = (currentIndex + direction + tabs.length) % tabs.length;
       handleTabSelect(tabs[nextIndex].filePath);
     };
-    const handlePrevTab = () => {
-      const tabs = fileTabs.openTabs;
-      if (tabs.length <= 1) return;
-      const currentIndex = tabs.findIndex((t) => t.filePath === fileTabs.activeTabPath);
-      const prevIndex = (currentIndex - 1 + tabs.length) % tabs.length;
-      handleTabSelect(tabs[prevIndex].filePath);
-    };
 
-    window.addEventListener("band:next-file-tab", handleNextTab);
-    window.addEventListener("band:prev-file-tab", handlePrevTab);
-    return () => {
-      window.removeEventListener("band:next-file-tab", handleNextTab);
-      window.removeEventListener("band:prev-file-tab", handlePrevTab);
-    };
-  }, [fileTabs.openTabs, fileTabs.activeTabPath, handleTabSelect]);
-
-  // Cmd+W / Ctrl+W to close active tab
-  useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "w") {
-        if (fileTabs.activeTabPath) {
-          e.preventDefault();
-          e.stopPropagation();
-          handleTabClose(fileTabs.activeTabPath);
-        }
+      if (!containerRef.current?.contains(document.activeElement)) return;
+
+      const key = e.key.toLowerCase();
+
+      // Ctrl+(Shift)+Tab → cycle file tabs
+      if (e.ctrlKey && !e.metaKey && key === "tab") {
+        e.preventDefault();
+        e.stopPropagation();
+        cycleFileTabs(e.shiftKey ? -1 : 1);
+        return;
+      }
+
+      const mod = e.metaKey || e.ctrlKey;
+      if (!mod) return;
+
+      // Cmd/Ctrl+Shift+[ / Cmd/Ctrl+Shift+] → cycle file tabs
+      if (e.shiftKey && (key === "[" || key === "]")) {
+        e.preventDefault();
+        e.stopPropagation();
+        cycleFileTabs(key === "]" ? 1 : -1);
+        return;
+      }
+
+      // Cmd/Ctrl+W → close the active file tab
+      if (key === "w" && !e.shiftKey && fileTabs.activeTabPath) {
+        e.preventDefault();
+        e.stopPropagation();
+        handleTabClose(fileTabs.activeTabPath);
       }
     };
     window.addEventListener("keydown", handler, { capture: true });
     return () => window.removeEventListener("keydown", handler, { capture: true });
-  }, [fileTabs.activeTabPath, handleTabClose]);
+  }, [fileTabs.openTabs, fileTabs.activeTabPath, handleTabSelect, handleTabClose]);
 
   // -------------------------------------------------------------------------
   // File tree imperative handle (drives "new file" / "new folder" from toolbar)
