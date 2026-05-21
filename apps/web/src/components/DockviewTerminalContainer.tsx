@@ -454,14 +454,49 @@ export function DockviewTerminalContainer({
     });
   }, []);
 
-  // Keyboard shortcuts:
-  // - Cmd/Ctrl+T → open a new terminal tab
-  // - Cmd/Ctrl+W → close the active terminal tab
-  // - Cmd/Ctrl+D → split right (vertical split)
-  // - Cmd/Ctrl+Shift+D → split down (horizontal split)
-  // - Ctrl+(Shift)+Tab → cycle through tabs in the active group
+  // Keyboard shortcuts (capture phase so we preempt the global hotkey handler
+  // in useGlobalShortcuts while the terminal panel has focus):
+  // - Cmd/Ctrl+T              → open a new terminal tab
+  // - Cmd/Ctrl+W              → close the active terminal tab
+  // - Cmd/Ctrl+D              → split right (vertical split)
+  // - Cmd/Ctrl+Shift+D        → split down (horizontal split)
+  // - Ctrl+(Shift)+Tab        → cycle tabs in the active group
+  // - Cmd/Ctrl+[ / Cmd/Ctrl+] → cycle tabs in the active group
+  // - Cmd/Ctrl+Shift+[/]      → cycle between split terminal groups
   useEffect(() => {
     if (!visible) return;
+
+    const focusActivePanel = (api: DockviewApi) => {
+      requestAnimationFrame(() => {
+        const panel = api.activePanel;
+        if (!panel) return;
+        panel.view.content.element
+          .querySelector<HTMLTextAreaElement>(".xterm-helper-textarea")
+          ?.focus();
+      });
+    };
+
+    const cycleTabs = (direction: 1 | -1) => {
+      const api = apiRef.current;
+      const group = api?.activeGroup;
+      if (!api || !group) return;
+      if (direction === 1) group.model.moveToNext();
+      else group.model.moveToPrevious();
+      focusActivePanel(api);
+    };
+
+    const cycleGroups = (direction: 1 | -1) => {
+      const api = apiRef.current;
+      if (!api) return;
+      const groups = api.groups.filter((g) => g.api.location.type === "grid");
+      if (groups.length < 2) return;
+      const current = api.activeGroup;
+      const idx = current ? groups.findIndex((g) => g.id === current.id) : -1;
+      const next = groups[(idx + direction + groups.length) % groups.length];
+      next?.activePanel?.api.setActive();
+      focusActivePanel(api);
+    };
+
     const handler = (e: KeyboardEvent) => {
       // Only handle shortcut if this container (or a descendant) has focus
       if (!containerRef.current?.contains(document.activeElement)) return;
@@ -472,30 +507,28 @@ export function DockviewTerminalContainer({
       if (e.ctrlKey && !e.metaKey && key === "tab") {
         e.preventDefault();
         e.stopPropagation();
-        const api = apiRef.current;
-        const group = api?.activeGroup;
-        if (!group) return;
-        if (e.shiftKey) {
-          group.model.moveToPrevious();
-        } else {
-          group.model.moveToNext();
-        }
-        // Focus the xterm helper textarea inside the newly active panel
-        // so the terminal actually receives keyboard input.
-        // focusContent() only focuses the dockview wrapper which makes the
-        // cursor blink but doesn't route keypresses to xterm.
-        requestAnimationFrame(() => {
-          const panel = api.activePanel;
-          if (!panel) return;
-          panel.view.content.element
-            .querySelector<HTMLTextAreaElement>(".xterm-helper-textarea")
-            ?.focus();
-        });
+        cycleTabs(e.shiftKey ? -1 : 1);
         return;
       }
 
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
+
+      // Cmd/Ctrl+Shift+[ / Cmd/Ctrl+Shift+] → cycle split groups
+      if (e.shiftKey && (key === "[" || key === "]")) {
+        e.preventDefault();
+        e.stopPropagation();
+        cycleGroups(key === "]" ? 1 : -1);
+        return;
+      }
+
+      // Cmd/Ctrl+[ / Cmd/Ctrl+] → cycle tabs in active group
+      if (!e.shiftKey && (key === "[" || key === "]")) {
+        e.preventDefault();
+        e.stopPropagation();
+        cycleTabs(key === "]" ? 1 : -1);
+        return;
+      }
 
       if (key === "t" && !e.shiftKey) {
         e.preventDefault();
