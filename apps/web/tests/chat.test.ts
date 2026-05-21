@@ -890,10 +890,19 @@ describe("stale task cleanup on server start", () => {
   });
 
   it("marks stale running tasks as failed on boot", async () => {
-    // The server should have cleaned up stale tasks during startup
-    const staleTask = readTask(tmpHome, "tsk_stale_1");
-    expect(staleTask.status).toBe("failed");
-    expect(staleTask.completedAt).toBeDefined();
+    // `cleanupStaleTasks` runs in Phase B (after `listen()`) via
+    // `setImmediate`, so the listen-banner-based readiness probe in
+    // `startServer` can return before the row flip has been persisted.
+    // Poll until the assertion holds — bounded so a real regression
+    // still fails the test instead of hanging.
+    let staleTask: Record<string, unknown> | undefined;
+    for (let attempt = 0; attempt < 100; attempt++) {
+      staleTask = readTask(tmpHome, "tsk_stale_1");
+      if (staleTask.status === "failed") break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(staleTask?.status).toBe("failed");
+    expect(staleTask?.completedAt).toBeDefined();
   });
 
   it("does not modify non-running tasks", async () => {
@@ -1053,11 +1062,35 @@ describe("tasks.cancel — orphaned task", () => {
     seedState(tmpHome, createDefaultState(tmpHome));
     seedSettings(tmpHome, defaultSettings());
 
-    // Seed an orphaned "running" task (no in-memory agent for it).
-    // This task was created while the stale cleanup was being run (before listen),
-    // but we seed it AFTER the tasks dir has the stale cleaned up.
-    // Actually, we need the server to start first, then we seed the orphaned task.
+    // Seed a sentinel "running" task so we have a reliable way to
+    // detect when Phase B's `cleanupStaleTasks` has finished. Issue
+    // #477 moved cleanup out of the await-blocking boot path; the
+    // listen banner can now arrive before the cleanup write lands,
+    // and a SQL race between cleanup and the orphan-seed below would
+    // either re-flip our orphan to `failed` (causing the cancel
+    // mutation to 404) or trigger SQLITE_BUSY. The sentinel lets the
+    // test wait deterministically for cleanup to complete instead of
+    // sleeping for a fixed amount.
+    seedTask(tmpHome, {
+      id: "tsk_cleanup_sentinel",
+      workspaceId: "testproject-main",
+      project: "testproject",
+      branch: "main",
+      prompt: "sentinel — flipped to failed by Phase B cleanup",
+      status: "running",
+      startedAt: Date.now() - 60_000,
+    });
+
     server = await startServer({ tmpHome });
+
+    // Wait for Phase B's cleanupStaleTasks to flip the sentinel. With
+    // it confirmed flipped, we know cleanup has run on this DB and
+    // any future "running" row we seed below will survive untouched.
+    for (let attempt = 0; attempt < 200; attempt++) {
+      const sentinel = readTask(tmpHome, "tsk_cleanup_sentinel");
+      if (sentinel.status === "failed") break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
   });
 
   afterAll(async () => {
@@ -1066,8 +1099,10 @@ describe("tasks.cancel — orphaned task", () => {
   });
 
   it("cancels an orphaned running task by updating the persisted file", async () => {
-    // Seed an orphaned task AFTER the server is already running
-    // (so cleanup already ran and won't touch this one)
+    // Seed an orphaned task AFTER the boot-time cleanup has run
+    // (proven by the sentinel-flip wait in `beforeAll`), so this row
+    // survives untouched and reaches `tasks.cancel` in its original
+    // "running" state.
     seedTask(tmpHome, {
       id: "tsk_orphaned_1",
       workspaceId: "testproject-main",

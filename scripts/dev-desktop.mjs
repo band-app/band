@@ -3,9 +3,12 @@
 /**
  * Dev orchestrator for the Electron desktop shell. Runs all of:
  *
- *   1. **Vite** (`pnpm dev:web`) — serves the renderer with HMR. The
- *      renderer (apps/web, packages/dashboard-core) hot-reloads on save;
- *      no Electron restart needed for renderer-side changes.
+ *   1. **`pnpm dev:web`** — `tsx watch start-server.ts` with
+ *      `NODE_ENV=development`. The unified start-server.ts mounts Vite as
+ *      middleware inside its own http server (see #477), so the renderer
+ *      hot-reloads on save *and* the dev process exposes the same
+ *      cronjob / cleanup / tunnel surface as the packaged DMG. No
+ *      Electron restart needed for renderer-side changes.
  *
  *   2. **`tsc --watch`** for `apps/desktop/src/main` and `src/preload` —
  *      incrementally re-emits the compiled main / preload bundles to
@@ -15,9 +18,10 @@
  *      exists. Auto-**restarted** whenever any file under `apps/desktop/dist/`
  *      changes — i.e. after every successful tsc emit.
  *
- *   4. The vite port is auto-detected from its stdout (vite falls back to
- *      the next free port if 3456 is taken) and forwarded to Electron via
- *      the `BAND_DEV_WEB_URL` env var.
+ *   4. The web-server port is auto-detected from its stdout (PORT defaults
+ *      to 3456 but a busy port is rare in dev; if `start-server.ts` ever
+ *      adds fallback logic, this regex picks up whatever it picks) and
+ *      forwarded to Electron via the `BAND_DEV_WEB_URL` env var.
  *
  * Cleanup: SIGTERM all children on exit (via process-group kill on Unix).
  */
@@ -59,30 +63,36 @@ function killTree(child) {
 }
 
 // ---------------------------------------------------------------------------
-// 1. Spawn vite (color-free so port detection works regardless of pnpm's
-//    forced TTY colorization).
+// 1. Spawn the dev web server (color-free so port detection works
+//    regardless of pnpm's forced TTY colorization). Pre-#477 this was
+//    `vite dev`; now it's `tsx watch start-server.ts` (same npm script
+//    name, `pnpm dev:web`, so this orchestrator didn't need to change).
 // ---------------------------------------------------------------------------
 
-const vite = spawn("pnpm", ["dev:web"], {
+const webServer = spawn("pnpm", ["dev:web"], {
   cwd: repoRoot,
   stdio: ["ignore", "pipe", "pipe"],
   detached: true,
   env: { ...process.env, FORCE_COLOR: "0", NO_COLOR: "1" },
 });
-vite.detached = true;
-vite.stderr.on("data", (chunk) => process.stderr.write(chunk));
+webServer.detached = true;
+webServer.stderr.on("data", (chunk) => process.stderr.write(chunk));
 
 let detectedPort = null;
-const rl = createInterface({ input: vite.stdout });
+const rl = createInterface({ input: webServer.stdout });
 rl.on("line", (rawLine) => {
   const line = stripAnsi(rawLine);
   process.stdout.write(line + "\n");
   if (detectedPort) return;
-  const match = line.match(/Local:\s+https?:\/\/(?:localhost|127\.0\.0\.1):(\d+)/);
+  // Match the `Web server listening on http://0.0.0.0:<port>` line emitted
+  // by `start-server.ts` (both dev and prod modes use the same banner).
+  // Pre-#477 this regex matched Vite's `Local: http://localhost:<port>`
+  // banner instead.
+  const match = line.match(/Web server listening on https?:\/\/[^:]+:(\d+)/);
   if (match) {
     detectedPort = match[1];
     console.log(
-      `\n[dev-desktop] vite bound to port ${detectedPort} → BAND_DEV_WEB_URL=http://localhost:${detectedPort}\n`,
+      `\n[dev-desktop] web server bound to port ${detectedPort} → BAND_DEV_WEB_URL=http://localhost:${detectedPort}\n`,
     );
     maybeStartElectron();
   }
@@ -195,10 +205,10 @@ function cleanup() {
   killTree(electronProc);
   killTree(tscMain);
   killTree(tscPreload);
-  killTree(vite);
+  killTree(webServer);
 }
 
-vite.on("exit", () => {
+webServer.on("exit", () => {
   cleanup();
   process.exit(0);
 });

@@ -9,10 +9,9 @@ import { createAuthMiddleware, parseCookies, tokensEqual } from "./auth.ts";
 import { handleTaskStream } from "./src/api/task-stream.ts";
 import { stopBranchStatusPoller } from "./src/lib/branch-status-poller.ts";
 import { isDesktopHostConnected } from "./src/lib/browser-host.ts";
-import { listBrowsers, loadBrowsersFromDb } from "./src/lib/browser-manager.ts";
+import { listBrowsers } from "./src/lib/browser-manager.ts";
 import { handleCdpConnection } from "./src/lib/cdp-proxy.ts";
 import { captureSnapshot } from "./src/lib/cdp-targets.ts";
-import { loadChatsFromDb } from "./src/lib/chat-manager.ts";
 import { startCronjobScheduler, stopCronjobScheduler } from "./src/lib/cronjob-scheduler.ts";
 import { closeDb } from "./src/lib/db/connection.ts";
 import { runMigrations } from "./src/lib/db/migrate.ts";
@@ -71,9 +70,12 @@ process.on("uncaughtException", (error: Error) => {
   process.exit(1);
 });
 
-// After bundling, this file lives at dist/start-server.mjs,
-// so paths are relative to dist/.
-const clientDir = join(import.meta.dirname, "client");
+// After bundling, this file lives at dist/start-server.mjs in production —
+// so paths under `import.meta.dirname` resolve relative to dist/. In dev
+// (`tsx watch start-server.ts`) `import.meta.dirname` points at `apps/web/`,
+// which is the same path Vite uses as its `root` below.
+const SERVER_ROOT = import.meta.dirname;
+const clientDir = join(SERVER_ROOT, "client");
 const port = parseInt(process.env.PORT || "3456", 10);
 // Remove PORT so child processes don't inherit it (issue #269).
 // Store as BAND_PORT for internal re-reads (e.g. tunnel start).
@@ -96,27 +98,61 @@ process.env.BAND_PORT = String(port);
 // instead of relying on every future spawn site to remember.
 delete process.env.ELECTRON_RUN_AS_NODE;
 
-const { handleAuth, expectedToken } = createAuthMiddleware(getOrCreateToken());
+// In dev mode (`pnpm dev:web` → `tsx watch start-server.ts`) we still call
+// `getOrCreateToken()` so any tooling that watches `settings.json` for a
+// token sees one, but we pass `undefined` to `createAuthMiddleware` so the
+// local browser (or `pnpm dev:desktop`'s Electron shell) can hit the server
+// without a cookie. This matches the prior `vite dev` behaviour exactly —
+// the deleted `trpcDevPlugin` never added auth either. Production (`node
+// dist/start-server.mjs`) enforces the cookie as before.
+const isDev = process.env.NODE_ENV === "development";
+const persistedToken = getOrCreateToken();
+const { handleAuth, expectedToken } = createAuthMiddleware(isDev ? undefined : persistedToken);
 
-const assets = sirv(clientDir, {
-  maxAge: 31536000,
-  immutable: true,
-  gzip: true,
-  etag: true,
-});
+// `sirv` calls `totalist` (which calls `readdirSync`) eagerly at construction
+// time to build its asset map. The dev server runs from source where
+// `dist/client` doesn't exist, so we initialise the prod static handler
+// lazily inside `main()` and leave this `null` in dev. The Vite middleware
+// chain replaces sirv's role in that mode.
+type StaticHandler = (
+  req: IncomingMessage,
+  res: ServerResponse,
+  next: (err?: unknown) => void,
+) => void;
+let assets: StaticHandler | null = null;
 
-// OpenAPI spec is pre-generated at build time by @trpc/openapi CLI.
-// Add server base path so docs show correct /trpc/* URLs. Deferred until
-// the first hit to `/api/openapi.json` or `/api/docs`: the 336 KB JSON
-// parse + mutate + `JSON.stringify(..., null, 2)` round-trip used to run
-// at module top on every boot, even when nobody requested the docs.
-// Cached for the lifetime of the process after the first request.
-let _openApiSpec: string | null = null;
-function getOpenApiSpec(): string {
+// OpenAPI spec.
+//
+// In prod the spec is pre-generated at build time by @trpc/openapi's CLI
+// (see `scripts/build-server.sh`) and read from disk on first hit — fast,
+// synchronous. In dev there's no build output, so we run the static
+// analyser against the live router source. Both paths add `servers: [{
+// url: "/trpc" }]` so Scalar shows the correct URLs, and both cache the
+// result for the lifetime of the process.
+//
+// The cache is a `Promise<string>` rather than a `string` so concurrent
+// requests during the (slow) first generation share the same in-flight
+// work instead of running the analyser N times.
+let _openApiSpec: Promise<string> | null = null;
+function getOpenApiSpec(): Promise<string> {
   if (_openApiSpec !== null) return _openApiSpec;
-  const openApiDoc = JSON.parse(readFileSync(join(import.meta.dirname, "openapi.json"), "utf-8"));
-  openApiDoc.servers = [{ url: "/trpc" }];
-  _openApiSpec = JSON.stringify(openApiDoc, null, 2);
+  _openApiSpec = (async () => {
+    if (isDev) {
+      // Dynamic import so `@trpc/openapi` doesn't have to be reachable
+      // in the prod bundle, where it's external.
+      // biome-ignore lint/suspicious/noExplicitAny: untyped runtime import
+      const { generateOpenAPIDocument } = (await import("@trpc/openapi")) as any;
+      const doc = await generateOpenAPIDocument("./src/trpc/router.ts", {
+        title: "Band API",
+        version: "1.0.0",
+      });
+      doc.servers = [{ url: "/trpc" }];
+      return JSON.stringify(doc, null, 2);
+    }
+    const openApiDoc = JSON.parse(readFileSync(join(SERVER_ROOT, "openapi.json"), "utf-8"));
+    openApiDoc.servers = [{ url: "/trpc" }];
+    return JSON.stringify(openApiDoc, null, 2);
+  })();
   return _openApiSpec;
 }
 
@@ -196,59 +232,127 @@ function serveWorkspaceFile(res: ServerResponse, workspaceId: string, rawPath: s
   }
 }
 
+// ---------------------------------------------------------------------------
+// Node IncomingMessage ↔ Web Request adapters.
+//
+// Both the unified Vite-middleware fallback path and the prod sirv fallback
+// path need to hand a `Request` to the TanStack `server-entry` `fetch`
+// adapter, so factor the conversion out instead of duplicating it.
+// ---------------------------------------------------------------------------
+
+async function nodeRequestToWeb(req: IncomingMessage): Promise<Request> {
+  const url = new URL(req.url!, `http://${req.headers.host}`);
+  const headers = new Headers();
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (value) {
+      if (Array.isArray(value)) {
+        for (const v of value) headers.append(key, v);
+      } else {
+        headers.set(key, value);
+      }
+    }
+  }
+  let body: Buffer | undefined;
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    body = await new Promise<Buffer>((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      req.on("data", (chunk: Buffer) => chunks.push(chunk));
+      req.on("end", () => resolve(Buffer.concat(chunks)));
+      req.on("error", reject);
+    });
+  }
+  return new Request(url.toString(), {
+    method: req.method,
+    headers,
+    body,
+    duplex: "half",
+  } as RequestInit);
+}
+
+function pipeWebResponseToNodeRes(response: Response, res: ServerResponse): void {
+  res.writeHead(response.status, Object.fromEntries(response.headers.entries()));
+  if (response.body) {
+    const reader = response.body.getReader();
+    const pump = async () => {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          res.end();
+          break;
+        }
+        res.write(value);
+      }
+    };
+    pump().catch(() => res.end());
+  } else {
+    response.text().then((text) => res.end(text));
+  }
+}
+
 async function main() {
-  // Run database migrations before anything else
+  // -----------------------------------------------------------------------
+  // Phase A — work that MUST complete before we accept the first request.
+  //
+  // The cardinal rule: if absence of this step would corrupt state on the
+  // first request, it goes here. Everything else is deferred to Phase B
+  // (after `listen()`) via `setImmediate` so the user-visible "server is
+  // up" event isn't held back by background bookkeeping.
+  //
+  // Today the only blocker is the DB schema migration. Hydration
+  // (`loadChatsFromDb`, `loadBrowsersFromDb`) is intentionally lazy —
+  // both managers run the same code path the first time their public API
+  // is hit via `ensureInitialized()`, so deferring it costs nothing on a
+  // cold cache and saves the boot path one synchronous SQL pass.
+  // -----------------------------------------------------------------------
   runMigrations();
 
-  // Hydrate in-memory chat pane maps from DB, resetting statuses to "idle"
-  // since no agent can be running on a fresh server start.
-  loadChatsFromDb();
-
-  // Hydrate the browser-tab registry too. Without this the 33-tab restore
-  // would run lazily on the renderer's first `browsers.list` call —
-  // captured at t+47 s in the boot trace on issue #472 — pushing the
-  // user-visible work out of the splash and into first-paint. After the
-  // bulk-UPDATE rewrite in `loadBrowsersFromDb` the cost is one SELECT +
-  // one UPDATE regardless of tab count, so eagerly running it here costs
-  // roughly nothing while moving the wall-time win onto the existing
-  // 9.8 s startup window.
-  loadBrowsersFromDb();
-
-  // Mark any persisted "running" tasks as "failed" — no agent can be running
-  // if the server just started.
+  // -----------------------------------------------------------------------
+  // Dev vs prod renderer transport.
   //
-  // ORDER MATTERS: this must run BEFORE `startTaskPruneScheduler` below. The
-  // prune's `completedAt`-branch only matches non-null timestamps; stamping
-  // dangling `running` rows with `completedAt = now` here ensures they're
-  // evaluated against the cutoff via `completedAt` rather than relying on
-  // the fallback to `startedAt`. Swapping these two calls would leave very
-  // old in-flight rows wedged in `running` state for one extra boot cycle.
-  cleanupStaleTasks();
+  // In dev (`pnpm dev:web`) we mount Vite as middleware *inside* our own
+  // http server. Vite handles route HMR, asset transformation, and SSR
+  // module loading; we own everything else (auth, /trpc, /mcp, /api/*,
+  // WebSocket upgrades). The `ssrLoadModule("@tanstack/react-start/
+  // server-entry")` path returns the live re-evaluated module on every
+  // request, so edits to `__root.tsx` and friends show up on the next
+  // navigation without a process restart.
+  //
+  // In prod (`node dist/start-server.mjs`) Vite isn't installed in the
+  // dependency closure — the bundle uses `sirv` for hashed asset serving
+  // plus a single eager import of the prebuilt SSR bundle.
+  //
+  // Both branches end up calling the same `serverEntryHandler(request)`
+  // contract: `(Request) => Promise<Response>`. The SSR fallback below
+  // doesn't know which branch produced it.
+  // -----------------------------------------------------------------------
+  // biome-ignore lint/suspicious/noExplicitAny: vite is dev-only, no runtime types in prod
+  let viteServer: any = null;
+  let viteMiddlewares:
+    | ((req: IncomingMessage, res: ServerResponse, next: (err?: unknown) => void) => void)
+    | null = null;
+  let serverEntryHandler: (req: Request) => Promise<Response>;
 
-  // Kick off the periodic task-history sweep (issue #416). Runs one pass
-  // immediately, then every 24h, deleting rows older than 30 days. The
-  // timer is unref()'d so it doesn't block shutdown.
-  startTaskPruneScheduler();
-
-  // Reset any "working" agent statuses — no agent is active on a fresh
-  // server start.
-  const resetCount = resetAgentStatuses();
-  if (resetCount > 0) {
-    console.log(`Reset ${resetCount} stale agent status(es) on startup`);
-  }
-
-  // First-time setup: detect editor, write default config, install
-  // extension and CLI. Idempotent — skips if defaults already exist.
-  await runFirstTimeSetup();
-
-  // Start cronjob scheduler — reads definitions and watches for changes
-  startCronjobScheduler();
-
-  const mod = await import("./server/server.js");
-  const server = mod.default as { fetch: (req: Request) => Promise<Response> };
-
+  // Create the http server early in both modes so we can pass it to Vite
+  // as the HMR ws host below. The request handler is a closure that
+  // refers to `viteMiddlewares` / `serverEntryHandler` by name; both
+  // assignments complete before we call `listen()`, so the closure never
+  // sees a half-initialised state.
   const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
-    // Auth check runs first
+    // Dev-mode liveness check. In prod `/api/health` is auth-protected
+    // (and answered inside `handleAuth`); in dev there is no token so
+    // `handleAuth` returns early and the request would otherwise fall
+    // through to SSR. The desktop shell and the dev-mode integration
+    // tests both rely on `/api/health` as the "server is up" probe in
+    // either mode, so we answer it unconditionally before auth here.
+    // Hostname is omitted to match the shape callers parse — they only
+    // look at `status` and `app`.
+    if (isDev && req.url === "/api/health" && req.method === "GET") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ status: "ok", app: "band-web-server" }));
+      return;
+    }
+
+    // Auth check runs first (no-op in dev when no token is configured)
     if (handleAuth(req, res)) return;
 
     // Serve uploaded files (images, attachments)
@@ -355,12 +459,13 @@ async function main() {
 
     // Serve OpenAPI spec
     if (req.url === "/api/openapi.json") {
+      const spec = await getOpenApiSpec();
       res.writeHead(200, {
         "Content-Type": "application/json",
         "Cache-Control": "no-cache",
         "Access-Control-Allow-Origin": "*",
       });
-      res.end(getOpenApiSpec());
+      res.end(spec);
       return;
     }
 
@@ -387,92 +492,102 @@ async function main() {
       return;
     }
 
-    // Try serving static assets first (sirv calls next() if no match)
-    assets(req, res, async () => {
-      const protocol = "http";
-      const url = new URL(req.url!, `${protocol}://${req.headers.host}`);
+    // Handle tRPC requests before TanStack router. We construct the Web
+    // Request once here so it's shared between the tRPC and SSR branches
+    // — the body has already been buffered by `nodeRequestToWeb`, so the
+    // second handler doesn't have to re-read the stream.
+    if (req.url?.startsWith("/trpc")) {
+      const request = await nodeRequestToWeb(req);
+      const response = await fetchRequestHandler({
+        endpoint: "/trpc",
+        req: request,
+        router: appRouter,
+        createContext,
+      });
+      pipeWebResponseToNodeRes(response, res);
+      return;
+    }
 
-      const headers = new Headers();
-      for (const [key, value] of Object.entries(req.headers)) {
-        if (value) {
-          if (Array.isArray(value)) {
-            for (const v of value) headers.append(key, v);
-          } else {
-            headers.set(key, value);
-          }
+    // -----------------------------------------------------------------------
+    // Renderer transport.
+    //
+    // In dev, Vite's middleware chain handles static assets, source
+    // transforms, and HMR client injection — anything it doesn't claim
+    // falls through to our SSR fallback. In prod, `sirv` handles hashed
+    // immutable assets and falls through to SSR for SPA-style routes.
+    // Either way, the fallback calls the unified `serverEntryHandler`.
+    // -----------------------------------------------------------------------
+    const ssrFallback = async () => {
+      try {
+        const request = await nodeRequestToWeb(req);
+        const response = await serverEntryHandler(request);
+        pipeWebResponseToNodeRes(response, res);
+      } catch (err) {
+        if (isDev && viteServer) {
+          // Surface the source location of the SSR error via Vite's
+          // sourcemap-aware fixer — otherwise the stack points into the
+          // transformed module, which is unreadable.
+          viteServer.ssrFixStacktrace?.(err);
         }
-      }
-
-      let body: Buffer | undefined;
-      if (req.method !== "GET" && req.method !== "HEAD") {
-        body = await new Promise<Buffer>((resolve, reject) => {
-          const chunks: Buffer[] = [];
-          req.on("data", (chunk: Buffer) => chunks.push(chunk));
-          req.on("end", () => resolve(Buffer.concat(chunks)));
-          req.on("error", reject);
-        });
-      }
-
-      const request = new Request(url.toString(), {
-        method: req.method,
-        headers,
-        body,
-        duplex: "half",
-      } as RequestInit);
-
-      // Handle tRPC requests before TanStack router
-      if (url.pathname.startsWith("/trpc")) {
-        const response = await fetchRequestHandler({
-          endpoint: "/trpc",
-          req: request,
-          router: appRouter,
-          createContext,
-        });
-
-        res.writeHead(response.status, Object.fromEntries(response.headers.entries()));
-
-        if (response.body) {
-          const reader = response.body.getReader();
-          const pump = async () => {
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) {
-                res.end();
-                break;
-              }
-              res.write(value);
-            }
-          };
-          pump().catch(() => res.end());
-        } else {
-          res.end(await response.text());
+        console.error("SSR error:", err);
+        if (!res.headersSent) {
+          res.writeHead(500, { "Content-Type": "text/plain" });
         }
-        return;
+        res.end("Internal server error");
       }
+    };
 
-      const response = await server.fetch(request);
-
-      res.writeHead(response.status, Object.fromEntries(response.headers.entries()));
-
-      if (response.body) {
-        const reader = response.body.getReader();
-        const pump = async () => {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) {
-              res.end();
-              break;
-            }
-            res.write(value);
-          }
-        };
-        pump().catch(() => res.end());
-      } else {
-        const text = await response.text();
-        res.end(text);
-      }
-    });
+    if (viteMiddlewares) {
+      viteMiddlewares(req, res, ssrFallback);
+      return;
+    }
+    // In prod `assets` is set inside `main()` before we accept the first
+    // request, so the non-null assertion is structural; in dev we take
+    // the branch above.
+    assets!(req, res, ssrFallback);
   });
+
+  // -----------------------------------------------------------------------
+  // Wire up the renderer transport (Vite-as-middleware in dev, sirv +
+  // prebuilt SSR bundle in prod). Done AFTER `createServer()` so we can
+  // hand the http server to Vite's `hmr.server` option — that lets
+  // Vite's HMR WebSocket ride on our listener via the `vite-hmr`
+  // subprotocol, with our own `httpServer.on("upgrade", …)` handler
+  // short-circuiting on that protocol so the two listeners don't fight
+  // over the upgrade.
+  // -----------------------------------------------------------------------
+  if (isDev) {
+    // biome-ignore lint/suspicious/noExplicitAny: vite is a devDep, imported dynamically so prod bundle skips it
+    const { createServer: createViteServer } = (await import("vite")) as any;
+    viteServer = await createViteServer({
+      root: SERVER_ROOT,
+      appType: "custom",
+      // Plugins, define, resolve.alias, and ssr config all live in
+      // `vite.config.ts` and are picked up automatically — the file is
+      // resolved from `root` by Vite. We override `server` here so the
+      // config's defaults don't try to spin up Vite's own http listener.
+      server: {
+        middlewareMode: true,
+        hmr: { server: httpServer },
+      },
+    });
+    viteMiddlewares = viteServer.middlewares;
+    serverEntryHandler = async (request: Request) => {
+      // biome-ignore lint/suspicious/noExplicitAny: ssrLoadModule returns untyped modules
+      const mod: any = await viteServer.ssrLoadModule("@tanstack/react-start/server-entry");
+      return mod.default.fetch(request);
+    };
+  } else {
+    assets = sirv(clientDir, {
+      maxAge: 31536000,
+      immutable: true,
+      gzip: true,
+      etag: true,
+    });
+    const mod = await import("./server/server.js");
+    const server = mod.default as { fetch: (req: Request) => Promise<Response> };
+    serverEntryHandler = (request) => server.fetch(request);
+  }
 
   // ---------------------------------------------------------------------------
   // WebSocket server for tRPC subscriptions
@@ -496,6 +611,14 @@ async function main() {
   const cdpWss = new WebSocketServer({ noServer: true });
 
   httpServer.on("upgrade", (req, socket, head) => {
+    // Vite's HMR WebSocket lives on this same http server in dev mode. It
+    // identifies itself with the `vite-hmr` subprotocol — leave that
+    // upgrade alone so Vite's own listener (registered when we created
+    // the middleware-mode server above) can claim it.
+    if (isDev && req.headers["sec-websocket-protocol"]?.includes("vite-hmr")) {
+      return;
+    }
+
     // Auth check: validate band_token cookie (skip if no token configured)
     if (expectedToken) {
       const cookies = parseCookies(req);
@@ -533,6 +656,16 @@ async function main() {
     });
   });
 
+  // Tracks the still-in-flight Phase B promise (currently just
+  // `runFirstTimeSetup` — everything else in Phase B is synchronous).
+  // The shutdown handler awaits this with a small timeout so SIGTERM
+  // doesn't have to race the `execFile` calls inside
+  // `whichBinary`/`shellPath`. Without it, `process.exit(0)` fires
+  // quickly but the orphaned child subprocesses (the user's
+  // interactive shell loaded with `-li`) kept the test harness's
+  // `afterAll` waiting until vitest's 30 s `hookTimeout` killed it.
+  let phaseBSettlePromise: Promise<void> | null = null;
+
   httpServer.listen(port, "0.0.0.0", () => {
     console.log(`Web server listening on http://0.0.0.0:${port}`);
     // Wall-time from Node process spawn (i.e. the moment the desktop
@@ -544,22 +677,85 @@ async function main() {
     // too (the bundled `start-server.mjs` is ~5.5 MB).
     console.log(`Web server boot took ${(process.uptime() * 1000).toFixed(0)} ms`);
 
-    // Branch status poller is started lazily by the watcher
-    // when the first subscriber connects.
+    // -----------------------------------------------------------------------
+    // Phase B — fire-and-forget bookkeeping that runs AFTER `listen()`.
+    //
+    // None of these steps gate the first request:
+    //   - `cleanupStaleTasks` flips persisted `running` rows to `failed` /
+    //     `idle` and runs immediately on the event-loop turn after the
+    //     listen callback. Until it does, the worst case is that
+    //     `tasks.list` reports a stale row as `running` for a few ms.
+    //   - `resetAgentStatuses` is similar — at-most a brief window where
+    //     `workspaceStatuses.agentStatus` looks busy.
+    //   - `startTaskPruneScheduler` and `startCronjobScheduler` just bind
+    //     interval timers; the user can wait the few ms before their
+    //     cron fires.
+    //   - `runFirstTimeSetup` does file-system bookkeeping (editor
+    //     detection, CLI install, hooks). Awaited in the old code path
+    //     was costing ~200-500 ms of `listen()` latency for absolutely
+    //     no first-request benefit.
+    //
+    // `setImmediate` (vs. spawning Promises directly) keeps these out of
+    // the current macrotask so they don't compete with the http server's
+    // own `listening` event handlers.
+    // -----------------------------------------------------------------------
+    setImmediate(() => {
+      // Mark any persisted "running" tasks as "failed" — no agent can be
+      // running if the server just started.
+      //
+      // ORDER MATTERS within Phase B: this must run BEFORE
+      // `startTaskPruneScheduler` below. The prune's `completedAt`-branch
+      // only matches non-null timestamps; stamping dangling `running`
+      // rows with `completedAt = now` here ensures they're evaluated
+      // against the cutoff via `completedAt` rather than relying on the
+      // fallback to `startedAt`. Swapping these two calls would leave
+      // very old in-flight rows wedged in `running` state for one extra
+      // boot cycle.
+      cleanupStaleTasks();
 
-    // Auto-start tunnel if configured
-    const settings = loadSettings() as Record<string, unknown>;
-    if (settings.autoStartTunnel) {
-      checkPrereqs()
-        .then((prereqs) => {
-          if (prereqs.cloudflared) {
-            return startTunnel({ port });
-          }
-        })
-        .catch((err) => {
-          console.error("Failed to auto-start tunnel:", err);
-        });
-    }
+      // Kick off the periodic task-history sweep (issue #416). Runs one
+      // pass immediately, then every 24h, deleting rows older than 30
+      // days. The timer is unref()'d so it doesn't block shutdown.
+      startTaskPruneScheduler();
+
+      // Reset any "working" agent statuses — no agent is active on a
+      // fresh server start.
+      const resetCount = resetAgentStatuses();
+      if (resetCount > 0) {
+        console.log(`Reset ${resetCount} stale agent status(es) on startup`);
+      }
+
+      // First-time setup: detect editor, write default config, install
+      // extension and CLI. Idempotent — skips if defaults already exist.
+      // Fire-and-forget; errors are logged but don't take the server
+      // down. We track the promise so the shutdown handler can give it a
+      // bounded amount of time to finish — otherwise long-running
+      // `execFile` calls inside `whichBinary` keep the event loop alive
+      // and `process.exit(0)` never fires.
+      phaseBSettlePromise = runFirstTimeSetup().catch((err) => {
+        console.error("First-time setup failed:", err);
+      });
+
+      // Start cronjob scheduler — reads definitions and watches for
+      // changes. Bind the scheduler last so any setting tweaks
+      // `runFirstTimeSetup` applies (default-disable, etc.) are visible
+      // to the first scheduled load.
+      startCronjobScheduler();
+
+      // Auto-start tunnel if configured.
+      const settings = loadSettings() as Record<string, unknown>;
+      if (settings.autoStartTunnel) {
+        checkPrereqs()
+          .then((prereqs) => {
+            if (prereqs.cloudflared) {
+              return startTunnel({ port });
+            }
+          })
+          .catch((err) => {
+            console.error("Failed to auto-start tunnel:", err);
+          });
+      }
+    });
   });
 
   // Graceful shutdown
@@ -569,6 +765,19 @@ async function main() {
     stopTaskPruneScheduler();
     killAllTerminals();
     killAllServers();
+
+    // Wait briefly for any still-in-flight Phase B work to settle so
+    // we don't tear down the DB / sockets out from under it. Bounded
+    // so SIGTERM stays responsive — once the timeout fires we just
+    // exit and let Node's normal child-process cleanup handle the
+    // dangling `execFile` calls.
+    if (phaseBSettlePromise) {
+      await Promise.race([
+        phaseBSettlePromise,
+        new Promise<void>((resolve) => setTimeout(resolve, 2_000).unref()),
+      ]);
+    }
+
     await stopTunnel().catch(() => {});
     wssHandler.broadcastReconnectNotification();
     wss.close();
@@ -576,6 +785,9 @@ async function main() {
     lspWss.close();
     cdpWss.close();
     httpServer.close();
+    if (viteServer) {
+      await viteServer.close().catch(() => {});
+    }
     closeDb();
     process.exit(0);
   };
