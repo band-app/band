@@ -1426,6 +1426,14 @@ export function DiffView({
     expandedFilesRef.current = new Set();
     prevFingerprintRef.current = "";
 
+    // INVARIANT: `fetchSummary` MUST NOT call `setLoading(true)`. The
+    // re-activation effect (see "Re-activation refresh" below) and the
+    // branch-status SSE handler both invoke this closure on an already-
+    // mounted DiffView, where the cached summary is showing. Flipping
+    // loading to true would wipe the file list and surface "Loading
+    // changes…" — the exact regression #484 was about. The only loading
+    // mutation here is `setLoading(false)` in `.finally`, which is a
+    // no-op when loading was already false.
     const fetchSummary = (forceRefresh = false) => {
       getWorkspaceDiffSummary
         .call(adapter, workspaceId, diffMode, compareBranch ?? undefined)
