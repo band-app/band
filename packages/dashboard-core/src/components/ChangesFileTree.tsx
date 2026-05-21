@@ -11,18 +11,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@band-app/ui";
-import {
-  AlertTriangle,
-  ChevronDown,
-  ChevronRight,
-  Folder,
-  FolderOpen,
-  RotateCcw,
-} from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, RotateCcw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDeferredMenuAction } from "../hooks/use-deferred-menu-action";
 import { buildFileTree, type FileTreeNode } from "../lib/build-file-tree";
-import { getFileIcon } from "../lib/file-icon";
+import { getFileIcon, getFolderIcon } from "../lib/file-icon";
 import type { FileStatus } from "../types";
 import { FileStatusBadge } from "./FileStatusBadge";
 
@@ -127,20 +120,18 @@ function ChangesTreeNode({
       )}
 
       {/* Icon */}
-      {isDir ? (
-        isExpanded ? (
-          <FolderOpen className="size-4 shrink-0 text-blue-600 dark:text-blue-400" />
-        ) : (
-          <Folder className="size-4 shrink-0 text-blue-600 dark:text-blue-400" />
-        )
-      ) : (
-        (() => {
-          // Use the last segment of the node name for icon detection
-          const fileName = node.name.includes("/") ? node.name.split("/").pop()! : node.name;
-          const FileIcon = getFileIcon(fileName);
-          return <FileIcon className="size-4 shrink-0 text-muted-foreground" />;
-        })()
-      )}
+      {isDir
+        ? (() => {
+            const folderName = node.name.includes("/") ? node.name.split("/").pop()! : node.name;
+            const FolderIcon = getFolderIcon(folderName, isExpanded);
+            return <FolderIcon className="size-4 shrink-0" />;
+          })()
+        : (() => {
+            // Use the last segment of the node name for icon detection
+            const fileName = node.name.includes("/") ? node.name.split("/").pop()! : node.name;
+            const FileIcon = getFileIcon(fileName);
+            return <FileIcon className="size-4 shrink-0" />;
+          })()}
 
       {/* Name */}
       <span className="min-w-0 flex-1 truncate">{node.name}</span>
