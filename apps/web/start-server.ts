@@ -389,9 +389,22 @@ function pipeWebResponseToNodeRes(response: Response, res: ServerResponse): void
         // client that disconnects mid-stream leaves the drain Promise
         // unresolved and the pump task leaked.
         if (!res.write(value)) {
+          // Cross-remove the partner listener whichever fires first.
+          // `once()` clears itself but not its sibling, so a slow client
+          // with many write-backpressure cycles would otherwise leak
+          // unfired `error` (or `drain`) listeners — and trip Node's
+          // MaxListeners warning after ~10 cycles.
           await new Promise<void>((resolve, reject) => {
-            res.once("drain", resolve);
-            res.once("error", reject);
+            const onDrain = () => {
+              res.removeListener("error", onError);
+              resolve();
+            };
+            const onError = (err: Error) => {
+              res.removeListener("drain", onDrain);
+              reject(err);
+            };
+            res.once("drain", onDrain);
+            res.once("error", onError);
           });
         }
       }
@@ -480,15 +493,24 @@ async function main() {
       // missing static asset like `dist/openapi.json` or a tRPC-layer
       // throw) would otherwise bubble to the global
       // `unhandledRejection` handler and kill the whole server. Catch
-      // it here, log, and reply 500 so a single bad request can't
-      // recycle the process.
+      // it here, log, and reply with an appropriate status so a single
+      // bad request can't recycle the process.
       const message = err instanceof Error ? (err.stack ?? err.message) : String(err);
-      console.error("Request handler error:", message);
+      const code = (err as NodeJS.ErrnoException | undefined)?.code;
+      // Surface a proper 413 for oversized request bodies so callers
+      // get the standard "Content Too Large" signal instead of an
+      // opaque 500.
+      const isTooLarge = code === "BODY_TOO_LARGE";
+      if (!isTooLarge) console.error("Request handler error:", message);
       if (!res.headersSent) {
-        res.writeHead(500, { "Content-Type": "text/plain" });
+        if (isTooLarge) {
+          res.writeHead(413, { "Content-Type": "text/plain" });
+        } else {
+          res.writeHead(500, { "Content-Type": "text/plain" });
+        }
       }
       try {
-        res.end("Internal server error");
+        res.end(isTooLarge ? "Request body too large" : "Internal server error");
       } catch {
         // Socket already closed — nothing to do.
       }

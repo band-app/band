@@ -19,7 +19,7 @@
  *        - `/api/openapi.json` returns the same shape as prod
  *        - `GET /` returns SSR'd HTML with `<title>Band</title>`
  *        - a seeded `running` task gets flipped to `failed` (cleanupStaleTasks ran)
- *        - the cronjob scheduler is bound (cronjobs.list works through tRPC)
+ *        - cronjobs tRPC CRUD works end-to-end in dev mode
  *
  *   2. **HMR through the unified server** — edit a route's title literal,
  *      re-fetch `/`, assert new value within a few seconds, restore,
@@ -338,12 +338,18 @@ describe("dev server — parity with prod", () => {
     expect(status).toBe("failed");
   });
 
-  it("cronjob scheduler is bound — cronjobs CRUD works through tRPC", async () => {
-    // The scheduler is started in Phase B (setImmediate after listen).
-    // If it never bound, `cronjobs.list` would still work (it reads from
-    // disk), so use `cronjobs.create` instead — the mutation goes
-    // through the file-watcher invalidation path that requires the
-    // scheduler to be running.
+  it("cronjobs CRUD works through tRPC in dev mode", async () => {
+    // Verifies that the cronjobs tRPC surface is reachable and writes
+    // through correctly in dev — the disk-backed CRUD path is the same
+    // in dev and prod, so this catches "dev didn't wire up tRPC" /
+    // "dev didn't mount the cronjobs router" regressions.
+    //
+    // NB: this is NOT a proof that `startCronjobScheduler()` actually
+    // bound — `cronjobs.create` writes to disk regardless of whether
+    // the scheduler's file watcher is running. A stronger version
+    // would seed an immediately-firing cronjob and poll for evidence
+    // of execution; that's a deeper test of croner semantics than the
+    // dev-parity scope wants today.
     const createRes = await trpcMutate(server.url, "cronjobs.create", {
       key: "devtest",
       name: "Dev parity cron",
@@ -398,6 +404,26 @@ describe("dev server — HMR through unified server", () => {
           `refactor moved the title.`,
       );
     }
+
+    // Last-resort restore: if the test process is killed between the
+    // in-test mutation and the afterAll restore (SIGTERM from CI, a
+    // crash inside the test body, etc.), this sync `exit` listener
+    // still runs and undoes the file edit. `vitest.config.ts` already
+    // sets `fileParallelism: false` so concurrent workers can't
+    // overwrite each other, but the crash-recovery case isn't covered
+    // by that config — a dirty file blocks every subsequent run via
+    // the beforeAll guard above.
+    process.on("exit", () => {
+      try {
+        const current = readFileSync(ROOT_ROUTE_PATH, "utf-8");
+        if (current !== originalRootRoute) {
+          writeFileSync(ROOT_ROUTE_PATH, originalRootRoute, "utf-8");
+        }
+      } catch {
+        // Best-effort — the file may already be unreadable on a hard
+        // kill, and nothing useful we can do at this point.
+      }
+    });
 
     server = await startDevServer(tmpHome);
   }, 90_000);
