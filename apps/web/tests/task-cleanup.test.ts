@@ -415,11 +415,48 @@ describe("auto-prune tasks older than 30 days (issue #416)", () => {
       }
     }
 
-    // ── First boot: the scheduler runs one prune pass synchronously before
-    //     the server announces it's listening, so by the time `startServer`
-    //     resolves, the prune has already executed. ──
+    // Wait for the Phase-B prune pass to finish writing. Issue #477
+    // moved `startTaskPruneScheduler` (which runs one prune
+    // synchronously on bind) out of the await-blocking boot path and
+    // into a `setImmediate` after `httpServer.listen()`, so the
+    // listen-banner-based readiness probe used by `startServer` can
+    // return a few ms before the prune lands on disk. Poll with a
+    // bounded retry budget — a real regression still fails the
+    // assertion below.
+    const EXPECTED_AFTER_PRUNE = ["tsk_recent_completed", "tsk_recent_orphan"] as const;
+    async function waitForPrune(home: string): Promise<void> {
+      let lastIds: string[] = [];
+      for (let attempt = 0; attempt < 100; attempt++) {
+        const sqlite = openDb(home);
+        try {
+          lastIds = listTaskIds(sqlite).sort();
+          if (
+            lastIds.length === EXPECTED_AFTER_PRUNE.length &&
+            lastIds.every((id, i) => id === EXPECTED_AFTER_PRUNE[i])
+          ) {
+            return;
+          }
+        } finally {
+          sqlite.close();
+        }
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      // Throw with a descriptive message instead of letting the
+      // assertion below collapse to a generic "arrays don't match" —
+      // a silent timeout makes "prune scheduler never executed"
+      // indistinguishable from "prune executed but produced the wrong
+      // row set."
+      throw new Error(
+        `Phase-B startTaskPruneScheduler did not prune within 5 s ` +
+          `(last observed task ids: [${lastIds.join(", ")}]). Regression?`,
+      );
+    }
+
+    // ── First boot: the scheduler kicks off one prune pass on bind in
+    //     Phase B (post-listen, via setImmediate). ──
     const server1 = await startServer({ tmpHome });
     try {
+      await waitForPrune(tmpHome);
       const sqlite = openDb(tmpHome);
       try {
         expect(listTaskIds(sqlite).sort()).toEqual(["tsk_recent_completed", "tsk_recent_orphan"]);
@@ -433,6 +470,7 @@ describe("auto-prune tasks older than 30 days (issue #416)", () => {
     // ── Second boot against the same DB: no rows should be deleted (idempotent). ──
     const server2 = await startServer({ tmpHome });
     try {
+      await waitForPrune(tmpHome);
       const sqlite = openDb(tmpHome);
       try {
         expect(listTaskIds(sqlite).sort()).toEqual(["tsk_recent_completed", "tsk_recent_orphan"]);

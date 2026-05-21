@@ -111,7 +111,18 @@ export async function spawnTerminal(
     resolvedPath.slice(0, 200),
   );
 
-  const nodePty = (await import("node-pty")).default;
+  // Use the namespace directly rather than `.default`. node-pty's
+  // CJS index.js sets `exports.__esModule = true` and never sets
+  // `module.exports.default` — so:
+  //   - Node's CJS-to-ESM interop (used by the prod bundle) exposes
+  //     the whole module both as `.default` *and* as a namespace
+  //     containing `spawn`, `fork`, etc.
+  //   - tsx's esbuild-style loader (used by `pnpm dev:web` since
+  //     #477 collapsed dev onto `start-server.ts`) honours the
+  //     `__esModule` flag and exposes ONLY the namespace, leaving
+  //     `.default` undefined.
+  // Reaching for `.spawn` on the namespace works under both loaders.
+  const nodePty = await import("node-pty");
   let ptyProcess: IPty;
   try {
     ptyProcess = nodePty.spawn(shell, [], {

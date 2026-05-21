@@ -55,6 +55,27 @@ function seedTask(
   sqlite.close();
 }
 
+function readTaskStatus(tmpHome: string, taskId: string): string | undefined {
+  const sqlite = new DatabaseSync(join(tmpHome, ".band", "band.db"), { readOnly: true });
+  try {
+    const row = sqlite.prepare("SELECT status FROM tasks WHERE id = ?").get(taskId) as
+      | { status: string }
+      | undefined;
+    return row?.status;
+  } finally {
+    sqlite.close();
+  }
+}
+
+function deleteTask(tmpHome: string, taskId: string): void {
+  const sqlite = new DatabaseSync(join(tmpHome, ".band", "band.db"));
+  try {
+    sqlite.prepare("DELETE FROM tasks WHERE id = ?").run(taskId);
+  } finally {
+    sqlite.close();
+  }
+}
+
 /**
  * Open the Tasks dialog from the dashboard's hamburger ("Menu") toolbar
  * dropdown. Returns the dialog locator for further interaction. Use after
@@ -127,10 +148,38 @@ test.beforeAll(async () => {
     completedAt: Date.now() - 7100_000,
   });
 
+  // Sentinel "running" row that boot-time `cleanupStaleTasks()` is
+  // guaranteed to flip to `failed`. Issue #477 moved that cleanup out
+  // of the await-blocking boot path and into a `setImmediate` after
+  // `httpServer.listen()`, so the listen banner can arrive before
+  // cleanup writes land. Without this sentinel, the orphan-running
+  // row we seed below would race cleanup and get re-flipped to
+  // `failed`, breaking the "Running" badge assertion.
+  seedTask(tmpHome, {
+    id: "tsk_cleanup_sentinel",
+    workspaceId: "myapp-main",
+    project: "myapp",
+    branch: "main",
+    prompt: "sentinel — flipped to failed by Phase B cleanup",
+    status: "running",
+    startedAt: Date.now() - 86400_000,
+  });
+
   server = await startServer({ tmpHome });
 
-  // Seed the running task AFTER the server starts so that cleanupStaleTasks()
-  // (which marks all running tasks as failed on startup) doesn't clobber it.
+  // Wait for Phase-B cleanup to flip the sentinel. Once it has, any
+  // future "running" row we seed will survive untouched on this boot.
+  for (let attempt = 0; attempt < 200; attempt++) {
+    if (readTaskStatus(tmpHome, "tsk_cleanup_sentinel") === "failed") break;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  // Remove the sentinel so it doesn't show up in the dashboard's
+  // tasks dialog and skew the per-status badge / count assertions.
+  deleteTask(tmpHome, "tsk_cleanup_sentinel");
+
+  // Now seed the running task we want the dashboard to render with
+  // the "Running" badge. Cleanup has already executed for this boot,
+  // so this row stays as-is.
   seedTask(tmpHome, {
     id: "tsk_3000",
     workspaceId: "backend-main",

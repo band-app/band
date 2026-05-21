@@ -6,6 +6,14 @@ mkdir -p dist
 pnpm exec trpc-openapi ./src/trpc/router.ts -o dist/openapi.json --title "Band API" --version "1.0.0"
 
 # Bundle the server entry point
+# `vite` and `@trpc/openapi` are imported dynamically inside the
+# `NODE_ENV=development` branch of start-server.ts (see #477 — unified
+# dev/prod server). esbuild's static-analysis bundler still tries to
+# follow those dynamic imports unless we mark them external. They are
+# never reached at runtime in the prod bundle (the branch is gated on
+# `process.env.NODE_ENV === "development"`), so leaving them as
+# unresolved imports is safe — and required, since vite drags in
+# `lightningcss` / `fsevents` native modules that esbuild can't bundle.
 esbuild start-server.ts \
   --bundle \
   --platform=node \
@@ -15,6 +23,8 @@ esbuild start-server.ts \
   --external:node-pty \
   --external:@vscode/ripgrep \
   --external:prettier \
+  --external:vite \
+  --external:@trpc/openapi \
   --banner:js="import{createRequire as __cr}from'module';import{fileURLToPath as __fu}from'url';import{dirname as __dn}from'path';const require=__cr(import.meta.url);const __filename=__fu(import.meta.url);const __dirname=__dn(__filename);"
 
 # Copy native modules into dist/ for self-contained builds (Electron app).

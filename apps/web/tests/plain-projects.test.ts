@@ -795,10 +795,11 @@ describe("tRPC — plain projects (syncWorktrees self-heal persistence)", () => 
     seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
     server = await startServer({ tmpHome });
     // `runFirstTimeSetup` (which awaits `syncWorktrees` →
-    // `saveState`) is awaited inside `start-server.ts` BEFORE the
-    // "listening" log line that `startServer` blocks on, so by the
-    // time this promise resolves the kind heal has already flushed
-    // to SQLite — no setTimeout race needed.
+    // `saveState`) runs in Phase B (after `listen()`) via
+    // `setImmediate` — that's intentional, see issue #477 — so the
+    // "listening" log line `startServer` blocks on can be observed
+    // before the kind heal has flushed to SQLite. The per-test
+    // assertion polls until the heal lands.
   });
 
   afterAll(async () => {
@@ -806,11 +807,27 @@ describe("tRPC — plain projects (syncWorktrees self-heal persistence)", () => 
     rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  it("syncWorktrees persists kind=plain to disk at boot", () => {
+  it("syncWorktrees persists kind=plain to disk at boot", async () => {
     // Read directly from the SQLite DB rather than via projects.list
     // (which has its own inline re-detection that would mask a
-    // persistence failure).
-    const kind = readProjectKind(server.home, "needs-heal");
+    // persistence failure). Poll until the Phase-B heal has run, with
+    // a bounded retry budget so a real regression still fails the
+    // test instead of hanging.
+    let kind: string | undefined;
+    for (let attempt = 0; attempt < 200; attempt++) {
+      kind = readProjectKind(server.home, "needs-heal");
+      if (kind === "plain") break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    // Throw with a descriptive message on timeout so a Phase-B
+    // regression surfaces as "syncWorktrees never ran" instead of a
+    // generic `expected "git" to be "plain"` assertion diff.
+    if (kind !== "plain") {
+      throw new Error(
+        `Phase-B syncWorktrees (via runFirstTimeSetup) did not heal 'needs-heal' ` +
+          `to kind=plain within 10 s (observed kind: ${String(kind)}). Regression?`,
+      );
+    }
     expect(kind).toBe("plain");
   });
 });
