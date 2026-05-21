@@ -2949,7 +2949,13 @@ function canonicalizeMaybeMissing(p: string): string {
     if (existsSync(prefix)) {
       try {
         const canonicalPrefix = realpathSync(prefix);
-        return [canonicalPrefix, ...parts.slice(i)].join(sep);
+        // `path.join` collapses the duplicate separator that arises when
+        // `canonicalPrefix === "/"` (which happens when the walk reaches
+        // `i = 1` — `parts.slice(0, 1).join(sep)` is `""`, falling
+        // through to `sep`). A naive `[..., ...].join(sep)` would
+        // produce `//nonexistent/foo`; functionally equivalent on POSIX
+        // but ugly in error messages.
+        return join(canonicalPrefix, ...parts.slice(i));
       } catch {
         return p;
       }

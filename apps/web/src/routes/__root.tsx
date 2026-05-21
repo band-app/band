@@ -327,6 +327,11 @@ function AppShell() {
   // without an explicit `--workspace` flag. The adapter de-duplicates so
   // it's safe to call on every render — the mutation only fires when the
   // value actually changes.
+  // `adapter` is a module-level singleton (created once per page load)
+  // and is intentionally omitted from the dep array — biome's
+  // `useExhaustiveDependencies` rejects outer-scope values as deps
+  // because mutating them doesn't trigger a re-render. If we ever
+  // promote it to a context or prop, list it then.
   useEffect(() => {
     void adapter.setActiveWorkspace(activeWorkspaceId);
   }, [activeWorkspaceId]);
@@ -366,6 +371,9 @@ function AppShell() {
       });
     });
     return unsubscribe;
+    // `adapter` (module-level singleton) and `crossPanelHandlers`
+    // (module-level mutable registry) are intentionally omitted from
+    // deps — see the comment on the setActiveWorkspace effect above.
   }, [router]);
 
   // Panel items for the title bar panel switcher dropdown

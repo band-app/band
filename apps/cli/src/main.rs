@@ -2044,7 +2044,17 @@ fn split_file_location(raw: &str) -> (String, Option<u32>, Option<u32>, Option<u
         }
     }
 
-    // Try :line:column (two trailing numeric components)
+    // Try :line:column (two trailing numeric components).
+    //
+    // The `> 0` guards match the server's `z.number().int().positive()`
+    // validators — 1-based, no zero. This means `file.rs:42:0` /
+    // `file.rs:0` / `file.rs:0:5` deliberately fall through every
+    // suffix branch and the raw colon-string ends up as the filename.
+    // The server then surfaces a clean "File not found" rather than
+    // silently treating `:0` as "no column" or "no line." It's a
+    // surprising edge case for the user but the alternative —
+    // accepting zero as a sentinel — would let a typo silently
+    // suppress positioning. Errs on the side of visibility.
     let mut parts = raw.rsplitn(3, ':');
     let last = parts.next();
     let middle = parts.next();
@@ -2057,7 +2067,8 @@ fn split_file_location(raw: &str) -> (String, Option<u32>, Option<u32>, Option<u
         }
     }
 
-    // Try :line
+    // Try :line (single trailing numeric component). Same `> 0`
+    // policy as above.
     if let Some(idx) = raw.rfind(':') {
         let tail = &raw[idx + 1..];
         if let Ok(line) = tail.parse::<u32>() {

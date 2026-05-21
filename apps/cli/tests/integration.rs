@@ -3452,3 +3452,50 @@ fn open_inverted_range_is_rejected_as_suffix() {
         "expected 'not found' error for unparseable suffix, got: {err}",
     );
 }
+
+#[test]
+fn open_valid_line_range_is_parsed_and_round_tripped() {
+    // Companion to `open_inverted_range_is_rejected_as_suffix`:
+    // exercises the happy path of the `:line-lineEnd` branch. Without
+    // this, a regression that swaps `line` / `lineEnd` in the JSON
+    // payload (or in the server's `formatFileLocation` call) would go
+    // undetected — the rejection test only covers the guard.
+    let env = TestEnv::new();
+    let create_out = env.band(&["workspaces", "create", "my-project", "feat/range"]);
+    assert!(
+        create_out.status.success(),
+        "stderr: {}",
+        stderr(&create_out)
+    );
+    let workspace_path = stdout(&create_out);
+
+    fs::write(
+        Path::new(&workspace_path).join("ranged.txt"),
+        "one\ntwo\nthree\nfour\nfive\n",
+    )
+    .unwrap();
+
+    let arg = format!("{}/ranged.txt:2-4", &workspace_path);
+    let output = env.band(&[
+        "--output",
+        "json",
+        "open",
+        &arg,
+        "--workspace",
+        "my-project-feat-range",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output))
+        .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)));
+    assert_eq!(json["external"].as_bool(), Some(false));
+    // Server normalises to a workspace-relative path with the range
+    // suffix preserved verbatim. If `line` and `lineEnd` got swapped
+    // anywhere in the pipeline, the round-tripped suffix would be
+    // `:4-2` (which the inverted-range test verifies is rejected).
+    assert_eq!(
+        json["filePath"].as_str(),
+        Some("ranged.txt:2-4"),
+        "json: {json}",
+    );
+}

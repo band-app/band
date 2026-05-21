@@ -1337,6 +1337,13 @@ export function CodeBrowserView({
       setViewLineEnd(opts?.lineEnd);
       setViewColumn(opts?.column);
     },
+    // `fileTabs` itself is a new object reference every render
+    // (`useFileTabs` returns an object literal), but
+    // `fileTabs.openTabExternal` is wrapped in `useCallback` inside the
+    // hook and therefore stable across renders. Listing the property
+    // here rather than `fileTabs` itself avoids spurious re-creation of
+    // `openExternalPath` (and the downstream pending-external-open
+    // drain effect) on every parent render.
     [fileTabs.openTabExternal],
   );
 
