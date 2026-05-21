@@ -28,6 +28,15 @@ export interface PendingExternalOpen {
   filePath: string;
 }
 
+// Lifecycle note: the map is only purged on consume, never on a timer.
+// If a CLI client targets a workspace that was closed between the
+// `band open` mutation and the navigate (or one that the dashboard has
+// no view mounted for), the entry sits indefinitely. For a single-user
+// dev tool this leak is negligible — at most one stale entry per
+// workspace ID. The per-workspace keying also makes it safe across
+// `CodeBrowserView` instances: a view for workspace B will not consume
+// a stale entry for workspace A, because `consumeExternalOpen` is
+// scoped by ID.
 const pending = new Map<string, PendingExternalOpen>();
 const listeners = new Set<() => void>();
 

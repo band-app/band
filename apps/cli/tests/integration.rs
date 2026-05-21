@@ -3414,3 +3414,41 @@ fn open_external_path_with_line_suffix_preserved() {
         "expected absolute path with :line:col suffix: {json}",
     );
 }
+
+#[test]
+fn open_inverted_range_is_rejected_as_suffix() {
+    // `:10-5` is a backwards line range. The CLI's `split_file_location`
+    // should refuse to parse it as a `line-lineEnd` suffix; the suffix
+    // sticks to the filename and the server fails the existence check,
+    // which is the right "I have no idea what this path is" answer.
+    //
+    // Without the `line <= end` guard, the suffix would be parsed as
+    // `(line=10, lineEnd=5)` and forwarded to the editor as a malformed
+    // selection — silent corruption rather than a visible error.
+    let env = TestEnv::new();
+    let create_out = env.band(&["workspaces", "create", "my-project", "feat/inverted"]);
+    assert!(
+        create_out.status.success(),
+        "stderr: {}",
+        stderr(&create_out)
+    );
+    let workspace_path = stdout(&create_out);
+
+    // Seed a real file so the only failure mode is the parser-driven one
+    // — if the test ever started passing because the suffix-bearing path
+    // happened to not exist, we wouldn't notice the guard regressing.
+    fs::write(Path::new(&workspace_path).join("real.txt"), "hi\n").unwrap();
+
+    let bogus = format!("{}/real.txt:10-5", &workspace_path);
+    let output = env.band(&["open", &bogus, "--workspace", "my-project-feat-inverted"]);
+    assert!(
+        !output.status.success(),
+        "expected failure for inverted range, got stdout: {}",
+        stdout(&output),
+    );
+    let err = stderr(&output);
+    assert!(
+        err.contains("not found") || err.contains("File not found"),
+        "expected 'not found' error for unparseable suffix, got: {err}",
+    );
+}

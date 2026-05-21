@@ -2029,7 +2029,15 @@ fn split_file_location(raw: &str) -> (String, Option<u32>, Option<u32>, Option<u
         if let Some(dash) = tail.find('-') {
             let (a, b) = (&tail[..dash], &tail[dash + 1..]);
             if let (Ok(line), Ok(end)) = (a.parse::<u32>(), b.parse::<u32>()) {
-                if line > 0 && end > 0 {
+                // Reject inverted ranges like `:10-5` — letting them through
+                // would forward a backwards `(line=10, lineEnd=5)` pair to
+                // the server, which round-trips through `formatFileLocation`
+                // and reaches the editor as a malformed selection. Falls
+                // through to the other suffix branches; none of them match
+                // a `digit-digit` tail, so the suffix is treated as part of
+                // the filename and the server returns a clean "File not
+                // found" error.
+                if line > 0 && end > 0 && line <= end {
                     return (raw[..idx].to_string(), Some(line), Some(end), None);
                 }
             }
