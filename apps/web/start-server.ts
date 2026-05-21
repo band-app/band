@@ -9,7 +9,7 @@ import { createAuthMiddleware, parseCookies, tokensEqual } from "./auth.ts";
 import { handleTaskStream } from "./src/api/task-stream.ts";
 import { stopBranchStatusPoller } from "./src/lib/branch-status-poller.ts";
 import { isDesktopHostConnected } from "./src/lib/browser-host.ts";
-import { listBrowsers } from "./src/lib/browser-manager.ts";
+import { listBrowsers, loadBrowsersFromDb } from "./src/lib/browser-manager.ts";
 import { handleCdpConnection } from "./src/lib/cdp-proxy.ts";
 import { captureSnapshot } from "./src/lib/cdp-targets.ts";
 import { loadChatsFromDb } from "./src/lib/chat-manager.ts";
@@ -203,6 +203,16 @@ async function main() {
   // Hydrate in-memory chat pane maps from DB, resetting statuses to "idle"
   // since no agent can be running on a fresh server start.
   loadChatsFromDb();
+
+  // Hydrate the browser-tab registry too. Without this the 33-tab restore
+  // would run lazily on the renderer's first `browsers.list` call —
+  // captured at t+47 s in the boot trace on issue #472 — pushing the
+  // user-visible work out of the splash and into first-paint. After the
+  // bulk-UPDATE rewrite in `loadBrowsersFromDb` the cost is one SELECT +
+  // one UPDATE regardless of tab count, so eagerly running it here costs
+  // roughly nothing while moving the wall-time win onto the existing
+  // 9.8 s startup window.
+  loadBrowsersFromDb();
 
   // Mark any persisted "running" tasks as "failed" — no agent can be running
   // if the server just started.
