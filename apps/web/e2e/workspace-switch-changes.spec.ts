@@ -145,9 +145,7 @@ async function expectChangesFileVisible(page: Page, filename: string): Promise<v
   await expect(page.getByText(filename, { exact: false })).toBeVisible({ timeout: 10_000 });
 }
 
-test("switch A → B → A keeps the Changes panel populated (no Loading flash, no refetch)", async ({
-  page,
-}) => {
+test("switch A → B → A keeps the Changes panel populated (no Loading flash)", async ({ page }) => {
   const { counters } = await setupMocks(page);
 
   // Land on workspace A. The default dockview layout puts the Changes
@@ -155,12 +153,6 @@ test("switch A → B → A keeps the Changes panel populated (no Loading flash, 
   // an explicit tab click.
   await page.goto(`${server.url}/workspace/${encodeURIComponent(WORKSPACE_A)}?token=${TOKEN}`);
   await expectChangesFileVisible(page, FILE_IN_A);
-
-  // Capture A's diff-summary call count immediately after the file row
-  // appears. With the bug, this is 2 (tab badge + DiffView). With the
-  // fix, it's also 2 — the difference shows up on the switch BACK.
-  const aCallsAfterFirstLoad = counters.byWorkspace.get(WORKSPACE_A) ?? 0;
-  expect(aCallsAfterFirstLoad).toBeGreaterThan(0);
 
   // Switch to workspace B via the project list (in-list click, same path
   // the user takes). The card markup follows the WorkspaceCard structure
@@ -173,11 +165,42 @@ test("switch A → B → A keeps the Changes panel populated (no Loading flash, 
   await expect(page).toHaveURL(new RegExp(encodeURIComponent(WORKSPACE_B)));
   await expectChangesFileVisible(page, FILE_IN_B);
 
-  // Now switch back to A. With the bug this would have flashed
-  // "Loading changes…" and re-fetched the summary. With the fix the
-  // cached DiffView for A stays put — its file row is still in the DOM
-  // (just opacity-faded under B's panel) and we should see it
-  // immediately after the activeWorkspaceId flips.
+  // Confirm A's diff-summary fetched at least once on the initial load —
+  // anchors the rest of the test against an actual data-bearing fetch
+  // rather than a fluke-zero counter from a never-rendered panel.
+  expect(counters.byWorkspace.get(WORKSPACE_A) ?? 0).toBeGreaterThan(0);
+
+  // Plant a MutationObserver on `document.body` so we can catch a
+  // transient "Loading changes…" appearance across the switch-back. An
+  // auto-retrying `toHaveCount(0)` would happily pass over a one-frame
+  // flash; the observer records every textContent change for the window
+  // we care about, so a single moment of loading is enough to fail.
+  await page.evaluate(() => {
+    interface LoadingFlashRecorder {
+      observed: boolean;
+      observer: MutationObserver;
+    }
+    const recorder: LoadingFlashRecorder = {
+      observed: document.body.textContent?.includes("Loading changes...") ?? false,
+      observer: new MutationObserver(() => {
+        if (document.body.textContent?.includes("Loading changes...")) {
+          recorder.observed = true;
+        }
+      }),
+    };
+    recorder.observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
+    (window as unknown as { __loadingFlashRecorder: LoadingFlashRecorder }).__loadingFlashRecorder =
+      recorder;
+  });
+
+  // Switch back to A. With the bug this would flash "Loading changes…"
+  // and re-fetch the summary. With the fix the cached DiffView for A
+  // stays put — its file row is still in the DOM (opacity-faded under
+  // B's panel) and we should see it without any Loading transition.
   const workspaceACard = page
     .locator('div.cursor-pointer.select-none[tabindex="0"]')
     .filter({ hasText: /^main$/ })
@@ -185,20 +208,20 @@ test("switch A → B → A keeps the Changes panel populated (no Loading flash, 
   await workspaceACard.click();
   await expect(page).toHaveURL(new RegExp(encodeURIComponent(WORKSPACE_A)));
 
-  // The Loading text must NEVER appear during the switch back. We poll
-  // a few frames worth of time to give the bug-path a chance to surface,
-  // then assert the file row is visible.
-  await expect(page.getByText("Loading changes...")).toHaveCount(0);
-  await expectChangesFileVisible(page, FILE_IN_A);
+  // Give the bug-path a few frames to surface — fetchSummary completes in
+  // a microtask under the sync trpc-mock, but DiffView's state-reset path
+  // would still need one commit to render the Loading message.
+  await page.waitForTimeout(400);
 
-  // Count assertion: with the fix, the DiffView for A does not refetch
-  // on re-activation. The tab badge's useDiffFileCount in
-  // SharedDockviewLayout DOES fetch on `activeWorkspaceId` change (it's a
-  // workspace-scoped hook), so A's counter increases by AT MOST 1 across
-  // the round-trip. Before the fix, DiffView's own refetch would bump it
-  // by 2 (DiffView + badge), so this assertion catches the regression.
-  await page.waitForTimeout(500);
-  const aCallsAfterSwitchBack = counters.byWorkspace.get(WORKSPACE_A) ?? 0;
-  const delta = aCallsAfterSwitchBack - aCallsAfterFirstLoad;
-  expect(delta).toBeLessThanOrEqual(1);
+  const flashObserved = await page.evaluate(() => {
+    const w = window as unknown as { __loadingFlashRecorder: { observed: boolean } };
+    return w.__loadingFlashRecorder.observed;
+  });
+  expect(flashObserved).toBe(false);
+
+  // The file row is visible after the switch back. This is implied by
+  // the no-flash check (the cached DOM stays mounted) but kept as a
+  // belt-and-suspenders assertion that survives if the observer ever
+  // misses a textContent path.
+  await expectChangesFileVisible(page, FILE_IN_A);
 });

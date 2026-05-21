@@ -830,6 +830,13 @@ export function DiffView({
   // without re-running the data fetch on every cache-driven activation)
   // reads this to invoke the latest closure. See issue #484.
   const fetchBranchesRef = useRef<(() => void) | null>(null);
+  // Tracks the previous `active` value so the SSE subscription effects
+  // below can detect a `false → true` transition and fire one immediate
+  // refresh — the inactive period meant we missed any branch-status
+  // events, so the cached data might be stale. Initial value `null`
+  // distinguishes "first run" (no refresh needed, the data-fetch effect
+  // covers it) from "was-inactive → now-active" (refresh).
+  const prevActiveRef = useRef<boolean | null>(null);
   // Per-file diff cache owned by the parent — eliminates child-level caching
   const [diffCache, setDiffCache] = useState<Map<string, FileDiffCacheEntry>>(new Map());
   const diffCacheRef = useRef<Map<string, FileDiffCacheEntry>>(new Map());
@@ -917,10 +924,15 @@ export function DiffView({
   // Subscribe to branch-status SSE events for the active workspace so a
   // `git checkout -b` from another tool (terminal, IDE) is reflected without
   // a full reload. Only attached while `active === true`: inactive cached
-  // workspaces don't keep listening to SSE we'd discard anyway. When the
-  // panel becomes active again, the next branch-status event triggers a
-  // refresh through `fetchBranchesRef`, which still points at the closure
-  // from the initial-fetch effect above.
+  // workspaces don't keep listening to SSE we'd discard anyway.
+  //
+  // On `active: false → true` we also fire one immediate refresh to close
+  // the staleness window — while the panel was inactive the SSE
+  // subscription was detached, so any agent edits / terminal `git`
+  // operations made during that period haven't refreshed the list yet. The
+  // re-activation detection lives in a single effect (below) shared with
+  // the summary refresh, so we don't try to coordinate `prevActiveRef`
+  // across two siblings.
   useEffect(() => {
     if (!active) return;
     const unsubscribe = adapter.subscribeStatusEvents((event) => {
@@ -1512,6 +1524,30 @@ export function DiffView({
     });
     return unsubscribe;
   }, [adapter, workspaceId, active]);
+
+  // Re-activation refresh: on every `active: false → true` transition,
+  // fire one immediate refresh of both summary + branches to close the
+  // staleness window the inactive period opened. The SSE subscriptions
+  // above only catch events that arrive WHILE active, so anything that
+  // changed during the inactive period (agent edits, terminal `git`
+  // operations, etc.) would otherwise sit stale until the next
+  // branch-status poll (~5 s).
+  //
+  // The fetch ref bodies are non-destructive: `fetchSummary` only
+  // mutates state when the fingerprint changes, so a re-activation that
+  // hits unchanged data is visually a no-op (no Loading spinner, no
+  // file-list wipe). Tracked separately from the SSE effects above
+  // because `prevActiveRef` would otherwise need to be coordinated
+  // across the two sibling effects — collapsing the transition logic
+  // into a single dedicated effect keeps that bookkeeping local.
+  useEffect(() => {
+    const wasInactive = prevActiveRef.current === false;
+    prevActiveRef.current = active;
+    if (active && wasInactive) {
+      fetchBranchesRef.current?.();
+      fetchSummaryRef.current?.();
+    }
+  }, [active]);
 
   // ---------------------------------------------------------------------------
   // Diff target dropdown — combines diff mode + branch selection into one menu.
