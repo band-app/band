@@ -101,6 +101,11 @@ function ensureSprite(): void {
     console.error(
       "[dashboard-core/file-icon] Failed to parse SVG sprite markup. Icons will render blank.",
     );
+    // Latch the flag so subsequent renders don't re-invoke DOMParser on the
+    // same broken markup ~1.2k times per page and re-log the same error. The
+    // markup is content-addressable (built once from the bundled SVGs), so
+    // retrying is pointless — if it failed once, it fails every time.
+    spriteInjected = true;
     return;
   }
   root.id = SPRITE_ID;
@@ -137,6 +142,15 @@ function makeComponent(iconName: string, displayPrefix: string): IconComponent {
         height: 16,
         "aria-hidden": true,
         className,
+        // `iconSources` is `{}` on the server (see IS_SSR gate above), so
+        // `symbolByBasename` is empty and `symbolIdForIcon` returns null for
+        // every icon during SSR. The client mounts with a fully populated
+        // `symbolByBasename` and the matching <use href="#mit-…"/> child.
+        // Without this flag, React 19 flags the mismatch and re-renders every
+        // icon subtree on hydration. The SVG is purely decorative
+        // (`aria-hidden`), so suppressing the warning is the documented
+        // escape hatch for this exact pattern (SSR-blank-then-client-paint).
+        suppressHydrationWarning: true,
       });
     }
     return createElement(
@@ -146,6 +160,7 @@ function makeComponent(iconName: string, displayPrefix: string): IconComponent {
         height: 16,
         "aria-hidden": true,
         className,
+        suppressHydrationWarning: true,
       },
       createElement("use", { href: `#${symbolId}` }),
     );

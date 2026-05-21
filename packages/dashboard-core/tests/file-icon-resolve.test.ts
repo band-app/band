@@ -22,10 +22,17 @@ describe("resolveIconName", () => {
     assert.equal(resolveIconName("Component.tsx"), expected);
   });
 
-  it("prefers longer compound extension when available", () => {
+  it("prefers longer compound extension when available", (t) => {
     const storiesEntry = manifest.fileExtensions["stories.tsx"];
     if (!storiesEntry) {
-      // Manifest doesn't ship a `stories.tsx` mapping; nothing to assert.
+      // `stories.tsx` is the compound extension we picked for this assertion
+      // because material-icon-theme historically shipped a dedicated mapping
+      // for it. If a future release drops it, surface the skip explicitly
+      // rather than letting the test pass vacuously — that hides the
+      // regression from `node:test`'s summary. (The compound-extension
+      // resolution path is also covered indirectly via `d.ts` / `spec.ts`
+      // mappings in other test cases below.)
+      t.skip("manifest does not ship a `stories.tsx` mapping in this version");
       return;
     }
     assert.equal(resolveIconName("Button.stories.tsx"), storiesEntry);
