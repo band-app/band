@@ -19,6 +19,11 @@ import React, {
   useRef,
   useState,
 } from "react";
+import {
+  cycleGridGroups,
+  cycleTabsInActiveGroup,
+  selectNeighbourBeforeRemove,
+} from "../lib/dockview-section-actions";
 import { trpc } from "../lib/trpc-client";
 import { ChatPane, type CodingAgentDef, useChatPaneState } from "./ChatPane";
 
@@ -560,18 +565,9 @@ export function DockviewChatContainer({
     const api = apiRef.current;
     if (!api || api.panels.length <= 1) return; // don't close last tab
 
+    selectNeighbourBeforeRemove(api, chatId);
     const panel = api.getPanel(chatId);
     if (panel) {
-      // Pre-select the neighbour to the left (or the right if we're closing
-      // the first tab) so focus doesn't snap to the first tab in the group.
-      // Matches the behaviour in DockviewTerminalContainer.closeTab.
-      const group = panel.group;
-      const groupPanels = group?.panels ?? [];
-      const idx = groupPanels.findIndex((p) => p.id === chatId);
-      if (idx >= 0 && groupPanels.length > 1) {
-        const neighbour = groupPanels[idx === 0 ? 1 : idx - 1];
-        neighbour?.api.setActive();
-      }
       api.removePanel(panel);
     }
 
@@ -603,24 +599,15 @@ export function DockviewChatContainer({
     if (!visible) return;
 
     const cycleTabs = (direction: 1 | -1) => {
-      const api = apiRef.current;
-      const group = api?.activeGroup;
-      if (!api || !group) return;
-      if (direction === 1) group.model.moveToNext();
-      else group.model.moveToPrevious();
-      group.model.focusContent();
+      cycleTabsInActiveGroup(apiRef.current, direction, () => {
+        apiRef.current?.activeGroup?.model.focusContent();
+      });
     };
 
     const cycleGroups = (direction: 1 | -1) => {
-      const api = apiRef.current;
-      if (!api) return;
-      const groups = api.groups.filter((g) => g.api.location.type === "grid");
-      if (groups.length < 2) return;
-      const current = api.activeGroup;
-      const idx = current ? groups.findIndex((g) => g.id === current.id) : -1;
-      const next = groups[(idx + direction + groups.length) % groups.length];
-      next?.activePanel?.api.setActive();
-      next?.model.focusContent();
+      cycleGridGroups(apiRef.current, direction, () => {
+        apiRef.current?.activeGroup?.model.focusContent();
+      });
     };
 
     const handler = (e: KeyboardEvent) => {

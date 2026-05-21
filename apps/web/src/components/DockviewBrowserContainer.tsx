@@ -21,6 +21,11 @@ import React, {
 } from "react";
 import { injectInitialUrls } from "../lib/browser-layout";
 import { invoke as desktopInvoke, listen as desktopListen } from "../lib/desktop-ipc";
+import {
+  cycleGridGroups,
+  cycleTabsInActiveGroup,
+  selectNeighbourBeforeRemove,
+} from "../lib/dockview-section-actions";
 import { isDesktop } from "../lib/is-desktop";
 import { trpc } from "../lib/trpc-client";
 import { BrowserPaneComponent, type BrowserPaneParams, useFavicon } from "./BrowserPanel";
@@ -484,18 +489,9 @@ export function DockviewBrowserContainer({
     const api = apiRef.current;
     if (!api || api.panels.length <= 1) return; // don't close last tab
 
+    selectNeighbourBeforeRemove(api, browserId);
     const panel = api.getPanel(browserId);
     if (panel) {
-      // Pre-select the neighbour to the left (or the right if we're closing
-      // the first tab) so focus doesn't snap to the first tab in the group.
-      // Matches the behaviour in DockviewTerminalContainer.closeTab.
-      const group = panel.group;
-      const groupPanels = group?.panels ?? [];
-      const idx = groupPanels.findIndex((p) => p.id === browserId);
-      if (idx >= 0 && groupPanels.length > 1) {
-        const neighbour = groupPanels[idx === 0 ? 1 : idx - 1];
-        neighbour?.api.setActive();
-      }
       api.removePanel(panel);
     }
 
@@ -528,39 +524,27 @@ export function DockviewBrowserContainer({
   useEffect(() => {
     if (!visible) return;
 
-    const focusActiveAddressBar = (api: DockviewApi) => {
-      requestAnimationFrame(() => {
-        const panel = api.activePanel;
-        if (!panel) return;
-        // `data-band-address-input` is set on the address-bar input in
-        // BrowserPanel.tsx — using the data attribute (rather than
-        // `input[type='text']`) avoids accidentally matching the find-bar
-        // input if it's mounted in the same panel.
-        panel.view.content.element
-          .querySelector<HTMLInputElement>("[data-band-address-input]")
-          ?.focus();
-      });
+    // `data-band-address-input` is set on the address-bar input in
+    // BrowserPanel.tsx — using the data attribute (rather than
+    // `input[type='text']`) avoids matching the find-bar input.
+    const refocusAddressBar = () => {
+      const panel = apiRef.current?.activePanel;
+      if (!panel) return;
+      panel.view.content.element
+        .querySelector<HTMLInputElement>("[data-band-address-input]")
+        ?.focus();
     };
 
     const cycleTabs = (direction: 1 | -1) => {
-      const api = apiRef.current;
-      const group = api?.activeGroup;
-      if (!api || !group) return;
-      if (direction === 1) group.model.moveToNext();
-      else group.model.moveToPrevious();
-      focusActiveAddressBar(api);
+      cycleTabsInActiveGroup(apiRef.current, direction, () => {
+        requestAnimationFrame(refocusAddressBar);
+      });
     };
 
     const cycleGroups = (direction: 1 | -1) => {
-      const api = apiRef.current;
-      if (!api) return;
-      const groups = api.groups.filter((g) => g.api.location.type === "grid");
-      if (groups.length < 2) return;
-      const current = api.activeGroup;
-      const idx = current ? groups.findIndex((g) => g.id === current.id) : -1;
-      const next = groups[(idx + direction + groups.length) % groups.length];
-      next?.activePanel?.api.setActive();
-      focusActiveAddressBar(api);
+      cycleGridGroups(apiRef.current, direction, () => {
+        requestAnimationFrame(refocusAddressBar);
+      });
     };
 
     const handler = (e: KeyboardEvent) => {

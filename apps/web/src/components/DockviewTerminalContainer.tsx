@@ -21,6 +21,11 @@ import React, {
   useRef,
   useState,
 } from "react";
+import {
+  cycleGridGroups,
+  cycleTabsInActiveGroup,
+  selectNeighbourBeforeRemove,
+} from "../lib/dockview-section-actions";
 import { trpc } from "../lib/trpc-client";
 
 // Lazy-load TerminalPanel to avoid importing @xterm CJS during SSR
@@ -433,17 +438,9 @@ export function DockviewTerminalContainer({
     const api = apiRef.current;
     if (!api || api.panels.length <= 1) return; // don't close last tab
 
+    selectNeighbourBeforeRemove(api, terminalId);
     const panel = api.getPanel(terminalId);
     if (panel) {
-      // Pre-select the neighbour to the left (or the right if we're closing
-      // the first tab) so focus doesn't snap to the first tab in the group.
-      const group = panel.group;
-      const groupPanels = group?.panels ?? [];
-      const idx = groupPanels.findIndex((p) => p.id === terminalId);
-      if (idx >= 0 && groupPanels.length > 1) {
-        const neighbour = groupPanels[idx === 0 ? 1 : idx - 1];
-        neighbour?.api.setActive();
-      }
       api.removePanel(panel);
     }
 
@@ -464,45 +461,35 @@ export function DockviewTerminalContainer({
   }, []);
 
   // Keyboard shortcuts (capture phase, scoped to this section's focus):
-  // - Cmd/Ctrl+T              → open a new terminal tab
-  // - Cmd/Ctrl+W              → close the active terminal tab
-  // - Cmd/Ctrl+D              → split right (vertical split)
-  // - Cmd/Ctrl+Shift+D        → split down (horizontal split)
+  // - Cmd+T                   → open a new terminal tab
+  // - Cmd+W                   → close the active terminal tab
+  // - Ctrl+D                  → close the active terminal tab (Cmd owns split)
+  // - Cmd+D                   → split right (vertical split)
+  // - Cmd+Shift+D             → split down (horizontal split)
   // - Ctrl+(Shift)+Tab        → cycle tabs in the active group
   // - Cmd/Ctrl+[ / Cmd/Ctrl+] → cycle between split terminal groups (panels)
   // - Cmd/Ctrl+Shift+[/]      → cycle tabs in the active group
   useEffect(() => {
     if (!visible) return;
 
-    const focusActivePanel = (api: DockviewApi) => {
-      requestAnimationFrame(() => {
-        const panel = api.activePanel;
-        if (!panel) return;
-        panel.view.content.element
-          .querySelector<HTMLTextAreaElement>(".xterm-helper-textarea")
-          ?.focus();
-      });
+    const refocusActivePanel = () => {
+      const panel = apiRef.current?.activePanel;
+      if (!panel) return;
+      panel.view.content.element
+        .querySelector<HTMLTextAreaElement>(".xterm-helper-textarea")
+        ?.focus();
     };
 
     const cycleTabs = (direction: 1 | -1) => {
-      const api = apiRef.current;
-      const group = api?.activeGroup;
-      if (!api || !group) return;
-      if (direction === 1) group.model.moveToNext();
-      else group.model.moveToPrevious();
-      focusActivePanel(api);
+      cycleTabsInActiveGroup(apiRef.current, direction, () => {
+        requestAnimationFrame(refocusActivePanel);
+      });
     };
 
     const cycleGroups = (direction: 1 | -1) => {
-      const api = apiRef.current;
-      if (!api) return;
-      const groups = api.groups.filter((g) => g.api.location.type === "grid");
-      if (groups.length < 2) return;
-      const current = api.activeGroup;
-      const idx = current ? groups.findIndex((g) => g.id === current.id) : -1;
-      const next = groups[(idx + direction + groups.length) % groups.length];
-      next?.activePanel?.api.setActive();
-      focusActivePanel(api);
+      cycleGridGroups(apiRef.current, direction, () => {
+        requestAnimationFrame(refocusActivePanel);
+      });
     };
 
     const handler = (e: KeyboardEvent) => {
@@ -538,28 +525,36 @@ export function DockviewTerminalContainer({
         return;
       }
 
+      const closeActiveTab = () => {
+        const active = apiRef.current?.activePanel;
+        if (active) closeTab(active.id);
+      };
+
       if (key === "t" && !e.shiftKey) {
         e.preventDefault();
         e.stopPropagation();
         handleAddTab();
       } else if (key === "w" && !e.shiftKey) {
-        const api = apiRef.current;
-        if (!api || api.panels.length <= 1) return;
         e.preventDefault();
         e.stopPropagation();
-        const active = api.activePanel;
-        if (active) {
-          closeTab(active.id);
-        }
+        closeActiveTab();
       } else if (key === "d") {
-        e.preventDefault();
-        e.stopPropagation();
-        const api = apiRef.current;
-        if (!api) return;
-        const activeGroup = api.activeGroup;
-        if (!activeGroup) return;
-        const direction = e.shiftKey ? "below" : "right";
-        handleSplit(activeGroup.id, direction);
+        // Cmd+D / Cmd+Shift+D → split. Ctrl+D → close active tab (Cmd already
+        // owns split, so reuse Ctrl+D for close). preventDefault always fires
+        // so xterm doesn't forward a stray ^D to the shell; the last-tab guard
+        // in closeTab keeps Ctrl+D as a silent no-op when only one terminal
+        // remains.
+        if (e.metaKey && !e.ctrlKey) {
+          e.preventDefault();
+          e.stopPropagation();
+          const activeGroup = apiRef.current?.activeGroup;
+          if (!activeGroup) return;
+          handleSplit(activeGroup.id, e.shiftKey ? "below" : "right");
+        } else if (e.ctrlKey && !e.metaKey && !e.shiftKey) {
+          e.preventDefault();
+          e.stopPropagation();
+          closeActiveTab();
+        }
       }
     };
     window.addEventListener("keydown", handler, true);
