@@ -1313,20 +1313,37 @@ export function CodeBrowserView({
   // -------------------------------------------------------------------------
   const capabilities = useCapabilities();
   const pickFile = capabilities.pickFile;
+
+  /**
+   * Open an absolute filesystem path as an external editor tab.
+   *
+   * Shared by:
+   *   - `handleOpenExternalFile` below (desktop Cmd+O → OS file picker)
+   *   - `band:open-file-external-direct` listener (CLI `band open <abs>`
+   *     for files outside the active workspace's root)
+   *
+   * We deliberately do NOT call `onSelectFile` / push to editor history
+   * — the route only carries workspace-relative paths, and pushing an
+   * absolute path would corrupt the back/forward stack. External tabs
+   * remain reachable via the tab bar and Cmd+W close.
+   */
+  const openExternalPath = useCallback(
+    (absolutePath: string, opts?: { line?: number; lineEnd?: number; column?: number }) => {
+      fileTabs.openTabExternal(absolutePath);
+      setViewFilePath(absolutePath);
+      setViewLine(opts?.line);
+      setViewLineEnd(opts?.lineEnd);
+      setViewColumn(opts?.column);
+    },
+    [fileTabs.openTabExternal],
+  );
+
   const handleOpenExternalFile = useCallback(async () => {
     if (!pickFile) return;
     const absolutePath = await pickFile();
     if (!absolutePath) return;
-    fileTabs.openTabExternal(absolutePath);
-    setViewFilePath(absolutePath);
-    setViewLine(undefined);
-    setViewLineEnd(undefined);
-    setViewColumn(undefined);
-    // We deliberately do NOT call onSelectFile / push to editor history —
-    // the route only carries workspace-relative paths, and pushing an
-    // absolute path would corrupt the back/forward stack. External tabs
-    // remain reachable via the tab bar and Cmd+W close.
-  }, [pickFile, fileTabs.openTabExternal]);
+    openExternalPath(absolutePath);
+  }, [pickFile, openExternalPath]);
 
   // Surface the action via the same command-palette event pattern as
   // Quick Open / Search in Files. Listened to here so the desktop-shell
@@ -1352,6 +1369,31 @@ export function CodeBrowserView({
     window.addEventListener("band:open-file-external", handler);
     return () => window.removeEventListener("band:open-file-external", handler);
   }, [pickFile, handleOpenExternalFile, workspaceId]);
+
+  // Direct external-open: the CLI's `band open <abs>` for files outside
+  // any workspace root fans out via the status SSE stream → __root.tsx
+  // listener → this window event. Unlike `band:open-file-external` above,
+  // there's no picker involved: the path is supplied in `detail` and we
+  // open it straight away. Not gated on `pickFile` — the path comes from
+  // a trusted server-side `editor.openFile` mutation, so the same
+  // `readExternalFile` capability the picker flow uses is enough.
+  //
+  // Filtered by workspaceId so multi-workspace dockview setups only
+  // open the tab in the workspace the CLI targeted.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ workspaceId?: string; filePath?: string }>).detail;
+      if (!detail || detail.workspaceId !== workspaceId || !detail.filePath) return;
+      const loc = parseFileLocation(detail.filePath);
+      openExternalPath(loc.filePath, {
+        line: loc.line,
+        lineEnd: loc.lineEnd,
+        column: loc.column,
+      });
+    };
+    window.addEventListener("band:open-file-external-direct", handler);
+    return () => window.removeEventListener("band:open-file-external-direct", handler);
+  }, [workspaceId, openExternalPath]);
 
   // -------------------------------------------------------------------------
   // Untitled tabs (issue #434) — empty scratch buffer with save-as flow.

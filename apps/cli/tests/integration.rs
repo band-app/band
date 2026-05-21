@@ -3126,3 +3126,285 @@ fn skills_install_filter_limits_to_matching_skills_only() {
     // Only one symlink (just band-chat) under .claude/skills/.
     assert_eq!(result["symlinks"]["linked"].as_array().unwrap().len(), 1);
 }
+
+// --- Open command tests ---
+
+/// Call the test helper that posts to `editor.setActiveWorkspace` on the
+/// running server. Mirrors the dashboard's behaviour when the user focuses
+/// a workspace, without requiring a real renderer to drive the focus event.
+fn set_active_workspace(band_dir: &Path, workspace_id: Option<&str>) {
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/set-active-workspace.mjs");
+    let value = workspace_id.unwrap_or("null");
+    let output = Command::new("node")
+        .arg(&script)
+        .arg(band_dir)
+        .arg(value)
+        .output()
+        .expect("set-active-workspace.mjs failed to execute");
+    assert!(
+        output.status.success(),
+        "set-active-workspace.mjs failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn open_with_explicit_workspace_opens_file() {
+    let env = TestEnv::new();
+    let create_out = env.band(&["workspaces", "create", "my-project", "feat/open"]);
+    assert!(
+        create_out.status.success(),
+        "stderr: {}",
+        stderr(&create_out)
+    );
+    let workspace_path = stdout(&create_out);
+
+    // Seed a file inside the new worktree so the server's existence check
+    // passes. The CLI sends an absolute path; the server normalizes it
+    // back to a workspace-relative path before emitting the open event.
+    let file_path = Path::new(&workspace_path).join("hello.txt");
+    fs::write(&file_path, "hello world\n").unwrap();
+
+    let output = env.band(&[
+        "--output",
+        "json",
+        "open",
+        file_path.to_str().unwrap(),
+        "--workspace",
+        "my-project-feat-open",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output))
+        .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)));
+    assert_eq!(json["ok"].as_bool(), Some(true));
+    assert_eq!(
+        json["workspaceId"].as_str(),
+        Some("my-project-feat-open"),
+        "json: {json}",
+    );
+    // Server normalises the path against the workspace root, so the wire
+    // value is workspace-relative ("hello.txt"), not the absolute path the
+    // CLI sent.
+    assert_eq!(json["filePath"].as_str(), Some("hello.txt"), "json: {json}");
+    // In-workspace files report external=false so the renderer routes
+    // through the workspace-relative `_splat` route, not the external-tab
+    // path.
+    assert_eq!(
+        json["external"].as_bool(),
+        Some(false),
+        "in-workspace file should not be external: {json}",
+    );
+}
+
+#[test]
+fn open_resolves_relative_path_against_cwd() {
+    let env = TestEnv::new();
+    let create_out = env.band(&["workspaces", "create", "my-project", "feat/relpath"]);
+    assert!(
+        create_out.status.success(),
+        "stderr: {}",
+        stderr(&create_out)
+    );
+    let workspace_path = stdout(&create_out);
+    let workspace_path = fs::canonicalize(&workspace_path).expect("canonicalize worktree");
+
+    // Drop a file into a subdir so the relative-path resolution has
+    // something to bite on.
+    let sub = workspace_path.join("src");
+    fs::create_dir_all(&sub).unwrap();
+    fs::write(sub.join("main.rs"), "fn main() {}\n").unwrap();
+
+    // Run band from inside the workspace; pass a relative path with a
+    // line/column suffix to exercise both code paths in `split_file_location`.
+    let output = env.band_in(
+        &workspace_path,
+        &[
+            "--output",
+            "json",
+            "open",
+            "src/main.rs:7:3",
+            "--workspace",
+            "my-project-feat-relpath",
+        ],
+    );
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output))
+        .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)));
+    // Server re-emits the workspace-relative path with the line/column
+    // suffix preserved verbatim (it's a UX hint, not a filesystem
+    // identifier).
+    assert_eq!(
+        json["filePath"].as_str(),
+        Some("src/main.rs:7:3"),
+        "json: {json}",
+    );
+}
+
+#[test]
+fn open_falls_back_to_active_workspace() {
+    let env = TestEnv::new();
+    let create_out = env.band(&["workspaces", "create", "my-project", "feat/active"]);
+    assert!(
+        create_out.status.success(),
+        "stderr: {}",
+        stderr(&create_out)
+    );
+    let workspace_path = stdout(&create_out);
+    fs::write(Path::new(&workspace_path).join("README.md"), "# Hi\n").unwrap();
+
+    // Simulate the dashboard focusing this workspace.
+    set_active_workspace(&env.band_dir, Some("my-project-feat-active"));
+
+    // No `--workspace` flag — server should pull the workspaceId from the
+    // active-workspace atom.
+    let output = env.band(&[
+        "--output",
+        "json",
+        "open",
+        Path::new(&workspace_path)
+            .join("README.md")
+            .to_str()
+            .unwrap(),
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output))
+        .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)));
+    assert_eq!(
+        json["workspaceId"].as_str(),
+        Some("my-project-feat-active"),
+        "json: {json}",
+    );
+}
+
+#[test]
+fn open_without_active_workspace_errors_clearly() {
+    let env = TestEnv::new();
+    // Explicitly clear any leftover active-workspace state from previous
+    // server interactions (the in-memory atom starts null on boot, but
+    // belt-and-braces).
+    set_active_workspace(&env.band_dir, None);
+
+    let output = env.band(&["open", "some-file.txt"]);
+    assert!(
+        !output.status.success(),
+        "expected failure, got stdout: {}",
+        stdout(&output)
+    );
+    let err = stderr(&output);
+    assert!(
+        err.contains("No active workspace"),
+        "expected 'No active workspace' in stderr, got: {err}",
+    );
+}
+
+#[test]
+fn open_missing_file_errors_clearly() {
+    let env = TestEnv::new();
+    let create_out = env.band(&["workspaces", "create", "my-project", "feat/missing"]);
+    assert!(
+        create_out.status.success(),
+        "stderr: {}",
+        stderr(&create_out)
+    );
+    let workspace_path = stdout(&create_out);
+
+    let bogus = Path::new(&workspace_path).join("does-not-exist.txt");
+    let output = env.band(&[
+        "open",
+        bogus.to_str().unwrap(),
+        "--workspace",
+        "my-project-feat-missing",
+    ]);
+    assert!(
+        !output.status.success(),
+        "expected failure, got stdout: {}",
+        stdout(&output)
+    );
+    let err = stderr(&output);
+    assert!(
+        err.contains("File not found") || err.contains("not found"),
+        "expected 'not found' in stderr, got: {err}",
+    );
+}
+
+#[test]
+fn open_external_path_outside_workspace_opens_as_external_tab() {
+    let env = TestEnv::new();
+    let create_out = env.band(&["workspaces", "create", "my-project", "feat/outside"]);
+    assert!(
+        create_out.status.success(),
+        "stderr: {}",
+        stderr(&create_out)
+    );
+
+    // A real file on disk that lives outside the workspace root (the
+    // `band open` flow needs to open this as an external editor tab —
+    // same surface as desktop Cmd+O / "Open File…").
+    let stray = env.tmp.path().join("stray.txt");
+    fs::write(&stray, "out of bounds\n").unwrap();
+
+    let output = env.band(&[
+        "--output",
+        "json",
+        "open",
+        stray.to_str().unwrap(),
+        "--workspace",
+        "my-project-feat-outside",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output))
+        .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)));
+    assert_eq!(
+        json["external"].as_bool(),
+        Some(true),
+        "expected external=true for out-of-workspace file: {json}",
+    );
+    // For external files the wire path stays absolute (the renderer
+    // needs the full path to call `readExternalFile`).
+    let returned = json["filePath"].as_str().unwrap_or("");
+    assert!(
+        returned.ends_with("/stray.txt"),
+        "expected absolute path ending in /stray.txt: {json}",
+    );
+}
+
+#[test]
+fn open_external_path_with_line_suffix_preserved() {
+    let env = TestEnv::new();
+    let create_out = env.band(&["workspaces", "create", "my-project", "feat/external-line"]);
+    assert!(
+        create_out.status.success(),
+        "stderr: {}",
+        stderr(&create_out)
+    );
+
+    let stray = env.tmp.path().join("logs.txt");
+    fs::write(&stray, "line1\nline2\nline3\n").unwrap();
+
+    // The line:column suffix is parsed off the path on the CLI side
+    // before the path is resolved against the filesystem, then attached
+    // back onto the response so the renderer can position the cursor.
+    let arg = format!("{}:2:3", stray.to_str().unwrap());
+    let output = env.band(&[
+        "--output",
+        "json",
+        "open",
+        &arg,
+        "--workspace",
+        "my-project-feat-external-line",
+    ]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+
+    let json: serde_json::Value = serde_json::from_str(&stdout(&output))
+        .unwrap_or_else(|e| panic!("invalid JSON: {e}\nstdout: {}", stdout(&output)));
+    assert_eq!(json["external"].as_bool(), Some(true));
+    let returned = json["filePath"].as_str().unwrap_or("");
+    assert!(
+        returned.ends_with("/logs.txt:2:3"),
+        "expected absolute path with :line:col suffix: {json}",
+    );
+}

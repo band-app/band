@@ -321,6 +321,63 @@ function AppShell() {
     activeWorkspaceId ? s.statuses.get(activeWorkspaceId)?.worktreePath : undefined,
   );
 
+  // Inform the server which workspace the user is currently focused on so
+  // the `band open` CLI command knows where to route files when called
+  // without an explicit `--workspace` flag. The adapter de-duplicates so
+  // it's safe to call on every render — the mutation only fires when the
+  // value actually changes.
+  useEffect(() => {
+    void adapter.setActiveWorkspace(activeWorkspaceId);
+  }, [activeWorkspaceId]);
+
+  // Listen for `band open` events from the SSE stream and route the
+  // dashboard to the requested file. The CLI calls
+  // `editor.openFile` which fans out via `emit({kind: "open-file"})`;
+  // this listener closes the loop. Two flavours:
+  //
+  //   - In-workspace files: navigate to the splat route. The
+  //     CodeBrowserView's existing `_splat` handler opens the tab and
+  //     positions the cursor from the `:line:col` suffix.
+  //   - External files: route navigation can't carry absolute paths
+  //     (they'd corrupt the URL and the back/forward stack). Navigate
+  //     to the workspace's code index instead so the CodeBrowserView
+  //     mounts, then dispatch a window event that the view's external-
+  //     open listener picks up. The event is dispatched on the next
+  //     microtask so the route mount has time to land its useEffect
+  //     subscribers before we fire.
+  useEffect(() => {
+    const unsubscribe = adapter.subscribeStatusEvents((event) => {
+      if (event.kind !== "open-file") return;
+      const workspaceId = typeof event.workspaceId === "string" ? event.workspaceId : undefined;
+      const filePath = typeof event.filePath === "string" ? event.filePath : undefined;
+      if (!workspaceId || !filePath) return;
+
+      if (event.external === true) {
+        router.navigate({
+          to: "/workspace/$workspaceId/code",
+          params: { workspaceId: encodeURIComponent(workspaceId) },
+        });
+        queueMicrotask(() => {
+          window.dispatchEvent(
+            new CustomEvent("band:open-file-external-direct", {
+              detail: { workspaceId, filePath },
+            }),
+          );
+        });
+        return;
+      }
+
+      router.navigate({
+        to: "/workspace/$workspaceId/code/$",
+        params: {
+          workspaceId: encodeURIComponent(workspaceId),
+          _splat: filePath,
+        },
+      });
+    });
+    return unsubscribe;
+  }, [router]);
+
   // Panel items for the title bar panel switcher dropdown
   const panelItems: PanelItem[] = useMemo(
     () => [

@@ -4,7 +4,7 @@ version: 0.1.0
 description: Programmatic workspace management for Band. Use when the user wants to create, list, or remove Band workspaces or projects, manage tunnels, manage cronjobs, or check settings via the Band CLI. Triggers include "create workspace", "list projects", "band workspace", "band project", "schedule a job". For sending chat messages to coding agents, see the `band-chat` skill.
 allowed-tools: Bash
 argument-hint: [command] [args...]
-commands: projects, workspaces, cronjobs, tunnel, settings, notify, schema, generate-skills, skills
+commands: projects, workspaces, cronjobs, tunnel, settings, open, notify, schema, generate-skills, skills
 ---
 
 # Band CLI
@@ -66,6 +66,34 @@ band workspaces create my-app feat/auth --prompt "Add JWT authentication to the 
 ```sh
 band workspaces list --output json | jq '.workspaces[] | select(.project == "my-app") | .branch'
 ```
+
+### Open a file in the dashboard
+
+`band open <file>` routes a file to whichever workspace is currently
+focused in the Band dashboard (the most recently active one). Use it
+from grep / stack-trace output to drop yourself straight into the
+editor without naming the workspace.
+
+```sh
+# Open the file in whichever workspace the dashboard is currently focused on
+band open src/main.rs
+
+# Jump to line 42, column 5
+band open src/main.rs:42:5
+
+# Override the active-workspace fallback
+band open src/main.rs --workspace my-app/feat/auth
+
+# Open an arbitrary file from outside any workspace — opens as an
+# external editor tab (the same surface as desktop Cmd+O / "Open File…")
+band open ~/Downloads/v3.js
+```
+
+Files inside the target workspace open as normal editor tabs.
+Files outside any workspace root open as external tabs, hosted in
+the active workspace's editor pane. Errors when no workspace is
+active in the dashboard and no `--workspace` is supplied, or when
+the file doesn't exist on disk.
 
 ### Drive a coding agent
 

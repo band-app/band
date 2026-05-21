@@ -1,16 +1,17 @@
 import { execFile, execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, constants as fsConstants, mkdirSync, unlinkSync } from "node:fs";
+import { existsSync, constants as fsConstants, mkdirSync, realpathSync, unlinkSync } from "node:fs";
 import { cp, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
 import { promisify } from "node:util";
-import { toWorkspaceId } from "@band-app/dashboard-core";
+import { formatFileLocation, toWorkspaceId } from "@band-app/dashboard-core";
 import { createLogger } from "@band-app/logger";
 import { initTRPC, TRPCError } from "@trpc/server";
 import { rgPath } from "@vscode/ripgrep";
 import type { UIMessage } from "ai";
 import { Cron } from "croner";
 import { z } from "zod";
+import { getActiveWorkspace, setActiveWorkspace } from "../lib/active-workspace";
 import {
   createMetadataAgent,
   createWorkspaceAgent,
@@ -2919,6 +2920,215 @@ const servicesRouter = t.router({
 });
 
 // ---------------------------------------------------------------------------
+// Editor (CLI-driven file open + active-workspace tracking)
+// ---------------------------------------------------------------------------
+
+/**
+ * `realpathSync` resolves symlinks but throws ENOENT for paths that don't
+ * exist. We need the symlink-resolution part for paths that may or may not
+ * exist (e.g. files the user wants to *open* that don't exist yet). Walk
+ * up the path until we hit an ancestor that does exist, canonicalize that,
+ * then re-append the trailing segments.
+ *
+ * Returns the input unchanged if no ancestor on disk can be canonicalized
+ * (e.g. running on a filesystem mid-delete). Callers fall back to an
+ * existence check on the returned value, which produces a clear "file not
+ * found" error rather than a confusing IO failure.
+ */
+function canonicalizeMaybeMissing(p: string): string {
+  if (existsSync(p)) {
+    try {
+      return realpathSync(p);
+    } catch {
+      return p;
+    }
+  }
+  const parts = p.split(sep);
+  for (let i = parts.length - 1; i > 0; i--) {
+    const prefix = parts.slice(0, i).join(sep) || sep;
+    if (existsSync(prefix)) {
+      try {
+        const canonicalPrefix = realpathSync(prefix);
+        return [canonicalPrefix, ...parts.slice(i)].join(sep);
+      } catch {
+        return p;
+      }
+    }
+  }
+  return p;
+}
+
+/**
+ * Backs the `band open <filePath>` CLI command and the web UI's "I am the
+ * currently focused workspace" hint.
+ *
+ * The web UI calls `editor.setActiveWorkspace` whenever its active workspace
+ * changes; the CLI's `band open` reads it via `editor.getActiveWorkspace` so
+ * the user doesn't need to name the workspace explicitly when firing a file
+ * at "wherever I'm currently looking at." The actual open is funnelled
+ * through `editor.openFile`, which:
+ *   1. Resolves the target workspace (explicit `workspaceId` > active).
+ *   2. Validates the file exists and is inside the workspace root —
+ *      paths from the CLI can be absolute (resolved against the user's
+ *      cwd) or workspace-relative.
+ *   3. Emits an `open-file` SSE event so the React shell can navigate
+ *      its router to the matching `code/<path>` route.
+ *
+ * Active-workspace tracking is process-local; the value resets when the
+ * web server restarts. That's intentional — no UI mounted → no active
+ * workspace, and the next focus event will repopulate it.
+ */
+const editorRouter = t.router({
+  getActiveWorkspace: publicProcedure.query(() => {
+    return { workspaceId: getActiveWorkspace() };
+  }),
+
+  setActiveWorkspace: publicProcedure
+    .input(z.object({ workspaceId: z.string().nullable() }))
+    .mutation(({ input }) => {
+      setActiveWorkspace(input.workspaceId);
+      return { ok: true };
+    }),
+
+  openFile: publicProcedure
+    .input(
+      z.object({
+        /**
+         * Workspace to open the file in. When omitted, falls back to the
+         * dashboard's currently active workspace.
+         */
+        workspaceId: z.string().optional(),
+        /**
+         * Either an absolute filesystem path or a workspace-relative
+         * path. Paths inside the workspace root open as normal editor
+         * tabs (routed via `/workspace/$id/code/$splat`); paths outside
+         * any workspace root open as external tabs (same surface as
+         * desktop Cmd+O / "Open File…"). May include a trailing
+         * line / column suffix in the standard `path:line[:column]` /
+         * `path:line-lineEnd` notation.
+         */
+        filePath: z.string().min(1),
+        line: z.number().int().positive().optional(),
+        lineEnd: z.number().int().positive().optional(),
+        column: z.number().int().positive().optional(),
+        /**
+         * Whether the renderer should bring the dashboard window to the
+         * foreground in addition to navigating to the file. Defaults to
+         * true. Passed through verbatim on the SSE event; the plain web
+         * build ignores it.
+         */
+        focus: z.boolean().optional(),
+      }),
+    )
+    .mutation(({ input }) => {
+      const targetWorkspaceId = input.workspaceId ?? getActiveWorkspace();
+      if (!targetWorkspaceId) {
+        throw new TRPCError({
+          code: "FAILED_PRECONDITION",
+          message:
+            "No active workspace. Open a workspace in the Band dashboard or pass --workspace.",
+        });
+      }
+
+      const workspace = resolveWorkspace(targetWorkspaceId);
+      if (!workspace) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `Workspace '${targetWorkspaceId}' not found`,
+        });
+      }
+
+      const root = workspace.worktree.path;
+
+      // Resolve the path: absolute paths are taken as-is; relative
+      // paths are resolved against the workspace root.
+      const absoluteTarget = isAbsolute(input.filePath)
+        ? resolve(input.filePath)
+        : resolve(root, input.filePath);
+
+      // Canonicalize the workspace root so symlinked path prefixes
+      // (macOS's `/var/folders` → `/private/var/folders` in particular)
+      // compare equal. The CLI canonicalizes the user's argument before
+      // sending, so a stored worktree path under `/var/...` would
+      // otherwise look "outside" its real location.
+      let canonicalRoot = root;
+      try {
+        canonicalRoot = realpathSync(root);
+      } catch {
+        // worktree may have been deleted out from under us — leave as-is
+      }
+
+      // Canonicalize the user's path the same way. `realpathSync` fails
+      // on missing files, so walk up to the deepest ancestor that does
+      // exist, canonicalize that, then re-append the trailing segments.
+      // That keeps the in-workspace check accurate for paths the user
+      // wants to *create* as well, and sidesteps a confusing IO error
+      // when the real problem is the file is just missing.
+      const canonicalTarget = canonicalizeMaybeMissing(absoluteTarget);
+
+      if (!existsSync(canonicalTarget)) {
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: `File not found: ${input.filePath}`,
+        });
+      }
+
+      // Segment-aware containment check (same invariant as the untitled
+      // save flow in CodeBrowserView): a naive `startsWith` would treat
+      // `/a/band-fork/x.ts` as inside `/a/band`.
+      const normalizedRoot = canonicalRoot.replace(/\/+$/, "");
+      const isInside =
+        canonicalTarget === normalizedRoot || canonicalTarget.startsWith(`${normalizedRoot}${sep}`);
+
+      // Two open modes share this procedure:
+      //
+      //   - In-workspace: emit a workspace-relative path so the React
+      //     shell routes to `/workspace/$id/code/$splat` (same flow as
+      //     the file tree / Quick Open dialog).
+      //   - External: file exists on disk but lives outside the active
+      //     workspace's root. Pass the absolute path through verbatim
+      //     so the FileViewer mounts it as an *external* tab
+      //     (`isExternal: true`), reading via `readExternalFile` and
+      //     skipping LSP / workspace-relative routing. Matches what
+      //     desktop Cmd+O ("Open File…") does — `band open` is just a
+      //     programmatic entrypoint into the same code path.
+      let payloadPath: string;
+      if (isInside) {
+        const relativePath =
+          canonicalTarget === normalizedRoot
+            ? ""
+            : canonicalTarget.slice(normalizedRoot.length + 1);
+        // POSIX separators on the wire — tanstack-router and
+        // `parseFileLocation` both work off `/`-separated paths.
+        payloadPath = relativePath.split(sep).join("/");
+      } else {
+        payloadPath = canonicalTarget;
+      }
+
+      const formatted = formatFileLocation(payloadPath, input.line, {
+        lineEnd: input.lineEnd,
+        column: input.column,
+      });
+
+      emit({
+        kind: "open-file",
+        workspaceId: targetWorkspaceId,
+        filePath: formatted,
+        external: !isInside,
+        focus: input.focus ?? true,
+      });
+
+      return {
+        ok: true,
+        workspaceId: targetWorkspaceId,
+        filePath: formatted,
+        external: !isInside,
+        worktreePath: root,
+      };
+    }),
+});
+
+// ---------------------------------------------------------------------------
 // Chat
 // ---------------------------------------------------------------------------
 
@@ -4106,6 +4316,7 @@ export const appRouter = t.router({
   chat: chatRouter,
   chatLayout: chatLayoutRouter,
   chats: chatsRouter,
+  editor: editorRouter,
   browserLayout: browserLayoutRouter,
   browsers: browsersRouter,
   browserHost: browserHostRouter,
