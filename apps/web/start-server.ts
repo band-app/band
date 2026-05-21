@@ -368,13 +368,29 @@ function pipeWebResponseToNodeRes(response: Response, res: ServerResponse): void
         // socket's internal buffer hits its high water mark. Without
         // awaiting `drain` here, large SSR payloads or long-running
         // tRPC streams would accumulate unbounded in Node's buffer,
-        // blowing memory on slow clients.
+        // blowing memory on slow clients. The error leg is essential
+        // for long-lived streams (tRPC subs, SSE): without it, a
+        // client that disconnects mid-stream leaves the drain Promise
+        // unresolved and the pump task leaked.
         if (!res.write(value)) {
-          await new Promise<void>((resolve) => res.once("drain", resolve));
+          await new Promise<void>((resolve, reject) => {
+            res.once("drain", resolve);
+            res.once("error", reject);
+          });
         }
       }
     };
-    pump().catch(() => res.end());
+    pump().catch((err) => {
+      // Surface stream failures so a truncated SSR / tRPC stream
+      // doesn't fail silently — without this the client sees a
+      // half-written response and the logs have no trace of why.
+      console.error("Stream pump error:", err);
+      try {
+        res.end();
+      } catch {
+        // Socket already closed — nothing to do.
+      }
+    });
   } else {
     // `.catch` so a body-read failure (or already-consumed Response)
     // doesn't bubble to the global `unhandledRejection` handler — that
@@ -947,15 +963,19 @@ async function main() {
     killAllTerminals();
     killAllServers();
 
-    // Wait briefly for any still-in-flight Phase B work to settle so
-    // we don't tear down the DB / sockets out from under it. Bounded
-    // so SIGTERM stays responsive — once the timeout fires we just
-    // exit and let Node's normal child-process cleanup handle the
-    // dangling `execFile` calls.
+    // Wait for any still-in-flight Phase B work to settle so we don't
+    // tear down the DB / sockets out from under it. `runFirstTimeSetup`
+    // can take 1-3 s on a populated $HOME (skill installer + agent
+    // detection via `execFile`), so the timeout needs to be > the
+    // documented worst case; 2 s was too tight and could fire before
+    // the skill installer's writes finished, leaving the DB closed
+    // mid-write. SIGTERM is still responsive enough at 5 s — once the
+    // timeout fires we just exit and let Node clean up dangling
+    // children.
     if (phaseBSettlePromise) {
       await Promise.race([
         phaseBSettlePromise,
-        new Promise<void>((resolve) => setTimeout(resolve, 2_000).unref()),
+        new Promise<void>((resolve) => setTimeout(resolve, 5_000).unref()),
       ]);
     }
 

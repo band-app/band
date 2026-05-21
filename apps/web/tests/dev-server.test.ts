@@ -194,7 +194,14 @@ async function trpcMutate(
 }
 
 async function trpcData<T>(res: Response): Promise<T> {
-  const body = (await res.json()) as { result: { data: T } };
+  // Throw with a descriptive message on non-2xx or on a tRPC error
+  // envelope (`{ error: … }`) rather than letting `body.result.data`
+  // dereference `undefined` and produce a confusing TypeError stack —
+  // the wrapper sees test debugging more often than success, so the
+  // failure mode should be obvious.
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+  const body = (await res.json()) as { result?: { data: T }; error?: unknown };
+  if (!body.result) throw new Error(`tRPC error: ${JSON.stringify(body.error)}`);
   return body.result.data;
 }
 
