@@ -434,7 +434,18 @@ export function TerminalPanel({
           // TUIs that distinguish Ctrl+J from Enter (Claude Code's chat:newline is
           // bound to ctrl+j = LF by default) will insert a newline, and plain shells
           // fall back to submit — same as Enter, so no regression.
+          //
+          // preventDefault() is critical here: returning false from
+          // attachCustomKeyEventHandler only stops xterm's internal _keyDown,
+          // it does NOT stop the browser from dispatching the subsequent
+          // `keypress` event for Enter — which xterm's hidden textarea then
+          // translates into a plain `\r`. Without preventDefault the byte
+          // stream is `\n\r`, and Claude Code reads the `\r` as submit (the
+          // newline is silently inserted right before submission, so it looks
+          // identical to plain Enter). Calling preventDefault here suppresses
+          // the keypress event so only the LF reaches the PTY.
           if (e.key === "Enter" && e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
+            e.preventDefault();
             terminal.input("\n");
             return false;
           }
