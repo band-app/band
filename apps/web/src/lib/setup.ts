@@ -21,23 +21,69 @@ const AGENT_CHECKS: { id: string; type: string; label: string; binary: string }[
  * it checks whether the relevant resource is already present and only acts
  * when something is missing.
  *
- * Steps:
- * 1. Install the band CLI on first launch (gated on CLI status — once
- *    `/usr/local/bin/band` exists we treat first-time setup as done).
- * 2. Ensure `codingAgents` is populated with detected agent CLIs.
- * 3. Ensure `notifications.soundOnNeedsAttention` defaults to `true`.
- * 4. Ensure Claude Code hooks are installed.
- * 5. Sync the CLI-shipped skills into each detected agent's global skills
- *    directory so a fresh install / auto-update lands the latest SKILL.md
- *    files automatically (issue: sync-cli-skills).
+ * Execution graph (warm boot — see issue #472 cold-start work):
+ *
+ *   ensureCliInstalled
+ *        │
+ *        ├─► ensureSettingsDefaults  (sequential RMW on ~/.band/settings.json)
+ *        ├─► ensureClaudeHooks
+ *        ├─► ensureSkillsInstalled
+ *        └─► ensureProjectStateInSync
+ *
+ * The CLI install gates the rest because:
+ *   - Claude hooks register a `band notify …` command and need the binary
+ *     resolvable on PATH (see `apps/web/src/lib/hooks.ts::installHooks`).
+ *   - `installSkills` spawns `band generate-skills` to render the SKILL.md
+ *     files from the live CLI schema.
+ *
+ * On warm boots `ensureCliInstalled` is just a stat (the symlink already
+ * exists) so the gate costs ~no wall time. The four downstream steps then
+ * fan out concurrently because they touch entirely different parts of the
+ * filesystem (settings.json, ~/.claude/, ~/.agents/skills/, the DB +
+ * `git worktree list`) — running them sequentially serialised hundreds of
+ * ms of independent I/O for no reason. The settings.json read-modify-write
+ * group must stay internally sequential (one reader → mutate → writer can't
+ * be interleaved with another), so `ensureSettingsDefaults` wraps that pair.
+ *
+ * `Promise.allSettled` (not `Promise.all`) so a single setup step failing
+ * never poisons the others — every `ensureXxx` already has its own
+ * try/catch and logs warns, but defense-in-depth is cheap here.
  */
 export async function runFirstTimeSetup(): Promise<void> {
   await ensureCliInstalled();
+
+  const results = await Promise.allSettled([
+    ensureSettingsDefaults(),
+    ensureClaudeHooks(),
+    ensureSkillsInstalled(),
+    ensureProjectStateInSync(),
+  ]);
+
+  // Surface any unexpected rejections — every `ensureXxx` is supposed to
+  // catch its own errors and log warns. If something escaped, log it here
+  // rather than swallowing it silently.
+  for (const r of results) {
+    if (r.status === "rejected") {
+      log.warn(
+        "Setup step failed: %s",
+        r.reason instanceof Error ? r.reason.message : String(r.reason),
+      );
+    }
+  }
+}
+
+/**
+ * Settings.json read-modify-write group. `ensureDefaultCodingAgents` and
+ * `ensureNotificationDefaults` both call `loadSettings()` → mutate →
+ * `saveSettings()` against the same `~/.band/settings.json` file. Running
+ * them concurrently would race: one's load happens before the other's
+ * save, so the later write clobbers the earlier mutation. Keep them
+ * sequential here; the rest of `runFirstTimeSetup` parallelises around
+ * this whole group.
+ */
+async function ensureSettingsDefaults(): Promise<void> {
   await ensureDefaultCodingAgents();
   ensureNotificationDefaults();
-  await ensureClaudeHooks();
-  await ensureSkillsInstalled();
-  await ensureProjectStateInSync();
 }
 
 /**
