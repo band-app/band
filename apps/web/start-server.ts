@@ -9,7 +9,7 @@ import { createAuthMiddleware, parseCookies, tokensEqual } from "./auth.ts";
 import { handleTaskStream } from "./src/api/task-stream.ts";
 import { stopBranchStatusPoller } from "./src/lib/branch-status-poller.ts";
 import { isDesktopHostConnected } from "./src/lib/browser-host.ts";
-import { listBrowsers } from "./src/lib/browser-manager.ts";
+import { listBrowsers, loadBrowsersFromDb } from "./src/lib/browser-manager.ts";
 import { handleCdpConnection } from "./src/lib/cdp-proxy.ts";
 import { captureSnapshot } from "./src/lib/cdp-targets.ts";
 import { loadChatsFromDb } from "./src/lib/chat-manager.ts";
@@ -106,11 +106,26 @@ const assets = sirv(clientDir, {
 });
 
 // OpenAPI spec is pre-generated at build time by @trpc/openapi CLI.
-// Add server base path so docs show correct /trpc/* URLs.
-const openApiDoc = JSON.parse(readFileSync(join(import.meta.dirname, "openapi.json"), "utf-8"));
-openApiDoc.servers = [{ url: "/trpc" }];
-const openApiSpec = JSON.stringify(openApiDoc, null, 2);
-const scalarHtml = getScalarHtml("/api/openapi.json");
+// Add server base path so docs show correct /trpc/* URLs. Deferred until
+// the first hit to `/api/openapi.json` or `/api/docs`: the 336 KB JSON
+// parse + mutate + `JSON.stringify(..., null, 2)` round-trip used to run
+// at module top on every boot, even when nobody requested the docs.
+// Cached for the lifetime of the process after the first request.
+let _openApiSpec: string | null = null;
+function getOpenApiSpec(): string {
+  if (_openApiSpec !== null) return _openApiSpec;
+  const openApiDoc = JSON.parse(readFileSync(join(import.meta.dirname, "openapi.json"), "utf-8"));
+  openApiDoc.servers = [{ url: "/trpc" }];
+  _openApiSpec = JSON.stringify(openApiDoc, null, 2);
+  return _openApiSpec;
+}
+
+let _scalarHtml: string | null = null;
+function getCachedScalarHtml(): string {
+  if (_scalarHtml !== null) return _scalarHtml;
+  _scalarHtml = getScalarHtml("/api/openapi.json");
+  return _scalarHtml;
+}
 
 /**
  * Serve a file from a subdirectory of a root path.
@@ -188,6 +203,16 @@ async function main() {
   // Hydrate in-memory chat pane maps from DB, resetting statuses to "idle"
   // since no agent can be running on a fresh server start.
   loadChatsFromDb();
+
+  // Hydrate the browser-tab registry too. Without this the 33-tab restore
+  // would run lazily on the renderer's first `browsers.list` call —
+  // captured at t+47 s in the boot trace on issue #472 — pushing the
+  // user-visible work out of the splash and into first-paint. After the
+  // bulk-UPDATE rewrite in `loadBrowsersFromDb` the cost is one SELECT +
+  // one UPDATE regardless of tab count, so eagerly running it here costs
+  // roughly nothing while moving the wall-time win onto the existing
+  // 9.8 s startup window.
+  loadBrowsersFromDb();
 
   // Mark any persisted "running" tasks as "failed" — no agent can be running
   // if the server just started.
@@ -335,7 +360,7 @@ async function main() {
         "Cache-Control": "no-cache",
         "Access-Control-Allow-Origin": "*",
       });
-      res.end(openApiSpec);
+      res.end(getOpenApiSpec());
       return;
     }
 
@@ -345,7 +370,7 @@ async function main() {
         "Content-Type": "text/html",
         "Cache-Control": "no-cache",
       });
-      res.end(scalarHtml);
+      res.end(getCachedScalarHtml());
       return;
     }
 
@@ -510,6 +535,14 @@ async function main() {
 
   httpServer.listen(port, "0.0.0.0", () => {
     console.log(`Web server listening on http://0.0.0.0:${port}`);
+    // Wall-time from Node process spawn (i.e. the moment the desktop
+    // shell or `pnpm start` forked this script) to the moment we're
+    // accepting requests. Single grep-able line so #472-style boot
+    // optimizations have a clean before/after number to point at;
+    // `process.uptime()` is preferred over a module-scope timer
+    // because it captures the bundle-load + module-evaluation cost
+    // too (the bundled `start-server.mjs` is ~5.5 MB).
+    console.log(`Web server boot took ${(process.uptime() * 1000).toFixed(0)} ms`);
 
     // Branch status poller is started lazily by the watcher
     // when the first subscriber connects.

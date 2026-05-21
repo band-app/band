@@ -21,23 +21,84 @@ const AGENT_CHECKS: { id: string; type: string; label: string; binary: string }[
  * it checks whether the relevant resource is already present and only acts
  * when something is missing.
  *
- * Steps:
- * 1. Install the band CLI on first launch (gated on CLI status — once
- *    `/usr/local/bin/band` exists we treat first-time setup as done).
- * 2. Ensure `codingAgents` is populated with detected agent CLIs.
- * 3. Ensure `notifications.soundOnNeedsAttention` defaults to `true`.
- * 4. Ensure Claude Code hooks are installed.
- * 5. Sync the CLI-shipped skills into each detected agent's global skills
- *    directory so a fresh install / auto-update lands the latest SKILL.md
- *    files automatically (issue: sync-cli-skills).
+ * Execution graph (warm boot — see issue #472 cold-start work):
+ *
+ *   ensureProjectStateInSync ─────────────────────────────────┐
+ *                                                             │
+ *   ensureCliInstalled ──┬─► ensureSettingsDefaults  ──────── ─┤
+ *                        ├─► ensureClaudeHooks      ──────── ─┤
+ *                        └─► ensureSkillsInstalled  ──────── ─┘
+ *                                                             │
+ *                                                            await
+ *
+ * Two parallelism dimensions:
+ *
+ *   1. The CLI install gates `ensureClaudeHooks` and `ensureSkillsInstalled`
+ *      because both need `band` resolvable on PATH (the hooks register a
+ *      `band notify …` command; the skills install spawns
+ *      `band generate-skills`). `ensureSettingsDefaults` doesn't strictly
+ *      need the CLI, but it's grouped here for code clarity and the cost
+ *      is negligible on warm boots.
+ *   2. `ensureProjectStateInSync` (DB + `git worktree list`) doesn't touch
+ *      the band CLI at all — kick it off *before* the CLI gate so its
+ *      ~100 ms of git fork/exec overlaps with the CLI stat AND the
+ *      downstream group, instead of sitting in series after them. On the
+ *      author's 28-project host this is the longest single step in the
+ *      pipeline, so getting it off the critical path is the biggest win.
+ *
+ * Settings.json RMW must stay internally sequential (one reader → mutate →
+ * writer can't be interleaved with another), so `ensureSettingsDefaults`
+ * wraps that pair.
+ *
+ * `Promise.allSettled` (not `Promise.all`) so one failing step never
+ * poisons the others — every `ensureXxx` already has its own try/catch
+ * and logs warns, but defense-in-depth is cheap here. The
+ * `projectSync` promise is created before the CLI await; if
+ * `ensureCliInstalled` were to throw synchronously (it doesn't — internal
+ * try/catch), the project sync promise would still be in flight without
+ * a handler attached. That's fine because `ensureProjectStateInSync`
+ * itself has a try/catch and never rejects, so no unhandled-rejection
+ * risk exists today. If you ever drop that try/catch, attach a
+ * `.catch()` here to preserve the invariant.
  */
 export async function runFirstTimeSetup(): Promise<void> {
+  // Kick this off immediately — independent of CLI install and settings.
+  const projectSync = ensureProjectStateInSync();
+
   await ensureCliInstalled();
+
+  const results = await Promise.allSettled([
+    projectSync,
+    ensureSettingsDefaults(),
+    ensureClaudeHooks(),
+    ensureSkillsInstalled(),
+  ]);
+
+  // Surface any unexpected rejections — every `ensureXxx` is supposed to
+  // catch its own errors and log warns. If something escaped, log it here
+  // rather than swallowing it silently.
+  for (const r of results) {
+    if (r.status === "rejected") {
+      log.warn(
+        "Setup step failed: %s",
+        r.reason instanceof Error ? r.reason.message : String(r.reason),
+      );
+    }
+  }
+}
+
+/**
+ * Settings.json read-modify-write group. `ensureDefaultCodingAgents` and
+ * `ensureNotificationDefaults` both call `loadSettings()` → mutate →
+ * `saveSettings()` against the same `~/.band/settings.json` file. Running
+ * them concurrently would race: one's load happens before the other's
+ * save, so the later write clobbers the earlier mutation. Keep them
+ * sequential here; the rest of `runFirstTimeSetup` parallelises around
+ * this whole group.
+ */
+async function ensureSettingsDefaults(): Promise<void> {
   await ensureDefaultCodingAgents();
   ensureNotificationDefaults();
-  await ensureClaudeHooks();
-  await ensureSkillsInstalled();
-  await ensureProjectStateInSync();
 }
 
 /**

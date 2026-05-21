@@ -15,6 +15,7 @@ import {
   deletePanelStatesForWorkspace,
   insertPanelState,
   listPanelStates,
+  resetPanelStatesToIdle,
   updatePanelState,
 } from "./panel-state-store";
 import { getAgentDefinition, loadSettings } from "./state";
@@ -391,18 +392,19 @@ export function removeWorkspaceChats(workspaceId: string): void {
  */
 export function loadChatsFromDb(): number {
   _initialized = true; // Mark as initialized so ensureInitialized() is a no-op
-  const rows = listPanelStates(PANEL_TYPE);
   const now = Date.now();
 
+  // Single bulk UPDATE: rewrite the `status` field inside every chat row's
+  // JSON blob to "idle" in one round-trip (one WAL fsync) instead of N
+  // per-row UPDATEs. Skipped for rows already at "idle" so a clean reboot
+  // doesn't churn `updated_at` for the whole registry. The in-memory loop
+  // below forces `status: "idle"` regardless of what the row says, so this
+  // is purely about keeping the persisted state in sync with the runtime.
+  resetPanelStatesToIdle(PANEL_TYPE, now);
+
+  const rows = listPanelStates(PANEL_TYPE);
   for (const row of rows) {
     const parsed = JSON.parse(row.state) as ChatPanelState;
-
-    // Reset status to idle on startup
-    parsed.status = "idle";
-    updatePanelState(row.id, {
-      state: JSON.stringify(parsed),
-      updatedAt: now,
-    });
 
     const session: ChatSession = {
       id: row.id,
@@ -414,6 +416,10 @@ export function loadChatsFromDb(): number {
       activeSessionId: parsed.activeSessionId ?? undefined,
       activeSessionSummary: parsed.activeSessionSummary ?? undefined,
       activeSessionLastModified: parsed.activeSessionLastModified ?? undefined,
+      // Force idle on the in-memory copy: even if the bulk UPDATE skipped
+      // this row because it was already "idle" on disk, or — in some odd
+      // race — wrote between the UPDATE and the SELECT, we never want to
+      // hand the rest of the server a session in a non-idle state on boot.
       status: "idle",
     };
     addToIndex(session);

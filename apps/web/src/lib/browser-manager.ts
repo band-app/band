@@ -13,6 +13,7 @@ import {
   deletePanelStatesForWorkspace,
   insertPanelState,
   listPanelStates,
+  resetPanelStatesToIdle,
   updatePanelState,
 } from "./panel-state-store";
 
@@ -266,18 +267,18 @@ export function removeWorkspaceBrowsers(workspaceId: string): void {
  */
 export function loadBrowsersFromDb(): number {
   _initialized = true;
-  const rows = listPanelStates(PANEL_TYPE);
   const now = Date.now();
 
+  // Same bulk-UPDATE pattern as `loadChatsFromDb` — collapses the per-row
+  // status reset into a single SQL statement (one WAL fsync) regardless of
+  // tab count. See `resetPanelStatesToIdle` for the JSON rewrite. The
+  // hydration loop below forces `status: "idle"` on the in-memory copy
+  // even when the row was already idle on disk.
+  resetPanelStatesToIdle(PANEL_TYPE, now);
+
+  const rows = listPanelStates(PANEL_TYPE);
   for (const row of rows) {
     const parsed = JSON.parse(row.state) as BrowserPanelState;
-
-    // Reset status to idle on startup
-    parsed.status = "idle";
-    updatePanelState(row.id, {
-      state: JSON.stringify(parsed),
-      updatedAt: now,
-    });
 
     const tab: BrowserTab = {
       id: row.id,
