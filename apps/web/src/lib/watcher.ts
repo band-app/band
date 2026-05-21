@@ -31,7 +31,8 @@ export interface StatusEvent {
     | "terminal-created"
     | "terminal-killed"
     | "chat-created"
-    | "chat-removed";
+    | "chat-removed"
+    | "open-file";
   status?: WorkspaceStatus;
   statuses?: WorkspaceStatus[];
   workspaceId?: string;
@@ -45,6 +46,28 @@ export interface StatusEvent {
   browserId?: string;
   terminalId?: string;
   chatId?: string;
+  /**
+   * For `kind: "open-file"`: workspace-relative file path with optional
+   * line / column suffix in the standard `path:line[:column]` /
+   * `path:line-lineEnd` notation. Parsed by the client via
+   * `parseFileLocation` from `@band-app/dashboard-core`. Backs the
+   * `band open` CLI command — see `editorRouter.openFile`.
+   */
+  filePath?: string;
+  /**
+   * For `kind: "open-file"`: whether to bring the dashboard window to
+   * the foreground in addition to navigating to the file. Defaults to
+   * true. Wired through the desktop IPC bridge by the renderer; the
+   * plain web build ignores the field.
+   */
+  focus?: boolean;
+  /**
+   * For `kind: "open-file"`: whether the file lives outside the
+   * resolved workspace's root. When true, `filePath` carries an
+   * absolute filesystem path and the renderer should open it as an
+   * external tab (same surface as desktop Cmd+O / "Open File…").
+   */
+  external?: boolean;
 }
 
 type StatusListener = (event: StatusEvent) => void;

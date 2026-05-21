@@ -27,15 +27,16 @@ import {
   Settings as SettingsIcon,
   Terminal as TerminalIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { BrowserHostBridge } from "../components/BrowserHostBridge";
 import { DesktopTitleBar, type PanelItem } from "../components/DesktopTitleBar";
-import { SharedDockviewLayout } from "../components/SharedDockviewLayout";
+import { crossPanelHandlers, SharedDockviewLayout } from "../components/SharedDockviewLayout";
 import { ToolbarOverflowMenuItems, ToolbarOverflowProvider } from "../components/ToolbarButtons";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useNavigationHistory } from "../hooks/useNavigationHistory";
 import { useZoom } from "../hooks/useZoom";
 import { getElectronBridge } from "../lib/desktop-ipc";
+import { dispatchOpenFileEvent } from "../lib/dispatch-open-file";
 import { isDesktop } from "../lib/is-desktop";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
 import {
@@ -320,6 +321,60 @@ function AppShell() {
   const workspacePath = useDashboardStore((s) =>
     activeWorkspaceId ? s.statuses.get(activeWorkspaceId)?.worktreePath : undefined,
   );
+
+  // Inform the server which workspace the user is currently focused on so
+  // the `band open` CLI command knows where to route files when called
+  // without an explicit `--workspace` flag. The adapter de-duplicates so
+  // it's safe to call on every render — the mutation only fires when the
+  // value actually changes.
+  // `adapter` is a module-level singleton (created once per page load)
+  // and is intentionally omitted from the dep array — biome's
+  // `useExhaustiveDependencies` rejects outer-scope values as deps
+  // because mutating them doesn't trigger a re-render. If we ever
+  // promote it to a context or prop, list it then.
+  useEffect(() => {
+    void adapter.setActiveWorkspace(activeWorkspaceId);
+  }, [activeWorkspaceId]);
+
+  // Listen for `band open` events from the SSE stream and route the
+  // dashboard to the requested file. The actual dispatch logic lives
+  // in `lib/dispatch-open-file.ts` so it can be tested in isolation
+  // without spinning up the dockview / router; see that file for the
+  // desktop-vs-mobile branching rationale.
+  //
+  // `useDesktopLayout` is read through a ref so a viewport resize
+  // doesn't tear down the SSE subscription — the dispatcher picks up
+  // the current layout at event time instead.
+  const useDesktopLayoutRef = useRef(useDesktopLayout);
+  useDesktopLayoutRef.current = useDesktopLayout;
+  useEffect(() => {
+    const unsubscribe = adapter.subscribeStatusEvents((event) => {
+      dispatchOpenFileEvent(event, {
+        isDockview: useDesktopLayoutRef.current,
+        handlers: {
+          onOpenFile: crossPanelHandlers.onOpenFile,
+          onActivateFilesPanel: crossPanelHandlers.onActivateFilesPanel,
+          navigateInWorkspace: (workspaceId, filePath) =>
+            router.navigate({
+              to: "/workspace/$workspaceId/code/$",
+              params: {
+                workspaceId: encodeURIComponent(workspaceId),
+                _splat: filePath,
+              },
+            }),
+          navigateToWorkspaceCode: (workspaceId) =>
+            router.navigate({
+              to: "/workspace/$workspaceId/code",
+              params: { workspaceId: encodeURIComponent(workspaceId) },
+            }),
+        },
+      });
+    });
+    return unsubscribe;
+    // `adapter` (module-level singleton) and `crossPanelHandlers`
+    // (module-level mutable registry) are intentionally omitted from
+    // deps — see the comment on the setActiveWorkspace effect above.
+  }, [router]);
 
   // Panel items for the title bar panel switcher dropdown
   const panelItems: PanelItem[] = useMemo(

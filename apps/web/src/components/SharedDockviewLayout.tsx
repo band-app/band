@@ -111,16 +111,30 @@ interface CrossPanelHandlers {
   onFileOpened: (workspaceId: string) => void;
   /** Called by a panel to register/unregister its find-in-file callback. */
   onFindInFile: (workspaceId: string, fn: (() => void) | null) => void;
+  /**
+   * Bring the Files panel to the foreground without touching its
+   * current-file state. Used by the `band open <external-file>` flow:
+   * the external path is queued via `lib/pending-external-open.ts`
+   * and the `CodeBrowserView` mounted inside the Files panel drains
+   * it, but the panel itself still needs to be `setActive()`'d so
+   * the user actually *sees* the new tab. Guarded on
+   * active-workspace so a CLI call targeting a non-visible workspace
+   * doesn't hijack the panel switcher.
+   */
+  onActivateFilesPanel: (workspaceId: string) => void;
 }
 
 // Mutable module-level handlers — SharedDockviewLayout writes them on every
 // render so per-workspace callbacks always reference the latest closure
-// without re-rendering every cached panel child.
-const crossPanelHandlers: CrossPanelHandlers = {
+// without re-rendering every cached panel child. Exported so non-dockview
+// call sites (e.g. the SSE listener in `__root.tsx`) can drive the dockview
+// without owning a dockview API reference.
+export const crossPanelHandlers: CrossPanelHandlers = {
   onOpenFile: () => {},
   onSelectFile: () => {},
   onFileOpened: () => {},
   onFindInFile: () => {},
+  onActivateFilesPanel: () => {},
 };
 
 // ---------------------------------------------------------------------------
@@ -822,6 +836,16 @@ export function SharedDockviewLayout() {
     else findInFileRegistry.current.delete(workspaceId);
   }, []);
 
+  const handleActivateFilesPanel = useCallback((workspaceId: string) => {
+    // Only activate when the request targets the currently visible
+    // workspace — same invariant as `handleOpenFile`. A cached but
+    // invisible workspace must not be allowed to flip the panel
+    // switcher.
+    if (workspaceId === activeWorkspaceIdRef.current) {
+      apiRef.current?.getPanel("files")?.api.setActive();
+    }
+  }, []);
+
   // Mirror the handlers into the module-level registry so panel children
   // (which can't reach into a closure across the dockview boundary) can
   // call them.
@@ -829,6 +853,7 @@ export function SharedDockviewLayout() {
   crossPanelHandlers.onFileOpened = handleFileOpened;
   crossPanelHandlers.onSelectFile = handleSelectFile;
   crossPanelHandlers.onFindInFile = handleSetFindInFile;
+  crossPanelHandlers.onActivateFilesPanel = handleActivateFilesPanel;
 
   // ---------------------------------------------------------------------
   // Command palette

@@ -59,6 +59,18 @@ enum Commands {
         #[command(subcommand)]
         cmd: TunnelCmd,
     },
+    /// Open a file in the active Band workspace's editor pane
+    Open {
+        /// Path to the file (absolute, or relative to cwd). Optionally
+        /// suffixed with `:line` / `:line:col` / `:line-lineEnd`.
+        file_path: String,
+        /// Workspace ID (overrides the dashboard's active workspace)
+        #[arg(long)]
+        workspace: Option<String>,
+        /// Don't raise the dashboard window to the foreground after opening
+        #[arg(long = "no-focus")]
+        no_focus: bool,
+    },
     /// Receive hook notifications from Claude Code (reads JSON from stdin)
     Notify,
     /// Show command schemas as JSON
@@ -584,6 +596,11 @@ fn main() {
             TunnelCmd::Start => cmd_tunnel_start(),
             TunnelCmd::Stop => cmd_tunnel_stop(),
         },
+        Commands::Open {
+            file_path,
+            workspace,
+            no_focus,
+        } => cmd_open(&file_path, workspace.as_deref(), !no_focus),
         Commands::Notify => cmd_notify(),
         Commands::Schema { .. } => unreachable!(),
         Commands::GenerateSkills { output_dir, filter } => {
@@ -1994,6 +2011,173 @@ fn cmd_tunnel_stop() -> Result<CommandResult, String> {
     })
 }
 
+// --- Open command ---
+
+/// Split a `path:line[:column]` / `path:line-lineEnd` suffix off the tail
+/// of a user-supplied file argument. Mirrors `parseFileLocation` in
+/// `packages/dashboard-core/src/lib/file-location.ts` — the server speaks
+/// the same syntax on the wire, but we have to strip it before resolving
+/// the path against the filesystem because a colon in the middle of a
+/// real Unix filename is rare-but-legal.
+///
+/// Returns `(filePath, line, lineEnd, column)`. Numeric components are
+/// `None` when the input doesn't carry that piece.
+fn split_file_location(raw: &str) -> (String, Option<u32>, Option<u32>, Option<u32>) {
+    // Try :line-lineEnd
+    if let Some(idx) = raw.rfind(':') {
+        let tail = &raw[idx + 1..];
+        if let Some(dash) = tail.find('-') {
+            let (a, b) = (&tail[..dash], &tail[dash + 1..]);
+            if let (Ok(line), Ok(end)) = (a.parse::<u32>(), b.parse::<u32>()) {
+                // Reject inverted ranges like `:10-5` — letting them through
+                // would forward a backwards `(line=10, lineEnd=5)` pair to
+                // the server, which round-trips through `formatFileLocation`
+                // and reaches the editor as a malformed selection. Falls
+                // through to the other suffix branches; none of them match
+                // a `digit-digit` tail, so the suffix is treated as part of
+                // the filename and the server returns a clean "File not
+                // found" error.
+                if line > 0 && end > 0 && line <= end {
+                    return (raw[..idx].to_string(), Some(line), Some(end), None);
+                }
+            }
+        }
+    }
+
+    // Try :line:column (two trailing numeric components).
+    //
+    // The `> 0` guards match the server's `z.number().int().positive()`
+    // validators — 1-based, no zero. This means `file.rs:42:0` /
+    // `file.rs:0` / `file.rs:0:5` deliberately fall through every
+    // suffix branch and the raw colon-string ends up as the filename.
+    // The server then surfaces a clean "File not found" rather than
+    // silently treating `:0` as "no column" or "no line." It's a
+    // surprising edge case for the user but the alternative —
+    // accepting zero as a sentinel — would let a typo silently
+    // suppress positioning. Errs on the side of visibility.
+    // `rsplitn` walks right-to-left, so name the bindings to match the
+    // iterator order (rightmost = col, middle = line, head = path).
+    // Otherwise a future reader skimming `last`/`middle`/`head`
+    // left-to-right will swap line and col in their mental model.
+    let mut parts = raw.rsplitn(3, ':');
+    let rightmost = parts.next();
+    let middle = parts.next();
+    let head = parts.next();
+    if let (Some(head), Some(middle), Some(rightmost)) = (head, middle, rightmost) {
+        if let (Ok(line), Ok(col)) = (middle.parse::<u32>(), rightmost.parse::<u32>()) {
+            if line > 0 && col > 0 {
+                return (head.to_string(), Some(line), None, Some(col));
+            }
+        }
+    }
+
+    // Try :line (single trailing numeric component). Same `> 0`
+    // policy as above.
+    //
+    // The `!contains(':')` guard on the head is load-bearing: without
+    // it, an input like `file.rs:0:5` that fails the `:line:col` guard
+    // above would re-enter this branch, find the final `:5`, parse 5
+    // as the line, and return `path="file.rs:0", line=5` — which the
+    // server then surfaces as a confusing "File not found: file.rs:0".
+    // The guard skips this branch whenever a colon survives in the
+    // candidate path, so unmatched colon-suffix inputs keep the full
+    // raw string as the filename.
+    if let Some(idx) = raw.rfind(':') {
+        let head = &raw[..idx];
+        let tail = &raw[idx + 1..];
+        if !head.contains(':') {
+            if let Ok(line) = tail.parse::<u32>() {
+                if line > 0 {
+                    return (head.to_string(), Some(line), None, None);
+                }
+            }
+        }
+    }
+
+    (raw.to_string(), None, None, None)
+}
+
+fn cmd_open(
+    file_path: &str,
+    workspace: Option<&str>,
+    focus: bool,
+) -> Result<CommandResult, String> {
+    let (path_only, line, line_end, column) = split_file_location(file_path);
+    if path_only.is_empty() {
+        return Err("File path is empty".to_string());
+    }
+
+    // Resolve relative paths against cwd so the server sees an absolute
+    // path it can validate against the workspace root. Absolute paths are
+    // passed through unchanged.
+    let resolved: std::path::PathBuf = if std::path::Path::new(&path_only).is_absolute() {
+        std::path::PathBuf::from(&path_only)
+    } else {
+        let cwd = std::env::current_dir()
+            .map_err(|e| format!("Failed to read current directory: {e}"))?;
+        cwd.join(&path_only)
+    };
+    // Canonicalize when possible so the server sees the real on-disk path
+    // (e.g. resolves `./foo` and `..`). When the file doesn't exist yet,
+    // fall back to the joined path so the server can produce a clear
+    // "file not found" error rather than a generic IO failure here.
+    let absolute = std::fs::canonicalize(&resolved).unwrap_or(resolved);
+    let absolute_str = absolute.to_string_lossy().into_owned();
+
+    let client = api::ApiClient::from_settings()?;
+
+    let mut input = serde_json::json!({
+        "filePath": absolute_str,
+        "focus": focus,
+    });
+    if let Some(ws) = workspace {
+        input["workspaceId"] = serde_json::json!(ws);
+    }
+    if let Some(line) = line {
+        input["line"] = serde_json::json!(line);
+    }
+    if let Some(end) = line_end {
+        input["lineEnd"] = serde_json::json!(end);
+    }
+    if let Some(col) = column {
+        input["column"] = serde_json::json!(col);
+    }
+
+    let data = client.trpc_mutate("editor.openFile", &input)?;
+    // Surface a clear error rather than printing "Opened <path> in " if
+    // the server's response shape ever drifts — the three fields below
+    // are part of the editor.openFile contract; an empty string here
+    // would be a silent bug.
+    let workspace_id = data
+        .get("workspaceId")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "server response missing workspaceId".to_string())?;
+    let resolved_path = data
+        .get("filePath")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "server response missing filePath".to_string())?;
+    let external = data
+        .get("external")
+        .and_then(serde_json::Value::as_bool)
+        .ok_or_else(|| "server response missing external".to_string())?;
+
+    let where_label = if external {
+        format!("{workspace_id} (external)")
+    } else {
+        workspace_id.to_string()
+    };
+
+    Ok(CommandResult {
+        text: format!("Opened {resolved_path} in {where_label}\n"),
+        json: serde_json::json!({
+            "ok": true,
+            "workspaceId": workspace_id,
+            "filePath": resolved_path,
+            "external": external,
+        }),
+    })
+}
+
 // --- Notify command ---
 
 fn cmd_notify() -> Result<CommandResult, String> {
@@ -2420,6 +2604,16 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "terminal_id", "type": "string", "required": false, "positional": true, "description": "Terminal ID (defaults to the cwd workspace's first terminal)"},
             ],
             "notes": "Streams terminal output to stdout while reading stdin line-by-line and sending it to the terminal.\nPress Ctrl+C to detach. Best for running commands, not full TUI interaction (use web UI for that)."
+        }),
+        serde_json::json!({
+            "name": "open",
+            "description": "Open a file in the active Band workspace's editor pane",
+            "parameters": [
+                {"name": "file_path", "type": "string", "required": true, "positional": true, "description": "Path to the file (absolute, or relative to cwd). Optionally suffixed with ':line', ':line:col', or ':line-lineEnd'."},
+                {"name": "--workspace", "type": "string", "required": false, "description": "Workspace ID (overrides the dashboard's active workspace)"},
+                {"name": "--no-focus", "type": "boolean", "required": false, "description": "Don't raise the dashboard window to the foreground after opening"},
+            ],
+            "notes": "Opens the file in the dashboard's currently focused workspace. When `--workspace` is omitted, the server uses the workspace most recently focused in the Band dashboard — exits non-zero if no workspace is active. Relative paths are resolved against the current working directory. Paths inside the workspace open as normal editor tabs; paths outside any workspace root open as external tabs (same surface as desktop Cmd+O / \"Open File…\"). Line/column suffixes (`src/main.rs:42:5`, `src/main.rs:5-10`) are supported and dropped into the editor's cursor position.\n\nExample:\n```sh\n# Open the file in whichever workspace the dashboard is currently focused on\nband open src/main.rs\n\n# Jump to line 42, column 5\nband open src/main.rs:42:5\n\n# Override the active-workspace fallback\nband open src/main.rs --workspace my-app/feat/auth\n\n# An out-of-workspace file opens as an external tab (workspace-relative\n# routing is bypassed; the FileViewer reads via the server's\n# readExternalFile capability).\nband open ~/Downloads/v3.js\n```"
         }),
         serde_json::json!({
             "name": "notify",

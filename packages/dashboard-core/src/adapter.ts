@@ -68,6 +68,18 @@ export interface DashboardAdapter {
   subscribeStatusEvents(handler: (event: Record<string, unknown>) => void): Unsubscribe;
 
   /**
+   * Tell the server which workspace the user is currently looking at. The
+   * value is process-local on the server (resets on restart) and is read by
+   * the `band open` CLI command so users can fire a file at "wherever I'm
+   * focused right now" without naming the workspace explicitly.
+   *
+   * Pass `null` when no workspace is active (e.g. the user is on the
+   * index route). Implementations may debounce or short-circuit when the
+   * value hasn't changed.
+   */
+  setActiveWorkspace(workspaceId: string | null): Promise<void>;
+
+  /**
    * Subscribe to external file-system changes inside a workspace. The
    * server emits one event per affected parent directory (workspace-
    * relative path; "" for the root). The FileBrowser uses this to

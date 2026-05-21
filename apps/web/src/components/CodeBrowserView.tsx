@@ -62,6 +62,7 @@ import { isUntitledPath, useFileTabs } from "../hooks/useFileTabs";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useTabState } from "../hooks/useTabState";
 import { pathInside } from "../lib/path-inside";
+import { consumeExternalOpen, subscribeExternalOpens } from "../lib/pending-external-open";
 import { FileTabBar } from "./FileTabBar";
 import type { MarkdownPreviewHandle, MarkdownPreviewMatchInfo } from "./MarkdownPreview";
 import { MarkdownPreview } from "./MarkdownPreview";
@@ -1313,20 +1314,45 @@ export function CodeBrowserView({
   // -------------------------------------------------------------------------
   const capabilities = useCapabilities();
   const pickFile = capabilities.pickFile;
+
+  /**
+   * Open an absolute filesystem path as an external editor tab.
+   *
+   * Shared by:
+   *   - `handleOpenExternalFile` below (desktop Cmd+O → OS file picker)
+   *   - The pending-external-open drain (CLI `band open <abs>` for files
+   *     outside the active workspace's root — see
+   *     `lib/pending-external-open.ts`)
+   *
+   * We deliberately do NOT call `onSelectFile` / push to editor history
+   * — the route only carries workspace-relative paths, and pushing an
+   * absolute path would corrupt the back/forward stack. External tabs
+   * remain reachable via the tab bar and Cmd+W close.
+   */
+  const openExternalPath = useCallback(
+    (absolutePath: string, opts?: { line?: number; lineEnd?: number; column?: number }) => {
+      fileTabs.openTabExternal(absolutePath);
+      setViewFilePath(absolutePath);
+      setViewLine(opts?.line);
+      setViewLineEnd(opts?.lineEnd);
+      setViewColumn(opts?.column);
+    },
+    // `fileTabs` itself is a new object reference every render
+    // (`useFileTabs` returns an object literal), but
+    // `fileTabs.openTabExternal` is wrapped in `useCallback` inside the
+    // hook and therefore stable across renders. Listing the property
+    // here rather than `fileTabs` itself avoids spurious re-creation of
+    // `openExternalPath` (and the downstream pending-external-open
+    // drain effect) on every parent render.
+    [fileTabs.openTabExternal],
+  );
+
   const handleOpenExternalFile = useCallback(async () => {
     if (!pickFile) return;
     const absolutePath = await pickFile();
     if (!absolutePath) return;
-    fileTabs.openTabExternal(absolutePath);
-    setViewFilePath(absolutePath);
-    setViewLine(undefined);
-    setViewLineEnd(undefined);
-    setViewColumn(undefined);
-    // We deliberately do NOT call onSelectFile / push to editor history —
-    // the route only carries workspace-relative paths, and pushing an
-    // absolute path would corrupt the back/forward stack. External tabs
-    // remain reachable via the tab bar and Cmd+W close.
-  }, [pickFile, fileTabs.openTabExternal]);
+    openExternalPath(absolutePath);
+  }, [pickFile, openExternalPath]);
 
   // Surface the action via the same command-palette event pattern as
   // Quick Open / Search in Files. Listened to here so the desktop-shell
@@ -1352,6 +1378,39 @@ export function CodeBrowserView({
     window.addEventListener("band:open-file-external", handler);
     return () => window.removeEventListener("band:open-file-external", handler);
   }, [pickFile, handleOpenExternalFile, workspaceId]);
+
+  // Direct external-open: the CLI's `band open <abs>` for files outside
+  // any workspace root fans out via the status SSE stream → __root.tsx,
+  // which enqueues into the pending-external-open store *before*
+  // navigating us into existence. We drain the queue synchronously here
+  // — once on mount (catches the pre-mount enqueue) and again from the
+  // subscriber callback (catches subsequent CLI calls while we're
+  // mounted). No event-timing race: the store is module-level so the
+  // payload survives between the navigate and our first effect tick.
+  //
+  // Not gated on `pickFile` — the path comes from a trusted server-side
+  // `editor.openFile` mutation, so the same `readExternalFile`
+  // capability the picker flow uses is enough.
+  //
+  // Filtered by workspaceId so multi-workspace dockview setups only
+  // open the tab in the workspace the CLI targeted.
+  useEffect(() => {
+    const drain = () => {
+      const pending = consumeExternalOpen(workspaceId);
+      if (!pending) return;
+      const loc = parseFileLocation(pending.filePath);
+      openExternalPath(loc.filePath, {
+        line: loc.line,
+        lineEnd: loc.lineEnd,
+        column: loc.column,
+      });
+    };
+    // Drain anything queued before we mounted (the common case for
+    // `band open` when the user wasn't already on the code route).
+    drain();
+    // And subscribe for subsequent enqueues while we're mounted.
+    return subscribeExternalOpens(drain);
+  }, [workspaceId, openExternalPath]);
 
   // -------------------------------------------------------------------------
   // Untitled tabs (issue #434) — empty scratch buffer with save-as flow.

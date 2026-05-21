@@ -194,6 +194,27 @@ export class WebDashboardAdapter implements DashboardAdapter {
     return this.subscribeStatusStream(handler);
   }
 
+  /**
+   * Cache so we only post to the server when the value actually changes —
+   * the React tree can re-render and call this on routes that don't
+   * change the workspace, and we don't want to spam the mutation.
+   */
+  private lastActiveWorkspaceId: string | null | undefined = undefined;
+
+  async setActiveWorkspace(workspaceId: string | null): Promise<void> {
+    if (this.lastActiveWorkspaceId === workspaceId) return;
+    this.lastActiveWorkspaceId = workspaceId;
+    try {
+      await this.trpc.editor.setActiveWorkspace.mutate({ workspaceId });
+    } catch {
+      // Best-effort: the active-workspace hint is a UX nicety, not a
+      // correctness invariant. Reset the cache so the next change attempt
+      // re-posts (rather than silently agreeing with a stale value the
+      // server never received).
+      this.lastActiveWorkspaceId = undefined;
+    }
+  }
+
   subscribeAgentStatus(
     onSnapshot: (statuses: WorkspaceStatus[]) => void,
     onUpdate: (status: WorkspaceStatus) => void,
