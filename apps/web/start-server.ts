@@ -106,11 +106,26 @@ const assets = sirv(clientDir, {
 });
 
 // OpenAPI spec is pre-generated at build time by @trpc/openapi CLI.
-// Add server base path so docs show correct /trpc/* URLs.
-const openApiDoc = JSON.parse(readFileSync(join(import.meta.dirname, "openapi.json"), "utf-8"));
-openApiDoc.servers = [{ url: "/trpc" }];
-const openApiSpec = JSON.stringify(openApiDoc, null, 2);
-const scalarHtml = getScalarHtml("/api/openapi.json");
+// Add server base path so docs show correct /trpc/* URLs. Deferred until
+// the first hit to `/api/openapi.json` or `/api/docs`: the 336 KB JSON
+// parse + mutate + `JSON.stringify(..., null, 2)` round-trip used to run
+// at module top on every boot, even when nobody requested the docs.
+// Cached for the lifetime of the process after the first request.
+let _openApiSpec: string | null = null;
+function getOpenApiSpec(): string {
+  if (_openApiSpec !== null) return _openApiSpec;
+  const openApiDoc = JSON.parse(readFileSync(join(import.meta.dirname, "openapi.json"), "utf-8"));
+  openApiDoc.servers = [{ url: "/trpc" }];
+  _openApiSpec = JSON.stringify(openApiDoc, null, 2);
+  return _openApiSpec;
+}
+
+let _scalarHtml: string | null = null;
+function getCachedScalarHtml(): string {
+  if (_scalarHtml !== null) return _scalarHtml;
+  _scalarHtml = getScalarHtml("/api/openapi.json");
+  return _scalarHtml;
+}
 
 /**
  * Serve a file from a subdirectory of a root path.
@@ -335,7 +350,7 @@ async function main() {
         "Cache-Control": "no-cache",
         "Access-Control-Allow-Origin": "*",
       });
-      res.end(openApiSpec);
+      res.end(getOpenApiSpec());
       return;
     }
 
@@ -345,7 +360,7 @@ async function main() {
         "Content-Type": "text/html",
         "Cache-Control": "no-cache",
       });
-      res.end(scalarHtml);
+      res.end(getCachedScalarHtml());
       return;
     }
 
