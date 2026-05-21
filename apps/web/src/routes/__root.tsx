@@ -36,9 +36,9 @@ import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useNavigationHistory } from "../hooks/useNavigationHistory";
 import { useZoom } from "../hooks/useZoom";
 import { getElectronBridge } from "../lib/desktop-ipc";
+import { dispatchOpenFileEvent } from "../lib/dispatch-open-file";
 import { isDesktop } from "../lib/is-desktop";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
-import { enqueueExternalOpen } from "../lib/pending-external-open";
 import {
   applyZoomLevel,
   applyZoomLevelToDom,
@@ -332,88 +332,38 @@ function AppShell() {
   }, [activeWorkspaceId]);
 
   // Listen for `band open` events from the SSE stream and route the
-  // dashboard to the requested file. The CLI calls
-  // `editor.openFile` which fans out via `emit({kind: "open-file"})`;
-  // this listener closes the loop.
-  //
-  // Two rendering models, two dispatch paths:
-  //
-  //   - Desktop / wide-web (`useDesktopLayout` true): the dockview
-  //     overlays the route Outlet, and `DesktopWorkspaceLayout`
-  //     `returns null` — i.e. the `/workspace/$id/code/$splat`
-  //     subtree is matched by the router but never renders. URL
-  //     navigation alone does NOTHING visible here. We have to:
-  //       • write the file into the per-workspace state store
-  //         (so the dockview-hosted `CodeBrowserView` picks it up
-  //         via its `openFilePath` prop), AND
-  //       • flip the Files panel to `setActive()` so the user
-  //         actually sees the new tab instead of staying in
-  //         whichever panel they were in (typically Terminal,
-  //         because `band open` is most often run from the Band
-  //         terminal pane).
-  //     Both happen inside `crossPanelHandlers.onOpenFile`. For
-  //     external paths, we still enqueue (the `CodeBrowserView` in
-  //     the Files panel is always mounted in dockview and drains
-  //     the queue) but we additionally call
-  //     `onActivateFilesPanel` to surface it.
-  //
-  //   - Mobile / narrow web (`useDesktopLayout` false): pure URL-
-  //     driven. The `code/$splat` route mounts `CodeBrowserView`
-  //     directly via the workspace layout's `<Outlet />`, and tab
-  //     switching is also URL-driven via `WorkspaceTabNav`.
-  //
-  // Route navigation can't carry absolute paths (they'd corrupt the
-  // URL and the back/forward stack), so external files use a
-  // pre-mount-safe `pending-external-open` store regardless of
-  // layout — see `lib/pending-external-open.ts`.
+  // dashboard to the requested file. The actual dispatch logic lives
+  // in `lib/dispatch-open-file.ts` so it can be tested in isolation
+  // without spinning up the dockview / router; see that file for the
+  // desktop-vs-mobile branching rationale.
   //
   // `useDesktopLayout` is read through a ref so a viewport resize
-  // doesn't tear down the SSE subscription; the listener picks up
-  // the current value at event time instead.
+  // doesn't tear down the SSE subscription — the dispatcher picks up
+  // the current layout at event time instead.
   const useDesktopLayoutRef = useRef(useDesktopLayout);
   useDesktopLayoutRef.current = useDesktopLayout;
   useEffect(() => {
     const unsubscribe = adapter.subscribeStatusEvents((event) => {
-      if (event.kind !== "open-file") return;
-      const workspaceId = typeof event.workspaceId === "string" ? event.workspaceId : undefined;
-      const filePath = typeof event.filePath === "string" ? event.filePath : undefined;
-      if (!workspaceId || !filePath) return;
-
-      const isDockview = useDesktopLayoutRef.current;
-
-      if (event.external === true) {
-        // External files always go through the pending-open queue.
-        // The CodeBrowserView (in the Files panel on desktop, in
-        // the route Outlet on mobile) drains it.
-        enqueueExternalOpen(workspaceId, filePath);
-        if (isDockview) {
-          crossPanelHandlers.onActivateFilesPanel(workspaceId);
-        } else {
-          router.navigate({
-            to: "/workspace/$workspaceId/code",
-            params: { workspaceId: encodeURIComponent(workspaceId) },
-          });
-        }
-        return;
-      }
-
-      // In-workspace path (workspace-relative, optionally suffixed
-      // with `:line[:col]` / `:line-end`).
-      if (isDockview) {
-        // `crossPanelHandlers.onOpenFile` does parseFileLocation
-        // internally, writes both `currentFile` (suffix-stripped)
-        // and `openFilePath` (suffix-preserved) to the per-workspace
-        // state, and activates the Files panel.
-        crossPanelHandlers.onOpenFile(workspaceId, filePath);
-      } else {
-        router.navigate({
-          to: "/workspace/$workspaceId/code/$",
-          params: {
-            workspaceId: encodeURIComponent(workspaceId),
-            _splat: filePath,
-          },
-        });
-      }
+      dispatchOpenFileEvent(event, {
+        isDockview: useDesktopLayoutRef.current,
+        handlers: {
+          onOpenFile: crossPanelHandlers.onOpenFile,
+          onActivateFilesPanel: crossPanelHandlers.onActivateFilesPanel,
+          navigateInWorkspace: (workspaceId, filePath) =>
+            router.navigate({
+              to: "/workspace/$workspaceId/code/$",
+              params: {
+                workspaceId: encodeURIComponent(workspaceId),
+                _splat: filePath,
+              },
+            }),
+          navigateToWorkspaceCode: (workspaceId) =>
+            router.navigate({
+              to: "/workspace/$workspaceId/code",
+              params: { workspaceId: encodeURIComponent(workspaceId) },
+            }),
+        },
+      });
     });
     return unsubscribe;
   }, [router]);
