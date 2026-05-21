@@ -365,6 +365,19 @@ function trpcDevPlugin(): Plugin {
         });
       });
 
+      // Log boot wall time once the dev HTTP server starts accepting
+      // requests. Mirrors the log emitted by `start-server.ts` in the
+      // bundled (production) path so before/after numbers for boot-path
+      // optimizations are grep-able from `pnpm dev:desktop` too. Vite
+      // already prints its own "ready in NNN ms" banner — that one
+      // measures only Vite's startup, not the work done by this plugin's
+      // `configureServer` (token rotation, runFirstTimeSetup, etc.). The
+      // log here uses `process.uptime()` so it captures the same wall
+      // time from Node process spawn.
+      server.httpServer?.once("listening", () => {
+        log.info("Web server boot took %d ms", Math.round(process.uptime() * 1000));
+      });
+
       // Clean up tunnel, terminals, and WebSocket servers on dev server shutdown
       server.httpServer?.on("close", () => {
         wss.close();
