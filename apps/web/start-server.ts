@@ -385,7 +385,28 @@ async function main() {
   // refers to `viteMiddlewares` / `serverEntryHandler` by name; both
   // assignments complete before we call `listen()`, so the closure never
   // sees a half-initialised state.
-  const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+  const httpServer = createServer((req: IncomingMessage, res: ServerResponse) => {
+    handleRequest(req, res).catch((err) => {
+      // Any uncaught error inside the async handler chain (most often a
+      // missing static asset like `dist/openapi.json` or a tRPC-layer
+      // throw) would otherwise bubble to the global
+      // `unhandledRejection` handler and kill the whole server. Catch
+      // it here, log, and reply 500 so a single bad request can't
+      // recycle the process.
+      const message = err instanceof Error ? (err.stack ?? err.message) : String(err);
+      console.error("Request handler error:", message);
+      if (!res.headersSent) {
+        res.writeHead(500, { "Content-Type": "text/plain" });
+      }
+      try {
+        res.end("Internal server error");
+      } catch {
+        // Socket already closed — nothing to do.
+      }
+    });
+  });
+
+  async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     // Dev-mode liveness check. In prod `/api/health` is auth-protected
     // (and answered inside `handleAuth`); in dev there is no token so
     // `handleAuth` returns early and the request would otherwise fall
@@ -593,7 +614,7 @@ async function main() {
     // request, so the non-null assertion is structural; in dev we take
     // the branch above.
     assets!(req, res, ssrFallback);
-  });
+  }
 
   // -----------------------------------------------------------------------
   // Wire up the renderer transport (Vite-as-middleware in dev, sirv +
