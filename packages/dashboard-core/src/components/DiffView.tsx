@@ -825,6 +825,11 @@ export function DiffView({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const fetchSummaryRef = useRef<((force?: boolean) => void) | null>(null);
+  // Ref to the latest `fetchBranches` body. The SSE subscription effect
+  // (separate from the initial-fetch effect so it can be keyed on `active`
+  // without re-running the data fetch on every cache-driven activation)
+  // reads this to invoke the latest closure. See issue #484.
+  const fetchBranchesRef = useRef<(() => void) | null>(null);
   // Per-file diff cache owned by the parent — eliminates child-level caching
   const [diffCache, setDiffCache] = useState<Map<string, FileDiffCacheEntry>>(new Map());
   const diffCacheRef = useRef<Map<string, FileDiffCacheEntry>>(new Map());
@@ -866,9 +871,14 @@ export function DiffView({
     setAvailableDefaultBranch(null);
   }, [workspaceId]);
 
-  // Fetch the list of branches and refresh on branch-status SSE events so a
-  // `git checkout -b` from another tool (terminal, IDE) is reflected without
-  // a full reload.
+  // Fetch the list of branches. This effect is intentionally NOT keyed on
+  // `active` — the workspace's panel may flip between active/inactive when
+  // the user switches workspaces, but the cached panel stays mounted (see
+  // MultiWorkspacePanelHost). Re-running the initial fetch on every
+  // re-activation would issue redundant `listWorkspaceBranches` requests.
+  // The SSE auto-refresh subscription is split into a separate effect below
+  // so the listener can come and go with `active` while the data fetch runs
+  // only once per workspace. See issue #484.
   useEffect(() => {
     const listWorkspaceBranches = adapter.listWorkspaceBranches;
     if (!listWorkspaceBranches) return;
@@ -895,23 +905,32 @@ export function DiffView({
         });
     };
 
+    fetchBranchesRef.current = fetchBranches;
     fetchBranches();
-
-    let unsubscribe: (() => void) | undefined;
-    if (active) {
-      unsubscribe = adapter.subscribeStatusEvents((event) => {
-        const data = event as SSEEvent;
-        if (data.kind === "branch-status" && data.workspaceId === workspaceId) {
-          fetchBranches();
-        }
-      });
-    }
 
     return () => {
       cancelled = true;
-      unsubscribe?.();
+      fetchBranchesRef.current = null;
     };
-  }, [adapter, workspaceId, active, setCompareBranch]);
+  }, [adapter, workspaceId, setCompareBranch]);
+
+  // Subscribe to branch-status SSE events for the active workspace so a
+  // `git checkout -b` from another tool (terminal, IDE) is reflected without
+  // a full reload. Only attached while `active === true`: inactive cached
+  // workspaces don't keep listening to SSE we'd discard anyway. When the
+  // panel becomes active again, the next branch-status event triggers a
+  // refresh through `fetchBranchesRef`, which still points at the closure
+  // from the initial-fetch effect above.
+  useEffect(() => {
+    if (!active) return;
+    const unsubscribe = adapter.subscribeStatusEvents((event) => {
+      const data = event as SSEEvent;
+      if (data.kind === "branch-status" && data.workspaceId === workspaceId) {
+        fetchBranchesRef.current?.();
+      }
+    });
+    return unsubscribe;
+  }, [adapter, workspaceId, active]);
   const setExpandAll = useCallback((v: boolean) => {
     setExpandAllState(v);
     storeExpandAll(v);
@@ -1453,28 +1472,13 @@ export function DiffView({
     fetchSummaryRef.current = fetchSummary;
     fetchSummary();
 
-    // Subscribe to branch-status events to auto-refresh when files change.
-    // The branch-status-poller emits events every ~5s with the workspace's
-    // git dirty state, so the diff view stays in sync without slow polling.
-    let unsubscribe: (() => void) | undefined;
-    if (active) {
-      unsubscribe = adapter.subscribeStatusEvents((event) => {
-        const data = event as SSEEvent;
-        if (data.kind === "branch-status" && data.workspaceId === workspaceId) {
-          fetchSummary();
-        }
-      });
-    }
-
     return () => {
       cancelled = true;
       fetchSummaryRef.current = null;
-      unsubscribe?.();
     };
   }, [
     adapter,
     workspaceId,
-    active,
     onStatsChange,
     diffMode,
     compareBranch,
@@ -1487,6 +1491,27 @@ export function DiffView({
     isPlain,
     projectKind,
   ]);
+
+  // Subscribe to branch-status SSE events to auto-refresh when files change.
+  // The branch-status-poller emits events every ~5s with the workspace's git
+  // dirty state, so the diff view stays in sync without slow polling.
+  //
+  // Split from the data-fetch effect above so we can attach/detach the
+  // subscription on `active` flips (workspace switches) WITHOUT re-running
+  // the initial fetch + state reset. Previously `active` was in the
+  // data-fetch effect's dep array, which meant every flip back to a cached
+  // workspace wiped the summary/diff cache and triggered "Loading
+  // changes…". See issue #484.
+  useEffect(() => {
+    if (!active) return;
+    const unsubscribe = adapter.subscribeStatusEvents((event) => {
+      const data = event as SSEEvent;
+      if (data.kind === "branch-status" && data.workspaceId === workspaceId) {
+        fetchSummaryRef.current?.();
+      }
+    });
+    return unsubscribe;
+  }, [adapter, workspaceId, active]);
 
   // ---------------------------------------------------------------------------
   // Diff target dropdown — combines diff mode + branch selection into one menu.
