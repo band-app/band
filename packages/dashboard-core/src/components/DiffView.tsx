@@ -917,6 +917,13 @@ export function DiffView({
 
     return () => {
       cancelled = true;
+      // Null out the ref so a late SSE callback can't invoke a stale
+      // closure after we've moved on. The window between this cleanup and
+      // the next effect body re-assigning the ref is brief — the
+      // subscription effect below shares the same `[adapter, workspaceId]`
+      // deps, so it's also tearing down and re-attaching for the same
+      // change, and any branch-status events that fire in between would
+      // be ignored by both sides anyway.
       fetchBranchesRef.current = null;
     };
   }, [adapter, workspaceId, setCompareBranch]);

@@ -156,11 +156,13 @@ test("switch A → B → A keeps the Changes panel populated (no Loading flash)"
 
   // Switch to workspace B via the project list (in-list click, same path
   // the user takes). The card markup follows the WorkspaceCard structure
-  // used in workspace-switch-scroll.spec.ts.
+  // used in workspace-switch-scroll.spec.ts. Filter by project name rather
+  // than `.nth(...)` — the latter silently breaks if the workspace list
+  // order changes or another sidebar element shares the same utility
+  // classes.
   const workspaceBCard = page
     .locator('div.cursor-pointer.select-none[tabindex="0"]')
-    .filter({ hasText: /^main$/ })
-    .nth(1); // Project A's card is index 0, Project B's is index 1
+    .filter({ hasText: PROJECT_B });
   await workspaceBCard.click();
   await expect(page).toHaveURL(new RegExp(encodeURIComponent(WORKSPACE_B)));
   await expectChangesFileVisible(page, FILE_IN_B);
@@ -203,8 +205,7 @@ test("switch A → B → A keeps the Changes panel populated (no Loading flash)"
   // B's panel) and we should see it without any Loading transition.
   const workspaceACard = page
     .locator('div.cursor-pointer.select-none[tabindex="0"]')
-    .filter({ hasText: /^main$/ })
-    .nth(0);
+    .filter({ hasText: PROJECT_A });
   await workspaceACard.click();
   await expect(page).toHaveURL(new RegExp(encodeURIComponent(WORKSPACE_A)));
 
