@@ -535,6 +535,14 @@ async function main() {
 
   httpServer.listen(port, "0.0.0.0", () => {
     console.log(`Web server listening on http://0.0.0.0:${port}`);
+    // Wall-time from Node process spawn (i.e. the moment the desktop
+    // shell or `pnpm start` forked this script) to the moment we're
+    // accepting requests. Single grep-able line so #472-style boot
+    // optimizations have a clean before/after number to point at;
+    // `process.uptime()` is preferred over a module-scope timer
+    // because it captures the bundle-load + module-evaluation cost
+    // too (the bundled `start-server.mjs` is ~5.5 MB).
+    console.log(`Web server boot took ${(process.uptime() * 1000).toFixed(0)} ms`);
 
     // Branch status poller is started lazily by the watcher
     // when the first subscriber connects.
