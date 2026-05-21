@@ -426,24 +426,13 @@ export function TerminalPanel({
             openSearchRef.current();
             return false;
           }
-          // Shift+Enter → send LF (0x0A) so receivers see a distinct newline character.
-          // We previously sent the kitty/fixterms CSI u sequence (\x1b[13;2u), but
-          // bash readline, zsh zle, fish, and most TUIs (including Claude Code's chat
-          // input) don't decode the kitty keyboard protocol, so Shift+Enter ended up
-          // behaving like a plain Enter. LF is the lowest-common-denominator newline:
-          // TUIs that distinguish Ctrl+J from Enter (Claude Code's chat:newline is
-          // bound to ctrl+j = LF by default) will insert a newline, and plain shells
-          // fall back to submit — same as Enter, so no regression.
-          //
-          // preventDefault() is critical here: returning false from
-          // attachCustomKeyEventHandler only stops xterm's internal _keyDown,
-          // it does NOT stop the browser from dispatching the subsequent
-          // `keypress` event for Enter — which xterm's hidden textarea then
-          // translates into a plain `\r`. Without preventDefault the byte
-          // stream is `\n\r`, and Claude Code reads the `\r` as submit (the
-          // newline is silently inserted right before submission, so it looks
-          // identical to plain Enter). Calling preventDefault here suppresses
-          // the keypress event so only the LF reaches the PTY.
+          // Shift+Enter → LF so TUIs that bind ctrl+j to "newline" (e.g. Claude
+          // Code's chat:newline) insert one. preventDefault() is load-bearing:
+          // returning false from attachCustomKeyEventHandler only stops xterm's
+          // internal _keyDown; the browser still dispatches `keypress` for
+          // Enter, which xterm's hidden textarea translates into a plain `\r`.
+          // Without preventDefault the byte stream is `\n\r`, and the trailing
+          // `\r` re-submits — identical to plain Enter from the user's POV.
           if (e.key === "Enter" && e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
             e.preventDefault();
             terminal.input("\n");
