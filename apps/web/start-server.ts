@@ -322,9 +322,25 @@ async function nodeRequestToWeb(req: IncomingMessage): Promise<Request> {
   }
   let body: Buffer | undefined;
   if (req.method !== "GET" && req.method !== "HEAD") {
+    // Buffer the request body in memory before handing it to TanStack /
+    // tRPC as a Web Request. Cap at 100 MB — well above any tRPC mutation,
+    // SSR form post, or MCP request we serve, but enough headroom that a
+    // legitimate large /api/uploads PUT (if one ever gets routed here)
+    // doesn't surprise the user. Without a cap, a malformed POST or a
+    // slowloris-style upload could OOM the whole process.
+    const MAX_REQUEST_BODY_BYTES = 100 * 1024 * 1024;
     body = await new Promise<Buffer>((resolve, reject) => {
       const chunks: Buffer[] = [];
-      req.on("data", (chunk: Buffer) => chunks.push(chunk));
+      let bytesSoFar = 0;
+      req.on("data", (chunk: Buffer) => {
+        bytesSoFar += chunk.byteLength;
+        if (bytesSoFar > MAX_REQUEST_BODY_BYTES) {
+          reject(Object.assign(new Error("Request body too large"), { code: "BODY_TOO_LARGE" }));
+          req.destroy();
+          return;
+        }
+        chunks.push(chunk);
+      });
       req.on("end", () => resolve(Buffer.concat(chunks)));
       req.on("error", reject);
     });
@@ -778,8 +794,16 @@ async function main() {
     // Vite's HMR WebSocket lives on this same http server in dev mode. It
     // identifies itself with the `vite-hmr` subprotocol — leave that
     // upgrade alone so Vite's own listener (registered when we created
-    // the middleware-mode server above) can claim it.
-    if (isDev && req.headers["sec-websocket-protocol"]?.includes("vite-hmr")) {
+    // the middleware-mode server above) can claim it. Parse the header
+    // as a proper comma-separated token list rather than a raw substring
+    // match so a client offering e.g. `my-vite-hmr-shim` can't slip past.
+    if (
+      isDev &&
+      req.headers["sec-websocket-protocol"]
+        ?.split(",")
+        .map((s) => s.trim())
+        .includes("vite-hmr")
+    ) {
       return;
     }
 
@@ -828,7 +852,17 @@ async function main() {
   // quickly but the orphaned child subprocesses (the user's
   // interactive shell loaded with `-li`) kept the test harness's
   // `afterAll` waiting until vitest's 30 s `hookTimeout` killed it.
-  let phaseBSettlePromise: Promise<void> | null = null;
+  //
+  // Initialised eagerly to a promise that resolves when the Phase B
+  // setImmediate callback assigns the real work — that way SIGTERM
+  // delivered in the (sub-millisecond) window between `listen()`
+  // returning and the `setImmediate` callback firing still waits
+  // correctly, instead of seeing `null` and tearing the DB down
+  // before Phase B has even started.
+  let phaseBStarted!: () => void;
+  let phaseBSettlePromise: Promise<void> = new Promise<void>((resolve) => {
+    phaseBStarted = resolve;
+  });
 
   // Bind the http server, scanning upward from `initialPort` until we
   // find a free port. Surfaces a clear error to stderr if every port
@@ -930,7 +964,13 @@ async function main() {
     // DB and sockets down. Otherwise the `execFile` calls inside
     // `whichBinary`/`shellPath` keep the event loop alive past
     // `process.exit(0)`'s call site.
-    phaseBSettlePromise = (async () => {
+    // Chain the real work onto the eagerly-allocated
+    // `phaseBSettlePromise` so the shutdown handler observes the same
+    // promise that's already in the closure rather than a re-assigned
+    // one. This also closes the SIGTERM-before-setImmediate-fires
+    // window — the shutdown handler waits on the original promise,
+    // which only resolves after `phaseBStarted()` fires below.
+    (async () => {
       try {
         await runFirstTimeSetup();
       } catch (err) {
@@ -952,7 +992,7 @@ async function main() {
           console.error("Failed to auto-start tunnel:", err);
         }
       }
-    })();
+    })().finally(phaseBStarted);
   });
 
   // Graceful shutdown
@@ -972,12 +1012,13 @@ async function main() {
     // mid-write. SIGTERM is still responsive enough at 5 s — once the
     // timeout fires we just exit and let Node clean up dangling
     // children.
-    if (phaseBSettlePromise) {
-      await Promise.race([
-        phaseBSettlePromise,
-        new Promise<void>((resolve) => setTimeout(resolve, 5_000).unref()),
-      ]);
-    }
+    // phaseBSettlePromise is always assigned (an eager Promise that
+    // resolves either when Phase B finishes or, if SIGTERM beats the
+    // `setImmediate` callback, immediately at first `.then`).
+    await Promise.race([
+      phaseBSettlePromise,
+      new Promise<void>((resolve) => setTimeout(resolve, 5_000).unref()),
+    ]);
 
     await stopTunnel().catch(() => {});
     wssHandler.broadcastReconnectNotification();

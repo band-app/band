@@ -901,6 +901,15 @@ describe("stale task cleanup on server start", () => {
       if (staleTask.status === "failed") break;
       await new Promise((r) => setTimeout(r, 50));
     }
+    // Throw with a descriptive message on timeout so a Phase-B
+    // regression surfaces as "cleanupStaleTasks didn't run" instead of
+    // a generic `expected "running" to be "failed"` assertion diff.
+    if (staleTask?.status !== "failed") {
+      throw new Error(
+        `Phase-B cleanupStaleTasks did not flip 'tsk_stale_1' to failed within 5 s ` +
+          `(observed status: ${String(staleTask?.status)}). Regression?`,
+      );
+    }
     expect(staleTask?.status).toBe("failed");
     expect(staleTask?.completedAt).toBeDefined();
   });

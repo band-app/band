@@ -68,7 +68,19 @@ export async function listenWithFallback(
         };
         server.once("error", onError);
         server.once("listening", onListening);
-        server.listen(port, "0.0.0.0");
+        try {
+          server.listen(port, "0.0.0.0");
+        } catch (err) {
+          // `server.listen()` throws synchronously in some failure
+          // modes — most commonly `ERR_SERVER_ALREADY_LISTEN` if
+          // a caller re-uses an already-bound server. Remove the
+          // listeners we just registered so they don't accumulate
+          // across retries (each leaked pair is two MaxListeners
+          // warnings closer to a process-wide warning storm).
+          server.removeListener("error", onError);
+          server.removeListener("listening", onListening);
+          reject(err);
+        }
       });
       return port;
     } catch (err) {

@@ -819,6 +819,15 @@ describe("tRPC — plain projects (syncWorktrees self-heal persistence)", () => 
       if (kind === "plain") break;
       await new Promise((r) => setTimeout(r, 50));
     }
+    // Throw with a descriptive message on timeout so a Phase-B
+    // regression surfaces as "syncWorktrees never ran" instead of a
+    // generic `expected "git" to be "plain"` assertion diff.
+    if (kind !== "plain") {
+      throw new Error(
+        `Phase-B syncWorktrees (via runFirstTimeSetup) did not heal 'needs-heal' ` +
+          `to kind=plain within 10 s (observed kind: ${String(kind)}). Regression?`,
+      );
+    }
     expect(kind).toBe("plain");
   });
 });
