@@ -168,11 +168,21 @@ async function bootstrap(): Promise<void> {
   // BrowserViewManager.hide() — without the hidden window, hide()
   // parks the renderer like the original code did).
   // Port intentionally !== 9222 so it doesn't collide with a Chrome a
-  // developer might have running. Keep in sync with
-  // `apps/web/src/lib/browser-host.ts::DESKTOP_CDP_PORT`.
-  const cdpEnabled = getWebBrowserCdpEnabled();
+  // developer might have running. The renderer-side constant in
+  // `apps/web/src/lib/browser-host.ts::DESKTOP_CDP_PORT` mirrors the
+  // default (9223) used by the screencast `/cdp` proxy. The env-var
+  // override below is for developers running a second Band instance
+  // alongside their daily-driver build — set `BAND_CDP_PORT=9224` (or
+  // any free port) on the dev launch and that instance gets its own
+  // CDP endpoint without colliding with the running prod app, even if
+  // both have `webBrowserCdpEnabled` on. Setting the env var also
+  // implicitly enables CDP for that instance — no need to flip the
+  // user-facing setting just to debug the renderer.
+  const cdpPortEnv = process.env.BAND_CDP_PORT;
+  const cdpEnabled = getWebBrowserCdpEnabled() || cdpPortEnv !== undefined;
   if (cdpEnabled) {
-    app.commandLine.appendSwitch("remote-debugging-port", "9223");
+    const cdpPort = cdpPortEnv ?? "9223";
+    app.commandLine.appendSwitch("remote-debugging-port", cdpPort);
   }
 
   // Make `band-action://` a known scheme so Chromium handles it
