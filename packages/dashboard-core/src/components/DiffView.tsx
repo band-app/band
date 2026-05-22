@@ -45,7 +45,12 @@ import { useProjectKindForWorkspace } from "../hooks/use-project-kind";
 import { useSearch } from "../hooks/use-search";
 import { buildFileTree, flattenFileTreeOrder } from "../lib/build-file-tree";
 import { baseViewerExtensions, loadLanguage, searchHighlightOnly } from "../lib/codemirror-setup";
-import { countDiffLines, type DiffLineCounts, diffContentHeight } from "../lib/diff-row-height";
+import {
+  countDiffLines,
+  type DiffLineCounts,
+  type DiffViewMode,
+  diffContentHeight,
+} from "../lib/diff-row-height";
 import { formatFileLocation } from "../lib/file-location";
 import { extensionToLanguage, filenameToLanguage } from "../lib/language-map";
 import { selectionToChatExtension } from "../lib/selection-to-chat";
@@ -63,7 +68,10 @@ export interface DiffStats {
   deletions: number;
 }
 
-type ViewMode = "unified" | "split";
+// Alias of the canonical `DiffViewMode` defined in
+// `../lib/diff-row-height` so the two definitions can't drift. If a new
+// mode is ever added (e.g. "inline"), updating the lib propagates here.
+type ViewMode = DiffViewMode;
 
 const VIEW_MODE_KEY = "band:diff-view-mode";
 
@@ -521,6 +529,21 @@ function getNextContextStep(current: number): number | null {
 // trivially fixable.
 const EMPTY_FILE_STATUSES: Record<string, FileStatus> = {};
 
+/**
+ * Whether a fetch should be dispatched for the given cache entry. Returns
+ * `true` when we have no diff yet AND no fetch is currently in flight —
+ * the in-flight check is what stops a second click (or a second
+ * `setExpandAll(true)` after state has committed) from racing a duplicate
+ * request against the still-pending first one. Errored entries
+ * (`loadingDiff: false, diff: null, diffError: set`) are eligible because
+ * a re-click should let the user retry.
+ */
+function shouldDispatchFetch(entry: FileDiffCacheEntry | undefined): boolean {
+  if (!entry) return true;
+  if (entry.loadingDiff) return false;
+  return entry.diff === null;
+}
+
 // ---------------------------------------------------------------------------
 // Lazy file row — renders diff from parent-provided cache
 // ---------------------------------------------------------------------------
@@ -919,6 +942,15 @@ export function DiffView({
   // set to re-request diffs for files that should still be open.
   const expandedFilesRef = useRef<Set<string>>(expandedFiles);
   expandedFilesRef.current = expandedFiles;
+  // Tracks the filename set we last saw, so the "auto-expand new entries
+  // when expand-all is on" effect (declared further down) can detect
+  // which filenames are genuinely new vs carried over. Declared up here
+  // alongside the other refs because the diff-mode-reset effect — which
+  // lives much earlier in this function body — also resets it; co-locating
+  // declaration and the late consumer would put the consumer in the TDZ
+  // of any future hoist of the reset effect, which is precisely the kind
+  // of footgun the reviewer caught.
+  const prevFilenamesRef = useRef<Set<string>>(new Set());
   // Fingerprint of the last fetched summary to detect actual data changes from SSE polls
   const prevFingerprintRef = useRef<string>("");
   const [viewMode, setViewModeState] = useState<ViewMode>(getStoredViewMode);
@@ -1341,27 +1373,27 @@ export function DiffView({
 
   const handleToggleFile = useCallback(
     (filename: string) => {
-      // React 18 Strict Mode invokes state updaters TWICE in development as
-      // an impurity check, so the fetch can't live inside the updater
-      // closure — it would fire two `getFileDiff` requests per toggle.
-      // Compute the "did we just open it?" signal inside the updater
-      // (using `diffCacheRef`, which IS pure), then issue the fetch
-      // outside.
+      // Decide whether to dispatch a fetch BEFORE mutating state. Doing it
+      // in a `let` captured by the updater closure works (the assignment
+      // is idempotent across React 18 Strict Mode's intentional
+      // double-invocation), but it's a side effect inside a function that
+      // promises to be pure. Reading from `diffCacheRef.current` here —
+      // outside the updater — gets us the same "is this a new open?"
+      // signal cleanly.
       //
       // Race note: rapid open/close/open clicks before the first fetch
-      // resolves can both see `diffCacheRef.current.has(filename) === false`
-      // and dispatch two `fetchFileDiff` calls. The duplicate is harmless —
-      // `fetchFileDiff`'s `.then` overwrites the cache idempotently and
-      // skips the state update if the diff string hasn't changed — so we
-      // don't try to de-dupe at the call site.
-      let shouldFetch = false;
+      // resolves can both see no cache entry and dispatch two
+      // `fetchFileDiff` calls. The duplicate is harmless — the resolve
+      // path overwrites the cache idempotently and skips the state
+      // update if the diff string hasn't changed.
+      const isOpening = !expandedFilesRef.current.has(filename);
+      const shouldFetch = isOpening && shouldDispatchFetch(diffCacheRef.current.get(filename));
       setExpandedFiles((prev) => {
         const next = new Set(prev);
         if (next.has(filename)) {
           next.delete(filename);
         } else {
           next.add(filename);
-          shouldFetch = !diffCacheRef.current.has(filename);
         }
         return next;
       });
@@ -1397,7 +1429,7 @@ export function DiffView({
         // real problem, since per-file deduplication already lives in
         // `fetchFileDiff` via the diffCacheRef check below.
         for (const name of names) {
-          if (!diffCacheRef.current.has(name)) {
+          if (shouldDispatchFetch(diffCacheRef.current.get(name))) {
             fetchFileDiff(name);
           }
         }
@@ -1849,7 +1881,13 @@ export function DiffView({
   // This mirrors the pre-virtualization behavior where each LazyFileRow's
   // `useState(expandAll)` initializer caused brand-new rows to mount in
   // the expand-all-driven default state.
-  const prevFilenamesRef = useRef<Set<string>>(new Set());
+  //
+  // `prevFilenamesRef` is declared above (near the other top-level refs)
+  // because the diff-mode reset effect — which lives ~270 lines earlier
+  // in this function — also resets it. Having both the declaration and
+  // the first usage in clear top-down order keeps a future refactor that
+  // hoists either site from silently introducing a TDZ on the ref
+  // binding.
   useEffect(() => {
     const prev = prevFilenamesRef.current;
     const next = new Set(filenames);
@@ -1866,7 +1904,7 @@ export function DiffView({
       return merged;
     });
     for (const n of newOnes) {
-      if (!diffCacheRef.current.has(n)) fetchFileDiff(n);
+      if (shouldDispatchFetch(diffCacheRef.current.get(n))) fetchFileDiff(n);
     }
   }, [filenames, expandAll, fetchFileDiff]);
 
@@ -1909,7 +1947,7 @@ export function DiffView({
       next.add(target);
       return next;
     });
-    if (!diffCacheRef.current.has(target)) {
+    if (shouldDispatchFetch(diffCacheRef.current.get(target))) {
       fetchFileDiff(target);
     }
     // Double rAF: the first lets React commit the expansion state, the
