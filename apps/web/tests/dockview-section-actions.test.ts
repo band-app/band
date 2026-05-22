@@ -12,9 +12,11 @@
  *     (would null-deref inside the section).
  *   - cycleGridGroups picking up floating / popout groups (only grid groups
  *     should be cyclable via Cmd+[ / Cmd+]).
- *   - cycleGridGroups visiting groups in *creation* order rather than
- *     *visual reading* order — splitting right then down should still cycle
- *     in the clockwise order the user sees on screen.
+ *   - cycleGridGroups visiting groups in creation order, or in the order
+ *     dictated by the split tree, rather than the on-screen clockwise order
+ *     — splitting right-then-down vs down-then-right produces identical
+ *     pixels but opposite traversal orders, so the cycle must depend on
+ *     measured pixel position, not tree shape.
  *   - Closing the leftmost tab snapping focus to the *next* leftmost instead
  *     of the panel on its right.
  *   - Closing a single-tab group still trying to pre-select a neighbour.
@@ -36,7 +38,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   cycleGridGroups,
   cycleTabsInActiveGroup,
+  type GroupRect,
   selectNeighbourBeforeRemove,
+  sortGroupsClockwise,
 } from "../src/lib/dockview-section-actions";
 
 // ---------------------------------------------------------------------------
@@ -49,6 +53,13 @@ interface StubPanel {
   api: { setActive: ReturnType<typeof vi.fn> };
 }
 
+interface StubRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
 interface StubGroup {
   id: string;
   panels: StubPanel[];
@@ -58,48 +69,35 @@ interface StubGroup {
     moveToPrevious: ReturnType<typeof vi.fn>;
   };
   api: { location: { type: "grid" | "floating" | "popout" } };
+  /** Stand-in for the runtime `element` getter dockview exposes via
+   * `BasePanelView`. `cycleGridGroups` reads this through an
+   * `unknown`-cast so we don't need to fake the rest of HTMLElement. */
+  element: {
+    getBoundingClientRect: () => StubRect;
+  };
 }
 
 function makePanel(id: string): StubPanel {
   return { id, api: { setActive: vi.fn() } };
 }
 
-function makeGroup(
-  id: string,
-  panelIds: string[],
-  opts?: { location?: "grid" | "floating" | "popout"; activeIndex?: number },
-): StubGroup {
+interface MakeGroupOpts {
+  location?: "grid" | "floating" | "popout";
+  activeIndex?: number;
+  rect?: StubRect;
+}
+
+function makeGroup(id: string, panelIds: string[], opts?: MakeGroupOpts): StubGroup {
   const panels = panelIds.map(makePanel);
+  const rect = opts?.rect ?? { left: 0, top: 0, width: 100, height: 100 };
   return {
     id,
     panels,
     activePanel: panels[opts?.activeIndex ?? 0],
     model: { moveToNext: vi.fn(), moveToPrevious: vi.fn() },
     api: { location: { type: opts?.location ?? "grid" } },
+    element: { getBoundingClientRect: () => rect },
   };
-}
-
-// --- Grid-tree builders --------------------------------------------------
-// Mirror the SerializedGridObject<GroupPanelViewState> shape dockview emits
-// from `api.toJSON().grid.root`. `walkGridNode` walks these depth-first, so
-// the order children appear in a branch's `data` array is the visual order
-// (left→right for horizontal splits, top→bottom for vertical splits).
-
-interface GridLeaf {
-  type: "leaf";
-  data: { id: string };
-}
-interface GridBranch {
-  type: "branch";
-  data: Array<GridLeaf | GridBranch>;
-}
-type GridNode = GridLeaf | GridBranch;
-
-function leaf(groupId: string): GridLeaf {
-  return { type: "leaf", data: { id: groupId } };
-}
-function branch(...children: GridNode[]): GridBranch {
-  return { type: "branch", data: children };
 }
 
 interface StubApi {
@@ -107,7 +105,6 @@ interface StubApi {
   groups: StubGroup[];
   getGroup: (id: string) => StubGroup | undefined;
   getPanel: (id: string) => (StubPanel & { group?: StubGroup }) | undefined;
-  toJSON: () => { grid: { root: GridNode } };
 }
 
 // biome-ignore lint/suspicious/noExplicitAny: stub fed to functions typed against the real DockviewApi
@@ -115,19 +112,7 @@ function asApi(stub: StubApi): any {
   return stub;
 }
 
-/**
- * Build a stub api around a set of groups. If `gridRoot` is omitted, the
- * grid tree defaults to a single horizontal branch containing every group
- * in the order they were passed in — so the existing tests that don't care
- * about spatial layout still pin the cycling order to creation order.
- */
-function makeApi(groups: StubGroup[], activeGroupIdx = 0, gridRoot?: GridNode): StubApi {
-  const gridGroups = groups.filter((g) => g.api.location.type === "grid");
-  const root: GridNode =
-    gridRoot ??
-    (gridGroups.length === 1
-      ? leaf(gridGroups[0].id)
-      : branch(...gridGroups.map((g) => leaf(g.id))));
+function makeApi(groups: StubGroup[], activeGroupIdx = 0): StubApi {
   return {
     activeGroup: groups[activeGroupIdx] ?? null,
     groups,
@@ -139,7 +124,6 @@ function makeApi(groups: StubGroup[], activeGroupIdx = 0, gridRoot?: GridNode): 
       }
       return undefined;
     },
-    toJSON: () => ({ grid: { root } }),
   };
 }
 
@@ -187,7 +171,98 @@ describe("cycleTabsInActiveGroup", () => {
 });
 
 // ---------------------------------------------------------------------------
-// cycleGridGroups
+// sortGroupsClockwise — pure algorithm, no DOM
+// ---------------------------------------------------------------------------
+
+describe("sortGroupsClockwise", () => {
+  // Helper: produces the cycle in clockwise order starting from `startId`.
+  function cycleFrom(ordered: GroupRect[], startId: string): string[] {
+    const idx = ordered.findIndex((r) => r.id === startId);
+    if (idx < 0) return [];
+    const out: string[] = [];
+    for (let i = 0; i < ordered.length; i++) {
+      out.push(ordered[(idx + i) % ordered.length].id);
+    }
+    return out;
+  }
+
+  it("returns input unchanged for fewer than two groups", () => {
+    expect(sortGroupsClockwise([])).toEqual([]);
+    const one: GroupRect[] = [{ id: "solo", cx: 10, cy: 10 }];
+    expect(sortGroupsClockwise(one).map((g) => g.id)).toEqual(["solo"]);
+  });
+
+  it("cycles a 2x2 grid clockwise (1→2→3→4)", () => {
+    // 1=top-left, 2=top-right, 3=bottom-right, 4=bottom-left
+    const rects: GroupRect[] = [
+      { id: "1", cx: 100, cy: 100 },
+      { id: "2", cx: 300, cy: 100 },
+      { id: "3", cx: 300, cy: 300 },
+      { id: "4", cx: 100, cy: 300 },
+    ];
+    const ordered = sortGroupsClockwise(rects);
+    expect(cycleFrom(ordered, "1")).toEqual(["1", "2", "3", "4"]);
+    expect(cycleFrom(ordered, "2")).toEqual(["2", "3", "4", "1"]);
+    expect(cycleFrom(ordered, "3")).toEqual(["3", "4", "1", "2"]);
+    expect(cycleFrom(ordered, "4")).toEqual(["4", "1", "2", "3"]);
+  });
+
+  it("cycles top-row + bottom-full-width in clockwise order (TL→TR→B)", () => {
+    // Matches the user's first screenshot layout.
+    const rects: GroupRect[] = [
+      { id: "TL", cx: 100, cy: 100 },
+      { id: "TR", cx: 300, cy: 100 },
+      { id: "B", cx: 200, cy: 300 },
+    ];
+    const ordered = sortGroupsClockwise(rects);
+    expect(cycleFrom(ordered, "TL")).toEqual(["TL", "TR", "B"]);
+  });
+
+  it("cycles a horizontal row left→right (1-D fallback)", () => {
+    // Polar angle ties when every panel sits on the same y-axis; the
+    // 1-D fallback should give the user the natural left→right order.
+    const rects: GroupRect[] = [
+      { id: "A", cx: 50, cy: 200 },
+      { id: "B", cx: 200, cy: 200 },
+      { id: "C", cx: 350, cy: 200 },
+    ];
+    const ordered = sortGroupsClockwise(rects);
+    expect(cycleFrom(ordered, "A")).toEqual(["A", "B", "C"]);
+    expect(cycleFrom(ordered, "C")).toEqual(["C", "A", "B"]);
+  });
+
+  it("cycles a vertical column top→bottom (1-D fallback)", () => {
+    const rects: GroupRect[] = [
+      { id: "T", cx: 200, cy: 50 },
+      { id: "M", cx: 200, cy: 200 },
+      { id: "B", cx: 200, cy: 350 },
+    ];
+    const ordered = sortGroupsClockwise(rects);
+    expect(cycleFrom(ordered, "T")).toEqual(["T", "M", "B"]);
+  });
+
+  it("is independent of input ordering", () => {
+    // Same 2x2 layout, two different input shufflings → identical cycle.
+    const a: GroupRect[] = [
+      { id: "4", cx: 100, cy: 300 },
+      { id: "1", cx: 100, cy: 100 },
+      { id: "3", cx: 300, cy: 300 },
+      { id: "2", cx: 300, cy: 100 },
+    ];
+    const b: GroupRect[] = [
+      { id: "2", cx: 300, cy: 100 },
+      { id: "3", cx: 300, cy: 300 },
+      { id: "1", cx: 100, cy: 100 },
+      { id: "4", cx: 100, cy: 300 },
+    ];
+    const orderedA = sortGroupsClockwise(a).map((r) => r.id);
+    const orderedB = sortGroupsClockwise(b).map((r) => r.id);
+    expect(orderedA).toEqual(orderedB);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// cycleGridGroups — exercises the full DOM-measure → sort → setActive path
 // ---------------------------------------------------------------------------
 
 describe("cycleGridGroups", () => {
@@ -206,43 +281,13 @@ describe("cycleGridGroups", () => {
   });
 
   it("ignores floating and popout groups when counting", () => {
-    // Only one grid-located leaf → cycling is a no-op. The floating group
-    // shouldn't appear in `grid.root` at all (dockview keeps floating /
-    // popout groups in sibling arrays on SerializedDockview), so the stub
-    // mirrors that: the grid tree has just the one leaf.
     const grid = makeGroup("g0", ["a"]);
     const floating = makeGroup("g1", ["b"], { location: "floating" });
     const refocus = vi.fn();
-    cycleGridGroups(asApi(makeApi([grid, floating], 0, leaf("g0"))), 1, refocus);
+    cycleGridGroups(asApi(makeApi([grid, floating])), 1, refocus);
     expect(floating.panels[0].api.setActive).not.toHaveBeenCalled();
     expect(grid.panels[0].api.setActive).not.toHaveBeenCalled();
     expect(refocus).not.toHaveBeenCalled();
-  });
-
-  it("activates the next grid group's active panel for direction 1", () => {
-    const g0 = makeGroup("g0", ["a"]);
-    const g1 = makeGroup("g1", ["b"]);
-    const g2 = makeGroup("g2", ["c"]);
-    const refocus = vi.fn();
-    cycleGridGroups(asApi(makeApi([g0, g1, g2], 0)), 1, refocus);
-    expect(g1.panels[0].api.setActive).toHaveBeenCalledTimes(1);
-    expect(g0.panels[0].api.setActive).not.toHaveBeenCalled();
-    expect(g2.panels[0].api.setActive).not.toHaveBeenCalled();
-    expect(refocus).toHaveBeenCalledTimes(1);
-  });
-
-  it("wraps around to the first group when going forward from the last", () => {
-    const g0 = makeGroup("g0", ["a"]);
-    const g1 = makeGroup("g1", ["b"]);
-    cycleGridGroups(asApi(makeApi([g0, g1], 1)), 1);
-    expect(g0.panels[0].api.setActive).toHaveBeenCalledTimes(1);
-  });
-
-  it("wraps around to the last group when going backward from the first", () => {
-    const g0 = makeGroup("g0", ["a"]);
-    const g1 = makeGroup("g1", ["b"]);
-    cycleGridGroups(asApi(makeApi([g0, g1], 0)), -1);
-    expect(g1.panels[0].api.setActive).toHaveBeenCalledTimes(1);
   });
 
   it("does not refocus when the next group has no active panel", () => {
@@ -250,75 +295,95 @@ describe("cycleGridGroups", () => {
     // group with no active panel between operations). Without the guard the
     // refocus callback would fire even though setActive() was a no-op, which
     // re-focuses whatever was already active and causes a confusing flicker.
-    const g0 = makeGroup("g0", ["a"]);
-    const g1 = makeGroup("g1", []);
+    const g0 = makeGroup("g0", ["a"], { rect: { left: 0, top: 0, width: 200, height: 200 } });
+    const g1 = makeGroup("g1", [], { rect: { left: 200, top: 0, width: 200, height: 200 } });
     g1.activePanel = undefined;
     const refocus = vi.fn();
     cycleGridGroups(asApi(makeApi([g0, g1], 0)), 1, refocus);
     expect(refocus).not.toHaveBeenCalled();
   });
 
-  it("cycles in visual reading order, not creation order", () => {
-    // Reproduces the screenshot the user described in PR #487 review:
-    //   ┌────────────┬────────────┐
-    //   │ topLeft    │ topRight   │
-    //   ├────────────┴────────────┤
-    //   │ bottom (full width)     │
-    //   └─────────────────────────┘
-    //
-    // dockview's `api.groups` reports these in *creation* order. To exercise
-    // the spatial-walk fix we deliberately list them in a different order
-    // (bottom was created first, then topLeft was split off it, then
-    // topRight). The grid tree (which `api.toJSON()` emits in visual order)
-    // pins the on-screen layout: outer vertical branch, top horizontal
-    // branch with [topLeft, topRight], then bottom underneath.
-    const bottom = makeGroup("bottom", ["b"]);
-    const topLeft = makeGroup("topLeft", ["tl"]);
-    const topRight = makeGroup("topRight", ["tr"]);
-    const tree = branch(branch(leaf("topLeft"), leaf("topRight")), leaf("bottom"));
-    // Active group is topLeft (index 1 in the creation-order array, but the
-    // visual-first leaf in the tree).
-    const api = makeApi([bottom, topLeft, topRight], 1, tree);
+  it("cycles a 2x2 grid clockwise (1 → 2 → 3 → 4 → 1) regardless of api.groups order", () => {
+    // Reproduces the user's screenshot. `api.groups` is deliberately in
+    // creation order [4, 2, 1, 3] — pre-fix this is what `Cmd+]` walked,
+    // landing on 4 from 1 instead of 2.
+    const g1 = makeGroup("1", ["t1"], { rect: { left: 0, top: 0, width: 200, height: 200 } });
+    const g2 = makeGroup("2", ["t2"], { rect: { left: 200, top: 0, width: 200, height: 200 } });
+    const g3 = makeGroup("3", ["t3"], { rect: { left: 200, top: 200, width: 200, height: 200 } });
+    const g4 = makeGroup("4", ["t4"], { rect: { left: 0, top: 200, width: 200, height: 200 } });
+
+    // Active = panel 1 (top-left).
+    const api = makeApi([g4, g2, g1, g3], 2);
 
     cycleGridGroups(asApi(api), 1);
-
-    // Cmd+] from topLeft should land on topRight (the next visual leaf),
-    // *not* on bottom (which is `api.groups[0]` so the old creation-order
-    // logic would have picked it).
-    expect(topRight.panels[0].api.setActive).toHaveBeenCalledTimes(1);
-    expect(bottom.panels[0].api.setActive).not.toHaveBeenCalled();
-    expect(topLeft.panels[0].api.setActive).not.toHaveBeenCalled();
+    expect(g2.panels[0].api.setActive).toHaveBeenCalledTimes(1);
+    expect(g3.panels[0].api.setActive).not.toHaveBeenCalled();
+    expect(g4.panels[0].api.setActive).not.toHaveBeenCalled();
   });
 
-  it("cycles in reverse visual reading order for direction -1", () => {
-    // Same layout as above. From topLeft, Cmd+[ should wrap to bottom
-    // (the last visual leaf), not snap forward.
-    const bottom = makeGroup("bottom", ["b"]);
-    const topLeft = makeGroup("topLeft", ["tl"]);
-    const topRight = makeGroup("topRight", ["tr"]);
-    const tree = branch(branch(leaf("topLeft"), leaf("topRight")), leaf("bottom"));
-    const api = makeApi([bottom, topLeft, topRight], 1, tree);
+  it("cycles a 2x2 grid counter-clockwise (1 → 4 → 3 → 2 → 1) for direction -1", () => {
+    const g1 = makeGroup("1", ["t1"], { rect: { left: 0, top: 0, width: 200, height: 200 } });
+    const g2 = makeGroup("2", ["t2"], { rect: { left: 200, top: 0, width: 200, height: 200 } });
+    const g3 = makeGroup("3", ["t3"], { rect: { left: 200, top: 200, width: 200, height: 200 } });
+    const g4 = makeGroup("4", ["t4"], { rect: { left: 0, top: 200, width: 200, height: 200 } });
+
+    // Active = panel 1.
+    const api = makeApi([g1, g2, g3, g4], 0);
 
     cycleGridGroups(asApi(api), -1);
-
-    expect(bottom.panels[0].api.setActive).toHaveBeenCalledTimes(1);
-    expect(topRight.panels[0].api.setActive).not.toHaveBeenCalled();
-    expect(topLeft.panels[0].api.setActive).not.toHaveBeenCalled();
+    expect(g4.panels[0].api.setActive).toHaveBeenCalledTimes(1);
+    expect(g2.panels[0].api.setActive).not.toHaveBeenCalled();
+    expect(g3.panels[0].api.setActive).not.toHaveBeenCalled();
   });
 
-  it("skips orphaned ids that the api can no longer resolve", () => {
-    // `api.toJSON()` is a snapshot; if a leaf references an id whose live
-    // group has already been disposed (rare race during teardown), the
-    // walk should silently drop it instead of crashing.
-    const g0 = makeGroup("g0", ["a"]);
-    const g1 = makeGroup("g1", ["b"]);
-    const tree = branch(leaf("g0"), leaf("ghost"), leaf("g1"));
-    const api = makeApi([g0, g1], 0, tree);
+  it("cycles a 3-panel layout (top-left, top-right, bottom-full) in clockwise order", () => {
+    const tl = makeGroup("tl", ["a"], { rect: { left: 0, top: 0, width: 200, height: 200 } });
+    const tr = makeGroup("tr", ["b"], { rect: { left: 200, top: 0, width: 200, height: 200 } });
+    const bot = makeGroup("bot", ["c"], { rect: { left: 0, top: 200, width: 400, height: 200 } });
+
+    // From top-right, Cmd+] should land on bottom.
+    const api = makeApi([tl, tr, bot], 1);
 
     cycleGridGroups(asApi(api), 1);
+    expect(bot.panels[0].api.setActive).toHaveBeenCalledTimes(1);
+    expect(tl.panels[0].api.setActive).not.toHaveBeenCalled();
+  });
 
-    // From g0, forward → g1 (ghost is filtered out).
-    expect(g1.panels[0].api.setActive).toHaveBeenCalledTimes(1);
+  it("falls back to linear order for a horizontal row (1-D)", () => {
+    const a = makeGroup("a", ["x"], { rect: { left: 0, top: 0, width: 200, height: 200 } });
+    const b = makeGroup("b", ["y"], { rect: { left: 200, top: 0, width: 200, height: 200 } });
+    const c = makeGroup("c", ["z"], { rect: { left: 400, top: 0, width: 200, height: 200 } });
+
+    // Active = a (leftmost). Cmd+] should land on b (middle).
+    const api = makeApi([a, b, c], 0);
+    cycleGridGroups(asApi(api), 1);
+    expect(b.panels[0].api.setActive).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to linear order for a vertical column (1-D)", () => {
+    const top = makeGroup("t", ["x"], { rect: { left: 0, top: 0, width: 200, height: 200 } });
+    const mid = makeGroup("m", ["y"], { rect: { left: 0, top: 200, width: 200, height: 200 } });
+    const bot = makeGroup("b", ["z"], { rect: { left: 0, top: 400, width: 200, height: 200 } });
+
+    // Active = top. Cmd+] should land on middle (not bottom).
+    const api = makeApi([top, mid, bot], 0);
+    cycleGridGroups(asApi(api), 1);
+    expect(mid.panels[0].api.setActive).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips groups whose element has zero size (detached / display:none)", () => {
+    const visible0 = makeGroup("v0", ["a"], { rect: { left: 0, top: 0, width: 200, height: 200 } });
+    const ghost = makeGroup("ghost", ["g"], { rect: { left: 0, top: 0, width: 0, height: 0 } });
+    const visible1 = makeGroup("v1", ["b"], {
+      rect: { left: 200, top: 0, width: 200, height: 200 },
+    });
+
+    // Active = v0; the ghost (zero-size) should be filtered out before
+    // sorting so it doesn't drag the layout centre toward the origin.
+    const api = makeApi([visible0, ghost, visible1], 0);
+    cycleGridGroups(asApi(api), 1);
+    expect(visible1.panels[0].api.setActive).toHaveBeenCalledTimes(1);
+    expect(ghost.panels[0].api.setActive).not.toHaveBeenCalled();
   });
 });
 
