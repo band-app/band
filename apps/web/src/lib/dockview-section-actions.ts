@@ -1,4 +1,5 @@
-import type { DockviewApi } from "dockview";
+import type { DockviewApi, DockviewGroupPanel } from "dockview";
+import { walkGridNode } from "./dockview-active-state";
 
 /**
  * Shared helpers for the per-section Dockview shortcut handlers in
@@ -26,14 +27,59 @@ export function cycleTabsInActiveGroup(
   refocus?.();
 }
 
-/** Cycle between split panel groups (grid-positioned, skips floating/popout). */
+/**
+ * Walk the dockview's serialized grid tree in spatial reading order
+ * (left-to-right, top-to-bottom) and return the live grid groups in
+ * that order. Floating / popout groups are skipped because they don't
+ * live in the grid tree.
+ *
+ * We use `api.toJSON().grid.root` instead of `api.groups` because
+ * `api.groups` is a creation-order array — splitting right then down
+ * yields `[orig, right, down]` regardless of where those splits end up
+ * visually. The serialized grid tree, on the other hand, encodes the
+ * branch hierarchy where each branch's `data` array is ordered by
+ * pixel position (left children first for horizontal branches, top
+ * children first for vertical branches). Walking it depth-first
+ * produces the same ordering the user sees on screen, so Cmd+] reads
+ * like "next panel clockwise" and Cmd+[ reads like "previous panel
+ * counter-clockwise".
+ *
+ * Note: `api.toJSON()` has one documented side effect — when a group
+ * is maximized, dockview internally exits then re-enters that group
+ * during serialization, which fires `onDidMaximizedGroupChange`
+ * events. SharedDockviewLayout's outer dockview guards against that
+ * via `inSaveLayoutToJSON`, but the per-section sub-dockviews don't
+ * have a maximize button so they can't be in that state during
+ * cycling.
+ */
+export function getGridGroupsInVisualOrder(api: DockviewApi): DockviewGroupPanel[] {
+  const json = api.toJSON();
+  const ordered: DockviewGroupPanel[] = [];
+  const root = json.grid?.root;
+  if (!root) return ordered;
+  walkGridNode(root, (leaf) => {
+    const id = leaf?.data?.id;
+    if (typeof id !== "string") return;
+    const group = api.getGroup(id);
+    if (!group) return;
+    // Filter to grid-located groups — `walkGridNode` already only emits
+    // leaves of the grid tree (floating / popout / edge groups live in
+    // sibling arrays on `SerializedDockview`), but this guards against
+    // any future shape change in `toJSON`.
+    if (group.api.location.type !== "grid") return;
+    ordered.push(group as DockviewGroupPanel);
+  });
+  return ordered;
+}
+
+/** Cycle between split panel groups in visual reading order (skips floating/popout). */
 export function cycleGridGroups(
   api: DockviewApi | null,
   direction: Direction,
   refocus?: () => void,
 ): void {
   if (!api) return;
-  const groups = api.groups.filter((g) => g.api.location.type === "grid");
+  const groups = getGridGroupsInVisualOrder(api);
   if (groups.length < 2) return;
   const current = api.activeGroup;
   const idx = current ? groups.findIndex((g) => g.id === current.id) : -1;
