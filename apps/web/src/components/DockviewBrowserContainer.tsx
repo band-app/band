@@ -421,13 +421,6 @@ export function DockviewBrowserContainer({
       const browserId = newBrowserId();
       markBrowserFresh(browserId);
 
-      // Create the server-side browser record BEFORE adding the panel
-      try {
-        await trpc.browsers.create.mutate({ workspaceId, id: browserId });
-      } catch (err) {
-        console.error("[DockviewBrowserContainer] error pre-creating browser:", err);
-      }
-
       // Build panel options, targeting the specific group if provided
       const options: Parameters<typeof api.addPanel>[0] = {
         id: browserId,
@@ -446,7 +439,22 @@ export function DockviewBrowserContainer({
         };
       }
 
+      // Important: add the dockview panel BEFORE the trpc mutation. The
+      // server fires a `browser-created` status event on success, which
+      // `subscribeStatusEvents` (below) reacts to by also calling
+      // `api.addPanel` — without a `position`, so it always adds as a
+      // tab in the active group. Calling addPanel first means the
+      // status-event listener finds the panel already exists and skips.
+      // For handleAddTab the outcome is the same either way, but
+      // handleSplit relies on the same ordering to preserve its
+      // `position.direction` — see comment there.
       api.addPanel(options);
+
+      try {
+        await trpc.browsers.create.mutate({ workspaceId, id: browserId });
+      } catch (err) {
+        console.error("[DockviewBrowserContainer] error pre-creating browser:", err);
+      }
       // Layout change listeners will auto-persist
     },
     [workspaceId],
@@ -455,33 +463,21 @@ export function DockviewBrowserContainer({
   const handleSplit = useCallback(
     async (groupId: string, direction: "right" | "below") => {
       const api = apiRef.current;
-      if (!api) {
-        console.warn("[DockviewBrowserContainer] handleSplit: no api");
-        return;
-      }
+      if (!api) return;
 
       const browserId = newBrowserId();
       markBrowserFresh(browserId);
 
-      // Create the server-side browser record BEFORE adding the panel
-      try {
-        await trpc.browsers.create.mutate({ workspaceId, id: browserId });
-      } catch (err) {
-        console.error("[DockviewBrowserContainer] error creating split browser:", err);
-      }
-
-      // Diagnostic: log what we're about to ask dockview to do plus
-      // whether the reference group still exists by the time we got here
-      // (the trpc await above can put us several frames after the click).
-      const groupBefore = api.getGroup(groupId);
-      const groupsBefore = api.groups.length;
-      console.info("[DockviewBrowserContainer] split:", {
-        groupId,
-        direction,
-        groupExists: !!groupBefore,
-        totalGroupsBefore: groupsBefore,
-      });
-
+      // Add the dockview panel BEFORE the trpc mutation — the server
+      // fires `browser-created` on success, which `subscribeStatusEvents`
+      // reacts to with its own positionless `api.addPanel` call (always
+      // a tab in the active group). If we awaited the trpc call first,
+      // that listener races handleSplit and wins, dropping the panel
+      // into the active group as a tab and then `handleSplit`'s
+      // positioned addPanel throws "panel already exists" — which is
+      // exactly what was making Cmd+D / the Split right button feel
+      // broken for the browser section. The terminal container uses the
+      // same ordering for the same reason.
       try {
         api.addPanel({
           id: browserId,
@@ -498,22 +494,15 @@ export function DockviewBrowserContainer({
           },
         } as Parameters<typeof api.addPanel>[0]);
       } catch (err) {
-        console.error("[DockviewBrowserContainer] addPanel threw:", err);
+        console.error("[DockviewBrowserContainer] split addPanel threw:", err);
         return;
       }
 
-      // Diagnostic: confirm the new panel landed in its own group rather
-      // than being absorbed as a tab in the reference group.
-      const groupsAfter = api.groups.length;
-      const newPanel = api.getPanel(browserId);
-      const newPanelGroupId = newPanel?.group?.id;
-      console.info("[DockviewBrowserContainer] split result:", {
-        groupsBefore,
-        groupsAfter,
-        wasNewGroupCreated: groupsAfter > groupsBefore,
-        newPanelLandedInGroupId: newPanelGroupId,
-        sameAsReferenceGroup: newPanelGroupId === groupId,
-      });
+      try {
+        await trpc.browsers.create.mutate({ workspaceId, id: browserId });
+      } catch (err) {
+        console.error("[DockviewBrowserContainer] error creating split browser:", err);
+      }
     },
     [workspaceId],
   );
