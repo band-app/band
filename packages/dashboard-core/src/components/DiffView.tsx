@@ -559,6 +559,20 @@ interface FileDiffCacheEntry {
    * `null` while the diff is still loading or has errored.
    */
   lineCounts: DiffLineCounts | null;
+  /**
+   * Last observed pixel height of the rendered CodeMirror diff body,
+   * captured via ResizeObserver while the editor was mounted. Used as the
+   * placeholder height on subsequent unmount cycles so the row stays the
+   * exact size the editor produced — no layout shift when the
+   * IntersectionObserver tears the editor down and rebuilds it (e.g. when
+   * the user scrolls away, or the Changes tab is hidden in dockview and
+   * later restored).
+   *
+   * Falls back to the static line-count estimate (`diffContentHeight`)
+   * until a measurement lands, so the first-paint behavior is unchanged
+   * for rows that have never been visible.
+   */
+  measuredHeight: number | null;
 }
 
 interface LazyFileRowProps {
@@ -589,6 +603,12 @@ interface LazyFileRowProps {
   onOpenFile?: (filename: string) => void;
   onRevertFile?: (filename: string) => void;
   onEditorViews?: (filename: string, views: EditorView[]) => void;
+  /**
+   * Called when the rendered diff body's pixel height changes, so the parent
+   * DiffView can cache the measurement and feed it back as the placeholder
+   * height on subsequent unmount cycles. See `FileDiffCacheEntry.measuredHeight`.
+   */
+  onMeasureHeight?: (filename: string, height: number) => void;
 }
 
 function LazyFileRow({
@@ -605,10 +625,19 @@ function LazyFileRow({
   onOpenFile,
   onRevertFile,
   onEditorViews,
+  onMeasureHeight,
 }: LazyFileRowProps) {
   const [copied, setCopied] = useState(false);
   const [revertDialogOpen, setRevertDialogOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  // Wraps the diff body (either the rendered CodeMirror editor or the
+  // placeholder), used as the target of a ResizeObserver so we can record
+  // the actual rendered pixel height and feed it back into
+  // `FileDiffCacheEntry.measuredHeight`. The cached measurement makes the
+  // placeholder dimensionally identical to the rendered editor, so
+  // unmount/remount cycles (scroll, dockview tab switch) produce zero
+  // layout shift after the first paint.
+  const diffBodyRef = useRef<HTMLDivElement>(null);
   // Whether this row's CodeMirror editor should be mounted right now.
   // Driven by an IntersectionObserver scoped to the scroll container: we
   // mount when the row is within `rootMargin` of the viewport (so editors
@@ -633,7 +662,23 @@ function LazyFileRow({
     const observer = new IntersectionObserver(
       (entries) => {
         const entry = entries[entries.length - 1];
-        if (entry) setShouldMount(entry.isIntersecting);
+        if (!entry) return;
+        // Dockview hides inactive tabbed panels with `display: none`. When
+        // that happens, the scroll container collapses to a 0×0 box and
+        // every row reads `isIntersecting: false` even though logically
+        // nothing about the row's position has changed. Acting on that
+        // would tear down every CodeMirror editor in the panel, so when
+        // the user switches back they'd watch each row asynchronously
+        // re-mount its editor — visibly identical to a re-render of the
+        // whole Changes view.
+        //
+        // `rootBounds` mirrors the root's bounding rect at the time the
+        // browser fired the entry; a zero-sized root means the panel is
+        // currently hidden, so we keep the previous mount state instead
+        // of flipping everything to unmounted.
+        const root = entry.rootBounds;
+        if (root && root.width === 0 && root.height === 0) return;
+        setShouldMount(entry.isIntersecting);
       },
       {
         root: scrollContainerEl,
@@ -647,6 +692,50 @@ function LazyFileRow({
     observer.observe(el);
     return () => observer.disconnect();
   }, [isOpen, scrollContainerEl]);
+
+  // Measure the rendered diff body whenever CodeMirror is mounted, and
+  // forward the height to the parent. We only observe while `shouldMount`
+  // is true because the placeholder branch deliberately renders the
+  // cached height — observing it would either be a no-op (height didn't
+  // change) or, worse, would overwrite the cache with the placeholder's
+  // own value before CM ever gets to render.
+  //
+  // A `requestAnimationFrame` coalesces the burst of ResizeObserver fires
+  // CodeMirror produces while it streams its first paint (syntax
+  // highlighting, line gutters, deletion widgets all settle over a few
+  // frames). Without this, each fire would dispatch a setState in the
+  // parent and trigger a re-render of every row in the list.
+  useEffect(() => {
+    if (!shouldMount || !onMeasureHeight) return;
+    const el = diffBodyRef.current;
+    if (!el) return;
+    if (typeof ResizeObserver === "undefined") return;
+    let frame: number | null = null;
+    let lastReported: number | null = null;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[entries.length - 1];
+      if (!entry) return;
+      // `borderBoxSize` is the source of truth — `contentRect.height`
+      // drops borders, which matters once a future refactor moves the
+      // divider inside the measured node. Fall back when the browser
+      // doesn't expose the new property (older Safari).
+      const reported = entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height;
+      const height = Math.round(reported);
+      if (height === 0) return;
+      if (height === lastReported) return;
+      lastReported = height;
+      if (frame != null) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        frame = null;
+        onMeasureHeight(filename, height);
+      });
+    });
+    observer.observe(el);
+    return () => {
+      if (frame != null) cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [shouldMount, filename, onMeasureHeight]);
 
   const handleEditorViews = useCallback(
     (views: EditorView[]) => {
@@ -684,11 +773,22 @@ function LazyFileRow({
   const canLoadMore = !isUntracked && getNextContextStep(contextLines) !== null;
 
   // Placeholder height for the diff-content area when CodeMirror isn't
-  // mounted. Returns 0 (no reserved space) until line counts arrive —
-  // there's no useful estimate before that, and the row simply grows from
-  // header-only to full size when the diff lands.
+  // mounted. Three sources, in priority order:
+  //   1. `measuredHeight` — the actual pixel height ResizeObserver
+  //      captured while CodeMirror was mounted. Pixel-perfect, so an
+  //      unmount/remount cycle (scroll, tab switch) produces zero
+  //      layout shift.
+  //   2. `diffContentHeight(lineCounts)` — the line-count estimate.
+  //      Close but not exact (line-height rounding, deletion-chunk
+  //      widget chrome in unified mode, etc.), so the first paint
+  //      may still shift slightly when CM hands back its real
+  //      height — but the user has never seen the rendered editor
+  //      yet, so a one-time shift is the best we can do here.
+  //   3. 0 — diff is still loading and we know nothing.
   const placeholderHeight = useMemo(() => {
-    if (!isOpen || !cacheEntry?.lineCounts) return 0;
+    if (!isOpen || !cacheEntry) return 0;
+    if (cacheEntry.measuredHeight != null) return cacheEntry.measuredHeight;
+    if (!cacheEntry.lineCounts) return 0;
     return diffContentHeight(cacheEntry.lineCounts, viewMode, canLoadMore);
   }, [isOpen, cacheEntry, viewMode, canLoadMore]);
 
@@ -806,7 +906,12 @@ function LazyFileRow({
           {diffError && <div className="px-4 py-4 text-sm text-destructive">{diffError}</div>}
           {diff !== null &&
             (shouldMount ? (
-              <>
+              // Wrapper is observed by the ResizeObserver in the effect
+              // above. Its rendered height — "Show full file" bar plus the
+              // CodeMirror editor — is reported back as
+              // `measuredHeight`, then reused verbatim as the placeholder
+              // height on the next unmount cycle.
+              <div ref={diffBodyRef}>
                 {canLoadMore && (
                   <div className="flex items-center justify-center border-b border-border/20 px-4 py-1.5">
                     <button
@@ -825,7 +930,7 @@ function LazyFileRow({
                   onEditorViews={handleEditorViews}
                   onLoadMoreContext={canLoadMore ? () => onLoadMoreContext(filename) : undefined}
                 />
-              </>
+              </div>
             ) : (
               // Placeholder occupying the SAME pixel height the CodeMirror
               // editor would render at, so the row's overall size doesn't
@@ -975,6 +1080,23 @@ export function DiffView({
   const setViewMode = useCallback((mode: ViewMode) => {
     setViewModeState(mode);
     storeViewMode(mode);
+    // Cached measurements are mode-specific — a split-view diff renders
+    // taller than the same diff in unified mode and vice versa, so the
+    // previous render's height would mis-size the placeholder until CM
+    // re-mounts and re-measures. Clearing the cache makes the (slightly
+    // less accurate) line-count estimate take over for the brief window
+    // between mode flip and ResizeObserver settling.
+    setDiffCache((prev) => {
+      let changed = false;
+      const next = new Map(prev);
+      for (const [filename, entry] of prev) {
+        if (entry.measuredHeight != null) {
+          next.set(filename, { ...entry, measuredHeight: null });
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
   }, []);
 
   // Reseed availableBranches when workspace changes — `useDiffTarget` already
@@ -1288,6 +1410,29 @@ export function DiffView({
     [search.dispatchToViews],
   );
 
+  // Record the rendered diff-body pixel height so the next time the row
+  // unmounts its CodeMirror editor (via the IntersectionObserver) the
+  // placeholder can be sized exactly the same. The early-out when the
+  // height already matches keeps ResizeObserver's steady-state fires
+  // (e.g. after a re-layout that didn't actually change the row) from
+  // dispatching no-op setStates that re-render every sibling row.
+  //
+  // We bail out entirely if the filename isn't already in the cache —
+  // the row only ever measures while CM is mounted (which implies the
+  // diff fetch landed and the entry exists), so a missing entry here
+  // would mean a stale measurement arriving after the file was removed
+  // from the summary, and we'd rather drop it than resurrect it.
+  const handleMeasureHeight = useCallback((filename: string, height: number) => {
+    setDiffCache((prev) => {
+      const existing = prev.get(filename);
+      if (!existing) return prev;
+      if (existing.measuredHeight === height) return prev;
+      const next = new Map(prev);
+      next.set(filename, { ...existing, measuredHeight: height });
+      return next;
+    });
+  }, []);
+
   // -------------------------------------------------------------------------
   // Per-file diff cache callbacks
   // -------------------------------------------------------------------------
@@ -1312,6 +1457,7 @@ export function DiffView({
             diffError: null,
             contextLines,
             lineCounts: null,
+            measuredHeight: null,
           });
           return next;
         });
@@ -1349,6 +1495,12 @@ export function DiffView({
               // virtualizer's estimateSize stays O(1) when it's called
               // repeatedly during scroll.
               lineCounts: countDiffLines(result.diff),
+              // Preserve any previously measured height across diff refreshes
+              // (e.g. the user clicks "Show full file" while CM is mounted).
+              // It'll be re-measured by the ResizeObserver on the next render,
+              // but holding the old value avoids a one-frame collapse to the
+              // estimate-only height.
+              measuredHeight: existing?.measuredHeight ?? null,
             });
             return next;
           });
@@ -1363,6 +1515,7 @@ export function DiffView({
               diffError: err instanceof Error ? err.message : "Failed to load diff",
               contextLines: existing?.contextLines ?? contextLines,
               lineCounts: existing?.lineCounts ?? null,
+              measuredHeight: existing?.measuredHeight ?? null,
             });
             return next;
           });
@@ -1950,31 +2103,72 @@ export function DiffView({
     if (shouldDispatchFetch(diffCacheRef.current.get(target))) {
       fetchFileDiff(target);
     }
-    // Double rAF: the first lets React commit the expansion state, the
+    // Scrolling to a far-off file is a moving target: as we scroll, the
+    // IntersectionObserver mounts CodeMirror editors in rows that just
+    // entered the overscan zone, and each mount swaps the row's
+    // placeholder (a line-count estimate) for the editor's true rendered
+    // height. With ~25k diff lines that drift can add up to several
+    // thousand pixels, so a one-shot `scrollTo` based on the initial
+    // estimate routinely overshoots and the user lands on the wrong
+    // file. The "active file" badge then reads from the scroll handler,
+    // which sees that wrong file at the viewport top and re-broadcasts
+    // it as `activeFile`.
+    //
+    // Iterative correction: after the initial scroll, keep re-aligning
+    // the target row to the viewport top on each frame as long as it's
+    // visibly drifting. We declare victory once the row has been
+    // pixel-stable for several consecutive frames, with a hard timeout
+    // so a row that's still streaming new content (long load-more
+    // expand-context) eventually releases the scroll lock instead of
+    // pinning forever.
+    const TOLERANCE_PX = 1;
+    const STABLE_FRAMES = 5;
+    const MAX_DURATION_MS = 2000;
+    let frameId: number | null = null;
+    let stableFrames = 0;
+    const startedAt = performance.now();
+    const align = () => {
+      frameId = null;
+      const container = scrollContainerRef.current;
+      if (!container) return;
+      const el = container.querySelector<HTMLElement>(
+        `[data-band-diff-file="${CSS.escape(target)}"]`,
+      );
+      if (!el) return;
+      const elTop = el.getBoundingClientRect().top;
+      const containerTop = container.getBoundingClientRect().top;
+      const delta = elTop - containerTop;
+      if (Math.abs(delta) <= TOLERANCE_PX) {
+        stableFrames += 1;
+        if (stableFrames >= STABLE_FRAMES) return;
+      } else {
+        stableFrames = 0;
+        // `scrollTop` assignment (vs `scrollTo`) skips the smooth-scroll
+        // coalescing the browser does for `scrollTo({behavior:"instant"})`
+        // calls fired in quick succession, which matters here because
+        // we're firing one per frame.
+        container.scrollTop = container.scrollTop + delta;
+      }
+      if (performance.now() - startedAt > MAX_DURATION_MS) return;
+      frameId = requestAnimationFrame(align);
+    };
+    // Double rAF priming: first lets React commit the expansion state,
     // second lets the row's placeholder grow to its computed height
-    // before we read its position. Without the second frame the scroll
-    // lands on the row's pre-expansion location and the user sees the
-    // file just below the top edge.
-    let frame2: number | null = null;
-    const frame1 = requestAnimationFrame(() => {
-      frame2 = requestAnimationFrame(() => {
-        const container = scrollContainerRef.current;
-        if (!container) return;
-        const el = container.querySelector<HTMLElement>(
-          `[data-band-diff-file="${CSS.escape(target)}"]`,
-        );
-        if (!el) return;
-        const elTop = el.getBoundingClientRect().top;
-        const containerTop = container.getBoundingClientRect().top;
-        container.scrollTo({
-          top: container.scrollTop + (elTop - containerTop),
-          behavior: "instant",
-        });
+    // before we read its position. The alignment loop then takes over
+    // and tracks the row as CodeMirror editors mount around it.
+    let priming1: number | null = null;
+    let priming2: number | null = null;
+    priming1 = requestAnimationFrame(() => {
+      priming1 = null;
+      priming2 = requestAnimationFrame(() => {
+        priming2 = null;
+        align();
       });
     });
     return () => {
-      cancelAnimationFrame(frame1);
-      if (frame2 !== null) cancelAnimationFrame(frame2);
+      if (priming1 !== null) cancelAnimationFrame(priming1);
+      if (priming2 !== null) cancelAnimationFrame(priming2);
+      if (frameId !== null) cancelAnimationFrame(frameId);
     };
   }, [focusedFile, focusedLineCounts, fetchFileDiff]);
 
@@ -2386,6 +2580,7 @@ export function DiffView({
                     onOpenFile={onOpenFile}
                     onRevertFile={adapter.revertFile ? handleRevertFile : undefined}
                     onEditorViews={handleEditorViews}
+                    onMeasureHeight={handleMeasureHeight}
                   />
                 );
                 if (!isLast) return row;
