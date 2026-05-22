@@ -514,6 +514,13 @@ function getNextContextStep(current: number): number | null {
   return null;
 }
 
+// Stable reference for the "no changes" fileStatuses object. Using a fresh
+// `{}` literal on every render makes downstream memos / effects keyed on
+// the object reference re-fire every render even though the underlying
+// value is the same — minor work, but worth eliminating since it's
+// trivially fixable.
+const EMPTY_FILE_STATUSES: Record<string, FileStatus> = {};
+
 // ---------------------------------------------------------------------------
 // Lazy file row — renders diff from parent-provided cache
 // ---------------------------------------------------------------------------
@@ -1340,6 +1347,13 @@ export function DiffView({
       // Compute the "did we just open it?" signal inside the updater
       // (using `diffCacheRef`, which IS pure), then issue the fetch
       // outside.
+      //
+      // Race note: rapid open/close/open clicks before the first fetch
+      // resolves can both see `diffCacheRef.current.has(filename) === false`
+      // and dispatch two `fetchFileDiff` calls. The duplicate is harmless —
+      // `fetchFileDiff`'s `.then` overwrites the cache idempotently and
+      // skips the state update if the diff string hasn't changed — so we
+      // don't try to de-dupe at the call site.
       let shouldFetch = false;
       setExpandedFiles((prev) => {
         const next = new Set(prev);
@@ -1372,6 +1386,16 @@ export function DiffView({
         // they scroll into view. Without this, the user would briefly see
         // a blank diff body after each scroll-mount until fetchFileDiff
         // resolved.
+        //
+        // KNOWN LIMITATION: on a workspace with hundreds of changed
+        // files this fires hundreds of concurrent `getFileDiff` requests.
+        // Modern browsers cap HTTP/1.1 at 6 sockets per origin and queue
+        // the rest, so we never blow past the network — but the adapter
+        // (and any backing process / git invocation) will see a burst.
+        // Acceptable for typical workspace sizes (≪100 files);
+        // throttling would belong in the adapter layer if it becomes a
+        // real problem, since per-file deduplication already lives in
+        // `fetchFileDiff` via the diffCacheRef check below.
         for (const name of names) {
           if (!diffCacheRef.current.has(name)) {
             fetchFileDiff(name);
@@ -1751,7 +1775,9 @@ export function DiffView({
   // `{}` on every render, but `filenames` is then a stable [] (empty array
   // produced by flattening an empty tree), so downstream effects keyed on
   // it don't re-fire spuriously.
-  const fileStatuses = hasChanges ? (summary?.fileStatuses ?? {}) : {};
+  const fileStatuses = hasChanges
+    ? (summary?.fileStatuses ?? EMPTY_FILE_STATUSES)
+    : EMPTY_FILE_STATUSES;
   const filenames = useMemo(
     () => flattenFileTreeOrder(buildFileTree(fileStatuses)),
     [fileStatuses],

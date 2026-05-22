@@ -95,10 +95,13 @@ export function diffContentHeight(
   // Unified view stacks deleted, context, and inserted lines as a single
   // column — every line consumes vertical space. Split view shows old vs
   // new side by side and pads the shorter side to match the taller one,
-  // so the visible height is `max(oldSide, newSide)`.
+  // so the visible height is `context + max(deletions, insertions)`.
+  // (Equivalent to `max(context + deletions, context + insertions)` —
+  // factored to make the "shared context, take whichever side is longer"
+  // intent obvious.)
   const contentLines =
     viewMode === "split"
-      ? Math.max(context + deletions, context + insertions)
+      ? context + Math.max(deletions, insertions)
       : context + insertions + deletions;
   const hunkSeparators = Math.max(0, hunks - 1) * ROW_HUNK_SEPARATOR_HEIGHT;
   const showFullBar = canLoadMore ? ROW_SHOW_FULL_BAR_HEIGHT : 0;
