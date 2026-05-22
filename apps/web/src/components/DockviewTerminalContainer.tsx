@@ -529,9 +529,19 @@ export function DockviewTerminalContainer({
         return;
       }
 
-      const closeActiveTab = () => {
-        const active = apiRef.current?.activePanel;
-        if (active) closeTab(active.id);
+      // Try to close the active tab; returns whether the close path actually
+      // ran. Callers use the return value to decide whether to swallow the
+      // keystroke. When `false` (no tab to close), the caller should let the
+      // event bubble — Cmd+W on the last tab needs to reach Electron's menu
+      // so the window can close, and Ctrl+D on the last tab needs to reach
+      // xterm so the user's shell can receive EOF.
+      const tryCloseActiveTab = (): boolean => {
+        const api = apiRef.current;
+        if (!api || api.panels.length <= 1) return false;
+        const active = api.activePanel;
+        if (!active) return false;
+        closeTab(active.id);
+        return true;
       };
 
       if (key === "t" && !e.shiftKey) {
@@ -539,25 +549,40 @@ export function DockviewTerminalContainer({
         e.stopPropagation();
         handleAddTab();
       } else if (key === "w" && !e.shiftKey) {
-        e.preventDefault();
-        e.stopPropagation();
-        closeActiveTab();
+        // Don't preventDefault when there's nothing to close — let the OS /
+        // Electron menu handle Cmd+W (close window) and let plain Ctrl+W
+        // bubble up.
+        if (tryCloseActiveTab()) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
       } else if (key === "d") {
         // Cmd+D / Cmd+Shift+D → split. Ctrl+D → close active tab (Cmd already
-        // owns split, so reuse Ctrl+D for close). We `preventDefault` for any
-        // modifier-d combo we reach here (the outer `mod` guard already
-        // filtered out plain `d` keypresses), so unhandled combos like
-        // Ctrl+Shift+D or Cmd+Ctrl+D don't leak a stray `^D` to xterm. The
-        // last-tab guard in closeTab keeps Ctrl+D as a silent no-op when
-        // only one terminal remains.
-        e.preventDefault();
-        e.stopPropagation();
+        // owns split, so reuse Ctrl+D for close).
+        //
+        // For the SPLIT branch we always `preventDefault` so unhandled
+        // modifier-d combos that fall through (e.g. Ctrl+Shift+D, Cmd+Ctrl+D)
+        // don't leak a stray `^D` to xterm.
+        //
+        // For the CLOSE branch we conditionally preventDefault — on the last
+        // terminal tab `tryCloseActiveTab` returns false and we let Ctrl+D
+        // through to xterm so the user can exit their shell with EOF.
         if (e.metaKey && !e.ctrlKey) {
+          e.preventDefault();
+          e.stopPropagation();
           const activeGroup = apiRef.current?.activeGroup;
           if (!activeGroup) return;
           handleSplit(activeGroup.id, e.shiftKey ? "below" : "right");
         } else if (e.ctrlKey && !e.metaKey && !e.shiftKey) {
-          closeActiveTab();
+          if (tryCloseActiveTab()) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        } else {
+          // Any other modifier-d combo (e.g. Ctrl+Shift+D, Cmd+Ctrl+D):
+          // swallow so xterm doesn't see a stray `^D`. No close, no split.
+          e.preventDefault();
+          e.stopPropagation();
         }
       }
     };

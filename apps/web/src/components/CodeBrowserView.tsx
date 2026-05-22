@@ -1282,7 +1282,18 @@ export function CodeBrowserView({
       const tabs = fileTabs.openTabs;
       if (tabs.length <= 1) return;
       const currentIndex = tabs.findIndex((t) => t.filePath === fileTabs.activeTabPath);
-      const nextIndex = (currentIndex + direction + tabs.length) % tabs.length;
+      // When `activeTabPath` is stale (briefly possible after an external
+      // tab close, before the next render reconciles), `findIndex` returns
+      // -1 and the naive `(-1 + direction + n) % n` resolves to 0 forward
+      // and n-2 backward — silently jumping to tab 0 or skipping the last
+      // tab. Treat that as "enter the cycle from the end the user is
+      // moving towards": forward → first, backward → last.
+      const nextIndex =
+        currentIndex < 0
+          ? direction === 1
+            ? 0
+            : tabs.length - 1
+          : (currentIndex + direction + tabs.length) % tabs.length;
       handleTabSelect(tabs[nextIndex].filePath);
     };
 
