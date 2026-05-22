@@ -211,6 +211,13 @@ function FileTreeToolbar({
     if (!el) return;
     const ro = new ResizeObserver((entries) => {
       for (const entry of entries) {
+        // Skip 0-width entries: Dockview hides inactive tabs with
+        // `display: none`, which fires a ResizeObserver callback with
+        // width 0. If we wrote that into `compact`, the next time the
+        // tab is shown React would paint one frame of the compact
+        // toolbar before the follow-up real measurement re-rendered
+        // — that's the layout flash on tab switch.
+        if (entry.contentRect.width === 0) continue;
         setCompact(entry.contentRect.width < TOOLBAR_COMPACT_BREAKPOINT);
       }
     });
@@ -489,6 +496,15 @@ export function CodeBrowserView({
     if (!el) return;
     const ro = new ResizeObserver((entries) => {
       for (const entry of entries) {
+        // Skip 0-width entries: Dockview hides inactive tabs with
+        // `display: none`, which fires a ResizeObserver callback with
+        // width 0. Writing that into `containerWidth` would flip
+        // `useMobileLayout` to true (0 < 600), so the next time Files
+        // becomes active React paints one frame in the mobile toggle
+        // layout before the follow-up real measurement re-renders the
+        // desktop split — that's the visible flash when switching from
+        // Browser/Terminal back to Files.
+        if (entry.contentRect.width === 0) continue;
         setContainerWidth(entry.contentRect.width);
       }
     });
