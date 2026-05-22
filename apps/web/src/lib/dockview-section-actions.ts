@@ -38,8 +38,13 @@ export function cycleGridGroups(
   const current = api.activeGroup;
   const idx = current ? groups.findIndex((g) => g.id === current.id) : -1;
   const next = groups[(idx + direction + groups.length) % groups.length];
-  next?.activePanel?.api.setActive();
-  refocus?.();
+  // Only refocus when we actually activated a different panel; if the next
+  // group has no active panel, setActive() is a no-op so re-focusing whatever
+  // is already focused would be a confusing flicker.
+  if (next?.activePanel) {
+    next.activePanel.api.setActive();
+    refocus?.();
+  }
 }
 
 /**

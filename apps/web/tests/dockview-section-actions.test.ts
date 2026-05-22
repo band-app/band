@@ -15,6 +15,18 @@
  *   - Closing the leftmost tab snapping focus to the *next* leftmost instead
  *     of the panel on its right.
  *   - Closing a single-tab group still trying to pre-select a neighbour.
+ *
+ * Note on the stub `DockviewApi`: CLAUDE.md prefers black-box integration tests
+ * over mock-based unit tests, but Dockview is a DOM-driven library — building
+ * a real `DockviewApi` requires mounting a Dockview container against a live
+ * DOM, manipulating splits via user-style drag interactions, and running this
+ * in vitest + jsdom (which doesn't implement layout). The helpers under test
+ * are also pure functions over the `DockviewApi` interface: no I/O, no state,
+ * no async — exactly the shape where stub-based contract tests give the
+ * highest signal-to-noise. Per-container behaviour (the focus-target callbacks
+ * + visibility wiring) is covered by manual QA against the running app, same
+ * as the rest of the dockview UI. See `apps/web/tests/browser-layout.test.ts`
+ * for the same pattern applied to the browser tab-strip helpers.
  */
 
 import { describe, expect, it, vi } from "vitest";
@@ -185,6 +197,19 @@ describe("cycleGridGroups", () => {
     const g1 = makeGroup("g1", ["b"]);
     cycleGridGroups(asApi(makeApi([g0, g1], 0)), -1);
     expect(g1.panels[0].api.setActive).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not refocus when the next group has no active panel", () => {
+    // An empty group is unusual but possible (dockview can briefly hold a
+    // group with no active panel between operations). Without the guard the
+    // refocus callback would fire even though setActive() was a no-op, which
+    // re-focuses whatever was already active and causes a confusing flicker.
+    const g0 = makeGroup("g0", ["a"]);
+    const g1 = makeGroup("g1", []);
+    g1.activePanel = undefined;
+    const refocus = vi.fn();
+    cycleGridGroups(asApi(makeApi([g0, g1], 0)), 1, refocus);
+    expect(refocus).not.toHaveBeenCalled();
   });
 });
 
