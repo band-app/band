@@ -113,9 +113,31 @@ function ensureSprite(): void {
   spriteInjected = true;
 }
 
-// Inject at module init so the sprite is in the DOM before the first React
-// commit references any <use href>.
-ensureSprite();
+// NOTE: We deliberately do NOT call ensureSprite() at module init.
+//
+// The web app uses SSR (tanstack-start). On the server `iconSources` is `{}`
+// (the IS_SSR gate above), so the server HTML contains NO sprite and the
+// icon components render as bare `<svg>` placeholders. On the client the
+// file-icon module's top-level code runs BEFORE React hydration starts.
+// If we injected the sprite into `document.body` here, the body would have
+// an extra `<svg id="mit-icon-sprite">` child that isn't in the server HTML,
+// and React 19 would treat that as a hydration mismatch (error #418):
+//
+//   "Hydration failed because the initial UI does not match what was
+//    rendered on the server."
+//
+// React's recovery path is to discard the entire client subtree and
+// re-render from scratch — which REMOVES the sprite we just appended. By
+// the time the icon components render, `spriteInjected` is already `true`
+// (it was latched when we appended), so the in-component ensureSprite()
+// no-ops and the sprite never comes back. Every `<use href="#mit-...">` in
+// the page then references a missing symbol → blank icons. See issue:
+// material icons missing in the file browser after the v0.16.5 DMG ship.
+//
+// The fix: rely solely on the in-component ensureSprite() call below. That
+// call runs DURING the React commit (after hydration), so the appended
+// sprite is a sibling-of-React's-root child added after reconciliation
+// completes — React doesn't try to reconcile it and doesn't tear it down.
 
 function symbolIdForIcon(iconName: string): string | null {
   const iconPath = resolveIconPath(iconName);
