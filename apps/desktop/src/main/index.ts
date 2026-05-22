@@ -178,10 +178,15 @@ async function bootstrap(): Promise<void> {
   // both have `webBrowserCdpEnabled` on. Setting the env var also
   // implicitly enables CDP for that instance — no need to flip the
   // user-facing setting just to debug the renderer.
-  const cdpPortEnv = process.env.BAND_CDP_PORT;
-  const cdpEnabled = getWebBrowserCdpEnabled() || cdpPortEnv !== undefined;
+  // Treat `BAND_CDP_PORT=""` (set but blank, e.g. from a `BAND_CDP_PORT=
+  // electron .` invocation) the same as unset — handing chromium an empty
+  // string would either no-op or pick a random port, neither of which is
+  // what a developer typing that command meant.
+  const cdpPortEnv = process.env.BAND_CDP_PORT?.trim();
+  const cdpEnabled =
+    getWebBrowserCdpEnabled() || (cdpPortEnv !== undefined && cdpPortEnv.length > 0);
   if (cdpEnabled) {
-    const cdpPort = cdpPortEnv ?? "9223";
+    const cdpPort = cdpPortEnv && cdpPortEnv.length > 0 ? cdpPortEnv : "9223";
     app.commandLine.appendSwitch("remote-debugging-port", cdpPort);
   }
 

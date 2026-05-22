@@ -460,12 +460,16 @@ export function DockviewTerminalContainer({
     });
   }, []);
 
-  // Keyboard shortcuts (capture phase, scoped to this section's focus):
-  // - Cmd+T                   → open a new terminal tab
-  // - Cmd+W                   → close the active terminal tab
+  // Keyboard shortcuts (capture phase, scoped to this section's focus).
+  // The outer modifier guard uses `mod = e.metaKey || e.ctrlKey`, so every
+  // shortcut that names `Cmd+X` below also fires for `Ctrl+X` — that's
+  // intentional for cross-platform support; readers should not assume
+  // platform-specific dispatch.
+  // - Cmd/Ctrl+T              → open a new terminal tab
+  // - Cmd/Ctrl+W              → close the active terminal tab
   // - Ctrl+D                  → close the active terminal tab (Cmd owns split)
-  // - Cmd+D                   → split right (vertical split)
-  // - Cmd+Shift+D             → split down (horizontal split)
+  // - Cmd/Ctrl+D              → split right (vertical split)
+  // - Cmd/Ctrl+Shift+D        → split down (horizontal split)
   // - Ctrl+(Shift)+Tab        → cycle tabs in the active group
   // - Cmd/Ctrl+[ / Cmd/Ctrl+] → cycle between split terminal groups (panels)
   // - Cmd/Ctrl+Shift+[/]      → cycle tabs in the active group
@@ -540,19 +544,19 @@ export function DockviewTerminalContainer({
         closeActiveTab();
       } else if (key === "d") {
         // Cmd+D / Cmd+Shift+D → split. Ctrl+D → close active tab (Cmd already
-        // owns split, so reuse Ctrl+D for close). preventDefault always fires
-        // so xterm doesn't forward a stray ^D to the shell; the last-tab guard
-        // in closeTab keeps Ctrl+D as a silent no-op when only one terminal
-        // remains.
+        // owns split, so reuse Ctrl+D for close). We `preventDefault` for any
+        // modifier-d combo we reach here (the outer `mod` guard already
+        // filtered out plain `d` keypresses), so unhandled combos like
+        // Ctrl+Shift+D or Cmd+Ctrl+D don't leak a stray `^D` to xterm. The
+        // last-tab guard in closeTab keeps Ctrl+D as a silent no-op when
+        // only one terminal remains.
+        e.preventDefault();
+        e.stopPropagation();
         if (e.metaKey && !e.ctrlKey) {
-          e.preventDefault();
-          e.stopPropagation();
           const activeGroup = apiRef.current?.activeGroup;
           if (!activeGroup) return;
           handleSplit(activeGroup.id, e.shiftKey ? "below" : "right");
         } else if (e.ctrlKey && !e.metaKey && !e.shiftKey) {
-          e.preventDefault();
-          e.stopPropagation();
           closeActiveTab();
         }
       }

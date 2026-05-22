@@ -13,7 +13,10 @@ import type { DockviewApi, DockviewGroupPanel } from "dockview";
 
 export type Direction = 1 | -1;
 
-/** Cycle tabs in the currently active group. */
+/** Cycle tabs in the currently active group. No-op (including no refocus
+ * call) when the group has only one panel and `moveToNext`/`moveToPrevious`
+ * would itself be a no-op — avoids spurious focus thrash on Ctrl+Tab presses
+ * in single-panel groups. */
 export function cycleTabsInActiveGroup(
   api: DockviewApi | null,
   direction: Direction,
@@ -21,6 +24,7 @@ export function cycleTabsInActiveGroup(
 ): void {
   const group = api?.activeGroup;
   if (!api || !group) return;
+  if (group.panels.length <= 1) return;
   if (direction === 1) group.model.moveToNext();
   else group.model.moveToPrevious();
   refocus?.();
@@ -147,7 +151,18 @@ export function cycleGridGroups(
   if (groups.length < 2) return;
   const current = api.activeGroup;
   const idx = current ? groups.findIndex((g) => g.id === current.id) : -1;
-  const next = groups[(idx + direction + groups.length) % groups.length];
+  // When the active group isn't in the cycle (no current active group, or
+  // the active group is floating/popout), enter the cycle from the end the
+  // user is moving towards: forward → first, backward → last. The naive
+  // `(idx + direction + n) % n` with `idx = -1` produces `0` forward but
+  // `n - 2` backward, which silently skips the last group.
+  const nextIdx =
+    idx < 0
+      ? direction === 1
+        ? 0
+        : groups.length - 1
+      : (idx + direction + groups.length) % groups.length;
+  const next = groups[nextIdx];
   // Only refocus when we actually activated a different panel; if the next
   // group has no active panel, setActive() is a no-op so re-focusing whatever
   // is already focused would be a confusing flicker.

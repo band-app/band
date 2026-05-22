@@ -715,6 +715,11 @@ export function DockviewBrowserContainer({
   useEffect(() => {
     if (!isDesktop) return;
     const unlisteners: Array<() => void> = [];
+    // Guards the async IIFE below: if the component unmounts before the
+    // `desktopListen` awaits resolve, we must NOT push their unlisten
+    // functions onto a list whose cleanup has already run. Without this,
+    // those listeners survive the unmount and leak across remounts.
+    let cancelled = false;
 
     const refocusAddressBar = () => {
       const panel = apiRef.current?.activePanel;
@@ -724,8 +729,8 @@ export function DockviewBrowserContainer({
     };
 
     void (async () => {
-      unlisteners.push(
-        await desktopListen<{
+      const fns = await Promise.all([
+        desktopListen<{
           browser_id: string;
           workspace_id: string;
           direction: "right" | "below";
@@ -736,7 +741,7 @@ export function DockviewBrowserContainer({
           if (!sourcePanel?.group) return;
           void handleSplit(sourcePanel.group.id, event.payload.direction);
         }),
-        await desktopListen<{
+        desktopListen<{
           browser_id: string;
           workspace_id: string;
         }>("browser-close-shortcut", (event) => {
@@ -746,7 +751,7 @@ export function DockviewBrowserContainer({
           if (!api.getPanel(sourceId)) return;
           closeTab(sourceId);
         }),
-        await desktopListen<{
+        desktopListen<{
           browser_id: string;
           workspace_id: string;
           target: "tabs" | "groups";
@@ -768,10 +773,19 @@ export function DockviewBrowserContainer({
             cycleGridGroups(apiRef.current, event.payload.direction, refocus);
           }
         }),
-      );
+      ]);
+      // If the effect already cleaned up while we were awaiting, dispose
+      // the just-registered listeners immediately instead of letting them
+      // outlive the component.
+      if (cancelled) {
+        for (const fn of fns) fn();
+      } else {
+        unlisteners.push(...fns);
+      }
     })();
 
     return () => {
+      cancelled = true;
       for (const unlisten of unlisteners) unlisten();
     };
   }, [handleSplit, closeTab]);

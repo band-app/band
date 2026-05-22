@@ -164,9 +164,21 @@ describe("cycleTabsInActiveGroup", () => {
   });
 
   it("does not throw when refocus is omitted", () => {
-    const group = makeGroup("g0", ["a"]);
+    const group = makeGroup("g0", ["a", "b"]);
     expect(() => cycleTabsInActiveGroup(asApi(makeApi([group])), 1)).not.toThrow();
     expect(group.model.moveToNext).toHaveBeenCalled();
+  });
+
+  it("is a no-op (no refocus) when the active group has a single panel", () => {
+    // moveToNext/moveToPrevious are no-ops in single-panel groups; firing the
+    // refocus callback in that case is pure noise (xterm focus thrash on every
+    // Ctrl+Tab press when nothing actually cycled). Skip both.
+    const group = makeGroup("g0", ["solo"]);
+    const refocus = vi.fn();
+    cycleTabsInActiveGroup(asApi(makeApi([group])), 1, refocus);
+    expect(group.model.moveToNext).not.toHaveBeenCalled();
+    expect(group.model.moveToPrevious).not.toHaveBeenCalled();
+    expect(refocus).not.toHaveBeenCalled();
   });
 });
 
@@ -340,6 +352,43 @@ describe("cycleGridGroups", () => {
     const api = makeApi([g1, g2, g3, g4], 0);
     cycleGridGroups(asApi(api), -1);
     expect(g3.panels[0].api.setActive).toHaveBeenCalledTimes(1);
+  });
+
+  it("enters the cycle from the first group when active group is floating/popout (direction 1)", () => {
+    // `getGridGroupsInVisualOrder` filters to grid groups, so a floating
+    // active group has `idx === -1`. The naive `(-1 + 1 + n) % n` formula
+    // gives 0 (first group, ok), but the corresponding backward case
+    // would give `n - 2` (skipping the last group) — see the next test.
+    const grid0 = makeGroup("grid0", ["a"], { rect: { left: 0, top: 0, width: 200, height: 200 } });
+    const grid1 = makeGroup("grid1", ["b"], {
+      rect: { left: 200, top: 0, width: 200, height: 200 },
+    });
+    const floating = makeGroup("float", ["c"], { location: "floating" });
+    const api = makeApi([grid0, grid1, floating]);
+    // Override activeGroup to the floating one so `findIndex` against the
+    // grid-only list returns -1.
+    api.activeGroup = floating;
+    cycleGridGroups(asApi(api), 1);
+    expect(grid0.panels[0].api.setActive).toHaveBeenCalledTimes(1);
+  });
+
+  it("enters the cycle from the last group when active group is floating/popout (direction -1)", () => {
+    // The bug we're fixing: `(-1 + -1 + n) % n = n - 2` — backward from a
+    // non-grid active group used to land on the second-to-last group,
+    // silently skipping the last one. Should land on the last grid group.
+    const grid0 = makeGroup("grid0", ["a"], { rect: { left: 0, top: 0, width: 200, height: 200 } });
+    const grid1 = makeGroup("grid1", ["b"], {
+      rect: { left: 200, top: 0, width: 200, height: 200 },
+    });
+    const grid2 = makeGroup("grid2", ["c"], {
+      rect: { left: 400, top: 0, width: 200, height: 200 },
+    });
+    const floating = makeGroup("float", ["d"], { location: "floating" });
+    const api = makeApi([grid0, grid1, grid2, floating]);
+    api.activeGroup = floating;
+    cycleGridGroups(asApi(api), -1);
+    expect(grid2.panels[0].api.setActive).toHaveBeenCalledTimes(1);
+    expect(grid1.panels[0].api.setActive).not.toHaveBeenCalled();
   });
 
   it("cycles a 3-panel layout (top-left, top-right, bottom-full) in reading order", () => {
