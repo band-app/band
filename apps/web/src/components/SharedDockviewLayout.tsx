@@ -606,7 +606,16 @@ function saveLayout(
       const activeState = extractActiveState(json);
       const existing = loadActiveState(workspaceId);
       if (existing?.maximizedGroup) {
-        activeState.maximizedGroup = existing.maximizedGroup;
+        // Only preserve the saved maximize when the named group is
+        // still present in the current layout. If a group has been
+        // deleted (e.g. the user removed all its tabs), dockview may
+        // not fire `onDidMaximizedGroupChange(false)` along the
+        // destruction path, so the stale id would otherwise hang
+        // around in localStorage indefinitely.
+        const groupStillExists = api.groups.some((g) => g.id === existing.maximizedGroup);
+        if (groupStillExists) {
+          activeState.maximizedGroup = existing.maximizedGroup;
+        }
       }
       localStorage.setItem(`${ACTIVE_STATE_KEY_PREFIX}${workspaceId}`, JSON.stringify(activeState));
     }
@@ -1396,6 +1405,12 @@ export function SharedDockviewLayout() {
           if (!initializedRef.current) return;
           const workspaceId = activeWorkspaceIdRef.current;
           if (!workspaceId) return;
+          // Defensive: dockview's event payload types both `group` and
+          // `group.id` as optional. If a future version (or an edge case
+          // during init) ever fires `isMaximized: true` without a group
+          // id, we'd silently overwrite the saved state with `undefined`
+          // and lose the user's maximize. Skip rather than corrupt.
+          if (e.isMaximized && !e.group?.id) return;
           try {
             const current = loadActiveState(workspaceId) ?? { groups: {} };
             const nextMax = e.isMaximized ? e.group?.id : undefined;
@@ -1450,44 +1465,53 @@ export function SharedDockviewLayout() {
     const api = apiRef.current;
     if (!api || !activeWorkspaceId) return;
     const activeState = loadActiveState(activeWorkspaceId);
-    // Even when the workspace has no saved state we still need to clear
-    // any maximize carried over from the workspace we just left —
-    // otherwise switching A (maximized) → B (no state) would leave B
-    // rendered under A's maximize overlay.
+    // ORDER MATTERS: restore per-group active tabs FIRST, then apply
+    // the saved maximize state. Doing it the other way around causes
+    // two correctness problems:
+    //
+    //   - `setActive()` on a panel inside a group that's NOT the
+    //     currently-maximized one implicitly exits the maximize so the
+    //     group can come to the foreground. If we'd just applied max,
+    //     that exit immediately undoes it.
+    //   - Skipping `setActive` for non-maximized groups (the obvious
+    //     workaround) is also wrong: those groups would silently
+    //     inherit whatever active tab the PREVIOUS workspace left in
+    //     the shared dockview, so when the user later exits maximize
+    //     they'd see stale tabs.
+    //
+    // Running setActive first means every group ends up on the correct
+    // tab for the incoming workspace. Any intermediate maximize-exit
+    // side effects then get overwritten by the final
+    // `applyMaximizedGroupToApi` call below, which fires its own
+    // `onDidMaximizedGroupChange` event so the persisted state ends up
+    // accurate.
+    if (activeState) {
+      try {
+        for (const [_groupId, viewId] of Object.entries(activeState.groups)) {
+          const panel = api.getPanel(viewId);
+          if (!panel) continue;
+          // Skip if already active in its group — setActive is a focus-fire
+          // even for no-op tab switches.
+          if (panel.api.isActive) continue;
+          // Skip single-panel groups (e.g. the projects edge group) — there's
+          // nothing to "switch to", and the focus side-effect resets the
+          // project list scroll position.
+          if (panel.group.panels.length <= 1) continue;
+          panel.api.setActive();
+        }
+        // Intentionally do NOT activate `activeState.activeGroup` here for
+        // the same reason: the previous code activated the first panel of
+        // the saved active group to focus that group, which on the edge-left
+        // group meant re-focusing the DashboardShell container and resetting
+        // the project list scroll.
+      } catch {}
+    }
+    // Apply (or clear) the maximize last. Even when the workspace has
+    // no saved state we still need to clear any maximize carried over
+    // from the workspace we just left — otherwise switching A
+    // (maximized) → B (no state) would leave B rendered under A's
+    // maximize overlay.
     applyMaximizedGroupToApi(api, activeState?.maximizedGroup);
-    if (!activeState) return;
-    try {
-      for (const [groupId, viewId] of Object.entries(activeState.groups)) {
-        // CRITICAL: skip panels in groups that aren't the maximized
-        // one. When a group is maximized, dockview hides every other
-        // group; calling `setActive()` on a panel inside a hidden
-        // group implicitly EXITS the maximize so the group can come
-        // back to the foreground. That immediately undoes the
-        // maximize we just restored and writes `maximizedGroup:
-        // undefined` to localStorage via the maxchange listener,
-        // corrupting the saved state. Tab activations inside hidden
-        // groups are already encoded in the saved layout JSON
-        // (`leaf.data.activeView`) and applied through fromJSON on
-        // page load, so we don't lose tab fidelity by skipping them
-        // here.
-        if (activeState.maximizedGroup && groupId !== activeState.maximizedGroup) continue;
-        const panel = api.getPanel(viewId);
-        if (!panel) continue;
-        // Skip if already active in its group — setActive is a focus-fire
-        // even for no-op tab switches.
-        if (panel.api.isActive) continue;
-        // Skip single-panel groups (e.g. the projects edge group) — there's
-        // nothing to "switch to", and the focus side-effect resets the
-        // project list scroll position.
-        if (panel.group.panels.length <= 1) continue;
-        panel.api.setActive();
-      }
-      // Intentionally do NOT activate `activeState.activeGroup` here for
-      // the same reason: the previous code activated the first panel of
-      // the saved active group to focus that group, which on the edge-left
-      // group meant re-focusing the DashboardShell container and resetting
-      // the project list scroll.
-    } catch {}
   }, [activeWorkspaceId]);
 
   // ---------------------------------------------------------------------
