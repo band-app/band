@@ -52,11 +52,20 @@ export function walkGridNode(node: any, callback: (leaf: any) => void): void {
  */
 export function extractActiveState(json: Record<string, unknown>): ActiveTabState {
   const state: ActiveTabState = { groups: {} };
-  if (typeof json.activeGroup === "string") {
-    state.activeGroup = json.activeGroup;
-  }
+  // Dockview's serialized output uses two different keys for the
+  // "currently active group" idea depending on direction of travel:
+  //   - `toJSON()` emits it as `activeGroup`.
+  //   - `applyActiveState(...)` (in this file) overlays it as
+  //     `activePanel` to match the shape `fromJSON(...)` expects on
+  //     the way back in.
+  // Either may be present (toJSON output, or a layout we've already
+  // overlaid). Prefer `activePanel` when both are set so the
+  // overlay-then-extract round trip stays consistent; fall back to
+  // `activeGroup` otherwise.
   if (typeof json.activePanel === "string") {
     state.activeGroup = json.activePanel;
+  } else if (typeof json.activeGroup === "string") {
+    state.activeGroup = json.activeGroup;
   }
   const grid = json.grid as Record<string, unknown> | undefined;
   if (grid?.root) {
