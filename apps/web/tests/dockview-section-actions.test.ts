@@ -13,7 +13,7 @@
  *   - cycleGridGroups picking up floating / popout groups (only grid groups
  *     should be cyclable via Cmd+[ / Cmd+]).
  *   - cycleGridGroups visiting groups in creation order, or in the order
- *     dictated by the split tree, rather than the on-screen clockwise order
+ *     dictated by the split tree, rather than the on-screen reading order
  *     — splitting right-then-down vs down-then-right produces identical
  *     pixels but opposite traversal orders, so the cycle must depend on
  *     measured pixel position, not tree shape.
@@ -40,7 +40,7 @@ import {
   cycleTabsInActiveGroup,
   type GroupRect,
   selectNeighbourBeforeRemove,
-  sortGroupsClockwise,
+  sortGroupsInReadingOrder,
 } from "../src/lib/dockview-section-actions";
 
 // ---------------------------------------------------------------------------
@@ -171,93 +171,90 @@ describe("cycleTabsInActiveGroup", () => {
 });
 
 // ---------------------------------------------------------------------------
-// sortGroupsClockwise — pure algorithm, no DOM
+// sortGroupsInReadingOrder — pure algorithm, no DOM
 // ---------------------------------------------------------------------------
 
-describe("sortGroupsClockwise", () => {
-  // Helper: produces the cycle in clockwise order starting from `startId`.
-  function cycleFrom(ordered: GroupRect[], startId: string): string[] {
-    const idx = ordered.findIndex((r) => r.id === startId);
-    if (idx < 0) return [];
-    const out: string[] = [];
-    for (let i = 0; i < ordered.length; i++) {
-      out.push(ordered[(idx + i) % ordered.length].id);
-    }
-    return out;
-  }
-
+describe("sortGroupsInReadingOrder", () => {
   it("returns input unchanged for fewer than two groups", () => {
-    expect(sortGroupsClockwise([])).toEqual([]);
-    const one: GroupRect[] = [{ id: "solo", cx: 10, cy: 10 }];
-    expect(sortGroupsClockwise(one).map((g) => g.id)).toEqual(["solo"]);
+    expect(sortGroupsInReadingOrder([])).toEqual([]);
+    const one: GroupRect[] = [{ id: "solo", top: 10, left: 10 }];
+    expect(sortGroupsInReadingOrder(one).map((g) => g.id)).toEqual(["solo"]);
   });
 
-  it("cycles a 2x2 grid clockwise (1→2→3→4)", () => {
-    // 1=top-left, 2=top-right, 3=bottom-right, 4=bottom-left
+  it("sorts a 2x2 grid as TL, TR, BL, BR", () => {
+    // User's naming: 1=TL, 2=TR, 3=BR, 4=BL → expected cycle 1, 2, 4, 3.
     const rects: GroupRect[] = [
-      { id: "1", cx: 100, cy: 100 },
-      { id: "2", cx: 300, cy: 100 },
-      { id: "3", cx: 300, cy: 300 },
-      { id: "4", cx: 100, cy: 300 },
+      { id: "1", top: 0, left: 0 },
+      { id: "2", top: 0, left: 200 },
+      { id: "3", top: 200, left: 200 },
+      { id: "4", top: 200, left: 0 },
     ];
-    const ordered = sortGroupsClockwise(rects);
-    expect(cycleFrom(ordered, "1")).toEqual(["1", "2", "3", "4"]);
-    expect(cycleFrom(ordered, "2")).toEqual(["2", "3", "4", "1"]);
-    expect(cycleFrom(ordered, "3")).toEqual(["3", "4", "1", "2"]);
-    expect(cycleFrom(ordered, "4")).toEqual(["4", "1", "2", "3"]);
+    const ids = sortGroupsInReadingOrder(rects).map((r) => r.id);
+    expect(ids).toEqual(["1", "2", "4", "3"]);
   });
 
-  it("cycles top-row + bottom-full-width in clockwise order (TL→TR→B)", () => {
-    // Matches the user's first screenshot layout.
+  it("sorts top-row + bottom-full-width as TL, TR, B", () => {
+    // First screenshot from the PR thread.
     const rects: GroupRect[] = [
-      { id: "TL", cx: 100, cy: 100 },
-      { id: "TR", cx: 300, cy: 100 },
-      { id: "B", cx: 200, cy: 300 },
+      { id: "TL", top: 0, left: 0 },
+      { id: "TR", top: 0, left: 200 },
+      { id: "B", top: 200, left: 0 },
     ];
-    const ordered = sortGroupsClockwise(rects);
-    expect(cycleFrom(ordered, "TL")).toEqual(["TL", "TR", "B"]);
+    const ids = sortGroupsInReadingOrder(rects).map((r) => r.id);
+    expect(ids).toEqual(["TL", "TR", "B"]);
   });
 
-  it("cycles a horizontal row left→right (1-D fallback)", () => {
-    // Polar angle ties when every panel sits on the same y-axis; the
-    // 1-D fallback should give the user the natural left→right order.
+  it("sorts a horizontal row left→right", () => {
     const rects: GroupRect[] = [
-      { id: "A", cx: 50, cy: 200 },
-      { id: "B", cx: 200, cy: 200 },
-      { id: "C", cx: 350, cy: 200 },
+      { id: "C", top: 0, left: 400 },
+      { id: "A", top: 0, left: 0 },
+      { id: "B", top: 0, left: 200 },
     ];
-    const ordered = sortGroupsClockwise(rects);
-    expect(cycleFrom(ordered, "A")).toEqual(["A", "B", "C"]);
-    expect(cycleFrom(ordered, "C")).toEqual(["C", "A", "B"]);
+    expect(sortGroupsInReadingOrder(rects).map((r) => r.id)).toEqual(["A", "B", "C"]);
   });
 
-  it("cycles a vertical column top→bottom (1-D fallback)", () => {
+  it("sorts a vertical column top→bottom", () => {
     const rects: GroupRect[] = [
-      { id: "T", cx: 200, cy: 50 },
-      { id: "M", cx: 200, cy: 200 },
-      { id: "B", cx: 200, cy: 350 },
+      { id: "M", top: 200, left: 0 },
+      { id: "B", top: 400, left: 0 },
+      { id: "T", top: 0, left: 0 },
     ];
-    const ordered = sortGroupsClockwise(rects);
-    expect(cycleFrom(ordered, "T")).toEqual(["T", "M", "B"]);
+    expect(sortGroupsInReadingOrder(rects).map((r) => r.id)).toEqual(["T", "M", "B"]);
+  });
+
+  it("groups visually-aligned rows even with sub-pixel top differences", () => {
+    // Dockview's flex sizing can give panels on the same row slightly
+    // different `top` values (e.g. 199.5 vs 200). Without row snapping
+    // the BR panel below would sort between TR and BL, producing
+    // TL, TR, BR, BL — wrong.
+    const rects: GroupRect[] = [
+      { id: "TL", top: 0, left: 0 },
+      { id: "TR", top: 0, left: 200 },
+      { id: "BL", top: 200, left: 0 },
+      { id: "BR", top: 199.5, left: 200 },
+    ];
+    const ids = sortGroupsInReadingOrder(rects).map((r) => r.id);
+    // BR should be grouped into the bottom row (within ~4px tolerance)
+    // and tie-broken by left.
+    expect(ids).toEqual(["TL", "TR", "BL", "BR"]);
   });
 
   it("is independent of input ordering", () => {
-    // Same 2x2 layout, two different input shufflings → identical cycle.
     const a: GroupRect[] = [
-      { id: "4", cx: 100, cy: 300 },
-      { id: "1", cx: 100, cy: 100 },
-      { id: "3", cx: 300, cy: 300 },
-      { id: "2", cx: 300, cy: 100 },
+      { id: "BR", top: 200, left: 200 },
+      { id: "TL", top: 0, left: 0 },
+      { id: "BL", top: 200, left: 0 },
+      { id: "TR", top: 0, left: 200 },
     ];
     const b: GroupRect[] = [
-      { id: "2", cx: 300, cy: 100 },
-      { id: "3", cx: 300, cy: 300 },
-      { id: "1", cx: 100, cy: 100 },
-      { id: "4", cx: 100, cy: 300 },
+      { id: "TR", top: 0, left: 200 },
+      { id: "BL", top: 200, left: 0 },
+      { id: "TL", top: 0, left: 0 },
+      { id: "BR", top: 200, left: 200 },
     ];
-    const orderedA = sortGroupsClockwise(a).map((r) => r.id);
-    const orderedB = sortGroupsClockwise(b).map((r) => r.id);
-    expect(orderedA).toEqual(orderedB);
+    expect(sortGroupsInReadingOrder(a).map((r) => r.id)).toEqual(
+      sortGroupsInReadingOrder(b).map((r) => r.id),
+    );
   });
 });
 
@@ -303,69 +300,75 @@ describe("cycleGridGroups", () => {
     expect(refocus).not.toHaveBeenCalled();
   });
 
-  it("cycles a 2x2 grid clockwise (1 → 2 → 3 → 4 → 1) regardless of api.groups order", () => {
-    // Reproduces the user's screenshot. `api.groups` is deliberately in
-    // creation order [4, 2, 1, 3] — pre-fix this is what `Cmd+]` walked,
-    // landing on 4 from 1 instead of 2.
+  it("cycles a 2x2 grid in reading order (TL → TR → BL → BR → TL) regardless of api.groups order", () => {
+    // User's screenshot: 1=TL, 2=TR, 3=BR, 4=BL. `api.groups` is in
+    // deliberately scrambled creation order so the test fails if the sort
+    // ever regresses to `api.groups` ordering.
     const g1 = makeGroup("1", ["t1"], { rect: { left: 0, top: 0, width: 200, height: 200 } });
     const g2 = makeGroup("2", ["t2"], { rect: { left: 200, top: 0, width: 200, height: 200 } });
     const g3 = makeGroup("3", ["t3"], { rect: { left: 200, top: 200, width: 200, height: 200 } });
     const g4 = makeGroup("4", ["t4"], { rect: { left: 0, top: 200, width: 200, height: 200 } });
 
-    // Active = panel 1 (top-left).
-    const api = makeApi([g4, g2, g1, g3], 2);
-
+    // From TL: forward = TR.
+    let api = makeApi([g4, g2, g1, g3], 2);
     cycleGridGroups(asApi(api), 1);
     expect(g2.panels[0].api.setActive).toHaveBeenCalledTimes(1);
-    expect(g3.panels[0].api.setActive).not.toHaveBeenCalled();
-    expect(g4.panels[0].api.setActive).not.toHaveBeenCalled();
+
+    // From TR: forward = BL.
+    api = makeApi([g4, g2, g1, g3], 1);
+    cycleGridGroups(asApi(api), 1);
+    expect(g4.panels[0].api.setActive).toHaveBeenCalledTimes(1);
+
+    // From BL: forward = BR.
+    api = makeApi([g4, g2, g1, g3], 0);
+    cycleGridGroups(asApi(api), 1);
+    expect(g3.panels[0].api.setActive).toHaveBeenCalledTimes(1);
+
+    // From BR: forward wraps to TL.
+    api = makeApi([g4, g2, g1, g3], 3);
+    cycleGridGroups(asApi(api), 1);
+    expect(g1.panels[0].api.setActive).toHaveBeenCalledTimes(1);
   });
 
-  it("cycles a 2x2 grid counter-clockwise (1 → 4 → 3 → 2 → 1) for direction -1", () => {
+  it("cycles a 2x2 grid backwards in reverse reading order for direction -1", () => {
     const g1 = makeGroup("1", ["t1"], { rect: { left: 0, top: 0, width: 200, height: 200 } });
     const g2 = makeGroup("2", ["t2"], { rect: { left: 200, top: 0, width: 200, height: 200 } });
     const g3 = makeGroup("3", ["t3"], { rect: { left: 200, top: 200, width: 200, height: 200 } });
     const g4 = makeGroup("4", ["t4"], { rect: { left: 0, top: 200, width: 200, height: 200 } });
 
-    // Active = panel 1.
+    // From TL, backwards wraps to BR.
     const api = makeApi([g1, g2, g3, g4], 0);
-
     cycleGridGroups(asApi(api), -1);
-    expect(g4.panels[0].api.setActive).toHaveBeenCalledTimes(1);
-    expect(g2.panels[0].api.setActive).not.toHaveBeenCalled();
-    expect(g3.panels[0].api.setActive).not.toHaveBeenCalled();
+    expect(g3.panels[0].api.setActive).toHaveBeenCalledTimes(1);
   });
 
-  it("cycles a 3-panel layout (top-left, top-right, bottom-full) in clockwise order", () => {
+  it("cycles a 3-panel layout (top-left, top-right, bottom-full) in reading order", () => {
     const tl = makeGroup("tl", ["a"], { rect: { left: 0, top: 0, width: 200, height: 200 } });
     const tr = makeGroup("tr", ["b"], { rect: { left: 200, top: 0, width: 200, height: 200 } });
     const bot = makeGroup("bot", ["c"], { rect: { left: 0, top: 200, width: 400, height: 200 } });
 
-    // From top-right, Cmd+] should land on bottom.
+    // From TR, forward = bottom.
     const api = makeApi([tl, tr, bot], 1);
-
     cycleGridGroups(asApi(api), 1);
     expect(bot.panels[0].api.setActive).toHaveBeenCalledTimes(1);
     expect(tl.panels[0].api.setActive).not.toHaveBeenCalled();
   });
 
-  it("falls back to linear order for a horizontal row (1-D)", () => {
+  it("cycles a horizontal row left→right", () => {
     const a = makeGroup("a", ["x"], { rect: { left: 0, top: 0, width: 200, height: 200 } });
     const b = makeGroup("b", ["y"], { rect: { left: 200, top: 0, width: 200, height: 200 } });
     const c = makeGroup("c", ["z"], { rect: { left: 400, top: 0, width: 200, height: 200 } });
 
-    // Active = a (leftmost). Cmd+] should land on b (middle).
     const api = makeApi([a, b, c], 0);
     cycleGridGroups(asApi(api), 1);
     expect(b.panels[0].api.setActive).toHaveBeenCalledTimes(1);
   });
 
-  it("falls back to linear order for a vertical column (1-D)", () => {
+  it("cycles a vertical column top→bottom", () => {
     const top = makeGroup("t", ["x"], { rect: { left: 0, top: 0, width: 200, height: 200 } });
     const mid = makeGroup("m", ["y"], { rect: { left: 0, top: 200, width: 200, height: 200 } });
     const bot = makeGroup("b", ["z"], { rect: { left: 0, top: 400, width: 200, height: 200 } });
 
-    // Active = top. Cmd+] should land on middle (not bottom).
     const api = makeApi([top, mid, bot], 0);
     cycleGridGroups(asApi(api), 1);
     expect(mid.panels[0].api.setActive).toHaveBeenCalledTimes(1);
@@ -378,8 +381,6 @@ describe("cycleGridGroups", () => {
       rect: { left: 200, top: 0, width: 200, height: 200 },
     });
 
-    // Active = v0; the ghost (zero-size) should be filtered out before
-    // sorting so it doesn't drag the layout centre toward the origin.
     const api = makeApi([visible0, ghost, visible1], 0);
     cycleGridGroups(asApi(api), 1);
     expect(visible1.panels[0].api.setActive).toHaveBeenCalledTimes(1);

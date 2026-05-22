@@ -27,30 +27,28 @@ export function cycleTabsInActiveGroup(
 }
 
 // ---------------------------------------------------------------------------
-// Clockwise ordering of grid groups
+// Visual ordering of grid groups
 // ---------------------------------------------------------------------------
 
 export interface GroupRect {
   /** Group id matching `DockviewGroupPanel.id`. */
   id: string;
-  /** Pixel position of the group's centre, in viewport coordinates. */
-  cx: number;
-  cy: number;
+  /** Pixel position of the group's top-left corner, in viewport coordinates. */
+  top: number;
+  left: number;
 }
 
 /**
- * Sort groups in clockwise visual order, starting from whichever panel sits
- * closest to "12 o'clock" relative to the layout's bounding-box centre.
+ * Sort groups in row-major reading order (top→bottom, then left→right within
+ * each row). For a 2×2 grid this gives top-left → top-right → bottom-left →
+ * bottom-right, matching iTerm's pane-cycling behaviour and the convention
+ * most editors use for split navigation.
  *
- * The result is a stable cyclic order — `cycleGridGroups` indexes into it
- * with `(currentIdx ± 1) mod n`, so the actual starting element doesn't
- * matter; only the relative ordering does. Concretely, for a 2×2 grid
- * (1=top-left, 2=top-right, 3=bottom-right, 4=bottom-left) the returned
- * order is [2, 3, 4, 1] — pressing Cmd+] from any panel walks the
- * perimeter clockwise (1→2→3→4→1), pressing Cmd+[ walks it counter-
- * clockwise (1→4→3→2→1).
+ * The returned array is a stable cyclic order — `cycleGridGroups` indexes
+ * into it with `(currentIdx ± 1) mod n`, so the starting element is
+ * incidental; only the relative ordering matters.
  *
- * ## Why polar angle instead of tree-walking
+ * ## Why a positional sort instead of walking the dockview tree
  *
  * Dockview stores the layout as a tree of nested splits whose depth-first
  * traversal order depends on which axis was split *first*. The same visual
@@ -58,60 +56,27 @@ export interface GroupRect {
  * down then split each side right" produces opposite traversal orders
  * (column-major vs row-major) even though the pixels are identical. To
  * decouple cycling from the user's split history we measure each panel's
- * pixel centre and sort by angle from the layout centre.
+ * pixel position and sort by `(top, left)`.
  *
- * ## Edge case: 1-D layouts
+ * ## Row-grouping tolerance
  *
- * When every panel is colinear (a single row or column), the polar-angle
- * sort produces ties because dx or dy is zero for every panel. We detect
- * this — the spread on one axis is much smaller than the other — and
- * fall back to a linear sort on the other axis: left→right for rows,
- * top→bottom for columns. This matches the only reasonable cycling
- * behaviour for 1-D layouts.
+ * Panels in the same visual row sometimes differ by a sub-pixel in their
+ * `top` value due to dockview's flex sizing. A naive `(top, left)` sort
+ * would treat 199.5 and 200 as different rows and produce the wrong order
+ * (e.g., the top-right panel could sort *between* the bottom-left and
+ * bottom-right panels). We snap `top` to a 4-pixel grid before comparing
+ * so visually-aligned panels are reliably grouped into the same row, then
+ * tie-break by `left` within the row.
  */
-export function sortGroupsClockwise(groups: GroupRect[]): GroupRect[] {
+export function sortGroupsInReadingOrder(groups: GroupRect[]): GroupRect[] {
   if (groups.length < 2) return groups.slice();
-
-  const xs = groups.map((g) => g.cx);
-  const ys = groups.map((g) => g.cy);
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minY = Math.min(...ys);
-  const maxY = Math.max(...ys);
-  const xSpread = maxX - minX;
-  const ySpread = maxY - minY;
-
-  // 1-D detection: if one axis has < 10% of the other's spread, the
-  // layout is effectively a single row/column and polar angle would
-  // produce ties. Sort linearly along the dominant axis instead.
-  const ONE_D_RATIO = 0.1;
-  if (xSpread < ySpread * ONE_D_RATIO) {
-    // Vertical column → top to bottom.
-    return [...groups].sort((a, b) => a.cy - b.cy);
-  }
-  if (ySpread < xSpread * ONE_D_RATIO) {
-    // Horizontal row → left to right.
-    return [...groups].sort((a, b) => a.cx - b.cx);
-  }
-
-  // 2-D layout: sort by clockwise angle from the bounding-box centre.
-  const cx = (minX + maxX) / 2;
-  const cy = (minY + maxY) / 2;
-  return [...groups].sort((a, b) => clockwiseAngle(a, cx, cy) - clockwiseAngle(b, cx, cy));
-}
-
-/**
- * Angle in radians, measured clockwise from "12 o'clock" (straight up),
- * normalised to `[0, 2π)`. Inputs use screen coordinates where the y
- * axis points downward, so "up" is `cy - py > 0` and we flip dy
- * accordingly inside `atan2`.
- */
-function clockwiseAngle(rect: GroupRect, cx: number, cy: number): number {
-  const dx = rect.cx - cx;
-  const dy = rect.cy - cy;
-  let angle = Math.atan2(dx, -dy);
-  if (angle < 0) angle += 2 * Math.PI;
-  return angle;
+  const ROW_SNAP = 4;
+  const rowOf = (g: GroupRect) => Math.round(g.top / ROW_SNAP);
+  return [...groups].sort((a, b) => {
+    const rowDiff = rowOf(a) - rowOf(b);
+    if (rowDiff !== 0) return rowDiff;
+    return a.left - b.left;
+  });
 }
 
 /**
@@ -137,7 +102,7 @@ function readElement(group: DockviewGroupPanel): ElementBearing["element"] | nul
 }
 
 /**
- * Return the grid groups in clockwise visual order. Floating/popout
+ * Return the grid groups in row-major reading order. Floating/popout
  * groups are excluded because they don't participate in the grid.
  *
  * Measurement uses `getBoundingClientRect()`, which means the section's
@@ -155,14 +120,14 @@ export function getGridGroupsInVisualOrder(api: DockviewApi): DockviewGroupPanel
     const el = readElement(g);
     if (!el) continue;
     const r = el.getBoundingClientRect();
-    // A zero-size rect means the element is detached or display:none. Skip
-    // it rather than feed `0,0` coordinates into the sort, which would
-    // collapse the layout centre.
+    // A zero-size rect means the element is detached or display:none.
+    // Skip it so the sort isn't fed phantom (0, 0) coordinates that
+    // would always land first.
     if (r.width === 0 && r.height === 0) continue;
-    rects.push({ id: g.id, cx: r.left + r.width / 2, cy: r.top + r.height / 2 });
+    rects.push({ id: g.id, top: r.top, left: r.left });
   }
 
-  const ordered = sortGroupsClockwise(rects);
+  const ordered = sortGroupsInReadingOrder(rects);
   const result: DockviewGroupPanel[] = [];
   for (const rect of ordered) {
     const g = api.getGroup(rect.id);
@@ -171,7 +136,7 @@ export function getGridGroupsInVisualOrder(api: DockviewApi): DockviewGroupPanel
   return result;
 }
 
-/** Cycle between split panel groups in clockwise visual order (skips floating/popout). */
+/** Cycle between split panel groups in row-major reading order (skips floating/popout). */
 export function cycleGridGroups(
   api: DockviewApi | null,
   direction: Direction,
