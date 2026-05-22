@@ -35,6 +35,13 @@ import {
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRecentFiles } from "../hooks/useRecentFiles";
 import { invoke as desktopInvoke } from "../lib/desktop-ipc";
+import {
+  type ActiveTabState,
+  applyActiveState,
+  applyMaximizedGroupToApi,
+  extractActiveState,
+  walkGridNode,
+} from "../lib/dockview-active-state";
 import { isDesktop } from "../lib/is-desktop";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
 import { trpc } from "../lib/trpc-client";
@@ -519,59 +526,6 @@ const EDGE_GROUP_IDS = {
 } as const;
 type EdgeDirection = keyof typeof EDGE_GROUP_IDS;
 
-/** Per-workspace active-tab state. */
-interface ActiveTabState {
-  activeGroup?: string;
-  groups: Record<string, string>; // groupId → activeView panelId
-}
-
-// biome-ignore lint/suspicious/noExplicitAny: recursive grid JSON
-function walkGridNode(node: any, callback: (leaf: any) => void): void {
-  if (!node) return;
-  if (node.type === "leaf") {
-    callback(node);
-  } else if (node.type === "branch" && Array.isArray(node.data)) {
-    for (const child of node.data) {
-      walkGridNode(child, callback);
-    }
-  }
-}
-
-function extractActiveState(json: Record<string, unknown>): ActiveTabState {
-  const state: ActiveTabState = { groups: {} };
-  if (typeof json.activeGroup === "string") {
-    state.activeGroup = json.activeGroup;
-  }
-  if (typeof json.activePanel === "string") {
-    state.activeGroup = json.activePanel;
-  }
-  const grid = json.grid as Record<string, unknown> | undefined;
-  if (grid?.root) {
-    walkGridNode(grid.root, (leaf) => {
-      const data = leaf.data;
-      if (data?.id && data?.activeView) {
-        state.groups[data.id] = data.activeView;
-      }
-    });
-  }
-  return state;
-}
-
-function applyActiveState(json: Record<string, unknown>, state: ActiveTabState): void {
-  if (state.activeGroup) {
-    json.activePanel = state.activeGroup;
-  }
-  const grid = json.grid as Record<string, unknown> | undefined;
-  if (grid?.root) {
-    walkGridNode(grid.root, (leaf) => {
-      const data = leaf.data;
-      if (data?.id && state.groups[data.id]) {
-        data.activeView = state.groups[data.id];
-      }
-    });
-  }
-}
-
 // biome-ignore lint/suspicious/noExplicitAny: recursive JSON normalizer
 function sortKeys(value: any): any {
   if (Array.isArray(value)) return value.map(sortKeys);
@@ -624,7 +578,9 @@ function stripPanelParams(json: Record<string, unknown>): Record<string, unknown
 /**
  * Persist the current layout.
  * - Full layout (structure + active tabs) → global key
- * - Active tab state only → per-workspace key
+ * - Active tab state → per-workspace key (maximizedGroup is preserved
+ *   from whatever's already saved; it's owned by the dedicated
+ *   `onDidMaximizedGroupChange` listener — see notes below).
  */
 function saveLayout(
   api: DockviewApi,
@@ -635,8 +591,23 @@ function saveLayout(
     const json = stripPanelParams(api.toJSON() as unknown as Record<string, unknown>);
 
     // Save per-workspace active tab state only when we have a real workspace.
+    //
+    // NOTE: we intentionally DON'T capture `maximizedGroup` here.
+    // `api.toJSON()` above internally exits and re-enters the maximized
+    // group as part of its serialization, which means by the time we
+    // reach this point `findMaximizedGroupId(api)` could observe a
+    // transient "no group maximized" state and clobber the real
+    // value. Maximize state is owned by the dedicated
+    // `onDidMaximizedGroupChange` listener, which patches the
+    // `maximizedGroup` field in isolation. We just need to PRESERVE
+    // whatever maximizedGroup is already on disk so this save doesn't
+    // drop it.
     if (workspaceId) {
       const activeState = extractActiveState(json);
+      const existing = loadActiveState(workspaceId);
+      if (existing?.maximizedGroup) {
+        activeState.maximizedGroup = existing.maximizedGroup;
+      }
       localStorage.setItem(`${ACTIVE_STATE_KEY_PREFIX}${workspaceId}`, JSON.stringify(activeState));
     }
 
@@ -671,7 +642,24 @@ function stripRemovedPanels(layout: Record<string, unknown>): void {
   }
 }
 
-/** Load layout: global structure + per-workspace active tabs merged. */
+/** Read the saved active-tab state for a workspace, or null when absent
+ *  or unparseable. */
+function loadActiveState(workspaceId: string | null): ActiveTabState | null {
+  if (!workspaceId) return null;
+  try {
+    const raw = localStorage.getItem(`${ACTIVE_STATE_KEY_PREFIX}${workspaceId}`);
+    if (!raw) return null;
+    return JSON.parse(raw) as ActiveTabState;
+  } catch {
+    return null;
+  }
+}
+
+/** Load layout: global structure + per-workspace active tabs merged.
+ *  Note that `maximizedGroup` is NOT folded into the returned JSON — it
+ *  has to be re-applied to the live api via `applyMaximizedGroupToApi`
+ *  after `fromJSON` because dockview doesn't model maximize in its
+ *  serialized form. */
 function loadLayout(workspaceId: string | null): unknown | null {
   try {
     const raw = localStorage.getItem(GLOBAL_LAYOUT_KEY);
@@ -681,12 +669,9 @@ function loadLayout(workspaceId: string | null): unknown | null {
     stripRemovedPanels(layout);
 
     // Overlay this workspace's saved active tab state (if any).
-    if (workspaceId) {
-      const activeRaw = localStorage.getItem(`${ACTIVE_STATE_KEY_PREFIX}${workspaceId}`);
-      if (activeRaw) {
-        const activeState: ActiveTabState = JSON.parse(activeRaw);
-        applyActiveState(layout, activeState);
-      }
+    const activeState = loadActiveState(workspaceId);
+    if (activeState) {
+      applyActiveState(layout, activeState);
     }
 
     return layout;
@@ -1371,6 +1356,15 @@ export function SharedDockviewLayout() {
         lastStructureRef.current = getStructuralFingerprint(initJson);
       }
 
+      // Restore the initial workspace's maximize state, if any. Has to
+      // happen AFTER `fromJSON` + the required-panel reconciliation
+      // above so that the target group actually exists in the dockview
+      // by the time we ask to maximize it.
+      const initialActiveState = loadActiveState(initialWorkspaceId);
+      if (initialActiveState?.maximizedGroup) {
+        applyMaximizedGroupToApi(event.api, initialActiveState.maximizedGroup);
+      }
+
       // Persist layout on changes. With a single dockview instance shared by
       // all workspaces, there's no eviction dance — fromJSON is only called
       // once at init, and onDidLayoutChange events after that are always
@@ -1379,6 +1373,43 @@ export function SharedDockviewLayout() {
         if (!initializedRef.current) return;
         saveLayout(event.api, activeWorkspaceIdRef.current, lastStructureRef);
       });
+
+      // `onDidLayoutChange` is NOT fired when the user enters or exits
+      // maximize on a group (dockview wires that event off a different
+      // emitter chain), so we listen explicitly. Without this, the
+      // maximize-state save lags behind by one structural event and
+      // toggling maximize alone wouldn't persist.
+      //
+      // CRITICAL: do NOT call `saveLayout` from here. `saveLayout`
+      // calls `api.toJSON()`, and `toJSON()` on a dockview with a
+      // maximized group internally toggles the maximize state (exits
+      // then re-enters) as part of its serialization dance. That
+      // re-entry fires another `onDidMaximizedGroupChange` event,
+      // which would re-trigger this listener and `saveLayout` again,
+      // producing an infinite event cascade. Instead, just patch the
+      // `maximizedGroup` field of the persisted active state — the
+      // rest of the layout JSON is unchanged by a max toggle and is
+      // already kept in sync by the `onDidLayoutChange` listener
+      // above.
+      event.api.onDidMaximizedGroupChange(
+        (e: { group?: { id?: string }; isMaximized?: boolean }) => {
+          if (!initializedRef.current) return;
+          const workspaceId = activeWorkspaceIdRef.current;
+          if (!workspaceId) return;
+          try {
+            const current = loadActiveState(workspaceId) ?? { groups: {} };
+            const nextMax = e.isMaximized ? e.group?.id : undefined;
+            if (current.maximizedGroup === nextMax) return;
+            current.maximizedGroup = nextMax;
+            localStorage.setItem(
+              `${ACTIVE_STATE_KEY_PREFIX}${workspaceId}`,
+              JSON.stringify(current),
+            );
+          } catch {
+            // Best-effort persistence
+          }
+        },
+      );
 
       initializedRef.current = true;
     },
@@ -1418,11 +1449,28 @@ export function SharedDockviewLayout() {
     if (!initializedRef.current) return;
     const api = apiRef.current;
     if (!api || !activeWorkspaceId) return;
+    const activeState = loadActiveState(activeWorkspaceId);
+    // Even when the workspace has no saved state we still need to clear
+    // any maximize carried over from the workspace we just left —
+    // otherwise switching A (maximized) → B (no state) would leave B
+    // rendered under A's maximize overlay.
+    applyMaximizedGroupToApi(api, activeState?.maximizedGroup);
+    if (!activeState) return;
     try {
-      const raw = localStorage.getItem(`${ACTIVE_STATE_KEY_PREFIX}${activeWorkspaceId}`);
-      if (!raw) return;
-      const activeState: ActiveTabState = JSON.parse(raw);
-      for (const [_groupId, viewId] of Object.entries(activeState.groups)) {
+      for (const [groupId, viewId] of Object.entries(activeState.groups)) {
+        // CRITICAL: skip panels in groups that aren't the maximized
+        // one. When a group is maximized, dockview hides every other
+        // group; calling `setActive()` on a panel inside a hidden
+        // group implicitly EXITS the maximize so the group can come
+        // back to the foreground. That immediately undoes the
+        // maximize we just restored and writes `maximizedGroup:
+        // undefined` to localStorage via the maxchange listener,
+        // corrupting the saved state. Tab activations inside hidden
+        // groups are already encoded in the saved layout JSON
+        // (`leaf.data.activeView`) and applied through fromJSON on
+        // page load, so we don't lose tab fidelity by skipping them
+        // here.
+        if (activeState.maximizedGroup && groupId !== activeState.maximizedGroup) continue;
         const panel = api.getPanel(viewId);
         if (!panel) continue;
         // Skip if already active in its group — setActive is a focus-fire
