@@ -21,6 +21,11 @@ import React, {
   useRef,
   useState,
 } from "react";
+import {
+  cycleGridGroups,
+  cycleTabsInActiveGroup,
+  selectNeighbourBeforeRemove,
+} from "../lib/dockview-section-actions";
 import { trpc } from "../lib/trpc-client";
 
 // Lazy-load TerminalPanel to avoid importing @xterm CJS during SSR
@@ -433,6 +438,7 @@ export function DockviewTerminalContainer({
     const api = apiRef.current;
     if (!api || api.panels.length <= 1) return; // don't close last tab
 
+    selectNeighbourBeforeRemove(api, terminalId);
     const panel = api.getPanel(terminalId);
     if (panel) {
       api.removePanel(panel);
@@ -454,14 +460,42 @@ export function DockviewTerminalContainer({
     });
   }, []);
 
-  // Keyboard shortcuts:
-  // - Cmd/Ctrl+T → open a new terminal tab
-  // - Cmd/Ctrl+W → close the active terminal tab
-  // - Cmd/Ctrl+D → split right (vertical split)
-  // - Cmd/Ctrl+Shift+D → split down (horizontal split)
-  // - Ctrl+(Shift)+Tab → cycle through tabs in the active group
+  // Keyboard shortcuts (capture phase, scoped to this section's focus).
+  // The outer modifier guard uses `mod = e.metaKey || e.ctrlKey`, so every
+  // shortcut that names `Cmd+X` below also fires for `Ctrl+X` — that's
+  // intentional for cross-platform support; readers should not assume
+  // platform-specific dispatch.
+  // - Cmd/Ctrl+T              → open a new terminal tab
+  // - Cmd/Ctrl+W              → close the active terminal tab
+  // - Ctrl+D                  → close the active terminal tab (Cmd owns split)
+  // - Cmd/Ctrl+D              → split right (vertical split)
+  // - Cmd/Ctrl+Shift+D        → split down (horizontal split)
+  // - Ctrl+(Shift)+Tab        → cycle tabs in the active group
+  // - Cmd/Ctrl+[ / Cmd/Ctrl+] → cycle between split terminal groups (panels)
+  // - Cmd/Ctrl+Shift+[/]      → cycle tabs in the active group
   useEffect(() => {
     if (!visible) return;
+
+    const refocusActivePanel = () => {
+      const panel = apiRef.current?.activePanel;
+      if (!panel) return;
+      panel.view.content.element
+        .querySelector<HTMLTextAreaElement>(".xterm-helper-textarea")
+        ?.focus();
+    };
+
+    const cycleTabs = (direction: 1 | -1) => {
+      cycleTabsInActiveGroup(apiRef.current, direction, () => {
+        requestAnimationFrame(refocusActivePanel);
+      });
+    };
+
+    const cycleGroups = (direction: 1 | -1) => {
+      cycleGridGroups(apiRef.current, direction, () => {
+        requestAnimationFrame(refocusActivePanel);
+      });
+    };
+
     const handler = (e: KeyboardEvent) => {
       // Only handle shortcut if this container (or a descendant) has focus
       if (!containerRef.current?.contains(document.activeElement)) return;
@@ -472,58 +506,106 @@ export function DockviewTerminalContainer({
       if (e.ctrlKey && !e.metaKey && key === "tab") {
         e.preventDefault();
         e.stopPropagation();
-        const api = apiRef.current;
-        const group = api?.activeGroup;
-        if (!group) return;
-        if (e.shiftKey) {
-          group.model.moveToPrevious();
-        } else {
-          group.model.moveToNext();
-        }
-        // Focus the xterm helper textarea inside the newly active panel
-        // so the terminal actually receives keyboard input.
-        // focusContent() only focuses the dockview wrapper which makes the
-        // cursor blink but doesn't route keypresses to xterm.
-        requestAnimationFrame(() => {
-          const panel = api.activePanel;
-          if (!panel) return;
-          panel.view.content.element
-            .querySelector<HTMLTextAreaElement>(".xterm-helper-textarea")
-            ?.focus();
-        });
+        cycleTabs(e.shiftKey ? -1 : 1);
         return;
       }
 
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
 
+      // Cmd/Ctrl+Shift+[ / Cmd/Ctrl+Shift+] → cycle tabs in active group
+      if (e.shiftKey && (key === "[" || key === "]")) {
+        e.preventDefault();
+        e.stopPropagation();
+        cycleTabs(key === "]" ? 1 : -1);
+        return;
+      }
+
+      // Cmd/Ctrl+[ / Cmd/Ctrl+] → cycle between split groups (panels)
+      if (!e.shiftKey && (key === "[" || key === "]")) {
+        e.preventDefault();
+        e.stopPropagation();
+        cycleGroups(key === "]" ? 1 : -1);
+        return;
+      }
+
+      // Try to close the active tab; returns whether the close path actually
+      // ran. Callers use the return value to decide whether to swallow the
+      // keystroke. When `false` (no tab to close), the caller should let the
+      // event bubble — Cmd+W on the last tab needs to reach Electron's menu
+      // so the window can close, and Ctrl+D on the last tab needs to reach
+      // xterm so the user's shell can receive EOF.
+      const tryCloseActiveTab = (): boolean => {
+        const api = apiRef.current;
+        if (!api || api.panels.length <= 1) return false;
+        const active = api.activePanel;
+        if (!active) return false;
+        closeTab(active.id);
+        return true;
+      };
+
       if (key === "t" && !e.shiftKey) {
         e.preventDefault();
         e.stopPropagation();
         handleAddTab();
       } else if (key === "w" && !e.shiftKey) {
-        const api = apiRef.current;
-        if (!api || api.panels.length <= 1) return;
-        e.preventDefault();
-        e.stopPropagation();
-        const active = api.activePanel;
-        if (active) {
-          closeTab(active.id);
+        // Don't preventDefault when there's nothing to close — let the OS /
+        // Electron menu handle Cmd+W (close window) and let plain Ctrl+W
+        // bubble up.
+        if (tryCloseActiveTab()) {
+          e.preventDefault();
+          e.stopPropagation();
         }
       } else if (key === "d") {
-        e.preventDefault();
-        e.stopPropagation();
-        const api = apiRef.current;
-        if (!api) return;
-        const activeGroup = api.activeGroup;
-        if (!activeGroup) return;
-        const direction = e.shiftKey ? "below" : "right";
-        handleSplit(activeGroup.id, direction);
+        // Cmd+D / Cmd+Shift+D → split. Ctrl+D → close active tab (Cmd already
+        // owns split, so reuse Ctrl+D for close).
+        //
+        // For the SPLIT branch we always `preventDefault` so unhandled
+        // modifier-d combos that fall through (e.g. Ctrl+Shift+D, Cmd+Ctrl+D)
+        // don't leak a stray `^D` to xterm.
+        //
+        // For the CLOSE branch we conditionally preventDefault — on the last
+        // terminal tab `tryCloseActiveTab` returns false and we let Ctrl+D
+        // through to xterm so the user can exit their shell with EOF.
+        if (e.metaKey && !e.ctrlKey) {
+          e.preventDefault();
+          e.stopPropagation();
+          const activeGroup = apiRef.current?.activeGroup;
+          if (!activeGroup) return;
+          handleSplit(activeGroup.id, e.shiftKey ? "below" : "right");
+        } else if (e.ctrlKey && !e.metaKey && !e.shiftKey) {
+          if (tryCloseActiveTab()) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        } else {
+          // Any other modifier-d combo (e.g. Ctrl+Shift+D, Cmd+Ctrl+D):
+          // swallow so xterm doesn't see a stray `^D`. No close, no split.
+          e.preventDefault();
+          e.stopPropagation();
+        }
       }
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
   }, [visible, closeTab, handleSplit, handleAddTab]);
+
+  // Auto-focus the active terminal's xterm textarea whenever the section
+  // becomes visible (e.g. user clicked the outer "Terminal" panel tab).
+  // Without this, the section-scoped keydown handler above bails out because
+  // document.activeElement is outside containerRef — meaning shortcuts only
+  // worked after the user manually clicked into a tab.
+  useEffect(() => {
+    if (!visible) return;
+    const id = requestAnimationFrame(() => {
+      const panel = apiRef.current?.activePanel;
+      if (!panel) return;
+      panel.view.content.element
+        .querySelector<HTMLTextAreaElement>(".xterm-helper-textarea")
+        ?.focus();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [visible]);
 
   // Sync dockview panels when terminals are created/killed externally (e.g. CLI).
   useEffect(() => {

@@ -19,6 +19,11 @@ import React, {
   useRef,
   useState,
 } from "react";
+import {
+  cycleGridGroups,
+  cycleTabsInActiveGroup,
+  selectNeighbourBeforeRemove,
+} from "../lib/dockview-section-actions";
 import { trpc } from "../lib/trpc-client";
 import { ChatPane, type CodingAgentDef, useChatPaneState } from "./ChatPane";
 
@@ -560,10 +565,17 @@ export function DockviewChatContainer({
     const api = apiRef.current;
     if (!api || api.panels.length <= 1) return; // don't close last tab
 
+    selectNeighbourBeforeRemove(api, chatId);
     const panel = api.getPanel(chatId);
     if (panel) {
       api.removePanel(panel);
     }
+
+    // Re-focus the panel content so the section-scoped keydown handler keeps
+    // seeing events on the next press.
+    requestAnimationFrame(() => {
+      apiRef.current?.activeGroup?.model.focusContent();
+    });
 
     // Delete the server-side chat record so closed tabs don't linger —
     // mirrors `browsers.remove` and `terminal.kill`. The mutation also
@@ -575,14 +587,29 @@ export function DockviewChatContainer({
     // Layout change listeners will auto-persist
   }, []);
 
-  // Keyboard shortcuts:
-  // - Cmd/Ctrl+T → open a new chat tab (default coding agent)
-  // - Cmd/Ctrl+W → close the active chat tab
-  // - Cmd/Ctrl+D → split right (vertical split)
-  // - Cmd/Ctrl+Shift+D → split down (horizontal split)
-  // - Ctrl+(Shift)+Tab → cycle through tabs in the active group
+  // Keyboard shortcuts (capture phase, scoped to this section's focus):
+  // - Cmd/Ctrl+T              → open a new chat tab (default coding agent)
+  // - Cmd/Ctrl+W              → close the active chat tab
+  // - Cmd/Ctrl+D              → split right (vertical split)
+  // - Cmd/Ctrl+Shift+D        → split down (horizontal split)
+  // - Ctrl+(Shift)+Tab        → cycle tabs in the active group
+  // - Cmd/Ctrl+[ / Cmd/Ctrl+] → cycle between split chat groups (panels)
+  // - Cmd/Ctrl+Shift+[/]      → cycle tabs in the active group
   useEffect(() => {
     if (!visible) return;
+
+    const cycleTabs = (direction: 1 | -1) => {
+      cycleTabsInActiveGroup(apiRef.current, direction, () => {
+        apiRef.current?.activeGroup?.model.focusContent();
+      });
+    };
+
+    const cycleGroups = (direction: 1 | -1) => {
+      cycleGridGroups(apiRef.current, direction, () => {
+        apiRef.current?.activeGroup?.model.focusContent();
+      });
+    };
+
     const handler = (e: KeyboardEvent) => {
       // Only handle shortcut if this container (or a descendant) has focus
       if (!containerRef.current?.contains(document.activeElement)) return;
@@ -593,21 +620,28 @@ export function DockviewChatContainer({
       if (e.ctrlKey && !e.metaKey && key === "tab") {
         e.preventDefault();
         e.stopPropagation();
-        const group = apiRef.current?.activeGroup;
-        if (!group) return;
-        if (e.shiftKey) {
-          group.model.moveToPrevious();
-        } else {
-          group.model.moveToNext();
-        }
-        // Re-focus the panel content so the container retains focus
-        // for subsequent keyboard shortcuts.
-        group.model.focusContent();
+        cycleTabs(e.shiftKey ? -1 : 1);
         return;
       }
 
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
+
+      // Cmd/Ctrl+Shift+[ / Cmd/Ctrl+Shift+] → cycle tabs in active group
+      if (e.shiftKey && (key === "[" || key === "]")) {
+        e.preventDefault();
+        e.stopPropagation();
+        cycleTabs(key === "]" ? 1 : -1);
+        return;
+      }
+
+      // Cmd/Ctrl+[ / Cmd/Ctrl+] → cycle between split groups (panels)
+      if (!e.shiftKey && (key === "[" || key === "]")) {
+        e.preventDefault();
+        e.stopPropagation();
+        cycleGroups(key === "]" ? 1 : -1);
+        return;
+      }
 
       if (key === "t" && !e.shiftKey) {
         e.preventDefault();
@@ -636,6 +670,20 @@ export function DockviewChatContainer({
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
   }, [visible, closeTab, handleSplit, handleAddTab]);
+
+  // Auto-focus the active chat panel whenever the section becomes visible
+  // (e.g. user clicked the outer "Chat" panel tab) so the section-scoped
+  // keydown handler above starts seeing events without the user having to
+  // click into a tab first.
+  useEffect(() => {
+    if (!visible) return;
+    const id = requestAnimationFrame(() => {
+      const group = apiRef.current?.activeGroup;
+      if (!group) return;
+      group.model.focusContent();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [visible]);
 
   // Sync dockview panels when chats are created/removed externally (e.g. CLI).
   // Mirrors the `browser-created` / `terminal-created` subscription in the

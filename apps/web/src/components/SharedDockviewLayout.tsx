@@ -980,22 +980,6 @@ export function SharedDockviewLayout() {
         return;
       }
 
-      // Ctrl+Tab → next file tab
-      if (e.key === "Tab" && e.ctrlKey && !e.shiftKey) {
-        e.preventDefault();
-        e.stopPropagation();
-        window.dispatchEvent(new CustomEvent("band:next-file-tab"));
-        return;
-      }
-
-      // Ctrl+Shift+Tab → previous file tab
-      if (e.key === "Tab" && e.ctrlKey && e.shiftKey) {
-        e.preventDefault();
-        e.stopPropagation();
-        window.dispatchEvent(new CustomEvent("band:prev-file-tab"));
-        return;
-      }
-
       // ⇧⌥F → Format Current File (matches VS Code; uses e.code so the
       // macOS Option-layer dead-key doesn't swallow the keystroke).
       if (e.code === "KeyF" && e.altKey && e.shiftKey && !e.metaKey && !e.ctrlKey) {

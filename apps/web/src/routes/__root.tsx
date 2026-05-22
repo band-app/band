@@ -306,7 +306,7 @@ function AppShell() {
     };
   }, [router]);
 
-  // Cmd+[ / Cmd+] — back/forward through workspace history
+  // Workspace back/forward history — drives the title-bar arrow buttons.
   const routerNavigate = useCallback((href: string) => router.navigate({ to: href }), [router]);
   const navigationHistory = useNavigationHistory(routerNavigate, capabilities);
 
