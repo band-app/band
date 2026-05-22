@@ -558,6 +558,12 @@ function countDiffLines(diff: string): DiffLineCounts {
   let insertions = 0;
   let deletions = 0;
   let hunks = 0;
+  // Mirror parseDiff: only count lines that live inside a hunk. The diff
+  // string can lead with `--- a/foo` / `+++ b/foo` file headers (depending
+  // on what the adapter strips), and those would otherwise increment
+  // deletions/insertions by 1 each — inflating the placeholder height by
+  // ~36 px per file and leaving a visible gap when CodeMirror mounts.
+  let inHunk = false;
   // Manual scan avoids allocating `diff.split("\n")` — diffs can be tens of
   // thousands of lines on a full-file expand-context, and this function
   // runs once per fetch, not per render.
@@ -570,17 +576,19 @@ function countDiffLines(diff: string): DiffLineCounts {
       const ch = diff.charCodeAt(i);
       // 64='@' 43='+' 45='-' 32=' '
       if (ch === 64 && diff.charCodeAt(i + 1) === 64) {
+        inHunk = true;
         hunks++;
-      } else if (ch === 43) {
+      } else if (inHunk && ch === 43) {
         insertions++;
-      } else if (ch === 45) {
+      } else if (inHunk && ch === 45) {
         deletions++;
-      } else if (ch === 32) {
+      } else if (inHunk && ch === 32) {
         context++;
       }
-      // Lines that don't start with any of the above (e.g. "\ No newline at
-      // end of file" diagnostics, or stray blanks) are intentionally
-      // ignored — they don't render visible lines in CodeMirror.
+      // Pre-hunk header lines (`---`/`+++`) and lines that don't start
+      // with any of the above (e.g. "\ No newline at end of file"
+      // diagnostics, or stray blanks) are intentionally ignored — they
+      // don't render visible lines in CodeMirror.
     }
     i = end + 1;
   }
@@ -637,12 +645,16 @@ interface LazyFileRowProps {
   isOpen: boolean;
   isActive?: boolean;
   /**
-   * Scroll container used as the IntersectionObserver root so the mount
-   * detection is scoped to THIS DiffView's viewport — multiple workspaces
-   * keep their cached panels in the DOM, and the default window viewport
-   * would falsely report rows in inactive panels as "visible".
+   * Scroll container element used as the IntersectionObserver root so the
+   * mount detection is scoped to THIS DiffView's viewport. Passed as a
+   * state value (rather than a ref) so a `null` → element transition on
+   * first paint actually re-runs the observer effect — with a ref the
+   * transition is invisible to React and the observer stays bound to the
+   * window viewport, which falsely flags rows in hidden sibling panels
+   * (kept alive by MultiWorkspacePanelHost) as visible and mounts
+   * CodeMirror editors the user can't even see.
    */
-  scrollContainerRef: React.RefObject<HTMLDivElement | null>;
+  scrollContainerEl: HTMLDivElement | null;
   onToggle: (filename: string) => void;
   onLoadMoreContext: (filename: string) => void;
   onShowFullFile: (filename: string) => void;
@@ -658,7 +670,7 @@ function LazyFileRow({
   viewMode,
   isOpen,
   isActive,
-  scrollContainerRef,
+  scrollContainerEl,
   onToggle,
   onLoadMoreContext,
   onShowFullFile,
@@ -684,13 +696,19 @@ function LazyFileRow({
     }
     const el = containerRef.current;
     if (!el) return;
+    // Wait for the scroll container to be in the DOM before subscribing —
+    // otherwise IntersectionObserver falls back to the window viewport,
+    // which doesn't match the actual scroll region. The state dependency
+    // re-runs this effect when the container element transitions
+    // null → real DOM node on first paint.
+    if (!scrollContainerEl) return;
     const observer = new IntersectionObserver(
       (entries) => {
         const entry = entries[entries.length - 1];
         if (entry) setShouldMount(entry.isIntersecting);
       },
       {
-        root: scrollContainerRef.current ?? null,
+        root: scrollContainerEl,
         // ~one full viewport of overscan above and below — wide enough to
         // hide the mount latency of a fast scroll, narrow enough that we
         // don't pay for editors the user is unlikely to read.
@@ -700,7 +718,7 @@ function LazyFileRow({
     );
     observer.observe(el);
     return () => observer.disconnect();
-  }, [isOpen, scrollContainerRef]);
+  }, [isOpen, scrollContainerEl]);
 
   const handleEditorViews = useCallback(
     (views: EditorView[]) => {
@@ -710,14 +728,17 @@ function LazyFileRow({
   );
 
   // Drop the row's editor views from the parent registry whenever the
-  // CodeMirror instance isn't actually mounted — that covers both the
-  // "collapsed" and "scrolled away" cases. Without this `collectAllMatches`
-  // (the search backend) would try to dispatch into a destroyed view.
+  // CodeMirror instance unmounts — that covers both the "collapsed" and
+  // "scrolled away" cases via the cleanup return. `collectAllMatches`
+  // (the search backend) reads from that registry, so a stale entry
+  // would dispatch into a destroyed view.
+  //
+  // The cleanup-only pattern avoids the double-clear we'd get if we also
+  // called the clear in the early-return body: React's effect lifecycle
+  // would run the previous render's cleanup AND the new body, hitting
+  // the parent twice on every collapse / mount-toggle.
   useEffect(() => {
-    if (!isOpen || !shouldMount) {
-      onEditorViews?.(filename, []);
-      return;
-    }
+    if (!isOpen || !shouldMount) return;
     return () => {
       onEditorViews?.(filename, []);
     };
@@ -1143,7 +1164,20 @@ export function DiffView({
   // -------------------------------------------------------------------------
   // Scroll container ref — used for scroll-to-file and tree sync
   // -------------------------------------------------------------------------
+  // Two-shaped binding for the scroll container: a ref (for synchronous
+  // reads inside event handlers and effects) and a state slot (so child
+  // rows can subscribe to the moment the element becomes available).
+  // LazyFileRow's IntersectionObserver needs the DOM node as its `root`,
+  // and capturing it through the ref alone risks setting up the observer
+  // while the ref is still null on first paint — making `root: null` fall
+  // back to the window viewport, which in turn falsely flags rows inside
+  // hidden sibling panels as visible.
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
+  const setScrollContainerNode = useCallback((node: HTMLDivElement | null) => {
+    scrollContainerRef.current = node;
+    setScrollContainerEl(node);
+  }, []);
 
   // -------------------------------------------------------------------------
   // Root ref — used for the workspace-level ⇧⌘G "focus Changes" handler
@@ -1402,22 +1436,24 @@ export function DiffView({
 
   const handleToggleFile = useCallback(
     (filename: string) => {
+      // React 18 Strict Mode invokes state updaters TWICE in development as
+      // an impurity check, so the fetch can't live inside the updater
+      // closure — it would fire two `getFileDiff` requests per toggle.
+      // Compute the "did we just open it?" signal inside the updater
+      // (using `diffCacheRef`, which IS pure), then issue the fetch
+      // outside.
+      let shouldFetch = false;
       setExpandedFiles((prev) => {
         const next = new Set(prev);
         if (next.has(filename)) {
           next.delete(filename);
         } else {
           next.add(filename);
-          // Kick off the diff fetch on transition to "open" — checking the
-          // cache ref keeps the fetch idempotent across virtualization
-          // remounts (a file that's been opened, scrolled away, and
-          // scrolled back into view re-uses the cached diff).
-          if (!diffCacheRef.current.has(filename)) {
-            fetchFileDiff(filename);
-          }
+          shouldFetch = !diffCacheRef.current.has(filename);
         }
         return next;
       });
+      if (shouldFetch) fetchFileDiff(filename);
     },
     [fetchFileDiff],
   );
@@ -1581,6 +1617,12 @@ export function DiffView({
     // Clear diff cache when this effect re-runs (e.g. diffMode change)
     setDiffCache(new Map());
     setExpandedFiles(new Set());
+    // Reset the "previously-seen filenames" record too — otherwise after a
+    // ref switch (diffMode / compareBranch), any filename that exists in
+    // both the old AND new targets (e.g. src/index.ts modified on both
+    // main and dev) would NOT count as "new" and the expand-all
+    // auto-expand effect would silently skip it.
+    prevFilenamesRef.current = new Set();
     prevFingerprintRef.current = "";
 
     // INVARIANT: `fetchSummary` MUST NOT call `setLoading(true)`. The
@@ -1908,17 +1950,35 @@ export function DiffView({
   //
   // The effect expands the row, kicks off its diff fetch if needed, and
   // then scrolls the row's wrapper to the top of the scroll container.
-  // It re-fires whenever the target's expansion state or line counts
-  // change so that a scroll issued before the diff arrived gets a second
-  // chance to land at the now-correct pixel position once the row's
-  // placeholder grows to its real size.
+  // It re-fires whenever the target's line counts change so that an
+  // initial scroll issued before the diff arrived gets one corrective
+  // pass once the row's placeholder grows to its real size — but at most
+  // ONCE per click. Subsequent re-fires (load-more-context bumping line
+  // counts, view mode toggle changing placeholder heights) leave the
+  // user's current scroll position alone instead of yanking the viewport
+  // back to the last sidebar pick.
   const focusedDiffEntry = focusedFile && diffCache.get(focusedFile.path);
-  const focusedIsExpanded = focusedFile ? expandedFiles.has(focusedFile.path) : false;
   const focusedLineCounts = focusedDiffEntry ? focusedDiffEntry.lineCounts : null;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: explicit deps capture every input that moves the target's pixel position
+  // Tracks whether we've already done the "settled" scroll for the
+  // current `focusedFile.seq`. A scroll is settled when it ran with
+  // non-null line counts (so its target pixel position is final).
+  // Initialized with seq:-1 so the first real click (seq:0) always
+  // scrolls.
+  const lastScrollRef = useRef<{ seq: number; settled: boolean }>({
+    seq: -1,
+    settled: false,
+  });
   useEffect(() => {
     if (!focusedFile) return;
     const target = focusedFile.path;
+    const isNewSeq = focusedFile.seq !== lastScrollRef.current.seq;
+    const isFirstCorrection =
+      !isNewSeq && !lastScrollRef.current.settled && focusedLineCounts !== null;
+    if (!isNewSeq && !isFirstCorrection) return;
+    lastScrollRef.current = {
+      seq: focusedFile.seq,
+      settled: focusedLineCounts !== null,
+    };
     setExpandedFiles((prev) => {
       if (prev.has(target)) return prev;
       const next = new Set(prev);
@@ -1954,7 +2014,7 @@ export function DiffView({
       cancelAnimationFrame(frame1);
       if (frame2 !== null) cancelAnimationFrame(frame2);
     };
-  }, [focusedFile, focusedIsExpanded, focusedLineCounts, effectiveViewMode, fetchFileDiff]);
+  }, [focusedFile, focusedLineCounts, fetchFileDiff]);
 
   // Plain (non-git) projects: render a calm, normal-text empty state. No
   // toolbar, no error styling — the Changes tab simply isn't meaningful
@@ -2337,7 +2397,7 @@ export function DiffView({
           </div>
         )}
         {hasChanges && (
-          <div ref={scrollContainerRef} className="min-h-0 flex-1 overflow-y-auto">
+          <div ref={setScrollContainerNode} className="min-h-0 flex-1 overflow-y-auto">
             {/* Every row is rendered as a lightweight wrapper card; the
                 expensive CodeMirror editor inside each one is gated by a
                 per-row IntersectionObserver (see LazyFileRow). That keeps
@@ -2357,7 +2417,7 @@ export function DiffView({
                     viewMode={effectiveViewMode}
                     isOpen={expandedFiles.has(filename)}
                     isActive={activeFile === filename}
-                    scrollContainerRef={scrollContainerRef}
+                    scrollContainerEl={scrollContainerEl}
                     onToggle={handleToggleFile}
                     onLoadMoreContext={handleLoadMoreContext}
                     onShowFullFile={handleShowFullFile}
