@@ -400,11 +400,13 @@ describe("selectNeighbourBeforeRemove", () => {
     expect(g.panels[1].api.setActive).not.toHaveBeenCalled();
   });
 
-  it("is a no-op when the group has only one panel", () => {
+  it("is a no-op when the group has only one panel and no other groups exist", () => {
     const g = makeGroup("g0", ["solo"]);
     selectNeighbourBeforeRemove(asApi(makeApi([g])), "solo");
     expect(g.panels[0].api.setActive).not.toHaveBeenCalled();
   });
+
+  // --- Multi-tab group: in-group neighbour ---
 
   it("pre-selects the left neighbour when closing the rightmost tab", () => {
     const g = makeGroup("g0", ["a", "b", "c"]);
@@ -426,5 +428,60 @@ describe("selectNeighbourBeforeRemove", () => {
     selectNeighbourBeforeRemove(asApi(makeApi([g])), "a");
     expect(g.panels[1].api.setActive).toHaveBeenCalledTimes(1); // "b"
     expect(g.panels[2].api.setActive).not.toHaveBeenCalled();
+  });
+
+  // --- Single-tab group: cross-group fallback ---
+
+  it("activates the previous group in reading order when closing the last tab in a group", () => {
+    // 2x2 layout, each group holds a single tab. Closing the panel in
+    // the top-right group should move focus to the top-left (previous
+    // in reading order TL→TR→BL→BR).
+    const tl = makeGroup("tl", ["t-tl"], { rect: { left: 0, top: 0, width: 200, height: 200 } });
+    const tr = makeGroup("tr", ["t-tr"], { rect: { left: 200, top: 0, width: 200, height: 200 } });
+    const bl = makeGroup("bl", ["t-bl"], { rect: { left: 0, top: 200, width: 200, height: 200 } });
+    const br = makeGroup("br", ["t-br"], {
+      rect: { left: 200, top: 200, width: 200, height: 200 },
+    });
+
+    // From TR (single-tab group), closing t-tr should pre-activate TL.
+    selectNeighbourBeforeRemove(asApi(makeApi([tl, tr, bl, br], 1)), "t-tr");
+    expect(tl.panels[0].api.setActive).toHaveBeenCalledTimes(1);
+    expect(bl.panels[0].api.setActive).not.toHaveBeenCalled();
+    expect(br.panels[0].api.setActive).not.toHaveBeenCalled();
+  });
+
+  it("wraps to the last group when closing the last tab in the first group", () => {
+    // Same 2x2. Closing the panel in TL (first in reading order) wraps
+    // to BR (last in reading order).
+    const tl = makeGroup("tl", ["t-tl"], { rect: { left: 0, top: 0, width: 200, height: 200 } });
+    const tr = makeGroup("tr", ["t-tr"], { rect: { left: 200, top: 0, width: 200, height: 200 } });
+    const bl = makeGroup("bl", ["t-bl"], { rect: { left: 0, top: 200, width: 200, height: 200 } });
+    const br = makeGroup("br", ["t-br"], {
+      rect: { left: 200, top: 200, width: 200, height: 200 },
+    });
+
+    selectNeighbourBeforeRemove(asApi(makeApi([tl, tr, bl, br], 0)), "t-tl");
+    expect(br.panels[0].api.setActive).toHaveBeenCalledTimes(1);
+    expect(tr.panels[0].api.setActive).not.toHaveBeenCalled();
+    expect(bl.panels[0].api.setActive).not.toHaveBeenCalled();
+  });
+
+  it("uses reading order for the cross-group fallback regardless of api.groups order", () => {
+    // Same 2x2 with api.groups deliberately scrambled. Without the
+    // positional sort the implementation would land on whichever group
+    // happened to come first in `api.groups`.
+    const tl = makeGroup("tl", ["t-tl"], { rect: { left: 0, top: 0, width: 200, height: 200 } });
+    const tr = makeGroup("tr", ["t-tr"], { rect: { left: 200, top: 0, width: 200, height: 200 } });
+    const bl = makeGroup("bl", ["t-bl"], { rect: { left: 0, top: 200, width: 200, height: 200 } });
+    const br = makeGroup("br", ["t-br"], {
+      rect: { left: 200, top: 200, width: 200, height: 200 },
+    });
+
+    // Scrambled order: BR, TL, BL, TR. Active = BL (idx 2).
+    // Reading order is still TL → TR → BL → BR; previous of BL is TR.
+    selectNeighbourBeforeRemove(asApi(makeApi([br, tl, bl, tr], 2)), "t-bl");
+    expect(tr.panels[0].api.setActive).toHaveBeenCalledTimes(1);
+    expect(tl.panels[0].api.setActive).not.toHaveBeenCalled();
+    expect(br.panels[0].api.setActive).not.toHaveBeenCalled();
   });
 });

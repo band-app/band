@@ -158,17 +158,50 @@ export function cycleGridGroups(
 }
 
 /**
- * Pre-select the left neighbour (or the right neighbour when closing the
- * first tab) of `panelId` inside its group so focus doesn't snap to the
- * leftmost tab after `api.removePanel`. Call this *before* `removePanel`.
+ * Pre-select the panel that should take focus *after* `api.removePanel(panelId)`
+ * runs. Call this *before* the removal.
+ *
+ * Two cases:
+ *
+ *   - **Multi-tab group**: the group survives the close. Pre-activate the
+ *     left neighbour in tab order (or the right neighbour when closing the
+ *     leftmost tab) so focus moves to an adjacent tab in the same group
+ *     instead of snapping to the first tab.
+ *
+ *   - **Last tab in a group**: dockview removes the entire group after
+ *     `removePanel`. Without intervention dockview activates whatever group
+ *     it happens to pick (typically the first one in `api.groups`), which
+ *     feels arbitrary to the user — close the top-right pane and the
+ *     bottom-left lights up, not the top-left next to where you just were.
+ *     We pre-activate the *previous* group in reading order, wrapping to
+ *     the last group when the closed group was first. After dockview tears
+ *     down the now-empty group, that pre-selected group's `activePanel`
+ *     keeps focus, so the close feels like a natural step backwards
+ *     through the layout.
  */
 export function selectNeighbourBeforeRemove(api: DockviewApi, panelId: string): void {
   const panel = api.getPanel(panelId);
   if (!panel) return;
-  const groupPanels = panel.group?.panels ?? [];
-  if (groupPanels.length <= 1) return;
-  const idx = groupPanels.findIndex((p) => p.id === panelId);
-  if (idx < 0) return;
-  const neighbour = groupPanels[idx === 0 ? 1 : idx - 1];
-  neighbour?.api.setActive();
+  const group = panel.group;
+  const groupPanels = group?.panels ?? [];
+
+  if (groupPanels.length > 1) {
+    // Multi-tab group: pick the in-group neighbour.
+    const idx = groupPanels.findIndex((p) => p.id === panelId);
+    if (idx < 0) return;
+    const neighbour = groupPanels[idx === 0 ? 1 : idx - 1];
+    neighbour?.api.setActive();
+    return;
+  }
+
+  // Last tab in a group: pre-activate the previous group in reading
+  // order, so focus lands next to the closed pane instead of snapping to
+  // some arbitrary group.
+  if (!group) return;
+  const ordered = getGridGroupsInVisualOrder(api);
+  if (ordered.length <= 1) return; // no other group to fall back to
+  const groupIdx = ordered.findIndex((g) => g.id === group.id);
+  if (groupIdx < 0) return;
+  const previous = ordered[groupIdx === 0 ? ordered.length - 1 : groupIdx - 1];
+  previous?.activePanel?.api.setActive();
 }
