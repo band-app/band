@@ -195,6 +195,44 @@ export interface BrowserNewTabShortcutPayload {
   workspace_id: string;
 }
 
+/**
+ * Emitted when the user presses Cmd+D / Cmd+Shift+D while focus is
+ * inside a `WebContentsView`. The renderer creates a new browser tab in
+ * a new dockview group adjacent to the source group, using `direction`
+ * to pick horizontal ("right") vs. vertical ("below") orientation —
+ * matching the React handler's behaviour when focus is in the address
+ * bar.
+ */
+export interface BrowserSplitShortcutPayload {
+  browser_id: string;
+  workspace_id: string;
+  direction: "right" | "below";
+}
+
+/**
+ * Emitted when the user presses Cmd+W while focus is inside a
+ * `WebContentsView`. The renderer closes the source tab using the same
+ * code path as the close-button click.
+ */
+export interface BrowserCloseShortcutPayload {
+  browser_id: string;
+  workspace_id: string;
+}
+
+/**
+ * Emitted when the user presses one of the cycle shortcuts (Cmd+[ /
+ * Cmd+] / Cmd+Shift+[ / Cmd+Shift+] / Ctrl+(Shift)+Tab) while focus is
+ * inside a `WebContentsView`. `target` decides whether to cycle the
+ * tabs in the current group or to cycle between split groups;
+ * `direction` is +1 for forward, -1 for backward.
+ */
+export interface BrowserCycleShortcutPayload {
+  browser_id: string;
+  workspace_id: string;
+  target: "tabs" | "groups";
+  direction: 1 | -1;
+}
+
 // ---------- macOS shell (camelCase invoke args) ----------
 
 export interface CheckAppExistsArgs {

@@ -24,7 +24,9 @@ import { createLogger } from "../main/services/log.js";
 import { Events } from "../shared/ipc-channels.js";
 import {
   type BrowserBoundsArgs,
+  type BrowserCloseShortcutPayload,
   type BrowserCreateArgs,
+  type BrowserCycleShortcutPayload,
   type BrowserEnsureArgs,
   type BrowserEvalArgs,
   type BrowserFindInPageArgs,
@@ -33,6 +35,7 @@ import {
   type BrowserKeyArg,
   type BrowserNavigateArgs,
   type BrowserNewTabShortcutPayload,
+  type BrowserSplitShortcutPayload,
   type BrowserStopFindInPageArgs,
   type BrowserTitleChangedPayload,
   type BrowserUrlChangedPayload,
@@ -1338,40 +1341,93 @@ export class BrowserViewManager {
     // changes).
     view.webContents.on("before-input-event", (event, input) => {
       if (input.type !== "keyDown") return;
-      if (input.shift || input.alt) return;
-      const modifier =
-        process.platform === "darwin" ? input.meta && !input.control : input.control && !input.meta;
-      if (!modifier) return;
-      const pressedKey = input.key.toLowerCase();
+      if (input.alt) return; // we don't bind any Alt-modified shortcut
+
       // Transfer keyboard focus back to the main window's webContents so
-      // the React side (find bar input, new-tab address bar, etc.)
-      // receives subsequent keystrokes instead of the WebContentsView
-      // the user was just typing into. Shared by every shortcut below.
-      const handleShortcut = (eventName: string, payload: BrowserFindShortcutPayload) => {
+      // the React side (find bar input, new-tab address bar, address-bar
+      // refocus after cycling) receives subsequent keystrokes instead of
+      // the WebContentsView the user was just typing into. Shared by
+      // every shortcut below.
+      const handleShortcut = (eventName: string, payload: unknown) => {
         event.preventDefault();
         if (!this.opts.mainWindow.webContents.isDestroyed()) {
           this.opts.mainWindow.webContents.focus();
         }
         this.emit(eventName, payload);
       };
-      // Cmd+F / Ctrl+F → open the find bar for this tab.
-      if (pressedKey === "f") {
+
+      const pressedKey = input.key.toLowerCase();
+
+      // Ctrl+(Shift)+Tab → cycle tabs in the active group. Uses raw
+      // `input.control` rather than the platform Cmd/Ctrl helper because
+      // the renderer-side handler also keys off `ctrlKey` regardless of
+      // platform — Cmd+Tab on macOS is reserved by the OS, so the only
+      // way to cycle tabs from a webContents is via Ctrl+Tab.
+      if (input.control && !input.meta && pressedKey === "tab") {
+        handleShortcut(Events.browserCycleShortcut, {
+          browser_id: key,
+          workspace_id: key,
+          target: "tabs",
+          direction: input.shift ? -1 : 1,
+        } satisfies BrowserCycleShortcutPayload);
+        return;
+      }
+
+      // Cmd/Ctrl (platform-dependent) — all the remaining shortcuts.
+      const mod =
+        process.platform === "darwin" ? input.meta && !input.control : input.control && !input.meta;
+      if (!mod) return;
+
+      // Cmd+F / Ctrl+F → open the find bar for this tab. (Shift not used.)
+      if (!input.shift && pressedKey === "f") {
         handleShortcut(Events.browserFindShortcut, {
           browser_id: key,
           workspace_id: key,
         } satisfies BrowserFindShortcutPayload);
         return;
       }
+
       // Cmd+T / Ctrl+T → open a new sibling browser tab in the same
       // dockview group. The renderer's `DockviewBrowserContainer`
       // already handles Cmd+T when DOM focus is inside it; we forward
       // the same intent for the case where Chromium consumed the
       // keydown inside the WebContentsView.
-      if (pressedKey === "t") {
+      if (!input.shift && pressedKey === "t") {
         handleShortcut(Events.browserNewTabShortcut, {
           browser_id: key,
           workspace_id: key,
         } satisfies BrowserNewTabShortcutPayload);
+        return;
+      }
+
+      // Cmd+W → close the active tab. (Shift not used.)
+      if (!input.shift && pressedKey === "w") {
+        handleShortcut(Events.browserCloseShortcut, {
+          browser_id: key,
+          workspace_id: key,
+        } satisfies BrowserCloseShortcutPayload);
+        return;
+      }
+
+      // Cmd+D → split right; Cmd+Shift+D → split down.
+      if (pressedKey === "d") {
+        handleShortcut(Events.browserSplitShortcut, {
+          browser_id: key,
+          workspace_id: key,
+          direction: input.shift ? "below" : "right",
+        } satisfies BrowserSplitShortcutPayload);
+        return;
+      }
+
+      // Cmd+[ / Cmd+] → cycle between split groups.
+      // Cmd+Shift+[ / Cmd+Shift+] → cycle tabs in the active group.
+      if (pressedKey === "[" || pressedKey === "]") {
+        handleShortcut(Events.browserCycleShortcut, {
+          browser_id: key,
+          workspace_id: key,
+          target: input.shift ? "tabs" : "groups",
+          direction: pressedKey === "]" ? 1 : -1,
+        } satisfies BrowserCycleShortcutPayload);
         return;
       }
     });

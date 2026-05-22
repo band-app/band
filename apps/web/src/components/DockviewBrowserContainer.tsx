@@ -680,6 +680,80 @@ export function DockviewBrowserContainer({
     return () => unlisten?.();
   }, [handleAddTab]);
 
+  // Cmd+D / Cmd+Shift+D, Cmd+W, Cmd+[/], Cmd+Shift+[/], Ctrl+(Shift)+Tab
+  // when the WebContentsView itself has focus.
+  // Same story as `browser-new-tab-shortcut` above: focus inside the
+  // child WebContentsView means the React keydown listener never fires.
+  // The main process intercepts these in `view-manager.ts::before-input-event`
+  // and forwards them as IPC events; we react to them here by delegating
+  // to the same handlers the in-React keydown path uses (handleSplit /
+  // closeTab / cycleTabsInActiveGroup / cycleGridGroups). Each listener
+  // ignores events whose source pane isn't in this container so multiple
+  // workspaces' containers don't all act on the same press.
+  useEffect(() => {
+    if (!isDesktop) return;
+    const unlisteners: Array<() => void> = [];
+
+    const refocusAddressBar = () => {
+      const panel = apiRef.current?.activePanel;
+      panel?.view.content.element
+        .querySelector<HTMLInputElement>("[data-band-address-input]")
+        ?.focus();
+    };
+
+    void (async () => {
+      unlisteners.push(
+        await desktopListen<{
+          browser_id: string;
+          workspace_id: string;
+          direction: "right" | "below";
+        }>("browser-split-shortcut", (event) => {
+          const api = apiRef.current;
+          if (!api) return;
+          const sourcePanel = api.getPanel(event.payload.browser_id);
+          if (!sourcePanel?.group) return;
+          void handleSplit(sourcePanel.group.id, event.payload.direction);
+        }),
+        await desktopListen<{
+          browser_id: string;
+          workspace_id: string;
+        }>("browser-close-shortcut", (event) => {
+          const api = apiRef.current;
+          if (!api) return;
+          const sourceId = event.payload.browser_id;
+          if (!api.getPanel(sourceId)) return;
+          closeTab(sourceId);
+        }),
+        await desktopListen<{
+          browser_id: string;
+          workspace_id: string;
+          target: "tabs" | "groups";
+          direction: 1 | -1;
+        }>("browser-cycle-shortcut", (event) => {
+          const api = apiRef.current;
+          if (!api) return;
+          const sourcePanel = api.getPanel(event.payload.browser_id);
+          if (!sourcePanel) return;
+          // Activate the source pane so the cycle helpers operate from
+          // the user's current spot — dockview's activeGroup may lag if
+          // the user only typed inside the embedded webContents without
+          // clicking the tab header first.
+          sourcePanel.api.setActive();
+          const refocus = () => requestAnimationFrame(refocusAddressBar);
+          if (event.payload.target === "tabs") {
+            cycleTabsInActiveGroup(apiRef.current, event.payload.direction, refocus);
+          } else {
+            cycleGridGroups(apiRef.current, event.payload.direction, refocus);
+          }
+        }),
+      );
+    })();
+
+    return () => {
+      for (const unlisten of unlisteners) unlisten();
+    };
+  }, [handleSplit, closeTab]);
+
   // Listen for the workspace-level ⇧⌘B "focus Browser" event. Scoped
   // to this container's subtree via containerRef. The native webview
   // can't be focused from React, so we focus the URL input instead —
