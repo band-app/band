@@ -9,7 +9,7 @@ import {
   type IDockviewPanelHeaderProps,
   type IDockviewPanelProps,
 } from "dockview";
-import { Columns2, Globe, Plus, Rows2, X } from "lucide-react";
+import { Globe, Plus, X } from "lucide-react";
 import React, {
   createContext,
   useCallback,
@@ -22,7 +22,6 @@ import React, {
 import { injectInitialUrls } from "../lib/browser-layout";
 import { invoke as desktopInvoke, listen as desktopListen } from "../lib/desktop-ipc";
 import {
-  cycleGridGroups,
   cycleTabsInActiveGroup,
   selectNeighbourBeforeRemove,
 } from "../lib/dockview-section-actions";
@@ -288,10 +287,9 @@ function BrowserTab(props: IDockviewPanelHeaderProps<BrowserTabParams>) {
 const addTabRef: {
   current: {
     onAdd: (groupId?: string) => void;
-    onSplit: (groupId: string, direction: "right" | "below") => void;
   };
 } = {
-  current: { onAdd: () => {}, onSplit: () => {} },
+  current: { onAdd: () => {} },
 };
 
 /** Shared ref for the close-tab action — used by BrowserTab's close button. */
@@ -303,6 +301,14 @@ const closeTabRef: { current: ((browserId: string) => void) | null } = {
  * Stable component for DockviewReact's rightHeaderActionsComponent.
  * Reads callback from the module-level ref to avoid the
  * "only React.memo/forwardRef/function components accepted" error.
+ *
+ * The browser section intentionally has no split affordance — the embedded
+ * Electron WebContentsView swallows keyboard shortcuts when the rendered
+ * page has focus, so split / close / cycle-group shortcuts can't reliably
+ * reach the React handler. Until the desktop-side `before-input-event`
+ * bridge in `view-manager.ts` forwards those keys, the browser section
+ * is restricted to tab-only operations (Cmd+T new tab, Cmd+W close,
+ * Cmd+Shift+[/] cycle tabs).
  */
 const RightHeaderActions = React.memo(function RightHeaderActions(
   props: IDockviewHeaderActionsProps,
@@ -310,22 +316,6 @@ const RightHeaderActions = React.memo(function RightHeaderActions(
   const groupId = props.group.id;
   return (
     <div className="flex h-full items-center">
-      <button
-        type="button"
-        className="inline-flex size-8 items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent rounded transition-colors"
-        onClick={() => addTabRef.current.onSplit(groupId, "right")}
-        title="Split right"
-      >
-        <Columns2 className="size-3.5" />
-      </button>
-      <button
-        type="button"
-        className="inline-flex size-8 items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent rounded transition-colors"
-        onClick={() => addTabRef.current.onSplit(groupId, "below")}
-        title="Split down"
-      >
-        <Rows2 className="size-3.5" />
-      </button>
       <button
         type="button"
         className="inline-flex size-8 items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent rounded transition-colors"
@@ -452,39 +442,6 @@ export function DockviewBrowserContainer({
     [workspaceId],
   );
 
-  const handleSplit = useCallback(
-    async (groupId: string, direction: "right" | "below") => {
-      const api = apiRef.current;
-      if (!api) return;
-
-      const browserId = newBrowserId();
-      markBrowserFresh(browserId);
-
-      // Create the server-side browser record BEFORE adding the panel
-      try {
-        await trpc.browsers.create.mutate({ workspaceId, id: browserId });
-      } catch (err) {
-        console.error("[DockviewBrowserContainer] error creating split browser:", err);
-      }
-
-      api.addPanel({
-        id: browserId,
-        component: "browserTab",
-        tabComponent: "browserTab",
-        title: "New Tab",
-        params: {
-          workspaceId,
-          browserId,
-        },
-        position: {
-          referenceGroup: groupId,
-          direction,
-        },
-      } as Parameters<typeof api.addPanel>[0]);
-    },
-    [workspaceId],
-  );
-
   const closeTab = useCallback((browserId: string) => {
     const api = apiRef.current;
     if (!api || api.panels.length <= 1) return; // don't close last tab
@@ -515,12 +472,18 @@ export function DockviewBrowserContainer({
   // Keyboard shortcuts (capture phase, scoped to this section's focus):
   // - Cmd/Ctrl+T              → open a new browser tab
   // - Cmd/Ctrl+W              → close the active browser tab
-  // - Cmd/Ctrl+D              → split right (vertical split)
-  // - Cmd/Ctrl+Shift+D        → split down (horizontal split)
   // - Cmd/Ctrl+R              → reload the active browser tab (desktop only)
   // - Ctrl+(Shift)+Tab        → cycle tabs in the active group
-  // - Cmd/Ctrl+[ / Cmd/Ctrl+] → cycle between split browser groups (panels)
   // - Cmd/Ctrl+Shift+[/]      → cycle tabs in the active group
+  //
+  // Split / cycle-between-groups shortcuts are intentionally not handled in
+  // the browser section. The embedded WebContentsView swallows keystrokes
+  // when the rendered page has focus, and the desktop-side
+  // `before-input-event` bridge in `view-manager.ts` only forwards Cmd+F
+  // and Cmd+T today — Cmd+D would therefore work from the address bar but
+  // silently fail from inside the page, which is the more common case.
+  // Until the bridge is extended, the browser section sticks to tab-only
+  // operations.
   useEffect(() => {
     if (!visible) return;
 
@@ -537,12 +500,6 @@ export function DockviewBrowserContainer({
 
     const cycleTabs = (direction: 1 | -1) => {
       cycleTabsInActiveGroup(apiRef.current, direction, () => {
-        requestAnimationFrame(refocusAddressBar);
-      });
-    };
-
-    const cycleGroups = (direction: 1 | -1) => {
-      cycleGridGroups(apiRef.current, direction, () => {
         requestAnimationFrame(refocusAddressBar);
       });
     };
@@ -572,14 +529,6 @@ export function DockviewBrowserContainer({
         return;
       }
 
-      // Cmd/Ctrl+[ / Cmd/Ctrl+] → cycle between split groups (panels)
-      if (!e.shiftKey && (key === "[" || key === "]")) {
-        e.preventDefault();
-        e.stopPropagation();
-        cycleGroups(key === "]" ? 1 : -1);
-        return;
-      }
-
       if (key === "t" && !e.shiftKey) {
         e.preventDefault();
         e.stopPropagation();
@@ -602,15 +551,6 @@ export function DockviewBrowserContainer({
         if (active) {
           closeTab(active.id);
         }
-      } else if (key === "d") {
-        e.preventDefault();
-        e.stopPropagation();
-        const api = apiRef.current;
-        if (!api) return;
-        const activeGroup = api.activeGroup;
-        if (!activeGroup) return;
-        const direction = e.shiftKey ? "below" : "right";
-        handleSplit(activeGroup.id, direction);
       } else if (key === "r" && !e.shiftKey && isDesktop) {
         const api = apiRef.current;
         if (!api) return;
@@ -626,7 +566,7 @@ export function DockviewBrowserContainer({
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [visible, closeTab, handleSplit, handleAddTab]);
+  }, [visible, closeTab, handleAddTab]);
 
   // Auto-focus the active browser pane's address bar whenever the section
   // becomes visible (e.g. user clicked the outer "Browser" panel tab) so
@@ -738,7 +678,7 @@ export function DockviewBrowserContainer({
   // instead of updateParameters — see the Provider wrapping DockviewReact.
 
   // Keep module-level refs in sync for stable Dockview components
-  addTabRef.current = { onAdd: handleAddTab, onSplit: handleSplit };
+  addTabRef.current = { onAdd: handleAddTab };
   closeTabRef.current = closeTab;
 
   // Use refs for the initial data so onReady's closure captures the latest
