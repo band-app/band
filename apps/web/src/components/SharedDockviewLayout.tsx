@@ -576,6 +576,24 @@ function stripPanelParams(json: Record<string, unknown>): Record<string, unknown
 }
 
 /**
+ * Module-level flag: `true` only for the brief synchronous window in
+ * which `saveLayout` calls `api.toJSON()`. dockview's `toJSON()`
+ * internally exits then re-enters the currently-maximized group as
+ * part of its serialization dance, firing
+ * `onDidMaximizedGroupChange(false)` followed by
+ * `onDidMaximizedGroupChange(true, <group>)`. Those events are not
+ * user-initiated and must NOT be persisted — the re-enter event in
+ * particular would otherwise contaminate the incoming workspace's
+ * localStorage with the outgoing workspace's maximize. The
+ * `onDidMaximizedGroupChange` listener (down in `onReady`) checks this
+ * flag and skips while it's true.
+ *
+ * Module scope is safe here because there's exactly one
+ * `SharedDockviewLayout` mounted at a time.
+ */
+let inSaveLayoutToJSON = false;
+
+/**
  * Persist the current layout.
  * - Full layout (structure + active tabs) → global key
  * - Active tab state → per-workspace key (maximizedGroup is preserved
@@ -588,7 +606,13 @@ function saveLayout(
   lastStructureRef: React.MutableRefObject<string>,
 ): void {
   try {
-    const json = stripPanelParams(api.toJSON() as unknown as Record<string, unknown>);
+    let json: Record<string, unknown>;
+    inSaveLayoutToJSON = true;
+    try {
+      json = stripPanelParams(api.toJSON() as unknown as Record<string, unknown>);
+    } finally {
+      inSaveLayoutToJSON = false;
+    }
 
     // Save per-workspace active tab state only when we have a real workspace.
     //
@@ -652,13 +676,27 @@ function stripRemovedPanels(layout: Record<string, unknown>): void {
 }
 
 /** Read the saved active-tab state for a workspace, or null when absent
- *  or unparseable. */
+ *  or unparseable. Defends against malformed payloads (older versions,
+ *  hand-edited localStorage, extensions) by requiring `groups` to be a
+ *  plain object — every caller indexes into it, and a missing `groups`
+ *  key would throw `TypeError: Cannot read properties of undefined`
+ *  inside the surrounding try/catch and silently nuke the workspace's
+ *  saved layout. */
 function loadActiveState(workspaceId: string | null): ActiveTabState | null {
   if (!workspaceId) return null;
   try {
     const raw = localStorage.getItem(`${ACTIVE_STATE_KEY_PREFIX}${workspaceId}`);
     if (!raw) return null;
-    return JSON.parse(raw) as ActiveTabState;
+    const parsed = JSON.parse(raw) as unknown;
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      typeof (parsed as { groups?: unknown }).groups !== "object" ||
+      (parsed as { groups?: unknown }).groups === null
+    ) {
+      return null;
+    }
+    return parsed as ActiveTabState;
   } catch {
     return null;
   }
@@ -1403,6 +1441,14 @@ export function SharedDockviewLayout() {
       event.api.onDidMaximizedGroupChange(
         (e: { group?: { id?: string }; isMaximized?: boolean }) => {
           if (!initializedRef.current) return;
+          // Suppress the spurious exit-then-reenter pair dockview fires
+          // from inside `toJSON()`. Without this guard the "re-enter"
+          // event would write the outgoing workspace's maximized group
+          // into the INCOMING workspace's localStorage entry — a real
+          // contamination bug the reviewer flagged in #491. Module-level
+          // flag is set by `saveLayout` for the synchronous duration of
+          // its `toJSON()` call.
+          if (inSaveLayoutToJSON) return;
           const workspaceId = activeWorkspaceIdRef.current;
           if (!workspaceId) return;
           // Defensive: dockview's event payload types both `group` and
