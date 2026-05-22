@@ -455,7 +455,10 @@ export function DockviewBrowserContainer({
   const handleSplit = useCallback(
     async (groupId: string, direction: "right" | "below") => {
       const api = apiRef.current;
-      if (!api) return;
+      if (!api) {
+        console.warn("[DockviewBrowserContainer] handleSplit: no api");
+        return;
+      }
 
       const browserId = newBrowserId();
       markBrowserFresh(browserId);
@@ -467,20 +470,50 @@ export function DockviewBrowserContainer({
         console.error("[DockviewBrowserContainer] error creating split browser:", err);
       }
 
-      api.addPanel({
-        id: browserId,
-        component: "browserTab",
-        tabComponent: "browserTab",
-        title: "New Tab",
-        params: {
-          workspaceId,
-          browserId,
-        },
-        position: {
-          referenceGroup: groupId,
-          direction,
-        },
-      } as Parameters<typeof api.addPanel>[0]);
+      // Diagnostic: log what we're about to ask dockview to do plus
+      // whether the reference group still exists by the time we got here
+      // (the trpc await above can put us several frames after the click).
+      const groupBefore = api.getGroup(groupId);
+      const groupsBefore = api.groups.length;
+      console.info("[DockviewBrowserContainer] split:", {
+        groupId,
+        direction,
+        groupExists: !!groupBefore,
+        totalGroupsBefore: groupsBefore,
+      });
+
+      try {
+        api.addPanel({
+          id: browserId,
+          component: "browserTab",
+          tabComponent: "browserTab",
+          title: "New Tab",
+          params: {
+            workspaceId,
+            browserId,
+          },
+          position: {
+            referenceGroup: groupId,
+            direction,
+          },
+        } as Parameters<typeof api.addPanel>[0]);
+      } catch (err) {
+        console.error("[DockviewBrowserContainer] addPanel threw:", err);
+        return;
+      }
+
+      // Diagnostic: confirm the new panel landed in its own group rather
+      // than being absorbed as a tab in the reference group.
+      const groupsAfter = api.groups.length;
+      const newPanel = api.getPanel(browserId);
+      const newPanelGroupId = newPanel?.group?.id;
+      console.info("[DockviewBrowserContainer] split result:", {
+        groupsBefore,
+        groupsAfter,
+        wasNewGroupCreated: groupsAfter > groupsBefore,
+        newPanelLandedInGroupId: newPanelGroupId,
+        sameAsReferenceGroup: newPanelGroupId === groupId,
+      });
     },
     [workspaceId],
   );
