@@ -1,14 +1,21 @@
+import { cn } from "@band-app/ui";
+
 interface IconProps {
   className?: string;
 }
 
 export function ClaudeIcon({ className }: IconProps) {
+  // Anthropic brand coral by default, applied via `text-*` so it flows
+  // through `currentColor` — parent `text-muted-foreground` and
+  // `forced-colors: active` both correctly affect the icon. Override by
+  // passing a different text-color className. (cn() uses tailwind-merge,
+  // so a caller-supplied `text-*` wins.)
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
       viewBox="0 0 16 16"
       fill="currentColor"
-      className={className}
+      className={cn("text-[#D97757]", className)}
       role="img"
       aria-label="Claude"
     >
@@ -33,21 +40,18 @@ export function CodexIcon({ className }: IconProps) {
 }
 
 export function OpenCodeIcon({ className }: IconProps) {
+  // Official opencode pixel mark (https://opencode.ai/brand).
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
       viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
+      fill="currentColor"
       className={className}
       role="img"
-      aria-label="OpenCode"
+      aria-label="opencode"
     >
-      <polyline points="4 17 10 11 4 5" />
-      <line x1="12" y1="19" x2="20" y2="19" />
+      <path fillOpacity={0.5} d="M16 10H8v8h8z" />
+      <path fillRule="evenodd" clipRule="evenodd" d="M20 22H4V2h16zM16 6H8v12h8z" />
     </svg>
   );
 }
