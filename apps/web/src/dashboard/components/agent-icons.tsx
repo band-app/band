@@ -5,14 +5,11 @@ interface IconProps {
 }
 
 export function ClaudeIcon({ className }: IconProps) {
-  // Default color is Claude's signature warm coral (Anthropic brand) applied
-  // via Tailwind so it goes through CSS `color` / `currentColor`. This means:
-  //   - parent containers with `text-muted-foreground` or other text-color
-  //     utilities correctly override it (e.g. ConversationEmptyState)
-  //   - `forced-colors: active` (Windows High Contrast) remaps it through
-  //     the system palette, unlike hardcoded `fill="#hex"`
-  //   - parent `opacity-*` still cascades and dims the icon
-  // Callers can pass a different text color via `className` to override.
+  // Anthropic brand coral by default, applied via `text-*` so it flows
+  // through `currentColor` — parent `text-muted-foreground` and
+  // `forced-colors: active` both correctly affect the icon. Override by
+  // passing a different text-color className. (cn() uses tailwind-merge,
+  // so a caller-supplied `text-*` wins.)
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -43,9 +40,7 @@ export function CodexIcon({ className }: IconProps) {
 }
 
 export function OpenCodeIcon({ className }: IconProps) {
-  // Official opencode mark: a pixel-style "O" with the signature
-  // half-fill block visible through the cutout. Mirrors the design used
-  // in opencode's favicon and wordmark (https://opencode.ai/brand).
+  // Official opencode pixel mark (https://opencode.ai/brand).
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
