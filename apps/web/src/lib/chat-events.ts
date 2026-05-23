@@ -146,6 +146,18 @@ export interface ErrorEvent {
   message: string;
 }
 
+/** An assistant-produced file the user can render inline (image, download
+ *  link, …). Emitted by `task-runner` either when the agent emits a
+ *  `file` event explicitly or when a tool call drops a new file into the
+ *  workspace shared dir. The client attaches it as a `file` part on the
+ *  current assistant message — never a stand-alone bubble. */
+export interface FileEvent {
+  type: "file";
+  mediaType: string;
+  url: string;
+  filename?: string;
+}
+
 /** Server pushes the full queue every time it changes. Idempotent — clients
  *  replace their local view wholesale (no need to track per-event mutations). */
 export interface QueueUpdatedEvent {
@@ -180,6 +192,7 @@ export type ChatEventPayload =
   | UsageEvent
   | ResultEvent
   | ErrorEvent
+  | FileEvent
   | QueueUpdatedEvent
   | SubscriptionOpenedEvent;
 
@@ -220,6 +233,7 @@ export const CHAT_EVENT_TYPES: ReadonlyArray<ChatEventType> = [
   "usage",
   "result",
   "error",
+  "file",
   "queue-updated",
   "subscription-opened",
 ] as const;

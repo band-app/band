@@ -474,6 +474,44 @@ export function chatEventReducer(
       };
     }
 
+    case "file": {
+      // Attach an assistant-produced file (image, download, scanned shared-
+      // dir artifact) as a `file` part on the current assistant message.
+      // Mirror the create-on-demand pattern used by text-start/tool-input —
+      // a `file` event can arrive before any text-delta if the agent's
+      // first output is a tool that drops a file.
+      const created = state.currentAssistantId === undefined;
+      const nextCounter = created ? state.messageIdCounter + 1 : state.messageIdCounter;
+      const assistantId = state.currentAssistantId ?? `a-${nextCounter}`;
+      let messages = state.messages;
+      if (created) {
+        messages = [...messages, { id: assistantId, role: "assistant", parts: [] }];
+      }
+      const filePart = {
+        type: "file" as const,
+        mediaType: event.mediaType,
+        url: event.url,
+        ...(event.filename ? { filename: event.filename } : {}),
+      };
+      const idx = messages.findIndex((m) => m.id === assistantId);
+      if (idx === -1) {
+        return { ...state, lastEventId, messages };
+      }
+      const before = messages[idx];
+      const updated: UIMessage = {
+        ...before,
+        parts: [...before.parts, filePart as unknown as UIMessageParts[number]],
+      };
+      messages = [...messages.slice(0, idx), updated, ...messages.slice(idx + 1)];
+      return {
+        ...state,
+        lastEventId,
+        currentAssistantId: assistantId,
+        messageIdCounter: nextCounter,
+        messages,
+      };
+    }
+
     case "queue-updated":
       return { ...state, lastEventId, queuedMessages: event.messages };
 

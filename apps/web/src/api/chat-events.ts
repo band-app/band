@@ -225,6 +225,15 @@ export async function handleChatEvents(
         const evt = queue.shift()!;
         // Final dedup safety net: replayPast may have emitted this event
         // after the subscribe handler's check but before we got here.
+        // The `eventId >= 0` guard intentionally skips dedup for synthetic
+        // negative-id events. The invariant that makes this safe: negative
+        // ids are only ever assigned by THIS file (here via `nextSyntheticId--`
+        // and inside replayPast for the cold JSONL path). They are never
+        // re-emitted by the live subscriber and never collide between
+        // replay+live because the subscriber's pre-existing `nextSyntheticId`
+        // closure keeps decrementing past whatever replay used. Without the
+        // guard a freshly-pushed `queue-updated` with eventId=-3 would be
+        // dropped just because lastEmittedId is at e.g. 12 from real events.
         if (evt.eventId <= lastEmittedId && evt.eventId >= 0) continue;
         emit(trackedWriter, evt);
 
@@ -380,7 +389,7 @@ async function replayPast(opts: {
           // rare overlap.)
           let syntheticId =
             bufferFirstId === Number.POSITIVE_INFINITY
-              ? -1000
+              ? afterEventId + 1
               : Math.max(afterEventId + 1, bufferFirstId - messages.length);
           for (const msg of messages) {
             const events = jsonlMessageToEvents(msg, syntheticId);
@@ -605,6 +614,18 @@ function chunkToChatEvent(
 
     case "error":
       return { type: "error", message: String(c.errorText ?? c.message ?? "Unknown error") };
+
+    case "file":
+      // Agent-produced file (image, download, etc.) — either emitted
+      // directly by the agent or scanned from the workspace's shared dir
+      // after a tool call. The client attaches it as a `file` part on the
+      // current assistant message.
+      return {
+        type: "file",
+        mediaType: String(c.mediaType ?? "application/octet-stream"),
+        url: String(c.url ?? ""),
+        ...(typeof c.filename === "string" ? { filename: c.filename } : {}),
+      };
 
     // `finish` and `finish-step` are AI-SDK protocol terminators — replaced
     // by `task-completed` / `task-error` in the new stream.
