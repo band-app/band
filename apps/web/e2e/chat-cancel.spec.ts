@@ -29,8 +29,8 @@
 
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { toWorkspaceId } from "@/dashboard";
 import { expect, test } from "@playwright/test";
+import { toWorkspaceId } from "@/dashboard";
 import {
   createTmpHome,
   type ServerHandle,
