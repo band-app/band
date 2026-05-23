@@ -1,14 +1,3 @@
-import {
-  DashboardProvider,
-  useDashboardStore,
-  useSettingsQuery,
-  useUpdateSettings,
-} from "@band-app/dashboard-core";
-import {
-  DesktopDashboardAdapter,
-  NativeShellCapabilities,
-} from "@band-app/dashboard-core/adapters/desktop";
-import { WebCapabilities, WebDashboardAdapter } from "@band-app/dashboard-core/adapters/web";
 import { DropdownMenuItem, TooltipProvider } from "@band-app/ui";
 import {
   createRootRoute,
@@ -28,6 +17,14 @@ import {
   Terminal as TerminalIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
+import {
+  DashboardProvider,
+  useDashboardStore,
+  useSettingsQuery,
+  useUpdateSettings,
+} from "@/dashboard";
+import { DesktopDashboardAdapter, NativeShellCapabilities } from "@/dashboard/adapters/desktop";
+import { WebCapabilities, WebDashboardAdapter } from "@/dashboard/adapters/web";
 import { BrowserHostBridge } from "../components/BrowserHostBridge";
 import { DesktopTitleBar, type PanelItem } from "../components/DesktopTitleBar";
 import { crossPanelHandlers, SharedDockviewLayout } from "../components/SharedDockviewLayout";
@@ -299,14 +296,14 @@ function AppShell() {
   // Wire up client-side navigation for WebCapabilities
   useEffect(() => {
     if (capabilities.navigate) return;
-    (capabilities as import("@band-app/dashboard-core/adapters/web").WebCapabilities).navigate = (
+    (capabilities as import("@/dashboard/adapters/web").WebCapabilities).navigate = (
       href: string,
     ) => {
       router.navigate({ to: href });
     };
   }, [router]);
 
-  // Cmd+[ / Cmd+] — back/forward through workspace history
+  // Workspace back/forward history — drives the title-bar arrow buttons.
   const routerNavigate = useCallback((href: string) => router.navigate({ to: href }), [router]);
   const navigationHistory = useNavigationHistory(routerNavigate, capabilities);
 

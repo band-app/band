@@ -7,11 +7,11 @@ import { resolveFolderIconName, resolveIconName, resolveIconPath } from "./file-
 // roundtrip, no flicker. SVG sources originate from the bundled npm package
 // at build time, not from user input.
 //
-// Glob path is relative to this file (src/lib/), so it resolves to
-// packages/dashboard-core/node_modules/material-icon-theme/icons/*.svg. pnpm
-// places a package-local symlink there; if hoisting config ever changes the
-// glob matches zero files — caught by the non-empty assertion below rather
-// than silently shipping blank icons.
+// Glob path is relative to this file (src/dashboard/lib/), so it resolves to
+// apps/web/node_modules/material-icon-theme/icons/*.svg. pnpm places a
+// package-local symlink there; if hoisting config ever changes the glob
+// matches zero files — caught by the non-empty assertion below rather than
+// silently shipping blank icons.
 //
 // SSR-gated via `typeof window === "undefined"` rather than Vite's
 // `import.meta.env.SSR`, because this module is bundled by two different
@@ -37,7 +37,7 @@ const IS_SSR = typeof window === "undefined";
 
 const iconSources: Record<string, string> = IS_SSR
   ? {}
-  : import.meta.glob<string>("../../node_modules/material-icon-theme/icons/*.svg", {
+  : import.meta.glob<string>("../../../node_modules/material-icon-theme/icons/*.svg", {
       query: "?raw",
       import: "default",
       eager: true,
@@ -45,8 +45,8 @@ const iconSources: Record<string, string> = IS_SSR
 
 if (!IS_SSR && Object.keys(iconSources).length === 0) {
   throw new Error(
-    "[dashboard-core/file-icon] material-icon-theme SVG glob matched zero files. " +
-      "Check packages/dashboard-core/node_modules/material-icon-theme/icons.",
+    "[dashboard/file-icon] material-icon-theme SVG glob matched zero files. " +
+      "Check apps/web/node_modules/material-icon-theme/icons.",
   );
 }
 
@@ -99,7 +99,7 @@ function ensureSprite(): void {
   const root = parsed.documentElement;
   if (root.nodeName === "parsererror") {
     console.error(
-      "[dashboard-core/file-icon] Failed to parse SVG sprite markup. Icons will render blank.",
+      "[dashboard/file-icon] Failed to parse SVG sprite markup. Icons will render blank.",
     );
     // Latch the flag so subsequent renders don't re-invoke DOMParser on the
     // same broken markup ~1.2k times per page and re-log the same error. The
@@ -113,9 +113,31 @@ function ensureSprite(): void {
   spriteInjected = true;
 }
 
-// Inject at module init so the sprite is in the DOM before the first React
-// commit references any <use href>.
-ensureSprite();
+// NOTE: We deliberately do NOT call ensureSprite() at module init.
+//
+// The web app uses SSR (tanstack-start). On the server `iconSources` is `{}`
+// (the IS_SSR gate above), so the server HTML contains NO sprite and the
+// icon components render as bare `<svg>` placeholders. On the client the
+// file-icon module's top-level code runs BEFORE React hydration starts.
+// If we injected the sprite into `document.body` here, the body would have
+// an extra `<svg id="mit-icon-sprite">` child that isn't in the server HTML,
+// and React 19 would treat that as a hydration mismatch (error #418):
+//
+//   "Hydration failed because the initial UI does not match what was
+//    rendered on the server."
+//
+// React's recovery path is to discard the entire client subtree and
+// re-render from scratch — which REMOVES the sprite we just appended. By
+// the time the icon components render, `spriteInjected` is already `true`
+// (it was latched when we appended), so the in-component ensureSprite()
+// no-ops and the sprite never comes back. Every `<use href="#mit-...">` in
+// the page then references a missing symbol → blank icons. See issue:
+// material icons missing in the file browser after the v0.16.5 DMG ship.
+//
+// The fix: rely solely on the in-component ensureSprite() call below. That
+// call runs DURING the React commit (after hydration), so the appended
+// sprite is a sibling-of-React's-root child added after reconciliation
+// completes — React doesn't try to reconcile it and doesn't tear it down.
 
 function symbolIdForIcon(iconName: string): string | null {
   const iconPath = resolveIconPath(iconName);

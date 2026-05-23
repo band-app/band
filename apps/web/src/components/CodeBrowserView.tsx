@@ -1,30 +1,4 @@
 import {
-  AUTO_DETECT_LANGUAGE_ID,
-  buildLspWsUrl,
-  createLspExtension,
-  FileBrowser,
-  type FileBrowserHandle,
-  FileViewer,
-  getFilePreviewType,
-  getLspLanguageId,
-  hasPendingNavigation,
-  languageToExtension,
-  parseFileLocation,
-  releaseLspClient,
-  resolveNavigation,
-  SearchBar,
-  scrollToLine,
-  serializeEditorState,
-  toFileUri,
-  toLspServerLang,
-  toWorkspaceId,
-  useCapabilities,
-  useEditorHistory,
-  useProjects,
-  useSearch,
-  useSettingsQuery,
-} from "@band-app/dashboard-core";
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -58,6 +32,32 @@ import {
   useState,
 } from "react";
 import { Group, Panel, Separator, usePanelRef } from "react-resizable-panels";
+import {
+  AUTO_DETECT_LANGUAGE_ID,
+  buildLspWsUrl,
+  createLspExtension,
+  FileBrowser,
+  type FileBrowserHandle,
+  FileViewer,
+  getFilePreviewType,
+  getLspLanguageId,
+  hasPendingNavigation,
+  languageToExtension,
+  parseFileLocation,
+  releaseLspClient,
+  resolveNavigation,
+  SearchBar,
+  scrollToLine,
+  serializeEditorState,
+  toFileUri,
+  toLspServerLang,
+  toWorkspaceId,
+  useCapabilities,
+  useEditorHistory,
+  useProjects,
+  useSearch,
+  useSettingsQuery,
+} from "@/dashboard";
 import { isUntitledPath, useFileTabs } from "../hooks/useFileTabs";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useTabState } from "../hooks/useTabState";
@@ -228,8 +228,8 @@ function FileTreeToolbar({
   // Defer the dropdown's menu actions until after the menu has fully
   // closed — same trick the file-tree context menus use. Without this,
   // selecting "New File" mounts the inline rename / new-entry input
-  // inside dashboard-core while Radix's FocusScope (still alive for
-  // the DropdownMenu's close transition) yanks focus back, and the
+  // inside the dashboard module while Radix's FocusScope (still alive
+  // for the DropdownMenu's close transition) yanks focus back, and the
   // input's own onBlur tears it down before it can take focus.
   const pendingMenuAction = useRef<(() => void) | null>(null);
   const queueMenuAction = useCallback((fn: () => void) => {
@@ -1269,45 +1269,102 @@ export function CodeBrowserView({
     return () => window.removeEventListener("band:lsp-navigate", handleLspNavigate);
   }, [pushDepartureAndArrival, fileTabs.openTabPinned, notifySelectFile]);
 
-  // Ctrl+Tab / Ctrl+Shift+Tab to switch between file tabs
+  // Keyboard shortcuts (capture phase, scoped to this section's focus):
+  // - Cmd/Ctrl+W              → close the active file tab
+  // - Ctrl+(Shift)+Tab        → cycle file tabs
+  // - Cmd/Ctrl+Shift+[/]      → cycle file tabs (matches the per-section
+  //                             convention used by Terminal/Chats/Browser).
+  // - Ctrl+-                  → editor history: go back (VSCode parity)
+  // - Ctrl+Shift+-            → editor history: go forward (VSCode parity)
+  //
+  // The Code section has no sub-dockview groups, so Cmd/Ctrl+[/] is a no-op
+  // here — we still swallow it so it doesn't bubble up to anything else.
+  //
+  // The editor-history shortcuts deliberately use **Ctrl** (not Cmd) to
+  // mirror VSCode on macOS and — more importantly — to dodge the desktop
+  // View menu's Zoom Out accelerator, which is registered as
+  // `CmdOrCtrl+-` in `apps/desktop/src/main/menu.ts`. Electron resolves
+  // `CmdOrCtrl` to Cmd on macOS, so `Ctrl+-` is unclaimed there. On
+  // Windows/Linux the same accelerator binds `Ctrl+-`, so the shortcut
+  // will be intercepted by the menu before reaching this handler; that's
+  // a known limitation to revisit when we ship outside macOS.
   useEffect(() => {
-    const handleNextTab = () => {
+    const cycleFileTabs = (direction: 1 | -1) => {
       const tabs = fileTabs.openTabs;
       if (tabs.length <= 1) return;
       const currentIndex = tabs.findIndex((t) => t.filePath === fileTabs.activeTabPath);
-      const nextIndex = (currentIndex + 1) % tabs.length;
+      // When `activeTabPath` is stale (briefly possible after an external
+      // tab close, before the next render reconciles), `findIndex` returns
+      // -1 and the naive `(-1 + direction + n) % n` resolves to 0 forward
+      // and n-2 backward — silently jumping to tab 0 or skipping the last
+      // tab. Treat that as "enter the cycle from the end the user is
+      // moving towards": forward → first, backward → last.
+      const nextIndex =
+        currentIndex < 0
+          ? direction === 1
+            ? 0
+            : tabs.length - 1
+          : (currentIndex + direction + tabs.length) % tabs.length;
       handleTabSelect(tabs[nextIndex].filePath);
     };
-    const handlePrevTab = () => {
-      const tabs = fileTabs.openTabs;
-      if (tabs.length <= 1) return;
-      const currentIndex = tabs.findIndex((t) => t.filePath === fileTabs.activeTabPath);
-      const prevIndex = (currentIndex - 1 + tabs.length) % tabs.length;
-      handleTabSelect(tabs[prevIndex].filePath);
-    };
 
-    window.addEventListener("band:next-file-tab", handleNextTab);
-    window.addEventListener("band:prev-file-tab", handlePrevTab);
-    return () => {
-      window.removeEventListener("band:next-file-tab", handleNextTab);
-      window.removeEventListener("band:prev-file-tab", handlePrevTab);
-    };
-  }, [fileTabs.openTabs, fileTabs.activeTabPath, handleTabSelect]);
-
-  // Cmd+W / Ctrl+W to close active tab
-  useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "w") {
-        if (fileTabs.activeTabPath) {
-          e.preventDefault();
-          e.stopPropagation();
-          handleTabClose(fileTabs.activeTabPath);
+      if (!containerRef.current?.contains(document.activeElement)) return;
+
+      const key = e.key.toLowerCase();
+
+      // Ctrl+(Shift)+Tab → cycle file tabs
+      if (e.ctrlKey && !e.metaKey && key === "tab") {
+        e.preventDefault();
+        e.stopPropagation();
+        cycleFileTabs(e.shiftKey ? -1 : 1);
+        return;
+      }
+
+      // Ctrl+- / Ctrl+Shift+- → editor history back/forward.
+      // Match on `e.code === "Minus"` so we don't have to juggle the
+      // Shift-modified `e.key` (which becomes `"_"` on US layouts).
+      // Require Ctrl exclusively (no Cmd, no Alt) to keep it distinct
+      // from the desktop Zoom Out accelerator.
+      if (e.ctrlKey && !e.metaKey && !e.altKey && e.code === "Minus") {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.shiftKey) {
+          handleEditorGoForward();
+        } else {
+          handleEditorGoBack();
         }
+        return;
+      }
+
+      const mod = e.metaKey || e.ctrlKey;
+      if (!mod) return;
+
+      // Cmd/Ctrl+Shift+[ / Cmd/Ctrl+Shift+] → cycle file tabs
+      if (e.shiftKey && (key === "[" || key === "]")) {
+        e.preventDefault();
+        e.stopPropagation();
+        cycleFileTabs(key === "]" ? 1 : -1);
+        return;
+      }
+
+      // Cmd/Ctrl+W → close the active file tab
+      if (key === "w" && !e.shiftKey && fileTabs.activeTabPath) {
+        e.preventDefault();
+        e.stopPropagation();
+        handleTabClose(fileTabs.activeTabPath);
       }
     };
     window.addEventListener("keydown", handler, { capture: true });
     return () => window.removeEventListener("keydown", handler, { capture: true });
-  }, [fileTabs.activeTabPath, handleTabClose]);
+  }, [
+    fileTabs.openTabs,
+    fileTabs.activeTabPath,
+    handleTabSelect,
+    handleTabClose,
+    handleEditorGoBack,
+    handleEditorGoForward,
+  ]);
 
   // -------------------------------------------------------------------------
   // File tree imperative handle (drives "new file" / "new folder" from toolbar)

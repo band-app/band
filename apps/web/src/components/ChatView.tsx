@@ -1,7 +1,6 @@
 // useChat from @ai-sdk/react was removed as part of the chat-event-log
 // refactor (issue #478). The chat is now driven by `useChatSubscription`
 // reading the server's event log directly.
-import { AgentIcon, useExperimentalContextMeter } from "@band-app/dashboard-core";
 import {
   Badge,
   Button,
@@ -57,6 +56,7 @@ import {
 } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { StickToBottomContext } from "use-stick-to-bottom";
+import { AgentIcon, useExperimentalContextMeter } from "@/dashboard";
 import { trpc } from "../lib/trpc-client";
 import {
   Conversation,

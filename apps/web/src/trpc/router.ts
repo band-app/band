@@ -11,12 +11,12 @@ import {
 import { cp, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
 import { promisify } from "node:util";
-import { formatFileLocation, toWorkspaceId } from "@band-app/dashboard-core";
 import { createLogger } from "@band-app/logger";
 import { initTRPC, TRPCError } from "@trpc/server";
 import { rgPath } from "@vscode/ripgrep";
 import { Cron } from "croner";
 import { z } from "zod";
+import { formatFileLocation, toWorkspaceId } from "@/dashboard";
 import { getActiveWorkspace, setActiveWorkspace } from "../lib/active-workspace";
 import {
   createMetadataAgent,

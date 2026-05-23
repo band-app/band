@@ -11,7 +11,7 @@
  * The zoom and settings menu items don't run main-process logic on click —
  * they call window globals (`window.__bandZoom`, `window.__bandOpenSettings`)
  * registered by the React tree (see `routes/__root.tsx` and
- * `packages/dashboard-core/src/components/DashboardShell.tsx`). Same pattern
+ * `apps/web/src/dashboard/components/DashboardShell.tsx`). Same pattern
  * the Tauri shell uses (`webview.eval`); here we use Electron's
  * `executeJavaScript`.
  *

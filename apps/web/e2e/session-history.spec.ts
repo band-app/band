@@ -28,7 +28,7 @@
 
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { toWorkspaceId } from "@band-app/dashboard-core";
+import { toWorkspaceId } from "@/dashboard";
 import { expect, test } from "@playwright/test";
 import {
   createTmpHome,

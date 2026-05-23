@@ -116,6 +116,19 @@ export const Events = {
    *  WebContentsView. The renderer's DockviewBrowserContainer reacts by
    *  opening a new tab in whichever container holds the source pane. */
   browserNewTabShortcut: "browser-new-tab-shortcut",
+  /** Pushed when the user presses Cmd+D / Cmd+Shift+D while focus is
+   *  inside a WebContentsView. The payload's `direction` ("right" or
+   *  "below") tells the renderer which split orientation to apply. */
+  browserSplitShortcut: "browser-split-shortcut",
+  /** Pushed when the user presses Cmd+W while focus is inside a
+   *  WebContentsView. The renderer closes the source tab via the same
+   *  path as the close-button click. */
+  browserCloseShortcut: "browser-close-shortcut",
+  /** Pushed when the user presses Cmd+[ / Cmd+] / Cmd+Shift+[ / Cmd+Shift+]
+   *  / Ctrl+(Shift)+Tab while focus is inside a WebContentsView.
+   *  The payload's `target` is "tabs" (cycle inside the current group)
+   *  or "groups" (cycle between split groups); `direction` is +1 or -1. */
+  browserCycleShortcut: "browser-cycle-shortcut",
   /** Pushed when the user accepts a TLS exception (clicks Proceed
    *  in the in-view cert interstitial). Carries the host so the
    *  renderer can flag the address bar with a "Not Secure" badge
@@ -124,6 +137,18 @@ export const Events = {
    *  it stays visible during screencast — this event is only for
    *  the surrounding dashboard chrome. */
   browserHostOverridden: "browser-host-overridden",
+  /** Pushed when a page inside a `WebContentsView` requests a new
+   *  window — `window.open(...)`, `target="_blank"`, middle / Cmd+
+   *  click on a link, etc. The main process *always* denies the
+   *  native OS window (so no detached browser window ever appears)
+   *  and forwards the request here so the renderer can materialize
+   *  the request as a new Band browser tab in the same workspace
+   *  (issue #488). The renderer's `DockviewBrowserContainer` picks
+   *  up the event and calls its existing add-tab flow scoped to the
+   *  source pane's dockview group; events whose `browser_id` isn't
+   *  in this container are ignored, so multiple workspaces don't all
+   *  spawn tabs for one window.open. */
+  browserOpenWindow: "browser-open-window",
   windowFullscreenChanged: "window-fullscreen-changed",
   /** Pushed by the main process when the background updater detects (or
    *  clears) a pending app update. Payload: `PendingUpdate` from

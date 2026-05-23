@@ -1,4 +1,3 @@
-import { useAdapter } from "@band-app/dashboard-core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   type DockviewApi,
@@ -19,8 +18,14 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { useAdapter } from "@/dashboard";
 import { injectInitialUrls } from "../lib/browser-layout";
 import { invoke as desktopInvoke, listen as desktopListen } from "../lib/desktop-ipc";
+import {
+  cycleGridGroups,
+  cycleTabsInActiveGroup,
+  selectNeighbourBeforeRemove,
+} from "../lib/dockview-section-actions";
 import { isDesktop } from "../lib/is-desktop";
 import { trpc } from "../lib/trpc-client";
 import { BrowserPaneComponent, type BrowserPaneParams, useFavicon } from "./BrowserPanel";
@@ -282,12 +287,25 @@ function BrowserTab(props: IDockviewPanelHeaderProps<BrowserTabParams>) {
 
 const addTabRef: {
   current: {
-    onAdd: (groupId?: string) => void;
+    onAdd: (groupId?: string, options?: AddTabOptions) => void;
     onSplit: (groupId: string, direction: "right" | "below") => void;
   };
 } = {
   current: { onAdd: () => {}, onSplit: () => {} },
 };
+
+/**
+ * Options for `handleAddTab` and `addTabRef.current.onAdd`.
+ *
+ * `initialUrl` lets callers materialize a tab that loads a specific
+ * URL on mount — used by the `browser-open-window` listener (issue
+ * #488) to forward `window.open(url)` / `target="_blank"` clicks
+ * into a new Band tab. When omitted the tab opens blank, matching
+ * the Cmd+T / "+" button UX.
+ */
+interface AddTabOptions {
+  initialUrl?: string;
+}
 
 /** Shared ref for the close-tab action — used by BrowserTab's close button. */
 const closeTabRef: { current: ((browserId: string) => void) | null } = {
@@ -409,21 +427,20 @@ export function DockviewBrowserContainer({
   }, [workspaceId]);
 
   const handleAddTab = useCallback(
-    async (groupId?: string) => {
+    async (groupId?: string, addOptions?: AddTabOptions) => {
       const api = apiRef.current;
       if (!api) return;
 
       const browserId = newBrowserId();
       markBrowserFresh(browserId);
 
-      // Create the server-side browser record BEFORE adding the panel
-      try {
-        await trpc.browsers.create.mutate({ workspaceId, id: browserId });
-      } catch (err) {
-        console.error("[DockviewBrowserContainer] error pre-creating browser:", err);
-      }
+      const initialUrl = addOptions?.initialUrl;
 
-      // Build panel options, targeting the specific group if provided
+      // Build panel options, targeting the specific group if provided.
+      // `initialUrl` (when present) gets injected into the panel's
+      // params so `BrowserPaneComponent` mounts with the URL already
+      // in hand — avoids the create-webview / server-fetch race on
+      // tabs spawned from `window.open` (issue #488).
       const options: Parameters<typeof api.addPanel>[0] = {
         id: browserId,
         component: "browserTab",
@@ -432,6 +449,7 @@ export function DockviewBrowserContainer({
         params: {
           workspaceId,
           browserId,
+          ...(initialUrl ? { initialUrl } : {}),
         },
       };
 
@@ -441,7 +459,29 @@ export function DockviewBrowserContainer({
         };
       }
 
+      // Important: add the dockview panel BEFORE the trpc mutation. The
+      // server fires a `browser-created` status event on success, which
+      // `subscribeStatusEvents` (below) reacts to by also calling
+      // `api.addPanel` — without a `position`, so it always adds as a
+      // tab in the active group. Calling addPanel first means the
+      // status-event listener finds the panel already exists and skips.
+      // For handleAddTab the outcome is the same either way, but
+      // handleSplit relies on the same ordering to preserve its
+      // `position.direction` — see comment there.
       api.addPanel(options);
+
+      try {
+        // Persist `initialUrl` to the server-side browser record so
+        // workspace restarts and CLI-side `browsers.get` queries see
+        // the right starting URL.
+        await trpc.browsers.create.mutate({
+          workspaceId,
+          id: browserId,
+          ...(initialUrl ? { url: initialUrl } : {}),
+        });
+      } catch (err) {
+        console.error("[DockviewBrowserContainer] error pre-creating browser:", err);
+      }
       // Layout change listeners will auto-persist
     },
     [workspaceId],
@@ -455,27 +495,41 @@ export function DockviewBrowserContainer({
       const browserId = newBrowserId();
       markBrowserFresh(browserId);
 
-      // Create the server-side browser record BEFORE adding the panel
+      // Add the dockview panel BEFORE the trpc mutation — the server
+      // fires `browser-created` on success, which `subscribeStatusEvents`
+      // reacts to with its own positionless `api.addPanel` call (always
+      // a tab in the active group). If we awaited the trpc call first,
+      // that listener races handleSplit and wins, dropping the panel
+      // into the active group as a tab and then `handleSplit`'s
+      // positioned addPanel throws "panel already exists" — which is
+      // exactly what was making Cmd+D / the Split right button feel
+      // broken for the browser section. The terminal container uses the
+      // same ordering for the same reason.
+      try {
+        api.addPanel({
+          id: browserId,
+          component: "browserTab",
+          tabComponent: "browserTab",
+          title: "New Tab",
+          params: {
+            workspaceId,
+            browserId,
+          },
+          position: {
+            referenceGroup: groupId,
+            direction,
+          },
+        } as Parameters<typeof api.addPanel>[0]);
+      } catch (err) {
+        console.error("[DockviewBrowserContainer] split addPanel threw:", err);
+        return;
+      }
+
       try {
         await trpc.browsers.create.mutate({ workspaceId, id: browserId });
       } catch (err) {
         console.error("[DockviewBrowserContainer] error creating split browser:", err);
       }
-
-      api.addPanel({
-        id: browserId,
-        component: "browserTab",
-        tabComponent: "browserTab",
-        title: "New Tab",
-        params: {
-          workspaceId,
-          browserId,
-        },
-        position: {
-          referenceGroup: groupId,
-          direction,
-        },
-      } as Parameters<typeof api.addPanel>[0]);
     },
     [workspaceId],
   );
@@ -484,10 +538,21 @@ export function DockviewBrowserContainer({
     const api = apiRef.current;
     if (!api || api.panels.length <= 1) return; // don't close last tab
 
+    selectNeighbourBeforeRemove(api, browserId);
     const panel = api.getPanel(browserId);
     if (panel) {
       api.removePanel(panel);
     }
+
+    // After closing, focus the address bar in the newly active panel so the
+    // section-scoped keydown handler still sees Cmd+W on the next press.
+    requestAnimationFrame(() => {
+      const activePanel = api.activePanel;
+      if (!activePanel) return;
+      activePanel.view.content.element
+        .querySelector<HTMLInputElement>("[data-band-address-input]")
+        ?.focus();
+    });
 
     // Delete the server-side browser record so closed tabs don't linger.
     trpc.browsers.remove.mutate({ browserId }).catch((err) => {
@@ -496,15 +561,41 @@ export function DockviewBrowserContainer({
     // Layout change listeners will auto-persist
   }, []);
 
-  // Keyboard shortcuts:
-  // - Cmd/Ctrl+T → open a new browser tab
-  // - Cmd/Ctrl+W → close the active browser tab
-  // - Cmd/Ctrl+D → split right (vertical split)
-  // - Cmd/Ctrl+Shift+D → split down (horizontal split)
-  // - Cmd/Ctrl+R → reload the active browser tab (desktop only)
-  // - Ctrl+(Shift)+Tab → cycle through tabs in the active group
+  // Keyboard shortcuts (capture phase, scoped to this section's focus):
+  // - Cmd/Ctrl+T              → open a new browser tab
+  // - Cmd/Ctrl+W              → close the active browser tab
+  // - Cmd/Ctrl+D              → split right (vertical split)
+  // - Cmd/Ctrl+Shift+D        → split down (horizontal split)
+  // - Cmd/Ctrl+R              → reload the active browser tab (desktop only)
+  // - Ctrl+(Shift)+Tab        → cycle tabs in the active group
+  // - Cmd/Ctrl+[ / Cmd/Ctrl+] → cycle between split browser groups (panels)
+  // - Cmd/Ctrl+Shift+[/]      → cycle tabs in the active group
   useEffect(() => {
     if (!visible) return;
+
+    // `data-band-address-input` is set on the address-bar input in
+    // BrowserPanel.tsx — using the data attribute (rather than
+    // `input[type='text']`) avoids matching the find-bar input.
+    const refocusAddressBar = () => {
+      const panel = apiRef.current?.activePanel;
+      if (!panel) return;
+      panel.view.content.element
+        .querySelector<HTMLInputElement>("[data-band-address-input]")
+        ?.focus();
+    };
+
+    const cycleTabs = (direction: 1 | -1) => {
+      cycleTabsInActiveGroup(apiRef.current, direction, () => {
+        requestAnimationFrame(refocusAddressBar);
+      });
+    };
+
+    const cycleGroups = (direction: 1 | -1) => {
+      cycleGridGroups(apiRef.current, direction, () => {
+        requestAnimationFrame(refocusAddressBar);
+      });
+    };
+
     const handler = (e: KeyboardEvent) => {
       // Only handle shortcut if this container (or a descendant) has focus
       if (!containerRef.current?.contains(document.activeElement)) return;
@@ -515,31 +606,28 @@ export function DockviewBrowserContainer({
       if (e.ctrlKey && !e.metaKey && key === "tab") {
         e.preventDefault();
         e.stopPropagation();
-        const api = apiRef.current;
-        const group = api?.activeGroup;
-        if (!group) return;
-        if (e.shiftKey) {
-          group.model.moveToPrevious();
-        } else {
-          group.model.moveToNext();
-        }
-        // Focus the address bar in the newly active panel.
-        requestAnimationFrame(() => {
-          const panel = api.activePanel;
-          if (!panel) return;
-          // `data-band-address-input` is set on the address-bar input in
-          // BrowserPanel.tsx — using the data attribute (rather than
-          // `input[type='text']`) avoids accidentally matching the
-          // find-bar input if it's mounted in the same panel.
-          panel.view.content.element
-            .querySelector<HTMLInputElement>("[data-band-address-input]")
-            ?.focus();
-        });
+        cycleTabs(e.shiftKey ? -1 : 1);
         return;
       }
 
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
+
+      // Cmd/Ctrl+Shift+[ / Cmd/Ctrl+Shift+] → cycle tabs in active group
+      if (e.shiftKey && (key === "[" || key === "]")) {
+        e.preventDefault();
+        e.stopPropagation();
+        cycleTabs(key === "]" ? 1 : -1);
+        return;
+      }
+
+      // Cmd/Ctrl+[ / Cmd/Ctrl+] → cycle between split groups (panels)
+      if (!e.shiftKey && (key === "[" || key === "]")) {
+        e.preventDefault();
+        e.stopPropagation();
+        cycleGroups(key === "]" ? 1 : -1);
+        return;
+      }
 
       if (key === "t" && !e.shiftKey) {
         e.preventDefault();
@@ -589,6 +677,22 @@ export function DockviewBrowserContainer({
     return () => window.removeEventListener("keydown", handler, true);
   }, [visible, closeTab, handleSplit, handleAddTab]);
 
+  // Auto-focus the active browser pane's address bar whenever the section
+  // becomes visible (e.g. user clicked the outer "Browser" panel tab) so
+  // the section-scoped keydown handler above starts seeing events without
+  // the user having to click into a tab first.
+  useEffect(() => {
+    if (!visible) return;
+    const id = requestAnimationFrame(() => {
+      const panel = apiRef.current?.activePanel;
+      if (!panel) return;
+      panel.view.content.element
+        .querySelector<HTMLInputElement>("[data-band-address-input]")
+        ?.focus();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [visible]);
+
   // Cmd+T / Ctrl+T when the WebContentsView itself has focus.
   // The keydown listener above only fires when DOM focus is inside this
   // container; once the user clicks into the rendered web page, focus
@@ -624,6 +728,170 @@ export function DockviewBrowserContainer({
     })();
     return () => unlisten?.();
   }, [handleAddTab]);
+
+  // Issue #488: page-initiated new-window requests (window.open,
+  // target="_blank", middle-click, Cmd+click) get routed by the main
+  // process through `setWindowOpenHandler` — the OS-level window is
+  // always denied, and a `browser-open-window` event is forwarded
+  // here with the requested URL. We materialize each one as a new
+  // Band browser tab in the same dockview group as the source pane
+  // so the navigation stays inside the workspace.
+  //
+  // Scoping: same as `browser-new-tab-shortcut` — multiple workspaces
+  // can have a DockviewBrowserContainer mounted simultaneously, so
+  // ignore events whose source browserId isn't one of ours.
+  //
+  // NOTE: `browser-open-window` must be in the preload's
+  // `ALLOWED_EVENT_NAMES` allowlist (`apps/desktop/src/preload/index.cts`)
+  // — otherwise `desktopListen` rejects synchronously and the listener
+  // never attaches.
+  useEffect(() => {
+    if (!isDesktop) return;
+    let unlisten: (() => void) | undefined;
+    // Guard against the unmount-before-resolution race: if the
+    // component unmounts while we're awaiting `desktopListen`, the
+    // cleanup closure runs synchronously with `unlisten` still
+    // `undefined`. Without the `cancelled` flag the eventual listener
+    // registration would survive the unmount and keep firing
+    // `handleAddTab` against an already-gone component. Mirrors the
+    // pattern used by the `browser-split-shortcut` / `*-close-shortcut`
+    // / `*-cycle-shortcut` effects below.
+    let cancelled = false;
+    void (async () => {
+      const fn = await desktopListen<{
+        browser_id: string;
+        workspace_id: string;
+        url: string;
+        disposition: "default" | "foreground-tab" | "background-tab" | "new-window" | "other";
+      }>("browser-open-window", (event) => {
+        const api = apiRef.current;
+        if (!api) return;
+        const sourceId = event.payload.browser_id;
+        const sourcePanel = sourceId ? api.getPanel(sourceId) : undefined;
+        // Ignore events from panes in other DockviewBrowserContainers —
+        // multiple workspaces' containers all receive every event.
+        if (!sourcePanel) return;
+        const groupId = sourcePanel.group?.id;
+        const url = event.payload.url;
+        if (!url) return;
+        // Drop the new tab into the *source* pane's group so the
+        // tab strip stays compact — same group placement Chrome
+        // and Edge use for window.open requests today. Focus
+        // follows the new tab (matches `markBrowserFresh` +
+        // `addPanel` defaults).
+        void handleAddTab(groupId, { initialUrl: url })
+          .then(() => {
+            requestAnimationFrame(() => {
+              const panel = apiRef.current?.activePanel;
+              panel?.view.content.element
+                .querySelector<HTMLInputElement>("[data-band-address-input]")
+                ?.focus();
+            });
+          })
+          .catch((err) => {
+            // Belt-and-suspenders: `handleAddTab` already try/catches
+            // the tRPC mutation, but an unexpected throw (e.g. in the
+            // RAF callback or future refactor of handleAddTab) would
+            // otherwise vanish silently.
+            console.error("[DockviewBrowserContainer] browser-open-window add-tab failed:", err);
+          });
+      });
+      if (cancelled) fn();
+      else unlisten = fn;
+    })();
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [handleAddTab]);
+
+  // Cmd+D / Cmd+Shift+D, Cmd+W, Cmd+[/], Cmd+Shift+[/], Ctrl+(Shift)+Tab
+  // when the WebContentsView itself has focus.
+  // Same story as `browser-new-tab-shortcut` above: focus inside the
+  // child WebContentsView means the React keydown listener never fires.
+  // The main process intercepts these in `view-manager.ts::before-input-event`
+  // and forwards them as IPC events; we react to them here by delegating
+  // to the same handlers the in-React keydown path uses (handleSplit /
+  // closeTab / cycleTabsInActiveGroup / cycleGridGroups). Each listener
+  // ignores events whose source pane isn't in this container so multiple
+  // workspaces' containers don't all act on the same press.
+  useEffect(() => {
+    if (!isDesktop) return;
+    const unlisteners: Array<() => void> = [];
+    // Guards the async IIFE below: if the component unmounts before the
+    // `desktopListen` awaits resolve, we must NOT push their unlisten
+    // functions onto a list whose cleanup has already run. Without this,
+    // those listeners survive the unmount and leak across remounts.
+    let cancelled = false;
+
+    const refocusAddressBar = () => {
+      const panel = apiRef.current?.activePanel;
+      panel?.view.content.element
+        .querySelector<HTMLInputElement>("[data-band-address-input]")
+        ?.focus();
+    };
+
+    void (async () => {
+      const fns = await Promise.all([
+        desktopListen<{
+          browser_id: string;
+          workspace_id: string;
+          direction: "right" | "below";
+        }>("browser-split-shortcut", (event) => {
+          const api = apiRef.current;
+          if (!api) return;
+          const sourcePanel = api.getPanel(event.payload.browser_id);
+          if (!sourcePanel?.group) return;
+          void handleSplit(sourcePanel.group.id, event.payload.direction);
+        }),
+        desktopListen<{
+          browser_id: string;
+          workspace_id: string;
+        }>("browser-close-shortcut", (event) => {
+          const api = apiRef.current;
+          if (!api) return;
+          const sourceId = event.payload.browser_id;
+          if (!api.getPanel(sourceId)) return;
+          closeTab(sourceId);
+        }),
+        desktopListen<{
+          browser_id: string;
+          workspace_id: string;
+          target: "tabs" | "groups";
+          direction: 1 | -1;
+        }>("browser-cycle-shortcut", (event) => {
+          const api = apiRef.current;
+          if (!api) return;
+          const sourcePanel = api.getPanel(event.payload.browser_id);
+          if (!sourcePanel) return;
+          // Activate the source pane so the cycle helpers operate from
+          // the user's current spot — dockview's activeGroup may lag if
+          // the user only typed inside the embedded webContents without
+          // clicking the tab header first.
+          sourcePanel.api.setActive();
+          const refocus = () => requestAnimationFrame(refocusAddressBar);
+          if (event.payload.target === "tabs") {
+            cycleTabsInActiveGroup(apiRef.current, event.payload.direction, refocus);
+          } else {
+            cycleGridGroups(apiRef.current, event.payload.direction, refocus);
+          }
+        }),
+      ]);
+      // If the effect already cleaned up while we were awaiting, dispose
+      // the just-registered listeners immediately instead of letting them
+      // outlive the component.
+      if (cancelled) {
+        for (const fn of fns) fn();
+      } else {
+        unlisteners.push(...fns);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      for (const unlisten of unlisteners) unlisten();
+    };
+  }, [handleSplit, closeTab]);
 
   // Listen for the workspace-level ⇧⌘B "focus Browser" event. Scoped
   // to this container's subtree via containerRef. The native webview

@@ -1,6 +1,6 @@
-import { useSettingsQuery } from "@band-app/dashboard-core";
 import { useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
+import { useSettingsQuery } from "@/dashboard";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
 import { clearPerWorkspaceState } from "./per-workspace-state-store";
 

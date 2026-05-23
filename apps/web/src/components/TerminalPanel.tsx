@@ -1,14 +1,9 @@
-import {
-  SearchBar,
-  type SearchBarHandle,
-  type SearchOptions,
-  useSettingsQuery,
-} from "@band-app/dashboard-core";
 import type { FitAddon } from "@xterm/addon-fit";
 import type { ISearchOptions, SearchAddon } from "@xterm/addon-search";
 import type { WebglAddon } from "@xterm/addon-webgl";
 import type { ITheme, Terminal } from "@xterm/xterm";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { SearchBar, type SearchBarHandle, type SearchOptions, useSettingsQuery } from "@/dashboard";
 import { useVirtualKeyboardToolbar } from "../hooks/useVirtualKeyboardToolbar";
 import { openExternalUrl } from "../lib/open-external-url";
 import {

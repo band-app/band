@@ -24,7 +24,9 @@ import { createLogger } from "../main/services/log.js";
 import { Events } from "../shared/ipc-channels.js";
 import {
   type BrowserBoundsArgs,
+  type BrowserCloseShortcutPayload,
   type BrowserCreateArgs,
+  type BrowserCycleShortcutPayload,
   type BrowserEnsureArgs,
   type BrowserEvalArgs,
   type BrowserFindInPageArgs,
@@ -33,6 +35,8 @@ import {
   type BrowserKeyArg,
   type BrowserNavigateArgs,
   type BrowserNewTabShortcutPayload,
+  type BrowserOpenWindowPayload,
+  type BrowserSplitShortcutPayload,
   type BrowserStopFindInPageArgs,
   type BrowserTitleChangedPayload,
   type BrowserUrlChangedPayload,
@@ -55,6 +59,7 @@ import {
   buildLoadErrorPayload,
   isMainFrameFailure,
 } from "./load-error.js";
+import { decideWindowOpenAction } from "./window-open.js";
 
 const log = createLogger("view-manager");
 
@@ -1171,6 +1176,58 @@ export class BrowserViewManager {
     // is sufficient — confirmed empirically by tracing both events
     // through the pino debug logger during the cert-interstitial
     // implementation (issue #444).
+
+    // ---- New-window requests → new Band browser tab (issue #488) ----
+    // Chromium funnels every page-initiated new-window request
+    // through `setWindowOpenHandler`:
+    //   - `window.open(url)` from page JS
+    //   - `<a target="_blank">` clicks
+    //   - middle-click / Cmd+click on a link
+    //   - `<form target="_blank">` submissions
+    //
+    // Without a handler, Chromium would either spawn a detached
+    // `BrowserWindow` (jarring) or drop the request silently
+    // (also jarring). We unconditionally `deny` the OS window so
+    // no detached browser window can ever appear, then emit a
+    // `browser-open-window` event that the renderer turns into a
+    // new Band browser tab in the same workspace.
+    //
+    // The handler must return SYNCHRONOUSLY — Chromium can't wait
+    // on a promise here. `this.emit` is a synchronous
+    // `webContents.send` that just queues the IPC message, so
+    // emitting from inside the handler is safe.
+    //
+    // We delegate the "should this become a Band tab?" decision
+    // to `decideWindowOpenAction` so the routing rules can be
+    // unit-tested in isolation (no Electron import). The handler
+    // here only owns:
+    //   1. ALWAYS deny — no detached window, ever.
+    //   2. Emit the event only when the helper green-lights the
+    //      URL (`about:blank`, `javascript:`, custom schemes etc.
+    //      are denied without creating a Band tab).
+    view.webContents.setWindowOpenHandler((details) => {
+      const decision = decideWindowOpenAction(details.url);
+      if (decision.kind === "open-in-band") {
+        const payload: BrowserOpenWindowPayload = {
+          browser_id: key,
+          workspace_id: key,
+          url: decision.url,
+          disposition: details.disposition,
+        };
+        this.emit(Events.browserOpenWindow, payload);
+      } else {
+        log.debug(
+          { url: details.url, reason: decision.reason, disposition: details.disposition },
+          "window-open: denied without creating a Band tab",
+        );
+      }
+      // Always deny the native OS window — even for the "ignore"
+      // branch above. The renderer either gets a new Band tab
+      // (open-in-band) or nothing happens (ignore) — never a
+      // detached OS window.
+      return { action: "deny" };
+    });
+
     view.webContents.on("page-title-updated", (_e, title) => {
       const payload: BrowserTitleChangedPayload = {
         browser_id: key,
@@ -1338,40 +1395,93 @@ export class BrowserViewManager {
     // changes).
     view.webContents.on("before-input-event", (event, input) => {
       if (input.type !== "keyDown") return;
-      if (input.shift || input.alt) return;
-      const modifier =
-        process.platform === "darwin" ? input.meta && !input.control : input.control && !input.meta;
-      if (!modifier) return;
-      const pressedKey = input.key.toLowerCase();
+      if (input.alt) return; // we don't bind any Alt-modified shortcut
+
       // Transfer keyboard focus back to the main window's webContents so
-      // the React side (find bar input, new-tab address bar, etc.)
-      // receives subsequent keystrokes instead of the WebContentsView
-      // the user was just typing into. Shared by every shortcut below.
-      const handleShortcut = (eventName: string, payload: BrowserFindShortcutPayload) => {
+      // the React side (find bar input, new-tab address bar, address-bar
+      // refocus after cycling) receives subsequent keystrokes instead of
+      // the WebContentsView the user was just typing into. Shared by
+      // every shortcut below.
+      const handleShortcut = (eventName: string, payload: unknown) => {
         event.preventDefault();
         if (!this.opts.mainWindow.webContents.isDestroyed()) {
           this.opts.mainWindow.webContents.focus();
         }
         this.emit(eventName, payload);
       };
-      // Cmd+F / Ctrl+F → open the find bar for this tab.
-      if (pressedKey === "f") {
+
+      const pressedKey = input.key.toLowerCase();
+
+      // Ctrl+(Shift)+Tab → cycle tabs in the active group. Uses raw
+      // `input.control` rather than the platform Cmd/Ctrl helper because
+      // the renderer-side handler also keys off `ctrlKey` regardless of
+      // platform — Cmd+Tab on macOS is reserved by the OS, so the only
+      // way to cycle tabs from a webContents is via Ctrl+Tab.
+      if (input.control && !input.meta && pressedKey === "tab") {
+        handleShortcut(Events.browserCycleShortcut, {
+          browser_id: key,
+          workspace_id: key,
+          target: "tabs",
+          direction: input.shift ? -1 : 1,
+        } satisfies BrowserCycleShortcutPayload);
+        return;
+      }
+
+      // Cmd/Ctrl (platform-dependent) — all the remaining shortcuts.
+      const mod =
+        process.platform === "darwin" ? input.meta && !input.control : input.control && !input.meta;
+      if (!mod) return;
+
+      // Cmd+F / Ctrl+F → open the find bar for this tab. (Shift not used.)
+      if (!input.shift && pressedKey === "f") {
         handleShortcut(Events.browserFindShortcut, {
           browser_id: key,
           workspace_id: key,
         } satisfies BrowserFindShortcutPayload);
         return;
       }
+
       // Cmd+T / Ctrl+T → open a new sibling browser tab in the same
       // dockview group. The renderer's `DockviewBrowserContainer`
       // already handles Cmd+T when DOM focus is inside it; we forward
       // the same intent for the case where Chromium consumed the
       // keydown inside the WebContentsView.
-      if (pressedKey === "t") {
+      if (!input.shift && pressedKey === "t") {
         handleShortcut(Events.browserNewTabShortcut, {
           browser_id: key,
           workspace_id: key,
         } satisfies BrowserNewTabShortcutPayload);
+        return;
+      }
+
+      // Cmd+W → close the active tab. (Shift not used.)
+      if (!input.shift && pressedKey === "w") {
+        handleShortcut(Events.browserCloseShortcut, {
+          browser_id: key,
+          workspace_id: key,
+        } satisfies BrowserCloseShortcutPayload);
+        return;
+      }
+
+      // Cmd+D → split right; Cmd+Shift+D → split down.
+      if (pressedKey === "d") {
+        handleShortcut(Events.browserSplitShortcut, {
+          browser_id: key,
+          workspace_id: key,
+          direction: input.shift ? "below" : "right",
+        } satisfies BrowserSplitShortcutPayload);
+        return;
+      }
+
+      // Cmd+[ / Cmd+] → cycle between split groups.
+      // Cmd+Shift+[ / Cmd+Shift+] → cycle tabs in the active group.
+      if (pressedKey === "[" || pressedKey === "]") {
+        handleShortcut(Events.browserCycleShortcut, {
+          browser_id: key,
+          workspace_id: key,
+          target: input.shift ? "tabs" : "groups",
+          direction: pressedKey === "]" ? 1 : -1,
+        } satisfies BrowserCycleShortcutPayload);
         return;
       }
     });

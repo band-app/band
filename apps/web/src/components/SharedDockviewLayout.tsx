@@ -1,16 +1,3 @@
-import {
-  buildCommands,
-  CommandPaletteDialog,
-  DashboardShell,
-  DiffView,
-  parseFileLocation,
-  QuickOpenDialog,
-  recordWorkspaceAccess,
-  SearchFilesDialog,
-  useDiffTarget,
-  useSettingsQuery,
-  WorkspacePickerDialog,
-} from "@band-app/dashboard-core";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@band-app/ui";
 import { useRouterState } from "@tanstack/react-router";
 import {
@@ -33,6 +20,19 @@ import {
   Terminal as TerminalIcon,
 } from "lucide-react";
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  buildCommands,
+  CommandPaletteDialog,
+  DashboardShell,
+  DiffView,
+  parseFileLocation,
+  QuickOpenDialog,
+  recordWorkspaceAccess,
+  SearchFilesDialog,
+  useDiffTarget,
+  useSettingsQuery,
+  WorkspacePickerDialog,
+} from "@/dashboard";
 import { useRecentFiles } from "../hooks/useRecentFiles";
 import { invoke as desktopInvoke } from "../lib/desktop-ipc";
 import {
@@ -977,22 +977,6 @@ export function SharedDockviewLayout() {
         queueMicrotask(() => {
           window.dispatchEvent(new CustomEvent("band:focus-projects"));
         });
-        return;
-      }
-
-      // Ctrl+Tab → next file tab
-      if (e.key === "Tab" && e.ctrlKey && !e.shiftKey) {
-        e.preventDefault();
-        e.stopPropagation();
-        window.dispatchEvent(new CustomEvent("band:next-file-tab"));
-        return;
-      }
-
-      // Ctrl+Shift+Tab → previous file tab
-      if (e.key === "Tab" && e.ctrlKey && e.shiftKey) {
-        e.preventDefault();
-        e.stopPropagation();
-        window.dispatchEvent(new CustomEvent("band:prev-file-tab"));
         return;
       }
 

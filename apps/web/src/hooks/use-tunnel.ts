@@ -1,5 +1,5 @@
-import { isServiceHealthy, useAdapter } from "@band-app/dashboard-core";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { isServiceHealthy, useAdapter } from "@/dashboard";
 import { trpc } from "../lib/trpc-client";
 
 const HEALTH_POLL_INTERVAL = 30_000;
