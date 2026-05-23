@@ -779,14 +779,22 @@ export function DockviewBrowserContainer({
         // and Edge use for window.open requests today. Focus
         // follows the new tab (matches `markBrowserFresh` +
         // `addPanel` defaults).
-        void handleAddTab(groupId, { initialUrl: url }).then(() => {
-          requestAnimationFrame(() => {
-            const panel = apiRef.current?.activePanel;
-            panel?.view.content.element
-              .querySelector<HTMLInputElement>("[data-band-address-input]")
-              ?.focus();
+        void handleAddTab(groupId, { initialUrl: url })
+          .then(() => {
+            requestAnimationFrame(() => {
+              const panel = apiRef.current?.activePanel;
+              panel?.view.content.element
+                .querySelector<HTMLInputElement>("[data-band-address-input]")
+                ?.focus();
+            });
+          })
+          .catch((err) => {
+            // Belt-and-suspenders: `handleAddTab` already try/catches
+            // the tRPC mutation, but an unexpected throw (e.g. in the
+            // RAF callback or future refactor of handleAddTab) would
+            // otherwise vanish silently.
+            console.error("[DockviewBrowserContainer] browser-open-window add-tab failed:", err);
           });
-        });
       });
       if (cancelled) fn();
       else unlisten = fn;

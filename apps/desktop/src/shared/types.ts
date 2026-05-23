@@ -247,6 +247,14 @@ export interface BrowserCycleShortcutPayload {
  * Band tab focused for the user. The union mirrors the one Electron's
  * `webContents.setWindowOpenHandler` callback emits, so any future
  * `switch` on it remains exhaustive.
+ *
+ * Note on `workspace_id`: `BrowserViewManager` is workspace-agnostic
+ * (one singleton per main window) and has no stored workspace id, so
+ * — consistent with every other event in `view-manager.ts` — both
+ * `browser_id` and `workspace_id` carry the same opaque LRU key. The
+ * renderer scopes on `browser_id` via `api.getPanel(sourceId)`; the
+ * duplicate is preserved for symmetry with the two-mode keying
+ * convention documented at the top of `view-manager.ts`.
  */
 export interface BrowserOpenWindowPayload {
   browser_id: string;
