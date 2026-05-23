@@ -1,22 +1,24 @@
+import { cn } from "@band-app/ui";
+
 interface IconProps {
   className?: string;
 }
 
 export function ClaudeIcon({ className }: IconProps) {
-  // Rendered in Claude's signature warm coral (Anthropic brand color)
-  // rather than `currentColor`, so the mark is recognizable regardless
-  // of the surrounding text color. Because we ignore `currentColor`,
-  // `text-muted-foreground` on a parent button won't dim the icon —
-  // disabled/muted appearance must come from CSS `opacity` on a parent
-  // (which cascades through the stacking context and dims the coral
-  // fill along with everything else). The model-picker trigger in
-  // ChatView already does this via `disabled && "opacity-50"`.
+  // Default color is Claude's signature warm coral (Anthropic brand) applied
+  // via Tailwind so it goes through CSS `color` / `currentColor`. This means:
+  //   - parent containers with `text-muted-foreground` or other text-color
+  //     utilities correctly override it (e.g. ConversationEmptyState)
+  //   - `forced-colors: active` (Windows High Contrast) remaps it through
+  //     the system palette, unlike hardcoded `fill="#hex"`
+  //   - parent `opacity-*` still cascades and dims the icon
+  // Callers can pass a different text color via `className` to override.
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
       viewBox="0 0 16 16"
-      fill="#D97757"
-      className={className}
+      fill="currentColor"
+      className={cn("text-[#D97757]", className)}
       role="img"
       aria-label="Claude"
     >
