@@ -858,13 +858,23 @@ async function runTask(chatId: string, task: InternalTask) {
       try {
         // Queued payloads already carry display-file metadata (saved to
         // disk by the submit handler before being queued). Re-resolve
-        // the agent prompt so the model sees the file paths.
+        // the agent prompt so the model sees the file paths, AND
+        // forward the resolved display files into submitTask so its
+        // pre-emit `user-message` event carries the `files` field —
+        // otherwise the file-card UI for a drained-queue turn would
+        // silently disappear.
         let agentPrompt: string | undefined;
+        let displayFiles: DisplayFile[] | undefined;
         if (queued.files && queued.files.length > 0) {
           const saved = await saveUploadedFilesDetailed(queued.files);
           if (saved.length > 0) {
             const fileList = saved.map((s) => `- ${s.path}`).join("\n");
             agentPrompt = `I'm sharing these files with you:\n${fileList}\n\n${queued.text}`;
+            displayFiles = saved.map((s) => ({
+              mediaType: s.mediaType,
+              url: `/api/uploads/${s.storedName}`,
+              filename: s.originalName,
+            }));
           }
         }
 
@@ -874,6 +884,7 @@ async function runTask(chatId: string, task: InternalTask) {
           prompt: queued.text,
           agentPrompt,
           sessionId: task.sessionId,
+          displayFiles,
         });
         autoStarted = true;
       } catch (err) {

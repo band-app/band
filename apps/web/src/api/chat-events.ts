@@ -287,9 +287,11 @@ async function replayPast(opts: {
             let syntheticId = -1000 - messages.length;
             for (const msg of messages) {
               const events = jsonlMessageToEvents(msg, syntheticId);
-              for (const evt of events) writer.write(evt);
+              for (const evt of events) {
+                writer.write(evt);
+                jsonlEmittedAny = true;
+              }
               syntheticId += Math.max(events.length, 1);
-              jsonlEmittedAny = true;
             }
           }
         }
@@ -311,15 +313,22 @@ async function replayPast(opts: {
   }
 
   // Hot reconnect path — gap-fill from buffer past the cursor. JSONL is
-  // only re-fetched when the buffer DOESN'T cover the cursor (eviction
-  // after MAX_BUFFER_SIZE entries). An empty buffer with a cursor means
-  // "client is fully caught up, no new live events yet" — NOT "need to
-  // re-replay JSONL". The previous logic treated buffer-empty as
-  // needs-JSONL and re-pushed the entire conversation on every workspace
-  // switch / visibility toggle.
+  // only re-fetched when the buffer DOESN'T cover the cursor:
+  //
+  //   • `buf === undefined` — the in-memory buffer is GONE (server
+  //     restart, eviction). The client carries a cursor from before the
+  //     restart; without JSONL it would see a blank chat until the next
+  //     agent turn produces fresh events. Treat as a gap, backfill.
+  //   • `buf.events.length === 0` — buffer exists but has no events
+  //     since the cursor. Client is fully caught up; no JSONL needed.
+  //     (Avoids re-pushing the conversation on every workspace switch
+  //     / visibility toggle.)
+  //   • `buf.events.length > 0 && cursor + 1 < buf.events[0].eventId` —
+  //     buffer rotated past the cursor (MAX_BUFFER_SIZE eviction).
+  //     Backfill the missing range from JSONL.
   const bufferFirstId =
     buf && buf.events.length > 0 ? (buf.events[0].eventId ?? 0) : Number.POSITIVE_INFINITY;
-  const needJsonl = buf && buf.events.length > 0 && afterEventId + 1 < bufferFirstId;
+  const needJsonl = !buf || (buf.events.length > 0 && afterEventId + 1 < bufferFirstId);
 
   if (needJsonl && chatWorkspaceId) {
     try {

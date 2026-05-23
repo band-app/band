@@ -61,6 +61,12 @@ export function openSseStream(res: ServerResponse): SseWriter {
   const onResClose = () => {
     closed = true;
     clearInterval(heartbeat);
+    // Remove ourselves from `res` so that under high connection churn
+    // we don't leave a dangling listener that triggers Node's
+    // MaxListenersExceededWarning. `close()` does the same cleanup if
+    // the caller closes first; this branch covers the client-drops-
+    // first case.
+    res.off("close", onResClose);
   };
   res.on("close", onResClose);
 
