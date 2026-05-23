@@ -239,14 +239,22 @@ export function chatEventReducer(
   const lastEventId = Math.max(state.lastEventId ?? 0, event.eventId);
 
   switch (event.type) {
-    case "subscription-opened":
+    case "subscription-opened": {
+      // Don't downgrade an optimistic `taskRunning: true` set by `send()`'s
+      // synthetic task-started event. A reconnect mid-flight (visibility,
+      // workspace switch, network blip) can arrive with `taskRunning: false`
+      // because the server task hasn't started yet — that would clear the
+      // optimistic thinking indicator and cause a visible blink before the
+      // real `task-started` re-arrives. Only upgrade false→true.
+      const taskRunning = state.taskRunning || event.taskRunning;
       return {
         ...state,
         lastEventId,
         sessionId: event.sessionId ?? state.sessionId,
-        taskRunning: event.taskRunning,
-        status: event.taskRunning ? "streaming" : state.status,
+        taskRunning,
+        status: taskRunning ? "streaming" : state.status,
       };
+    }
 
     case "session-resolved":
       return { ...state, lastEventId, sessionId: event.sessionId };

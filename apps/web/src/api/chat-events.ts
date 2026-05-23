@@ -144,39 +144,41 @@ export async function handleChatEvents(
     }
   }
 
-  // Replay phase. `afterEventId === undefined` triggers a cold subscribe
-  // (full JSONL replay). Any provided value — including 0 — is treated as
-  // a hot reconnect: the client tells us "I already have history up to N,
-  // just give me events past N". The previous `lastEventId > 0` check
-  // mapped 0 → undefined and forced JSONL re-replay on every reconnect
-  // for sessions that never produced a live buffer event.
-  await replayPast({
-    writer,
-    chatId,
-    sessionId: resolvedSessionId,
-    afterEventId: lastEventId,
-    chatWorkspaceId: chat?.workspaceId ?? explicitWorkspaceId,
-    agentTypeHint: chat?.agent,
-  }).catch((err) => {
-    log.warn({ chatId, err }, "replay phase failed; continuing to live tail");
-  });
-
-  // If no task is running and the queue is empty, we still keep the stream
-  // open — the client expects the subscription to survive idle periods so
-  // it can pick up the next user submission's events live. Close on
-  // request abort.
-
-  // Live tail.
+  // Register the live-tail subscribers BEFORE replayPast so that
+  // task-runner broadcasts arriving during replay (the most important
+  // case: a fast agent crash that fires `task-error` while we're still
+  // reading JSONL) land in our queue instead of being dropped because no
+  // listener was registered. We dedup against `lastEmittedId` (running
+  // max), updated inside the writer wrapper, so events that replayPast
+  // also emitted aren't double-sent.
   const queue: ChatEvent[] = [];
   let notify: (() => void) | null = null;
+  let lastEmittedId = lastEventId ?? Number.NEGATIVE_INFINITY;
+
+  const trackedWriter: SseWriter = {
+    get closed() {
+      return writer.closed;
+    },
+    write(evt) {
+      writer.write(evt);
+      if (evt.eventId > lastEmittedId) lastEmittedId = evt.eventId;
+    },
+    comment(text) {
+      writer.comment(text);
+    },
+    close() {
+      writer.close();
+    },
+  };
 
   const unsubscribeTask = subscribeTask(chatId, (chunk: StreamChunk) => {
-    if (lastEventId !== undefined && chunk.eventId != null && chunk.eventId <= lastEventId) {
-      return; // already replayed
+    const eid = chunk.eventId;
+    if (eid != null && eid <= lastEmittedId) {
+      return; // already replayed/emitted
     }
     const payload = chunkToChatEvent(chunk, resolvedSessionId);
     if (!payload) return;
-    queue.push({ ...payload, eventId: chunk.eventId ?? nextSyntheticId-- } as ChatEvent);
+    queue.push({ ...payload, eventId: eid ?? nextSyntheticId-- } as ChatEvent);
     notify?.();
   });
 
@@ -195,11 +197,36 @@ export async function handleChatEvents(
   };
   res.on("close", onClose);
 
+  // Replay phase. `afterEventId === undefined` triggers a cold subscribe
+  // (full JSONL replay). Any provided value — including 0 — is treated as
+  // a hot reconnect: the client tells us "I already have history up to N,
+  // just give me events past N". The previous `lastEventId > 0` check
+  // mapped 0 → undefined and forced JSONL re-replay on every reconnect
+  // for sessions that never produced a live buffer event.
+  await replayPast({
+    writer: trackedWriter,
+    chatId,
+    sessionId: resolvedSessionId,
+    afterEventId: lastEventId,
+    chatWorkspaceId: chat?.workspaceId ?? explicitWorkspaceId,
+    agentTypeHint: chat?.agent,
+  }).catch((err) => {
+    log.warn({ chatId, err }, "replay phase failed; continuing to live tail");
+  });
+
+  // If no task is running and the queue is empty, we still keep the stream
+  // open — the client expects the subscription to survive idle periods so
+  // it can pick up the next user submission's events live. Close on
+  // request abort.
+
   try {
     while (!res.destroyed && !writer.closed) {
       while (queue.length > 0) {
         const evt = queue.shift()!;
-        emit(writer, evt);
+        // Final dedup safety net: replayPast may have emitted this event
+        // after the subscribe handler's check but before we got here.
+        if (evt.eventId <= lastEmittedId && evt.eventId >= 0) continue;
+        emit(trackedWriter, evt);
 
         // Close the stream once the active task settles and there are no
         // queued messages to drain. The client reopens on its next user
@@ -338,8 +365,23 @@ async function replayPast(opts: {
         if (agent.supportedFeatures.sessionListing && agent.getSessionMessages) {
           const result = await agent.getSessionMessages(sessionId, workspace.worktree.path, {});
           const messages = result.messages;
+          // Synthetic ids must sit strictly in the gap `(afterEventId,
+          // bufferFirstId)` so they (a) survive the `<= afterEventId` filter
+          // below and (b) sort before live buffer ids. The naive
+          // `bufferFirstId - messages.length` start fails for sessions whose
+          // JSONL length exceeds the gap: every id ends up ≤ afterEventId
+          // and the whole backfill gets silently dropped. Picking
+          // `afterEventId + 1` as the lower bound guarantees no event is
+          // skipped by the filter even when `messages.length` is large.
+          // (Hot-reconnect doesn't usually backfill a huge transcript —
+          // JSONL is only fetched when the in-memory buffer has rotated
+          // past the cursor — so we don't worry about the per-event step
+          // crossing into bufferFirstId; the client-side dedup catches the
+          // rare overlap.)
           let syntheticId =
-            bufferFirstId === Number.POSITIVE_INFINITY ? -1000 : bufferFirstId - messages.length;
+            bufferFirstId === Number.POSITIVE_INFINITY
+              ? -1000
+              : Math.max(afterEventId + 1, bufferFirstId - messages.length);
           for (const msg of messages) {
             const events = jsonlMessageToEvents(msg, syntheticId);
             for (const evt of events) {
@@ -356,6 +398,20 @@ async function replayPast(opts: {
   }
 
   if (buf) {
+    // Intentional: we replay EVERY buffer event past the cursor regardless
+    // of which task produced it. Auto-queued sends reuse `sessionId`
+    // (see `task-runner.ts::submitTask` after `shiftQueuedMessage`), so the
+    // buffer can hold events from multiple sequential tasks under one
+    // session. A client reconnecting mid-session with a stale cursor needs
+    // those prior-task tail events to reconstruct its state — they are NOT
+    // duplicates from its perspective, just events it hasn't seen yet.
+    //
+    // The old `task-stream.ts` Phase-2b filtered to `eventId >= task.firstEventId`,
+    // which was correct under a "one task per stream" model but wrong here:
+    // a client with cursor=N reconnecting after task A finished and task B
+    // started would have lost A's last events. Client-side dedup
+    // (`event.eventId <= state.lastEventId → skip`) is the right place for
+    // ordering safety; the server simply ships everything past the cursor.
     const events = getSessionEventsAfter(sessionId, afterEventId);
     for (const row of events) {
       const chunk = row.chunk as StreamChunk;
