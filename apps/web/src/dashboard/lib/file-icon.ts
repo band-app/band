@@ -7,11 +7,11 @@ import { resolveFolderIconName, resolveIconName, resolveIconPath } from "./file-
 // roundtrip, no flicker. SVG sources originate from the bundled npm package
 // at build time, not from user input.
 //
-// Glob path is relative to this file (src/lib/), so it resolves to
-// packages/dashboard-core/node_modules/material-icon-theme/icons/*.svg. pnpm
-// places a package-local symlink there; if hoisting config ever changes the
-// glob matches zero files — caught by the non-empty assertion below rather
-// than silently shipping blank icons.
+// Glob path is relative to this file (src/dashboard/lib/), so it resolves to
+// apps/web/node_modules/material-icon-theme/icons/*.svg. pnpm places a
+// package-local symlink there; if hoisting config ever changes the glob
+// matches zero files — caught by the non-empty assertion below rather than
+// silently shipping blank icons.
 //
 // SSR-gated via `typeof window === "undefined"` rather than Vite's
 // `import.meta.env.SSR`, because this module is bundled by two different
@@ -37,7 +37,7 @@ const IS_SSR = typeof window === "undefined";
 
 const iconSources: Record<string, string> = IS_SSR
   ? {}
-  : import.meta.glob<string>("../../node_modules/material-icon-theme/icons/*.svg", {
+  : import.meta.glob<string>("../../../node_modules/material-icon-theme/icons/*.svg", {
       query: "?raw",
       import: "default",
       eager: true,
@@ -45,8 +45,8 @@ const iconSources: Record<string, string> = IS_SSR
 
 if (!IS_SSR && Object.keys(iconSources).length === 0) {
   throw new Error(
-    "[dashboard-core/file-icon] material-icon-theme SVG glob matched zero files. " +
-      "Check packages/dashboard-core/node_modules/material-icon-theme/icons.",
+    "[dashboard/file-icon] material-icon-theme SVG glob matched zero files. " +
+      "Check apps/web/node_modules/material-icon-theme/icons.",
   );
 }
 
@@ -99,7 +99,7 @@ function ensureSprite(): void {
   const root = parsed.documentElement;
   if (root.nodeName === "parsererror") {
     console.error(
-      "[dashboard-core/file-icon] Failed to parse SVG sprite markup. Icons will render blank.",
+      "[dashboard/file-icon] Failed to parse SVG sprite markup. Icons will render blank.",
     );
     // Latch the flag so subsequent renders don't re-invoke DOMParser on the
     // same broken markup ~1.2k times per page and re-log the same error. The

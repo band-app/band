@@ -44,7 +44,7 @@ export function resolveIconPath(iconName: string): string | null {
   const def = manifest.iconDefinitions[iconName] ?? manifest.iconDefinitions[manifest.file];
   if (!def?.iconPath) {
     console.error(
-      `[dashboard-core/file-icon] Missing iconDefinitions entry for "${iconName}" and fallback "${manifest.file}".`,
+      `[dashboard/file-icon] Missing iconDefinitions entry for "${iconName}" and fallback "${manifest.file}".`,
     );
     return null;
   }

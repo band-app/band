@@ -1,4 +1,4 @@
-import { DashboardShell } from "@band-app/dashboard-core";
+import { DashboardShell } from "@/dashboard";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { isDesktop } from "../lib/is-desktop";
 import { DesktopLayout } from "./DesktopLayout";

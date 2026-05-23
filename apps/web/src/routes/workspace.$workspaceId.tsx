@@ -1,12 +1,3 @@
-import {
-  type DiffStats,
-  QuickOpenDialog,
-  SearchFilesDialog,
-  useDashboardStore,
-  useDiffTarget,
-  type WorkspaceTab,
-  WorkspaceTabNav,
-} from "@band-app/dashboard-core";
 import { createFileRoute, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
 import {
@@ -18,6 +9,15 @@ import {
   useRef,
   useState,
 } from "react";
+import {
+  type DiffStats,
+  QuickOpenDialog,
+  SearchFilesDialog,
+  useDashboardStore,
+  useDiffTarget,
+  type WorkspaceTab,
+  WorkspaceTabNav,
+} from "@/dashboard";
 import { DesktopDragRegion } from "../components/DesktopTitleBar";
 import { AgentSwitcherContext } from "../hooks/useAgentSwitcherContext";
 import { useIsDesktop } from "../hooks/useIsDesktop";

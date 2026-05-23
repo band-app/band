@@ -1,6 +1,6 @@
-import { useSettingsQuery } from "@band-app/dashboard-core";
 import { createFileRoute, Navigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { useSettingsQuery } from "@/dashboard";
 import { agentTypeSupportsSessionListing } from "../components/ChatPane";
 import { ChatView } from "../components/ChatView";
 import { useAgentSwitcherContext } from "../hooks/useAgentSwitcherContext";

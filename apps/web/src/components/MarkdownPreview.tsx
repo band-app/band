@@ -32,10 +32,10 @@
  * which covers every supported Band runtime today.)
  */
 
-import type { SearchOptions } from "@band-app/dashboard-core";
 import { cn } from "@band-app/ui";
 import { forwardRef, useCallback, useImperativeHandle, useLayoutEffect, useRef } from "react";
 import { Streamdown } from "streamdown";
+import type { SearchOptions } from "@/dashboard";
 import { applyFrontmatterTable } from "../lib/frontmatter";
 import { streamdownComponents, streamdownPlugins } from "./streamdown-components";
 

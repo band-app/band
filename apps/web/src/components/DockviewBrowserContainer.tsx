@@ -1,4 +1,3 @@
-import { useAdapter } from "@band-app/dashboard-core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   type DockviewApi,
@@ -19,6 +18,7 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { useAdapter } from "@/dashboard";
 import { injectInitialUrls } from "../lib/browser-layout";
 import { invoke as desktopInvoke, listen as desktopListen } from "../lib/desktop-ipc";
 import {

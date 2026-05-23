@@ -26,8 +26,8 @@
  * No-op outside the Electron desktop shell.
  */
 
-import type { SearchBarHandle, SearchOptions } from "@band-app/dashboard-core";
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { SearchBarHandle, SearchOptions } from "@/dashboard";
 import { invoke as desktopInvoke, listen as desktopListen } from "../lib/desktop-ipc";
 import { isDesktop } from "../lib/is-desktop";
 

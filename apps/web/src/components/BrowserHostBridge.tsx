@@ -1,5 +1,5 @@
-import { useSettingsQuery } from "@band-app/dashboard-core";
 import { useEffect } from "react";
+import { useSettingsQuery } from "@/dashboard";
 import { invoke as desktopInvoke, listen as desktopListen } from "../lib/desktop-ipc";
 import { isDesktop } from "../lib/is-desktop";
 import { trpc } from "../lib/trpc-client";

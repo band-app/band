@@ -8,8 +8,7 @@
   "scripts": {
     "build": "cargo build --release",
     "build:dev": "cargo build",
-    "build:test-server": "pnpm --filter @band-app/server build:test-server",
-    "test": "pnpm build:test-server && cargo test",
+    "test": "pnpm --filter @band-app/server build && cargo test",
     "lint": "cargo clippy -- -D warnings",
     "format": "cargo fmt -- --check",
     "format:fix": "cargo fmt"

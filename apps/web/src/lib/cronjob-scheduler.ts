@@ -1,7 +1,7 @@
-import { toWorkspaceId } from "@band-app/dashboard-core";
 import { createLogger } from "@band-app/logger";
 import { Cron } from "croner";
 import { eq } from "drizzle-orm";
+import { toWorkspaceId } from "@/dashboard";
 import { getOrCreateDefaultChat } from "./chat-manager";
 import { listAllCronjobs, loadCronjobFile } from "./cronjob-store";
 import type { CronjobDefinition } from "./cronjob-types";

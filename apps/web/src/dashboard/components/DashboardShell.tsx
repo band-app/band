@@ -217,11 +217,15 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar, hideMenu }: Das
       // (a dockview panel with explicit pixel height) so it doesn't need
       // the compensation. See band-app/band#463.
       //
-      // NOTE: `--app-zoom` is hardcoded here because `packages/dashboard-core`
-      // can't import from `apps/web/src/lib/zoom.ts` without inverting the
-      // package dependency graph. Keep this string in sync with the
-      // `ZOOM_CSS_VAR` constant exported from that module — grep for
-      // `ZOOM_CSS_VAR` in `apps/web/src/lib/zoom.ts` if renaming.
+      // NOTE: `--app-zoom` is hardcoded here because the `dashboard` module
+      // is an internal seam — code under `apps/web/src/dashboard/` must not
+      // reach out into `apps/web/src/lib/` (or anywhere else in apps/web)
+      // except through the `DashboardAdapter`. That boundary survived the
+      // fold from `packages/dashboard-core` so the seam can be re-enforced
+      // as a separate package again if we ever ship a second renderer.
+      // Keep this string in sync with the `ZOOM_CSS_VAR` constant exported
+      // from `apps/web/src/lib/zoom.ts` — grep for `ZOOM_CSS_VAR` there if
+      // renaming.
       style={
         hideTitleBar
           ? undefined

@@ -162,8 +162,8 @@ lands at the end — the dedupe is clean.
 - `apps/web/src/lib/agent-pool.ts` — read setting, plumb to adapter
   config.
 - `apps/web/src/lib/task-runner.ts` — +`case "text-end"`.
-- `packages/dashboard-core/src/types.ts` — +`claudeCodePartialMessages`
+- `apps/web/src/dashboard/types.ts` — +`claudeCodePartialMessages`
   on `Settings`.
-- `packages/dashboard-core/src/components/SettingsPage.tsx` — new Switch
+- `apps/web/src/dashboard/components/SettingsPage.tsx` — new Switch
   under "Coding Agents" section.
 - `docs/experiments/partial-messages.md` — this writeup.

@@ -1,6 +1,6 @@
-import type { PlatformCapabilities } from "@band-app/dashboard-core";
 import { useRouterState } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { PlatformCapabilities } from "@/dashboard";
 
 /**
  * Browser-like workspace history powering the title-bar back/forward buttons.

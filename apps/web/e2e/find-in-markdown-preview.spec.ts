@@ -17,8 +17,8 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { toWorkspaceId } from "@band-app/dashboard-core";
 import { expect, type Page, test } from "@playwright/test";
+import { toWorkspaceId } from "@/dashboard";
 import {
   createTmpHome,
   type ServerHandle,

@@ -9,7 +9,7 @@
  * `wholeWord`/`regex` would be silent no-ops.
  */
 
-import { SearchBar } from "@band-app/dashboard-core";
+import { SearchBar } from "@/dashboard";
 import type { UseBrowserFindInPageReturn } from "../hooks/useBrowserFindInPage";
 
 export function BrowserFindBar({ find }: { find: UseBrowserFindInPageReturn }) {
