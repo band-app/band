@@ -748,12 +748,27 @@ export function DockviewBrowserContainer({
   useEffect(() => {
     if (!isDesktop) return;
     let unlisten: (() => void) | undefined;
+    // Guard against the unmount-before-resolution race: if the
+    // component unmounts while we're awaiting `desktopListen`, the
+    // cleanup closure runs synchronously with `unlisten` still
+    // `undefined`. Without the `cancelled` flag the eventual listener
+    // registration would survive the unmount and keep firing
+    // `handleAddTab` against an already-gone component. Mirrors the
+    // pattern used by the `browser-split-shortcut` / `*-close-shortcut`
+    // / `*-cycle-shortcut` effects below.
+    let cancelled = false;
     void (async () => {
-      unlisten = await desktopListen<{
+      const fn = await desktopListen<{
         browser_id: string;
         workspace_id: string;
         url: string;
-        disposition: string;
+        disposition:
+          | "default"
+          | "foreground-tab"
+          | "background-tab"
+          | "new-window"
+          | "save-to-disk"
+          | "other";
       }>("browser-open-window", (event) => {
         const api = apiRef.current;
         if (!api) return;
@@ -779,8 +794,13 @@ export function DockviewBrowserContainer({
           });
         });
       });
+      if (cancelled) fn();
+      else unlisten = fn;
     })();
-    return () => unlisten?.();
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, [handleAddTab]);
 
   // Cmd+D / Cmd+Shift+D, Cmd+W, Cmd+[/], Cmd+Shift+[/], Ctrl+(Shift)+Tab

@@ -45,7 +45,7 @@ export function decideWindowOpenAction(url: string): WindowOpenAction {
   // — the page can't script into a `WebContentsView` we never
   // handed back, so the resulting blank tab would just be litter
   // the user has to close manually.
-  if (trimmed === "about:blank" || trimmed.toLowerCase() === "about:blank") {
+  if (trimmed.toLowerCase() === "about:blank") {
     return { kind: "ignore", reason: "about-blank" };
   }
 

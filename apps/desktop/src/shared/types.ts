@@ -244,13 +244,21 @@ export interface BrowserCycleShortcutPayload {
  * the window to be opened — passed through unchanged so future
  * renderer logic can distinguish e.g. "new-window" from "background-
  * tab". Today the renderer treats all of them identically: a new
- * Band tab focused for the user.
+ * Band tab focused for the user. The union mirrors the one Electron's
+ * `webContents.setWindowOpenHandler` callback emits, so any future
+ * `switch` on it remains exhaustive.
  */
 export interface BrowserOpenWindowPayload {
   browser_id: string;
   workspace_id: string;
   url: string;
-  disposition: string;
+  disposition:
+    | "default"
+    | "foreground-tab"
+    | "background-tab"
+    | "new-window"
+    | "save-to-disk"
+    | "other";
 }
 
 // ---------- macOS shell (camelCase invoke args) ----------
