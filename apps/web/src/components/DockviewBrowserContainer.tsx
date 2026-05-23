@@ -762,13 +762,7 @@ export function DockviewBrowserContainer({
         browser_id: string;
         workspace_id: string;
         url: string;
-        disposition:
-          | "default"
-          | "foreground-tab"
-          | "background-tab"
-          | "new-window"
-          | "save-to-disk"
-          | "other";
+        disposition: "default" | "foreground-tab" | "background-tab" | "new-window" | "other";
       }>("browser-open-window", (event) => {
         const api = apiRef.current;
         if (!api) return;

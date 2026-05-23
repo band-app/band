@@ -252,13 +252,7 @@ export interface BrowserOpenWindowPayload {
   browser_id: string;
   workspace_id: string;
   url: string;
-  disposition:
-    | "default"
-    | "foreground-tab"
-    | "background-tab"
-    | "new-window"
-    | "save-to-disk"
-    | "other";
+  disposition: "default" | "foreground-tab" | "background-tab" | "new-window" | "other";
 }
 
 // ---------- macOS shell (camelCase invoke args) ----------
