@@ -42,7 +42,6 @@
     "vscode-jsonrpc": "8.2.0"
   },
   "devDependencies": {
-    "@ai-sdk/react": "^3.0.0",
     "@band-app/coding-agent": "workspace:^",
     "@band-app/dashboard-core": "workspace:^",
     "@band-app/logger": "workspace:^",
