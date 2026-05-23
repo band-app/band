@@ -3,11 +3,14 @@ interface IconProps {
 }
 
 export function ClaudeIcon({ className }: IconProps) {
+  // Rendered in Claude's signature warm coral (Anthropic brand color)
+  // rather than `currentColor`, so the mark is recognizable regardless of
+  // the surrounding text color.
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
       viewBox="0 0 16 16"
-      fill="currentColor"
+      fill="#D97757"
       className={className}
       role="img"
       aria-label="Claude"
@@ -33,21 +36,20 @@ export function CodexIcon({ className }: IconProps) {
 }
 
 export function OpenCodeIcon({ className }: IconProps) {
+  // Official opencode mark: a pixel-style "O" with the signature
+  // half-fill block visible through the cutout. Mirrors the design used
+  // in opencode's favicon and wordmark (https://opencode.ai/brand).
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
       viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
+      fill="currentColor"
       className={className}
       role="img"
       aria-label="OpenCode"
     >
-      <polyline points="4 17 10 11 4 5" />
-      <line x1="12" y1="19" x2="20" y2="19" />
+      <path opacity={0.5} d="M16 10H8v8h8z" />
+      <path fillRule="evenodd" clipRule="evenodd" d="M20 22H4V2h16zM16 6H8v12h8z" />
     </svg>
   );
 }
