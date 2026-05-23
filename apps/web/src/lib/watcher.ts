@@ -50,7 +50,7 @@ export interface StatusEvent {
    * For `kind: "open-file"`: workspace-relative file path with optional
    * line / column suffix in the standard `path:line[:column]` /
    * `path:line-lineEnd` notation. Parsed by the client via
-   * `parseFileLocation` from `@band-app/dashboard-core`. Backs the
+   * `parseFileLocation` from `@/dashboard`. Backs the
    * `band open` CLI command — see `editorRouter.openFile`.
    */
   filePath?: string;

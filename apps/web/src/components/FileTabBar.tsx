@@ -1,4 +1,3 @@
-import { getFileIcon } from "@band-app/dashboard-core";
 import {
   Button,
   ContextMenu,
@@ -30,6 +29,7 @@ import {
 } from "lucide-react";
 import type React from "react";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { getFileIcon } from "@/dashboard";
 import type { FileTab } from "../hooks/useFileTabs";
 
 // ---------------------------------------------------------------------------

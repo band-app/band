@@ -24,8 +24,8 @@
  */
 
 import { rmSync } from "node:fs";
-import { toWorkspaceId } from "@band-app/dashboard-core";
 import { expect, test } from "@playwright/test";
+import { toWorkspaceId } from "@/dashboard";
 import {
   createTmpHome,
   type ServerHandle,

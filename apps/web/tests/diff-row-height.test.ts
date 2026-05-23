@@ -1,5 +1,4 @@
-import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, expect, it } from "vitest";
 
 import {
   countDiffLines,
@@ -8,11 +7,11 @@ import {
   ROW_DIFF_DIVIDER,
   ROW_HUNK_SEPARATOR_HEIGHT,
   ROW_SHOW_FULL_BAR_HEIGHT,
-} from "../src/lib/diff-row-height.ts";
+} from "../src/dashboard/lib/diff-row-height.ts";
 
 describe("countDiffLines", () => {
   it("returns all zeros for an empty diff", () => {
-    assert.deepEqual(countDiffLines(""), {
+    expect(countDiffLines("")).toEqual({
       context: 0,
       insertions: 0,
       deletions: 0,
@@ -29,7 +28,7 @@ describe("countDiffLines", () => {
       "+another new",
       " context line B",
     ].join("\n");
-    assert.deepEqual(countDiffLines(diff), {
+    expect(countDiffLines(diff)).toEqual({
       context: 2,
       insertions: 2,
       deletions: 1,
@@ -51,7 +50,7 @@ describe("countDiffLines", () => {
       " g",
       "+h",
     ].join("\n");
-    assert.deepEqual(countDiffLines(diff), {
+    expect(countDiffLines(diff)).toEqual({
       context: 3,
       insertions: 3,
       deletions: 2,
@@ -73,7 +72,7 @@ describe("countDiffLines", () => {
       "-old",
       "+new",
     ].join("\n");
-    assert.deepEqual(countDiffLines(diff), {
+    expect(countDiffLines(diff)).toEqual({
       context: 1,
       insertions: 1,
       deletions: 1,
@@ -85,7 +84,7 @@ describe("countDiffLines", () => {
     // The backslash-space marker starts with `\` (charCode 92), which
     // none of the bucket cases match — so it's silently dropped.
     const diff = ["@@ -1,1 +1,1 @@", "-old", "+new", "\\ No newline at end of file"].join("\n");
-    assert.deepEqual(countDiffLines(diff), {
+    expect(countDiffLines(diff)).toEqual({
       context: 0,
       insertions: 1,
       deletions: 1,
@@ -98,7 +97,7 @@ describe("countDiffLines", () => {
     // in the scanner. Regression guard: an off-by-one would drop the
     // last line.
     const diff = ["@@ -1,1 +1,2 @@", " ctx", "+added"].join("\n");
-    assert.deepEqual(countDiffLines(diff), {
+    expect(countDiffLines(diff)).toEqual({
       context: 1,
       insertions: 1,
       deletions: 0,
@@ -112,7 +111,7 @@ describe("countDiffLines", () => {
     // Regression guard: a future refactor of the lookahead must preserve
     // this behavior.
     const diff = "@";
-    assert.deepEqual(countDiffLines(diff), {
+    expect(countDiffLines(diff)).toEqual({
       context: 0,
       insertions: 0,
       deletions: 0,
@@ -126,8 +125,8 @@ describe("countDiffLines", () => {
     // — i.e. that `hunks` keeps incrementing rather than getting stuck.
     const diff = ["@@ -1,1 +1,1 @@", " context", "@@ -10,1 +10,1 @@", " context2"].join("\n");
     const counts = countDiffLines(diff);
-    assert.equal(counts.hunks, 2);
-    assert.equal(counts.context, 2);
+    expect(counts.hunks).toBe(2);
+    expect(counts.context).toBe(2);
   });
 });
 
@@ -135,12 +134,11 @@ describe("diffContentHeight", () => {
   const zeroCounts = { context: 0, insertions: 0, deletions: 0, hunks: 0 };
 
   it("returns just the divider when there's no content and no chrome", () => {
-    assert.equal(diffContentHeight(zeroCounts, "unified", false), ROW_DIFF_DIVIDER);
+    expect(diffContentHeight(zeroCounts, "unified", false)).toBe(ROW_DIFF_DIVIDER);
   });
 
   it("adds the 'Show full file' bar when canLoadMore is true", () => {
-    assert.equal(
-      diffContentHeight(zeroCounts, "unified", true),
+    expect(diffContentHeight(zeroCounts, "unified", true)).toBe(
       ROW_DIFF_DIVIDER + ROW_SHOW_FULL_BAR_HEIGHT,
     );
   });
@@ -149,7 +147,7 @@ describe("diffContentHeight", () => {
     const counts = { context: 5, insertions: 3, deletions: 2, hunks: 1 };
     // 5 + 3 + 2 = 10 lines × 18 px + 1 px divider
     const expected = ROW_DIFF_DIVIDER + 10 * ROW_CM_LINE_HEIGHT;
-    assert.equal(diffContentHeight(counts, "unified", false), expected);
+    expect(diffContentHeight(counts, "unified", false)).toBe(expected);
   });
 
   it("split mode uses max(oldSide, newSide), not the sum", () => {
@@ -158,26 +156,26 @@ describe("diffContentHeight", () => {
     // Split renders both editors at the same (max) height, so we expect 8.
     const counts = { context: 5, insertions: 3, deletions: 2, hunks: 1 };
     const expected = ROW_DIFF_DIVIDER + 8 * ROW_CM_LINE_HEIGHT;
-    assert.equal(diffContentHeight(counts, "split", false), expected);
+    expect(diffContentHeight(counts, "split", false)).toBe(expected);
   });
 
   it("split mode picks the old side when there are more deletions than insertions", () => {
     const counts = { context: 2, insertions: 1, deletions: 5, hunks: 1 };
     // oldSide = 2 + 5 = 7 > newSide = 2 + 1 = 3
     const expected = ROW_DIFF_DIVIDER + 7 * ROW_CM_LINE_HEIGHT;
-    assert.equal(diffContentHeight(counts, "split", false), expected);
+    expect(diffContentHeight(counts, "split", false)).toBe(expected);
   });
 
   it("adds 32 px per hunk separator between hunks (count − 1)", () => {
     const counts = { context: 0, insertions: 0, deletions: 0, hunks: 3 };
     // 3 hunks → 2 separators between them
     const expected = ROW_DIFF_DIVIDER + 2 * ROW_HUNK_SEPARATOR_HEIGHT;
-    assert.equal(diffContentHeight(counts, "unified", false), expected);
+    expect(diffContentHeight(counts, "unified", false)).toBe(expected);
   });
 
   it("does not add a separator for a single hunk", () => {
     const counts = { context: 0, insertions: 0, deletions: 0, hunks: 1 };
-    assert.equal(diffContentHeight(counts, "unified", false), ROW_DIFF_DIVIDER);
+    expect(diffContentHeight(counts, "unified", false)).toBe(ROW_DIFF_DIVIDER);
   });
 
   it("combines all components correctly: split + canLoadMore + multiple hunks", () => {
@@ -191,8 +189,8 @@ describe("diffContentHeight", () => {
       ROW_SHOW_FULL_BAR_HEIGHT +
       10 * ROW_CM_LINE_HEIGHT +
       ROW_HUNK_SEPARATOR_HEIGHT;
-    assert.equal(diffContentHeight(counts, "split", true), expected);
-    assert.equal(expected, 243);
+    expect(diffContentHeight(counts, "split", true)).toBe(expected);
+    expect(expected).toBe(243);
   });
 });
 
@@ -213,15 +211,15 @@ describe("countDiffLines + diffContentHeight round-trip", () => {
       " }",
     ].join("\n");
     const counts = countDiffLines(diff);
-    assert.deepEqual(counts, {
+    expect(counts).toEqual({
       context: 4,
       insertions: 2,
       deletions: 1,
       hunks: 1,
     });
     // unified: 4 + 2 + 1 = 7 lines × 18 = 126 + 1 (divider) = 127
-    assert.equal(diffContentHeight(counts, "unified", false), 127);
+    expect(diffContentHeight(counts, "unified", false)).toBe(127);
     // split: max(4+1, 4+2) = 6 lines × 18 = 108 + 1 = 109
-    assert.equal(diffContentHeight(counts, "split", false), 109);
+    expect(diffContentHeight(counts, "split", false)).toBe(109);
   });
 });

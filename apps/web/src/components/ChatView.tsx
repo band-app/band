@@ -1,5 +1,4 @@
 import { useChat } from "@ai-sdk/react";
-import { AgentIcon, useExperimentalContextMeter } from "@band-app/dashboard-core";
 import {
   Badge,
   Button,
@@ -64,6 +63,7 @@ import {
   useState,
 } from "react";
 import type { StickToBottomContext } from "use-stick-to-bottom";
+import { AgentIcon, useExperimentalContextMeter } from "@/dashboard";
 import { TaskChatTransport } from "../lib/task-chat-transport";
 import { trpc } from "../lib/trpc-client";
 import {

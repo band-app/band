@@ -1,4 +1,3 @@
-import type { SelectionToChatDetail } from "@band-app/dashboard-core";
 import { cn } from "@band-app/ui";
 import type { ChatStatus } from "ai";
 import { ArrowUpIcon, FileIcon, Loader2, Paperclip, SquareIcon, X } from "lucide-react";
@@ -12,6 +11,7 @@ import type {
   RefObject,
 } from "react";
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import type { SelectionToChatDetail } from "@/dashboard";
 
 let fileIdCounter = 0;
 

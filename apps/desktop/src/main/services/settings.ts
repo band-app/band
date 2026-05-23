@@ -16,7 +16,7 @@ const DEFAULT_WEB_SERVER_PORT = 3456;
 interface RawSettings {
   webServerPort?: number;
   tokenSecret?: string;
-  /** CDP screencast experiment — see `packages/dashboard-core/src/types.ts`. */
+  /** CDP screencast experiment — see `apps/web/src/dashboard/types.ts`. */
   webBrowserCdpEnabled?: boolean;
   // Other fields exist in settings.json (worktreesDir, defaults, codingAgent,
   // notifications, labels, autoStartTunnel, …) but the desktop shell only

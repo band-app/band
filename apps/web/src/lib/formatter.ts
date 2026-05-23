@@ -1,8 +1,8 @@
 import { existsSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve as resolvePath } from "node:path";
-import type { FormatFileResult } from "@band-app/dashboard-core";
 import { createLogger } from "@band-app/logger";
 import prettier from "prettier";
+import type { FormatFileResult } from "@/dashboard";
 
 const log = createLogger("formatter");
 
@@ -35,7 +35,7 @@ export class FormatterError extends Error {
   }
 }
 
-// `FormatFileResult` is defined in `@band-app/dashboard-core` because the
+// `FormatFileResult` is defined in `@/dashboard` because the
 // client-side adapter contract is the load-bearing public surface; the
 // server is the *implementer*, so it imports the shape rather than
 // re-declaring it. A future field addition (e.g. `warnings`) means

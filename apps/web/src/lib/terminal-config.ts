@@ -1,6 +1,6 @@
-import type { WorkspaceTerminalConfig } from "@band-app/dashboard-core";
 import { createLogger } from "@band-app/logger";
 import { z } from "zod";
+import type { WorkspaceTerminalConfig } from "@/dashboard";
 import { loadProjectConfig } from "./project-config";
 
 const log = createLogger("terminal-config");

@@ -2,8 +2,8 @@ import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { toWorkspaceId } from "@band-app/dashboard-core";
 import { eq, or, sql } from "drizzle-orm";
+import { toWorkspaceId } from "@/dashboard";
 import { getDb } from "./db/connection";
 import {
   branchStatuses as branchStatusesTable,

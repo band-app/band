@@ -1,4 +1,3 @@
-import { AgentIcon, useAdapter } from "@band-app/dashboard-core";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   type DockviewApi,
@@ -19,6 +18,7 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { AgentIcon, useAdapter } from "@/dashboard";
 import {
   cycleGridGroups,
   cycleTabsInActiveGroup,

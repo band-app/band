@@ -3,8 +3,8 @@
 //
 // Root cause: two separate `httpBatchLink`s — one in
 // `apps/web/src/lib/trpc-client.ts`, one in
-// `packages/dashboard-core/src/adapters/web.ts` (the client DiffView
-// actually routes through) — were configured without `maxURLLength`, so
+// `apps/web/src/dashboard/adapters/web.ts` (the client DiffView actually
+// routes through) — were configured without `maxURLLength`, so
 // the default cap is `Infinity`. DiffView fires one
 // `workspace.getFileDiff` query per expanded file on mount, on every SSE
 // `branch-status` tick, and all at once when the user clicks "expand all".
@@ -31,9 +31,9 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { toWorkspaceId } from "@band-app/dashboard-core";
 import { createTRPCClient, httpBatchLink } from "@trpc/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { toWorkspaceId } from "@/dashboard";
 import type { AppRouter } from "../src/trpc/router";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { SERVER_RUNTIME, SERVER_SCRIPT } from "./helpers/server-runtime";
@@ -139,7 +139,7 @@ function git(cwd: string, args: string[]): string {
 
 // Match both production tRPC client configurations (the one in
 // `apps/web/src/lib/trpc-client.ts` and the one in
-// `packages/dashboard-core/src/adapters/web.ts`) — same link, same
+// `apps/web/src/dashboard/adapters/web.ts`) — same link, same
 // `maxURLLength`. We omit the `wsLink` half of the production `splitLink`
 // because this test only exercises queries (no subscriptions) and the WS
 // client there requires a browser `location` global that doesn't exist in
@@ -158,10 +158,10 @@ function createBatchClient(serverUrl: string) {
 
 // Long path components produce realistic per-op payloads. Each filePath is
 // ~70 chars, mirroring real-world monorepo paths like
-// `packages/dashboard-core/src/components/file-browser/SomeComponent.tsx`.
+// `apps/web/src/dashboard/components/file-browser/SomeComponent.tsx`.
 function buildFilePath(i: number): string {
   const idx = String(i).padStart(3, "0");
-  return `packages/dashboard-core/src/components/file-browser/changed-file-${idx}.ts`;
+  return `apps/web/src/dashboard/components/file-browser/changed-file-${idx}.ts`;
 }
 
 describe("tRPC — batch URL splitting (#430)", () => {
@@ -188,7 +188,7 @@ describe("tRPC — batch URL splitting (#430)", () => {
     repoPath = join(tmpHome, "repo");
     mkdirSync(repoPath, { recursive: true });
     git(repoPath, ["init", "-b", "main"]);
-    mkdirSync(join(repoPath, "packages/dashboard-core/src/components/file-browser"), {
+    mkdirSync(join(repoPath, "apps/web/src/dashboard/components/file-browser"), {
       recursive: true,
     });
     for (let i = 0; i < FILE_COUNT; i++) {

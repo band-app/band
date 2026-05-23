@@ -1,4 +1,3 @@
-import { parseFileLocation } from "@band-app/dashboard-core";
 import { cn } from "@band-app/ui";
 import type { ComponentProps } from "react";
 import { useCallback } from "react";
@@ -8,11 +7,12 @@ import {
   type ExtraProps,
   type UrlTransform,
 } from "streamdown";
+import { parseFileLocation } from "@/dashboard";
 
 import { openExternalUrl } from "../../lib/open-external-url";
 
 // ---------------------------------------------------------------------------
-// Known file extensions (derived from dashboard-core file-icon.ts)
+// Known file extensions (derived from dashboard/lib/file-icon.ts)
 // ---------------------------------------------------------------------------
 
 const KNOWN_EXTENSIONS = new Set([

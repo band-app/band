@@ -6,13 +6,21 @@
   "workspaces": {
     ".": {
       "entry": ["scripts/*.mjs"],
-      "ignoreDependencies": ["@band-app/cli", "@trpc/client", "@trpc/server"]
+      "ignoreDependencies": [
+        "@band-app/cli",
+        "@tanstack/react-query",
+        "@trpc/client",
+        "@trpc/server"
+      ]
     },
     "apps/web": {
       "entry": [
         "src/client.tsx",
         "src/server.ts",
         "src/router.tsx",
+        "src/dashboard/index.ts",
+        "src/dashboard/adapters/web.ts",
+        "src/dashboard/adapters/desktop.ts",
         "bin/band-server.mjs",
         "start-server.ts"
       ],
@@ -23,13 +31,13 @@
         "class-variance-authority",
         "clsx",
         "tailwind-merge",
-        "@dnd-kit/core",
-        "@dnd-kit/sortable",
-        "@dnd-kit/utilities",
         "@tanstack/router-plugin",
         "nanoid",
         "typescript-language-server",
-        "vscode-jsonrpc"
+        "vscode-jsonrpc",
+        "@babel/runtime",
+        "@codemirror/lint",
+        "esbuild"
       ]
     },
     "apps/desktop": {
@@ -53,11 +61,6 @@
     "packages/ui": {
       "entry": ["src/index.ts", "src/utils.ts"],
       "project": ["src/**/*.{ts,tsx}"]
-    },
-    "packages/dashboard-core": {
-      "entry": ["src/index.ts", "src/adapters/web.ts", "src/adapters/desktop.ts"],
-      "project": ["src/**/*.{ts,tsx}"],
-      "ignoreDependencies": ["@babel/runtime", "@codemirror/lint"]
     },
     "packages/coding-agent": {
       "entry": ["src/index.ts", "tests/mocks/*.mjs"],

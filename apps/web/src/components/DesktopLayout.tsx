@@ -1,7 +1,7 @@
-import { DashboardShell } from "@band-app/dashboard-core";
 import { MessageSquare } from "lucide-react";
 import { type ReactNode, useCallback, useRef } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
+import { DashboardShell } from "@/dashboard";
 import {
   loadSidebarWidth,
   SIDEBAR_MAX_SIZE,

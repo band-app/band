@@ -1,81 +1,83 @@
-import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, expect, it } from "vitest";
 
 import {
   manifest,
   resolveFolderIconName,
   resolveIconName,
   resolveIconPath,
-} from "../src/lib/file-icon-resolve.ts";
+} from "../src/dashboard/lib/file-icon-resolve.ts";
 
 describe("resolveIconName", () => {
   it("matches exact filename before extension", () => {
     const dockerName = manifest.fileNames.dockerfile;
-    assert.ok(dockerName, "manifest.fileNames.dockerfile missing");
-    assert.equal(resolveIconName("Dockerfile"), dockerName);
-    assert.equal(resolveIconName("path/to/Dockerfile"), dockerName);
+    expect(dockerName, "manifest.fileNames.dockerfile missing").toBeTruthy();
+    expect(resolveIconName("Dockerfile")).toBe(dockerName);
+    expect(resolveIconName("path/to/Dockerfile")).toBe(dockerName);
   });
 
   it("resolves common code extensions via manifest.fileExtensions", () => {
     const expected = manifest.fileExtensions.tsx;
-    assert.ok(expected, "manifest.fileExtensions.tsx missing");
-    assert.equal(resolveIconName("Component.tsx"), expected);
+    expect(expected, "manifest.fileExtensions.tsx missing").toBeTruthy();
+    expect(resolveIconName("Component.tsx")).toBe(expected);
   });
 
-  it("prefers longer compound extension when available", (t) => {
+  it("prefers longer compound extension when available", (ctx) => {
     const storiesEntry = manifest.fileExtensions["stories.tsx"];
     if (!storiesEntry) {
       // `stories.tsx` is the compound extension we picked for this assertion
       // because material-icon-theme historically shipped a dedicated mapping
       // for it. If a future release drops it, surface the skip explicitly
       // rather than letting the test pass vacuously — that hides the
-      // regression from `node:test`'s summary. (The compound-extension
+      // regression from vitest's summary. (The compound-extension
       // resolution path is also covered indirectly via `d.ts` / `spec.ts`
       // mappings in other test cases below.)
-      t.skip("manifest does not ship a `stories.tsx` mapping in this version");
+      ctx.skip();
       return;
     }
-    assert.equal(resolveIconName("Button.stories.tsx"), storiesEntry);
+    expect(resolveIconName("Button.stories.tsx")).toBe(storiesEntry);
   });
 
   it("falls back to manifest.file for unknown extensions", () => {
-    assert.equal(resolveIconName("mystery.qqq"), manifest.file);
-    assert.equal(resolveIconName("noext"), manifest.file);
+    expect(resolveIconName("mystery.qqq")).toBe(manifest.file);
+    expect(resolveIconName("noext")).toBe(manifest.file);
   });
 
   it("lowercases input for matching", () => {
     const expected = manifest.fileExtensions.tsx;
-    assert.equal(resolveIconName("Foo.TSX"), expected);
+    expect(resolveIconName("Foo.TSX")).toBe(expected);
   });
 });
 
 describe("resolveFolderIconName", () => {
   it("returns the default folder when name is unknown", () => {
-    assert.equal(resolveFolderIconName("zzz-unknown", false), manifest.folder);
-    assert.equal(resolveFolderIconName("zzz-unknown", true), manifest.folderExpanded);
+    expect(resolveFolderIconName("zzz-unknown", false)).toBe(manifest.folder);
+    expect(resolveFolderIconName("zzz-unknown", true)).toBe(manifest.folderExpanded);
   });
 
   it("returns the named folder icon when present", () => {
     const src = manifest.folderNames.src;
-    assert.ok(src, "manifest.folderNames.src should exist in material-icon-theme");
-    assert.equal(resolveFolderIconName("src", false), src);
+    expect(src, "manifest.folderNames.src should exist in material-icon-theme").toBeTruthy();
+    expect(resolveFolderIconName("src", false)).toBe(src);
   });
 
   it("uses the expanded variant when expanded=true", () => {
     const srcExpanded = manifest.folderNamesExpanded.src;
-    assert.ok(srcExpanded, "manifest.folderNamesExpanded.src should exist in material-icon-theme");
-    assert.equal(resolveFolderIconName("src", true), srcExpanded);
+    expect(
+      srcExpanded,
+      "manifest.folderNamesExpanded.src should exist in material-icon-theme",
+    ).toBeTruthy();
+    expect(resolveFolderIconName("src", true)).toBe(srcExpanded);
   });
 });
 
 describe("resolveIconPath", () => {
   it("returns iconPath for known names", () => {
     const path = resolveIconPath(manifest.file);
-    assert.ok(path?.endsWith(".svg"));
+    expect(path?.endsWith(".svg")).toBe(true);
   });
 
   it("falls back to manifest.file iconPath for unknown names", () => {
     const fallback = resolveIconPath(manifest.file);
-    assert.equal(resolveIconPath("definitely-not-an-icon-name"), fallback);
+    expect(resolveIconPath("definitely-not-an-icon-name")).toBe(fallback);
   });
 });

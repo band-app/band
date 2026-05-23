@@ -882,7 +882,7 @@ async function main() {
   // correctly, instead of seeing `null` and tearing the DB down
   // before Phase B has even started.
   let phaseBStarted!: () => void;
-  let phaseBSettlePromise: Promise<void> = new Promise<void>((resolve) => {
+  const phaseBSettlePromise: Promise<void> = new Promise<void>((resolve) => {
     phaseBStarted = resolve;
   });
 

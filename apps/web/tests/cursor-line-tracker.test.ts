@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { cursorLineTracker } from "@band-app/dashboard-core";
+
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { cursorLineTracker } from "@/dashboard";
 
 // ---------------------------------------------------------------------------
 // Helper: create a CodeMirror EditorView with the cursorLineTracker extension

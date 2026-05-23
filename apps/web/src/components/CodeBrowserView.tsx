@@ -1,30 +1,4 @@
 import {
-  AUTO_DETECT_LANGUAGE_ID,
-  buildLspWsUrl,
-  createLspExtension,
-  FileBrowser,
-  type FileBrowserHandle,
-  FileViewer,
-  getFilePreviewType,
-  getLspLanguageId,
-  hasPendingNavigation,
-  languageToExtension,
-  parseFileLocation,
-  releaseLspClient,
-  resolveNavigation,
-  SearchBar,
-  scrollToLine,
-  serializeEditorState,
-  toFileUri,
-  toLspServerLang,
-  toWorkspaceId,
-  useCapabilities,
-  useEditorHistory,
-  useProjects,
-  useSearch,
-  useSettingsQuery,
-} from "@band-app/dashboard-core";
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -58,6 +32,32 @@ import {
   useState,
 } from "react";
 import { Group, Panel, Separator, usePanelRef } from "react-resizable-panels";
+import {
+  AUTO_DETECT_LANGUAGE_ID,
+  buildLspWsUrl,
+  createLspExtension,
+  FileBrowser,
+  type FileBrowserHandle,
+  FileViewer,
+  getFilePreviewType,
+  getLspLanguageId,
+  hasPendingNavigation,
+  languageToExtension,
+  parseFileLocation,
+  releaseLspClient,
+  resolveNavigation,
+  SearchBar,
+  scrollToLine,
+  serializeEditorState,
+  toFileUri,
+  toLspServerLang,
+  toWorkspaceId,
+  useCapabilities,
+  useEditorHistory,
+  useProjects,
+  useSearch,
+  useSettingsQuery,
+} from "@/dashboard";
 import { isUntitledPath, useFileTabs } from "../hooks/useFileTabs";
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { useTabState } from "../hooks/useTabState";
@@ -228,8 +228,8 @@ function FileTreeToolbar({
   // Defer the dropdown's menu actions until after the menu has fully
   // closed — same trick the file-tree context menus use. Without this,
   // selecting "New File" mounts the inline rename / new-entry input
-  // inside dashboard-core while Radix's FocusScope (still alive for
-  // the DropdownMenu's close transition) yanks focus back, and the
+  // inside the dashboard module while Radix's FocusScope (still alive
+  // for the DropdownMenu's close transition) yanks focus back, and the
   // input's own onBlur tears it down before it can take focus.
   const pendingMenuAction = useRef<(() => void) | null>(null);
   const queueMenuAction = useCallback((fn: () => void) => {

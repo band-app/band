@@ -1,4 +1,3 @@
-import { useSettingsQuery, useUpdateSettings } from "@band-app/dashboard-core";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -9,6 +8,7 @@ import {
 } from "@band-app/ui";
 import { Check, ChevronDown, Copy } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSettingsQuery, useUpdateSettings } from "@/dashboard";
 // ---------------------------------------------------------------------------
 // App icon imports
 // ---------------------------------------------------------------------------
