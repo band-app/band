@@ -1274,9 +1274,20 @@ export function CodeBrowserView({
   // - Ctrl+(Shift)+Tab        → cycle file tabs
   // - Cmd/Ctrl+Shift+[/]      → cycle file tabs (matches the per-section
   //                             convention used by Terminal/Chats/Browser).
+  // - Ctrl+-                  → editor history: go back (VSCode parity)
+  // - Ctrl+Shift+-            → editor history: go forward (VSCode parity)
   //
   // The Code section has no sub-dockview groups, so Cmd/Ctrl+[/] is a no-op
   // here — we still swallow it so it doesn't bubble up to anything else.
+  //
+  // The editor-history shortcuts deliberately use **Ctrl** (not Cmd) to
+  // mirror VSCode on macOS and — more importantly — to dodge the desktop
+  // View menu's Zoom Out accelerator, which is registered as
+  // `CmdOrCtrl+-` in `apps/desktop/src/main/menu.ts`. Electron resolves
+  // `CmdOrCtrl` to Cmd on macOS, so `Ctrl+-` is unclaimed there. On
+  // Windows/Linux the same accelerator binds `Ctrl+-`, so the shortcut
+  // will be intercepted by the menu before reaching this handler; that's
+  // a known limitation to revisit when we ship outside macOS.
   useEffect(() => {
     const cycleFileTabs = (direction: 1 | -1) => {
       const tabs = fileTabs.openTabs;
@@ -1310,6 +1321,22 @@ export function CodeBrowserView({
         return;
       }
 
+      // Ctrl+- / Ctrl+Shift+- → editor history back/forward.
+      // Match on `e.code === "Minus"` so we don't have to juggle the
+      // Shift-modified `e.key` (which becomes `"_"` on US layouts).
+      // Require Ctrl exclusively (no Cmd, no Alt) to keep it distinct
+      // from the desktop Zoom Out accelerator.
+      if (e.ctrlKey && !e.metaKey && !e.altKey && e.code === "Minus") {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.shiftKey) {
+          handleEditorGoForward();
+        } else {
+          handleEditorGoBack();
+        }
+        return;
+      }
+
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
 
@@ -1330,7 +1357,14 @@ export function CodeBrowserView({
     };
     window.addEventListener("keydown", handler, { capture: true });
     return () => window.removeEventListener("keydown", handler, { capture: true });
-  }, [fileTabs.openTabs, fileTabs.activeTabPath, handleTabSelect, handleTabClose]);
+  }, [
+    fileTabs.openTabs,
+    fileTabs.activeTabPath,
+    handleTabSelect,
+    handleTabClose,
+    handleEditorGoBack,
+    handleEditorGoForward,
+  ]);
 
   // -------------------------------------------------------------------------
   // File tree imperative handle (drives "new file" / "new folder" from toolbar)
