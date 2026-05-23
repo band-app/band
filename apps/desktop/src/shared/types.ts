@@ -233,6 +233,26 @@ export interface BrowserCycleShortcutPayload {
   direction: 1 | -1;
 }
 
+/**
+ * Emitted when a page inside a `WebContentsView` requests a new
+ * window (`window.open(...)`, `target="_blank"`, middle / Cmd+click
+ * on a link, etc — issue #488). The native OS window is always
+ * denied; the renderer turns this event into a new Band browser tab
+ * in the same workspace, opening it next to the source tab.
+ *
+ * `disposition` is the raw Chromium hint about how the page asked
+ * the window to be opened — passed through unchanged so future
+ * renderer logic can distinguish e.g. "new-window" from "background-
+ * tab". Today the renderer treats all of them identically: a new
+ * Band tab focused for the user.
+ */
+export interface BrowserOpenWindowPayload {
+  browser_id: string;
+  workspace_id: string;
+  url: string;
+  disposition: string;
+}
+
 // ---------- macOS shell (camelCase invoke args) ----------
 
 export interface CheckAppExistsArgs {

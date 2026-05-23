@@ -287,12 +287,25 @@ function BrowserTab(props: IDockviewPanelHeaderProps<BrowserTabParams>) {
 
 const addTabRef: {
   current: {
-    onAdd: (groupId?: string) => void;
+    onAdd: (groupId?: string, options?: AddTabOptions) => void;
     onSplit: (groupId: string, direction: "right" | "below") => void;
   };
 } = {
   current: { onAdd: () => {}, onSplit: () => {} },
 };
+
+/**
+ * Options for `handleAddTab` and `addTabRef.current.onAdd`.
+ *
+ * `initialUrl` lets callers materialize a tab that loads a specific
+ * URL on mount — used by the `browser-open-window` listener (issue
+ * #488) to forward `window.open(url)` / `target="_blank"` clicks
+ * into a new Band tab. When omitted the tab opens blank, matching
+ * the Cmd+T / "+" button UX.
+ */
+interface AddTabOptions {
+  initialUrl?: string;
+}
 
 /** Shared ref for the close-tab action — used by BrowserTab's close button. */
 const closeTabRef: { current: ((browserId: string) => void) | null } = {
@@ -414,14 +427,20 @@ export function DockviewBrowserContainer({
   }, [workspaceId]);
 
   const handleAddTab = useCallback(
-    async (groupId?: string) => {
+    async (groupId?: string, addOptions?: AddTabOptions) => {
       const api = apiRef.current;
       if (!api) return;
 
       const browserId = newBrowserId();
       markBrowserFresh(browserId);
 
-      // Build panel options, targeting the specific group if provided
+      const initialUrl = addOptions?.initialUrl;
+
+      // Build panel options, targeting the specific group if provided.
+      // `initialUrl` (when present) gets injected into the panel's
+      // params so `BrowserPaneComponent` mounts with the URL already
+      // in hand — avoids the create-webview / server-fetch race on
+      // tabs spawned from `window.open` (issue #488).
       const options: Parameters<typeof api.addPanel>[0] = {
         id: browserId,
         component: "browserTab",
@@ -430,6 +449,7 @@ export function DockviewBrowserContainer({
         params: {
           workspaceId,
           browserId,
+          ...(initialUrl ? { initialUrl } : {}),
         },
       };
 
@@ -451,7 +471,14 @@ export function DockviewBrowserContainer({
       api.addPanel(options);
 
       try {
-        await trpc.browsers.create.mutate({ workspaceId, id: browserId });
+        // Persist `initialUrl` to the server-side browser record so
+        // workspace restarts and CLI-side `browsers.get` queries see
+        // the right starting URL.
+        await trpc.browsers.create.mutate({
+          workspaceId,
+          id: browserId,
+          ...(initialUrl ? { url: initialUrl } : {}),
+        });
       } catch (err) {
         console.error("[DockviewBrowserContainer] error pre-creating browser:", err);
       }
@@ -698,6 +725,60 @@ export function DockviewBrowserContainer({
           });
         },
       );
+    })();
+    return () => unlisten?.();
+  }, [handleAddTab]);
+
+  // Issue #488: page-initiated new-window requests (window.open,
+  // target="_blank", middle-click, Cmd+click) get routed by the main
+  // process through `setWindowOpenHandler` — the OS-level window is
+  // always denied, and a `browser-open-window` event is forwarded
+  // here with the requested URL. We materialize each one as a new
+  // Band browser tab in the same dockview group as the source pane
+  // so the navigation stays inside the workspace.
+  //
+  // Scoping: same as `browser-new-tab-shortcut` — multiple workspaces
+  // can have a DockviewBrowserContainer mounted simultaneously, so
+  // ignore events whose source browserId isn't one of ours.
+  //
+  // NOTE: `browser-open-window` must be in the preload's
+  // `ALLOWED_EVENT_NAMES` allowlist (`apps/desktop/src/preload/index.cts`)
+  // — otherwise `desktopListen` rejects synchronously and the listener
+  // never attaches.
+  useEffect(() => {
+    if (!isDesktop) return;
+    let unlisten: (() => void) | undefined;
+    void (async () => {
+      unlisten = await desktopListen<{
+        browser_id: string;
+        workspace_id: string;
+        url: string;
+        disposition: string;
+      }>("browser-open-window", (event) => {
+        const api = apiRef.current;
+        if (!api) return;
+        const sourceId = event.payload.browser_id;
+        const sourcePanel = sourceId ? api.getPanel(sourceId) : undefined;
+        // Ignore events from panes in other DockviewBrowserContainers —
+        // multiple workspaces' containers all receive every event.
+        if (!sourcePanel) return;
+        const groupId = sourcePanel.group?.id;
+        const url = event.payload.url;
+        if (!url) return;
+        // Drop the new tab into the *source* pane's group so the
+        // tab strip stays compact — same group placement Chrome
+        // and Edge use for window.open requests today. Focus
+        // follows the new tab (matches `markBrowserFresh` +
+        // `addPanel` defaults).
+        void handleAddTab(groupId, { initialUrl: url }).then(() => {
+          requestAnimationFrame(() => {
+            const panel = apiRef.current?.activePanel;
+            panel?.view.content.element
+              .querySelector<HTMLInputElement>("[data-band-address-input]")
+              ?.focus();
+          });
+        });
+      });
     })();
     return () => unlisten?.();
   }, [handleAddTab]);

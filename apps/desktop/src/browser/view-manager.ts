@@ -35,6 +35,7 @@ import {
   type BrowserKeyArg,
   type BrowserNavigateArgs,
   type BrowserNewTabShortcutPayload,
+  type BrowserOpenWindowPayload,
   type BrowserSplitShortcutPayload,
   type BrowserStopFindInPageArgs,
   type BrowserTitleChangedPayload,
@@ -58,6 +59,7 @@ import {
   buildLoadErrorPayload,
   isMainFrameFailure,
 } from "./load-error.js";
+import { decideWindowOpenAction } from "./window-open.js";
 
 const log = createLogger("view-manager");
 
@@ -1174,6 +1176,58 @@ export class BrowserViewManager {
     // is sufficient — confirmed empirically by tracing both events
     // through the pino debug logger during the cert-interstitial
     // implementation (issue #444).
+
+    // ---- New-window requests → new Band browser tab (issue #488) ----
+    // Chromium funnels every page-initiated new-window request
+    // through `setWindowOpenHandler`:
+    //   - `window.open(url)` from page JS
+    //   - `<a target="_blank">` clicks
+    //   - middle-click / Cmd+click on a link
+    //   - `<form target="_blank">` submissions
+    //
+    // Without a handler, Chromium would either spawn a detached
+    // `BrowserWindow` (jarring) or drop the request silently
+    // (also jarring). We unconditionally `deny` the OS window so
+    // no detached browser window can ever appear, then emit a
+    // `browser-open-window` event that the renderer turns into a
+    // new Band browser tab in the same workspace.
+    //
+    // The handler must return SYNCHRONOUSLY — Chromium can't wait
+    // on a promise here. `this.emit` is a synchronous
+    // `webContents.send` that just queues the IPC message, so
+    // emitting from inside the handler is safe.
+    //
+    // We delegate the "should this become a Band tab?" decision
+    // to `decideWindowOpenAction` so the routing rules can be
+    // unit-tested in isolation (no Electron import). The handler
+    // here only owns:
+    //   1. ALWAYS deny — no detached window, ever.
+    //   2. Emit the event only when the helper green-lights the
+    //      URL (`about:blank`, `javascript:`, custom schemes etc.
+    //      are denied without creating a Band tab).
+    view.webContents.setWindowOpenHandler((details) => {
+      const decision = decideWindowOpenAction(details.url);
+      if (decision.kind === "open-in-band") {
+        const payload: BrowserOpenWindowPayload = {
+          browser_id: key,
+          workspace_id: key,
+          url: decision.url,
+          disposition: details.disposition,
+        };
+        this.emit(Events.browserOpenWindow, payload);
+      } else {
+        log.debug(
+          { url: details.url, reason: decision.reason, disposition: details.disposition },
+          "window-open: denied without creating a Band tab",
+        );
+      }
+      // Always deny the native OS window — even for the "ignore"
+      // branch above. The renderer either gets a new Band tab
+      // (open-in-band) or nothing happens (ignore) — never a
+      // detached OS window.
+      return { action: "deny" };
+    });
+
     view.webContents.on("page-title-updated", (_e, title) => {
       const payload: BrowserTitleChangedPayload = {
         browser_id: key,

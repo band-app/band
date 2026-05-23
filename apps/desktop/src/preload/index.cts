@@ -96,6 +96,10 @@ const ALLOWED_EVENT_NAMES = new Set<string>([
   "browser-close-shortcut",
   "browser-cycle-shortcut",
   "browser-host-overridden",
+  // Issue #488: page-initiated window.open / target="_blank" /
+  // middle-click — forwarded by the main process so the renderer
+  // can open a new Band tab instead of a detached OS window.
+  "browser-open-window",
   "window-fullscreen-changed",
   "updater-status-changed",
 ]);
