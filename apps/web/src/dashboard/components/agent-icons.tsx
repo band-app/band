@@ -4,8 +4,13 @@ interface IconProps {
 
 export function ClaudeIcon({ className }: IconProps) {
   // Rendered in Claude's signature warm coral (Anthropic brand color)
-  // rather than `currentColor`, so the mark is recognizable regardless of
-  // the surrounding text color.
+  // rather than `currentColor`, so the mark is recognizable regardless
+  // of the surrounding text color. Because we ignore `currentColor`,
+  // `text-muted-foreground` on a parent button won't dim the icon —
+  // disabled/muted appearance must come from CSS `opacity` on a parent
+  // (which cascades through the stacking context and dims the coral
+  // fill along with everything else). The model-picker trigger in
+  // ChatView already does this via `disabled && "opacity-50"`.
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -46,9 +51,9 @@ export function OpenCodeIcon({ className }: IconProps) {
       fill="currentColor"
       className={className}
       role="img"
-      aria-label="OpenCode"
+      aria-label="opencode"
     >
-      <path opacity={0.5} d="M16 10H8v8h8z" />
+      <path fillOpacity={0.5} d="M16 10H8v8h8z" />
       <path fillRule="evenodd" clipRule="evenodd" d="M20 22H4V2h16zM16 6H8v12h8z" />
     </svg>
   );
