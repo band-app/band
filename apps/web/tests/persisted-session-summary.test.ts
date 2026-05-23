@@ -430,46 +430,34 @@ describe("chats.get — persisted activeSessionSummary", () => {
     expect(refreshed?.activeSessionId).toBe(SESSION_B);
   });
 
-  /**
-   * Touch SESSION_C's JSONL so its mtime is the newest among the seeded
-   * sessions. Earlier tests rewrite SESSION_B's file (no mtime override),
-   * which would otherwise win the mtime race. Tests that exercise the
-   * fallback path call this to make the expected outcome deterministic.
-   */
-  function makeSessionCNewest(): void {
-    const future = (Date.now() + 60_000) / 1000;
-    const file = join(projectsDir(tmpHome, repoDir), `${SESSION_C}.jsonl`);
-    utimesSync(file, future, future);
-  }
-
-  it("fallback (no persisted activeSessionId) selects the mtime-newest session and persists it", async () => {
-    makeSessionCNewest();
-
-    // Create a chat row WITHOUT calling setActiveSession first. Use
-    // chats.create so the row exists with no activeSessionId.
-    const chatId = `chat_${Date.now()}_fallback`;
+  it("chats.get on a row with no persisted activeSessionId leaves it null (no auto-promotion)", async () => {
+    // Under the event-log model (see issue #478) we no longer promote
+    // the mtime-newest on-disk session as the chat's active one. That
+    // legacy fallback race-conditioned against the "New session" UX:
+    // clearing chat.activeSessionId would silently get reverted to the
+    // prior session by the very next chats.get. Discovery of prior
+    // sessions is now an explicit user action via the history dropdown
+    // (`sessions.list`).
+    const chatId = `chat_${Date.now()}_no_fallback`;
     const created = await trpcMutation(server.url, "chats.create", {
       workspaceId,
       id: chatId,
     });
     expect(created.status).toBe(200);
 
-    // First chats.get should resolve the fallback (newest = SESSION_C)
-    // and return the persisted row.
     const first = await getChat(server.url, chatId);
-    expect(first?.activeSessionId).toBe(SESSION_C);
-    expect(first?.activeSessionSummary).toBe("latest work in progress");
-    expect(typeof first?.activeSessionLastModified).toBe("number");
+    expect(first?.activeSessionId == null).toBe(true);
+    expect(first?.activeSessionSummary == null).toBe(true);
 
-    // Subsequent reads should be pure SQLite — same values, no drift.
+    // Background refresh shouldn't promote either. Give it a beat,
+    // then verify the row is still empty.
+    await new Promise((r) => setTimeout(r, 500));
     const second = await getChat(server.url, chatId);
-    expect(second?.activeSessionId).toBe(SESSION_C);
-    expect(second?.activeSessionSummary).toBe("latest work in progress");
+    expect(second?.activeSessionId == null).toBe(true);
+    expect(second?.activeSessionSummary == null).toBe(true);
   });
 
-  it("setActiveSession with sessionId=undefined clears both id and summary", async () => {
-    makeSessionCNewest();
-
+  it("setActiveSession with sessionId=undefined clears both id and summary and stays cleared", async () => {
     const chatId = `chat_${Date.now()}_clear`;
     await setActiveSession(server.url, workspaceId, chatId, SESSION_A);
     const before = await getChat(server.url, chatId);
@@ -477,11 +465,20 @@ describe("chats.get — persisted activeSessionSummary", () => {
     expect(before?.activeSessionSummary).toBe("explore the codebase");
 
     await setActiveSession(server.url, workspaceId, chatId, undefined);
-    // The next chats.get sees no activeSessionId — the fallback resolver
-    // kicks in and picks the latest session. Verify it's not the
-    // session we just cleared.
+    // Under the event-log model the cleared row stays cleared — no
+    // background re-promotion of the mtime-newest session. The "New
+    // session" UX depends on this guarantee. See issue #478.
     const after = await getChat(server.url, chatId);
-    expect(after?.activeSessionId).toBe(SESSION_C);
-    expect(after?.activeSessionSummary).toBe("latest work in progress");
+    expect(after?.activeSessionId == null).toBe(true);
+    expect(after?.activeSessionSummary == null).toBe(true);
+
+    // Give the background refresh a beat to run — it must not resurrect
+    // any session either. 500ms is generous because the refresh involves
+    // a (synchronous, on-disk) `agent.getSessionInfo` call and runs on
+    // top of whatever parallel-test load is already on the CPU.
+    await new Promise((r) => setTimeout(r, 500));
+    const later = await getChat(server.url, chatId);
+    expect(later?.activeSessionId == null).toBe(true);
+    expect(later?.activeSessionSummary == null).toBe(true);
   });
 });

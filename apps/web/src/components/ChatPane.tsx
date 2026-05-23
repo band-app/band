@@ -41,13 +41,26 @@ export interface ChatPaneState {
   agentLabel: string;
   agents: CodingAgentDef[];
   newSessionRef: React.MutableRefObject<(() => void) | null>;
-  /** Notify that the active session changed — persists to the server. */
-  onActiveSessionChange: (sessionId: string | undefined) => void;
+  /**
+   * Background-notify path: called when the subscription resolves a new
+   * session id on its own (server auto-started one on first message). Just
+   * refreshes the chatQuery so the tab title updates — server-side
+   * task-runner already persisted `activeSessionId` on `session-start`, so
+   * no client mutation is needed and no remount is triggered.
+   */
+  onSessionDiscovered: (sessionId: string) => void;
+  /**
+   * User-initiated path: called from "Select past session" / "New session"
+   * affordances. Persists the change to the server, invalidates the
+   * chatQuery cache, AND bumps `paneKey` to remount ChatView so its
+   * subscription opens fresh against the new session.
+   */
+  onSwitchSession: (sessionId: string | undefined) => Promise<void>;
   /** Summary of the active session (if any). Used for tab titles. */
   activeSessionSummary: string | undefined;
   /** Switch to a different coding agent — triggers chat reload. */
   onSwitchAgent: (agentId: string) => void;
-  /** Key that increments on agent switch to force ChatView remount. */
+  /** Key that increments on agent switch / session switch to force ChatView remount. */
   paneKey: number;
 }
 
@@ -203,22 +216,60 @@ export function useChatPaneState(workspaceId: string, chatId: string): ChatPaneS
     setShowSessionList((prev) => !prev);
   }, []);
 
-  // Persist active session to the server. The server resolves the new
-  // session's summary inline, so the next chats.get carries the updated
-  // tab title. We also clear the local summary immediately so the title
-  // doesn't show the previous session's prompt while the mutation is in
-  // flight — the next chatQuery refetch will repopulate it.
-  const onActiveSessionChange = useCallback(
-    (sessionId: string | undefined) => {
-      trpc.chats.setActiveSession
-        .mutate({ workspaceId, chatId, sessionId: sessionId ?? undefined })
-        .then(() => {
-          queryClient.invalidateQueries({ queryKey: chatKey(chatId) });
-        })
-        .catch((err) => {
-          console.error("[ChatPane] error persisting active session:", err);
-        });
+  // Persist active session to the server AND remount the ChatView so its
+  // event-log subscription opens against the new session. Without the
+  // remount, the existing subscription would keep streaming the old
+  // session's events into the reducer's already-populated `messages`
+  // array, double-rendering the conversation.
+  //
+  // Sequence: await the setActiveSession mutation (so the server's chat
+  // row reflects the new sessionId by the time the new subscription
+  // opens) → update local `initialSessionId` → bump `paneKey`. ChatView
+  // remounts, its useChatSubscription opens a fresh stream, and the
+  // server's chat-events handler picks up the new chat.activeSessionId
+  // for replay.
+  // Background-notify path. Called when the subscription resolves a session
+  // id on its own (server's task-runner.session-start already persisted
+  // chat.activeSessionId — we just need to refresh the chatQuery so the
+  // tab title / cached summary update). Crucially: NO remount. The user
+  // is mid-conversation; tearing down the subscription would lose state.
+  const onSessionDiscovered = useCallback(
+    (sessionId: string) => {
       setActiveSessionSummary(undefined);
+      setInitialSessionId(sessionId);
+      sessionInitRef.current = true;
+      queryClient.invalidateQueries({ queryKey: chatKey(chatId) });
+    },
+    [chatId, queryClient],
+  );
+
+  // User-initiated path. Persists to server, then bumps `paneKey` to
+  // remount ChatView with the new session loaded from scratch.
+  //
+  // Sequence: await the setActiveSession mutation (so the chat row reflects
+  // the new sessionId by the time the new subscription opens) → update
+  // local `initialSessionId` → bump `paneKey`. ChatView remounts, its
+  // `useChatSubscription` opens a fresh stream, and the server's
+  // chat-events handler picks up the new chat.activeSessionId for replay.
+  const onSwitchSession = useCallback(
+    async (sessionId: string | undefined) => {
+      setActiveSessionSummary(undefined);
+      try {
+        await trpc.chats.setActiveSession.mutate({
+          workspaceId,
+          chatId,
+          sessionId: sessionId ?? undefined,
+        });
+      } catch (err) {
+        console.error("[ChatPane] error persisting active session:", err);
+        return;
+      }
+      queryClient.invalidateQueries({ queryKey: chatKey(chatId) });
+      // Pin the local state — chatQuery refetch could re-promote the prior
+      // session via `ensureActiveSessionSummary`'s latest-on-disk fallback.
+      setInitialSessionId(sessionId);
+      sessionInitRef.current = true;
+      setPaneKey((k) => k + 1);
     },
     [workspaceId, chatId, queryClient],
   );
@@ -260,7 +311,8 @@ export function useChatPaneState(workspaceId: string, chatId: string): ChatPaneS
     agentLabel,
     agents,
     newSessionRef,
-    onActiveSessionChange,
+    onSessionDiscovered,
+    onSwitchSession,
     activeSessionSummary,
     onSwitchAgent,
     paneKey,
@@ -295,7 +347,8 @@ export function ChatPane({ workspaceId, chatId, visible, wsActive, state }: Chat
         showSessionList={state.showSessionList}
         onShowSessionListChange={state.setShowSessionList}
         onNewSessionRef={state.newSessionRef}
-        onActiveSessionChange={state.onActiveSessionChange}
+        onSessionDiscovered={state.onSessionDiscovered}
+        onSwitchSession={state.onSwitchSession}
         agentType={state.agentType}
         codingAgentId={state.codingAgentId}
         onSwitchAgent={state.onSwitchAgent}

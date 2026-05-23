@@ -27,12 +27,7 @@
 
 import { createLogger } from "@band-app/logger";
 import { getOrCreateAgent } from "./agent-pool";
-import {
-  type ChatSession,
-  getChat,
-  updateChatActiveSession,
-  updateChatSessionSummary,
-} from "./chat-manager";
+import { type ChatSession, getChat, updateChatSessionSummary } from "./chat-manager";
 
 const log = createLogger("chat-session-summary");
 
@@ -76,17 +71,22 @@ export async function ensureActiveSessionSummary(
       return getChat(chatId);
     }
 
-    // Fallback: no activeSessionId on the row at all. Find the latest
-    // session by mtime and persist it as the active session.
-    if (!agent.getLatestSession) return chat;
-    const latest = await agent.getLatestSession(worktreePath);
-    if (!latest) return chat;
-    updateChatActiveSession(chatId, {
-      activeSessionId: latest.sessionId,
-      summary: latest.summary,
-      lastModified: latest.lastModified,
-    });
-    return getChat(chatId);
+    // No activeSessionId. Leave it null.
+    //
+    // The legacy code path used `agent.getLatestSession` here to promote
+    // the most-recently-modified session on disk as the active one — a
+    // useful default when first opening a workspace with prior sessions.
+    // That fallback breaks the "New session" flow under the event-log
+    // model: handleNewSession clears activeSessionId to null, the
+    // subsequent chats.get refetch fires this fallback, and the prior
+    // session gets re-promoted before the new task even starts.
+    //
+    // Under the event-log model the client subscribes to
+    // `/api/chats/:chatId/events?workspaceId=...`, which handles JSONL
+    // backfill server-side from chat.activeSessionId. When activeSessionId
+    // is null, the server returns an empty replay — exactly the right
+    // behaviour for a "new session" or never-touched chat. See issue #478.
+    return chat;
   } catch (err) {
     log.warn({ chatId, err }, "ensureActiveSessionSummary failed");
     return chat;
@@ -131,20 +131,14 @@ async function doRefresh(chatId: string, worktreePath: string): Promise<void> {
       return;
     }
 
-    // No activeSessionId yet — opportunistically resolve the latest
-    // session so the next read is on the pure-SQLite hot path.
-    if (!agent.getLatestSession) return;
-    const latest = await agent.getLatestSession(worktreePath);
-    if (!latest) return;
-    // Re-read the chat: a concurrent setActiveSession may have set
-    // an activeSessionId in the meantime, which we must not clobber.
-    const fresh = getChat(chatId);
-    if (!fresh || fresh.activeSessionId) return;
-    updateChatActiveSession(chatId, {
-      activeSessionId: latest.sessionId,
-      summary: latest.summary,
-      lastModified: latest.lastModified,
-    });
+    // No activeSessionId. Leave it null — the same rationale as in
+    // `ensureActiveSessionSummary` above applies to the background path
+    // too: re-promoting the mtime-newest on-disk session breaks the
+    // "New session" flow under the event-log model. After clearing
+    // chat.activeSessionId, this fire-and-forget refresh would race
+    // against the user's intent and re-resurrect the prior session.
+    // Discovery of prior sessions is now an explicit user action via
+    // the history dropdown (`sessions.list`). See issue #478.
   } catch (err) {
     log.warn({ chatId, err }, "active session refresh failed");
   }

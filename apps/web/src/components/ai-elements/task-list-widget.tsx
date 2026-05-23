@@ -38,7 +38,10 @@ export function TaskListWidget({ tasks, workspaceId }: { tasks: TaskMap; workspa
   const completedCount = taskList.filter((t) => t.status === "completed").length;
 
   return (
-    <div className="not-prose mb-2 w-full rounded border border-border/50">
+    <div
+      data-testid="task-list-widget__container"
+      className="not-prose mb-2 w-full rounded border border-border/50"
+    >
       <button
         type="button"
         onClick={toggleCollapsed}

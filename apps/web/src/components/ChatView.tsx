@@ -1,4 +1,6 @@
-import { useChat } from "@ai-sdk/react";
+// useChat from @ai-sdk/react was removed as part of the chat-event-log
+// refactor (issue #478). The chat is now driven by `useChatSubscription`
+// reading the server's event log directly.
 import { AgentIcon, useExperimentalContextMeter } from "@band-app/dashboard-core";
 import {
   Badge,
@@ -40,7 +42,6 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import type { UIMessage } from "ai";
 import { getToolName, isToolUIPart } from "ai";
 import {
   Bot,
@@ -54,17 +55,8 @@ import {
   ScrollText,
   X,
 } from "lucide-react";
-import {
-  Fragment,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { StickToBottomContext } from "use-stick-to-bottom";
-import { TaskChatTransport } from "../lib/task-chat-transport";
 import { trpc } from "../lib/trpc-client";
 import {
   Conversation,
@@ -89,6 +81,7 @@ import { applyTaskToolCall, isTaskTool, type TaskMap } from "./ai-elements/task-
 import type { ToolPart } from "./ai-elements/tool";
 import type { ToolCallItem } from "./ai-elements/tool-call";
 import { ToolCall } from "./ai-elements/tool-call";
+import { useChatSubscription } from "./chat/use-chat-subscription";
 
 const IN_PROGRESS_STATES = new Set<ToolPart["state"]>([
   "input-available",
@@ -125,7 +118,10 @@ function toolPartToItem(part: ToolPart): ToolCallItem {
 
 function ThinkingIndicator() {
   return (
-    <div className="mt-2 flex items-center gap-2 text-muted-foreground">
+    <div
+      data-testid="chat-pane__thinking-indicator"
+      className="mt-2 flex items-center gap-2 text-muted-foreground"
+    >
       <Loader2 className="size-4 lg:size-3.5 animate-spin" />
       <span className="text-base lg:text-sm">Thinking...</span>
     </div>
@@ -192,53 +188,10 @@ function ConversationSkeleton() {
   );
 }
 
-type UIMessageParts = ReturnType<
-  typeof import("@ai-sdk/react").useChat
->["messages"][number]["parts"];
-
 interface QueuedFilePart {
   mediaType: string;
   url: string;
   filename?: string;
-}
-
-type QueueSegment = {
-  userPrompt: string | null;
-  userFiles?: QueuedFilePart[];
-  parts: UIMessageParts;
-};
-
-/**
- * Splits an assistant message's parts at `data-prompt` boundaries so each
- * queued task renders as a separate user→assistant pair.
- *
- * Every `data-prompt` becomes a user bubble — they are only emitted for
- * queued messages (never for the initial direct message which is already
- * a real user message in the messages array).
- */
-function splitMessageAtQueueBoundaries(parts: UIMessageParts): QueueSegment[] {
-  const segments: QueueSegment[] = [];
-  let current: QueueSegment = { userPrompt: null, parts: [] };
-
-  for (const part of parts) {
-    if (part.type === "data-prompt") {
-      // Finish current segment and start a new one
-      segments.push(current);
-      const data = (part as { type: string; data: { text: string; files?: QueuedFilePart[] } })
-        .data;
-      current = {
-        userPrompt: data.text,
-        userFiles: data.files,
-        parts: [],
-      };
-      continue;
-    }
-    // Skip other data-* parts (data-result, data-session) from rendering
-    if (typeof part.type === "string" && part.type.startsWith("data-")) continue;
-    current.parts.push(part);
-  }
-  segments.push(current);
-  return segments;
 }
 
 interface ModelInfo {
@@ -285,8 +238,21 @@ interface ChatViewProps {
   onShowSessionListChange: (show: boolean) => void;
   onStreamingChange?: (streaming: boolean) => void;
   onNewSessionRef?: React.MutableRefObject<(() => void) | null>;
-  /** Called when the active session changes (user picks one, or a new one starts). */
-  onActiveSessionChange?: (sessionId: string | undefined) => void;
+  /**
+   * Background-notify path: fired from the subscription's reducer state
+   * when the server resolves a session id on its own (first message in a
+   * brand-new chat). Parent should refresh tab-title cache only — must
+   * NOT remount this component, or the in-flight conversation gets torn
+   * down. Server already persisted `chat.activeSessionId` via
+   * task-runner.session-start.
+   */
+  onSessionDiscovered?: (sessionId: string) => void;
+  /**
+   * User-initiated path: fired by "Select past session" and "New session"
+   * affordances. Parent should persist + remount this component so its
+   * subscription opens fresh against the new session's events.
+   */
+  onSwitchSession?: (sessionId: string | undefined) => Promise<void> | void;
   chatKey?: number;
   agentType?: string;
   codingAgentId?: string;
@@ -303,60 +269,28 @@ export function ChatView({
   workspaceName,
   supportsSessionListing,
   initialSessionId,
-  sessionQueryDone = false,
+  sessionQueryDone: _sessionQueryDone = false,
   showSessionList: _showSessionList,
   onShowSessionListChange,
   onStreamingChange,
   onNewSessionRef,
-  onActiveSessionChange,
-  chatKey = 0,
+  onSessionDiscovered,
+  onSwitchSession,
+  chatKey: _chatKey = 0,
   agentType,
   codingAgentId,
   onSwitchAgent,
   visible,
   wsActive,
 }: ChatViewProps) {
-  const sessionIdRef = useRef<string | undefined>(undefined);
-  const lastEventIdRef = useRef<number | undefined>(undefined);
-  const firstEventIdRef = useRef<number | undefined>(undefined);
-  // Index of the first JSONL message currently in `messages`. Used as the
-  // exclusive upper bound for the next "older messages" pagination request.
-  // Set when the server returns history sourced from JSONL (firstEventId is
-  // null). When pagination is buffer-based, this stays undefined.
-  const firstMessageIndexRef = useRef<number | undefined>(undefined);
-  const [activeSessionId, setActiveSessionId] = useState<string | undefined>(undefined);
-  // If we have an initialSessionId we're going to call loadMessages() in the
-  // mount effect below — initialize loadingHistory to true so the skeleton
-  // shows on the first render rather than briefly flashing the empty state.
-  const [loadingHistory, setLoadingHistory] = useState(!!initialSessionId);
   // True once the user explicitly clears the session via "New session". The
-  // `initialSessionId` prop reflects the parent's persisted activeSessionId
-  // and may stay stale for a tick (or longer) after handleNewSession fires,
-  // so we ignore it for skeleton/empty-state decisions once cleared.
+  // parent's `initialSessionId` prop may stay stale for a tick or longer
+  // after `handleNewSession` fires; we ignore it for skeleton/empty-state
+  // decisions once cleared.
   const [initialSessionCleared, setInitialSessionCleared] = useState(false);
-  // The session this view is currently on, considering local navigation:
-  //   - activeSessionId once the mount effect / handleSelectSession sets it
-  //   - else the initialSessionId prop, unless the user explicitly cleared
-  // This is what render conditions should consult, not initialSessionId.
-  const currentSessionId =
-    activeSessionId ?? (initialSessionCleared ? undefined : initialSessionId);
-  const [hasMore, setHasMore] = useState(false);
-  const [usage, setUsage] = useState<UsageData | undefined>(undefined);
   const [contextMeterEnabled] = useExperimentalContextMeter();
-  const [loadingOlder, setLoadingOlder] = useState(false);
-  const scrollHeightBeforePrependRef = useRef<number | null>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const stickyContextRef = useRef<StickToBottomContext>(null);
-  // Gate that ensures we run the initial history-load exactly once for a
-  // given (chatKey, initialSessionId) tuple. Distinct from the connect
-  // retry loop, which is allowed to fire multiple times.
-  const initialHistoryLoadedRef = useRef(false);
-  // Mirrors `useChat`'s status so the retry loop can read it without
-  // forcing a re-render of the closure.
-  const statusRef = useRef<"submitted" | "streaming" | "ready" | "error">("ready");
-  // Holds the AbortController for the in-flight reconnect attempt so a new
-  // attempt (or unmount) can cancel the old one cleanly.
-  const connectAbortRef = useRef<AbortController | null>(null);
   const prevVisibleRef = useRef(visible);
 
   // Scroll to bottom when the panel becomes visible (e.g. switching tabs in dockview).
@@ -412,7 +346,13 @@ export function ChatView({
       .query({ agentId: codingAgentId || undefined })
       .then((data) => setModes(data.modes as { id: string; name: string; description?: string }[]))
       .catch(() => setModes([]));
-    // Hydrate persisted mode from the chat record, or derive from active task
+    // Hydrate persisted mode from the chat record. The active-task mode
+    // hint used to live here too; under the event-log model the running
+    // task's mode arrives via the `task-started` event the subscription
+    // delivers — the reducer doesn't expose it on `state` yet because the
+    // mode-dropdown UI doesn't need it for any current code path. If the
+    // dropdown needs to reflect mid-stream mode changes, surface it from
+    // the reducer rather than re-introducing a side-channel probe.
     trpc.chats.get
       .query({ chatId })
       .then((data) => {
@@ -422,15 +362,7 @@ export function ChatView({
         }
       })
       .catch(() => {});
-    trpc.tasks.get
-      .query({ workspaceId, chatId })
-      .then((data) => {
-        if (data.task?.mode && data.task.status === "running") {
-          setSelectedMode(data.task.mode);
-        }
-      })
-      .catch(() => {});
-  }, [workspaceId, chatId, codingAgentId]);
+  }, [chatId, codingAgentId]);
 
   // Listen for Shift+Tab mode toggle dispatched from the workspace layout
   useEffect(() => {
@@ -459,20 +391,12 @@ export function ChatView({
     [models, selectedModel],
   );
 
-  // Drop the SDK-reported `maxContextTokens` when the model changes — that
-  // value was for the prior model and would otherwise stick until the next
-  // turn refreshes it (e.g. switching Sonnet 1M → Haiku 200k would still
-  // show the 1M denominator). Falling back to undefined lets ContextMeter
-  // use the static MODEL_CONTEXT_WINDOWS entry for the new model in the
-  // meantime.
-  useEffect(() => {
-    if (!selectedModel) return;
-    setUsage((prev) => {
-      if (!prev || prev.maxContextTokens === undefined) return prev;
-      const { maxContextTokens: _drop, ...rest } = prev;
-      return rest;
-    });
-  }, [selectedModel]);
+  // (Legacy effect that dropped `maxContextTokens` from `usage` on model
+  // switch lived here. Under the event-log model `usage` is owned by the
+  // subscription reducer and the ContextMeter component handles the
+  // model-switch fallback locally by treating `maxContextTokens` as a
+  // hint, not a contract — see `ContextMeter` and `MODEL_CONTEXT_WINDOWS`
+  // below.)
 
   useEffect(() => {
     const modelsP = trpc.models.listAll
@@ -516,213 +440,103 @@ export function ChatView({
     [chatId],
   );
 
-  interface QueuedMessageView {
-    id: string;
-    text: string;
-    files?: QueuedFilePart[];
-  }
-  const [queuedMessages, setQueuedMessages] = useState<QueuedMessageView[]>([]);
-
-  // Subscribe to queue state changes via a dedicated tRPC subscription.
-  // The backend pushes the full queue array on every change (push, shift,
-  // remove, clear) so the frontend always has the authoritative state.
-  useEffect(() => {
-    const subscription = trpc.queue.stream.subscribe(
-      { workspaceId, chatId },
-      {
-        onData(data: { messages: QueuedMessageView[] }) {
-          setQueuedMessages(data.messages);
-        },
-      },
-    );
-    return () => subscription.unsubscribe();
-  }, [workspaceId, chatId]);
-
-  const transport = useMemo(
-    () =>
-      new TaskChatTransport(
-        workspaceId,
-        chatId,
-        () => sessionIdRef.current,
-        () => lastEventIdRef.current,
-      ),
-    [workspaceId, chatId],
-  );
-
-  // Close the SSE connection when the transport is replaced (chat/workspace
-  // change) or the component unmounts. This releases the HTTP connection back
-  // to the browser pool — critical because browsers limit HTTP/1.1 connections
-  // to ~6 per origin, and each SSE stream holds one open.
-  useEffect(() => {
-    return () => transport.close();
-  }, [transport]);
-
-  useEffect(() => {
-    transport.mode = selectedMode;
-  }, [transport, selectedMode]);
-
-  useEffect(() => {
-    transport.model = userModelOverride ?? agentDefaultModel;
-  }, [transport, userModelOverride, agentDefaultModel]);
-
-  useEffect(() => {
-    transport.codingAgentId = codingAgentId;
-  }, [transport, codingAgentId]);
-
-  const { messages, sendMessage, status, setMessages, stop, resumeStream } = useChat({
-    id: `${chatId}:${chatKey}`,
-    transport,
-    // Don't auto-resume — we control when to resume so that sessionIdRef
-    // and lastEventIdRef are populated first (from loadMessages).
-    resume: false,
-    onData: (dataPart) => {
-      if (
-        dataPart.type === "data-session" &&
-        dataPart.data != null &&
-        typeof dataPart.data === "object" &&
-        "sessionId" in (dataPart.data as Record<string, unknown>)
-      ) {
-        const sid = (dataPart.data as { sessionId: string }).sessionId;
-        sessionIdRef.current = sid;
-        onActiveSessionChange?.(sid);
-      } else if (
-        dataPart.type === "data-usage" &&
-        dataPart.data != null &&
-        typeof dataPart.data === "object"
-      ) {
-        const data = dataPart.data as Partial<UsageData>;
-        if (typeof data.inputTokens === "number" && typeof data.outputTokens === "number") {
-          const next: UsageData = {
-            provider: data.provider,
-            inputTokens: data.inputTokens,
-            outputTokens: data.outputTokens,
-            cacheReadTokens: data.cacheReadTokens,
-            cacheCreationTokens: data.cacheCreationTokens,
-            reasoningOutputTokens: data.reasoningOutputTokens,
-            contextTokens: data.contextTokens,
-            totalProcessedTokens: data.totalProcessedTokens,
-            maxContextTokens: data.maxContextTokens,
-          };
-          // SSE gap-fill can replay older usage chunks on reconnect. Prefer
-          // monotonic totalProcessedTokens when present so context may shrink
-          // after compaction; older providers fall back to context size.
-          setUsage((prev) => {
-            const shouldUseNext =
-              prev?.totalProcessedTokens !== undefined && next.totalProcessedTokens !== undefined
-                ? next.totalProcessedTokens >= prev.totalProcessedTokens
-                : usageContextSize(next) >= usageContextSize(prev);
-            return shouldUseNext ? next : prev;
-          });
-        }
-      }
-    },
+  // -----------------------------------------------------------------------
+  // The new event-log subscription. One hook replaces:
+  //   • useChat from @ai-sdk/react
+  //   • TaskChatTransport
+  //   • sessionIdRef + lastEventIdRef + firstEventIdRef + firstMessageIndexRef
+  //   • connectAbortRef + statusRef
+  //   • loadMessages + connectToRunningStream + the 5-step backoff retry
+  //   • the focus/online listener
+  //   • the wsActive deactivate/reactivate effect
+  //   • the trpc.queue.stream subscription
+  //   • optimistic queuedMessages state
+  //   • the tasks.get pre-flight in handleSubmit
+  //
+  // Server is the single writer. The hook reads the event log and folds
+  // it through `chatEventReducer`. See `docs/experiments/chat-event-log.md`.
+  // -----------------------------------------------------------------------
+  const subscription = useChatSubscription({
+    workspaceId,
+    chatId,
+    mode: selectedMode,
+    model: userModelOverride ?? agentDefaultModel,
+    codingAgentId,
+    // Mirrors the legacy wsActive lifecycle — release the connection
+    // slot while the pane is not the active dockview tab; reopen on
+    // reactivation (visibility / wsActive transitions). The hook also
+    // factors in `document.visibilityState` internally.
+    enabled: wsActive !== false,
   });
+  const { messages, status, sessionId, queuedMessages, usage, send, cancel } = subscription;
 
-  const abortingRef = useRef(false);
+  const isStreaming = status === "submitting" || status === "streaming";
 
-  // Keep statusRef in sync with the live `status` so the connect-retry loop
-  // (which can outlive a single render) can observe transitions to
-  // "submitted"/"streaming" and stop retrying.
+  // Forward subscription-discovered session ids to the parent for tab-title
+  // cache refresh. Uses the background path (`onSessionDiscovered`) — the
+  // user-initiated path (`onSwitchSession`) is reserved for explicit "select
+  // session" / "new session" actions and includes a remount.
+  //
+  // Seeded with `initialSessionId` so we don't re-fire for the value the
+  // parent already gave us (which would happen on every remount after a
+  // session switch).
+  const lastNotifiedSessionRef = useRef<string | undefined>(initialSessionId);
   useEffect(() => {
-    statusRef.current = status;
-  }, [status]);
+    if (sessionId && lastNotifiedSessionRef.current !== sessionId) {
+      lastNotifiedSessionRef.current = sessionId;
+      onSessionDiscovered?.(sessionId);
+    }
+  }, [sessionId, onSessionDiscovered]);
+
+  // Mirror legacy state shape for the queued-message render block + drag-drop.
+  // `subscription.queuedMessages` is the server-pushed authoritative list,
+  // but dnd-kit needs the local order to update immediately on drop
+  // (otherwise items snap back). `optimisticQueue`, when non-null,
+  // overrides the subscription's view until the next `queue-updated` event
+  // lands — at which point we clear it and the server is authoritative again.
+  type QueuedMessageView = { id: string; text: string; files?: QueuedFilePart[] };
+  const [optimisticQueue, setOptimisticQueue] = useState<QueuedMessageView[] | null>(null);
+  // Clear optimistic state on every subscription update — the server is
+  // now the source of truth. If the user did rapid actions, the subscription
+  // catches up within ms; the small reconciliation flicker is acceptable.
+  //
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally watching `queuedMessages`
+  useEffect(() => {
+    setOptimisticQueue(null);
+  }, [queuedMessages]);
+  const queuedMessagesView: QueuedMessageView[] = optimisticQueue ?? queuedMessages;
+
+  // The current session this view is on.
+  //
+  // Once the user clicks "New session", `initialSessionCleared` is set to
+  // `true` and we MUST treat the chat as session-less regardless of what
+  // the subscription's `sessionId` reports. Without this, the still-open
+  // (pre-remount) subscription's `sessionId` keeps the chat looking like
+  // it's on the old session — the "session history" tab title stays, and
+  // the skeleton stays mounted via the `!!currentSessionId` branch of the
+  // skeleton condition below.
+  //
+  // Otherwise, the subscription's `sessionId` is authoritative once a
+  // `session-resolved` event has arrived; before that, fall back to
+  // `initialSessionId` (the parent's cached value from `chats.get`).
+  const currentSessionId = initialSessionCleared ? undefined : (sessionId ?? initialSessionId);
+
+  // Drop the SDK-reported `maxContextTokens` already covered by the hook
+  // via reducer state — handled below where `usage` is consumed.
+
+  // No older-messages pagination on the first cut. The subscription's
+  // initial replay loads the recent window from the buffer + JSONL.
+  // Scroll-up pagination can be added back as a follow-up by paginating
+  // the chat-events subscription with `Last-Event-ID` from below the
+  // current replay window — see `docs/experiments/chat-event-log.md`.
+  const hasMore = false;
+  const loadingHistory =
+    !isStreaming && messages.length === 0 && !!initialSessionId && !subscription.isConnected;
+  const loadingOlder = false;
 
   const handleStop = useCallback(() => {
-    abortingRef.current = true;
-    transport.abort().finally(() => {
-      abortingRef.current = false;
-      stop();
-    });
-  }, [transport, stop]);
-
-  const isStreaming = status === "submitted" || status === "streaming";
-
-  // Cancel any in-flight reconnect retry. Called before opening a new one
-  // and on unmount/dependency change.
-  const cancelConnectAttempt = useCallback(() => {
-    if (connectAbortRef.current) {
-      connectAbortRef.current.abort();
-      connectAbortRef.current = null;
-    }
-  }, []);
-
-  /**
-   * Try to reconnect to a running task's SSE stream, retrying with backoff
-   * until one of:
-   *   - `useChat.status` flips to "submitted"/"streaming" (success)
-   *   - the server confirms no task is running (clean give-up)
-   *   - we exhaust the retry budget
-   *   - the attempt is cancelled (unmount / new attempt)
-   *
-   * Why retry? `GET /api/tasks/:chatId/stream` returns 204 if the in-memory
-   * task hasn't been registered yet (registration lag, server boot, brief
-   * race during workspace switch). The Vercel AI SDK treats 204 as "nothing
-   * to resume" and silently leaves status at "ready" — no thinking indicator,
-   * no error, no log. The retry loop turns that silent failure into either
-   * a real connection or a clean give-up.
-   */
-  const connectToRunningStream = useCallback(async () => {
-    cancelConnectAttempt();
-    const controller = new AbortController();
-    connectAbortRef.current = controller;
-    const signal = controller.signal;
-
-    // Read the latest status off the ref. Wrapping the read in a function
-    // keeps TypeScript from narrowing the ref's union type across awaits —
-    // `statusRef.current` is mutable, so a check earlier in the function
-    // shouldn't shrink its type later.
-    const isAttached = (): boolean => {
-      const s = statusRef.current;
-      return s === "submitted" || s === "streaming";
-    };
-
-    // Backoff schedule (ms): first attempt is immediate, then 250 → 500 →
-    // 1000 → 2000. Total wait ~3.75s before giving up — long enough to
-    // cover task registration lag without blocking the UI for too long.
-    const delays = [0, 250, 500, 1000, 2000];
-
-    try {
-      for (let i = 0; i < delays.length; i++) {
-        if (signal.aborted) return;
-
-        if (delays[i] > 0) {
-          await new Promise<void>((r) => setTimeout(r, delays[i]));
-          if (signal.aborted) return;
-        }
-
-        // If `useChat` is already streaming (e.g. a sendMessage just took
-        // over while we were waiting), we're done.
-        if (isAttached()) return;
-
-        // Attempt the resume. The transport aborts any prior in-flight
-        // connection internally, so calling this repeatedly is safe.
-        resumeStream();
-
-        // Give the AI SDK a tick to update `status`. If the GET succeeds
-        // and the server has events to send, status flips to "streaming"
-        // shortly after the first chunk arrives.
-        await new Promise<void>((r) => setTimeout(r, 350));
-        if (signal.aborted) return;
-
-        if (isAttached()) return;
-
-        // Status didn't change → resumeStream resolved to null (204) or
-        // hasn't seen events yet. Ask the server: is anything actually
-        // running? If not, give up cleanly. If yes, keep retrying.
-        try {
-          const { running } = await trpc.tasks.isRunning.query({ workspaceId, chatId });
-          if (signal.aborted) return;
-          if (!running) return;
-        } catch {
-          // Network blip — keep retrying with the same backoff.
-        }
-      }
-    } finally {
-      if (connectAbortRef.current === controller) {
-        connectAbortRef.current = null;
-      }
-    }
-  }, [workspaceId, chatId, resumeStream, cancelConnectAttempt]);
+    void cancel();
+  }, [cancel]);
 
   useEffect(() => {
     onStreamingChange?.(isStreaming);
@@ -734,297 +548,27 @@ export function ChatView({
     }
   }, [isStreaming, handleStop]);
 
-  const doSendMessage = useCallback(
-    (message: PromptInputMessage) => {
-      if (message.files?.length) {
-        const dataTransfer = new DataTransfer();
-        for (const file of message.files) {
-          dataTransfer.items.add(file);
-        }
-        sendMessage({ text: message.text, files: dataTransfer.files });
-      } else {
-        sendMessage({ text: message.text });
-      }
-    },
-    [sendMessage],
-  );
-
-  // Load session history, then attempt to resume the live stream.
-  // This ensures sessionIdRef and lastEventIdRef are set BEFORE
-  // reconnectToStream runs, so gap-fill replays from the right point.
-  const loadMessages = useCallback(
-    async (sessionId: string) => {
-      // Kill any stale stream before loading + resuming to prevent
-      // two concurrent streams writing to the same messages array.
-      stop();
-      cancelConnectAttempt();
-      setLoadingHistory(true);
-      try {
-        const data = await trpc.sessions.messages.query({
-          workspaceId,
-          chatId,
-          sessionId,
-        });
-        setMessages(data.messages as unknown as UIMessage[]);
-        lastEventIdRef.current = data.lastEventId ?? undefined;
-        firstEventIdRef.current = data.firstEventId ?? undefined;
-        firstMessageIndexRef.current =
-          (data as { firstMessageIndex?: number | null }).firstMessageIndex ?? undefined;
-        setHasMore(data.hasMore);
-        // Re-hydrate the context meter from the persisted snapshot so it
-        // survives task completion and page refreshes.
-        if (data.lastUsage) {
-          setUsage({
-            provider: data.lastUsage.provider,
-            inputTokens: data.lastUsage.inputTokens,
-            outputTokens: data.lastUsage.outputTokens,
-            cacheReadTokens: data.lastUsage.cacheReadTokens,
-            cacheCreationTokens: data.lastUsage.cacheCreationTokens,
-            reasoningOutputTokens: data.lastUsage.reasoningOutputTokens,
-            contextTokens: data.lastUsage.contextTokens,
-            totalProcessedTokens: data.lastUsage.totalProcessedTokens,
-            maxContextTokens: data.lastUsage.maxContextTokens,
-          });
-        }
-      } finally {
-        setLoadingHistory(false);
-      }
-      // Now that refs are populated, try to reconnect to a running stream
-      // with retries. If no task is running on the server, the loop gives
-      // up cleanly after one round-trip to tasks.isRunning.
-      void connectToRunningStream();
-    },
-    [workspaceId, chatId, setMessages, connectToRunningStream, stop, cancelConnectAttempt],
-  );
-
-  // Load older messages when the user scrolls to the top of the chat.
-  // Uses the buffer cursor (firstEventId) when available, otherwise the
-  // JSONL cursor (firstMessageIndex). Exactly one of the two is set.
-  const loadOlderMessages = useCallback(async () => {
-    const sessionId = sessionIdRef.current;
-    const beforeEventId = firstEventIdRef.current;
-    const beforeMessageIndex = firstMessageIndexRef.current;
-    const haveCursor = beforeEventId !== undefined || beforeMessageIndex !== undefined;
-    if (!sessionId || !haveCursor || !hasMore || loadingOlder || loadingHistory) {
-      return;
-    }
-
-    setLoadingOlder(true);
-    try {
-      const data = await trpc.sessions.messages.query({
-        workspaceId,
-        chatId,
-        sessionId,
-        beforeEventId,
-        beforeMessageIndex,
-        limit: 100,
-      });
-
-      if (data.messages.length > 0) {
-        // Capture scroll height before prepend for position restoration
-        const scrollEl = stickyContextRef.current?.scrollRef?.current;
-        if (scrollEl) {
-          scrollHeightBeforePrependRef.current = scrollEl.scrollHeight;
-        }
-
-        setMessages((prev) => [...(data.messages as unknown as UIMessage[]), ...prev]);
-        firstEventIdRef.current = data.firstEventId ?? undefined;
-        firstMessageIndexRef.current =
-          (data as { firstMessageIndex?: number | null }).firstMessageIndex ?? undefined;
-        setHasMore(data.hasMore);
-      } else {
-        setHasMore(false);
-      }
-    } catch (err) {
-      console.error("[loadOlderMessages] error:", err);
-    } finally {
-      setLoadingOlder(false);
-    }
-  }, [workspaceId, chatId, hasMore, loadingOlder, loadingHistory, setMessages]);
-
-  // Restore scroll position after prepending older messages so the user's
-  // viewport doesn't jump. Fires synchronously before the browser paints.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: messages triggers re-run after prepend
-  useLayoutEffect(() => {
-    const prevHeight = scrollHeightBeforePrependRef.current;
-    if (prevHeight === null) return;
-    scrollHeightBeforePrependRef.current = null;
-
-    const scrollEl = stickyContextRef.current?.scrollRef?.current;
-    if (!scrollEl) return;
-
-    const delta = scrollEl.scrollHeight - prevHeight;
-    if (delta > 0) {
-      scrollEl.scrollTop += delta;
-    }
-  }, [messages]);
-
-  // Observe a sentinel element at the top of the chat to trigger loading
-  // older messages when the user scrolls near the top.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: hasMore/loadingOlder/loadingHistory re-create observer when state changes
-  useEffect(() => {
-    const sentinel = sentinelRef.current;
-    const scrollEl = stickyContextRef.current?.scrollRef?.current;
-    if (!sentinel || !scrollEl) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0]?.isIntersecting) {
-          loadOlderMessages();
-        }
-      },
-      {
-        root: scrollEl,
-        rootMargin: "200px 0px 0px 0px",
-        threshold: 0,
-      },
-    );
-
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [hasMore, loadingOlder, loadingHistory, loadOlderMessages]);
-
-  // Wait for the parent's session query to resolve before doing anything.
-  // This avoids the race where an eager resumeStream() opens stream A,
-  // then initialSessionId arrives → loadMessages opens stream B, and
-  // both pump chunks into the same messages array (causing duplicates).
-  //
-  // The history-load itself is one-shot per (chatKey, initialSessionId):
-  // we don't want to refetch all messages on every render. The reconnect
-  // attempt embedded in loadMessages (via connectToRunningStream) IS
-  // retryable, and is also re-triggered on tab focus / network online
-  // events below.
-  useEffect(() => {
-    if (initialHistoryLoadedRef.current) return;
-    if (initialSessionId) {
-      initialHistoryLoadedRef.current = true;
-      sessionIdRef.current = initialSessionId;
-      setActiveSessionId(initialSessionId);
-      loadMessages(initialSessionId);
-    } else if (sessionQueryDone && !initialSessionId) {
-      // No sessions — just try resuming a running task (e.g. started from
-      // CLI). Use the retrying connect helper instead of a single
-      // resumeStream() call so we cover the registration-lag window.
-      initialHistoryLoadedRef.current = true;
-      void connectToRunningStream();
-    }
-  }, [initialSessionId, sessionQueryDone, loadMessages, connectToRunningStream]);
-
-  // Re-attempt reconnect when the tab regains focus or the network comes
-  // back online. We skip if we're already streaming or already attempting,
-  // and we ask the server first to avoid a retry storm when nothing's
-  // actually running.
-  useEffect(() => {
-    const maybeReconnect = () => {
-      if (statusRef.current === "submitted" || statusRef.current === "streaming") return;
-      if (connectAbortRef.current) return;
-      // Fire-and-forget: connectToRunningStream itself handles the
-      // is-running short-circuit.
-      void connectToRunningStream();
-    };
-    const onFocus = () => maybeReconnect();
-    const onOnline = () => maybeReconnect();
-    window.addEventListener("focus", onFocus);
-    window.addEventListener("online", onOnline);
-    return () => {
-      window.removeEventListener("focus", onFocus);
-      window.removeEventListener("online", onOnline);
-    };
-  }, [connectToRunningStream]);
-
-  // Release the SSE connection while the workspace is hidden so cached
-  // (but inactive) workspaces don't pin HTTP/1.1 connection slots —
-  // browsers cap at ~6 per origin and the dockview LRU keeps several
-  // workspaces alive at once. The server-side task keeps running
-  // independently; on reactivation we re-fetch the persisted session
-  // history (so messages that landed while we were hidden show up) and
-  // then resume any still-running stream via Last-Event-ID.
-  const prevWsActiveRef = useRef(wsActive);
-  useEffect(() => {
-    const prev = prevWsActiveRef.current;
-    prevWsActiveRef.current = wsActive;
-
-    if (prev && !wsActive) {
-      // Workspace just deactivated — abort any in-flight reconnect retry
-      // and close the active SSE fetch. transport.close() is a no-op when
-      // there's no open connection (idle chat).
-      cancelConnectAttempt();
-      transport.close();
-    } else if (!prev && wsActive && sessionIdRef.current) {
-      // Workspace just reactivated and we know about a session — refresh
-      // from the persisted JSONL state. loadMessages also calls
-      // connectToRunningStream at the end, so an in-flight task is
-      // resumed from Last-Event-ID. If the task completed while we were
-      // hidden, this is the only path that surfaces the final message
-      // (the resume endpoint returns 204 once the in-memory task is
-      // gone, so resumeStream alone wouldn't pick it up).
-      void loadMessages(sessionIdRef.current);
-    }
-  }, [wsActive, transport, cancelConnectAttempt, loadMessages]);
-
-  // Cancel any in-flight reconnect on unmount or when the underlying
-  // chat/key changes (transport gets recreated).
-  // biome-ignore lint/correctness/useExhaustiveDependencies: chatKey/chatId trigger cleanup
-  useEffect(() => {
-    return () => cancelConnectAttempt();
-  }, [chatKey, chatId, cancelConnectAttempt]);
-
+  // Session switching — handled by the parent (`ChatPane.onSwitchSession`)
+  // which persists to the server and bumps `paneKey` to remount this
+  // component with a clean reducer state. The new subscription opens
+  // against the new session's events.
   const handleSelectSession = useCallback(
     async (sessionId: string) => {
-      // Stop any active stream before switching sessions
-      stop();
-      cancelConnectAttempt();
-      sessionIdRef.current = sessionId;
-      lastEventIdRef.current = undefined;
-      firstEventIdRef.current = undefined;
-      firstMessageIndexRef.current = undefined;
-      setHasMore(false);
-      setActiveSessionId(sessionId);
-      onActiveSessionChange?.(sessionId);
-      setMessages([]);
-      setQueuedMessages([]);
-      setUsage(undefined);
+      // Clear the server-side queue: queued messages were enqueued against
+      // the previous session; carrying them over isn't well-defined.
       trpc.queue.clear.mutate({ workspaceId, chatId }).catch(() => {});
       onShowSessionListChange(false);
-      await loadMessages(sessionId);
+      await onSwitchSession?.(sessionId);
     },
-    [
-      loadMessages,
-      setMessages,
-      stop,
-      cancelConnectAttempt,
-      onShowSessionListChange,
-      onActiveSessionChange,
-      workspaceId,
-      chatId,
-    ],
+    [onSwitchSession, onShowSessionListChange, workspaceId, chatId],
   );
 
   const handleNewSession = useCallback(() => {
-    stop();
-    cancelConnectAttempt();
-    sessionIdRef.current = undefined;
-    lastEventIdRef.current = undefined;
-    firstEventIdRef.current = undefined;
-    firstMessageIndexRef.current = undefined;
-    setHasMore(false);
-    setActiveSessionId(undefined);
     setInitialSessionCleared(true);
-    onActiveSessionChange?.(undefined);
-    setMessages([]);
-    setQueuedMessages([]);
-    setUsage(undefined);
     trpc.queue.clear.mutate({ workspaceId, chatId }).catch(() => {});
     onShowSessionListChange(false);
-  }, [
-    setMessages,
-    stop,
-    cancelConnectAttempt,
-    onShowSessionListChange,
-    onActiveSessionChange,
-    workspaceId,
-    chatId,
-  ]);
+    void onSwitchSession?.(undefined);
+  }, [onSwitchSession, onShowSessionListChange, workspaceId, chatId]);
 
   useEffect(() => {
     if (onNewSessionRef) {
@@ -1046,93 +590,43 @@ export function ChatView({
     return () => window.removeEventListener("band:new-chat-session", onNewChat);
   }, [visible, wsActive, handleNewSession]);
 
-  const queueMessage = useCallback(
-    async (message: PromptInputMessage) => {
-      // Convert browser File[] to base64 data URLs so they can be
-      // serialized through tRPC. Files are uploaded to disk only when
-      // the queued message is drained (server-side).
-      const files = await Promise.all(
-        (message.files ?? []).map(
-          (file): Promise<QueuedFilePart> =>
-            new Promise((resolve, reject) => {
-              const reader = new FileReader();
-              reader.onload = () => {
-                resolve({
-                  mediaType: file.type,
-                  url: reader.result as string,
-                  filename: file.name,
-                });
-              };
-              reader.onerror = () => reject(reader.error);
-              reader.readAsDataURL(file);
-            }),
-        ),
-      );
-
-      // Optimistic update with a temporary id; subscription corrects when
-      // the server's response arrives.
-      const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      setQueuedMessages((prev) => [
-        ...prev,
-        { id: tempId, text: message.text, files: files.length > 0 ? files : undefined },
-      ]);
-      trpc.queue.push
-        .mutate({
-          workspaceId,
-          chatId,
-          text: message.text,
-          ...(files.length > 0 && { files }),
-        })
-        .catch(() => {});
-    },
-    [workspaceId, chatId],
-  );
-
   const handleSubmit = useCallback(
     async (message: PromptInputMessage) => {
       if (!message.text.trim() && !message.files?.length) return;
-
-      if (isStreaming) {
-        // Agent is busy — queue the message on the backend.
-        // Optimistic update for instant feedback; subscription corrects if needed.
-        await queueMessage(message);
-        return;
-      }
-
-      // Check if a task is running in the background (e.g. started from CLI
-      // or another tab) that this chat doesn't know about yet.
+      // No pre-flight, no optimistic state, no `isStreaming` branch. The
+      // server queues server-side if a task is already running; the
+      // resulting `queue-updated` event lands on the subscription within
+      // ms. The legacy `handleSubmit` had four conditional branches
+      // (queue if streaming locally, probe tasks.get and queue if running
+      // remotely, send otherwise, fall through to send if probe failed) —
+      // all of them collapse into this one call.
       try {
-        const { task } = await trpc.tasks.get.query({ workspaceId, chatId });
-        if (task && task.status === "running") {
-          await queueMessage(message);
-          return;
-        }
-      } catch {
-        // If the check fails, proceed with sending — the backend will
-        // reject with CONFLICT if a task is actually running.
+        await send(message.text, message.files);
+      } catch (err) {
+        console.error("[ChatView] send failed:", err);
       }
-
-      doSendMessage(message);
     },
-    [doSendMessage, isStreaming, workspaceId, chatId, queueMessage],
+    [send],
   );
 
   const handleCancelQueued = useCallback(
     (id: string) => {
-      // Optimistic update for instant feedback; subscription corrects if needed.
-      setQueuedMessages((prev) => prev.filter((m) => m.id !== id));
+      // Optimistic update — subscription's queue-updated event clears
+      // optimisticQueue and replaces with server state.
+      setOptimisticQueue((current) => (current ?? queuedMessages).filter((m) => m.id !== id));
       trpc.queue.remove.mutate({ workspaceId, chatId, id }).catch(() => {});
     },
-    [workspaceId, chatId],
+    [queuedMessages, workspaceId, chatId],
   );
 
   const handleEditQueued = useCallback(
     (id: string, text: string) => {
-      // Optimistic update for instant feedback; subscription corrects if needed.
-      setQueuedMessages((prev) => prev.map((m) => (m.id === id ? { ...m, text } : m)));
+      setOptimisticQueue((current) =>
+        (current ?? queuedMessages).map((m) => (m.id === id ? { ...m, text } : m)),
+      );
       trpc.queue.update.mutate({ workspaceId, chatId, id, text }).catch(() => {});
     },
-    [workspaceId, chatId],
+    [queuedMessages, workspaceId, chatId],
   );
 
   // Pointer sensor with a small activation distance so a click on the
@@ -1146,29 +640,28 @@ export function ChatView({
     (event: DragEndEvent) => {
       const { active, over } = event;
       if (!over || active.id === over.id) return;
-      setQueuedMessages((prev) => {
-        const oldIdx = prev.findIndex((m) => m.id === active.id);
-        const newIdx = prev.findIndex((m) => m.id === over.id);
-        if (oldIdx === -1 || newIdx === -1) return prev;
-        const reordered = arrayMove(prev, oldIdx, newIdx);
-        // Persist the new order. queue.set replaces the whole queue;
-        // the subscription will broadcast the same shape back so the
-        // optimistic state and the server stay in sync.
-        trpc.queue.set
-          .mutate({
-            workspaceId,
-            chatId,
-            messages: reordered.map((m) => ({
-              id: m.id,
-              text: m.text,
-              ...(m.files && m.files.length > 0 && { files: m.files }),
-            })),
-          })
-          .catch(() => {});
-        return reordered;
-      });
+      const base = optimisticQueue ?? queuedMessages;
+      const oldIdx = base.findIndex((m) => m.id === active.id);
+      const newIdx = base.findIndex((m) => m.id === over.id);
+      if (oldIdx === -1 || newIdx === -1) return;
+      const reordered = arrayMove(base, oldIdx, newIdx);
+      setOptimisticQueue(reordered);
+      // Persist the new order. queue.set replaces the whole queue;
+      // the subscription broadcasts the same shape back which clears the
+      // optimistic state.
+      trpc.queue.set
+        .mutate({
+          workspaceId,
+          chatId,
+          messages: reordered.map((m) => ({
+            id: m.id,
+            text: m.text,
+            ...(m.files && m.files.length > 0 && { files: m.files }),
+          })),
+        })
+        .catch(() => {});
     },
-    [workspaceId, chatId],
+    [optimisticQueue, queuedMessages, workspaceId, chatId],
   );
 
   const taskMap: TaskMap = useMemo(() => {
@@ -1187,26 +680,20 @@ export function ChatView({
   }, [messages]);
 
   const getLastUserMessage = useCallback((): string | undefined => {
+    // Under the chat-events model, queued/drained user messages emit their
+    // own user-role messages — no need to scan assistant parts for
+    // `data-prompt` markers (that legacy AI-SDK chunk type is gone).
     for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].role === "user") {
-        const text = messages[i].parts
-          .filter((p): p is { type: "text"; text: string } => p.type === "text")
-          .map((p) => p.text)
-          .join("\n")
-          .trim();
-        if (text) return text;
-      }
-      if (messages[i].role === "assistant") {
-        // Find the last data-prompt in this message
-        const prompts = messages[i].parts.filter((p) => p.type === "data-prompt");
-        const last = prompts[prompts.length - 1];
-        if (last) return (last as { type: string; data: { text: string } }).data.text;
-      }
+      if (messages[i].role !== "user") continue;
+      const text = messages[i].parts
+        .filter((p): p is { type: "text"; text: string } => p.type === "text")
+        .map((p) => p.text)
+        .join("\n")
+        .trim();
+      if (text) return text;
     }
     return undefined;
   }, [messages]);
-
-  const isEmpty = messages.length === 0;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -1232,13 +719,28 @@ export function ChatView({
           )}
 
           {/*
-            Empty state: only when we know there's no session to load.
-            Skeleton: when sessions are still being fetched, when we have a
-            session but the message-load effect hasn't kicked in yet, or while
-            the load is in flight. This prevents the empty state from
-            flashing on first workspace load before chats.get resolves.
+            Skeleton / empty-state decision (issue #478, simplified):
+            The ONLY signal that determines "we're still loading vs. done
+            loading" is whether the EventSource is connected. Everything
+            else (initialSessionId, initialSessionCleared, currentSessionId,
+            sessionQueryDone) ends up racy across the
+            setInitialSessionId / setPaneKey batched updates fired by
+            `New session` and `Select session`, and the skeleton would
+            get stuck whenever those races resolved in the wrong order.
+
+            - Not connected yet → skeleton (we don't know what's coming).
+            - Connected + no messages → empty state (server told us
+              nothing's there, or we just cleared the session).
+            - Connected + messages → render them.
+
+            JSONL replay events arrive over the same SSE response that
+            flips `isConnected` to true, so the gap between "connected
+            with empty messages" and "messages populate" is sub-frame in
+            practice — empty-state flash is imperceptible.
           */}
-          {isEmpty && sessionQueryDone && !currentSessionId && !loadingHistory && (
+          {messages.length === 0 && !subscription.isConnected && <ConversationSkeleton />}
+
+          {messages.length === 0 && subscription.isConnected && (
             <ConversationEmptyState
               icon={
                 agentType ? (
@@ -1250,10 +752,6 @@ export function ChatView({
               title={workspaceName}
               description="Send a message to start coding"
             />
-          )}
-
-          {messages.length === 0 && (loadingHistory || !sessionQueryDone || !!currentSessionId) && (
-            <ConversationSkeleton />
           )}
 
           {(() => {
@@ -1304,115 +802,46 @@ export function ChatView({
                 );
               }
 
-              // Assistant message
-              const hasDataPrompts = message.parts.some((p) => p.type === "data-prompt");
-
-              if (!hasDataPrompts) {
-                // No queue boundaries — render as before
-                const visibleParts = message.parts.filter(
-                  (p) =>
-                    (p.type === "text" && p.text.trim()) || p.type === "file" || isToolUIPart(p),
-                );
-                if (visibleParts.length === 0 && !showThinking) return null;
-                return (
-                  <Message key={message.id} from="assistant">
-                    <MessageContent>
-                      {groupMessageParts(message.parts).map((segment) => {
-                        if (segment.type === "text") {
-                          const { part, partIndex } = segment;
-                          if (part.type === "text" && part.text.trim()) {
-                            return (
-                              <MessageResponse key={`${message.id}-text-${partIndex}`}>
-                                {part.text}
-                              </MessageResponse>
-                            );
-                          }
-                          return null;
-                        }
-                        if (segment.type === "file") {
+              // Assistant message — under the chat-events model every queued
+              // turn becomes its own user-role message, so we never need to
+              // split an assistant message at `data-prompt` boundaries.
+              const visibleParts = message.parts.filter(
+                (p) => (p.type === "text" && p.text.trim()) || p.type === "file" || isToolUIPart(p),
+              );
+              if (visibleParts.length === 0 && !showThinking) return null;
+              return (
+                <Message key={message.id} from="assistant">
+                  <MessageContent>
+                    {groupMessageParts(message.parts).map((segment) => {
+                      if (segment.type === "text") {
+                        const { part, partIndex } = segment;
+                        if (part.type === "text" && part.text.trim()) {
                           return (
-                            <MessageFilePart
-                              key={`${message.id}-file-${segment.partIndex}`}
-                              part={segment.part}
-                            />
+                            <MessageResponse key={`${message.id}-text-${partIndex}`}>
+                              {part.text}
+                            </MessageResponse>
                           );
                         }
-                        const item = toolPartToItem(segment.part);
-                        if (isTaskTool(item.toolName)) return null;
+                        return null;
+                      }
+                      if (segment.type === "file") {
                         return (
-                          <ToolCall key={`${message.id}-tool-${segment.partIndex}`} item={item} />
+                          <MessageFilePart
+                            key={`${message.id}-file-${segment.partIndex}`}
+                            part={segment.part}
+                          />
                         );
-                      })}
-                      {showThinking && <ThinkingIndicator />}
-                    </MessageContent>
-                  </Message>
-                );
-              }
-
-              // Split at data-prompt boundaries
-              const segments = splitMessageAtQueueBoundaries(message.parts);
-
-              return segments.map((segment, segIdx) => {
-                const visibleParts = groupMessageParts(segment.parts);
-                const isLastSegment = segIdx === segments.length - 1;
-                const segKey = segment.userPrompt ?? "initial";
-
-                return (
-                  <Fragment key={`${message.id}-seg-${segKey}`}>
-                    {segment.userPrompt && (
-                      <Message from="user">
-                        <MessageContent>
-                          {segment.userFiles?.map((file) => (
-                            <MessageFilePart
-                              key={`${message.id}-${segKey}-userfile-${file.url}`}
-                              part={{ type: "file", ...file }}
-                            />
-                          ))}
-                          <MessageResponse>{segment.userPrompt}</MessageResponse>
-                        </MessageContent>
-                      </Message>
-                    )}
-                    {(visibleParts.length > 0 || (isLastSegment && showThinking)) && (
-                      <Message from="assistant">
-                        <MessageContent>
-                          {visibleParts.map((seg) => {
-                            if (seg.type === "text") {
-                              const { part, partIndex } = seg;
-                              if (part.type === "text" && part.text.trim()) {
-                                return (
-                                  <MessageResponse
-                                    key={`${message.id}-${segKey}-text-${partIndex}`}
-                                  >
-                                    {part.text}
-                                  </MessageResponse>
-                                );
-                              }
-                              return null;
-                            }
-                            if (seg.type === "file") {
-                              return (
-                                <MessageFilePart
-                                  key={`${message.id}-${segKey}-file-${seg.partIndex}`}
-                                  part={seg.part}
-                                />
-                              );
-                            }
-                            const item = toolPartToItem(seg.part);
-                            if (isTaskTool(item.toolName)) return null;
-                            return (
-                              <ToolCall
-                                key={`${message.id}-${segKey}-tool-${seg.partIndex}`}
-                                item={item}
-                              />
-                            );
-                          })}
-                          {isLastSegment && showThinking && <ThinkingIndicator />}
-                        </MessageContent>
-                      </Message>
-                    )}
-                  </Fragment>
-                );
-              });
+                      }
+                      const item = toolPartToItem(segment.part);
+                      if (isTaskTool(item.toolName)) return null;
+                      return (
+                        <ToolCall key={`${message.id}-tool-${segment.partIndex}`} item={item} />
+                      );
+                    })}
+                    {showThinking && <ThinkingIndicator />}
+                  </MessageContent>
+                </Message>
+              );
             });
           })()}
           {isStreaming && (!messages.length || messages[messages.length - 1].role === "user") && (
@@ -1422,17 +851,17 @@ export function ChatView({
               </MessageContent>
             </Message>
           )}
-          {queuedMessages.length > 0 && (
+          {queuedMessagesView.length > 0 && (
             <DndContext
               sensors={dndSensors}
               collisionDetection={closestCenter}
               onDragEnd={handleReorderQueued}
             >
               <SortableContext
-                items={queuedMessages.map((m) => m.id)}
+                items={queuedMessagesView.map((m) => m.id)}
                 strategy={verticalListSortingStrategy}
               >
-                {queuedMessages.map((m) => (
+                {queuedMessagesView.map((m) => (
                   <QueuedMessageBubble
                     key={m.id}
                     id={m.id}
@@ -1475,7 +904,7 @@ export function ChatView({
                 <SessionHistoryMenu
                   workspaceId={workspaceId}
                   chatId={chatId}
-                  activeSessionId={activeSessionId ?? sessionIdRef.current}
+                  activeSessionId={currentSessionId}
                   onSelectSession={handleSelectSession}
                   onNewSession={handleNewSession}
                 />
@@ -1491,14 +920,27 @@ export function ChatView({
                   selectedModel={selectedModel}
                   onSelectModel={handleModelSelect}
                   onSwitchAgent={onSwitchAgent}
-                  disabled={status !== "ready" && status !== "error"}
+                  disabled={isStreaming}
                 />
               )}
               {modes.length > 0 && (
                 <ModeMenu modes={modes} selected={selectedMode} onSelect={handleModeSelect} />
               )}
             </div>
-            <PromptInputSubmit status={status} onStop={handleStop} />
+            {/* PromptInputSubmit was built against the AI SDK's ChatStatus
+                union (`"ready" | "submitted" | "streaming" | "error"`).
+                Our reducer's ChatStatus is the same shape under different
+                names; map at the boundary. */}
+            <PromptInputSubmit
+              status={
+                status === "submitting"
+                  ? "submitted"
+                  : status === "idle" || status === "completed"
+                    ? "ready"
+                    : status
+              }
+              onStop={handleStop}
+            />
           </PromptInputActions>
         </PromptInput>
       </div>
@@ -1903,11 +1345,6 @@ function ContextMeter({
   );
 }
 
-function usageContextSize(usage: UsageData | undefined): number {
-  if (!usage) return 0;
-  return usage.contextTokens ?? legacyContextSize(usage);
-}
-
 /**
  * Backward-compat fallback for usage snapshots that lack `contextTokens`.
  * Uses `provider` when set; falls back to `cacheCreationTokens` presence as
@@ -1962,22 +1399,42 @@ function SessionHistoryMenu({
       .finally(() => setLoading(false));
   }, [open, workspaceId, chatId]);
 
+  // Composing Tooltip + DropdownMenu trigger:
+  //
+  //   <Tooltip><TooltipTrigger asChild><DropdownMenuTrigger className="…">
+  //
+  // i.e. only ONE `asChild` in the chain. The previous shape was:
+  //
+  //   <TooltipTrigger asChild><DropdownMenuTrigger asChild><button>…
+  //
+  // Two stacked `asChild` triggers fight over the underlying button's ref:
+  // Radix's `composeRefs` works pairwise but the outer `asChild` ends up
+  // capturing the inner `DropdownMenuTrigger` (a forwardRef component) as
+  // the anchor *element* rather than the actual `<button>`. The Popper
+  // then can't find an anchor on first open and falls back to positioning
+  // against the document body — visually that's the dropdown sitting in
+  // the top-left of the chat with a 100+ px gap from the Clock icon
+  // trigger. Removing the inner `asChild` lets DropdownMenuTrigger render
+  // its own `<button>`, the tooltip wraps it cleanly, and Popper anchors
+  // correctly every time. Same fix kills the click-leak: with a correct
+  // anchor the menu opens ABOVE the trigger (via `side="top"`) instead
+  // of underneath the cursor.
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              className="inline-flex items-center justify-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              <Clock className="size-4" />
-            </button>
+          <DropdownMenuTrigger
+            type="button"
+            data-testid="chat-pane__session-history-button"
+            aria-label="Session history"
+            className="inline-flex items-center justify-center rounded-md px-1.5 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <Clock className="size-4" />
           </DropdownMenuTrigger>
         </TooltipTrigger>
         <TooltipContent>Session history</TooltipContent>
       </Tooltip>
-      <DropdownMenuContent align="start" className="w-72">
+      <DropdownMenuContent side="top" align="start" sideOffset={6} className="w-72">
         {loading ? (
           <div className="flex items-center justify-center py-6">
             <Loader2 className="size-4 animate-spin text-muted-foreground" />
@@ -1991,7 +1448,7 @@ function SessionHistoryMenu({
               return (
                 <DropdownMenuItem
                   key={session.sessionId}
-                  onClick={() => onSelectSession(session.sessionId)}
+                  onSelect={() => onSelectSession(session.sessionId)}
                   className={cn("flex flex-col items-start gap-0.5", isActive && "bg-accent")}
                 >
                   <span className="line-clamp-1 text-sm font-medium">{session.summary}</span>
@@ -2013,7 +1470,7 @@ function SessionHistoryMenu({
           </div>
         )}
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => onNewSession()}>
+        <DropdownMenuItem onSelect={() => onNewSession()}>
           <Plus className="size-3.5" />
           New session
           <DropdownMenuShortcut>⌘⇧N</DropdownMenuShortcut>

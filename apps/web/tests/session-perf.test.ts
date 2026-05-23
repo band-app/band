@@ -219,12 +219,10 @@ function seedSessionFile(
 const SESSION_COUNT = 50;
 const MESSAGES_PER_SESSION = 250;
 
-describe("workspace-switch perf — sessions.list and sessions.messages", () => {
+describe("workspace-switch perf — sessions.list", () => {
   let server: ServerHandle;
   let tmpHome: string;
   let repoDir: string;
-  // Held for one session so the messages tests can address it.
-  let primarySessionId = "";
 
   beforeAll(async () => {
     tmpHome = createTmpHome();
@@ -251,7 +249,6 @@ describe("workspace-switch perf — sessions.list and sessions.messages", () => 
     // Seed many sessions, each with many messages.
     for (let i = 0; i < SESSION_COUNT; i++) {
       const id = `aaaaaaaa-bbbb-cccc-dddd-${String(i).padStart(12, "0")}`;
-      if (i === 0) primarySessionId = id;
       // Vary message count so listSessions has different fileSizes.
       const count = i === 0 ? MESSAGES_PER_SESSION : 5;
       seedSessionFile(tmpHome, repoDir, id, buildSessionFixture(id, count));
@@ -285,73 +282,8 @@ describe("workspace-switch perf — sessions.list and sessions.messages", () => 
     expect(elapsedMs).toBeLessThan(5000);
   });
 
-  it("sessions.messages with limit=10 returns 10 most recent messages", async () => {
-    const res = await trpcQuery(server.url, "sessions.messages", {
-      workspaceId: "perfproject-main",
-      sessionId: primarySessionId,
-      limit: 10,
-    });
-    expect(res.status).toBe(200);
-
-    const data = await trpcData<{
-      messages: Array<{ role: string; parts: Array<{ type: string; text?: string }> }>;
-      firstMessageIndex: number | null;
-      hasMore: boolean;
-    }>(res);
-
-    // The fixture has 2 messages per turn (user + assistant) for
-    // MESSAGES_PER_SESSION turns. The server's pagination semantics slice
-    // the agent-message list, which corresponds to message indexes; the
-    // exact count returned matches the requested limit.
-    expect(data.messages.length).toBeLessThanOrEqual(10);
-    expect(data.messages.length).toBeGreaterThan(0);
-
-    // Most recent text message should be the final reply.
-    const lastMessage = data.messages[data.messages.length - 1];
-    const lastText = lastMessage.parts.find((p) => p.type === "text")?.text ?? "";
-    expect(lastText).toBe(`reply #${MESSAGES_PER_SESSION - 1}`);
-
-    // hasMore must be true since we asked for 10 of many.
-    expect(data.hasMore).toBe(true);
-    expect(typeof data.firstMessageIndex).toBe("number");
-    expect(data.firstMessageIndex).toBeGreaterThan(0);
-  });
-
-  it("sessions.messages older page via beforeMessageIndex returns the previous slice", async () => {
-    // First page (latest)
-    const firstRes = await trpcQuery(server.url, "sessions.messages", {
-      workspaceId: "perfproject-main",
-      sessionId: primarySessionId,
-      limit: 10,
-    });
-    const firstData = await trpcData<{
-      messages: Array<{ role: string; parts: Array<{ type: string; text?: string }> }>;
-      firstMessageIndex: number | null;
-      hasMore: boolean;
-    }>(firstRes);
-    expect(firstData.firstMessageIndex).not.toBeNull();
-    const firstStart = firstData.firstMessageIndex as number;
-
-    // Older page using the cursor
-    const olderRes = await trpcQuery(server.url, "sessions.messages", {
-      workspaceId: "perfproject-main",
-      sessionId: primarySessionId,
-      beforeMessageIndex: firstStart,
-      limit: 10,
-    });
-    expect(olderRes.status).toBe(200);
-
-    const olderData = await trpcData<{
-      messages: Array<{ role: string; parts: Array<{ type: string; text?: string }> }>;
-      firstMessageIndex: number | null;
-      hasMore: boolean;
-    }>(olderRes);
-
-    expect(olderData.messages.length).toBeLessThanOrEqual(10);
-    expect(olderData.messages.length).toBeGreaterThan(0);
-    // Older page's start index must be strictly smaller than the
-    // first page's start index.
-    expect(olderData.firstMessageIndex).not.toBeNull();
-    expect(olderData.firstMessageIndex as number).toBeLessThan(firstStart);
-  });
+  // The legacy `sessions.messages` paginated history endpoint has been
+  // replaced by the chat-events SSE stream (`/api/chats/:chatId/events`),
+  // which handles JSONL backfill inline. The perf tests for that endpoint
+  // were removed alongside it. See `docs/experiments/chat-event-log.md`.
 });

@@ -15,7 +15,6 @@ import { formatFileLocation, toWorkspaceId } from "@band-app/dashboard-core";
 import { createLogger } from "@band-app/logger";
 import { initTRPC, TRPCError } from "@trpc/server";
 import { rgPath } from "@vscode/ripgrep";
-import type { UIMessage } from "ai";
 import { Cron } from "croner";
 import { z } from "zod";
 import { getActiveWorkspace, setActiveWorkspace } from "../lib/active-workspace";
@@ -73,7 +72,6 @@ import {
   scheduleActiveSessionRefresh,
 } from "../lib/chat-session-summary";
 import { checkCli, installCli, resolveCliPaths } from "../lib/cli";
-import { convertEventsToUIMessages, convertHistoryToUIMessages } from "../lib/convert-events";
 import { reloadSchedules, stopJobsForKey } from "../lib/cronjob-scheduler";
 import {
   deleteCronjobFile,
@@ -103,7 +101,6 @@ import {
   subscribeQueue,
   updateQueuedMessage,
 } from "../lib/queued-message-store";
-import { getSessionEventsBefore, getSessionEventsTail } from "../lib/session-store";
 import { runSetup } from "../lib/setup-runner";
 import {
   bandHome,
@@ -121,14 +118,7 @@ import {
   upsertWorkspaceStatus,
   worktreesDir,
 } from "../lib/state";
-import {
-  abortTask,
-  cancelTask,
-  getSessionUsage,
-  getTask,
-  submitTask,
-  TaskConflictError,
-} from "../lib/task-runner";
+import { abortTask, cancelTask, getTask, submitTask, TaskConflictError } from "../lib/task-runner";
 import { deleteWorkspaceTasks, listTasks, loadTask } from "../lib/task-store";
 import { loadWorkspaceTerminalConfig } from "../lib/terminal-config";
 import {
@@ -2709,192 +2699,12 @@ const sessionsRouter = t.router({
       return { sessions: allSessions, supported: true };
     }),
 
-  messages: publicProcedure
-    .input(
-      z.object({
-        workspaceId: z.string(),
-        chatId: z.string().optional(),
-        sessionId: z.string(),
-        // Buffer cursor: pagination through the in-memory ring buffer.
-        beforeEventId: z.number().optional(),
-        // JSONL cursor: pagination through the on-disk session history.
-        // Index is in the full message list; the server returns messages
-        // [max(0, beforeMessageIndex - limit), beforeMessageIndex).
-        beforeMessageIndex: z.number().int().nonnegative().optional(),
-        limit: z.number().min(1).max(200).default(100).optional(),
-      }),
-    )
-    .query(async ({ input }) => {
-      const pageSize = input.limit ?? 100;
-      // Latest usage snapshot — included on the initial page only so the
-      // chat UI can re-hydrate the context meter without a separate query.
-      const lastUsage = input.beforeEventId ? null : (getSessionUsage(input.sessionId) ?? null);
-
-      // Try in-memory session buffer first (only for non-JSONL pagination).
-      // When the client is paginating via beforeMessageIndex we're explicitly
-      // requesting an older JSONL page and must skip the buffer.
-      if (input.beforeMessageIndex === undefined) {
-        const events = input.beforeEventId
-          ? getSessionEventsBefore(input.sessionId, input.beforeEventId, pageSize)
-          : getSessionEventsTail(input.sessionId, pageSize);
-
-        if (events.length > 0) {
-          const bufferMessages = convertEventsToUIMessages(events);
-          const firstEventId = events[0].id;
-          const lastEventId = events[events.length - 1].id;
-
-          // Check if there are more events before the first one we returned
-          const older = getSessionEventsBefore(input.sessionId, firstEventId, 1);
-          const hasMoreInBuffer = older.length > 0;
-
-          if (hasMoreInBuffer || input.beforeEventId) {
-            // More buffer pages available, or this is already a pagination
-            // request — return buffer page only.
-            return {
-              messages: bufferMessages,
-              firstEventId,
-              lastEventId,
-              firstMessageIndex: null,
-              hasMore: hasMoreInBuffer,
-              lastUsage,
-            };
-          }
-
-          // We're at the start of the buffer with no older buffer pages.
-          // Check if JSONL history exists (e.g. from before a server restart).
-          // If it does, use JSONL as the sole history source — it contains the
-          // complete conversation including any tasks whose events are also in
-          // the buffer. Merging them would cause duplicates.
-          // The buffer's lastEventId is still returned so that resumeStream()
-          // can gap-fill from the correct point for any in-flight task.
-          try {
-            const workspace = resolveWorkspace(input.workspaceId);
-            if (workspace) {
-              const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
-              const jsonl = await loadJsonlPage({
-                chatId,
-                workspacePath: workspace.worktree.path,
-                sessionId: input.sessionId,
-                pageSize,
-                beforeMessageIndex: undefined,
-              });
-              // Only switch to the JSONL response when JSONL actually has
-              // messages — otherwise the buffer is the authoritative source
-              // (e.g. agents that don't persist sessions to disk).
-              if (jsonl && jsonl.messages.length > 0) {
-                return {
-                  messages: jsonl.messages,
-                  firstEventId: null,
-                  lastEventId,
-                  firstMessageIndex: jsonl.firstMessageIndex,
-                  hasMore: jsonl.hasMore,
-                  lastUsage,
-                };
-              }
-            }
-          } catch {
-            // JSONL lookup failed — return buffer-only results
-          }
-
-          return {
-            messages: bufferMessages,
-            firstEventId,
-            lastEventId,
-            firstMessageIndex: null,
-            hasMore: false,
-            lastUsage,
-          };
-        }
-      }
-
-      // Fallback: no buffer at all (cold path) or explicit JSONL pagination
-      // — convert agent's JSONL-based history server-side, sliced to the
-      // most recent `pageSize` messages.
-      const workspace = resolveWorkspace(input.workspaceId);
-      if (!workspace) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Workspace not found" });
-      }
-      const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
-      const jsonl = await loadJsonlPage({
-        chatId,
-        workspacePath: workspace.worktree.path,
-        sessionId: input.sessionId,
-        pageSize,
-        beforeMessageIndex: input.beforeMessageIndex,
-      });
-      if (!jsonl) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Session listing not supported" });
-      }
-      return {
-        messages: jsonl.messages,
-        firstEventId: null,
-        lastEventId: null,
-        firstMessageIndex: jsonl.firstMessageIndex,
-        hasMore: jsonl.hasMore,
-        lastUsage,
-      };
-    }),
+  // The legacy `sessions.messages` query was the AI-SDK-shaped history
+  // endpoint used by the old `loadMessages → reconnectToStream` dance in
+  // ChatView. It has been replaced by the chat-events stream
+  // (`GET /api/chats/:chatId/events`), which handles JSONL backfill +
+  // live tail in a single subscription. See `docs/experiments/chat-event-log.md`.
 });
-
-/**
- * Load a page of session history from the agent's JSONL transcript.
- *
- * The first call (no `beforeMessageIndex`) requests the last `pageSize`
- * messages via `{ tail: pageSize }`. Older pages use `{ offset, limit }`
- * derived from the previous response's `firstMessageIndex`. Adapters
- * over-fetch by one message (the "+1 trick") so the response carries an
- * accurate `hasMore` without requiring a separate `total` count.
- *
- * Returns `null` when the agent does not support session listing.
- */
-async function loadJsonlPage(opts: {
-  chatId: string;
-  workspacePath: string;
-  sessionId: string;
-  pageSize: number;
-  beforeMessageIndex: number | undefined;
-}): Promise<{ messages: UIMessage[]; firstMessageIndex: number; hasMore: boolean } | null> {
-  const chatSession = getChat(opts.chatId);
-  const agent = await getOrCreateAgent(opts.chatId, opts.workspacePath, chatSession?.agent);
-  if (!agent.supportedFeatures.sessionListing || !agent.getSessionMessages) {
-    return null;
-  }
-
-  // Translate the cursor model used by the tRPC endpoint into the agent's
-  // tail/offset/limit options. `beforeMessageIndex` is the index *after*
-  // the slice, so the slice is `[max(0, before - pageSize), before)`.
-  const queryOpts =
-    opts.beforeMessageIndex !== undefined
-      ? {
-          offset: Math.max(0, opts.beforeMessageIndex - opts.pageSize),
-          limit: opts.beforeMessageIndex - Math.max(0, opts.beforeMessageIndex - opts.pageSize),
-        }
-      : { tail: opts.pageSize };
-
-  const {
-    messages: slice,
-    hasMore,
-    firstOffset,
-  } = await agent.getSessionMessages(opts.sessionId, opts.workspacePath, queryOpts);
-
-  const messages = convertHistoryToUIMessages(
-    slice as {
-      role: "user" | "assistant";
-      id: string;
-      content: {
-        type: "text" | "tool_use" | "tool_result";
-        text?: string;
-        toolCallId?: string;
-        toolName?: string;
-        displayTitle?: string;
-        input?: unknown;
-        output?: string;
-        isError?: boolean;
-      }[];
-    }[],
-  );
-  return { messages, firstMessageIndex: firstOffset, hasMore };
-}
 
 // ---------------------------------------------------------------------------
 // Services
