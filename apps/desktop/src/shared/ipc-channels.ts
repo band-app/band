@@ -137,6 +137,18 @@ export const Events = {
    *  it stays visible during screencast — this event is only for
    *  the surrounding dashboard chrome. */
   browserHostOverridden: "browser-host-overridden",
+  /** Pushed when a page inside a `WebContentsView` requests a new
+   *  window — `window.open(...)`, `target="_blank"`, middle / Cmd+
+   *  click on a link, etc. The main process *always* denies the
+   *  native OS window (so no detached browser window ever appears)
+   *  and forwards the request here so the renderer can materialize
+   *  the request as a new Band browser tab in the same workspace
+   *  (issue #488). The renderer's `DockviewBrowserContainer` picks
+   *  up the event and calls its existing add-tab flow scoped to the
+   *  source pane's dockview group; events whose `browser_id` isn't
+   *  in this container are ignored, so multiple workspaces don't all
+   *  spawn tabs for one window.open. */
+  browserOpenWindow: "browser-open-window",
   windowFullscreenChanged: "window-fullscreen-changed",
   /** Pushed by the main process when the background updater detects (or
    *  clears) a pending app update. Payload: `PendingUpdate` from
