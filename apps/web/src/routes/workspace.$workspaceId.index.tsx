@@ -1,4 +1,4 @@
-import { createFileRoute, Navigate } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { useSettingsQuery } from "@/dashboard";
 import { agentTypeSupportsSessionListing } from "../components/ChatPane";
@@ -19,9 +19,13 @@ function WorkspaceIndex() {
   const isWideScreen = useIsDesktop();
   const useDesktopLayout = isWideScreen || isDesktop;
 
-  // Desktop: chat is always visible in the left panel — redirect to changes tab
+  // Desktop: dockview (mounted at the app shell) already renders every panel
+  // — Chat included — so this route has nothing to render. Keeping the URL at
+  // `/workspace/$id` makes it the canonical desktop URL instead of redirecting
+  // to `/changes` (which was just ceremony post-shared-dockview refactor, see
+  // issue #467).
   if (useDesktopLayout) {
-    return <Navigate to="/workspace/$workspaceId/changes" params={{ workspaceId }} replace />;
+    return null;
   }
 
   // Mobile: show chat view
