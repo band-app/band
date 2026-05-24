@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } fro
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { listWorktrees } from "../src/lib/git.ts";
+import { getRepoInfo, listWorktrees } from "../src/lib/git.ts";
 
 const gitEnv = {
   ...process.env,
@@ -124,5 +124,39 @@ describe("listWorktrees", () => {
     const detached = worktrees.find((wt) => wt.path === wtPath);
     expect(detached).toBeDefined();
     expect(detached!.branch).toBe("");
+  });
+});
+
+// `getRepoInfo` is best-effort metadata — issue #458. The two failure
+// branches below ("not a git checkout" and "no origin remote") are
+// expected steady states for some project directories, not error paths.
+// These tests pin down that the function returns `null` cleanly for both,
+// so the negative cache in `branch-status-poller` has something stable
+// to memoize.
+describe("getRepoInfo", () => {
+  it("returns null for a non-git directory", async () => {
+    const tmp = realpathSync(mkdtempSync(join(tmpdir(), "band-no-git-")));
+    const info = await getRepoInfo(tmp);
+    expect(info).toBeNull();
+  });
+
+  it("returns null when the repo has no `origin` remote", async () => {
+    const { repoPath } = createRepo();
+    const info = await getRepoInfo(repoPath);
+    expect(info).toBeNull();
+  });
+
+  it("parses an SSH origin remote", async () => {
+    const { repoPath } = createRepo();
+    git(repoPath, ["remote", "add", "origin", "git@github.com:band-app/band.git"]);
+    const info = await getRepoInfo(repoPath);
+    expect(info).toEqual({ host: "github.com", owner: "band-app", repo: "band" });
+  });
+
+  it("parses an HTTPS origin remote", async () => {
+    const { repoPath } = createRepo();
+    git(repoPath, ["remote", "add", "origin", "https://github.com/band-app/band.git"]);
+    const info = await getRepoInfo(repoPath);
+    expect(info).toEqual({ host: "github.com", owner: "band-app", repo: "band" });
   });
 });

@@ -1,6 +1,9 @@
 import { execFile } from "node:child_process";
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
+import { createLogger } from "@band-app/logger";
+
+const log = createLogger("git");
 
 export interface WorktreeInfo {
   branch: string;
@@ -41,13 +44,21 @@ export async function getRepoInfo(worktreePath: string): Promise<RepoInfo | null
     const remoteUrl = (await execGit(["remote", "get-url", "origin"], worktreePath)).trim();
     const parsed = parseGitRemoteUrl(remoteUrl);
     if (!parsed) {
-      console.error(`getRepoInfo: failed to parse remote URL "${remoteUrl}" for ${worktreePath}`);
+      // Steady-state condition (e.g. self-hosted remote with an unusual URL
+      // shape) — debug-level, not error-level. The caller decides whether the
+      // absent metadata is actually a problem.
+      log.debug('getRepoInfo: failed to parse remote URL "%s" for %s', remoteUrl, worktreePath);
     }
     return parsed;
   } catch (err) {
-    console.error(
-      `getRepoInfo: failed for ${worktreePath}:`,
-      err instanceof Error ? err.message : err,
+    // `getRepoInfo` is best-effort metadata: a project directory may legitimately
+    // not be a git checkout, or may lack an `origin` remote. Those are expected
+    // steady states, not error paths — log at debug so the server log isn't
+    // spammed every CI poll tick. See issue #458.
+    log.debug(
+      "getRepoInfo: failed for %s: %s",
+      worktreePath,
+      err instanceof Error ? err.message : String(err),
     );
     return null;
   }

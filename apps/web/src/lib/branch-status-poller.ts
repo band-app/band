@@ -1,3 +1,4 @@
+import { createLogger } from "@band-app/logger";
 import { eq } from "drizzle-orm";
 import { toWorkspaceId } from "@/dashboard";
 import { getDb } from "./db/connection";
@@ -7,6 +8,8 @@ import { buildBatchedCIQuery, type CIStatus, parseBatchedCIResponse } from "./gi
 import { loadState } from "./state";
 import { syncWorktrees } from "./sync-state";
 import { emit } from "./watcher";
+
+const log = createLogger("branch-status-poller");
 
 interface GitStatus {
   dirty: boolean;
@@ -54,9 +57,30 @@ let pollerTimer: ReturnType<typeof setInterval> | null = null;
 let tickCount = 0;
 let currentActivity: ActivityLevel = "active";
 
-// Cache repo info per project path within a single CI poll tick.
-// Cleared on each CI tick so transferred repos or new remotes are picked up.
-const repoInfoCache = new Map<string, RepoInfo>();
+/**
+ * Cache repo info per project path with a TTL.
+ *
+ * Both positive (RepoInfo) and negative (null) results are cached.
+ *
+ * Caching null is the important part: "directory isn't a git checkout" and
+ * "git checkout has no `origin` remote" are expected steady states for some
+ * project directories — they cannot be fixed by retrying on the next CI tick.
+ * Without a negative cache, the failure path runs every tick and `getRepoInfo`
+ * logs an error each time (issue #458). With a TTL, the cache still self-heals
+ * for the legitimate cases (transferred repos, newly configured remotes)
+ * within at most one TTL window.
+ */
+const REPO_INFO_TTL_MS = 5 * 60 * 1000; // 5 minutes
+interface RepoInfoCacheEntry {
+  info: RepoInfo | null;
+  expiresAt: number;
+}
+const repoInfoCache = new Map<string, RepoInfoCacheEntry>();
+
+/** Test/refresh hook: drop every cached entry so the next lookup re-resolves. */
+export function clearRepoInfoCache(): void {
+  repoInfoCache.clear();
+}
 
 function getWorkspaces(): WorkspaceInfo[] {
   const state = loadState();
@@ -133,17 +157,15 @@ async function getGitStatus(worktreePath: string): Promise<GitStatus> {
 }
 
 /**
- * Resolve repo info for a project path, with caching.
+ * Resolve repo info for a project path, with TTL-based caching of both
+ * positive and negative results. See the `repoInfoCache` comment above.
  */
 async function resolveRepoInfo(projectPath: string): Promise<RepoInfo | null> {
+  const now = Date.now();
   const cached = repoInfoCache.get(projectPath);
-  if (cached !== undefined) return cached;
+  if (cached && cached.expiresAt > now) return cached.info;
   const info = await getRepoInfo(projectPath);
-  // Only cache successful lookups — null means the remote wasn't available yet
-  // (e.g. project added before git remote was configured) and should be retried.
-  if (info) {
-    repoInfoCache.set(projectPath, info);
-  }
+  repoInfoCache.set(projectPath, { info, expiresAt: now + REPO_INFO_TTL_MS });
   return info;
 }
 
@@ -155,10 +177,11 @@ async function resolveRepoInfo(projectPath: string): Promise<RepoInfo | null> {
  * Falls back to individual gh CLI calls if the GraphQL query fails.
  */
 async function getBatchedCIStatuses(workspaces: WorkspaceInfo[]): Promise<Map<string, CIStatus>> {
-  // Clear cache so transferred repos or newly configured remotes are picked up
-  repoInfoCache.clear();
-
-  // Resolve repo info for all workspaces in parallel
+  // Resolve repo info for all workspaces in parallel.
+  // `resolveRepoInfo` is now TTL-cached (both positive and negative results),
+  // so transferred repos or newly configured remotes are picked up within at
+  // most one TTL window without re-running `git remote get-url origin` on
+  // every CI tick. See `repoInfoCache` above and issue #458.
   const resolved: Array<{
     ws: WorkspaceInfo;
     repoInfo: RepoInfo;
@@ -170,9 +193,12 @@ async function getBatchedCIStatuses(workspaces: WorkspaceInfo[]): Promise<Map<st
       if (repoInfo) {
         resolved.push({ ws, repoInfo, alias: `ws_${index}` });
       } else {
-        console.error(
-          `CI poll: failed to resolve repo info for ${ws.workspaceId} (${ws.projectPath})`,
-        );
+        // No origin / not a git checkout. `getRepoInfo` already logged the
+        // underlying reason at debug; emit a companion debug entry with the
+        // workspace context so the two lines correlate in the log. Logging
+        // at error here would defeat the negative cache (issue #458) — the
+        // poller runs this branch every CI tick for known-non-git paths.
+        log.debug("CI poll: no repo info for %s (%s)", ws.workspaceId, ws.projectPath);
       }
     }),
   );
