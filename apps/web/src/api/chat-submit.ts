@@ -100,6 +100,17 @@ export async function handleChatSubmit(
   let savedFiles: Awaited<ReturnType<typeof saveUploadedFilesDetailed>> = [];
   if (files && files.length > 0) {
     savedFiles = await saveUploadedFilesDetailed(files);
+    // Surface the count mismatch when `saveUploadedFilesDetailed`
+    // silently skips an entry (its data-URL regex requires the exact
+    // `data:<mime>;base64,...` shape, so a malformed input from a
+    // non-browser client — CLI, curl, third-party — would otherwise
+    // disappear into a 200 OK with no signal back to the caller).
+    if (savedFiles.length !== files.length) {
+      log.warn(
+        { chatId, submitted: files.length, saved: savedFiles.length },
+        "chat-submit: some file uploads were dropped (malformed data URL?)",
+      );
+    }
     if (savedFiles.length > 0) {
       const fileList = savedFiles.map((s) => `- ${s.path}`).join("\n");
       agentPrompt = `I'm sharing these files with you:\n${fileList}\n\n${text}`;

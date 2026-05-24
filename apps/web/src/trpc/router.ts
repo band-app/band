@@ -3929,13 +3929,29 @@ type QueuedFileInput = z.infer<typeof queuedFileSchema>;
  * agent prompt as `I'm sharing these files with you:\n- /…/id_rsa`,
  * and the agent would happily read and stream the contents.
  *
- * Uses `path.resolve` rather than a raw `startsWith` so traversal
- * attempts (`/…/uploads/../../etc/passwd`) are caught.
+ * Uses `realpathSync` (not `path.resolve`) so symlinks are followed: a
+ * `path.resolve`-only check would let an attacker who can drop a
+ * symlink in `~/.band/uploads/` (e.g. `evil → /etc/passwd`) point the
+ * agent at the symlink target. `realpathSync` walks the filesystem and
+ * returns the canonical resolved path; the `startsWith` check is then
+ * applied to the *canonical* form.
+ *
+ * The `try/catch` is load-bearing: if the path doesn't exist, hasn't
+ * been saved yet, or was deleted between push and use, `realpathSync`
+ * throws ENOENT and we correctly reject — never silently pass through
+ * a path the agent can't read either.
  */
 function isPathWithinUploadDir(p: string): boolean {
   const uploadDir = join(bandHome(), "uploads");
-  const normalized = resolve(p);
-  return normalized === uploadDir || normalized.startsWith(uploadDir + sep);
+  let canonicalUploadDir: string;
+  let canonicalPath: string;
+  try {
+    canonicalUploadDir = realpathSync(uploadDir);
+    canonicalPath = realpathSync(p);
+  } catch {
+    return false;
+  }
+  return canonicalPath === canonicalUploadDir || canonicalPath.startsWith(canonicalUploadDir + sep);
 }
 
 async function resolveQueuedFiles(
