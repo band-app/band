@@ -688,14 +688,31 @@ export function DockviewBrowserContainer({
   // shows up as the inner tab strip clustered against the left edge.
   // `api.layout(...)` runs synchronously and re-applies the correct
   // sizes before paint.
+  //
+  // Zero-rect fallback: same pattern as `DockviewTerminalContainer`.
+  // If the container hasn't reflowed yet when `useLayoutEffect`
+  // runs, defer `api.layout()` to the first ResizeObserver tick
+  // that reports a non-zero size, so the fix isn't a silent no-op.
   useLayoutEffect(() => {
     if (!visible) return;
     const api = apiRef.current;
     const container = containerRef.current;
     if (!api || !container) return;
     const rect = container.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) return;
-    api.layout(Math.round(rect.width), Math.round(rect.height), true);
+    if (rect.width > 0 && rect.height > 0) {
+      api.layout(Math.round(rect.width), Math.round(rect.height), true);
+      return;
+    }
+    const ro = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      const { width, height } = entry.contentRect;
+      if (width <= 0 || height <= 0) return;
+      ro.disconnect();
+      api.layout(Math.round(width), Math.round(height), true);
+    });
+    ro.observe(container);
+    return () => ro.disconnect();
   }, [visible]);
 
   // Auto-focus the active browser pane's address bar whenever the section

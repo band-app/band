@@ -605,14 +605,35 @@ export function DockviewTerminalContainer({
   // it. Calling `api.layout(...)` synchronously inside
   // `useLayoutEffect` runs BEFORE paint, so the first painted frame
   // already has the correct widths.
+  //
+  // Zero-rect fallback: in the common case
+  // `container.getBoundingClientRect()` returns the real size right
+  // away because `useLayoutEffect` runs after React has committed
+  // the DOM change. If the browser hasn't reflowed yet (rare timing
+  // edge), the rect comes back 0×0 and we'd silently skip the fix.
+  // The ResizeObserver fallback below catches that case by deferring
+  // `api.layout()` until the container actually gains non-zero size,
+  // avoiding the silent no-op.
   useLayoutEffect(() => {
     if (!visible) return;
     const api = apiRef.current;
     const container = containerRef.current;
     if (!api || !container) return;
     const rect = container.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) return;
-    api.layout(Math.round(rect.width), Math.round(rect.height), true);
+    if (rect.width > 0 && rect.height > 0) {
+      api.layout(Math.round(rect.width), Math.round(rect.height), true);
+      return;
+    }
+    const ro = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      const { width, height } = entry.contentRect;
+      if (width <= 0 || height <= 0) return;
+      ro.disconnect();
+      api.layout(Math.round(width), Math.round(height), true);
+    });
+    ro.observe(container);
+    return () => ro.disconnect();
   }, [visible]);
 
   // Auto-focus the active terminal's xterm textarea whenever the section

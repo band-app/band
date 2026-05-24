@@ -955,12 +955,23 @@ export function BrowserPaneComponent({
     const logFail = (cmd: string) => (err: unknown) =>
       console.error(`[BrowserPane] ${cmd} failed`, err);
 
+    // Chain `browser_show` after `browser_set_bounds` so the show
+    // call observably happens AFTER the bounds update has reached
+    // the main process. Today both handlers run synchronously in
+    // the main process and the IPC delivery order alone is enough,
+    // but a future change that makes either handler async (e.g.
+    // adding a mutex) would silently break the bounds-before-show
+    // invariant if we kept fire-and-forget ordering. The `.then`
+    // chain encodes the dependency at the call site.
     const showWebview = () => {
       const bounds = getBounds();
-      if (bounds && bounds.width > 0 && bounds.height > 0) {
-        invoke("browser_set_bounds", { browserId, ...bounds }).catch(logFail("browser_set_bounds"));
-      }
-      invoke("browser_show", { browserId }).catch(logFail("browser_show"));
+      const setBoundsP =
+        bounds && bounds.width > 0 && bounds.height > 0
+          ? invoke("browser_set_bounds", { browserId, ...bounds }).catch(
+              logFail("browser_set_bounds"),
+            )
+          : Promise.resolve();
+      setBoundsP.then(() => invoke("browser_show", { browserId }).catch(logFail("browser_show")));
     };
 
     const hideWebview = () => {
@@ -990,13 +1001,19 @@ export function BrowserPaneComponent({
     if (!wsActive) {
       invoke("browser_hide", { browserId }).catch(logFail("browser_hide"));
     } else if (api.isVisible) {
-      // Bounds before show — see the rationale on the
-      // onDidVisibilityChange effect above. Same fix, same reason.
+      // Bounds before show — same .then() chain as the
+      // onDidVisibilityChange effect above. Encodes the ordering
+      // dependency at the call site, so a future async refactor of
+      // the main-process handlers can't silently break the
+      // invariant.
       const bounds = getBounds();
-      if (bounds && bounds.width > 0 && bounds.height > 0) {
-        invoke("browser_set_bounds", { browserId, ...bounds }).catch(logFail("browser_set_bounds"));
-      }
-      invoke("browser_show", { browserId }).catch(logFail("browser_show"));
+      const setBoundsP =
+        bounds && bounds.width > 0 && bounds.height > 0
+          ? invoke("browser_set_bounds", { browserId, ...bounds }).catch(
+              logFail("browser_set_bounds"),
+            )
+          : Promise.resolve();
+      setBoundsP.then(() => invoke("browser_show", { browserId }).catch(logFail("browser_show")));
     }
   }, [params.wsActive, api, created, getBounds, invoke, browserId]);
 
