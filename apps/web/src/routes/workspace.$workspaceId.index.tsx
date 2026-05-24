@@ -1,5 +1,5 @@
 import { createFileRoute, Navigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useSettingsQuery } from "@/dashboard";
 import { agentTypeSupportsSessionListing } from "../components/ChatPane";
 import { ChatView } from "../components/ChatView";
@@ -34,6 +34,11 @@ function MobileChatContent({ workspaceId }: { workspaceId: string }) {
   const [supportsSessionListing, setSupportsSessionListing] = useState(false);
   const [initialSessionId, setInitialSessionId] = useState<string | undefined>(undefined);
   const [sessionQueryDone, setSessionQueryDone] = useState(false);
+  // Local remount key for user-initiated session switches. Combined with the
+  // context-owned `chatKey` (which bumps on agent switch) so either kind of
+  // switch forces ChatView to remount and reopen its event-log subscription
+  // against the new session.
+  const [sessionPaneKey, setSessionPaneKey] = useState(0);
   const { showSessionList, setShowSessionList } = useSessionListContext();
   const { chatKey, setTaskRunning, agentType, codingAgentId, switchAgent, newSessionRef } =
     useAgentSwitcherContext();
@@ -94,12 +99,41 @@ function MobileChatContent({ workspaceId }: { workspaceId: string }) {
     };
   }, [workspaceId, chatId, chatKey, settings]);
 
+  // User-initiated session switch from the SessionHistoryMenu. Mirrors the
+  // desktop pane's `onSwitchSession` (see `useChatPaneState` in ChatPane.tsx):
+  // persist the new active session to the server, pin local
+  // `initialSessionId`, then bump `sessionPaneKey` so ChatView remounts and
+  // its useChatSubscription opens a fresh stream against the new session.
+  //
+  // Before this existed, ChatView's `onSwitchSession` prop was undefined on
+  // mobile, so tapping a session in the history menu cleared the queue and
+  // closed the Radix dropdown (its default on-select behavior) but never
+  // actually switched sessions — the chat kept rendering the previous one.
+  const onSwitchSession = useCallback(
+    async (sessionId: string | undefined) => {
+      if (!chatId) return;
+      try {
+        await trpc.chats.setActiveSession.mutate({
+          workspaceId,
+          chatId,
+          sessionId: sessionId ?? undefined,
+        });
+      } catch (err) {
+        console.error("[MobileChatContent] error persisting active session:", err);
+        return;
+      }
+      setInitialSessionId(sessionId);
+      setSessionPaneKey((k) => k + 1);
+    },
+    [workspaceId, chatId],
+  );
+
   if (!chatId) return null;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <ChatView
-        key={chatKey}
+        key={`${chatKey}-${sessionPaneKey}`}
         chatKey={chatKey}
         workspaceId={workspaceId}
         chatId={chatId}
@@ -111,6 +145,7 @@ function MobileChatContent({ workspaceId }: { workspaceId: string }) {
         onShowSessionListChange={setShowSessionList}
         onStreamingChange={setTaskRunning}
         onNewSessionRef={newSessionRef}
+        onSwitchSession={onSwitchSession}
         agentType={agentType}
         codingAgentId={codingAgentId}
         onSwitchAgent={switchAgent}
