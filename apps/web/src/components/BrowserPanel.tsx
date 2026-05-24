@@ -1,6 +1,13 @@
 import type { IDockviewPanelProps } from "dockview";
 import { ArrowLeft, ArrowRight, RotateCw, Wrench, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { useBrowserPaneControls } from "../hooks/useBrowserPaneControls";
 import { useBrowserPaneFreeze } from "../hooks/useBrowserPaneFreeze";
 import { useOverriddenHosts } from "../hooks/useOverriddenHosts";
@@ -299,19 +306,40 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
   }, []);
 
   // ------- visibility tracking (hide/show when tab switches) -------
+  //
+  // The native WebContentsView is an OS-level overlay; its position is
+  // set asynchronously over IPC, so any extra round-trip translates
+  // into a visible "snap" when the user re-enters the Browser tab.
+  // Two things matter for keeping the snap invisible:
+  //
+  //   1. Send `browser_set_bounds` BEFORE `browser_show`. Setting bounds
+  //      on a hidden view is safe; doing it after `show` means the
+  //      view appears at its stale last-known position for one frame
+  //      and then snaps to the current placeholder rect.
+  //   2. Fire the IPCs without `await`-ing between them so both
+  //      messages reach the main process in the same event-loop tick
+  //      instead of one round-trip apart.
+  //
+  // We do NOT bother gating the bounds call on `width > 0 && height > 0`
+  // when SHOWING — by the time the visibility event fires, dockview
+  // has already re-attached the panel content and the placeholder has
+  // its real size. We DO keep the guard everywhere we might be called
+  // with a placeholder that's still 0×0 (creation, ResizeObserver).
 
   useEffect(() => {
     if (!isDesktop || !created) return;
 
-    const handleVisibility = async (visible: boolean) => {
+    const handleVisibility = (visible: boolean) => {
       if (visible) {
-        await invoke("browser_show", { workspaceId });
+        // Bounds first, then show: ensures the view appears at the
+        // correct position on the very next compositor frame.
         const bounds = getBounds();
         if (bounds && bounds.width > 0 && bounds.height > 0) {
-          await invoke("browser_set_bounds", { workspaceId, ...bounds });
+          invoke("browser_set_bounds", { workspaceId, ...bounds }).catch(() => {});
         }
+        invoke("browser_show", { workspaceId }).catch(() => {});
       } else {
-        await invoke("browser_hide", { workspaceId });
+        invoke("browser_hide", { workspaceId }).catch(() => {});
       }
     };
 
@@ -336,20 +364,28 @@ export function BrowserPanelComponent({ params, api }: IDockviewPanelProps<Brows
   // The native webview is an OS-level layer that floats on top of the DOM.
   // When the workspace is hidden (wsActive=false) we must explicitly hide
   // the webview — CSS display:none on the React tree has no effect on it.
+  //
+  // `useLayoutEffect` (not `useEffect`) so the IPCs fire in the same
+  // commit phase as the `wsActive` prop change, before the browser
+  // paints. Combined with "bounds before show" (see above), this
+  // collapses the previously-visible snap on workspace switch into a
+  // single correctly-positioned frame.
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!isDesktop || !created) return;
     const wsActive = params.wsActive !== false;
 
     if (!wsActive) {
       invoke("browser_hide", { workspaceId }).catch(() => {});
     } else if (api.isActive) {
-      // Only re-show if the browser tab is the active tab in its group
-      invoke("browser_show", { workspaceId }).catch(() => {});
+      // Bounds first so the view appears at the correct rect on
+      // re-show; see the rationale in the visibility-tracking effect
+      // above.
       const bounds = getBounds();
       if (bounds && bounds.width > 0 && bounds.height > 0) {
         invoke("browser_set_bounds", { workspaceId, ...bounds }).catch(() => {});
       }
+      invoke("browser_show", { workspaceId }).catch(() => {});
     }
   }, [params.wsActive, api, created, getBounds, invoke, workspaceId]);
 
