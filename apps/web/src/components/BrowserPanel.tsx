@@ -1,13 +1,6 @@
 import type { IDockviewPanelProps } from "dockview";
 import { ArrowLeft, ArrowRight, RotateCw, Wrench, X } from "lucide-react";
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useBrowserPaneControls } from "../hooks/useBrowserPaneControls";
 import { useBrowserPaneFreeze } from "../hooks/useBrowserPaneFreeze";
 import { useOverriddenHosts } from "../hooks/useOverriddenHosts";
@@ -941,38 +934,19 @@ export function BrowserPaneComponent({
   // while `isVisible` = content area is on screen (multiple in a split).
   // We show/hide based on *visibility*, not active focus, so split views
   // keep both native webviews rendered simultaneously.
-  //
-  // The native WebContentsView is an OS-level overlay; its position is
-  // applied asynchronously over IPC. Two things matter for keeping the
-  // re-entry snap invisible (issue: when switching back to the Browser
-  // tab the user saw a one-frame flash of the chromium content at the
-  // top-left of the window before it snapped to the placeholder rect):
-  //
-  //   1. Send `browser_set_bounds` BEFORE `browser_show`. Setting bounds
-  //      on a hidden view is safe; if we show first, chromium un-parks
-  //      the compositor with its last-cached frame still at whatever
-  //      bounds were active before — typically the wrong rect — and
-  //      paints that one frame before our bounds update catches up.
-  //   2. Fire the IPCs without `await`-ing between them so both messages
-  //      reach the main process in the same event-loop tick instead of
-  //      one round-trip apart.
   useEffect(() => {
     if (!isDesktop || !created) return;
 
-    const showWebview = () => {
-      // Bounds first, then show. Setting bounds on a hidden view is a
-      // no-visible-effect update; once `browser_show` flips
-      // `setVisible(true)` the compositor wakes up with the correct
-      // rect already in place.
+    const showWebview = async () => {
+      await invoke("browser_show", { browserId });
       const bounds = getBounds();
       if (bounds && bounds.width > 0 && bounds.height > 0) {
-        invoke("browser_set_bounds", { browserId, ...bounds }).catch(() => {});
+        await invoke("browser_set_bounds", { browserId, ...bounds });
       }
-      invoke("browser_show", { browserId }).catch(() => {});
     };
 
-    const hideWebview = () => {
-      invoke("browser_hide", { browserId }).catch(() => {});
+    const hideWebview = async () => {
+      await invoke("browser_hide", { browserId });
     };
 
     const d = api.onDidVisibilityChange((e) => {
@@ -989,26 +963,18 @@ export function BrowserPaneComponent({
   }, [api, created, getBounds, invoke, browserId]);
 
   // ------- workspace-level visibility -------
-  //
-  // `useLayoutEffect` (not `useEffect`) so the IPCs fire in the same
-  // commit phase as the `wsActive` prop change, before the browser
-  // paints. Combined with "bounds before show" (see above), this
-  // collapses the previously-visible snap on workspace switch into a
-  // single correctly-positioned frame.
-  useLayoutEffect(() => {
+  useEffect(() => {
     if (!isDesktop || !created) return;
     const wsActive = params.wsActive !== false;
 
     if (!wsActive) {
       invoke("browser_hide", { browserId }).catch(() => {});
     } else if (api.isVisible) {
-      // Bounds before show — see the rationale in the visibility-
-      // tracking effect above.
+      invoke("browser_show", { browserId }).catch(() => {});
       const bounds = getBounds();
       if (bounds && bounds.width > 0 && bounds.height > 0) {
         invoke("browser_set_bounds", { browserId, ...bounds }).catch(() => {});
       }
-      invoke("browser_show", { browserId }).catch(() => {});
     }
   }, [params.wsActive, api, created, getBounds, invoke, browserId]);
 

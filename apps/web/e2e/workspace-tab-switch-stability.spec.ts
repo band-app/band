@@ -6,50 +6,52 @@
  * ----------
  * The shared dockview layout (`apps/web/src/components/SharedDockviewLayout.tsx`)
  * hides inactive tab panels by detaching their content element from the
- * DOM (dockview's default `onlyWhenVisible` renderer). When the user
- * switches BACK to the Terminal or Browser tab, two non-DOM rendering
- * surfaces have to catch up to the panel's real size:
- *
- *   - Terminal: xterm.js's canvas has internal pixel dimensions
- *     driven by `fitAddon.fit()`. Before the fix, that fit was queued
- *     via `requestAnimationFrame`, so the browser painted ONE frame
- *     with the still-old-sized canvas, then ANOTHER frame after the
- *     RAF resized it — the user saw the second-frame "snap".
- *   - Browser (desktop only): the native WebContentsView is an
- *     OS-level overlay positioned over IPC. Before the fix, the
- *     visibility effect awaited `browser_show` and THEN awaited
- *     `browser_set_bounds`, so the view re-appeared at its stale
- *     last-known rect before snapping to the placeholder's current
- *     rect.
+ * DOM (dockview's default `onlyWhenVisible` renderer). The Terminal and
+ * Browser panels each embed a *nested* dockview
+ * (`DockviewTerminalContainer` / `DockviewBrowserContainer`) inside
+ * their content area. When the outer panel detaches, that nested
+ * dockview's shell element collapses to 0×0; when the user switches
+ * BACK to the Terminal or Browser tab and the shell gains real size,
+ * dockview-core re-applies inline `style.width` / `style.height` to
+ * its splitview view containers — but only after a
+ * `requestAnimationFrame`, because
+ * `node_modules/dockview-core/dist/esm/dom.js::watchElementResize`
+ * wraps its ResizeObserver callback in RAF. That extra frame is what
+ * the user perceives as the inner tab strip "resizing" — they briefly
+ * see the splitview's stale width inlined on the container before the
+ * RAF fires and corrects it.
  *
  * Fix (verified by this spec):
- *   - `TerminalPanel.tsx` now uses `useLayoutEffect` with a
- *     synchronous `fitAddon.fit()` call (no RAF), so the canvas
- *     resize lands in the same commit phase as the visibility flip
- *     and the very first paint after the tab switch already has
- *     the right-sized canvas.
- *   - `BrowserPanel.tsx` fires `browser_set_bounds` BEFORE
- *     `browser_show` (no inter-await) and elevates the workspace-
- *     level visibility effect to `useLayoutEffect`.
+ *   - `DockviewTerminalContainer` and `DockviewBrowserContainer` each
+ *     add a `useLayoutEffect` keyed on `visible` that reads the
+ *     wrapper's current `getBoundingClientRect()` and calls
+ *     `apiRef.current.layout(width, height, force=true)`
+ *     synchronously. `useLayoutEffect` runs between React commit and
+ *     paint, and `api.layout()` propagates straight through the
+ *     splitview which writes the correct inline widths in the same
+ *     call — bypassing the RAF gate. The first painted frame after
+ *     the tab switch already has the correct widths.
  *
  * What this spec asserts
  * ----------------------
  * The Terminal panel's xterm-screen rect is identical before and
- * after a Files↔Terminal round-trip. This is functional smoke
- * coverage for the new `useLayoutEffect` code path — if the
- * synchronous fit() throws, or somehow ends up sizing the canvas to
- * a different rect than the previous mount, this spec fails.
+ * after a Files↔Terminal round-trip. Smoke coverage that exercises
+ * the synchronous-layout code path: if the inner dockview ever fails
+ * to re-layout (e.g. the `useLayoutEffect` is removed or
+ * `api.layout()` throws), the inner splitview's stale width keeps
+ * the screen rect from matching across the round-trip.
  *
  * What this spec does NOT catch
  * -----------------------------
  * The actual visible "snap" is a single ~16ms frame. Playwright's
  * `expect.poll` retries on a ~100ms interval, so by the time the
- * polled assertion runs the snap is already over and the canvas is
- * back to a correct rect. Detecting the snap directly would require
- * frame-level CDP tracing, which is fragile in CI and out of scope
- * for an integration test. The fix is verified visually on a real
- * machine (see the PR description) and this spec guards the code
- * path so the underlying mechanism stays functional.
+ * polled assertion runs the snap is already over and the rect is
+ * back to its stable value either way. Detecting the snap directly
+ * would require frame-level CDP tracing, which is fragile in CI and
+ * out of scope for an integration test. The fix is verified visually
+ * on a real desktop build (see the PR description for the steps);
+ * this spec guards the code path so the underlying mechanism stays
+ * functional.
  *
  * The Browser panel can't be tested from the web build (no native
  * WebContentsView; the "desktop only" fallback paints inline). We

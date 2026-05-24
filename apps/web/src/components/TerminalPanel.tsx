@@ -2,7 +2,7 @@ import type { FitAddon } from "@xterm/addon-fit";
 import type { ISearchOptions, SearchAddon } from "@xterm/addon-search";
 import type { WebglAddon } from "@xterm/addon-webgl";
 import type { ITheme, Terminal } from "@xterm/xterm";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { SearchBar, type SearchBarHandle, type SearchOptions, useSettingsQuery } from "@/dashboard";
 import { useVirtualKeyboardToolbar } from "../hooks/useVirtualKeyboardToolbar";
 import { openExternalUrl } from "../lib/open-external-url";
@@ -921,33 +921,17 @@ export function TerminalPanel({
     };
   }, [terminalId, workspaceId, paneMetadata, autoFocus]);
 
-  // Refit when visibility changes and notify server of new size.
-  //
-  // `useLayoutEffect` (not `useEffect`) + a synchronous `fit()` (not a
-  // `requestAnimationFrame` callback) so the canvas resize lands in the
-  // SAME frame that React commits the new `visible` value, eliminating
-  // the one-frame "snap" the user used to see when switching back to
-  // the Terminal tab:
-  //
-  //   - Before: dockview re-attaches the panel content -> React commits
-  //     `visible=true` -> useEffect schedules a RAF -> browser paints
-  //     ONCE with the still-old-sized xterm canvas -> RAF fires next
-  //     frame -> fit() resizes the canvas -> browser paints AGAIN at
-  //     the correct size. The two-paint sequence is the visible snap.
-  //   - After: useLayoutEffect runs synchronously between commit and
-  //     paint, fit() reads the (now-correct) parent dimensions via
-  //     getComputedStyle and immediately resizes the canvas, so the
-  //     first paint already shows the right-sized terminal.
-  //
-  // The PTY resize message is harmless if cols/rows didn't actually
-  // change (and `fitAddon.fit()` is a no-op in that case anyway).
-  useLayoutEffect(() => {
-    if (!visible || !fitAddonRef.current) return;
-    fitAddonRef.current.fit();
-    const term = terminalRef.current;
-    const ws = wsRef.current;
-    if (term && ws?.readyState === WebSocket.OPEN && term.cols > 0 && term.rows > 0) {
-      ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+  // Refit when visibility changes and notify server of new size
+  useEffect(() => {
+    if (visible && fitAddonRef.current) {
+      requestAnimationFrame(() => {
+        fitAddonRef.current?.fit();
+        const term = terminalRef.current;
+        const ws = wsRef.current;
+        if (term && ws?.readyState === WebSocket.OPEN && term.cols > 0 && term.rows > 0) {
+          ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+        }
+      });
     }
   }, [visible]);
 
