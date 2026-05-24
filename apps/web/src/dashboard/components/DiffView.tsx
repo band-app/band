@@ -494,7 +494,19 @@ function DiffFileContent({
       }
     };
 
-    setup();
+    // If `setup()` rejects after `await loadLanguage()` (e.g. `new
+    // MergeView()` throws on a malformed diff or a CodeMirror extension
+    // conflict), the success path that fires `onEditorViewsRef.current?.([
+    // ...views])` is never reached. Without this `.catch`, that unhandled
+    // rejection would leave `LazyFileRow`'s `editorRendered` flag stuck at
+    // `false`: the wrapper stays pinned to `minHeight: placeholderHeight`,
+    // the ResizeObserver never attaches, and the height cache is never
+    // populated — the row would never recover until the component
+    // unmounts. Routing the failure through the same empty-views callback
+    // the cleanup path uses lets the parent reset and recover gracefully.
+    setup().catch(() => {
+      onEditorViewsRef.current?.([]);
+    });
 
     return () => {
       cancelled = true;
