@@ -3,10 +3,25 @@ import { toWorkspaceId } from "@/dashboard";
 import { getDb } from "./db/connection";
 import { branchStatuses as branchStatusesTable } from "./db/schema";
 import { execGh, execGit, getRepoInfo, type RepoInfo } from "./git";
-import { buildBatchedCIQuery, type CIStatus, parseBatchedCIResponse } from "./github-graphql";
+import {
+  buildCIQuery,
+  type CIStatus,
+  type GraphQLRepoResponse,
+  parseCIResponse,
+} from "./github-graphql";
+import { LogThrottle } from "./log-dedupe";
 import { loadState } from "./state";
 import { syncWorktrees } from "./sync-state";
 import { emit } from "./watcher";
+
+/**
+ * Throttle for the GraphQL failure log line. Issue #457: the poller used to
+ * call `console.error` once per host per CI tick (every 30 s) once an error
+ * mode was hit, drowning out the rest of `~/.band/server.log`. We now emit
+ * one line per (host, error message) per hour, so the first occurrence of
+ * each distinct failure surfaces but a steady-state failure stays quiet.
+ */
+const ciErrorThrottle = new LogThrottle({ ttlMs: 60 * 60 * 1000 });
 
 interface GitStatus {
   dirty: boolean;
@@ -148,107 +163,52 @@ async function resolveRepoInfo(projectPath: string): Promise<RepoInfo | null> {
 }
 
 /**
- * Fetch CI status for all workspaces using batched GraphQL queries.
+ * Fetch CI status for all workspaces with one GraphQL query per workspace.
  *
- * Groups workspaces by GitHub host and executes one GraphQL query per host,
- * fetching PR status and check suite results for all branches in a single request.
- * Falls back to individual gh CLI calls if the GraphQL query fails.
+ * Each `gh api graphql` invocation issues a plain `repository(...)` selection
+ * (no aliased top-level fan-out — see `buildCIQuery` for the rationale and
+ * issue #457). Queries run in parallel via `Promise.allSettled`, so for a
+ * typical Band user with a handful of workspaces the wall-clock impact is
+ * dominated by the slowest single GitHub round-trip rather than by the
+ * spawn fan-out.
+ *
+ * The repeating `GraphQL query failed` line that motivated #457 is gated by
+ * `ciErrorThrottle`, so a steady-state failure surfaces once per
+ * (host, error message) per hour instead of once per tick.
  */
-async function getBatchedCIStatuses(workspaces: WorkspaceInfo[]): Promise<Map<string, CIStatus>> {
+async function getCIStatuses(workspaces: WorkspaceInfo[]): Promise<Map<string, CIStatus>> {
   // Clear cache so transferred repos or newly configured remotes are picked up
   repoInfoCache.clear();
 
-  // Resolve repo info for all workspaces in parallel
-  const resolved: Array<{
-    ws: WorkspaceInfo;
-    repoInfo: RepoInfo;
-    alias: string;
-  }> = [];
+  const allResults = new Map<string, CIStatus>();
+
+  // Resolve repo info + issue the GraphQL query per workspace, in parallel.
   await Promise.allSettled(
-    workspaces.map(async (ws, index) => {
+    workspaces.map(async (ws) => {
       const repoInfo = await resolveRepoInfo(ws.projectPath);
-      if (repoInfo) {
-        resolved.push({ ws, repoInfo, alias: `ws_${index}` });
-      } else {
-        console.error(
-          `CI poll: failed to resolve repo info for ${ws.workspaceId} (${ws.projectPath})`,
-        );
+      if (!repoInfo) {
+        // `getRepoInfo` already logs to console.error on parse/git failure;
+        // surface a deduped note here too so callers can see which
+        // workspace was skipped without spamming the log every tick.
+        const key = `repo-info:${ws.projectPath}`;
+        if (ciErrorThrottle.shouldLog(key)) {
+          console.error(
+            `CI poll: failed to resolve repo info for ${ws.workspaceId} (${ws.projectPath})`,
+          );
+        }
+        return;
+      }
+
+      const status = await fetchCIStatusForWorkspace(ws, repoInfo);
+      if (status) {
+        allResults.set(ws.workspaceId, status);
       }
     }),
   );
 
-  // If no workspaces have repo info, return empty
-  if (resolved.length === 0) {
-    const results = new Map<string, CIStatus>();
-    for (const ws of workspaces) {
-      results.set(ws.workspaceId, { state: "none" });
-    }
-    return results;
-  }
-
-  // Group by GitHub host (one query per host for correct auth)
-  const byHost = new Map<string, typeof resolved>();
-  for (const entry of resolved) {
-    const host = entry.repoInfo.host;
-    const group = byHost.get(host) ?? [];
-    group.push(entry);
-    byHost.set(host, group);
-  }
-
-  const allResults = new Map<string, CIStatus>();
-
-  // Execute one batched GraphQL query per host
-  for (const [host, group] of byHost) {
-    const inputs = group.map((g) => ({
-      alias: g.alias,
-      branch: g.ws.branch,
-      repoInfo: g.repoInfo,
-    }));
-
-    const query = buildBatchedCIQuery(inputs);
-    // Use any workspace's worktreePath for cwd (gh auth is per-host)
-    const cwd = group[0].ws.worktreePath;
-
-    const ghArgs = ["api", "graphql", "-f", `query=${query}`];
-    if (host !== "github.com") {
-      ghArgs.push("--hostname", host);
-    }
-
-    try {
-      const output = await execGh(ghArgs, cwd);
-      const response = JSON.parse(output) as {
-        data: Record<string, unknown>;
-      };
-      // Build map of alias -> defaultBranch for aliases that are on the default branch
-      const defaultBranches = new Map<string, string>();
-      for (const g of group) {
-        if (g.ws.branch === g.ws.defaultBranch) {
-          defaultBranches.set(g.alias, g.ws.defaultBranch);
-        }
-      }
-
-      const parsed = parseBatchedCIResponse(
-        response.data as Record<string, never>,
-        inputs.map((i) => i.alias),
-        defaultBranches,
-      );
-
-      // Map aliases back to workspace IDs
-      for (const g of group) {
-        const status = parsed.get(g.alias);
-        if (status) {
-          allResults.set(g.ws.workspaceId, status);
-        }
-      }
-    } catch (err) {
-      console.error(
-        `CI poll: GraphQL query failed for host (${group.length} workspaces):`,
-        err instanceof Error ? err.message : err,
-      );
-    }
-  }
-
-  // Fill in "none" for workspaces that couldn't resolve repo info
+  // Fill in "none" for workspaces that didn't produce a status (failed
+  // resolve or query). Without this the DB upsert further down would skip
+  // those rows entirely and stale CI state would linger.
   for (const ws of workspaces) {
     if (!allResults.has(ws.workspaceId)) {
       allResults.set(ws.workspaceId, { state: "none" });
@@ -256,6 +216,44 @@ async function getBatchedCIStatuses(workspaces: WorkspaceInfo[]): Promise<Map<st
   }
 
   return allResults;
+}
+
+/**
+ * Issue one `gh api graphql` query for a single workspace and parse the
+ * response. Returns `null` on failure (already logged via the throttle).
+ */
+async function fetchCIStatusForWorkspace(
+  ws: WorkspaceInfo,
+  repoInfo: RepoInfo,
+): Promise<CIStatus | null> {
+  const query = buildCIQuery({ branch: ws.branch, repoInfo });
+
+  const ghArgs = ["api", "graphql", "-f", `query=${query}`];
+  if (repoInfo.host !== "github.com") {
+    ghArgs.push("--hostname", repoInfo.host);
+  }
+
+  try {
+    const output = await execGh(ghArgs, ws.worktreePath);
+    const response = JSON.parse(output) as {
+      data?: { repository?: GraphQLRepoResponse | null };
+    };
+    const repo = response.data?.repository ?? null;
+    const isDefaultBranch = ws.branch === ws.defaultBranch;
+    return parseCIResponse(repo, isDefaultBranch);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    // Compose a stable key so a recurring failure mode gets one log per TTL
+    // rather than one per tick. Trim trailing whitespace to keep tiny
+    // differences in `gh` stderr from defeating the throttle.
+    const key = `gql:${repoInfo.host}:${message.trim()}`;
+    if (ciErrorThrottle.shouldLog(key)) {
+      console.error(
+        `CI poll: GraphQL query failed for host ${repoInfo.host} (workspace ${ws.workspaceId}): ${message}`,
+      );
+    }
+    return null;
+  }
 }
 
 async function pollTick() {
@@ -282,10 +280,11 @@ async function pollTick() {
 
   const db = getDb();
 
-  // Fetch CI statuses in batch on CI ticks
+  // Fetch CI statuses on CI ticks (one GraphQL request per workspace,
+  // in parallel — see `getCIStatuses` for the per-workspace rationale).
   let ciStatuses = new Map<string, CIStatus>();
   if (isCITick) {
-    ciStatuses = await getBatchedCIStatuses(workspaces);
+    ciStatuses = await getCIStatuses(workspaces);
   }
 
   await Promise.allSettled(
