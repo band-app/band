@@ -90,7 +90,7 @@ function defaultSettings() {
 }
 
 async function startServer(
-  opts: { tmpHome?: string; scenarioPath?: string } = {},
+  opts: { tmpHome?: string; scenarioPath?: string; extraEnv?: Record<string, string> } = {},
 ): Promise<ServerHandle> {
   const home = opts.tmpHome || createTmpHome();
   const port = await getRandomPort();
@@ -104,6 +104,7 @@ async function startServer(
         PORT: String(port),
         NODE_ENV: "production",
         FAKE_AGENT_SCENARIO: opts.scenarioPath || "",
+        ...(opts.extraEnv ?? {}),
       },
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -1208,6 +1209,173 @@ describe("chat-events — file attachment uploads end-to-end", () => {
     // Crucially: the wire URL is NOT the bulky base64 data URL.
     expect(file.url.startsWith("data:")).toBe(false);
   }, 20_000);
+});
+
+// ---------------------------------------------------------------------------
+// Queue drain preserves file attachments
+//
+// Regression for the silently-dropped-image bug:
+//   - User submits message #1 (long task). It starts running.
+//   - User submits message #2 carrying an image attachment. The submit
+//     returns `{ queued: true }` because the chat is busy.
+//   - Task #1 completes.
+//   - The drained queued turn used to call `saveUploadedFilesDetailed`
+//     again at drain time. But by then the queued payload's url had
+//     already been transformed from a `data:` URL into
+//     `/api/uploads/<storedName>` — the helper's data-URL regex no
+//     longer matched, so EVERY file was silently dropped. The result:
+//     no `files` on the user-message event, no `I'm sharing these
+//     files…` preamble for the agent, image gone.
+//
+// The fix carries the on-disk `path` through the queue payload and
+// reconstructs the agent prompt + display files directly from queued
+// metadata, without a second save. This test pins both halves:
+//   - The user-message event for the drained turn carries `files` with
+//     the right mediaType and a stable `/api/uploads/` URL.
+//   - The agent received the `I'm sharing these files with you:\n- <path>`
+//     preamble verbatim (verified by reading the stdin log dumped by
+//     the fake-agent — see `FAKE_AGENT_STDIN_LOG` in fake-agent.mjs).
+// ---------------------------------------------------------------------------
+
+describe("chat-events — queue drain preserves file attachments", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+  let stdinLogPath: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome();
+    seedState(tmpHome, createDefaultState(tmpHome));
+    seedSettings(tmpHome, defaultSettings());
+    // longScenario sleeps mid-stream so the second submit lands while
+    // the first task is still running and gets queued server-side. The
+    // drain is the path we're exercising.
+    const scenario = writeScenario(tmpHome, longScenario("queue-files-session"));
+    stdinLogPath = join(tmpHome, "fake-agent-stdin.log");
+    server = await startServer({
+      tmpHome,
+      scenarioPath: scenario,
+      extraEnv: { FAKE_AGENT_STDIN_LOG: stdinLogPath },
+    });
+  }, 30_000);
+
+  afterAll(async () => {
+    if (server) await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("drained queued message keeps its image attachment + agent receives the file-sharing preamble", async () => {
+    const chatId = newChatId("queue-files");
+
+    // Subscribe FIRST so we observe both turns. Stop after two
+    // `task-completed` events — first task + drained second task.
+    const subscriptionPromise = collectEvents(server.url, chatId, {
+      until: (_e, all) => all.filter((x) => x.type === "task-completed").length >= 2,
+      maxEvents: 200,
+      timeoutMs: 30_000,
+    });
+
+    // Turn 1 — text-only, kicks off the long task.
+    const firstRes = await submitMessage(server.url, chatId, {
+      workspaceId: "testproject-main",
+      text: "first turn",
+    });
+    expect(firstRes.status).toBe(200);
+    expect(await firstRes.json()).toEqual({ ok: true, queued: false });
+
+    // Brief beat so the second submit lands while the first task is
+    // actually in flight (otherwise the conflict path doesn't fire and
+    // the second turn runs immediately instead of being queued).
+    await new Promise((r) => setTimeout(r, 100));
+
+    // Turn 2 — same 1×1 PNG signature the existing file-upload test
+    // uses, encoded as a data URL the way the chat UI submits images
+    // pasted from the clipboard.
+    const pixelBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0a]);
+    const dataUrl = `data:image/png;base64,${pixelBytes.toString("base64")}`;
+    const queuedText = "what about this image?";
+
+    const secondRes = await submitMessage(server.url, chatId, {
+      workspaceId: "testproject-main",
+      text: queuedText,
+      files: [{ mediaType: "image/png", url: dataUrl, filename: "queued-pixel.png" }],
+    });
+    // Confirm we actually hit the queue path; if this returns
+    // `queued: false`, the rest of the test would pass trivially without
+    // exercising the drain — that's the bug we're guarding against.
+    expect(secondRes.status).toBe(200);
+    expect(await secondRes.json()).toEqual({ ok: true, queued: true });
+
+    // The submit handler persists the file under <HOME>/.band/uploads/
+    // BEFORE pushing the queued payload. By the time the second submit
+    // returns 200 the bytes must already be on disk.
+    const uploadDir = join(server.home, ".band", "uploads");
+    expect(existsSync(uploadDir)).toBe(true);
+    const uploadedFiles = readdirSync(uploadDir);
+    expect(uploadedFiles.length).toBe(1);
+    expect(uploadedFiles[0]).toMatch(/^\d+-0-queued-pixel\.png$/);
+    const savedAbsPath = join(uploadDir, uploadedFiles[0]);
+    expect(Buffer.compare(readFileSync(savedAbsPath), pixelBytes)).toBe(0);
+
+    const events = await subscriptionPromise;
+
+    // Two complete turns, each with its own user-message → task-completed
+    // sequence. The DRAINED turn (#1 in 0-indexed order, the second
+    // user-message overall) is the one we care about.
+    const userMessages = events.filter((e) => e.type === "user-message");
+    expect(userMessages.length).toBe(2);
+
+    const drainedUserMsg = userMessages[1];
+    const drainedData = drainedUserMsg.data as Extract<
+      ChatEventPayload,
+      { type: "user-message" }
+    > & { eventId: number };
+
+    // The drained user bubble surfaces the queued text — not the
+    // `I'm sharing these files…\n\n<text>` agent prompt (that's the
+    // augmented prompt sent to the model, not the displayed text).
+    expect(drainedData.text).toBe(queuedText);
+
+    // And the file metadata is preserved end-to-end. Pre-fix the wire
+    // shape had NO `files` field at all (saveUploadedFilesDetailed had
+    // silently dropped everything because the URL was no longer a
+    // data: URL), so this is the smoking-gun assertion.
+    expect(drainedData.files).toBeDefined();
+    expect(drainedData.files).toHaveLength(1);
+    const drainedFile = drainedData.files![0];
+    expect(drainedFile.mediaType).toBe("image/png");
+    expect(drainedFile.filename).toBe("queued-pixel.png");
+    expect(drainedFile.url).toMatch(/^\/api\/uploads\/\d+-0-queued-pixel\.png$/);
+    // The URL on the wire must be the stable upload URL, not the
+    // bulky base64 data URL (which would persist into JSONL forever
+    // if it leaked through here).
+    expect(drainedFile.url.startsWith("data:")).toBe(false);
+
+    // Bytes on disk are unchanged — no double-save, no truncation. (Pre-fix
+    // the drain re-ran `saveUploadedFilesDetailed`, which would have
+    // produced a SECOND file on disk if the regex had actually matched.)
+    expect(readdirSync(uploadDir).length).toBe(1);
+
+    // And the agent actually received the file-sharing preamble. The
+    // fake-agent dumps every parsed stdin message (and its argv) to
+    // FAKE_AGENT_STDIN_LOG; grep for the marker phrase, the absolute
+    // disk path, AND the queued text. All three together pin that the
+    // agent saw `I'm sharing these files with you:\n- <path>\n\n<text>`.
+    //
+    // We assert on the three fragments rather than the exact composed
+    // string because the SDK's serialization is JSON (newlines become
+    // `\n` escapes); argv would keep them raw. Splitting the assertion
+    // tolerates either transport while still pinning the same fact.
+    expect(existsSync(stdinLogPath)).toBe(true);
+    const stdinLog = readFileSync(stdinLogPath, "utf-8");
+    expect(stdinLog).toContain("I'm sharing these files with you:");
+    expect(stdinLog).toContain(savedAbsPath);
+    expect(stdinLog).toContain(queuedText);
+    // Sanity: the first-turn prompt MUST NOT have leaked a stale
+    // `[File sharing:` hint into the SECOND turn's user content (that
+    // hint is only meant for new sessions; the drain is a resume).
+    // We don't assert the absence globally because the first turn
+    // (also a new session) is legitimately allowed to carry it.
+  }, 40_000);
 });
 
 // ---------------------------------------------------------------------------

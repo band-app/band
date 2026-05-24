@@ -138,7 +138,7 @@ import {
   writeToTerminal,
 } from "../lib/terminal-manager";
 import { getTunnelStatus, startTunnel, stopTunnel } from "../lib/tunnel";
-import { saveUploadedFiles } from "../lib/upload-utils";
+import { saveUploadedFiles, saveUploadedFilesDetailed } from "../lib/upload-utils";
 import { emit, subscribe as subscribeStatus } from "../lib/watcher";
 import { resolveWorkspace } from "../lib/workspace";
 import type { Context } from "./context";
@@ -3889,11 +3889,95 @@ const historyRouter = t.router({
 // Queue (persisted queued messages)
 // ---------------------------------------------------------------------------
 
+/**
+ * Wire shape accepted from tRPC clients. `path` is optional on input
+ * because external/CLI callers may enqueue a raw `data:` URL that the
+ * server has not yet persisted — we resolve a path in that case
+ * (see `resolveQueuedFiles` below). Clients that already have the file
+ * on disk (the dashboard's drag-reorder, for example) MUST forward the
+ * existing `path` through unchanged so it survives the round-trip.
+ */
 const queuedFileSchema = z.object({
   mediaType: z.string(),
   url: z.string(),
+  path: z.string().optional(),
   filename: z.string().optional(),
 });
+
+type QueuedFileInput = z.infer<typeof queuedFileSchema>;
+
+/**
+ * Ensure every enqueued file has a persisted on-disk `path`. Two shapes
+ * to handle:
+ *
+ *   1. The client already saved the bytes (e.g. dashboard reorder via
+ *      `queue.set`) and forwards `path` + a `/api/uploads/...` URL —
+ *      pass through unchanged.
+ *   2. The client hands us a `data:` URL with no `path` (e.g. CLI-driven
+ *      enqueue from raw base64) — persist via `saveUploadedFilesDetailed`
+ *      and rebuild the file record with the fresh path + stable URL.
+ *
+ * Any other shape (no `path`, non-data URL — there's no way to recover
+ * the disk path from a bare URL) is dropped with a log entry rather
+ * than silently inserted in a half-broken state.
+ */
+async function resolveQueuedFiles(
+  chatId: string,
+  files: QueuedFileInput[] | undefined,
+): Promise<{ mediaType: string; url: string; path: string; filename?: string }[] | undefined> {
+  if (!files || files.length === 0) return undefined;
+
+  const resolved: { mediaType: string; url: string; path: string; filename?: string }[] = [];
+  const needsSave: QueuedFileInput[] = [];
+  const needsSaveIdx: number[] = [];
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    if (file.path) {
+      resolved.push({
+        mediaType: file.mediaType,
+        url: file.url,
+        path: file.path,
+        ...(file.filename !== undefined && { filename: file.filename }),
+      });
+      continue;
+    }
+    if (file.url.startsWith("data:")) {
+      needsSave.push(file);
+      needsSaveIdx.push(i);
+      // Placeholder so we can splice into the right slot once saved.
+      resolved.push({
+        mediaType: file.mediaType,
+        url: file.url,
+        path: "",
+        filename: file.filename,
+      });
+      continue;
+    }
+    log.warn(
+      { chatId, url: file.url, filename: file.filename },
+      "queue: dropping file with no path and non-data URL — cannot recover disk path",
+    );
+  }
+
+  if (needsSave.length > 0) {
+    const saved = await saveUploadedFilesDetailed(needsSave);
+    // saveUploadedFilesDetailed preserves input order, so saved[k] maps
+    // back to the original `needsSave[k]` / `needsSaveIdx[k]`. Anything
+    // it skipped (non-data URL) is already pruned by the loop above.
+    for (let k = 0; k < saved.length; k++) {
+      const target = needsSaveIdx[k];
+      resolved[target] = {
+        mediaType: saved[k].mediaType,
+        url: `/api/uploads/${saved[k].storedName}`,
+        path: saved[k].path,
+        ...(saved[k].originalName !== undefined && { filename: saved[k].originalName }),
+      };
+    }
+  }
+
+  const finalized = resolved.filter((f) => f.path !== "");
+  return finalized.length > 0 ? finalized : undefined;
+}
 
 const queueRouter = t.router({
   push: publicProcedure
@@ -3905,9 +3989,10 @@ const queueRouter = t.router({
         files: z.array(queuedFileSchema).optional(),
       }),
     )
-    .mutation(({ input }) => {
+    .mutation(async ({ input }) => {
       const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
-      const message = pushQueuedMessage(chatId, { text: input.text, files: input.files });
+      const files = await resolveQueuedFiles(chatId, input.files);
+      const message = pushQueuedMessage(chatId, { text: input.text, files });
       return { ok: true, message, messages: getQueuedMessages(chatId) };
     }),
 
@@ -3925,9 +4010,16 @@ const queueRouter = t.router({
         ),
       }),
     )
-    .mutation(({ input }) => {
+    .mutation(async ({ input }) => {
       const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
-      setQueuedMessages(chatId, input.messages);
+      const messages = await Promise.all(
+        input.messages.map(async (m) => ({
+          ...(m.id !== undefined && { id: m.id }),
+          text: m.text,
+          files: await resolveQueuedFiles(chatId, m.files),
+        })),
+      );
+      setQueuedMessages(chatId, messages);
       return { ok: true, messages: getQueuedMessages(chatId) };
     }),
 

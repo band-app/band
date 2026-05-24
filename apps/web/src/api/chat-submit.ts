@@ -86,14 +86,24 @@ export async function handleChatSubmit(
 
   // Upload any attached files first — needs to be sequential w.r.t. the
   // submit so the agent prompt references valid paths.
+  //
+  // Capture the full `SavedFile` records (including the absolute on-disk
+  // path) and only collapse to the display shape when we hand them to
+  // submitTask. The disk path also rides along in the queued payload so
+  // a drained queued message can rebuild its agent prompt WITHOUT
+  // re-running `saveUploadedFilesDetailed` (the second call would
+  // silently skip every file — the URL is `/api/uploads/<storedName>`
+  // by then, not a `data:` URL, and the regex inside that helper
+  // requires the latter).
   let agentPrompt: string | undefined;
   let displayFiles: { mediaType: string; url: string; filename?: string }[] | undefined;
+  let savedFiles: Awaited<ReturnType<typeof saveUploadedFilesDetailed>> = [];
   if (files && files.length > 0) {
-    const saved = await saveUploadedFilesDetailed(files);
-    if (saved.length > 0) {
-      const fileList = saved.map((s) => `- ${s.path}`).join("\n");
+    savedFiles = await saveUploadedFilesDetailed(files);
+    if (savedFiles.length > 0) {
+      const fileList = savedFiles.map((s) => `- ${s.path}`).join("\n");
       agentPrompt = `I'm sharing these files with you:\n${fileList}\n\n${text}`;
-      displayFiles = saved.map((s) => ({
+      displayFiles = savedFiles.map((s) => ({
         mediaType: s.mediaType,
         url: `/api/uploads/${s.storedName}`,
         filename: s.originalName,
@@ -120,9 +130,21 @@ export async function handleChatSubmit(
     if (err instanceof TaskConflictError) {
       // Already running — queue instead. The subscriber sees a
       // `queue-updated` event automatically via subscribeQueue.
+      // Carry the absolute disk path through so the drain path in
+      // task-runner.ts can rebuild `I'm sharing these files…\n- <path>`
+      // without re-uploading (the URLs are already
+      // `/api/uploads/<storedName>` at this point, so re-running
+      // `saveUploadedFilesDetailed` would silently drop them).
       pushQueuedMessage(chatId, {
         text,
-        ...(displayFiles && displayFiles.length > 0 && { files: displayFiles }),
+        ...(savedFiles.length > 0 && {
+          files: savedFiles.map((s) => ({
+            mediaType: s.mediaType,
+            url: `/api/uploads/${s.storedName}`,
+            path: s.path,
+            filename: s.originalName,
+          })),
+        }),
       });
       log.info({ chatId, workspaceId }, "chat-submit: task busy, message queued");
       sendJson(res, 200, { ok: true, queued: true });

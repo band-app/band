@@ -22,6 +22,15 @@
 export interface ChatEventFile {
   mediaType: string;
   url: string;
+  /**
+   * Absolute on-disk path, surfaced for queued attachments so a
+   * `queue.set` round-trip from the dashboard (drag-reorder)
+   * preserves the disk reference. Optional because not every file
+   * event carries one — `FileEvent` for an assistant-produced file
+   * doesn't (it's a shared-dir URL only). Browsers never render
+   * this; it travels back to the server unchanged.
+   */
+  path?: string;
   filename?: string;
 }
 

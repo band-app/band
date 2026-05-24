@@ -20,7 +20,27 @@ import { randomUUID } from "node:crypto";
 
 export interface QueuedFile {
   mediaType: string;
+  /**
+   * Stable URL that the chat UI can fetch to render the file, e.g.
+   * `/api/uploads/<storedName>`. Distinct from `path` because the URL
+   * is what the browser sees, while `path` is what the agent process
+   * needs to actually read bytes off disk.
+   */
   url: string;
+  /**
+   * Absolute on-disk path under `<HOME>/.band/uploads/`. Required so the
+   * drain in `task-runner.ts` can rebuild the `I'm sharing these files
+   * with you:\n- <path>` agent prompt WITHOUT re-running
+   * `saveUploadedFilesDetailed` (which would silently drop the file —
+   * by the time it lands in the queue the URL has already been
+   * transformed from a base64 data URL into `/api/uploads/...`, which
+   * the data-URL regex in `upload-utils.ts` no longer matches).
+   *
+   * Every code path that enqueues a `QueuedFile` is responsible for
+   * persisting the bytes first (via `saveUploadedFilesDetailed`) and
+   * passing the resulting absolute path through here.
+   */
+  path: string;
   filename?: string;
 }
 
