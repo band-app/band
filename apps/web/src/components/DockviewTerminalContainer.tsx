@@ -16,6 +16,7 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -589,6 +590,30 @@ export function DockviewTerminalContainer({
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
   }, [visible, closeTab, handleSplit, handleAddTab]);
+
+  // Force a synchronous re-layout of the inner dockview when the outer
+  // Terminal panel becomes visible. Background: dockview-core's
+  // `watchElementResize` (node_modules/dockview-core/.../dom.js) wraps
+  // its ResizeObserver callback in `requestAnimationFrame`, so the
+  // first time the inner dockview's shell element gains real size
+  // (because the outer panel just re-attached its DOM), the dockview
+  // engine waits one frame before it re-applies inline `style.width` /
+  // `style.height` on its splitview view containers. That frame paints
+  // with the previous (often very narrow) width still inlined on those
+  // containers — visible as the inner tab strip shrunk against the
+  // left edge with the right-header action buttons clustered next to
+  // it. Calling `api.layout(...)` synchronously inside
+  // `useLayoutEffect` runs BEFORE paint, so the first painted frame
+  // already has the correct widths.
+  useLayoutEffect(() => {
+    if (!visible) return;
+    const api = apiRef.current;
+    const container = containerRef.current;
+    if (!api || !container) return;
+    const rect = container.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
+    api.layout(Math.round(rect.width), Math.round(rect.height), true);
+  }, [visible]);
 
   // Auto-focus the active terminal's xterm textarea whenever the section
   // becomes visible (e.g. user clicked the outer "Terminal" panel tab).

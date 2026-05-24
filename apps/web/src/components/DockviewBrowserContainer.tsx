@@ -14,6 +14,7 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -676,6 +677,26 @@ export function DockviewBrowserContainer({
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
   }, [visible, closeTab, handleSplit, handleAddTab]);
+
+  // Force a synchronous re-layout of the inner dockview when the outer
+  // Browser panel becomes visible. See the matching effect (and its
+  // long comment) in DockviewTerminalContainer for the full rationale:
+  // dockview-core's `watchElementResize` defers its resize callback by
+  // a `requestAnimationFrame`, so the first frame after the outer
+  // panel re-attaches its DOM paints with the inner splitview's view
+  // containers still carrying their stale inline width/height — which
+  // shows up as the inner tab strip clustered against the left edge.
+  // `api.layout(...)` runs synchronously and re-applies the correct
+  // sizes before paint.
+  useLayoutEffect(() => {
+    if (!visible) return;
+    const api = apiRef.current;
+    const container = containerRef.current;
+    if (!api || !container) return;
+    const rect = container.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
+    api.layout(Math.round(rect.width), Math.round(rect.height), true);
+  }, [visible]);
 
   // Auto-focus the active browser pane's address bar whenever the section
   // becomes visible (e.g. user clicked the outer "Browser" panel tab) so
