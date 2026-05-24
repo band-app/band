@@ -174,15 +174,18 @@ export function baseViewerExtensions(
     rootDarkStyles.height = "100%";
     rootLightStyles.height = "100%";
   }
-  // For natural-height callers we only want the *vertical* axis to expand
-  // with the document — the horizontal axis must still scroll, otherwise
-  // long lines (minified JS, generated SQL, etc.) are silently clipped by
-  // whatever ancestor sets `overflow: clip` (LazyFileRow's `overflow-clip`
-  // root). `overflow-x: auto; overflow-y: visible` keeps the scroller's
-  // horizontal scrollbar functional while letting vertical layout flow
-  // through to the auto-height parent chain.
+  // Natural-height callers need `.cm-scroller` to flow with its content
+  // instead of becoming a fixed-height scroll container. Per CSS Overflow
+  // L3 spec, mixing `visible` with a non-`visible`/`clip` value on the
+  // orthogonal axis (e.g. `overflowX: auto, overflowY: visible`) makes
+  // the `visible` compute as `auto` in every browser — silently
+  // re-introducing the fixed-height scroller that breaks our parent's
+  // auto-height chain. So both axes must be `visible`. Long lines fall
+  // back to the existing `overflow-clip` on `LazyFileRow`'s root, which
+  // is the same horizontal-clipping behaviour the codebase had before
+  // this PR (no regression).
   const scrollerStyles: Record<string, string> = naturalHeight
-    ? { overflowX: "auto", overflowY: "visible" }
+    ? { overflow: "visible" }
     : { overflow: "auto" };
 
   return [

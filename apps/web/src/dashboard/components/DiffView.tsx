@@ -512,7 +512,13 @@ function DiffFileContent({
     // setup would otherwise fire `[]` into the new mount and reset
     // `editorRendered = false` mid-setup — re-introducing the very
     // layout shift this PR is fixing.
-    setup().catch(() => {
+    setup().catch((err) => {
+      // Surface the failure to the console so a broken editor isn't
+      // completely invisible to the developer. The row remains pinned
+      // at `minHeight: placeholderHeight` with no editor content —
+      // there's no user-facing affordance for retry, but at least the
+      // error is debuggable from the devtools.
+      console.error("[DiffFileContent] editor setup failed", err);
       if (cancelled) return;
       onEditorViewsRef.current?.([]);
     });
