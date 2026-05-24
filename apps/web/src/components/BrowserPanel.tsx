@@ -955,23 +955,28 @@ export function BrowserPaneComponent({
     const logFail = (cmd: string) => (err: unknown) =>
       console.error(`[BrowserPane] ${cmd} failed`, err);
 
-    // Chain `browser_show` after `browser_set_bounds` so the show
-    // call observably happens AFTER the bounds update has reached
-    // the main process. Today both handlers run synchronously in
-    // the main process and the IPC delivery order alone is enough,
-    // but a future change that makes either handler async (e.g.
-    // adding a mutex) would silently break the bounds-before-show
-    // invariant if we kept fire-and-forget ordering. The `.then`
-    // chain encodes the dependency at the call site.
+    // Fire `browser_set_bounds` and `browser_show` in submission
+    // order without awaiting between them. Both IPC handlers in the
+    // main process (`view-manager.ts::setBounds` and `::show`) are
+    // synchronous (`view.setBounds()` is sync Electron, `moveTo` +
+    // `setVisible` are sync), and Electron's `ipcRenderer.invoke`
+    // delivers messages FIFO per renderer, so the bounds update is
+    // observed by the main process before the show call.
+    //
+    // We tried wrapping these in a `.then(...)` chain to make the
+    // ordering explicit, but that introduced a worse race: on rapid
+    // tab switches (show → hide → ...) the `.then` callback could
+    // fire `browser_show` AFTER a subsequent `browser_hide` had
+    // already been queued, leaving the view visible when the user
+    // expected it hidden. The current `dispose()`-only cleanup
+    // can't abort an already-scheduled `then`. The fire-and-forget
+    // pattern below relies on the per-renderer FIFO instead.
     const showWebview = () => {
       const bounds = getBounds();
-      const setBoundsP =
-        bounds && bounds.width > 0 && bounds.height > 0
-          ? invoke("browser_set_bounds", { browserId, ...bounds }).catch(
-              logFail("browser_set_bounds"),
-            )
-          : Promise.resolve();
-      setBoundsP.then(() => invoke("browser_show", { browserId }).catch(logFail("browser_show")));
+      if (bounds && bounds.width > 0 && bounds.height > 0) {
+        invoke("browser_set_bounds", { browserId, ...bounds }).catch(logFail("browser_set_bounds"));
+      }
+      invoke("browser_show", { browserId }).catch(logFail("browser_show"));
     };
 
     const hideWebview = () => {
@@ -1001,19 +1006,15 @@ export function BrowserPaneComponent({
     if (!wsActive) {
       invoke("browser_hide", { browserId }).catch(logFail("browser_hide"));
     } else if (api.isVisible) {
-      // Bounds before show — same .then() chain as the
-      // onDidVisibilityChange effect above. Encodes the ordering
-      // dependency at the call site, so a future async refactor of
-      // the main-process handlers can't silently break the
-      // invariant.
+      // Bounds before show — same fire-and-forget pattern as the
+      // onDidVisibilityChange effect above. Relies on Electron's
+      // per-renderer FIFO IPC delivery; see the long comment there
+      // for why a `.then()` chain is worse than fire-and-forget.
       const bounds = getBounds();
-      const setBoundsP =
-        bounds && bounds.width > 0 && bounds.height > 0
-          ? invoke("browser_set_bounds", { browserId, ...bounds }).catch(
-              logFail("browser_set_bounds"),
-            )
-          : Promise.resolve();
-      setBoundsP.then(() => invoke("browser_show", { browserId }).catch(logFail("browser_show")));
+      if (bounds && bounds.width > 0 && bounds.height > 0) {
+        invoke("browser_set_bounds", { browserId, ...bounds }).catch(logFail("browser_set_bounds"));
+      }
+      invoke("browser_show", { browserId }).catch(logFail("browser_show"));
     }
   }, [params.wsActive, api, created, getBounds, invoke, browserId]);
 
