@@ -127,13 +127,14 @@ test.describe("Tab-switch stability (fix-tab-switch-resize)", () => {
     await workspacePage.goto(WORKSPACE);
     await workspacePage.waitForReady();
 
-    // Find the Terminal and Files dockview tabs. Dockview labels its
-    // tab elements with `.dv-default-tab` and the tab text matches
-    // the panel title. `getByRole("tab")` would be cleaner but
-    // dockview's default tab markup doesn't add `role="tab"` — the
-    // `.dv-default-tab` content div is what receives the click.
-    const terminalTab = page.locator(".dv-default-tab", { hasText: "Terminal" }).first();
-    const filesTab = page.locator(".dv-default-tab", { hasText: "Files" }).first();
+    // Look up the OUTER Terminal / Files tabs via their
+    // `workspace__tab--*` testids (owned by `DefaultTab` in
+    // `SharedDockviewLayout.tsx`). Scoped to outer tabs only — nested
+    // dockview tab strips render their own renderers and never carry
+    // these testids — so the locators stay unambiguous even when the
+    // inner Terminal dockview is also displaying a "Terminal" tab.
+    const terminalTab = workspacePage.tab("terminal");
+    const filesTab = workspacePage.tab("files");
 
     await terminalTab.click();
     await expect(workspacePage.terminalInput).toBeVisible();

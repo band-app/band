@@ -46,7 +46,6 @@ import { isDesktop } from "../lib/is-desktop";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
 import { trpc } from "../lib/trpc-client";
 import { CodeBrowserView } from "./CodeBrowserView";
-import { DockviewBrowserContainer } from "./DockviewBrowserContainer";
 import { DockviewChatContainer } from "./DockviewChatContainer";
 import { MultiWorkspacePanelHost } from "./MultiWorkspacePanelHost";
 import {
@@ -89,12 +88,25 @@ const PANEL_SHORTCUTS: Record<string, string> = {
 };
 
 // ---------------------------------------------------------------------------
-// Lazy-loaded dockview terminal container (avoid importing @xterm CJS during SSR)
+// Lazy-loaded dockview inner containers
 // ---------------------------------------------------------------------------
+// Terminal: avoid importing @xterm (CJS) during SSR.
+// Browser: avoid running BrowserPaneComponent's `useLayoutEffect`s during
+// TanStack Start's SSR pass (React emits "useLayoutEffect does nothing on
+// the server" warnings for any layout effect that gets rendered into the
+// streaming output). Lazy-wrapping defers the whole subtree until the
+// client takes over, which matches the Terminal pattern and keeps the
+// SSR transcript clean.
 
 const DockviewTerminalContainer = lazy(() =>
   import("./DockviewTerminalContainer").then((m) => ({
     default: m.DockviewTerminalContainer,
+  })),
+);
+
+const DockviewBrowserContainer = lazy(() =>
+  import("./DockviewBrowserContainer").then((m) => ({
+    default: m.DockviewBrowserContainer,
   })),
 );
 
@@ -296,11 +308,13 @@ function BrowserPanelComponent({ api }: IDockviewPanelProps) {
           );
         }
         return (
-          <DockviewBrowserContainer
-            workspaceId={workspaceId}
-            visible={visible}
-            wsActive={wsActive}
-          />
+          <Suspense fallback={null}>
+            <DockviewBrowserContainer
+              workspaceId={workspaceId}
+              visible={visible}
+              wsActive={wsActive}
+            />
+          </Suspense>
         );
       }}
     </MultiWorkspacePanelHost>
@@ -321,8 +335,15 @@ function DefaultTab(props: IDockviewPanelHeaderProps) {
     return () => d.dispose();
   }, [props.api]);
 
+  // `data-testid` is keyed by the dockview panel `component` (e.g.
+  // "terminal", "browser", "files"). Owned by us (not by dockview's
+  // CSS class names) so it survives dockview upgrades, and it
+  // disambiguates the OUTER shared-layout tabs from any nested
+  // dockview tabs (which use their own tab renderers, e.g.
+  // `TerminalTab` in `DockviewTerminalContainer`). Used by e2e
+  // specs that need to click a specific outer panel tab.
   const tab = (
-    <div className="dv-default-tab">
+    <div className="dv-default-tab" data-testid={`workspace__tab--${props.api.component}`}>
       <div
         className="dv-default-tab-content"
         style={{ display: "flex", alignItems: "center", gap: 6 }}
@@ -369,8 +390,9 @@ function BadgeTab(props: IDockviewPanelHeaderProps) {
 
   const hasBadge = badge != null && badge > 0;
 
+  // See `DefaultTab` above for the `data-testid` rationale.
   const tab = (
-    <div className="dv-default-tab">
+    <div className="dv-default-tab" data-testid={`workspace__tab--${props.api.component}`}>
       <div
         className="dv-default-tab-content"
         style={{ display: "flex", alignItems: "center", gap: 6 }}

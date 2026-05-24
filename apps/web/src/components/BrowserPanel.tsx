@@ -947,16 +947,24 @@ export function BrowserPaneComponent({
   useEffect(() => {
     if (!isDesktop || !created) return;
 
+    // Log IPC failures instead of swallowing them. A failed
+    // `browser_show` / `browser_set_bounds` / `browser_hide` leaves
+    // the native WebContentsView in an indeterminate state (hidden
+    // when it should be shown, stale bounds, etc.) — surfacing the
+    // error makes the failure mode visible during debugging.
+    const logFail = (cmd: string) => (err: unknown) =>
+      console.error(`[BrowserPane] ${cmd} failed`, err);
+
     const showWebview = () => {
       const bounds = getBounds();
       if (bounds && bounds.width > 0 && bounds.height > 0) {
-        invoke("browser_set_bounds", { browserId, ...bounds }).catch(() => {});
+        invoke("browser_set_bounds", { browserId, ...bounds }).catch(logFail("browser_set_bounds"));
       }
-      invoke("browser_show", { browserId }).catch(() => {});
+      invoke("browser_show", { browserId }).catch(logFail("browser_show"));
     };
 
     const hideWebview = () => {
-      invoke("browser_hide", { browserId }).catch(() => {});
+      invoke("browser_hide", { browserId }).catch(logFail("browser_hide"));
     };
 
     const d = api.onDidVisibilityChange((e) => {
@@ -976,17 +984,19 @@ export function BrowserPaneComponent({
   useEffect(() => {
     if (!isDesktop || !created) return;
     const wsActive = params.wsActive !== false;
+    const logFail = (cmd: string) => (err: unknown) =>
+      console.error(`[BrowserPane] ${cmd} failed`, err);
 
     if (!wsActive) {
-      invoke("browser_hide", { browserId }).catch(() => {});
+      invoke("browser_hide", { browserId }).catch(logFail("browser_hide"));
     } else if (api.isVisible) {
       // Bounds before show — see the rationale on the
       // onDidVisibilityChange effect above. Same fix, same reason.
       const bounds = getBounds();
       if (bounds && bounds.width > 0 && bounds.height > 0) {
-        invoke("browser_set_bounds", { browserId, ...bounds }).catch(() => {});
+        invoke("browser_set_bounds", { browserId, ...bounds }).catch(logFail("browser_set_bounds"));
       }
-      invoke("browser_show", { browserId }).catch(() => {});
+      invoke("browser_show", { browserId }).catch(logFail("browser_show"));
     }
   }, [params.wsActive, api, created, getBounds, invoke, browserId]);
 
