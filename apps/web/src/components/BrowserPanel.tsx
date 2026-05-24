@@ -934,19 +934,53 @@ export function BrowserPaneComponent({
   // while `isVisible` = content area is on screen (multiple in a split).
   // We show/hide based on *visibility*, not active focus, so split views
   // keep both native webviews rendered simultaneously.
+  //
+  // Bounds-before-show ordering: setting bounds on a hidden view is a
+  // no-visible-effect update, so we apply the current placeholder rect
+  // *first* and then flip `setVisible(true)`. If we did it the other
+  // way around (show, then set-bounds), the chromium compositor would
+  // un-park at the view's last-known bounds — which is the source of
+  // the "renders small then expands" snap users reported when the
+  // outer Browser tab re-attached its DOM after a window resize or
+  // any other geometry change that happened while the tab was hidden.
+  // Same reasoning applies to the workspace-level effect below.
   useEffect(() => {
     if (!isDesktop || !created) return;
 
-    const showWebview = async () => {
-      await invoke("browser_show", { browserId });
+    // Log IPC failures instead of swallowing them. A failed
+    // `browser_show` / `browser_set_bounds` / `browser_hide` leaves
+    // the native WebContentsView in an indeterminate state (hidden
+    // when it should be shown, stale bounds, etc.) — surfacing the
+    // error makes the failure mode visible during debugging.
+    const logFail = (cmd: string) => (err: unknown) =>
+      console.error(`[BrowserPane] ${cmd} failed`, err);
+
+    // Fire `browser_set_bounds` and `browser_show` in submission
+    // order without awaiting between them. Both IPC handlers in the
+    // main process (`view-manager.ts::setBounds` and `::show`) are
+    // synchronous (`view.setBounds()` is sync Electron, `moveTo` +
+    // `setVisible` are sync), and Electron's `ipcRenderer.invoke`
+    // delivers messages FIFO per renderer, so the bounds update is
+    // observed by the main process before the show call.
+    //
+    // We tried wrapping these in a `.then(...)` chain to make the
+    // ordering explicit, but that introduced a worse race: on rapid
+    // tab switches (show → hide → ...) the `.then` callback could
+    // fire `browser_show` AFTER a subsequent `browser_hide` had
+    // already been queued, leaving the view visible when the user
+    // expected it hidden. The current `dispose()`-only cleanup
+    // can't abort an already-scheduled `then`. The fire-and-forget
+    // pattern below relies on the per-renderer FIFO instead.
+    const showWebview = () => {
       const bounds = getBounds();
       if (bounds && bounds.width > 0 && bounds.height > 0) {
-        await invoke("browser_set_bounds", { browserId, ...bounds });
+        invoke("browser_set_bounds", { browserId, ...bounds }).catch(logFail("browser_set_bounds"));
       }
+      invoke("browser_show", { browserId }).catch(logFail("browser_show"));
     };
 
-    const hideWebview = async () => {
-      await invoke("browser_hide", { browserId });
+    const hideWebview = () => {
+      invoke("browser_hide", { browserId }).catch(logFail("browser_hide"));
     };
 
     const d = api.onDidVisibilityChange((e) => {
@@ -966,15 +1000,21 @@ export function BrowserPaneComponent({
   useEffect(() => {
     if (!isDesktop || !created) return;
     const wsActive = params.wsActive !== false;
+    const logFail = (cmd: string) => (err: unknown) =>
+      console.error(`[BrowserPane] ${cmd} failed`, err);
 
     if (!wsActive) {
-      invoke("browser_hide", { browserId }).catch(() => {});
+      invoke("browser_hide", { browserId }).catch(logFail("browser_hide"));
     } else if (api.isVisible) {
-      invoke("browser_show", { browserId }).catch(() => {});
+      // Bounds before show — same fire-and-forget pattern as the
+      // onDidVisibilityChange effect above. Relies on Electron's
+      // per-renderer FIFO IPC delivery; see the long comment there
+      // for why a `.then()` chain is worse than fire-and-forget.
       const bounds = getBounds();
       if (bounds && bounds.width > 0 && bounds.height > 0) {
-        invoke("browser_set_bounds", { browserId, ...bounds }).catch(() => {});
+        invoke("browser_set_bounds", { browserId, ...bounds }).catch(logFail("browser_set_bounds"));
       }
+      invoke("browser_show", { browserId }).catch(logFail("browser_show"));
     }
   }, [params.wsActive, api, created, getBounds, invoke, browserId]);
 

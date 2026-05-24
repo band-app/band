@@ -53,6 +53,17 @@ export class WorkspacePage {
     this.changesHeading = page.getByRole("heading", { name: "Files changed" });
   }
 
+  /** Locate a tab in the OUTER shared-dockview tab strip by its panel
+   *  component id ("chat" | "changes" | "files" | "terminal" |
+   *  "browser"). `data-testid` is set by `DefaultTab` / `BadgeTab` in
+   *  `SharedDockviewLayout.tsx`, scoped to outer tabs only, so this
+   *  locator never collides with nested dockview tab strips (which
+   *  render their own per-instance tab components and never carry
+   *  `workspace__tab--*` testids). */
+  tab(panelComponent: "chat" | "changes" | "files" | "terminal" | "browser"): Locator {
+    return this.page.getByTestId(`workspace__tab--${panelComponent}`);
+  }
+
   /** Navigate to the code view of the given workspace. The only place
    *  in this page object where a URL is constructed. */
   async goto(workspaceId: string): Promise<void> {

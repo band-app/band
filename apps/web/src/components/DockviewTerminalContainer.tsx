@@ -16,6 +16,7 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -590,6 +591,51 @@ export function DockviewTerminalContainer({
     return () => window.removeEventListener("keydown", handler, true);
   }, [visible, closeTab, handleSplit, handleAddTab]);
 
+  // Force a synchronous re-layout of the inner dockview when the outer
+  // Terminal panel becomes visible. Background: dockview-core's
+  // `watchElementResize` (node_modules/dockview-core/.../dom.js) wraps
+  // its ResizeObserver callback in `requestAnimationFrame`, so the
+  // first time the inner dockview's shell element gains real size
+  // (because the outer panel just re-attached its DOM), the dockview
+  // engine waits one frame before it re-applies inline `style.width` /
+  // `style.height` on its splitview view containers. That frame paints
+  // with the previous (often very narrow) width still inlined on those
+  // containers — visible as the inner tab strip shrunk against the
+  // left edge with the right-header action buttons clustered next to
+  // it. Calling `api.layout(...)` synchronously inside
+  // `useLayoutEffect` runs BEFORE paint, so the first painted frame
+  // already has the correct widths.
+  //
+  // Zero-rect fallback: in the common case
+  // `container.getBoundingClientRect()` returns the real size right
+  // away because `useLayoutEffect` runs after React has committed
+  // the DOM change. If the browser hasn't reflowed yet (rare timing
+  // edge), the rect comes back 0×0 and we'd silently skip the fix.
+  // The ResizeObserver fallback below catches that case by deferring
+  // `api.layout()` until the container actually gains non-zero size,
+  // avoiding the silent no-op.
+  useLayoutEffect(() => {
+    if (!visible) return;
+    const api = apiRef.current;
+    const container = containerRef.current;
+    if (!api || !container) return;
+    const rect = container.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      api.layout(Math.round(rect.width), Math.round(rect.height), true);
+      return;
+    }
+    const ro = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      const { width, height } = entry.contentRect;
+      if (width <= 0 || height <= 0) return;
+      ro.disconnect();
+      api.layout(Math.round(width), Math.round(height), true);
+    });
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, [visible]);
+
   // Auto-focus the active terminal's xterm textarea whenever the section
   // becomes visible (e.g. user clicked the outer "Terminal" panel tab).
   // Without this, the section-scoped keydown handler above bails out because
@@ -646,6 +692,13 @@ export function DockviewTerminalContainer({
   initialLayoutRef.current = initialData?.layout ?? null;
   const initialTerminalIdsRef = useRef<Set<string> | null>(null);
   initialTerminalIdsRef.current = initialData?.terminalIds ?? null;
+  // Mirror `visible` into a ref so onReady can decide whether to
+  // force-layout the freshly-attached api. Covers the cold-mount
+  // path where the `useLayoutEffect([visible])` below ran with
+  // `apiRef.current === null` (because dockview hadn't initialised
+  // yet) and so silently bailed.
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
 
   const onReady = useCallback(
     (event: DockviewReadyEvent) => {
@@ -709,6 +762,22 @@ export function DockviewTerminalContainer({
       event.api.onDidActivePanelChange(persist);
       event.api.onDidAddGroup(persist);
       event.api.onDidRemoveGroup(persist);
+
+      // Cold-mount catch-up: if the outer Terminal panel was already
+      // visible when this container first rendered, the
+      // `useLayoutEffect([visible])` below already fired with
+      // `apiRef.current === null` (dockview wasn't initialised yet)
+      // and silently bailed. DockviewReact's own mount effect calls
+      // `api.layout(clientWidth, clientHeight)` immediately before
+      // `onReady`, so the dockview IS correctly laid out at this
+      // point — but make that guarantee explicit by re-running the
+      // forced layout here if we're currently visible. Idempotent.
+      if (visibleRef.current && containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          event.api.layout(Math.round(rect.width), Math.round(rect.height), true);
+        }
+      }
     },
     [workspaceId, schedulePersist],
   );

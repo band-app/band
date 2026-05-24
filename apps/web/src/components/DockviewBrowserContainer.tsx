@@ -14,6 +14,7 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -677,6 +678,43 @@ export function DockviewBrowserContainer({
     return () => window.removeEventListener("keydown", handler, true);
   }, [visible, closeTab, handleSplit, handleAddTab]);
 
+  // Force a synchronous re-layout of the inner dockview when the outer
+  // Browser panel becomes visible. See the matching effect (and its
+  // long comment) in DockviewTerminalContainer for the full rationale:
+  // dockview-core's `watchElementResize` defers its resize callback by
+  // a `requestAnimationFrame`, so the first frame after the outer
+  // panel re-attaches its DOM paints with the inner splitview's view
+  // containers still carrying their stale inline width/height — which
+  // shows up as the inner tab strip clustered against the left edge.
+  // `api.layout(...)` runs synchronously and re-applies the correct
+  // sizes before paint.
+  //
+  // Zero-rect fallback: same pattern as `DockviewTerminalContainer`.
+  // If the container hasn't reflowed yet when `useLayoutEffect`
+  // runs, defer `api.layout()` to the first ResizeObserver tick
+  // that reports a non-zero size, so the fix isn't a silent no-op.
+  useLayoutEffect(() => {
+    if (!visible) return;
+    const api = apiRef.current;
+    const container = containerRef.current;
+    if (!api || !container) return;
+    const rect = container.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      api.layout(Math.round(rect.width), Math.round(rect.height), true);
+      return;
+    }
+    const ro = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      const { width, height } = entry.contentRect;
+      if (width <= 0 || height <= 0) return;
+      ro.disconnect();
+      api.layout(Math.round(width), Math.round(height), true);
+    });
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, [visible]);
+
   // Auto-focus the active browser pane's address bar whenever the section
   // becomes visible (e.g. user clicked the outer "Browser" panel tab) so
   // the section-scoped keydown handler above starts seeing events without
@@ -961,6 +999,11 @@ export function DockviewBrowserContainer({
   initialBrowserIdsRef.current = initialData?.browserIds ?? null;
   const initialUrlsRef = useRef<Map<string, string> | null>(null);
   initialUrlsRef.current = initialData?.urls ?? null;
+  // Mirror `visible` into a ref so onReady can decide whether to
+  // force-layout the freshly-attached api. See the matching ref in
+  // `DockviewTerminalContainer` for the cold-mount rationale.
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
 
   const onReady = useCallback(
     (event: DockviewReadyEvent) => {
@@ -1030,6 +1073,18 @@ export function DockviewBrowserContainer({
       event.api.onDidActivePanelChange(persist);
       event.api.onDidAddGroup(persist);
       event.api.onDidRemoveGroup(persist);
+
+      // Cold-mount catch-up: if the outer Browser panel was already
+      // visible when this container first rendered, the
+      // `useLayoutEffect([visible])` below already fired with
+      // `apiRef.current === null` and silently bailed. Same
+      // rationale as `DockviewTerminalContainer.onReady`.
+      if (visibleRef.current && containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          event.api.layout(Math.round(rect.width), Math.round(rect.height), true);
+        }
+      }
     },
     [workspaceId, schedulePersist],
   );
