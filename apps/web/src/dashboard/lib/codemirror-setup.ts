@@ -154,11 +154,28 @@ export async function loadLanguage(lang: string): Promise<LanguageSupport | null
  * @param isDark - Whether to use dark theme colours. Defaults to true for backwards compat.
  * @param opts.skipLineNumbers - When true, omit the default lineNumbers() extension
  *   so callers can supply a custom one (e.g. with remapped line numbers for diffs).
+ * @param opts.naturalHeight - When true, the editor sizes to its content rather than
+ *   filling a fixed-height parent. Omits `height: 100%` on the root and uses
+ *   `overflow: visible` on the scroller so the editor lays out at its intrinsic
+ *   content height. Use this when the editor lives inside an auto-height container
+ *   (e.g. the diff rows in the Changes view). Defaults to false (fixed-height).
  */
 export function baseViewerExtensions(
   isDark = true,
-  opts?: { skipLineNumbers?: boolean },
+  opts?: { skipLineNumbers?: boolean; naturalHeight?: boolean },
 ): Extension[] {
+  const naturalHeight = opts?.naturalHeight ?? false;
+  const rootDarkStyles: Record<string, string> = { fontSize: "13px" };
+  const rootLightStyles: Record<string, string> = {
+    fontSize: "13px",
+    backgroundColor: "var(--background)",
+  };
+  if (!naturalHeight) {
+    rootDarkStyles.height = "100%";
+    rootLightStyles.height = "100%";
+  }
+  const scrollerOverflow = naturalHeight ? "visible" : "auto";
+
   return [
     EditorState.readOnly.of(true),
     EditorView.editable.of(false),
@@ -182,8 +199,8 @@ export function baseViewerExtensions(
     EditorView.theme(
       isDark
         ? {
-            "&": { height: "100%", fontSize: "13px" },
-            ".cm-scroller": { overflow: "auto" },
+            "&": rootDarkStyles,
+            ".cm-scroller": { overflow: scrollerOverflow },
             ".cm-lineNumbers": { paddingLeft: "12px", paddingRight: "12px" },
             ".cm-activeLineGutter": { backgroundColor: "transparent" },
             ".cm-searchMatch": {
@@ -195,8 +212,8 @@ export function baseViewerExtensions(
             },
           }
         : {
-            "&": { height: "100%", fontSize: "13px", backgroundColor: "var(--background)" },
-            ".cm-scroller": { overflow: "auto" },
+            "&": rootLightStyles,
+            ".cm-scroller": { overflow: scrollerOverflow },
             ".cm-lineNumbers": { paddingLeft: "12px", paddingRight: "12px" },
             ".cm-gutters": {
               backgroundColor: "var(--background)",

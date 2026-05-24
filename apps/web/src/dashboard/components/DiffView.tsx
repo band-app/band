@@ -438,7 +438,7 @@ function DiffFileContent({
           a: {
             doc: oldText,
             extensions: [
-              ...baseViewerExtensions(isDark, { skipLineNumbers: true }),
+              ...baseViewerExtensions(isDark, { skipLineNumbers: true, naturalHeight: true }),
               makeLineNumbers(oldLineNumbers),
               hunkSeparatorExtension(oldHunkBoundaryLines, loadMore),
               selectionToChatExtension(filename, oldLineNumbers),
@@ -448,7 +448,7 @@ function DiffFileContent({
           b: {
             doc: newText,
             extensions: [
-              ...baseViewerExtensions(isDark, { skipLineNumbers: true }),
+              ...baseViewerExtensions(isDark, { skipLineNumbers: true, naturalHeight: true }),
               makeLineNumbers(newLineNumbers),
               hunkSeparatorExtension(newHunkBoundaryLines, loadMore),
               selectionToChatExtension(filename, newLineNumbers),
@@ -463,7 +463,7 @@ function DiffFileContent({
         onEditorViewsRef.current?.([viewRef.current.a, viewRef.current.b]);
       } else {
         const extensions = [
-          ...baseViewerExtensions(isDark, { skipLineNumbers: true }),
+          ...baseViewerExtensions(isDark, { skipLineNumbers: true, naturalHeight: true }),
           makeLineNumbers(newLineNumbers),
           hunkSeparatorExtension(newHunkBoundaryLines, loadMore),
           searchHighlightOnly(),
@@ -645,6 +645,30 @@ function LazyFileRow({
   // leaves that zone so a workspace with 100+ expanded diffs only ever
   // pays for the handful of editors actually near the screen.
   const [shouldMount, setShouldMount] = useState(false);
+  // Tracks whether the CodeMirror editor has finished its first paint.
+  // Distinct from `shouldMount`: between the moment the wrapper renders
+  // (shouldMount=true → placeholder gone) and the moment CodeMirror's
+  // async setup finishes (await loadLanguage + new MergeView + first
+  // layout pass), the wrapper would otherwise be auto-height and
+  // collapse to the "Show full file" bar (~30px), pushing rows below it
+  // upward. Once the editor reports it has views, we drop the
+  // placeholder-height hold on the wrapper and let the editor's natural
+  // height drive layout. Re-armed on every unmount so a remount in the
+  // same row (scroll-away/back, viewMode change) still benefits.
+  const [editorRendered, setEditorRendered] = useState(false);
+  // Pending raf for the editorRendered transition. Held in a ref so the
+  // cleanup effect can cancel it on unmount, avoiding a setState into a
+  // dead component if the row scrolls away mid-mount.
+  const editorRenderRafRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (editorRenderRafRef.current != null) {
+        cancelAnimationFrame(editorRenderRafRef.current);
+        editorRenderRafRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!isOpen) {
@@ -695,10 +719,16 @@ function LazyFileRow({
 
   // Measure the rendered diff body whenever CodeMirror is mounted, and
   // forward the height to the parent. We only observe while `shouldMount`
-  // is true because the placeholder branch deliberately renders the
-  // cached height — observing it would either be a no-op (height didn't
-  // change) or, worse, would overwrite the cache with the placeholder's
-  // own value before CM ever gets to render.
+  // is true AND the editor has actually painted (`editorRendered`),
+  // because:
+  //   - The placeholder branch deliberately renders the cached height —
+  //     observing it would either be a no-op (height didn't change) or,
+  //     worse, would overwrite the cache with the placeholder's own
+  //     value before CM ever gets to render.
+  //   - While the editor is still mounting we hold the wrapper at
+  //     `placeholderHeight` via `minHeight`. Observing that would write
+  //     the held value back to the cache (corrupting it if the estimate
+  //     was inflated) instead of the editor's true content height.
   //
   // A `requestAnimationFrame` coalesces the burst of ResizeObserver fires
   // CodeMirror produces while it streams its first paint (syntax
@@ -706,7 +736,7 @@ function LazyFileRow({
   // frames). Without this, each fire would dispatch a setState in the
   // parent and trigger a re-render of every row in the list.
   useEffect(() => {
-    if (!shouldMount || !onMeasureHeight) return;
+    if (!shouldMount || !editorRendered || !onMeasureHeight) return;
     const el = diffBodyRef.current;
     if (!el) return;
     if (typeof ResizeObserver === "undefined") return;
@@ -735,11 +765,33 @@ function LazyFileRow({
       if (frame != null) cancelAnimationFrame(frame);
       observer.disconnect();
     };
-  }, [shouldMount, filename, onMeasureHeight]);
+  }, [shouldMount, editorRendered, filename, onMeasureHeight]);
 
   const handleEditorViews = useCallback(
     (views: EditorView[]) => {
       onEditorViews?.(filename, views);
+      // Cancel any pending raf from a previous mount/unmount cycle so a
+      // late `setEditorRendered(true)` doesn't fire after we've already
+      // torn down.
+      if (editorRenderRafRef.current != null) {
+        cancelAnimationFrame(editorRenderRafRef.current);
+        editorRenderRafRef.current = null;
+      }
+      if (views.length === 0) {
+        // DiffFileContent unmounted (or is about to remount). Re-arm the
+        // placeholder hold for the next paint.
+        setEditorRendered(false);
+        return;
+      }
+      // Defer the "rendered" flip by one frame so CodeMirror's first
+      // measure/layout pass completes against the held wrapper height
+      // before we release the hold. Flipping synchronously would briefly
+      // expose the empty editor shell, defeating the whole point of the
+      // hold.
+      editorRenderRafRef.current = requestAnimationFrame(() => {
+        editorRenderRafRef.current = null;
+        setEditorRendered(true);
+      });
     },
     [filename, onEditorViews],
   );
@@ -911,7 +963,24 @@ function LazyFileRow({
               // CodeMirror editor — is reported back as
               // `measuredHeight`, then reused verbatim as the placeholder
               // height on the next unmount cycle.
-              <div ref={diffBodyRef}>
+              //
+              // The `minHeight` hold prevents a layout shift during the
+              // window between (a) shouldMount flipping to true and (b)
+              // the editor's async `setup` finishing (loadLanguage await
+              // + new MergeView() + first paint). Without it the wrapper
+              // is empty-auto-height for that window, collapsing the row
+              // to the "Show full file" bar (~30px) and pushing every
+              // row below it upward; when the editor paints they snap
+              // back down. We pin the wrapper to the cached/estimated
+              // height (the same value the placeholder uses) until
+              // `editorRendered` flips, then let the editor's natural
+              // height take over. The ResizeObserver only attaches once
+              // `editorRendered` is true (see deps above), so the held
+              // value never bleeds into the measuredHeight cache.
+              <div
+                ref={diffBodyRef}
+                style={editorRendered ? undefined : { minHeight: placeholderHeight }}
+              >
                 {canLoadMore && (
                   <div className="flex items-center justify-center border-b border-border/20 px-4 py-1.5">
                     <button
