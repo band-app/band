@@ -51,6 +51,47 @@ export interface QueuedMessage {
   files?: QueuedFile[];
 }
 
+/**
+ * Wire shape — what the browser (or any tRPC/SSE client) sees. Drops
+ * the server-only `path` field. Without this projection, every
+ * `queue-updated` event over SSE would leak the absolute on-disk
+ * path of each queued attachment (e.g.
+ * `/Users/<name>/.band/uploads/<storedName>`) to anyone holding a
+ * band_token — including anyone sharing a tunnel URL.
+ *
+ * The dashboard's drag-reorder flow round-trips a wire message back
+ * into `queue.set`; the server-side `resolveQueuedFiles` derives the
+ * disk path from the `/api/uploads/<storedName>` URL so the path
+ * never has to travel through the client.
+ */
+export interface WireQueuedFile {
+  mediaType: string;
+  url: string;
+  filename?: string;
+}
+
+export interface WireQueuedMessage {
+  id: string;
+  text: string;
+  files?: WireQueuedFile[];
+}
+
+/** Project a stored `QueuedMessage[]` to the public wire shape. */
+export function toWireQueuedMessages(messages: QueuedMessage[]): WireQueuedMessage[] {
+  return messages.map((m) => ({
+    id: m.id,
+    text: m.text,
+    ...(m.files &&
+      m.files.length > 0 && {
+        files: m.files.map((f) => ({
+          mediaType: f.mediaType,
+          url: f.url,
+          ...(f.filename !== undefined && { filename: f.filename }),
+        })),
+      }),
+  }));
+}
+
 const QUEUED_KEY = Symbol.for("band.queued-messages");
 const LISTENERS_KEY = Symbol.for("band.queued-messages.listeners");
 

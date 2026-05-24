@@ -226,7 +226,7 @@ describe("tRPC — queue CRUD", () => {
     expect(getData.messages.map((m) => m.text)).toEqual(["fix the bug"]);
   });
 
-  it("pushes a queued message with file attachments (data URL → server saves to disk + stores path)", async () => {
+  it("pushes a queued message with file attachments (data URL → server saves to disk; wire shape strips path)", async () => {
     await trpcMutate(server.url, "queue.clear", { workspaceId: "proj-main" });
 
     const file: QueuedFile = {
@@ -255,21 +255,18 @@ describe("tRPC — queue CRUD", () => {
     // break the drain path, which needs a real disk path).
     expect(persistedFile.url).toMatch(/^\/api\/uploads\//);
     expect(persistedFile.url.startsWith("data:")).toBe(false);
-    // And the absolute on-disk path is carried alongside the URL —
-    // the drain path in task-runner.ts uses this to rebuild the
-    // `I'm sharing these files with you:\n- <path>` agent prompt
-    // without re-saving.
-    expect(persistedFile.path).toBeDefined();
-    expect(persistedFile.path!.startsWith("/")).toBe(true);
-    expect(persistedFile.path!.includes("/.band/uploads/")).toBe(true);
+    // The on-disk path is server-internal — the SSE and tRPC wire
+    // strip it via `toWireQueuedMessages`. Clients should derive the
+    // path server-side (from the `/api/uploads/<storedName>` URL) so
+    // a tunnel-sharing scenario can't leak `<HOME>/.band/uploads/…`.
+    expect(persistedFile.path).toBeUndefined();
 
     const getRes = await trpcQuery(server.url, "queue.get", { workspaceId: "proj-main" });
     const getData = await trpcData<{ messages: QueuedMessage[] }>(getRes);
     expect(getData.messages).toHaveLength(1);
     expect(getData.messages[0].files).toHaveLength(1);
     expect(getData.messages[0].files![0].filename).toBe("pixel.png");
-    // path round-trips through queue.get.
-    expect(getData.messages[0].files![0].path).toBe(persistedFile.path);
+    expect(getData.messages[0].files![0].path).toBeUndefined();
 
     // cleanup
     await trpcMutate(server.url, "queue.clear", { workspaceId: "proj-main" });
@@ -308,11 +305,11 @@ describe("tRPC — queue CRUD", () => {
     await trpcMutate(server.url, "queue.clear", { workspaceId: "proj-main" });
   });
 
-  it("queue.set preserves the on-disk path when the client forwards it (drag-reorder roundtrip)", async () => {
+  it("queue.set roundtrip with only `url` (no client-supplied path) is accepted (drag-reorder works)", async () => {
     await trpcMutate(server.url, "queue.clear", { workspaceId: "proj-main" });
 
     // Push a message with a file via the standard data-URL path so the
-    // server has a real on-disk path to round-trip.
+    // server actually persists bytes.
     const file: QueuedFile = {
       mediaType: "image/png",
       url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
@@ -324,14 +321,16 @@ describe("tRPC — queue CRUD", () => {
       files: [file],
     });
     const pushData = await trpcData<{ message: QueuedMessage }>(pushRes);
-    const initialPath = pushData.message.files![0].path;
     const initialUrl = pushData.message.files![0].url;
-    expect(initialPath).toBeDefined();
+    // Wire shape strips `path` — the client never sees the disk path.
+    expect(pushData.message.files![0].path).toBeUndefined();
 
-    // Simulate the dashboard's drag-reorder: read back the queued
-    // message, then resubmit via queue.set with the file object
-    // unchanged. The server must NOT re-save the file (no new
-    // upload entry on disk), and the same `path` must survive.
+    // Simulate the dashboard's drag-reorder: resubmit the file object
+    // from the queue.push response (no `path` because the wire stripped
+    // it) via queue.set. The server must derive the disk path from the
+    // `/api/uploads/<storedName>` URL and keep the file metadata
+    // intact — without that, the drain would have nothing to inject
+    // into the agent prompt.
     await trpcMutate(server.url, "queue.set", {
       workspaceId: "proj-main",
       messages: [
@@ -348,8 +347,9 @@ describe("tRPC — queue CRUD", () => {
     expect(getData.messages).toHaveLength(1);
     expect(getData.messages[0].files).toHaveLength(1);
     const after = getData.messages[0].files![0];
-    expect(after.path).toBe(initialPath);
     expect(after.url).toBe(initialUrl);
+    expect(after.filename).toBe("pixel.png");
+    expect(after.path).toBeUndefined();
 
     // cleanup
     await trpcMutate(server.url, "queue.clear", { workspaceId: "proj-main" });
@@ -436,14 +436,15 @@ describe("tRPC — queue CRUD", () => {
     const getData = await trpcData<{ messages: QueuedMessage[] }>(getRes);
     expect(getData.messages.map((m) => m.id)).toEqual([c.id, a.id, b.id]);
     expect(getData.messages.map((m) => m.text)).toEqual(["charlie", "alpha", "bravo"]);
-    // File attachment survives the reorder — including its on-disk path,
-    // which the drain path in task-runner.ts needs to rebuild the
-    // `I'm sharing these files with you:\n- <path>` agent prompt.
+    // File attachment survives the reorder. The on-disk path lives
+    // only server-side; the wire carries the stable `/api/uploads/`
+    // URL and the drain rebuilds the path from it.
     const reorderedB = getData.messages.find((m) => m.id === b.id);
     expect(reorderedB?.files).toHaveLength(1);
     expect(reorderedB?.files?.[0].filename).toBe("pixel.png");
-    expect(reorderedB?.files?.[0].path).toBe(b.files?.[0].path);
-    expect(reorderedB?.files?.[0].path).toMatch(/\/\.band\/uploads\//);
+    expect(reorderedB?.files?.[0].url).toBe(b.files?.[0].url);
+    expect(reorderedB?.files?.[0].url).toMatch(/^\/api\/uploads\//);
+    expect(reorderedB?.files?.[0].path).toBeUndefined();
 
     // cleanup
     await trpcMutate(server.url, "queue.clear", { workspaceId: "proj-main" });
@@ -543,9 +544,10 @@ describe("tRPC — queue CRUD", () => {
     expect(getData.messages[0].text).toBe("actually, look at this image carefully");
     expect(getData.messages[0].files).toHaveLength(1);
     expect(getData.messages[0].files![0].filename).toBe("pixel.png");
-    // The on-disk path is what the drain path uses to build the
-    // agent prompt. A text-only update must NOT clobber it.
-    expect(getData.messages[0].files![0].path).toBe(pushData.message.files![0].path);
+    // The URL identifies the file on disk; a text-only update must
+    // not clobber it (the drain rebuilds the path from this URL).
+    expect(getData.messages[0].files![0].url).toBe(pushData.message.files![0].url);
+    expect(getData.messages[0].files![0].path).toBeUndefined();
 
     // cleanup
     await trpcMutate(server.url, "queue.clear", { workspaceId: "proj-main" });

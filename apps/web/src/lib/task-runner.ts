@@ -871,13 +871,23 @@ async function runTask(chatId: string, task: InternalTask) {
         let agentPrompt: string | undefined;
         let displayFiles: DisplayFile[] | undefined;
         if (queued.files && queued.files.length > 0) {
-          const fileList = queued.files.map((f) => `- ${f.path}`).join("\n");
-          agentPrompt = `I'm sharing these files with you:\n${fileList}\n\n${queued.text}`;
-          displayFiles = queued.files.map((f) => ({
-            mediaType: f.mediaType,
-            url: f.url,
-            filename: f.filename,
-          }));
+          // Defensive filter: drop any queued file whose path didn't
+          // make it through the resolve step (empty string sentinel).
+          // The tRPC `resolveQueuedFiles` should never let an empty
+          // path through to the store, but if a future regression
+          // does, injecting `- ` into the agent prompt would just
+          // make the agent fail to read a file at "" — better to
+          // skip silently with the rest of the prompt intact.
+          const usableFiles = queued.files.filter((f) => f.path);
+          if (usableFiles.length > 0) {
+            const fileList = usableFiles.map((f) => `- ${f.path}`).join("\n");
+            agentPrompt = `I'm sharing these files with you:\n${fileList}\n\n${queued.text}`;
+            displayFiles = usableFiles.map((f) => ({
+              mediaType: f.mediaType,
+              url: f.url,
+              filename: f.filename,
+            }));
+          }
         }
 
         submitTask({

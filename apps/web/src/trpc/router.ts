@@ -99,6 +99,7 @@ import {
   setQueuedMessages,
   shiftQueuedMessage,
   subscribeQueue,
+  toWireQueuedMessages,
   updateQueuedMessage,
 } from "../lib/queued-message-store";
 import { runSetup } from "../lib/setup-runner";
@@ -3929,29 +3930,48 @@ type QueuedFileInput = z.infer<typeof queuedFileSchema>;
  * agent prompt as `I'm sharing these files with you:\n- /…/id_rsa`,
  * and the agent would happily read and stream the contents.
  *
- * Uses `realpathSync` (not `path.resolve`) so symlinks are followed: a
- * `path.resolve`-only check would let an attacker who can drop a
- * symlink in `~/.band/uploads/` (e.g. `evil → /etc/passwd`) point the
- * agent at the symlink target. `realpathSync` walks the filesystem and
- * returns the canonical resolved path; the `startsWith` check is then
- * applied to the *canonical* form.
+ * Two-layer check:
+ *   1. **String containment** — normalize with `path.resolve` (catches
+ *      `…/uploads/../../etc/passwd`-style traversal) and verify the
+ *      result lives under the uploads dir. Pure string op, never
+ *      throws, doesn't depend on the file existing.
+ *   2. **Symlink defence** — if the file exists, walk symlinks with
+ *      `realpathSync` and re-check containment of the canonical form,
+ *      so an attacker who can place `~/.band/uploads/evil → /etc/passwd`
+ *      can't bypass with a path inside the uploads dir.
  *
- * The `try/catch` is load-bearing: if the path doesn't exist, hasn't
- * been saved yet, or was deleted between push and use, `realpathSync`
- * throws ENOENT and we correctly reject — never silently pass through
- * a path the agent can't read either.
+ * Splitting the checks avoids a previous failure mode where
+ * `realpathSync` threw ENOENT on a previously-valid path (the file
+ * was deleted between enqueue and use) and the attachment was
+ * silently dropped from a queue.set roundtrip — see review on #500.
+ * Now: missing file with a path that PASSES the string-containment
+ * check is accepted (the drain may then fail to read it, surfacing
+ * the issue to the user); missing file with an out-of-bounds path is
+ * rejected up front.
  */
 function isPathWithinUploadDir(p: string): boolean {
   const uploadDir = join(bandHome(), "uploads");
-  let canonicalUploadDir: string;
-  let canonicalPath: string;
-  try {
-    canonicalUploadDir = realpathSync(uploadDir);
-    canonicalPath = realpathSync(p);
-  } catch {
+  // Layer 1: string-only containment. Catches `/etc/passwd` and any
+  // `…/uploads/../../etc/passwd`-shaped traversal.
+  const normalized = resolve(p);
+  if (normalized !== uploadDir && !normalized.startsWith(uploadDir + sep)) {
     return false;
   }
-  return canonicalPath === canonicalUploadDir || canonicalPath.startsWith(canonicalUploadDir + sep);
+  // Layer 2: symlink defence — only meaningful when the file actually
+  // exists. `realpathSync` walks the symlink chain and returns the
+  // canonical path; we then re-check containment. ENOENT means the
+  // file isn't there yet (or was deleted), in which case layer 1 has
+  // already accepted the normalized path — defer to the caller (the
+  // drain) to surface the read failure rather than silently dropping.
+  try {
+    const canonicalUploadDir = realpathSync(uploadDir);
+    const canonicalPath = realpathSync(p);
+    return (
+      canonicalPath === canonicalUploadDir || canonicalPath.startsWith(canonicalUploadDir + sep)
+    );
+  } catch {
+    return true;
+  }
 }
 
 async function resolveQueuedFiles(
@@ -3965,11 +3985,24 @@ async function resolveQueuedFiles(
   const needsSaveIdx: number[] = [];
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
-    if (file.path) {
-      // Containment check — never trust a client-supplied path.
-      if (!isPathWithinUploadDir(file.path)) {
+
+    // Derive path from URL when the client doesn't supply one. The
+    // SSE wire shape strips `path` (it's server-internal), so the
+    // dashboard's drag-reorder round-trip lands here with just
+    // `url: "/api/uploads/<storedName>"`. Reconstructing the path
+    // server-side keeps the wire small AND prevents a malicious
+    // client from spoofing a path that doesn't match its URL.
+    const uploadsUrlMatch = file.url.match(/^\/api\/uploads\/(.+)$/);
+    const derivedPath =
+      file.path ?? (uploadsUrlMatch ? join(bandHome(), "uploads", uploadsUrlMatch[1]) : undefined);
+
+    if (derivedPath) {
+      // Containment check — never trust a client-supplied path, even
+      // a derived one (an attacker could send
+      // `url: "/api/uploads/../../etc/passwd"`).
+      if (!isPathWithinUploadDir(derivedPath)) {
         log.warn(
-          { chatId, path: file.path, filename: file.filename },
+          { chatId, path: derivedPath, filename: file.filename },
           "queue: dropping file with path outside uploads directory",
         );
         continue;
@@ -3977,7 +4010,7 @@ async function resolveQueuedFiles(
       resolved.push({
         mediaType: file.mediaType,
         url: file.url,
-        path: file.path,
+        path: derivedPath,
         ...(file.filename !== undefined && { filename: file.filename }),
       });
       continue;
@@ -4006,25 +4039,34 @@ async function resolveQueuedFiles(
 
   if (needsSave.length > 0) {
     const saved = await saveUploadedFilesDetailed(needsSave);
-    // saveUploadedFilesDetailed preserves input order, so saved[k] maps
-    // back to the original `needsSave[k]` / `needsSaveIdx[k]`. Assert
-    // the invariant — if a future change makes the helper skip entries
-    // mid-batch, silent placeholder drift would be near-impossible to
-    // debug from the call site.
+    // The splicing loop below is index-aligned: `saved[k]` MUST
+    // correspond to `needsSave[k]`. `saveUploadedFilesDetailed` skips
+    // entries that fail its data-URL regex (compacted output) and
+    // could in principle return fewer results than the input. A
+    // mid-batch skip would then misalign every subsequent slot —
+    // `saved[k]` would be written into a slot that belongs to a
+    // different file, silently corrupting the queued payload. We
+    // pre-filter for data-URL entries, so a mismatch here means an
+    // upstream regression (malformed data URL slipping through). When
+    // that happens, refuse to splice and let the placeholders fall
+    // through to the `.filter((f) => f.path !== "")` pruning step
+    // below — losing the saved-but-unmappable files is the right
+    // trade-off vs. silently corrupting another file's metadata.
     if (saved.length !== needsSave.length) {
       log.error(
         { chatId, expected: needsSave.length, got: saved.length },
-        "queue: saveUploadedFilesDetailed returned unexpected count — some files will be dropped",
+        "queue: saveUploadedFilesDetailed returned unexpected count — dropping data-URL files (cannot map 1:1)",
       );
-    }
-    for (let k = 0; k < saved.length; k++) {
-      const target = needsSaveIdx[k];
-      resolved[target] = {
-        mediaType: saved[k].mediaType,
-        url: `/api/uploads/${saved[k].storedName}`,
-        path: saved[k].path,
-        ...(saved[k].originalName !== undefined && { filename: saved[k].originalName }),
-      };
+    } else {
+      for (let k = 0; k < saved.length; k++) {
+        const target = needsSaveIdx[k];
+        resolved[target] = {
+          mediaType: saved[k].mediaType,
+          url: `/api/uploads/${saved[k].storedName}`,
+          path: saved[k].path,
+          ...(saved[k].originalName !== undefined && { filename: saved[k].originalName }),
+        };
+      }
     }
   }
 
@@ -4044,9 +4086,28 @@ const queueRouter = t.router({
     )
     .mutation(async ({ input }) => {
       const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
-      const files = await resolveQueuedFiles(chatId, input.files);
+      // If disk write fails (ENOSPC, permissions, etc.), degrade to a
+      // text-only queue entry rather than reject the whole push with a
+      // 500. Losing the attachment is annoying; losing the user's
+      // typed message because their disk is full would be worse —
+      // they'd have to retype it from scratch with no indication that
+      // the text actually survived.
+      let files: Awaited<ReturnType<typeof resolveQueuedFiles>>;
+      try {
+        files = await resolveQueuedFiles(chatId, input.files);
+      } catch (err) {
+        log.error(
+          { chatId, err: err instanceof Error ? err.message : err },
+          "queue.push: failed to persist file uploads; enqueuing text only",
+        );
+        files = undefined;
+      }
       const message = pushQueuedMessage(chatId, { text: input.text, files });
-      return { ok: true, message, messages: getQueuedMessages(chatId) };
+      return {
+        ok: true,
+        message: toWireQueuedMessages([message])[0],
+        messages: toWireQueuedMessages(getQueuedMessages(chatId)),
+      };
     }),
 
   set: publicProcedure
@@ -4093,15 +4154,14 @@ const queueRouter = t.router({
         }),
       );
       setQueuedMessages(chatId, messages);
-      return { ok: true, messages: getQueuedMessages(chatId) };
+      return { ok: true, messages: toWireQueuedMessages(getQueuedMessages(chatId)) };
     }),
 
   get: publicProcedure
     .input(z.object({ workspaceId: z.string(), chatId: z.string().optional() }))
     .query(({ input }) => {
       const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
-      const messages = getQueuedMessages(chatId);
-      return { messages };
+      return { messages: toWireQueuedMessages(getQueuedMessages(chatId)) };
     }),
 
   remove: publicProcedure
@@ -4109,7 +4169,11 @@ const queueRouter = t.router({
     .mutation(({ input }) => {
       const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
       const removed = removeQueuedMessage(chatId, input.id);
-      return { ok: true, removed, messages: getQueuedMessages(chatId) };
+      return {
+        ok: true,
+        removed,
+        messages: toWireQueuedMessages(getQueuedMessages(chatId)),
+      };
     }),
 
   update: publicProcedure
@@ -4124,7 +4188,11 @@ const queueRouter = t.router({
     .mutation(({ input }) => {
       const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
       const updated = updateQueuedMessage(chatId, input.id, input.text);
-      return { ok: true, updated, messages: getQueuedMessages(chatId) };
+      return {
+        ok: true,
+        updated,
+        messages: toWireQueuedMessages(getQueuedMessages(chatId)),
+      };
     }),
 
   shift: publicProcedure
@@ -4132,7 +4200,7 @@ const queueRouter = t.router({
     .mutation(({ input }) => {
       const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
       const message = shiftQueuedMessage(chatId);
-      return { message };
+      return { message: message ? toWireQueuedMessages([message])[0] : null };
     }),
 
   clear: publicProcedure
@@ -4163,8 +4231,10 @@ const queueRouter = t.router({
         resolve?.();
       });
 
-      // Emit current state immediately so the client is in sync
-      yield { messages: getQueuedMessages(chatId) };
+      // Emit current state immediately so the client is in sync.
+      // `toWireQueuedMessages` strips the server-only `path` field —
+      // see queued-message-store.ts for why.
+      yield { messages: toWireQueuedMessages(getQueuedMessages(chatId)) };
 
       // Discard notifications that arrived between listener registration
       // and the initial yield — the initial yield already covers them.
@@ -4173,7 +4243,8 @@ const queueRouter = t.router({
       try {
         while (!opts.signal?.aborted) {
           while (queue.length > 0) {
-            yield queue.shift()!;
+            const update = queue.shift()!;
+            yield { messages: toWireQueuedMessages(update.messages) };
           }
           await new Promise<void>((r) => {
             resolve = r;

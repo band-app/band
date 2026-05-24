@@ -8,7 +8,11 @@ import type {
   ToolInputAvailableEvent,
 } from "../lib/chat-events";
 import { getChat } from "../lib/chat-manager";
-import { getQueuedMessages, subscribeQueue } from "../lib/queued-message-store";
+import {
+  getQueuedMessages,
+  subscribeQueue,
+  toWireQueuedMessages,
+} from "../lib/queued-message-store";
 import { getSessionEventsAfter } from "../lib/session-store";
 import { openSseStream, type SseWriter } from "../lib/sse-writer";
 import {
@@ -132,7 +136,7 @@ export async function handleChatEvents(
   // every subscribe regardless of whether the queue is empty or not.
   emit(writer, {
     type: "queue-updated",
-    messages: getQueuedMessages(chatId),
+    messages: toWireQueuedMessages(getQueuedMessages(chatId)),
     eventId: nextSyntheticId--,
   });
 
@@ -186,7 +190,7 @@ export async function handleChatEvents(
     if (qChatId !== chatId) return;
     queue.push({
       type: "queue-updated",
-      messages,
+      messages: toWireQueuedMessages(messages),
       eventId: nextSyntheticId--,
     });
     notify?.();
