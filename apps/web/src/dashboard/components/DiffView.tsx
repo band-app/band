@@ -504,7 +504,16 @@ function DiffFileContent({
     // populated — the row would never recover until the component
     // unmounts. Routing the failure through the same empty-views callback
     // the cleanup path uses lets the parent reset and recover gracefully.
+    //
+    // The `cancelled` gate is critical: when props change (isDark,
+    // viewMode, hunks) React runs the cleanup synchronously and then
+    // re-runs the effect, wiring a *new* `handleEditorViews` into
+    // `onEditorViewsRef.current`. A late rejection from the previous
+    // setup would otherwise fire `[]` into the new mount and reset
+    // `editorRendered = false` mid-setup — re-introducing the very
+    // layout shift this PR is fixing.
     setup().catch(() => {
+      if (cancelled) return;
       onEditorViewsRef.current?.([]);
     });
 

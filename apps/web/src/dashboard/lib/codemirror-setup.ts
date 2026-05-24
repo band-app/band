@@ -174,7 +174,16 @@ export function baseViewerExtensions(
     rootDarkStyles.height = "100%";
     rootLightStyles.height = "100%";
   }
-  const scrollerOverflow = naturalHeight ? "visible" : "auto";
+  // For natural-height callers we only want the *vertical* axis to expand
+  // with the document — the horizontal axis must still scroll, otherwise
+  // long lines (minified JS, generated SQL, etc.) are silently clipped by
+  // whatever ancestor sets `overflow: clip` (LazyFileRow's `overflow-clip`
+  // root). `overflow-x: auto; overflow-y: visible` keeps the scroller's
+  // horizontal scrollbar functional while letting vertical layout flow
+  // through to the auto-height parent chain.
+  const scrollerStyles: Record<string, string> = naturalHeight
+    ? { overflowX: "auto", overflowY: "visible" }
+    : { overflow: "auto" };
 
   return [
     EditorState.readOnly.of(true),
@@ -200,7 +209,7 @@ export function baseViewerExtensions(
       isDark
         ? {
             "&": rootDarkStyles,
-            ".cm-scroller": { overflow: scrollerOverflow },
+            ".cm-scroller": scrollerStyles,
             ".cm-lineNumbers": { paddingLeft: "12px", paddingRight: "12px" },
             ".cm-activeLineGutter": { backgroundColor: "transparent" },
             ".cm-searchMatch": {
@@ -213,7 +222,7 @@ export function baseViewerExtensions(
           }
         : {
             "&": rootLightStyles,
-            ".cm-scroller": { overflow: scrollerOverflow },
+            ".cm-scroller": scrollerStyles,
             ".cm-lineNumbers": { paddingLeft: "12px", paddingRight: "12px" },
             ".cm-gutters": {
               backgroundColor: "var(--background)",
