@@ -934,19 +934,29 @@ export function BrowserPaneComponent({
   // while `isVisible` = content area is on screen (multiple in a split).
   // We show/hide based on *visibility*, not active focus, so split views
   // keep both native webviews rendered simultaneously.
+  //
+  // Bounds-before-show ordering: setting bounds on a hidden view is a
+  // no-visible-effect update, so we apply the current placeholder rect
+  // *first* and then flip `setVisible(true)`. If we did it the other
+  // way around (show, then set-bounds), the chromium compositor would
+  // un-park at the view's last-known bounds — which is the source of
+  // the "renders small then expands" snap users reported when the
+  // outer Browser tab re-attached its DOM after a window resize or
+  // any other geometry change that happened while the tab was hidden.
+  // Same reasoning applies to the workspace-level effect below.
   useEffect(() => {
     if (!isDesktop || !created) return;
 
-    const showWebview = async () => {
-      await invoke("browser_show", { browserId });
+    const showWebview = () => {
       const bounds = getBounds();
       if (bounds && bounds.width > 0 && bounds.height > 0) {
-        await invoke("browser_set_bounds", { browserId, ...bounds });
+        invoke("browser_set_bounds", { browserId, ...bounds }).catch(() => {});
       }
+      invoke("browser_show", { browserId }).catch(() => {});
     };
 
-    const hideWebview = async () => {
-      await invoke("browser_hide", { browserId });
+    const hideWebview = () => {
+      invoke("browser_hide", { browserId }).catch(() => {});
     };
 
     const d = api.onDidVisibilityChange((e) => {
@@ -970,11 +980,13 @@ export function BrowserPaneComponent({
     if (!wsActive) {
       invoke("browser_hide", { browserId }).catch(() => {});
     } else if (api.isVisible) {
-      invoke("browser_show", { browserId }).catch(() => {});
+      // Bounds before show — see the rationale on the
+      // onDidVisibilityChange effect above. Same fix, same reason.
       const bounds = getBounds();
       if (bounds && bounds.width > 0 && bounds.height > 0) {
         invoke("browser_set_bounds", { browserId, ...bounds }).catch(() => {});
       }
+      invoke("browser_show", { browserId }).catch(() => {});
     }
   }, [params.wsActive, api, created, getBounds, invoke, browserId]);
 
