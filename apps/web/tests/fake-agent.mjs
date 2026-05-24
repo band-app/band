@@ -25,7 +25,7 @@
  * shutdown.
  */
 
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
 const scenarioPath = process.env.FAKE_AGENT_SCENARIO;
@@ -35,6 +35,29 @@ if (!scenarioPath) {
 }
 
 const exitCode = parseInt(process.env.FAKE_AGENT_EXIT_CODE || "0", 10);
+
+// Optional: when FAKE_AGENT_STDIN_LOG is set, every parsed stdin message
+// is appended (one JSON object per line) to that file. Tests that need to
+// assert the exact prompt the SDK transmitted to the agent process —
+// e.g. that a queue-drained message carries the
+// `I'm sharing these files with you:\n- <path>` preamble — read this log
+// after the task completes. Without it the prompt is black-box.
+const stdinLogPath = process.env.FAKE_AGENT_STDIN_LOG;
+
+if (stdinLogPath) {
+	try {
+		mkdirSync(dirname(stdinLogPath), { recursive: true });
+		// Record argv as well — depending on the SDK's transport, the
+		// prompt may travel via stdin OR via a `--print <prompt>` argv
+		// flag. Logging both keeps tests insulated from SDK changes.
+		appendFileSync(
+			stdinLogPath,
+			JSON.stringify({ _fake_agent_argv: process.argv.slice(2) }) + "\n",
+		);
+	} catch {
+		// best effort
+	}
+}
 
 let messages;
 try {
@@ -65,6 +88,18 @@ process.stdin.on("data", (chunk) => {
 
 		try {
 			const msg = JSON.parse(line);
+
+			// Tee every parsed stdin message to disk if a log path was
+			// configured. Append-only so two scenarios sharing a tmpHome
+			// (the fake-agent spawns once per task) both end up in the log.
+			if (stdinLogPath) {
+				try {
+					mkdirSync(dirname(stdinLogPath), { recursive: true });
+					appendFileSync(stdinLogPath, JSON.stringify(msg) + "\n");
+				} catch {
+					// best effort
+				}
+			}
 
 			if (msg.type === "control_request") {
 				// SDK is sending us a control_request (e.g. initialize).

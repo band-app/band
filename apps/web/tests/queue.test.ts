@@ -23,6 +23,7 @@ interface ServerHandle {
 interface QueuedFile {
   mediaType: string;
   url: string;
+  path?: string;
   filename?: string;
 }
 
@@ -225,7 +226,7 @@ describe("tRPC — queue CRUD", () => {
     expect(getData.messages.map((m) => m.text)).toEqual(["fix the bug"]);
   });
 
-  it("pushes a queued message with file attachments", async () => {
+  it("pushes a queued message with file attachments (data URL → server saves to disk; wire shape strips path)", async () => {
     await trpcMutate(server.url, "queue.clear", { workspaceId: "proj-main" });
 
     const file: QueuedFile = {
@@ -244,17 +245,111 @@ describe("tRPC — queue CRUD", () => {
     const data = await trpcData<{ ok: boolean; message: QueuedMessage }>(res);
     expect(data.message.text).toBe("review this image");
     expect(data.message.files).toHaveLength(1);
-    expect(data.message.files![0]).toMatchObject({
-      mediaType: "image/png",
-      filename: "pixel.png",
-    });
-    expect(data.message.files![0].url).toBe(file.url);
+    const persistedFile = data.message.files![0];
+    expect(persistedFile.mediaType).toBe("image/png");
+    expect(persistedFile.filename).toBe("pixel.png");
+    // queue.push that receives a `data:` URL must persist the bytes
+    // BEFORE pushing, and rewrite the URL to the stable
+    // `/api/uploads/<storedName>` form. The data URL never reaches
+    // the queue store (it would bloat the in-memory payload and
+    // break the drain path, which needs a real disk path).
+    expect(persistedFile.url).toMatch(/^\/api\/uploads\//);
+    expect(persistedFile.url.startsWith("data:")).toBe(false);
+    // The on-disk path is server-internal — the SSE and tRPC wire
+    // strip it via `toWireQueuedMessages`. Clients should derive the
+    // path server-side (from the `/api/uploads/<storedName>` URL) so
+    // a tunnel-sharing scenario can't leak `<HOME>/.band/uploads/…`.
+    expect(persistedFile.path).toBeUndefined();
 
     const getRes = await trpcQuery(server.url, "queue.get", { workspaceId: "proj-main" });
     const getData = await trpcData<{ messages: QueuedMessage[] }>(getRes);
     expect(getData.messages).toHaveLength(1);
     expect(getData.messages[0].files).toHaveLength(1);
     expect(getData.messages[0].files![0].filename).toBe("pixel.png");
+    expect(getData.messages[0].files![0].path).toBeUndefined();
+
+    // cleanup
+    await trpcMutate(server.url, "queue.clear", { workspaceId: "proj-main" });
+  });
+
+  it("queue.push drops files whose client-supplied path escapes the uploads directory", async () => {
+    await trpcMutate(server.url, "queue.clear", { workspaceId: "proj-main" });
+
+    // A malicious (or careless) client could enqueue a path that
+    // points at a sensitive file — without containment the drain in
+    // task-runner would inject `I'm sharing these files with you:\n
+    // - /home/user/.ssh/id_rsa` into the agent prompt, and the agent
+    // would happily read+stream the contents back. Reject any path
+    // not under `<HOME>/.band/uploads/`, including traversal attempts.
+    const res = await trpcMutate(server.url, "queue.push", {
+      workspaceId: "proj-main",
+      text: "secret-extract attempt",
+      files: [
+        {
+          mediaType: "text/plain",
+          url: "/api/uploads/spoofed",
+          path: "/etc/passwd",
+          filename: "passwd.txt",
+        },
+      ],
+    });
+    expect(res.status).toBe(200);
+    const data = await trpcData<{ ok: boolean; message: QueuedMessage }>(res);
+    // The message itself goes through (the bad file is dropped) so the
+    // text part is preserved — but `files` is undefined since the only
+    // file in the batch was rejected.
+    expect(data.message.text).toBe("secret-extract attempt");
+    expect(data.message.files).toBeUndefined();
+
+    // cleanup
+    await trpcMutate(server.url, "queue.clear", { workspaceId: "proj-main" });
+  });
+
+  it("queue.set roundtrip with only `url` (no client-supplied path) is accepted (drag-reorder works)", async () => {
+    await trpcMutate(server.url, "queue.clear", { workspaceId: "proj-main" });
+
+    // Push a message with a file via the standard data-URL path so the
+    // server actually persists bytes.
+    const file: QueuedFile = {
+      mediaType: "image/png",
+      url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+      filename: "pixel.png",
+    };
+    const pushRes = await trpcMutate(server.url, "queue.push", {
+      workspaceId: "proj-main",
+      text: "look at this image",
+      files: [file],
+    });
+    const pushData = await trpcData<{ message: QueuedMessage }>(pushRes);
+    const initialUrl = pushData.message.files![0].url;
+    // Wire shape strips `path` — the client never sees the disk path.
+    expect(pushData.message.files![0].path).toBeUndefined();
+
+    // Simulate the dashboard's drag-reorder: resubmit the file object
+    // from the queue.push response (no `path` because the wire stripped
+    // it) via queue.set. The server must derive the disk path from the
+    // `/api/uploads/<storedName>` URL and keep the file metadata
+    // intact — without that, the drain would have nothing to inject
+    // into the agent prompt.
+    await trpcMutate(server.url, "queue.set", {
+      workspaceId: "proj-main",
+      messages: [
+        {
+          id: pushData.message.id,
+          text: pushData.message.text,
+          files: pushData.message.files,
+        },
+      ],
+    });
+
+    const getRes = await trpcQuery(server.url, "queue.get", { workspaceId: "proj-main" });
+    const getData = await trpcData<{ messages: QueuedMessage[] }>(getRes);
+    expect(getData.messages).toHaveLength(1);
+    expect(getData.messages[0].files).toHaveLength(1);
+    const after = getData.messages[0].files![0];
+    expect(after.url).toBe(initialUrl);
+    expect(after.filename).toBe("pixel.png");
+    expect(after.path).toBeUndefined();
 
     // cleanup
     await trpcMutate(server.url, "queue.clear", { workspaceId: "proj-main" });
@@ -341,10 +436,15 @@ describe("tRPC — queue CRUD", () => {
     const getData = await trpcData<{ messages: QueuedMessage[] }>(getRes);
     expect(getData.messages.map((m) => m.id)).toEqual([c.id, a.id, b.id]);
     expect(getData.messages.map((m) => m.text)).toEqual(["charlie", "alpha", "bravo"]);
-    // File attachment survives the reorder
+    // File attachment survives the reorder. The on-disk path lives
+    // only server-side; the wire carries the stable `/api/uploads/`
+    // URL and the drain rebuilds the path from it.
     const reorderedB = getData.messages.find((m) => m.id === b.id);
     expect(reorderedB?.files).toHaveLength(1);
     expect(reorderedB?.files?.[0].filename).toBe("pixel.png");
+    expect(reorderedB?.files?.[0].url).toBe(b.files?.[0].url);
+    expect(reorderedB?.files?.[0].url).toMatch(/^\/api\/uploads\//);
+    expect(reorderedB?.files?.[0].path).toBeUndefined();
 
     // cleanup
     await trpcMutate(server.url, "queue.clear", { workspaceId: "proj-main" });
@@ -444,6 +544,10 @@ describe("tRPC — queue CRUD", () => {
     expect(getData.messages[0].text).toBe("actually, look at this image carefully");
     expect(getData.messages[0].files).toHaveLength(1);
     expect(getData.messages[0].files![0].filename).toBe("pixel.png");
+    // The URL identifies the file on disk; a text-only update must
+    // not clobber it (the drain rebuilds the path from this URL).
+    expect(getData.messages[0].files![0].url).toBe(pushData.message.files![0].url);
+    expect(getData.messages[0].files![0].path).toBeUndefined();
 
     // cleanup
     await trpcMutate(server.url, "queue.clear", { workspaceId: "proj-main" });

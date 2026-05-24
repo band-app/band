@@ -20,7 +20,27 @@ import { randomUUID } from "node:crypto";
 
 export interface QueuedFile {
   mediaType: string;
+  /**
+   * Stable URL that the chat UI can fetch to render the file, e.g.
+   * `/api/uploads/<storedName>`. Distinct from `path` because the URL
+   * is what the browser sees, while `path` is what the agent process
+   * needs to actually read bytes off disk.
+   */
   url: string;
+  /**
+   * Absolute on-disk path under `<HOME>/.band/uploads/`. Required so the
+   * drain in `task-runner.ts` can rebuild the `I'm sharing these files
+   * with you:\n- <path>` agent prompt WITHOUT re-running
+   * `saveUploadedFilesDetailed` (which would silently drop the file —
+   * by the time it lands in the queue the URL has already been
+   * transformed from a base64 data URL into `/api/uploads/...`, which
+   * the data-URL regex in `upload-utils.ts` no longer matches).
+   *
+   * Every code path that enqueues a `QueuedFile` is responsible for
+   * persisting the bytes first (via `saveUploadedFilesDetailed`) and
+   * passing the resulting absolute path through here.
+   */
+  path: string;
   filename?: string;
 }
 
@@ -29,6 +49,47 @@ export interface QueuedMessage {
   id: string;
   text: string;
   files?: QueuedFile[];
+}
+
+/**
+ * Wire shape — what the browser (or any tRPC/SSE client) sees. Drops
+ * the server-only `path` field. Without this projection, every
+ * `queue-updated` event over SSE would leak the absolute on-disk
+ * path of each queued attachment (e.g.
+ * `/Users/<name>/.band/uploads/<storedName>`) to anyone holding a
+ * band_token — including anyone sharing a tunnel URL.
+ *
+ * The dashboard's drag-reorder flow round-trips a wire message back
+ * into `queue.set`; the server-side `resolveQueuedFiles` derives the
+ * disk path from the `/api/uploads/<storedName>` URL so the path
+ * never has to travel through the client.
+ */
+export interface WireQueuedFile {
+  mediaType: string;
+  url: string;
+  filename?: string;
+}
+
+export interface WireQueuedMessage {
+  id: string;
+  text: string;
+  files?: WireQueuedFile[];
+}
+
+/** Project a stored `QueuedMessage[]` to the public wire shape. */
+export function toWireQueuedMessages(messages: QueuedMessage[]): WireQueuedMessage[] {
+  return messages.map((m) => ({
+    id: m.id,
+    text: m.text,
+    ...(m.files &&
+      m.files.length > 0 && {
+        files: m.files.map((f) => ({
+          mediaType: f.mediaType,
+          url: f.url,
+          ...(f.filename !== undefined && { filename: f.filename }),
+        })),
+      }),
+  }));
 }
 
 const QUEUED_KEY = Symbol.for("band.queued-messages");

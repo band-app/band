@@ -9,7 +9,6 @@ import { createPendingInput, rejectAllPendingInputs } from "./pending-inputs";
 import { shiftQueuedMessage } from "./queued-message-store";
 import { bandHome, upsertWorkspaceStatus } from "./state";
 import { generateTaskId, markTaskFailed, saveTask } from "./task-store";
-import { saveUploadedFilesDetailed } from "./upload-utils";
 import { emit as emitStatusEvent } from "./watcher";
 import { resolveWorkspace } from "./workspace";
 
@@ -857,23 +856,36 @@ async function runTask(chatId: string, task: InternalTask) {
     if (queued) {
       try {
         // Queued payloads already carry display-file metadata (saved to
-        // disk by the submit handler before being queued). Re-resolve
-        // the agent prompt so the model sees the file paths, AND
-        // forward the resolved display files into submitTask so its
-        // pre-emit `user-message` event carries the `files` field —
-        // otherwise the file-card UI for a drained-queue turn would
-        // silently disappear.
+        // disk by the submit handler before being queued). Rebuild the
+        // agent prompt and display-files arrays directly from the
+        // queued metadata — DO NOT call `saveUploadedFilesDetailed`
+        // again: by the time the file landed on the queue its URL had
+        // already been transformed from a `data:` URL into
+        // `/api/uploads/<storedName>`, and the helper's data-URL regex
+        // would silently skip every file (the bug this fixes).
+        //
+        // The `path` field on `QueuedFile` is what makes this safe to
+        // do without a second save: every enqueue site is responsible
+        // for persisting bytes first and forwarding the absolute path
+        // through. See `apps/web/src/lib/queued-message-store.ts`.
         let agentPrompt: string | undefined;
         let displayFiles: DisplayFile[] | undefined;
         if (queued.files && queued.files.length > 0) {
-          const saved = await saveUploadedFilesDetailed(queued.files);
-          if (saved.length > 0) {
-            const fileList = saved.map((s) => `- ${s.path}`).join("\n");
+          // Defensive filter: drop any queued file whose path didn't
+          // make it through the resolve step (empty string sentinel).
+          // The tRPC `resolveQueuedFiles` should never let an empty
+          // path through to the store, but if a future regression
+          // does, injecting `- ` into the agent prompt would just
+          // make the agent fail to read a file at "" — better to
+          // skip silently with the rest of the prompt intact.
+          const usableFiles = queued.files.filter((f) => f.path);
+          if (usableFiles.length > 0) {
+            const fileList = usableFiles.map((f) => `- ${f.path}`).join("\n");
             agentPrompt = `I'm sharing these files with you:\n${fileList}\n\n${queued.text}`;
-            displayFiles = saved.map((s) => ({
-              mediaType: s.mediaType,
-              url: `/api/uploads/${s.storedName}`,
-              filename: s.originalName,
+            displayFiles = usableFiles.map((f) => ({
+              mediaType: f.mediaType,
+              url: f.url,
+              filename: f.filename,
             }));
           }
         }
