@@ -183,18 +183,23 @@ test.describe("Tab-switch stability (fix-tab-switch-resize)", () => {
     await filesTab.click();
     await expect(workspacePage.terminalInput).not.toBeVisible();
 
-    // Switch back to Terminal. The visibility-change handler runs
-    // `fitAddon.fit()` synchronously inside `useLayoutEffect`; the
-    // first paint after this click should already show the
-    // correctly-sized xterm canvas.
+    // Switch back to Terminal. `DockviewTerminalContainer`'s
+    // `useLayoutEffect` calls `api.layout(width, height)`
+    // synchronously to bypass dockview-core's RAF-gated
+    // ResizeObserver (see the comment on that effect for the full
+    // explanation). The first paint after this click should
+    // already have correct splitview widths, so the xterm
+    // container — and therefore the xterm-screen rect inside it —
+    // is sized to match what we captured before the round-trip.
     await terminalTab.click();
     await expect(workspacePage.terminalInput).toBeVisible();
     await expect(screen).toBeVisible();
 
     // The screen rect must match what we observed before the
-    // round-trip. If the synchronous fit regressed back to a RAF (or
-    // worse, never fired), the rect would either be 0×0 for one
-    // frame or a stale-sized value.
+    // round-trip. If the synchronous re-layout regressed back to
+    // dockview's RAF-deferred layout (or never ran), the rect
+    // would either be 0×0 for one frame or carry a stale-sized
+    // value from the previously narrow splitview inline widths.
     await expect
       .poll(
         async () => {

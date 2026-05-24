@@ -999,6 +999,11 @@ export function DockviewBrowserContainer({
   initialBrowserIdsRef.current = initialData?.browserIds ?? null;
   const initialUrlsRef = useRef<Map<string, string> | null>(null);
   initialUrlsRef.current = initialData?.urls ?? null;
+  // Mirror `visible` into a ref so onReady can decide whether to
+  // force-layout the freshly-attached api. See the matching ref in
+  // `DockviewTerminalContainer` for the cold-mount rationale.
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
 
   const onReady = useCallback(
     (event: DockviewReadyEvent) => {
@@ -1068,6 +1073,18 @@ export function DockviewBrowserContainer({
       event.api.onDidActivePanelChange(persist);
       event.api.onDidAddGroup(persist);
       event.api.onDidRemoveGroup(persist);
+
+      // Cold-mount catch-up: if the outer Browser panel was already
+      // visible when this container first rendered, the
+      // `useLayoutEffect([visible])` below already fired with
+      // `apiRef.current === null` and silently bailed. Same
+      // rationale as `DockviewTerminalContainer.onReady`.
+      if (visibleRef.current && containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          event.api.layout(Math.round(rect.width), Math.round(rect.height), true);
+        }
+      }
     },
     [workspaceId, schedulePersist],
   );

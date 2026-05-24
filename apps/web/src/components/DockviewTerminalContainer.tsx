@@ -692,6 +692,13 @@ export function DockviewTerminalContainer({
   initialLayoutRef.current = initialData?.layout ?? null;
   const initialTerminalIdsRef = useRef<Set<string> | null>(null);
   initialTerminalIdsRef.current = initialData?.terminalIds ?? null;
+  // Mirror `visible` into a ref so onReady can decide whether to
+  // force-layout the freshly-attached api. Covers the cold-mount
+  // path where the `useLayoutEffect([visible])` below ran with
+  // `apiRef.current === null` (because dockview hadn't initialised
+  // yet) and so silently bailed.
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
 
   const onReady = useCallback(
     (event: DockviewReadyEvent) => {
@@ -755,6 +762,22 @@ export function DockviewTerminalContainer({
       event.api.onDidActivePanelChange(persist);
       event.api.onDidAddGroup(persist);
       event.api.onDidRemoveGroup(persist);
+
+      // Cold-mount catch-up: if the outer Terminal panel was already
+      // visible when this container first rendered, the
+      // `useLayoutEffect([visible])` below already fired with
+      // `apiRef.current === null` (dockview wasn't initialised yet)
+      // and silently bailed. DockviewReact's own mount effect calls
+      // `api.layout(clientWidth, clientHeight)` immediately before
+      // `onReady`, so the dockview IS correctly laid out at this
+      // point — but make that guarantee explicit by re-running the
+      // forced layout here if we're currently visible. Idempotent.
+      if (visibleRef.current && containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          event.api.layout(Math.round(rect.width), Math.round(rect.height), true);
+        }
+      }
     },
     [workspaceId, schedulePersist],
   );
