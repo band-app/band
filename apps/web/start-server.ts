@@ -6,7 +6,8 @@ import { applyWSSHandler } from "@trpc/server/adapters/ws";
 import sirv from "sirv";
 import { WebSocketServer } from "ws";
 import { createAuthMiddleware, parseCookies, tokensEqual } from "./auth.ts";
-import { handleTaskStream } from "./src/api/task-stream.ts";
+import { handleChatEvents } from "./src/api/chat-events.ts";
+import { handleChatSubmit } from "./src/api/chat-submit.ts";
 import { stopBranchStatusPoller } from "./src/lib/branch-status-poller.ts";
 import { isDesktopHostConnected } from "./src/lib/browser-host.ts";
 import { listBrowsers } from "./src/lib/browser-manager.ts";
@@ -667,10 +668,39 @@ async function main() {
       return;
     }
 
-    // SSE endpoint for task streaming (replaces tRPC WebSocket subscription)
-    const taskStreamMatch = req.url?.match(/^\/api\/tasks\/([^/]+)\/stream/);
-    if (taskStreamMatch) {
-      handleTaskStream(req, res, decodeURIComponent(taskStreamMatch[1]));
+    // Chat events stream — single subscription that replays history + tails
+    // live broadcasts for one chat. Replaced the legacy `/api/tasks/.../stream`
+    // SSE endpoint as part of the chat-event-log refactor. See
+    // `apps/web/src/api/chat-events.ts` and `docs/experiments/chat-event-log.md`.
+    const chatEventsMatch = req.url?.match(/^\/api\/chats\/([^/]+)\/events(?:\?|$)/);
+    if (chatEventsMatch && req.method === "GET") {
+      void handleChatEvents(req, res, decodeURIComponent(chatEventsMatch[1])).catch((err) => {
+        if (!res.headersSent) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Internal server error" }));
+        } else {
+          try {
+            res.end();
+          } catch {
+            // already torn down
+          }
+        }
+        console.error("[chat-events] handler error", err);
+      });
+      return;
+    }
+
+    // Decoupled submit endpoint — sister of /events. Returns 200 immediately
+    // (no SSE body); subscribers see the server's response over /events.
+    const chatSubmitMatch = req.url?.match(/^\/api\/chats\/([^/]+)\/messages(?:\?|$)/);
+    if (chatSubmitMatch && req.method === "POST") {
+      void handleChatSubmit(req, res, decodeURIComponent(chatSubmitMatch[1])).catch((err) => {
+        if (!res.headersSent) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Internal server error" }));
+        }
+        console.error("[chat-submit] handler error", err);
+      });
       return;
     }
 

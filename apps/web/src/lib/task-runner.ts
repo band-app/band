@@ -107,6 +107,15 @@ interface InternalTask extends TaskInfo {
   taskRecordId: string;
   agentPrompt: string;
   displayFiles?: DisplayFile[];
+  /**
+   * Set when `submitTask` has already broadcast the `user-message` +
+   * `task-started` events synchronously (because the task is resuming a
+   * known session, so we don't need to wait for the agent's `session-start`
+   * to know which buffer to write to). Tells the `session-start` handler
+   * in `runTask` to SKIP its own broadcasts of those events — re-emitting
+   * would duplicate the user bubble client-side.
+   */
+  lifecyclePreEmitted?: boolean;
 }
 
 // Use globalThis to ensure a single shared state across multiple bundles
@@ -268,6 +277,35 @@ export function submitTask(options: SubmitTaskOptions): TaskInfo {
   tasks.set(chatId, task);
   persistTask(task);
 
+  // Pre-emit `user-message` + `task-started` synchronously when we're
+  // resuming a known session. Without this, the queue-drain UX has a
+  // visible 1-2 second gap between the previous task completing and the
+  // next user bubble + thinking indicator appearing: the late broadcast
+  // in runTask's `session-start` handler can't fire until the agent
+  // process has spawned and emitted its first event.
+  //
+  // For NEW sessions (no `sessionId`), we still wait for `session-start`
+  // because `broadcast()` only writes to the in-memory buffer when
+  // `task.sessionId` is set — and we need the events on the buffer for
+  // gap-fill replay on reconnect. The client-side optimistic dispatch in
+  // `useChatSubscription.send()` covers the visual gap for the immediate
+  // single-message path; only the server-driven queue drain needs this.
+  if (sessionId) {
+    task.lifecyclePreEmitted = true;
+    broadcast(chatId, {
+      type: "user-message",
+      text: prompt,
+      ...(displayFiles && displayFiles.length > 0 && { files: displayFiles }),
+    } as unknown as UIMessageChunk);
+    broadcast(chatId, {
+      type: "task-started",
+      taskId: task.taskRecordId,
+      agentType: task.codingAgentId,
+      model: task.model,
+      mode: task.mode,
+    } as unknown as UIMessageChunk);
+  }
+
   // Fire-and-forget async execution
   runTask(chatId, task).catch((err) => {
     log.error({ chatId, err }, "task execution failed");
@@ -277,11 +315,14 @@ export function submitTask(options: SubmitTaskOptions): TaskInfo {
       task.status = "failed";
       task.completedAt = Date.now();
       persistTask(task);
-      broadcast(chatId, {
-        type: "error",
-        errorText: err instanceof Error ? err.message : "Task execution failed",
-      });
+      const errMsg = err instanceof Error ? err.message : "Task execution failed";
+      broadcast(chatId, { type: "error", errorText: errMsg });
       broadcast(chatId, { type: "finish" });
+      broadcast(chatId, {
+        type: "task-error",
+        taskId: task.taskRecordId,
+        message: errMsg,
+      } as unknown as UIMessageChunk);
       updateChatStatus(chatId, "error");
     }
   });
@@ -308,6 +349,11 @@ export function abortTask(chatId: string): boolean {
   persistTask(task);
   broadcast(chatId, { type: "error", errorText: "Task aborted by user" });
   broadcast(chatId, { type: "finish" });
+  broadcast(chatId, {
+    type: "task-error",
+    taskId: task.taskRecordId,
+    message: "Task aborted by user",
+  } as unknown as UIMessageChunk);
   tasks.delete(chatId);
 
   updateChatStatus(chatId, "idle");
@@ -335,6 +381,11 @@ export function cancelTask(taskId: string): { cancelled: boolean; workspaceId?: 
       persistTask(task);
       broadcast(chatId, { type: "error", errorText: "Task cancelled" });
       broadcast(chatId, { type: "finish" });
+      broadcast(chatId, {
+        type: "task-error",
+        taskId: task.taskRecordId,
+        message: "Task cancelled",
+      } as unknown as UIMessageChunk);
       tasks.delete(chatId);
 
       updateChatStatus(chatId, "idle");
@@ -487,20 +538,31 @@ async function runTask(chatId: string, task: InternalTask) {
             type: "data-session" as UIMessageChunk["type"],
             data: { sessionId: event.sessionId },
           } as UIMessageChunk);
-          // Broadcast the user's prompt AFTER session-start so task.sessionId
-          // is set and broadcast() stores it in the session buffer.
-          // Uses "user-message" (not "data-prompt") so the live stream ignores
-          // it — useChat already has the user message in its state.
-          // Include any uploaded file metadata so reloading the session
-          // from the JSONL re-renders the user bubble with its images.
-          broadcast(chatId, {
-            type: "user-message",
-            text: task.prompt,
-            ...(task.displayFiles &&
-              task.displayFiles.length > 0 && {
-                files: task.displayFiles,
-              }),
-          } as unknown as UIMessageChunk);
+          // Broadcast the user's prompt + task-started AFTER session-start
+          // so they're buffered against the resolved sessionId and
+          // therefore replayable on reconnect. Skipped when `submitTask`
+          // already pre-emitted them synchronously (resumed sessions, see
+          // `lifecyclePreEmitted`): re-emitting would duplicate the user
+          // bubble client-side. Include any uploaded file metadata so
+          // reloading the session from the JSONL re-renders the user
+          // bubble with its images.
+          if (!task.lifecyclePreEmitted) {
+            broadcast(chatId, {
+              type: "user-message",
+              text: task.prompt,
+              ...(task.displayFiles &&
+                task.displayFiles.length > 0 && {
+                  files: task.displayFiles,
+                }),
+            } as unknown as UIMessageChunk);
+            broadcast(chatId, {
+              type: "task-started",
+              taskId: task.taskRecordId,
+              agentType: task.codingAgentId,
+              model: task.model,
+              mode: task.mode,
+            } as unknown as UIMessageChunk);
+          }
           break;
         }
 
@@ -678,16 +740,29 @@ async function runTask(chatId: string, task: InternalTask) {
             } as UIMessageChunk);
             broadcast(chatId, { type: "finish-step" });
             broadcast(chatId, { type: "finish" });
+            // Lifecycle marker for chat-events stream — distinct from the
+            // SDK-protocol `finish`/`finish-step` events. Carries task
+            // metadata for the reducer to derive `status: completed`.
+            broadcast(chatId, {
+              type: "task-completed",
+              taskId: task.taskRecordId,
+              durationMs: event.durationMs,
+              numTurns: event.numTurns,
+              ...(agent.supportedFeatures.costTracking && { costUsd: event.costUsd }),
+            } as unknown as UIMessageChunk);
             finished = true;
           } else {
             task.status = "failed";
             task.completedAt = Date.now();
             persistTask(task);
-            broadcast(chatId, {
-              type: "error",
-              errorText: `Agent error: ${event.errors.join(", ") || "unknown error"}`,
-            });
+            const errMsg = `Agent error: ${event.errors.join(", ") || "unknown error"}`;
+            broadcast(chatId, { type: "error", errorText: errMsg });
             broadcast(chatId, { type: "finish" });
+            broadcast(chatId, {
+              type: "task-error",
+              taskId: task.taskRecordId,
+              message: errMsg,
+            } as unknown as UIMessageChunk);
             finished = true;
           }
           break;
@@ -748,32 +823,46 @@ async function runTask(chatId: string, task: InternalTask) {
         task.completedAt = Date.now();
       }
       persistTask(task);
-      broadcast(chatId, {
-        type: "error",
-        errorText: "Agent session ended without producing a result",
-      });
+      const errMsg = "Agent session ended without producing a result";
+      broadcast(chatId, { type: "error", errorText: errMsg });
       broadcast(chatId, { type: "finish" });
+      broadcast(chatId, {
+        type: "task-error",
+        taskId: task.taskRecordId,
+        message: errMsg,
+      } as unknown as UIMessageChunk);
     }
   } catch (err) {
     task.status = "failed";
     task.completedAt = Date.now();
     persistTask(task);
-    broadcast(chatId, {
-      type: "error",
-      errorText: err instanceof Error ? err.message : "Unknown error",
-    });
+    const errMsg = err instanceof Error ? err.message : "Unknown error";
+    broadcast(chatId, { type: "error", errorText: errMsg });
     broadcast(chatId, { type: "finish" });
+    broadcast(chatId, {
+      type: "task-error",
+      taskId: task.taskRecordId,
+      message: errMsg,
+    } as unknown as UIMessageChunk);
     updateChatStatus(chatId, "error");
   }
 
-  // Auto-start a new task if there's a queued message and the task succeeded
+  // Auto-start a new task if there's a queued message and the task succeeded.
+  // Under the chat-events stream the drained turn is surfaced by the
+  // follow-up task's `user-message` (session-start) event — no need to
+  // emit a separate "user bubble" chunk here. See `docs/experiments/chat-event-log.md`.
   let autoStarted = false;
   if (task.status === "completed") {
     const queued = shiftQueuedMessage(chatId);
     if (queued) {
       try {
-        // Upload any attached files to disk so the agent can read them.
-        // Mirrors the immediate-submit path in api/task-stream.ts.
+        // Queued payloads already carry display-file metadata (saved to
+        // disk by the submit handler before being queued). Re-resolve
+        // the agent prompt so the model sees the file paths, AND
+        // forward the resolved display files into submitTask so its
+        // pre-emit `user-message` event carries the `files` field —
+        // otherwise the file-card UI for a drained-queue turn would
+        // silently disappear.
         let agentPrompt: string | undefined;
         let displayFiles: DisplayFile[] | undefined;
         if (queued.files && queued.files.length > 0) {
@@ -781,10 +870,6 @@ async function runTask(chatId: string, task: InternalTask) {
           if (saved.length > 0) {
             const fileList = saved.map((s) => `- ${s.path}`).join("\n");
             agentPrompt = `I'm sharing these files with you:\n${fileList}\n\n${queued.text}`;
-            // Replace the bulky base64 data URLs with stable
-            // /api/uploads/* references for the persisted bubble — the
-            // bytes already live on disk, no need to embed them again
-            // in the SSE event / session JSONL.
             displayFiles = saved.map((s) => ({
               mediaType: s.mediaType,
               url: `/api/uploads/${s.storedName}`,
@@ -793,22 +878,13 @@ async function runTask(chatId: string, task: InternalTask) {
           }
         }
 
-        // Emit the queued user prompt so the client can render it as a
-        // user message bubble between assistant responses. Include any
-        // file attachments so they show up in the bubble too.
-        broadcast(chatId, {
-          type: "data-prompt" as UIMessageChunk["type"],
-          data: {
-            text: queued.text,
-            ...(displayFiles && displayFiles.length > 0 && { files: displayFiles }),
-          },
-        } as UIMessageChunk);
         submitTask({
           workspaceId: task.workspaceId,
           chatId,
           prompt: queued.text,
           agentPrompt,
           sessionId: task.sessionId,
+          displayFiles,
         });
         autoStarted = true;
       } catch (err) {

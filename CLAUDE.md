@@ -6,6 +6,8 @@ IDE-agnostic agent orchestrator.
 
 This project uses **integration tests** as the primary testing approach. Do not write unit tests with mocked dependencies.
 
+> **When writing, adding, or modifying tests — backend OR frontend — invoke the [`write-integration-test`](.claude/skills/write-integration-test/SKILL.md) skill FIRST.** It is the canonical reference for this repository: real-server boot, Express stubs for external services, no tRPC mocking, no `page.route()` on own routes, Page Object Model for Playwright, locator priority, the universal checklist, and worked examples for both layers. The rules below are the summary; the skill is the source of truth.
+
 ### Why Integration Tests
 
 Unit tests with heavy mocking verify that your mocks work, not that your system works. Integration tests exercise the real system through its public interfaces — the same way a client or user would interact with it.
@@ -13,12 +15,28 @@ Unit tests with heavy mocking verify that your mocks work, not that your system 
 ### Rules
 
 - **Never modify production code to make a test pass.** No test-only branches, no exporting internals, no `NODE_ENV` checks in business logic.
-- **Black-box testing only.** Test through public interfaces: HTTP endpoints, CLI commands, file system outputs.
+- **Black-box testing only.** Test through public interfaces: HTTP endpoints, CLI commands, file system outputs, the rendered DOM (frontend).
 - **Real infrastructure.** For databases use test containers, not mocks. For file-based state use temporary directories. Start real servers on random ports.
-- **MSW for external boundaries.** Mock only what you don't own (third-party APIs) using MSW at the network layer.
+- **External-only stubs at the network boundary.** Mock only services your process calls *out* to (third-party APIs, agent binaries, GitHub, etc.) using an **Express stub on a random port + env-var override** read at request time. Do NOT use MSW (it misses subprocess-originated traffic, and the env-var indirection is what forces the production code into a testable shape). Do NOT use `page.route()` to intercept your own backend routes from a Playwright test. Do NOT add a tRPC mock layer.
 - **Test framework: match the package.** `node:test` with `node:assert/strict` is the default for new code. The web app (`apps/web`) is the exception: it already standardised on **vitest** before this convention was written down (the existing test suite uses `describe`/`it`/`expect`/`beforeAll` from `vitest`), so new tests under `apps/web/tests/` should use vitest too rather than mix runners in one package. Don't add test framework dependencies elsewhere unless already present.
 
-See `.claude/skills/integration-tests.md` for the full set of rules and examples.
+See the `write-integration-test` skill (`.claude/skills/write-integration-test/SKILL.md`) for the full doctrine — backend + frontend integration tests, Express-stub patterns, page-object conventions, the universal checklist, and worked examples.
+
+### Frontend tests (web app)
+
+**Frontend tests follow the same integration doctrine as backend tests** — they boot the real server (the production `dist/start-server.mjs` bundle), drive it through a real Chromium via Playwright, and assert on the real rendered DOM / `localStorage` / URL state. Read [`docs/frontend-testing.md`](docs/frontend-testing.md) and the `write-integration-test` skill (`.claude/skills/write-integration-test/`) before authoring frontend tests.
+
+The non-negotiables for any new frontend test:
+
+- **Boot the real server** with `apps/web/e2e/helpers/server.ts` (`startServer` + `createTmpHome` + `seedState` + `seedSettings`). No in-process React mounting. No shallow renders. No `jsdom` + `renderHook` for behaviour that's user-observable.
+- **No tRPC mocking.** No `createTrpcMock`. No `page.route('**/trpc/**', …)`. The existing `apps/web/e2e/helpers/trpc-mock.ts` and the two `workspace-switch-*.spec.ts` files that use it are technical debt to be migrated, not a pattern to copy.
+- **Page Object Model.** Locators (`getByRole`, `getByTestId`) live on a page object class under `apps/web/e2e/pages/`. The test body never calls `page.goto()`, `page.getByRole()`, `page.getByTestId()` directly — only methods like `workspacePage.maximizePanel()`.
+- **Locator priority for elements your code owns:** `getByRole({ name })` when the ARIA name is system-controlled; otherwise `getByTestId("page__element")` (BEM convention). Banned: CSS selectors, element IDs, `getByText` for localisable copy.
+- **External services get Express stubs** under `apps/web/e2e/fixtures/` (or `apps/web/tests/fixtures/` if shared with backend tests). One stub per env var. Subprocess-originated traffic (`codex`, `claude-code`, `git`) is exactly the case where MSW would silently fail — Express stubs cover it.
+- **Production code reads outbound URLs from env vars at request time**, not at module load (`axios.create({ baseURL })` at module top is wrong). Refactoring that pattern is the only allowed production-code change a test may introduce, alongside `data-testid` attributes on JSX.
+- **Wait properly.** `expect(locator).toBeVisible()` and `expect.poll(() => …)` auto-retry. Never `page.waitForTimeout(N)`.
+
+Look at `apps/web/e2e/workspace-maximize-state.spec.ts` and `apps/web/e2e/pages/WorkspacePage.ts` as the model — they follow the doctrine end-to-end. Run frontend tests with `pnpm --filter @band-app/server test:e2e`.
 
 ### Exceptions
 

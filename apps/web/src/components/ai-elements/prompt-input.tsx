@@ -549,6 +549,8 @@ export const PromptInputSubmit = ({
       {isStreaming && (
         <button
           type="button"
+          data-testid="prompt-input__stop-button"
+          aria-label="Stop generation"
           className="inline-flex size-8 lg:size-7 shrink-0 items-center justify-center rounded-full bg-secondary text-secondary-foreground transition-colors hover:bg-secondary/80"
           onClick={onStop}
         >

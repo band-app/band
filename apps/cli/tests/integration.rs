@@ -2355,9 +2355,10 @@ fn chats_watch_url_encodes_chat_id_path_segment() {
 
     let path = mock.captured_path().expect("mock did not capture a path");
     assert!(
-        path.starts_with("/api/tasks/"),
-        "expected /api/tasks/ prefix: {path}"
+        path.starts_with("/api/chats/"),
+        "expected /api/chats/ prefix: {path}"
     );
+    assert!(path.ends_with("/events"), "expected /events suffix: {path}");
     assert!(
         !path.contains("/../"),
         "chat_id slashes should be encoded, got: {path}"

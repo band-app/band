@@ -992,12 +992,19 @@ fn cmd_chats_send(
     })
 }
 
-/// Stream a chat pane's currently-running task as raw NDJSON.
+/// Stream a chat pane's event log as raw NDJSON.
 ///
-/// Connects to `GET /api/tasks/<chat_id>/stream` (the same SSE endpoint the
-/// dashboard uses) and dumps each `data: {...}` payload to stdout, one JSON
-/// object per line. The output is always raw JSON regardless of `--output`.
-/// Exits 0 with no output when the chat has no running task (HTTP 204).
+/// Connects to `GET /api/chats/<chat_id>/events` (the unified server-
+/// authoritative SSE event log the dashboard uses) and dumps each
+/// `data: {...}` payload to stdout, one JSON object per line. The
+/// output is always raw JSON regardless of `--output`.
+///
+/// Behaviour change from the legacy `/api/tasks/<chat_id>/stream`:
+/// the new endpoint keeps the connection open even when no task is
+/// running, so the watcher behaves like `tail -f` — it surfaces the
+/// NEXT submission's events live. SIGINT (Ctrl-C) terminates it. The
+/// legacy 204 "no running task" branch is retained for forward-compat
+/// in case any deployment still routes the old path through a proxy.
 fn handle_chats_watch(chat_id: Option<&str>) -> i32 {
     match cmd_chats_watch(chat_id) {
         Ok(()) => 0,
@@ -1014,7 +1021,7 @@ fn cmd_chats_watch(chat_id: Option<&str>) -> Result<(), String> {
     let client = api::ApiClient::from_settings()?;
     let chat_id =
         resolve_default_panel(&client, chat_id, "chats.list", "chats", "id", "chat pane")?;
-    let path = format!("/api/tasks/{}/stream", urlencoded_path_segment(&chat_id));
+    let path = format!("/api/chats/{}/events", urlencoded_path_segment(&chat_id));
     let mut response = client.get_raw_stream(&path)?;
     let status = response.status().as_u16();
 
