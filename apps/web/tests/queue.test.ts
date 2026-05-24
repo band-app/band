@@ -275,6 +275,39 @@ describe("tRPC — queue CRUD", () => {
     await trpcMutate(server.url, "queue.clear", { workspaceId: "proj-main" });
   });
 
+  it("queue.push drops files whose client-supplied path escapes the uploads directory", async () => {
+    await trpcMutate(server.url, "queue.clear", { workspaceId: "proj-main" });
+
+    // A malicious (or careless) client could enqueue a path that
+    // points at a sensitive file — without containment the drain in
+    // task-runner would inject `I'm sharing these files with you:\n
+    // - /home/user/.ssh/id_rsa` into the agent prompt, and the agent
+    // would happily read+stream the contents back. Reject any path
+    // not under `<HOME>/.band/uploads/`, including traversal attempts.
+    const res = await trpcMutate(server.url, "queue.push", {
+      workspaceId: "proj-main",
+      text: "secret-extract attempt",
+      files: [
+        {
+          mediaType: "text/plain",
+          url: "/api/uploads/spoofed",
+          path: "/etc/passwd",
+          filename: "passwd.txt",
+        },
+      ],
+    });
+    expect(res.status).toBe(200);
+    const data = await trpcData<{ ok: boolean; message: QueuedMessage }>(res);
+    // The message itself goes through (the bad file is dropped) so the
+    // text part is preserved — but `files` is undefined since the only
+    // file in the batch was rejected.
+    expect(data.message.text).toBe("secret-extract attempt");
+    expect(data.message.files).toBeUndefined();
+
+    // cleanup
+    await trpcMutate(server.url, "queue.clear", { workspaceId: "proj-main" });
+  });
+
   it("queue.set preserves the on-disk path when the client forwards it (drag-reorder roundtrip)", async () => {
     await trpcMutate(server.url, "queue.clear", { workspaceId: "proj-main" });
 

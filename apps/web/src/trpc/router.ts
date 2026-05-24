@@ -3921,6 +3921,23 @@ type QueuedFileInput = z.infer<typeof queuedFileSchema>;
  * the disk path from a bare URL) is dropped with a log entry rather
  * than silently inserted in a half-broken state.
  */
+/**
+ * Reject client-supplied paths that aren't under `<HOME>/.band/uploads/`.
+ * Without this, an authenticated caller (local UI, CLI, or anyone with
+ * the band_token) could enqueue `path: "/home/user/.ssh/id_rsa"` — the
+ * drain in `task-runner.ts` would inject the path verbatim into the
+ * agent prompt as `I'm sharing these files with you:\n- /…/id_rsa`,
+ * and the agent would happily read and stream the contents.
+ *
+ * Uses `path.resolve` rather than a raw `startsWith` so traversal
+ * attempts (`/…/uploads/../../etc/passwd`) are caught.
+ */
+function isPathWithinUploadDir(p: string): boolean {
+  const uploadDir = join(bandHome(), "uploads");
+  const normalized = resolve(p);
+  return normalized === uploadDir || normalized.startsWith(uploadDir + sep);
+}
+
 async function resolveQueuedFiles(
   chatId: string,
   files: QueuedFileInput[] | undefined,
@@ -3933,6 +3950,14 @@ async function resolveQueuedFiles(
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
     if (file.path) {
+      // Containment check — never trust a client-supplied path.
+      if (!isPathWithinUploadDir(file.path)) {
+        log.warn(
+          { chatId, path: file.path, filename: file.filename },
+          "queue: dropping file with path outside uploads directory",
+        );
+        continue;
+      }
       resolved.push({
         mediaType: file.mediaType,
         url: file.url,
@@ -3943,7 +3968,11 @@ async function resolveQueuedFiles(
     }
     if (file.url.startsWith("data:")) {
       needsSave.push(file);
-      needsSaveIdx.push(i);
+      // Record the slot in `resolved[]` (NOT the loop index `i`): when an
+      // earlier entry is dropped (`log.warn` branch), `resolved` lags
+      // `files` and `needsSaveIdx[k] = i` would point at the wrong slot,
+      // silently corrupting one entry and orphaning another.
+      needsSaveIdx.push(resolved.length);
       // Placeholder so we can splice into the right slot once saved.
       resolved.push({
         mediaType: file.mediaType,
@@ -3962,8 +3991,16 @@ async function resolveQueuedFiles(
   if (needsSave.length > 0) {
     const saved = await saveUploadedFilesDetailed(needsSave);
     // saveUploadedFilesDetailed preserves input order, so saved[k] maps
-    // back to the original `needsSave[k]` / `needsSaveIdx[k]`. Anything
-    // it skipped (non-data URL) is already pruned by the loop above.
+    // back to the original `needsSave[k]` / `needsSaveIdx[k]`. Assert
+    // the invariant — if a future change makes the helper skip entries
+    // mid-batch, silent placeholder drift would be near-impossible to
+    // debug from the call site.
+    if (saved.length !== needsSave.length) {
+      log.error(
+        { chatId, expected: needsSave.length, got: saved.length },
+        "queue: saveUploadedFilesDetailed returned unexpected count — some files will be dropped",
+      );
+    }
     for (let k = 0; k < saved.length; k++) {
       const target = needsSaveIdx[k];
       resolved[target] = {
@@ -4012,12 +4049,32 @@ const queueRouter = t.router({
     )
     .mutation(async ({ input }) => {
       const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
+      // Resolve files per message and tolerate per-message failures.
+      // `Promise.all` would short-circuit on the first rejection and
+      // leave any already-saved files orphaned on disk with no queue
+      // entry referencing them. We log and drop the bad message's
+      // files instead, so the reorder/set proceeds with the remaining
+      // metadata intact.
       const messages = await Promise.all(
-        input.messages.map(async (m) => ({
-          ...(m.id !== undefined && { id: m.id }),
-          text: m.text,
-          files: await resolveQueuedFiles(chatId, m.files),
-        })),
+        input.messages.map(async (m) => {
+          try {
+            return {
+              ...(m.id !== undefined && { id: m.id }),
+              text: m.text,
+              files: await resolveQueuedFiles(chatId, m.files),
+            };
+          } catch (err) {
+            log.error(
+              { chatId, messageId: m.id, err: err instanceof Error ? err.message : err },
+              "queue: failed to resolve files for queued message; dropping its files",
+            );
+            return {
+              ...(m.id !== undefined && { id: m.id }),
+              text: m.text,
+              files: undefined,
+            };
+          }
+        }),
       );
       setQueuedMessages(chatId, messages);
       return { ok: true, messages: getQueuedMessages(chatId) };

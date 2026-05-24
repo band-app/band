@@ -1282,10 +1282,33 @@ describe("chat-events — queue drain preserves file attachments", () => {
     expect(firstRes.status).toBe(200);
     expect(await firstRes.json()).toEqual({ ok: true, queued: false });
 
-    // Brief beat so the second submit lands while the first task is
-    // actually in flight (otherwise the conflict path doesn't fire and
-    // the second turn runs immediately instead of being queued).
-    await new Promise((r) => setTimeout(r, 100));
+    // Wait for the first task to be actually running before submitting
+    // the second message — otherwise the conflict path doesn't fire and
+    // the second turn runs immediately instead of being queued. A hard
+    // sleep would race on fast CI machines (task completes < sleep
+    // duration) or slow ones (sleep ends before task starts); polling
+    // for `task-started` makes the assertion order-of-events stable.
+    // Same pattern the cancel/abort test uses.
+    await new Promise<void>((resolveStart, rejectStart) => {
+      const start = Date.now();
+      const poll = async () => {
+        try {
+          const probe = await collectEvents(server.url, chatId, {
+            until: (e) => e.type === "task-started",
+            timeoutMs: 5_000,
+          });
+          if (probe.some((e) => e.type === "task-started")) return resolveStart();
+        } catch {
+          // probe stream may close early; that's fine, we'll re-poll
+        }
+        if (Date.now() - start > 5_000) {
+          rejectStart(new Error("task-started never arrived for first turn"));
+        } else {
+          setTimeout(poll, 50);
+        }
+      };
+      poll();
+    });
 
     // Turn 2 — same 1×1 PNG signature the existing file-upload test
     // uses, encoded as a data URL the way the chat UI submits images
