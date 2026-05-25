@@ -336,22 +336,22 @@ function AppShell() {
   // Listen for `band open` events from the SSE stream and route the
   // dashboard to the requested file. The actual dispatch logic lives
   // in `lib/dispatch-open-file.ts` so it can be tested in isolation
-  // without spinning up the dockview / router; see that file for the
-  // desktop-vs-mobile branching rationale.
+  // without spinning up the dockview.
   //
-  // `useDesktopLayout` is read through a ref so a viewport resize
-  // doesn't tear down the SSE subscription — the dispatcher picks up
-  // the current layout at event time instead.
+  // Mobile / narrow web: short-circuit here. `band open` is a desktop
+  // developer affordance — the mobile workspace layout's tab + file
+  // state is local-only, so an open-file event has nowhere to land
+  // (see issue #467). `useDesktopLayout` is read through a ref so a
+  // viewport resize doesn't tear down the SSE subscription — we read
+  // the current value at event time instead.
   const useDesktopLayoutRef = useRef(useDesktopLayout);
   useDesktopLayoutRef.current = useDesktopLayout;
   useEffect(() => {
     const unsubscribe = adapter.subscribeStatusEvents((event) => {
+      if (!useDesktopLayoutRef.current) return;
       dispatchOpenFileEvent(event, {
-        isDockview: useDesktopLayoutRef.current,
-        handlers: {
-          onOpenFile: crossPanelHandlers.onOpenFile,
-          onActivateFilesPanel: crossPanelHandlers.onActivateFilesPanel,
-        },
+        onOpenFile: crossPanelHandlers.onOpenFile,
+        onActivateFilesPanel: crossPanelHandlers.onActivateFilesPanel,
       });
     });
     return unsubscribe;

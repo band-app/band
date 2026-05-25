@@ -1,21 +1,18 @@
 /**
- * Pure dispatcher for `band open` SSE events.
+ * Pure dispatcher for `band open` SSE events on the desktop dockview.
  *
  * Extracted from `__root.tsx` so it's testable in isolation. Given an
- * `open-file` event and the current layout, decides which side-effecting
- * handler to call:
+ * `open-file` event, decides which side-effecting handler to call:
  *
- *                  in-workspace            external
- *   ───────────────┼─────────────────────┼─────────────────────────────
- *   Desktop        │  onOpenFile         │  enqueue + onActivateFilesPanel
- *   Mobile / web   │  unsupported (no-op)
+ *   in-workspace   →  onOpenFile
+ *   external       →  enqueue + onActivateFilesPanel
  *
- * Mobile is intentionally a no-op: post the route-unification refactor
- * (issue #467), the mobile workspace layout's active tab and selected
- * file live entirely in local React state — there's no URL surface and
- * no cross-component state store to deep-link into. `band open` is a
- * desktop developer affordance; the dashboard happening to be open on a
- * phone shouldn't try to half-support it.
+ * Mobile / narrow web is handled by the caller — it short-circuits before
+ * reaching the dispatcher (see `__root.tsx`). Rationale: post the route-
+ * unification refactor (issue #467) the mobile workspace layout's active
+ * tab and selected file live entirely in local React state, so an
+ * open-file event has nowhere to land on mobile. `band open` is a
+ * desktop developer affordance.
  */
 
 import { enqueueExternalOpen } from "./pending-external-open";
@@ -39,22 +36,18 @@ export interface OpenFileDispatchHandlers {
 }
 
 export type OpenFileDispatchResult =
-  | {
-      handled: true;
-      kind: "dockview-in-workspace" | "dockview-external";
-    }
+  | { handled: true; kind: "in-workspace" | "external" }
   | {
       handled: false;
-      reason: "not-open-file" | "missing-workspace-id" | "missing-file-path" | "mobile-unsupported";
+      reason: "not-open-file" | "missing-workspace-id" | "missing-file-path";
     };
 
 /**
  * Decide how to handle an `open-file` SSE event. Pure-ish — the only
  * side effect outside the supplied handlers is the
- * `enqueueExternalOpen` write for external paths on the desktop branch,
- * which is part of the dispatcher's contract (the renderer-side queue
- * is the only place absolute paths can live without corrupting routing
- * state).
+ * `enqueueExternalOpen` write for external paths, which is part of the
+ * dispatcher's contract (the renderer-side queue is the only place
+ * absolute paths can live without corrupting routing state).
  *
  * Accepts the raw SSE payload shape (`Record<string, unknown>`) rather
  * than `StatusEvent` because the SSE stream is shared across all event
@@ -67,7 +60,7 @@ export type OpenFileDispatchResult =
  */
 export function dispatchOpenFileEvent(
   event: Record<string, unknown>,
-  options: { isDockview: boolean; handlers: OpenFileDispatchHandlers },
+  handlers: OpenFileDispatchHandlers,
 ): OpenFileDispatchResult {
   if (event.kind !== "open-file") return { handled: false, reason: "not-open-file" };
   const workspaceId = typeof event.workspaceId === "string" ? event.workspaceId : undefined;
@@ -75,22 +68,14 @@ export function dispatchOpenFileEvent(
   const filePath = typeof event.filePath === "string" ? event.filePath : undefined;
   if (!filePath) return { handled: false, reason: "missing-file-path" };
 
-  const { isDockview, handlers } = options;
-
-  // Mobile / narrow web: `band open` has nowhere to land — the workspace
-  // URL no longer carries a tab/file segment, and the mobile layout's
-  // state is local-only. Bail out cleanly; the CLI still succeeds, but
-  // the dashboard makes no UI change. See issue #467.
-  if (!isDockview) return { handled: false, reason: "mobile-unsupported" };
-
   if (event.external === true) {
     // External files: queue first (so a freshly-mounting CodeBrowserView
     // catches it on mount), then surface the Files panel.
     enqueueExternalOpen(workspaceId, filePath);
     handlers.onActivateFilesPanel(workspaceId);
-    return { handled: true, kind: "dockview-external" };
+    return { handled: true, kind: "external" };
   }
 
   handlers.onOpenFile(workspaceId, filePath);
-  return { handled: true, kind: "dockview-in-workspace" };
+  return { handled: true, kind: "in-workspace" };
 }

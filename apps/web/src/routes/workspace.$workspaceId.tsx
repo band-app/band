@@ -140,9 +140,7 @@ function WorkspaceLayout() {
   // issue #467.
   return (
     <div className={`h-full ${hydrated ? "" : "invisible"}`}>
-      {useDesktopLayout ? null : (
-        <MobileWorkspaceLayout key={decoded} workspaceId={decoded} encodedId={workspaceId} />
-      )}
+      {useDesktopLayout ? null : <MobileWorkspaceLayout key={decoded} workspaceId={decoded} />}
     </div>
   );
 }
@@ -157,13 +155,7 @@ interface CodingAgentDef {
   label: string;
 }
 
-function MobileWorkspaceLayout({
-  workspaceId,
-  encodedId: _encodedId,
-}: {
-  workspaceId: string;
-  encodedId: string;
-}) {
+function MobileWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
   const navigate = useNavigate();
   const { height: appHeight, offsetTop: appOffsetTop } = useAppHeight();
   const diffFileCount = useDiffFileCount(workspaceId);
