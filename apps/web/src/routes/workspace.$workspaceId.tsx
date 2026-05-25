@@ -35,6 +35,13 @@ export const Route = createFileRoute("/workspace/$workspaceId")({
   // `/workspace/$id/code/foo.ts`, `/workspace/$id/terminal`) used to resolve to
   // child routes that no longer exist. Redirect them to the canonical workspace
   // URL instead of showing the root 404. See issue #467.
+  //
+  // CAVEAT: this catches ANY unmatched sub-path under `/workspace/$id`, not
+  // just the five retired routes. If a future child route is added here, a
+  // typo'd link (e.g. `/workspace/$id/settigns` for a real `/settings` route)
+  // will silently land on the workspace root rather than surfacing a 404.
+  // If that becomes a problem, narrow this to an allowlist of known retired
+  // path prefixes.
   notFoundComponent: WorkspaceNotFoundRedirect,
 });
 
@@ -478,6 +485,13 @@ function MobileChatContent({ workspaceId }: { workspaceId: string }) {
         return;
       }
       setInitialSessionId(sessionId);
+      // Reset before bumping the pane key so the remounted `ChatView`
+      // doesn't see a stale `sessionQueryDone={true}` on its first render
+      // — the `chats.get` effect re-runs and flips it back to true once
+      // the new session is resolved. Without this, the remount would
+      // bypass the "wait for session" gate. (Pre-existing bug preserved
+      // verbatim when this code moved out of `workspace.$workspaceId.index.tsx`.)
+      setSessionQueryDone(false);
       setSessionPaneKey((k) => k + 1);
     },
     [workspaceId, chatId],
