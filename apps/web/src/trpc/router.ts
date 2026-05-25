@@ -335,6 +335,11 @@ const projectsRouter = t.router({
         worktrees,
         label: input.label ?? undefined,
         kind,
+        // Default to true so the first CI poll after adding a project
+        // still runs the GraphQL query. `syncWorktrees` writes the real
+        // value on the next tick — see `reconcileOneProject` in
+        // `sync-state.ts` and issue #458.
+        hasOrigin: true,
       };
 
       state.projects.push(project);

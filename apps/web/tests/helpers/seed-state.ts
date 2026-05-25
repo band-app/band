@@ -21,6 +21,13 @@ interface ProjectData {
   worktrees?: WorktreeData[];
   label?: string;
   kind?: "git" | "plain";
+  /**
+   * Whether the project has an `origin` remote. Optional; defaults to
+   * `true` so tests that don't care about CI polling behavior continue
+   * to mirror the schema default (see `ProjectState.hasOrigin` and
+   * issue #458).
+   */
+  hasOrigin?: boolean;
 }
 
 interface StateData {
@@ -49,6 +56,7 @@ export function seedState(tmpHome: string, state: StateData): void {
           label: project.label ?? null,
           sortOrder: i,
           kind: project.kind ?? "git",
+          hasOrigin: project.hasOrigin ?? true,
         })
         .run();
 

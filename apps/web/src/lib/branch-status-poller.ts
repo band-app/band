@@ -26,6 +26,13 @@ interface WorkspaceInfo {
   defaultBranch: string;
   worktreePath: string;
   projectPath: string;
+  /**
+   * Whether the project's git repo has an `origin` remote. Populated
+   * from `ProjectState.hasOrigin`, which `syncWorktrees` keeps in sync
+   * at the CI tick cadence. Used to skip the CI / GraphQL probe for
+   * origin-less repos — see issue #458.
+   */
+  hasOrigin: boolean;
 }
 
 /**
@@ -57,31 +64,6 @@ let pollerTimer: ReturnType<typeof setInterval> | null = null;
 let tickCount = 0;
 let currentActivity: ActivityLevel = "active";
 
-/**
- * Cache repo info per project path with a TTL.
- *
- * Both positive (RepoInfo) and negative (null) results are cached.
- *
- * Caching null is the important part: "directory isn't a git checkout" and
- * "git checkout has no `origin` remote" are expected steady states for some
- * project directories — they cannot be fixed by retrying on the next CI tick.
- * Without a negative cache, the failure path runs every tick and `getRepoInfo`
- * logs an error each time (issue #458). With a TTL, the cache still self-heals
- * for the legitimate cases (transferred repos, newly configured remotes)
- * within at most one TTL window.
- */
-const REPO_INFO_TTL_MS = 5 * 60 * 1000; // 5 minutes
-interface RepoInfoCacheEntry {
-  info: RepoInfo | null;
-  expiresAt: number;
-}
-const repoInfoCache = new Map<string, RepoInfoCacheEntry>();
-
-/** Test/refresh hook: drop every cached entry so the next lookup re-resolves. */
-export function clearRepoInfoCache(): void {
-  repoInfoCache.clear();
-}
-
 function getWorkspaces(): WorkspaceInfo[] {
   const state = loadState();
   const workspaces: WorkspaceInfo[] = [];
@@ -98,6 +80,7 @@ function getWorkspaces(): WorkspaceInfo[] {
         defaultBranch: project.defaultBranch,
         worktreePath: wt.path,
         projectPath: project.path,
+        hasOrigin: project.hasOrigin,
       });
     }
   }
@@ -157,31 +140,21 @@ async function getGitStatus(worktreePath: string): Promise<GitStatus> {
 }
 
 /**
- * Resolve repo info for a project path, with TTL-based caching of both
- * positive and negative results. See the `repoInfoCache` comment above.
- */
-async function resolveRepoInfo(projectPath: string): Promise<RepoInfo | null> {
-  const now = Date.now();
-  const cached = repoInfoCache.get(projectPath);
-  if (cached && cached.expiresAt > now) return cached.info;
-  const info = await getRepoInfo(projectPath);
-  repoInfoCache.set(projectPath, { info, expiresAt: now + REPO_INFO_TTL_MS });
-  return info;
-}
-
-/**
  * Fetch CI status for all workspaces using batched GraphQL queries.
  *
  * Groups workspaces by GitHub host and executes one GraphQL query per host,
  * fetching PR status and check suite results for all branches in a single request.
- * Falls back to individual gh CLI calls if the GraphQL query fails.
+ *
+ * The caller is responsible for pre-filtering to workspaces whose project
+ * has `hasOrigin === true` (see `ProjectState.hasOrigin`, written by
+ * `syncWorktrees`). That removes the no-origin / not-a-git-checkout
+ * steady-state failures from this path entirely — no per-tick `getRepoInfo`
+ * retry loop, no negative cache, no log spam (issue #458). The
+ * `getRepoInfo` call below should therefore succeed in steady state; a
+ * failure here is a transient race (origin removed between sync and poll)
+ * and is logged at debug.
  */
 async function getBatchedCIStatuses(workspaces: WorkspaceInfo[]): Promise<Map<string, CIStatus>> {
-  // Resolve repo info for all workspaces in parallel.
-  // `resolveRepoInfo` is now TTL-cached (both positive and negative results),
-  // so transferred repos or newly configured remotes are picked up within at
-  // most one TTL window without re-running `git remote get-url origin` on
-  // every CI tick. See `repoInfoCache` above and issue #458.
   const resolved: Array<{
     ws: WorkspaceInfo;
     repoInfo: RepoInfo;
@@ -189,15 +162,14 @@ async function getBatchedCIStatuses(workspaces: WorkspaceInfo[]): Promise<Map<st
   }> = [];
   await Promise.allSettled(
     workspaces.map(async (ws, index) => {
-      const repoInfo = await resolveRepoInfo(ws.projectPath);
+      const repoInfo = await getRepoInfo(ws.projectPath);
       if (repoInfo) {
         resolved.push({ ws, repoInfo, alias: `ws_${index}` });
       } else {
-        // No origin / not a git checkout. `getRepoInfo` already logged the
-        // underlying reason at debug; emit a companion debug entry with the
-        // workspace context so the two lines correlate in the log. Logging
-        // at error here would defeat the negative cache (issue #458) — the
-        // poller runs this branch every CI tick for known-non-git paths.
+        // Transient race: `hasOrigin` was true at `getWorkspaces()` time but
+        // the probe just now returned null. `getRepoInfo` already logged the
+        // underlying reason at debug. `syncWorktrees` will rewrite
+        // `hasOrigin` on the next sync tick and steady state will resume.
         log.debug("CI poll: no repo info for %s (%s)", ws.workspaceId, ws.projectPath);
       }
     }),
@@ -308,10 +280,19 @@ async function pollTick() {
 
   const db = getDb();
 
-  // Fetch CI statuses in batch on CI ticks
+  // Fetch CI statuses in batch on CI ticks. Filter to workspaces whose
+  // project has an `origin` remote — by construction, an origin-less
+  // project has no PR / CI status to report and the GraphQL query would
+  // need a `getRepoInfo` probe that's guaranteed to fail (issue #458).
+  // `hasOrigin` is maintained by `syncWorktrees`, which runs in the same
+  // tick body just above; freshly-discovered origin changes land in the
+  // map before this filter reads it.
   let ciStatuses = new Map<string, CIStatus>();
   if (isCITick) {
-    ciStatuses = await getBatchedCIStatuses(workspaces);
+    const ciWorkspaces = workspaces.filter((w) => w.hasOrigin);
+    if (ciWorkspaces.length > 0) {
+      ciStatuses = await getBatchedCIStatuses(ciWorkspaces);
+    }
   }
 
   await Promise.allSettled(

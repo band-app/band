@@ -1,9 +1,10 @@
-import { execGit, listWorktrees } from "./git";
+import { execGit, getRepoInfo, listWorktrees } from "./git";
 import {
   loadState,
   type ProjectState,
   reconcileKindForProject,
   saveState,
+  setProjectHasOrigin,
   type WorktreeState,
 } from "./state";
 
@@ -149,6 +150,26 @@ async function reconcileOneProject(project: ProjectState): Promise<boolean> {
   if (remoteBranch && remoteBranch !== project.defaultBranch) {
     project.defaultBranch = remoteBranch;
     mutated = true;
+  }
+
+  // Sync `hasOrigin` so the CI poller can skip origin-less projects
+  // without re-probing on every tick (issue #458). This is the same
+  // probe `branch-status-poller` would have run inline — moving it
+  // here piggy-backs on the existing sync cadence (30 s / 3 min / 10
+  // min) and gives the poller a property read instead of a subprocess.
+  //
+  // We persist via the focused `setProjectHasOrigin` UPDATE rather than
+  // returning a mutation flag and rolling into the caller's full-tree
+  // `saveState`. The whole-tree rewrite would race with concurrent
+  // `workspaces.create` traffic — a stale in-memory copy from before the
+  // create would clobber the just-saved worktree row. The targeted
+  // UPDATE leaves the worktrees table alone. The in-memory `project`
+  // object is mutated too so the rest of the sync (and any caller that
+  // re-reads the state object) sees the fresh value.
+  const hasOrigin = (await getRepoInfo(project.path)) !== null;
+  if (hasOrigin !== project.hasOrigin) {
+    project.hasOrigin = hasOrigin;
+    setProjectHasOrigin(project.name, hasOrigin);
   }
 
   return mutated;
