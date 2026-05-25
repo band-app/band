@@ -168,7 +168,7 @@ describe("getRepoInfo", () => {
     expect(info).toEqual({ host: "github.com", owner: "band-app", repo: "band" });
   });
 
-  it("parses an `ssh://` scheme origin remote", async () => {
+  it("parses an `ssh://` scheme origin remote with user@", async () => {
     // `ssh://git@github.com/owner/repo.git` is what `gh repo clone`
     // emits for repos without SCP-style aliasing. Before #502 review
     // this fell into the `parseGitRemoteUrl` null branch and silently
@@ -176,6 +176,18 @@ describe("getRepoInfo", () => {
     const { repoPath, tmp } = createRepo();
     tmpDirs.push(tmp);
     git(repoPath, ["remote", "add", "origin", "ssh://git@github.com/band-app/band.git"]);
+    const info = await getRepoInfo(repoPath);
+    expect(info).toEqual({ host: "github.com", owner: "band-app", repo: "band" });
+  });
+
+  it("parses an `ssh://` scheme origin remote without user@", async () => {
+    // The `[\w.-]+@` user-info component is optional in RFC 3986 — and
+    // `ssh://github.com/owner/repo.git` is a valid clone URL that some
+    // CI configs and `gh` paths emit. Originally the regex required
+    // user@; the make-it-optional fix landed via #502 review.
+    const { repoPath, tmp } = createRepo();
+    tmpDirs.push(tmp);
+    git(repoPath, ["remote", "add", "origin", "ssh://github.com/band-app/band.git"]);
     const info = await getRepoInfo(repoPath);
     expect(info).toEqual({ host: "github.com", owner: "band-app", repo: "band" });
   });

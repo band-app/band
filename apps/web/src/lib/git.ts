@@ -29,11 +29,12 @@ export function parseGitRemoteUrl(url: string): RepoInfo | null {
   if (sshMatch) {
     return { host: sshMatch[1], owner: sshMatch[2], repo: sshMatch[3] };
   }
-  // ssh:// scheme: ssh://git@github.com/owner/repo.git
-  // (what `gh repo clone` emits for repos without SCP support; previously
-  // landed in the parse-failure branch and silently flipped `hasOrigin`
-  // to false — see issue #458 review feedback.)
-  const sshSchemeMatch = url.match(/^ssh:\/\/[\w.-]+@([^/]+)\/([^/]+)\/(.+?)(?:\.git)?$/);
+  // ssh:// scheme: ssh://git@github.com/owner/repo.git, or the
+  // userless variant ssh://github.com/owner/repo.git.
+  // (`gh repo clone` emits these for repos without SCP-style aliasing;
+  // before the #502 review they fell into the parse-failure branch and
+  // silently flipped `hasOrigin` to false — issue #458 review feedback.)
+  const sshSchemeMatch = url.match(/^ssh:\/\/(?:[\w.-]+@)?([^/]+)\/([^/]+)\/(.+?)(?:\.git)?$/);
   if (sshSchemeMatch) {
     return {
       host: sshSchemeMatch[1],

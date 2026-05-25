@@ -181,8 +181,19 @@ async function reconcileOneProject(project: ProjectState): Promise<boolean> {
     // throws (SQLite locked, disk full), the in-memory value stays in
     // sync with what's actually persisted; the next sync tick will try
     // again rather than the two diverging.
-    setProjectHasOrigin(project.name, hasOrigin);
-    project.hasOrigin = hasOrigin;
+    //
+    // Swallow the throw rather than letting it propagate. `reconcileOneProject`
+    // runs inside `Promise.all` in `syncWorktrees`; an unhandled rejection
+    // here aborts the entire batch and skips the trailing `saveState` for
+    // every project's worktree/defaultBranch reconciliation. A failed
+    // `hasOrigin` write is recoverable on the next sync tick; losing the
+    // rest of the batch isn't.
+    try {
+      setProjectHasOrigin(project.name, hasOrigin);
+      project.hasOrigin = hasOrigin;
+    } catch {
+      // Next sync tick retries — see comment above.
+    }
   }
 
   return mutated;
