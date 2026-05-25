@@ -8,21 +8,14 @@
  *                  in-workspace            external
  *   ───────────────┼─────────────────────┼─────────────────────────────
  *   Desktop        │  onOpenFile         │  enqueue + onActivateFilesPanel
- *   Mobile / web   │  navigateInWorkspace│  enqueue + navigateToWorkspaceCode
+ *   Mobile / web   │  unsupported (no-op)
  *
- * The two rendering models exist because:
- *   - Desktop dockview overlays the route Outlet and
- *     `DesktopWorkspaceLayout` returns null, so URL navigation alone
- *     never renders `CodeBrowserView`. Files are opened by writing into
- *     the per-workspace state store (via `crossPanelHandlers.onOpenFile`)
- *     and activating the Files panel.
- *   - Mobile/narrow web is purely URL-driven via TanStack routes; the
- *     `code/$splat` route mounts `CodeBrowserView` with the file in its
- *     props.
- *
- * External paths can't go in the URL (absolute paths corrupt the
- * back/forward stack), so they use a renderer-side queue regardless of
- * layout — see `lib/pending-external-open.ts`.
+ * Mobile is intentionally a no-op: post the route-unification refactor
+ * (issue #467), the mobile workspace layout's active tab and selected
+ * file live entirely in local React state — there's no URL surface and
+ * no cross-component state store to deep-link into. `band open` is a
+ * desktop developer affordance; the dashboard happening to be open on a
+ * phone shouldn't try to half-support it.
  */
 
 import { enqueueExternalOpen } from "./pending-external-open";
@@ -43,41 +36,25 @@ export interface OpenFileDispatchHandlers {
    * `CodeBrowserView` drains).
    */
   onActivateFilesPanel: (workspaceId: string) => void;
-  /**
-   * Mobile/web path for in-workspace files. Navigates to `/workspace/$id`
-   * (the unified workspace URL — see issue #467) and signals
-   * `MobileWorkspaceLayout` to switch to the Files tab with `filePath`
-   * pre-selected. The signal is queued via `setMobilePendingAction` before
-   * navigation so the soon-to-be-mounted layout drains it on its first
-   * `useEffect`.
-   */
-  navigateInWorkspace: (workspaceId: string, filePath: string) => void;
-  /**
-   * Mobile/web path for external files. Navigates to `/workspace/$id` and
-   * signals `MobileWorkspaceLayout` to switch to the Files tab. The actual
-   * file path lives in the `pending-external-open` queue and is drained by
-   * `CodeBrowserView` on mount.
-   */
-  navigateToWorkspaceCode: (workspaceId: string) => void;
 }
 
 export type OpenFileDispatchResult =
   | {
       handled: true;
-      kind:
-        | "dockview-in-workspace"
-        | "dockview-external"
-        | "mobile-in-workspace"
-        | "mobile-external";
+      kind: "dockview-in-workspace" | "dockview-external";
     }
-  | { handled: false; reason: "not-open-file" | "missing-workspace-id" | "missing-file-path" };
+  | {
+      handled: false;
+      reason: "not-open-file" | "missing-workspace-id" | "missing-file-path" | "mobile-unsupported";
+    };
 
 /**
  * Decide how to handle an `open-file` SSE event. Pure-ish — the only
  * side effect outside the supplied handlers is the
- * `enqueueExternalOpen` write for external paths, which is part of the
- * dispatcher's contract (the renderer-side queue is the only place
- * absolute paths can live without corrupting routing state).
+ * `enqueueExternalOpen` write for external paths on the desktop branch,
+ * which is part of the dispatcher's contract (the renderer-side queue
+ * is the only place absolute paths can live without corrupting routing
+ * state).
  *
  * Accepts the raw SSE payload shape (`Record<string, unknown>`) rather
  * than `StatusEvent` because the SSE stream is shared across all event
@@ -100,22 +77,20 @@ export function dispatchOpenFileEvent(
 
   const { isDockview, handlers } = options;
 
+  // Mobile / narrow web: `band open` has nowhere to land — the workspace
+  // URL no longer carries a tab/file segment, and the mobile layout's
+  // state is local-only. Bail out cleanly; the CLI still succeeds, but
+  // the dashboard makes no UI change. See issue #467.
+  if (!isDockview) return { handled: false, reason: "mobile-unsupported" };
+
   if (event.external === true) {
     // External files: queue first (so a freshly-mounting CodeBrowserView
-    // catches it on mount), then surface the Files panel / route.
+    // catches it on mount), then surface the Files panel.
     enqueueExternalOpen(workspaceId, filePath);
-    if (isDockview) {
-      handlers.onActivateFilesPanel(workspaceId);
-      return { handled: true, kind: "dockview-external" };
-    }
-    handlers.navigateToWorkspaceCode(workspaceId);
-    return { handled: true, kind: "mobile-external" };
+    handlers.onActivateFilesPanel(workspaceId);
+    return { handled: true, kind: "dockview-external" };
   }
 
-  if (isDockview) {
-    handlers.onOpenFile(workspaceId, filePath);
-    return { handled: true, kind: "dockview-in-workspace" };
-  }
-  handlers.navigateInWorkspace(workspaceId, filePath);
-  return { handled: true, kind: "mobile-in-workspace" };
+  handlers.onOpenFile(workspaceId, filePath);
+  return { handled: true, kind: "dockview-in-workspace" };
 }

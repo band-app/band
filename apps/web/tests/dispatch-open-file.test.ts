@@ -8,31 +8,31 @@ import { consumeExternalOpen } from "../src/lib/pending-external-open";
 // ---------------------------------------------------------------------------
 // dispatchOpenFileEvent — pure dispatcher for `band open` SSE events.
 //
-// Covers the routing matrix between the two rendering models:
+// Covers the routing matrix:
 //
 //                  in-workspace            external
 //   ───────────────┼─────────────────────┼─────────────────────────────
 //   Desktop        │  onOpenFile         │  enqueue + onActivateFilesPanel
-//   Mobile / web   │  navigateInWorkspace│  enqueue + navigateToWorkspaceCode
+//   Mobile / web   │  unsupported (no-op)
+//
+// Mobile is intentionally a no-op post issue #467 — the unified workspace
+// route doesn't carry tab/file state in the URL, and `band open` is a
+// desktop-developer affordance.
 //
 // The dispatcher is the contract between the SSE event boundary and the
-// dockview/router; verifying it here means future regressions in
-// __root.tsx's listener (which is now just a thin shim) can't silently
-// break `band open` end-to-end. The CLI integration tests cover the
-// server-side event shape; this file covers the renderer-side dispatch.
+// dockview; verifying it here means future regressions in __root.tsx's
+// listener (which is now just a thin shim) can't silently break
+// `band open` end-to-end. The CLI integration tests cover the server-side
+// event shape; this file covers the renderer-side dispatch.
 // ---------------------------------------------------------------------------
 
 function makeHandlers(): OpenFileDispatchHandlers & {
   onOpenFile: ReturnType<typeof vi.fn>;
   onActivateFilesPanel: ReturnType<typeof vi.fn>;
-  navigateInWorkspace: ReturnType<typeof vi.fn>;
-  navigateToWorkspaceCode: ReturnType<typeof vi.fn>;
 } {
   return {
     onOpenFile: vi.fn(),
     onActivateFilesPanel: vi.fn(),
-    navigateInWorkspace: vi.fn(),
-    navigateToWorkspaceCode: vi.fn(),
   };
 }
 
@@ -57,7 +57,7 @@ describe("dispatchOpenFileEvent", () => {
   });
 
   // -------------------------------------------------------------------
-  // Happy paths — one per quadrant of the dispatch matrix.
+  // Happy paths
   // -------------------------------------------------------------------
 
   it("desktop + in-workspace → onOpenFile (writes per-workspace state + activates panel)", () => {
@@ -72,10 +72,7 @@ describe("dispatchOpenFileEvent", () => {
       "my-project-feat-x",
       "src/foo.rs:42:5",
     );
-    // The other three branches must not have fired.
     expect(handlers.onActivateFilesPanel).not.toHaveBeenCalled();
-    expect(handlers.navigateInWorkspace).not.toHaveBeenCalled();
-    expect(handlers.navigateToWorkspaceCode).not.toHaveBeenCalled();
     // External path is workspace-relative — no enqueue.
     expect(consumeExternalOpen("my-project-feat-x")).toBeUndefined();
   });
@@ -90,8 +87,6 @@ describe("dispatchOpenFileEvent", () => {
     expect(result).toEqual({ handled: true, kind: "dockview-external" });
     expect(handlers.onActivateFilesPanel).toHaveBeenCalledExactlyOnceWith("my-project-feat-x");
     expect(handlers.onOpenFile).not.toHaveBeenCalled();
-    expect(handlers.navigateInWorkspace).not.toHaveBeenCalled();
-    expect(handlers.navigateToWorkspaceCode).not.toHaveBeenCalled();
     // The CodeBrowserView in the (now-active) Files panel will drain
     // this on its next subscriber tick.
     expect(consumeExternalOpen("my-project-feat-x")).toEqual({
@@ -99,39 +94,34 @@ describe("dispatchOpenFileEvent", () => {
     });
   });
 
-  it("mobile + in-workspace → navigateInWorkspace", () => {
+  it("mobile + in-workspace → unsupported (no handler fires)", () => {
     const handlers = makeHandlers();
     const result = dispatchOpenFileEvent(openFileEvent({ filePath: "src/foo.rs:10-20" }), {
       isDockview: false,
       handlers,
     });
 
-    expect(result).toEqual({ handled: true, kind: "mobile-in-workspace" });
-    expect(handlers.navigateInWorkspace).toHaveBeenCalledExactlyOnceWith(
-      "my-project-feat-x",
-      "src/foo.rs:10-20",
-    );
+    expect(result).toEqual({ handled: false, reason: "mobile-unsupported" });
     expect(handlers.onOpenFile).not.toHaveBeenCalled();
     expect(handlers.onActivateFilesPanel).not.toHaveBeenCalled();
-    expect(handlers.navigateToWorkspaceCode).not.toHaveBeenCalled();
+    // No enqueue either — mobile bails out before the external-path branch.
     expect(consumeExternalOpen("my-project-feat-x")).toBeUndefined();
   });
 
-  it("mobile + external → enqueues + navigates to workspace code index", () => {
+  it("mobile + external → unsupported (no enqueue, no handler)", () => {
     const handlers = makeHandlers();
     const result = dispatchOpenFileEvent(
       openFileEvent({ filePath: "/abs/path/foo.rs", external: true }),
       { isDockview: false, handlers },
     );
 
-    expect(result).toEqual({ handled: true, kind: "mobile-external" });
-    expect(handlers.navigateToWorkspaceCode).toHaveBeenCalledExactlyOnceWith("my-project-feat-x");
+    expect(result).toEqual({ handled: false, reason: "mobile-unsupported" });
     expect(handlers.onOpenFile).not.toHaveBeenCalled();
     expect(handlers.onActivateFilesPanel).not.toHaveBeenCalled();
-    expect(handlers.navigateInWorkspace).not.toHaveBeenCalled();
-    expect(consumeExternalOpen("my-project-feat-x")).toEqual({
-      filePath: "/abs/path/foo.rs",
-    });
+    // The dispatcher bails out before the enqueue — without a mobile
+    // surface to drain the queue, queuing would leak a stale entry that
+    // a later desktop visit would unexpectedly consume.
+    expect(consumeExternalOpen("my-project-feat-x")).toBeUndefined();
   });
 
   // -------------------------------------------------------------------
@@ -151,8 +141,6 @@ describe("dispatchOpenFileEvent", () => {
     expect(result).toEqual({ handled: false, reason: "not-open-file" });
     expect(handlers.onOpenFile).not.toHaveBeenCalled();
     expect(handlers.onActivateFilesPanel).not.toHaveBeenCalled();
-    expect(handlers.navigateInWorkspace).not.toHaveBeenCalled();
-    expect(handlers.navigateToWorkspaceCode).not.toHaveBeenCalled();
   });
 
   it("ignores open-file events with no workspaceId", () => {
@@ -187,28 +175,25 @@ describe("dispatchOpenFileEvent", () => {
 
   it("respects per-call isDockview (no internal caching of layout)", () => {
     const handlers = makeHandlers();
-    dispatchOpenFileEvent(openFileEvent(), { isDockview: true, handlers });
-    dispatchOpenFileEvent(openFileEvent({ workspaceId: "other-workspace" }), {
+    const r1 = dispatchOpenFileEvent(openFileEvent(), { isDockview: true, handlers });
+    const r2 = dispatchOpenFileEvent(openFileEvent({ workspaceId: "other-workspace" }), {
       isDockview: false,
       handlers,
     });
 
+    expect(r1).toEqual({ handled: true, kind: "dockview-in-workspace" });
+    expect(r2).toEqual({ handled: false, reason: "mobile-unsupported" });
     expect(handlers.onOpenFile).toHaveBeenCalledExactlyOnceWith("my-project-feat-x", "src/foo.rs");
-    expect(handlers.navigateInWorkspace).toHaveBeenCalledExactlyOnceWith(
-      "other-workspace",
-      "src/foo.rs",
-    );
   });
 });
 
 // ---------------------------------------------------------------------------
 // Suffix preservation — the dispatcher does not parse the suffix; it
 // forwards `filePath` to the handler verbatim. This is deliberate: the
-// downstream consumer (CodeBrowserView via `openFilePath`, or the
-// _splat route on mobile) does its own `parseFileLocation` and the
-// dispatcher just decides where the payload goes. Document the
-// invariant so a future "normalize here" refactor doesn't break the
-// cursor-position contract.
+// downstream consumer (CodeBrowserView via `openFilePath`) does its own
+// `parseFileLocation` and the dispatcher just decides where the payload
+// goes. Document the invariant so a future "normalize here" refactor
+// doesn't break the cursor-position contract.
 // ---------------------------------------------------------------------------
 
 describe("dispatchOpenFileEvent — suffix passthrough", () => {
@@ -227,19 +212,6 @@ describe("dispatchOpenFileEvent — suffix passthrough", () => {
     });
 
     expect(handlers.onOpenFile).toHaveBeenCalledWith("my-project-feat-x", "src/main.rs:42:5");
-  });
-
-  it("forwards :line-end range suffix verbatim on the in-workspace mobile path", () => {
-    const handlers = makeHandlers();
-    dispatchOpenFileEvent(openFileEvent({ filePath: "src/main.rs:5-10" }), {
-      isDockview: false,
-      handlers,
-    });
-
-    expect(handlers.navigateInWorkspace).toHaveBeenCalledWith(
-      "my-project-feat-x",
-      "src/main.rs:5-10",
-    );
   });
 
   it("preserves suffix in the queued external entry on dockview", () => {

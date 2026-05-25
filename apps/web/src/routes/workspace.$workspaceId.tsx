@@ -19,10 +19,6 @@ import { AgentSwitcherContext, useAgentSwitcherContext } from "../hooks/useAgent
 import { useIsDesktop } from "../hooks/useIsDesktop";
 import { SessionListContext, useSessionListContext } from "../hooks/useSessionListContext";
 import { isDesktop } from "../lib/is-desktop";
-import {
-  consumeMobilePendingAction,
-  subscribeMobilePendingActions,
-} from "../lib/mobile-pending-action";
 import { trpc } from "../lib/trpc-client";
 
 // Lazy-load to avoid importing @xterm/xterm (CJS) in SSR context. The
@@ -187,22 +183,6 @@ function MobileWorkspaceLayout({
   const [, setTaskRunning] = useState(false);
   const [chatKey, setChatKey] = useState(0);
   const newSessionRef = useRef<(() => void) | null>(null);
-
-  // Drain any pending mobile action (queued by the `band open` SSE handler
-  // before this layout mounted). Run once on mount, then subscribe so calls
-  // that arrive while we ARE mounted reach us through the listener.
-  useEffect(() => {
-    const drain = () => {
-      const action = consumeMobilePendingAction(workspaceId);
-      if (!action) return;
-      setActiveTab(action.tab);
-      if (action.filePath !== undefined) {
-        setCurrentFile(action.filePath);
-      }
-    };
-    drain();
-    return subscribeMobilePendingActions(drain);
-  }, [workspaceId]);
 
   // Load available agents from settings and current workspace agent
   // biome-ignore lint/correctness/useExhaustiveDependencies: chatKey intentionally triggers reload after agent switch; currentAgentId excluded to avoid infinite loop

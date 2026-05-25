@@ -35,7 +35,6 @@ import { useZoom } from "../hooks/useZoom";
 import { getElectronBridge } from "../lib/desktop-ipc";
 import { dispatchOpenFileEvent } from "../lib/dispatch-open-file";
 import { isDesktop } from "../lib/is-desktop";
-import { setMobilePendingAction } from "../lib/mobile-pending-action";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
 import {
   applyZoomLevel,
@@ -352,30 +351,6 @@ function AppShell() {
         handlers: {
           onOpenFile: crossPanelHandlers.onOpenFile,
           onActivateFilesPanel: crossPanelHandlers.onActivateFilesPanel,
-          // Mobile: the workspace URL no longer carries the active tab or
-          // selected file — both live in `MobileWorkspaceLayout`'s local
-          // state. We queue the tab-switch + file open through
-          // `setMobilePendingAction` BEFORE navigating, so the soon-to-be-
-          // mounted layout drains the queue in its `useEffect` (the queue
-          // module mirrors `pending-external-open.ts` — same pattern as
-          // CodeBrowserView's external-file drain). See issue #467.
-          navigateInWorkspace: (workspaceId, filePath) => {
-            setMobilePendingAction(workspaceId, { tab: "code", filePath });
-            router.navigate({
-              to: "/workspace/$workspaceId",
-              params: { workspaceId: encodeURIComponent(workspaceId) },
-            });
-          },
-          navigateToWorkspaceCode: (workspaceId) => {
-            // External path: the actual file lives in
-            // `pending-external-open` and is drained by `CodeBrowserView`'s
-            // own mount effect — we just need to switch to the Files tab.
-            setMobilePendingAction(workspaceId, { tab: "code" });
-            router.navigate({
-              to: "/workspace/$workspaceId",
-              params: { workspaceId: encodeURIComponent(workspaceId) },
-            });
-          },
         },
       });
     });
@@ -383,7 +358,7 @@ function AppShell() {
     // `adapter` (module-level singleton) and `crossPanelHandlers`
     // (module-level mutable registry) are intentionally omitted from
     // deps — see the comment on the setActiveWorkspace effect above.
-  }, [router]);
+  }, []);
 
   // Panel items for the title bar panel switcher dropdown
   const panelItems: PanelItem[] = useMemo(
