@@ -308,10 +308,18 @@ test.describe("Workspace maximize state (issue #490)", () => {
     await workspacePage.restorePanel();
     await expect(workspacePage.maximizeButtons.first()).toBeVisible();
 
-    // The Terminal panel exposes a Terminal input textbox when it's
-    // the active tab in its group; the Changes panel exposes a
-    // "Files changed" heading. Asserting on the live DOM is the
-    // cleanest end-to-end proof that the right tab is showing.
-    await expect(workspacePage.terminalInput).toBeVisible();
+    // Two-phase assertion to keep this stable under CI load (see
+    // README of the issue #502 review thread). Phase 1 is the fast
+    // negative regression check — if the wrong tab (Changes) leaked
+    // across the workspace switch, its "Files changed" heading
+    // renders quickly and fails the test deterministically. Phase 2
+    // is the slow positive: xterm.js needs to mount its DOM (panel
+    // activate → React render → xterm init → textbox emitted with
+    // the `Terminal input` aria-name) which can take multiple
+    // seconds in CI even when correctness is fine, so we give the
+    // textbox a generous timeout instead of relying on Playwright's
+    // 5 s default.
+    await expect(workspacePage.changesHeading).not.toBeVisible();
+    await expect(workspacePage.terminalInput).toBeVisible({ timeout: 15_000 });
   });
 });
