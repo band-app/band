@@ -10,8 +10,11 @@ import type { PlatformCapabilities } from "@/dashboard";
  * Any normal workspace visit truncates the forward stack — exactly like
  * a browser.
  *
- * Uses `capabilities.getWorkspaceHref()` when navigating so the user
- * lands on the last-viewed tab inside each workspace.
+ * Uses `capabilities.getWorkspaceHref()` to build the destination URL.
+ * Post-#467, that's always the canonical `/workspace/$id` — there is no
+ * per-tab sub-path to restore anymore, since tab state lives in the
+ * mobile layout's local React state and the desktop dockview renders
+ * every panel regardless of URL.
  *
  * Returns the `goBack`/`goForward` actions plus `canGoBack`/`canGoForward`
  * flags so callers can render UI controls (e.g. arrow buttons in the title bar).

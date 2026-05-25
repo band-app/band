@@ -91,7 +91,7 @@ test.beforeEach(async ({ page }) => {
   // until we go to ANY page in the origin. Land on the workspace URL
   // first, then clear and reload so the dockview reads the cleared
   // state on its onReady.
-  await page.goto(`${server.url}/workspace/${encodeURIComponent(WORKSPACE_A)}/code?token=${TOKEN}`);
+  await page.goto(`${server.url}/workspace/${encodeURIComponent(WORKSPACE_A)}?token=${TOKEN}`);
   await page.evaluate(
     ([keys]) => {
       for (const key of keys) {

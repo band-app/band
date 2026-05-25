@@ -556,15 +556,16 @@ export function CodeBrowserView({
     [isExternalPath, viewFilePath],
   );
 
-  // The parent route's onSelectFile pushes the path into the URL
-  // (`/workspace/$workspaceId/code/$filePath`). External files use
-  // absolute filesystem paths, which would produce a nonsensical URL
-  // (`/workspace/foo/code//Users/alice/foo.md`) — so we silently drop
-  // those notifications. The tab list (persisted to localStorage) is
-  // the source of truth for "what's currently being viewed" instead.
+  // The parent's `onSelectFile` writes the path into its workspace state
+  // (per-workspace store on desktop; local state on mobile). External
+  // files use absolute filesystem paths, which would produce a
+  // nonsensical workspace-relative reference (e.g. desktop's recent-files
+  // list, where these labels surface in chip form) — so we silently drop
+  // those notifications. The tab list (persisted to localStorage) is the
+  // source of truth for "what's currently being viewed" instead.
   //
-  // The guard checks `isExternalPath` against the current tab list so
-  // the invariant ("external tabs don't round-trip through the route")
+  // The guard checks `isExternalPath` against the current tab list so the
+  // invariant ("external tabs don't round-trip through the parent state")
   // is explicit, rather than relying on the implicit "external paths
   // happen to be absolute, workspace-relative paths happen not to be."
   const notifySelectFile = useCallback(

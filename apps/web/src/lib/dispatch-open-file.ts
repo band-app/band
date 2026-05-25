@@ -1,28 +1,18 @@
 /**
- * Pure dispatcher for `band open` SSE events.
+ * Pure dispatcher for `band open` SSE events on the desktop dockview.
  *
  * Extracted from `__root.tsx` so it's testable in isolation. Given an
- * `open-file` event and the current layout, decides which side-effecting
- * handler to call:
+ * `open-file` event, decides which side-effecting handler to call:
  *
- *                  in-workspace            external
- *   ───────────────┼─────────────────────┼─────────────────────────────
- *   Desktop        │  onOpenFile         │  enqueue + onActivateFilesPanel
- *   Mobile / web   │  navigateInWorkspace│  enqueue + navigateToWorkspaceCode
+ *   in-workspace   →  onOpenFile
+ *   external       →  enqueue + onActivateFilesPanel
  *
- * The two rendering models exist because:
- *   - Desktop dockview overlays the route Outlet and
- *     `DesktopWorkspaceLayout` returns null, so URL navigation alone
- *     never renders `CodeBrowserView`. Files are opened by writing into
- *     the per-workspace state store (via `crossPanelHandlers.onOpenFile`)
- *     and activating the Files panel.
- *   - Mobile/narrow web is purely URL-driven via TanStack routes; the
- *     `code/$splat` route mounts `CodeBrowserView` with the file in its
- *     props.
- *
- * External paths can't go in the URL (absolute paths corrupt the
- * back/forward stack), so they use a renderer-side queue regardless of
- * layout — see `lib/pending-external-open.ts`.
+ * Mobile / narrow web is handled by the caller — it short-circuits before
+ * reaching the dispatcher (see `__root.tsx`). Rationale: post the route-
+ * unification refactor (issue #467) the mobile workspace layout's active
+ * tab and selected file live entirely in local React state, so an
+ * open-file event has nowhere to land on mobile. `band open` is a
+ * desktop developer affordance.
  */
 
 import { enqueueExternalOpen } from "./pending-external-open";
@@ -43,30 +33,14 @@ export interface OpenFileDispatchHandlers {
    * `CodeBrowserView` drains).
    */
   onActivateFilesPanel: (workspaceId: string) => void;
-  /**
-   * Mobile/web path for in-workspace files. Navigates to
-   * `/workspace/$id/code/$splat` so the route mounts `CodeBrowserView`
-   * with `file={_splat}`.
-   */
-  navigateInWorkspace: (workspaceId: string, filePath: string) => void;
-  /**
-   * Mobile/web path for external files. Navigates to
-   * `/workspace/$id/code` so the index route mounts `CodeBrowserView`,
-   * which drains the pending-external-open queue on mount.
-   */
-  navigateToWorkspaceCode: (workspaceId: string) => void;
 }
 
 export type OpenFileDispatchResult =
+  | { handled: true; kind: "in-workspace" | "external" }
   | {
-      handled: true;
-      kind:
-        | "dockview-in-workspace"
-        | "dockview-external"
-        | "mobile-in-workspace"
-        | "mobile-external";
-    }
-  | { handled: false; reason: "not-open-file" | "missing-workspace-id" | "missing-file-path" };
+      handled: false;
+      reason: "not-open-file" | "missing-workspace-id" | "missing-file-path";
+    };
 
 /**
  * Decide how to handle an `open-file` SSE event. Pure-ish — the only
@@ -86,7 +60,7 @@ export type OpenFileDispatchResult =
  */
 export function dispatchOpenFileEvent(
   event: Record<string, unknown>,
-  options: { isDockview: boolean; handlers: OpenFileDispatchHandlers },
+  handlers: OpenFileDispatchHandlers,
 ): OpenFileDispatchResult {
   if (event.kind !== "open-file") return { handled: false, reason: "not-open-file" };
   const workspaceId = typeof event.workspaceId === "string" ? event.workspaceId : undefined;
@@ -94,24 +68,14 @@ export function dispatchOpenFileEvent(
   const filePath = typeof event.filePath === "string" ? event.filePath : undefined;
   if (!filePath) return { handled: false, reason: "missing-file-path" };
 
-  const { isDockview, handlers } = options;
-
   if (event.external === true) {
     // External files: queue first (so a freshly-mounting CodeBrowserView
-    // catches it on mount), then surface the Files panel / route.
+    // catches it on mount), then surface the Files panel.
     enqueueExternalOpen(workspaceId, filePath);
-    if (isDockview) {
-      handlers.onActivateFilesPanel(workspaceId);
-      return { handled: true, kind: "dockview-external" };
-    }
-    handlers.navigateToWorkspaceCode(workspaceId);
-    return { handled: true, kind: "mobile-external" };
+    handlers.onActivateFilesPanel(workspaceId);
+    return { handled: true, kind: "external" };
   }
 
-  if (isDockview) {
-    handlers.onOpenFile(workspaceId, filePath);
-    return { handled: true, kind: "dockview-in-workspace" };
-  }
-  handlers.navigateInWorkspace(workspaceId, filePath);
-  return { handled: true, kind: "mobile-in-workspace" };
+  handlers.onOpenFile(workspaceId, filePath);
+  return { handled: true, kind: "in-workspace" };
 }

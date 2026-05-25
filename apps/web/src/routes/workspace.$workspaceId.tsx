@@ -1,66 +1,54 @@
-import { createFileRoute, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
+import { createFileRoute, Navigate, useNavigate } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from "react";
-import {
-  type DiffStats,
+  DiffView,
   QuickOpenDialog,
   SearchFilesDialog,
   useDashboardStore,
   useDiffTarget,
+  useSettingsQuery,
   type WorkspaceTab,
   WorkspaceTabNav,
 } from "@/dashboard";
+import { agentTypeSupportsSessionListing } from "../components/ChatPane";
+import { ChatView } from "../components/ChatView";
+import { CodeBrowserView } from "../components/CodeBrowserView";
 import { DesktopDragRegion } from "../components/DesktopTitleBar";
-import { AgentSwitcherContext } from "../hooks/useAgentSwitcherContext";
+import { AgentSwitcherContext, useAgentSwitcherContext } from "../hooks/useAgentSwitcherContext";
 import { useIsDesktop } from "../hooks/useIsDesktop";
-import { SessionListContext } from "../hooks/useSessionListContext";
+import { SessionListContext, useSessionListContext } from "../hooks/useSessionListContext";
 import { isDesktop } from "../lib/is-desktop";
 import { trpc } from "../lib/trpc-client";
 
+// Lazy-load to avoid importing @xterm/xterm (CJS) in SSR context. The
+// Terminal tab is mounted on demand the first time the user activates it.
+const DockviewTerminalContainer = lazy(() =>
+  import("../components/DockviewTerminalContainer").then((m) => ({
+    default: m.DockviewTerminalContainer,
+  })),
+);
+
 export const Route = createFileRoute("/workspace/$workspaceId")({
   component: WorkspaceLayout,
+  // Bookmarks / shared links from before route unification (`/workspace/$id/changes`,
+  // `/workspace/$id/code/foo.ts`, `/workspace/$id/terminal`) used to resolve to
+  // child routes that no longer exist. Redirect them to the canonical workspace
+  // URL instead of showing the root 404. See issue #467.
+  //
+  // CAVEAT: this catches ANY unmatched sub-path under `/workspace/$id`, not
+  // just the five retired routes. If a future child route is added here, a
+  // typo'd link (e.g. `/workspace/$id/settigns` for a real `/settings` route)
+  // will silently land on the workspace root rather than surfacing a 404.
+  // If that becomes a problem, narrow this to an allowlist of known retired
+  // path prefixes.
+  notFoundComponent: WorkspaceNotFoundRedirect,
 });
 
-// Context for child routes to report diff stats back to the layout tab nav
-interface DiffStatsContextValue {
-  diffStats: DiffStats | null;
-  setDiffStats: (stats: DiffStats | null) => void;
+function WorkspaceNotFoundRedirect() {
+  const { workspaceId } = Route.useParams();
+  return <Navigate to="/workspace/$workspaceId" params={{ workspaceId }} replace />;
 }
-
-const DiffStatsContext = createContext<DiffStatsContextValue>({
-  diffStats: null,
-  setDiffStats: () => {},
-});
-
-export function useDiffStatsContext() {
-  return useContext(DiffStatsContext);
-}
-
-// Context for child routes to register a find-in-file callback with the layout
-interface FindInFileContextValue {
-  setFindInFile: (fn: (() => void) | null) => void;
-}
-
-const FindInFileContext = createContext<FindInFileContextValue>({
-  setFindInFile: () => {},
-});
-
-export function useFindInFileContext() {
-  return useContext(FindInFileContext);
-}
-
-// (Removed CodeToolbarContext — the toolbar now dispatches `band:open-quick-open`
-// and `band:open-search-files` window events that this layout and
-// SharedDockviewLayout each listen for. Context proved unreliable
-// to thread through multiple route levels on the iOS Simulator.)
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -90,15 +78,6 @@ function useAppHeight() {
     };
   }, []);
   return { height, offsetTop };
-}
-
-function useActiveTab(workspaceId: string): WorkspaceTab {
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const prefix = `/workspace/${workspaceId}`;
-  if (pathname.startsWith(`${prefix}/changes`)) return "diff";
-  if (pathname.startsWith(`${prefix}/code`)) return "code";
-  if (pathname.startsWith(`${prefix}/terminal`)) return "terminal";
-  return "chat";
 }
 
 function useDiffFileCount(workspaceId: string): number {
@@ -141,8 +120,6 @@ function WorkspaceLayout() {
   const isWideScreen = useIsDesktop();
   const useDesktopLayout = isWideScreen || isDesktop;
   const [hydrated, setHydrated] = useState(false);
-  const [diffStats, setDiffStats] = useState<DiffStats | null>(null);
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
 
   // Mark as hydrated after first client render to prevent SSR layout flash
   useLayoutEffect(() => {
@@ -167,49 +144,22 @@ function WorkspaceLayout() {
     clearNeedsAttention(decoded);
   }, [decoded, clearNeedsAttention]);
 
-  // Persist the full sub-path (e.g. "/code/src/index.ts") so it can be
-  // restored when navigating back — this remembers both the active tab
-  // and the specific file the user was viewing.  An empty string means
-  // the Chat tab (the workspace index route).
-  useEffect(() => {
-    const prefix = `/workspace/${workspaceId}`;
-    if (pathname.startsWith(prefix)) {
-      const subPath = pathname.slice(prefix.length); // e.g. "/code/src/index.ts", "" for chat
-      try {
-        sessionStorage.setItem(`band-tab:${decoded}`, subPath);
-      } catch {}
-    }
-  }, [pathname, workspaceId, decoded]);
-
+  // Desktop: the shared dockview (mounted at AppShell) renders every panel —
+  // Chat/Changes/Files/Terminal/Browser — at once, so this route has nothing
+  // of its own to render. Keeping the URL canonical at `/workspace/$id` (no
+  // sub-paths) means workspace switches don't churn the AppShell's
+  // `<Outlet />`.
+  //
+  // Mobile: the per-workspace `MobileWorkspaceLayout` is keyed on the decoded
+  // workspace id so each workspace gets a clean tab state. This matches the
+  // pre-route-unification behaviour where the `/changes` / `/code` /
+  // `/terminal` child routes remounted per workspace via URL navigation. See
+  // issue #467.
   return (
-    <DiffStatsContext.Provider value={{ diffStats, setDiffStats }}>
-      <div className={`h-full ${hydrated ? "" : "invisible"}`}>
-        {useDesktopLayout ? (
-          <DesktopWorkspaceLayout workspaceId={decoded} encodedId={workspaceId} />
-        ) : (
-          <MobileWorkspaceLayout workspaceId={decoded} encodedId={workspaceId} />
-        )}
-      </div>
-    </DiffStatsContext.Provider>
+    <div className={`h-full ${hydrated ? "" : "invisible"}`}>
+      {useDesktopLayout ? null : <MobileWorkspaceLayout key={decoded} workspaceId={decoded} />}
+    </div>
   );
-}
-
-// ---------------------------------------------------------------------------
-// Desktop dockview layout
-// ---------------------------------------------------------------------------
-
-function DesktopWorkspaceLayout({
-  workspaceId: _workspaceId,
-  encodedId: _encodedId,
-}: {
-  workspaceId: string;
-  encodedId: string;
-}) {
-  // Dockview is owned by SharedDockviewLayout in __root.tsx — a SINGLE
-  // dockview instance for the whole app. Per-workspace content is cached
-  // inside each panel via MultiWorkspacePanelHost, so a workspace switch
-  // never tears down dockview.
-  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -222,17 +172,18 @@ interface CodingAgentDef {
   label: string;
 }
 
-function MobileWorkspaceLayout({
-  workspaceId,
-  encodedId,
-}: {
-  workspaceId: string;
-  encodedId: string;
-}) {
-  const activeTab = useActiveTab(encodedId);
-  const diffFileCount = useDiffFileCount(workspaceId);
+function MobileWorkspaceLayout({ workspaceId }: { workspaceId: string }) {
   const navigate = useNavigate();
   const { height: appHeight, offsetTop: appOffsetTop } = useAppHeight();
+  const diffFileCount = useDiffFileCount(workspaceId);
+
+  // Active tab + selected file are now PURELY local state — no URL involvement.
+  // Always start on Chat (we deliberately do not persist the last tab across
+  // workspace visits; the previous sessionStorage `band-tab:` mechanism was
+  // removed when child routes were folded in — see issue #467).
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>("chat");
+  const [currentFile, setCurrentFile] = useState<string | undefined>(undefined);
+
   const [showSessionList, setShowSessionList] = useState(false);
 
   // Agent switcher state
@@ -291,15 +242,12 @@ function MobileWorkspaceLayout({
   // Search-in-Files state for the file-tree toolbar (mobile / non-dockview).
   const [searchFilesOpen, setSearchFilesOpen] = useState(false);
 
-  const handleOpenFile = useCallback(
-    (filename: string) => {
-      navigate({
-        to: "/workspace/$workspaceId/code/$",
-        params: { workspaceId: encodedId, _splat: filename },
-      });
-    },
-    [navigate, encodedId],
-  );
+  // Open a file in the Files tab. Switches tab + sets the selected file in
+  // a single transition.
+  const handleOpenFile = useCallback((filename: string) => {
+    setCurrentFile(filename);
+    setActiveTab("code");
+  }, []);
 
   // Listen for file link clicks from chat messages → open Quick Open with query
   useEffect(() => {
@@ -317,9 +265,9 @@ function MobileWorkspaceLayout({
   // Window-event triggers for the file-tree toolbar's Quick Open / Search
   // in Files buttons. We use a window event (rather than threading the
   // setters through a React Context) because the toolbar is rendered by
-  // CodeBrowserView several levels down the route tree, and routing the
-  // setter via context proved unreliable on the iOS Simulator's tree.
-  // The toolbar dispatches the event; this layout owns the dialog state.
+  // CodeBrowserView several levels down, and routing the setter via
+  // context proved unreliable on the iOS Simulator's tree. The toolbar
+  // dispatches the event; this layout owns the dialog state.
   useEffect(() => {
     const openQO = () => setQuickOpenOpen(true);
     const openSF = () => setSearchFilesOpen(true);
@@ -353,14 +301,11 @@ function MobileWorkspaceLayout({
     setShowSessionList(show);
   }, []);
 
-  const currentAgent = agents.find((a) => a.id === currentAgentId);
+  const handleSelectFile = useCallback((filePath: string | null) => {
+    setCurrentFile(filePath ?? undefined);
+  }, []);
 
-  const tabHrefs = {
-    chat: `/workspace/${encodedId}`,
-    diff: `/workspace/${encodedId}/changes`,
-    code: `/workspace/${encodedId}/code`,
-    terminal: `/workspace/${encodedId}/terminal`,
-  };
+  const currentAgent = agents.find((a) => a.id === currentAgentId);
 
   return (
     <SessionListContext.Provider
@@ -399,11 +344,29 @@ function MobileWorkspaceLayout({
           </header>
           <WorkspaceTabNav
             activeTab={activeTab}
-            tabHrefs={tabHrefs}
+            onTabChange={setActiveTab}
             diffFileCount={diffFileCount}
           />
           <main className="flex min-h-0 flex-1 flex-col">
-            <Outlet />
+            {/* Tab content. Conditional render — switching tabs unmounts the
+             *  previous tab, matching the pre-refactor mobile behaviour where
+             *  each tab was its own route. */}
+            {activeTab === "chat" && <MobileChatContent workspaceId={workspaceId} />}
+            {activeTab === "diff" && (
+              <DiffView workspaceId={workspaceId} active onOpenFile={handleOpenFile} />
+            )}
+            {activeTab === "code" && (
+              <CodeBrowserView
+                workspaceId={workspaceId}
+                file={currentFile}
+                onSelectFile={handleSelectFile}
+              />
+            )}
+            {activeTab === "terminal" && (
+              <Suspense fallback={null}>
+                <DockviewTerminalContainer workspaceId={workspaceId} visible={true} />
+              </Suspense>
+            )}
           </main>
           <QuickOpenDialog
             workspaceId={workspaceId}
@@ -425,5 +388,137 @@ function MobileWorkspaceLayout({
         </div>
       </AgentSwitcherContext.Provider>
     </SessionListContext.Provider>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Mobile chat content
+// ---------------------------------------------------------------------------
+
+function MobileChatContent({ workspaceId }: { workspaceId: string }) {
+  const { settings } = useSettingsQuery();
+  const [chatId, setChatId] = useState<string | undefined>(undefined);
+  const [supportsSessionListing, setSupportsSessionListing] = useState(false);
+  const [initialSessionId, setInitialSessionId] = useState<string | undefined>(undefined);
+  const [sessionQueryDone, setSessionQueryDone] = useState(false);
+  // Local remount key for user-initiated session switches. Combined with the
+  // context-owned `chatKey` (which bumps on agent switch) so either kind of
+  // switch forces ChatView to remount and reopen its event-log subscription
+  // against the new session.
+  const [sessionPaneKey, setSessionPaneKey] = useState(0);
+  const { showSessionList, setShowSessionList } = useSessionListContext();
+  const { chatKey, setTaskRunning, agentType, codingAgentId, switchAgent, newSessionRef } =
+    useAgentSwitcherContext();
+
+  // Resolve default chat for mobile view
+  useEffect(() => {
+    let cancelled = false;
+    trpc.chats.list
+      .query({ workspaceId })
+      .then((data) => {
+        if (cancelled) return;
+        if (data.chats.length > 0) {
+          setChatId(data.chats[0].id);
+        } else {
+          return trpc.chats.create.mutate({ workspaceId }).then((result) => {
+            if (!cancelled) setChatId(result.chat.id);
+          });
+        }
+      })
+      .catch((err) => console.error("[MobileChatContent] error resolving chat:", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId]);
+
+  // Resolve initial session + session-listing support from the persisted
+  // chat row. This mirrors `useChatPaneState` (ChatPane.tsx): the server
+  // persists `activeSessionId` (and the cached summary) on the chat row
+  // so the hot path is a pure SQLite read with no filesystem walk over
+  // `~/.claude/projects/<workspace>/`. Falls back to the latest session
+  // (mtime-sorted) inside `chats.get` when no activeSessionId is
+  // persisted yet. `sessions.list` is only invoked lazily when the user
+  // opens the history dropdown (see `SessionHistoryMenu` in ChatView).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: chatKey intentionally triggers reload after agent switch
+  useEffect(() => {
+    if (!chatId) return;
+    let cancelled = false;
+    trpc.chats.get
+      .query({ chatId })
+      .then((data) => {
+        if (cancelled) return;
+        const chat = data?.chat;
+        // Fall back to the default coding agent when the chat row hasn't
+        // been created yet (lazy creation on first message send) so the
+        // session-history dropdown is available on a brand-new empty chat.
+        const agentId = chat?.agent ?? settings.defaultCodingAgent;
+        const found = agentId ? settings.codingAgents?.find((a) => a.id === agentId) : undefined;
+        setSupportsSessionListing(agentTypeSupportsSessionListing(found?.type));
+        if (chat?.activeSessionId) setInitialSessionId(chat.activeSessionId);
+        setSessionQueryDone(true);
+      })
+      .catch((err) => {
+        if (!cancelled) setSessionQueryDone(true);
+        console.error("[chats.get] error:", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId, chatId, chatKey, settings]);
+
+  // User-initiated session switch from the SessionHistoryMenu. Mirrors the
+  // desktop pane's `onSwitchSession` (see `useChatPaneState` in ChatPane.tsx):
+  // persist the new active session to the server, pin local
+  // `initialSessionId`, then bump `sessionPaneKey` so ChatView remounts and
+  // its useChatSubscription opens a fresh stream against the new session.
+  const onSwitchSession = useCallback(
+    async (sessionId: string | undefined) => {
+      if (!chatId) return;
+      try {
+        await trpc.chats.setActiveSession.mutate({
+          workspaceId,
+          chatId,
+          sessionId: sessionId ?? undefined,
+        });
+      } catch (err) {
+        console.error("[MobileChatContent] error persisting active session:", err);
+        return;
+      }
+      setInitialSessionId(sessionId);
+      // Reset before bumping the pane key so the remounted `ChatView`
+      // doesn't see a stale `sessionQueryDone={true}` on its first render
+      // — the `chats.get` effect re-runs and flips it back to true once
+      // the new session is resolved. Without this, the remount would
+      // bypass the "wait for session" gate. (Pre-existing bug preserved
+      // verbatim when this code moved out of `workspace.$workspaceId.index.tsx`.)
+      setSessionQueryDone(false);
+      setSessionPaneKey((k) => k + 1);
+    },
+    [workspaceId, chatId],
+  );
+
+  if (!chatId) return null;
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <ChatView
+        key={`${chatKey}-${sessionPaneKey}`}
+        chatKey={chatKey}
+        workspaceId={workspaceId}
+        chatId={chatId}
+        workspaceName={workspaceId}
+        supportsSessionListing={supportsSessionListing}
+        initialSessionId={initialSessionId}
+        sessionQueryDone={sessionQueryDone}
+        showSessionList={showSessionList}
+        onShowSessionListChange={setShowSessionList}
+        onStreamingChange={setTaskRunning}
+        onNewSessionRef={newSessionRef}
+        onSwitchSession={onSwitchSession}
+        agentType={agentType}
+        codingAgentId={codingAgentId}
+        onSwitchAgent={switchAgent}
+      />
+    </div>
   );
 }
