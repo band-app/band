@@ -1,3 +1,4 @@
+import { createLogger } from "@band-app/logger";
 import { eq } from "drizzle-orm";
 import { toWorkspaceId } from "@/dashboard";
 import { getDb } from "./db/connection";
@@ -7,6 +8,8 @@ import { buildBatchedCIQuery, type CIStatus, parseBatchedCIResponse } from "./gi
 import { loadState } from "./state";
 import { syncWorktrees } from "./sync-state";
 import { emit } from "./watcher";
+
+const log = createLogger("branch-status-poller");
 
 interface GitStatus {
   dirty: boolean;
@@ -146,10 +149,11 @@ async function getGitStatus(worktreePath: string): Promise<GitStatus> {
  * has `hasOrigin === true` (see `ProjectState.hasOrigin`, written by
  * `syncWorktrees`). That removes the no-origin / not-a-git-checkout
  * steady-state failures from this path entirely — no per-tick `getRepoInfo`
- * retry loop, no negative cache, no log spam (issue #458). The
- * `getRepoInfo` call below should therefore succeed in steady state; a
- * failure here is a transient race (origin removed between sync and poll)
- * and is logged at debug.
+ * retry loop, no negative cache (issue #458). Because the caller has
+ * pre-filtered, a `getRepoInfo` null result here is genuinely unexpected
+ * (origin was removed externally between sync and poll, or git itself is
+ * misbehaving) and is logged at `warn` — `syncWorktrees` will rewrite
+ * `hasOrigin` on the next sync tick and the noise stops on its own.
  */
 async function getBatchedCIStatuses(workspaces: WorkspaceInfo[]): Promise<Map<string, CIStatus>> {
   // Dedupe `getRepoInfo` calls by project path. A project with N
@@ -165,6 +169,21 @@ async function getBatchedCIStatuses(workspaces: WorkspaceInfo[]): Promise<Map<st
     }),
   );
 
+  // Caller already filtered to `hasOrigin === true`, so a null result
+  // here is genuinely unexpected — origin was removed externally
+  // between the last sync tick and this CI tick, OR git itself is
+  // misbehaving (binary missing, auth broken, FS perms). Surface those
+  // at `warn` so operators don't miss them. `syncWorktrees` will rewrite
+  // `hasOrigin` on its next tick and the noise stops on its own.
+  for (const path of uniqueProjectPaths) {
+    if (repoInfoByPath.get(path) === null) {
+      log.warn(
+        "CI poll: getRepoInfo returned null for %s despite hasOrigin=true; will reconcile on next sync tick",
+        path,
+      );
+    }
+  }
+
   const resolved: Array<{
     ws: WorkspaceInfo;
     repoInfo: RepoInfo;
@@ -175,11 +194,6 @@ async function getBatchedCIStatuses(workspaces: WorkspaceInfo[]): Promise<Map<st
     if (repoInfo) {
       resolved.push({ ws, repoInfo, alias: `ws_${index}` });
     }
-    // Silent skip on null: `hasOrigin` was true at `getWorkspaces()` time
-    // but the probe just now returned null — a transient race after
-    // origin was removed externally. `syncWorktrees` will rewrite
-    // `hasOrigin` on the next sync tick and steady state resumes.
-    // `getRepoInfo` already logged the underlying reason at debug.
   }
 
   // If no workspaces have repo info, return empty
