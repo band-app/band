@@ -1,4 +1,3 @@
-import { createLogger } from "@band-app/logger";
 import { eq } from "drizzle-orm";
 import { toWorkspaceId } from "@/dashboard";
 import { getDb } from "./db/connection";
@@ -8,8 +7,6 @@ import { buildBatchedCIQuery, type CIStatus, parseBatchedCIResponse } from "./gi
 import { loadState } from "./state";
 import { syncWorktrees } from "./sync-state";
 import { emit } from "./watcher";
-
-const log = createLogger("branch-status-poller");
 
 interface GitStatus {
   dirty: boolean;
@@ -165,13 +162,12 @@ async function getBatchedCIStatuses(workspaces: WorkspaceInfo[]): Promise<Map<st
       const repoInfo = await getRepoInfo(ws.projectPath);
       if (repoInfo) {
         resolved.push({ ws, repoInfo, alias: `ws_${index}` });
-      } else {
-        // Transient race: `hasOrigin` was true at `getWorkspaces()` time but
-        // the probe just now returned null. `getRepoInfo` already logged the
-        // underlying reason at debug. `syncWorktrees` will rewrite
-        // `hasOrigin` on the next sync tick and steady state will resume.
-        log.debug("CI poll: no repo info for %s (%s)", ws.workspaceId, ws.projectPath);
       }
+      // Silent skip on null: `hasOrigin` was true at `getWorkspaces()` time
+      // but the probe just now returned null — a transient race after
+      // origin was removed externally. `syncWorktrees` will rewrite
+      // `hasOrigin` on the next sync tick and steady state resumes.
+      // `getRepoInfo` already logged the underlying reason at debug.
     }),
   );
 

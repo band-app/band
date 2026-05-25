@@ -131,8 +131,8 @@ describe("listWorktrees", () => {
 // branches below ("not a git checkout" and "no origin remote") are
 // expected steady states for some project directories, not error paths.
 // These tests pin down that the function returns `null` cleanly for both,
-// so the negative cache in `branch-status-poller` has something stable
-// to memoize.
+// so the `hasOrigin` flag that `syncWorktrees` derives from it has a
+// stable contract.
 describe("getRepoInfo", () => {
   it("returns null for a non-git directory", async () => {
     const tmp = realpathSync(mkdtempSync(join(tmpdir(), "band-no-git-")));
