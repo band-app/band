@@ -2842,11 +2842,12 @@ const editorRouter = t.router({
           /**
            * Either an absolute filesystem path or a workspace-relative
            * path. Paths inside the workspace root open as normal editor
-           * tabs (routed via `/workspace/$id/code/$splat`); paths outside
-           * any workspace root open as external tabs (same surface as
-           * desktop Cmd+O / "Open File…"). May include a trailing
-           * line / column suffix in the standard `path:line[:column]` /
-           * `path:line-lineEnd` notation.
+           * tabs (the renderer routes to the Files panel via the
+           * `open-file` SSE event; see `dispatchOpenFileEvent`); paths
+           * outside any workspace root open as external tabs (same
+           * surface as desktop Cmd+O / "Open File…"). May include a
+           * trailing line / column suffix in the standard
+           * `path:line[:column]` / `path:line-lineEnd` notation.
            */
           filePath: z.string().min(1),
           line: z.number().int().positive().optional(),
@@ -2955,9 +2956,9 @@ const editorRouter = t.router({
 
       // Two open modes share this procedure:
       //
-      //   - In-workspace: emit a workspace-relative path so the React
-      //     shell routes to `/workspace/$id/code/$splat` (same flow as
-      //     the file tree / Quick Open dialog).
+      //   - In-workspace: emit a workspace-relative path so the renderer
+      //     opens it in the workspace's Files panel (same flow as the
+      //     file tree / Quick Open dialog).
       //   - External: file exists on disk but lives outside the active
       //     workspace's root. Pass the absolute path through verbatim
       //     so the FileViewer mounts it as an *external* tab

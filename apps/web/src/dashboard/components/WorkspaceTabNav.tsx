@@ -4,9 +4,7 @@ export type WorkspaceTab = "chat" | "diff" | "code" | "terminal";
 
 interface WorkspaceTabNavProps {
   activeTab: WorkspaceTab;
-  onTabChange?: (tab: WorkspaceTab) => void;
-  /** When provided, tabs render as `<a>` links instead of buttons. */
-  tabHrefs?: Partial<Record<WorkspaceTab, string>>;
+  onTabChange: (tab: WorkspaceTab) => void;
   diffFileCount?: number;
 }
 
@@ -17,19 +15,13 @@ const tabs: { id: WorkspaceTab; label: string; icon: typeof MessageSquare }[] = 
   { id: "terminal", label: "Terminal", icon: TerminalSquare },
 ];
 
-export function WorkspaceTabNav({
-  activeTab,
-  onTabChange,
-  tabHrefs,
-  diffFileCount,
-}: WorkspaceTabNavProps) {
+export function WorkspaceTabNav({ activeTab, onTabChange, diffFileCount }: WorkspaceTabNavProps) {
   return (
     <div className="flex shrink-0 border-b border-border">
       {tabs.map((tab) => {
         const Icon = tab.icon;
         const isActive = activeTab === tab.id;
         const badge = tab.id === "diff" && diffFileCount != null && diffFileCount > 0;
-        const href = tabHrefs?.[tab.id];
 
         const className = `flex flex-1 items-center justify-center gap-1.5 py-2.5 text-sm font-medium transition-colors ${
           isActive
@@ -37,41 +29,21 @@ export function WorkspaceTabNav({
             : "text-muted-foreground hover:text-foreground"
         }`;
 
-        const content = (
-          <>
+        return (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => onTabChange(tab.id)}
+            className={className}
+            aria-label={tab.label}
+            title={tab.label}
+          >
             <Icon className="size-4" />
             {badge && (
               <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-500/20 text-blue-600 dark:text-blue-400 px-1.5 text-xs font-medium">
                 {diffFileCount}
               </span>
             )}
-          </>
-        );
-
-        if (href) {
-          return (
-            <a
-              key={tab.id}
-              href={href}
-              className={className}
-              aria-label={tab.label}
-              title={tab.label}
-            >
-              {content}
-            </a>
-          );
-        }
-
-        return (
-          <button
-            key={tab.id}
-            type="button"
-            onClick={() => onTabChange?.(tab.id)}
-            className={className}
-            aria-label={tab.label}
-            title={tab.label}
-          >
-            {content}
           </button>
         );
       })}

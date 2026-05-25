@@ -110,7 +110,7 @@ test.beforeEach(async ({ page }) => {
   // Land on the workspace URL first so localStorage is accessible
   // (it's origin-scoped), clear the per-workspace dockview state, and
   // navigate fresh in the test body so we start from a known layout.
-  await page.goto(`${server.url}/workspace/${encodeURIComponent(WORKSPACE)}/code?token=${TOKEN}`);
+  await page.goto(`${server.url}/workspace/${encodeURIComponent(WORKSPACE)}?token=${TOKEN}`);
   await page.evaluate(
     ([key]) => {
       localStorage.removeItem(key);

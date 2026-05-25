@@ -44,15 +44,19 @@ export interface OpenFileDispatchHandlers {
    */
   onActivateFilesPanel: (workspaceId: string) => void;
   /**
-   * Mobile/web path for in-workspace files. Navigates to
-   * `/workspace/$id/code/$splat` so the route mounts `CodeBrowserView`
-   * with `file={_splat}`.
+   * Mobile/web path for in-workspace files. Navigates to `/workspace/$id`
+   * (the unified workspace URL — see issue #467) and signals
+   * `MobileWorkspaceLayout` to switch to the Files tab with `filePath`
+   * pre-selected. The signal is queued via `setMobilePendingAction` before
+   * navigation so the soon-to-be-mounted layout drains it on its first
+   * `useEffect`.
    */
   navigateInWorkspace: (workspaceId: string, filePath: string) => void;
   /**
-   * Mobile/web path for external files. Navigates to
-   * `/workspace/$id/code` so the index route mounts `CodeBrowserView`,
-   * which drains the pending-external-open queue on mount.
+   * Mobile/web path for external files. Navigates to `/workspace/$id` and
+   * signals `MobileWorkspaceLayout` to switch to the Files tab. The actual
+   * file path lives in the `pending-external-open` queue and is drained by
+   * `CodeBrowserView` on mount.
    */
   navigateToWorkspaceCode: (workspaceId: string) => void;
 }

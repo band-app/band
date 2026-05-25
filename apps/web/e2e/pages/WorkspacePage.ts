@@ -1,5 +1,5 @@
 /**
- * Page object for the workspace dockview route (`/workspace/:id/code`).
+ * Page object for the workspace dockview route (`/workspace/:id`).
  *
  * Owns the locators for the shared dockview's header buttons (Maximize /
  * Restore) and provides high-level actions (`maximizePanel`,
@@ -64,10 +64,11 @@ export class WorkspacePage {
     return this.page.getByTestId(`workspace__tab--${panelComponent}`);
   }
 
-  /** Navigate to the code view of the given workspace. The only place
-   *  in this page object where a URL is constructed. */
+  /** Navigate to the given workspace. The workspace URL no longer carries a
+   *  sub-path for the active tab — see issue #467 for the route unification
+   *  that folded `/changes`, `/code`, `/terminal` into `/workspace/:id`. */
   async goto(workspaceId: string): Promise<void> {
-    const url = `${this.baseUrl}/workspace/${encodeURIComponent(workspaceId)}/code?token=${this.token}`;
+    const url = `${this.baseUrl}/workspace/${encodeURIComponent(workspaceId)}?token=${this.token}`;
     await test.step(`Navigate to workspace ${workspaceId}`, async () => {
       await this.page.goto(url);
     });

@@ -521,26 +521,17 @@ export class WebDashboardAdapter implements DashboardAdapter {
   }
 }
 
-// Valid sub-path prefixes for restoring the last workspace location
-const VALID_TAB_PREFIXES = ["/changes", "/code", "/terminal"];
-
 export class WebCapabilities implements PlatformCapabilities {
   copyPath = false;
   navigate?: (href: string) => void;
 
+  // The workspace URL no longer carries a sub-path for the active tab —
+  // tab state lives entirely inside `MobileWorkspaceLayout`, and the
+  // desktop dockview at AppShell renders every panel regardless of URL.
+  // See issue #467 for the refactor that removed the `band-tab:` session
+  // store and the `/changes` / `/code` / `/terminal` child routes.
   getWorkspaceHref(workspaceId: string): string {
-    const base = `/workspace/${encodeURIComponent(workspaceId)}`;
-    try {
-      const stored = sessionStorage.getItem(`band-tab:${workspaceId}`);
-      if (stored !== null) {
-        // Empty string means the Chat tab (workspace index route);
-        // non-empty values must match a known sub-path prefix.
-        if (stored === "" || VALID_TAB_PREFIXES.some((p) => stored.startsWith(p))) {
-          return `${base}${stored}`;
-        }
-      }
-    } catch {}
-    return base;
+    return `/workspace/${encodeURIComponent(workspaceId)}`;
   }
 
   async openUrl(url: string): Promise<void> {

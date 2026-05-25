@@ -110,15 +110,24 @@ test.afterAll(async () => {
 });
 
 /**
- * Deep-link the browser straight at the workspace's code view with the
- * markdown file selected. Bypasses the file-tree click path so the test
- * is focused on the preview itself.
+ * Navigate to the workspace, switch to the Files tab, then click the
+ * markdown file in the tree. Post-#467 (route unification), the workspace
+ * URL no longer carries a sub-path for the active tab OR the selected file
+ * — both live in `MobileWorkspaceLayout`'s local state — so this drives
+ * the same UI flow a real mobile user would take.
  */
 async function openMarkdownPreview(page: Page): Promise<void> {
-  const url =
-    `${server.url}/workspace/${encodeURIComponent(workspaceId)}` +
-    `/code/${encodeURIComponent(FILE_PATH)}?token=${TOKEN}`;
-  await page.goto(url);
+  await page.goto(`${server.url}/workspace/${encodeURIComponent(workspaceId)}?token=${TOKEN}`);
+
+  // Switch to the Files tab. The button's aria-label is set in
+  // `WorkspaceTabNav.tsx` — system-controlled, so `getByRole({ name })` is
+  // safe per `docs/frontend-testing.md` §7.
+  await page.getByRole("button", { name: "Files" }).click();
+
+  // Click the markdown file in the tree. The file row label is the bare
+  // file name (no path).
+  await page.getByText(FILE_PATH, { exact: true }).click();
+
   // The markdown renders into a sticky heading — when it appears, the
   // preview is laid out and ready for the find bar to attach its keybind.
   await expect(page.getByRole("heading", { level: 1, name: "Test Document" })).toBeVisible({
