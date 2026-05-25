@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Navigate, useNavigate } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
@@ -31,7 +31,17 @@ const DockviewTerminalContainer = lazy(() =>
 
 export const Route = createFileRoute("/workspace/$workspaceId")({
   component: WorkspaceLayout,
+  // Bookmarks / shared links from before route unification (`/workspace/$id/changes`,
+  // `/workspace/$id/code/foo.ts`, `/workspace/$id/terminal`) used to resolve to
+  // child routes that no longer exist. Redirect them to the canonical workspace
+  // URL instead of showing the root 404. See issue #467.
+  notFoundComponent: WorkspaceNotFoundRedirect,
 });
+
+function WorkspaceNotFoundRedirect() {
+  const { workspaceId } = Route.useParams();
+  return <Navigate to="/workspace/$workspaceId" params={{ workspaceId }} replace />;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers

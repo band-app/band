@@ -124,9 +124,13 @@ async function openMarkdownPreview(page: Page): Promise<void> {
   // safe per `docs/frontend-testing.md` §7.
   await page.getByRole("button", { name: "Files" }).click();
 
-  // Click the markdown file in the tree. The file row label is the bare
-  // file name (no path).
-  await page.getByText(FILE_PATH, { exact: true }).click();
+  // Click the markdown file in the tree. File-tree rows are buttons whose
+  // accessible name is the bare filename — `getByRole({ name })` keeps the
+  // locator unambiguous (the filename also appears in the tab bar after the
+  // click, which would trip Playwright's strict mode if we used
+  // `getByText`). Aligns with the locator-priority rules in
+  // `docs/frontend-testing.md` §7 and CLAUDE.md.
+  await page.getByRole("button", { name: FILE_PATH }).click();
 
   // The markdown renders into a sticky heading — when it appears, the
   // preview is laid out and ready for the find bar to attach its keybind.
