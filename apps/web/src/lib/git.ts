@@ -29,12 +29,21 @@ export function parseGitRemoteUrl(url: string): RepoInfo | null {
   if (sshMatch) {
     return { host: sshMatch[1], owner: sshMatch[2], repo: sshMatch[3] };
   }
-  // ssh:// scheme: ssh://git@github.com/owner/repo.git, or the
-  // userless variant ssh://github.com/owner/repo.git.
-  // (`gh repo clone` emits these for repos without SCP-style aliasing;
-  // before the #502 review they fell into the parse-failure branch and
-  // silently flipped `hasOrigin` to false — issue #458 review feedback.)
-  const sshSchemeMatch = url.match(/^ssh:\/\/(?:[\w.-]+@)?([^/]+)\/([^/]+)\/(.+?)(?:\.git)?$/);
+  // ssh:// scheme, all of:
+  //   ssh://git@github.com/owner/repo.git           (with user)
+  //   ssh://github.com/owner/repo.git               (userless)
+  //   ssh://git@github.com:22/owner/repo.git        (explicit port)
+  //   ssh://github.com:2222/owner/repo.git          (userless + port)
+  // The `(?::\d+)?` strips the port from the host capture — without it
+  // the bare `[^/]+` host group eats the colon and we'd persist a host
+  // like `"github.com:22"`, which then mismatches the gh CLI's
+  // `--hostname` and breaks the GraphQL query. (`gh repo clone` emits
+  // these for repos without SCP-style aliasing; before #502 review the
+  // whole `ssh://` shape fell through and silently flipped `hasOrigin`
+  // to false — issue #458 review feedback.)
+  const sshSchemeMatch = url.match(
+    /^ssh:\/\/(?:[\w.-]+@)?([^/:]+)(?::\d+)?\/([^/]+)\/(.+?)(?:\.git)?$/,
+  );
   if (sshSchemeMatch) {
     return {
       host: sshSchemeMatch[1],

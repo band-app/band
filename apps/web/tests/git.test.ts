@@ -192,6 +192,19 @@ describe("getRepoInfo", () => {
     expect(info).toEqual({ host: "github.com", owner: "band-app", repo: "band" });
   });
 
+  it("strips the explicit port from an `ssh://` scheme origin", async () => {
+    // Self-hosted Git servers commonly bind SSH on a non-22 port and
+    // emit URLs like `ssh://git@gitea.example.com:2222/owner/repo.git`.
+    // The host group must not capture the `:2222` — `gh --hostname` and
+    // `parseBatchedCIResponse` both key on bare host. Bug surfaced via
+    // #502 review.
+    const { repoPath, tmp } = createRepo();
+    tmpDirs.push(tmp);
+    git(repoPath, ["remote", "add", "origin", "ssh://git@github.com:22/band-app/band.git"]);
+    const info = await getRepoInfo(repoPath);
+    expect(info).toEqual({ host: "github.com", owner: "band-app", repo: "band" });
+  });
+
   it("parses an HTTPS origin remote", async () => {
     const { repoPath, tmp } = createRepo();
     tmpDirs.push(tmp);
