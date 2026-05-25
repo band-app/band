@@ -130,7 +130,16 @@ async function reconcileOneProject(project: ProjectState): Promise<boolean> {
         pinned: pinnedByBranch.get(wt.branch) ?? false,
       }));
   } catch {
-    // If git fails for this project (e.g. path doesn't exist), skip it
+    // If git fails for this project (e.g. path was deleted, NFS mount is
+    // gone), it has no usable origin — clear `hasOrigin` so the CI poller
+    // stops including its workspaces in the batched GraphQL query. Without
+    // this, a "ghost" project keeps its schema-default `hasOrigin: true`
+    // and the poller wastes a `getRepoInfo` subprocess on every CI tick
+    // forever. See issue #458 review feedback.
+    if (project.hasOrigin) {
+      setProjectHasOrigin(project.name, false);
+      project.hasOrigin = false;
+    }
     return false;
   }
 
@@ -168,8 +177,12 @@ async function reconcileOneProject(project: ProjectState): Promise<boolean> {
   // re-reads the state object) sees the fresh value.
   const hasOrigin = (await getRepoInfo(project.path)) !== null;
   if (hasOrigin !== project.hasOrigin) {
-    project.hasOrigin = hasOrigin;
+    // DB write first, in-memory mirror second. If `setProjectHasOrigin`
+    // throws (SQLite locked, disk full), the in-memory value stays in
+    // sync with what's actually persisted; the next sync tick will try
+    // again rather than the two diverging.
     setProjectHasOrigin(project.name, hasOrigin);
+    project.hasOrigin = hasOrigin;
   }
 
   return mutated;

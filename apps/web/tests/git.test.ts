@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -132,29 +132,57 @@ describe("listWorktrees", () => {
 // expected steady states for some project directories, not error paths.
 // These tests pin down that the function returns `null` cleanly for both,
 // so the `hasOrigin` flag that `syncWorktrees` derives from it has a
-// stable contract.
+// stable contract. The success branches exercise the three remote-URL
+// formats `parseGitRemoteUrl` accepts (SCP-style SSH, `ssh://` scheme,
+// HTTPS) — the `ssh://` case was added in response to PR #502 review.
 describe("getRepoInfo", () => {
+  const tmpDirs: string[] = [];
+  afterEach(() => {
+    for (const dir of tmpDirs) {
+      try {
+        rmSync(dir, { recursive: true, force: true });
+      } catch {}
+    }
+    tmpDirs.length = 0;
+  });
+
   it("returns null for a non-git directory", async () => {
     const tmp = realpathSync(mkdtempSync(join(tmpdir(), "band-no-git-")));
+    tmpDirs.push(tmp);
     const info = await getRepoInfo(tmp);
     expect(info).toBeNull();
   });
 
   it("returns null when the repo has no `origin` remote", async () => {
-    const { repoPath } = createRepo();
+    const { repoPath, tmp } = createRepo();
+    tmpDirs.push(tmp);
     const info = await getRepoInfo(repoPath);
     expect(info).toBeNull();
   });
 
-  it("parses an SSH origin remote", async () => {
-    const { repoPath } = createRepo();
+  it("parses an SCP-style SSH origin remote", async () => {
+    const { repoPath, tmp } = createRepo();
+    tmpDirs.push(tmp);
     git(repoPath, ["remote", "add", "origin", "git@github.com:band-app/band.git"]);
     const info = await getRepoInfo(repoPath);
     expect(info).toEqual({ host: "github.com", owner: "band-app", repo: "band" });
   });
 
+  it("parses an `ssh://` scheme origin remote", async () => {
+    // `ssh://git@github.com/owner/repo.git` is what `gh repo clone`
+    // emits for repos without SCP-style aliasing. Before #502 review
+    // this fell into the `parseGitRemoteUrl` null branch and silently
+    // set `hasOrigin = false`, permanently suppressing CI for the repo.
+    const { repoPath, tmp } = createRepo();
+    tmpDirs.push(tmp);
+    git(repoPath, ["remote", "add", "origin", "ssh://git@github.com/band-app/band.git"]);
+    const info = await getRepoInfo(repoPath);
+    expect(info).toEqual({ host: "github.com", owner: "band-app", repo: "band" });
+  });
+
   it("parses an HTTPS origin remote", async () => {
-    const { repoPath } = createRepo();
+    const { repoPath, tmp } = createRepo();
+    tmpDirs.push(tmp);
     git(repoPath, ["remote", "add", "origin", "https://github.com/band-app/band.git"]);
     const info = await getRepoInfo(repoPath);
     expect(info).toEqual({ host: "github.com", owner: "band-app", repo: "band" });

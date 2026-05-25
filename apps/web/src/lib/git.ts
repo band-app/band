@@ -20,13 +20,26 @@ export interface RepoInfo {
 
 /**
  * Parse a git remote URL into host, owner, and repo components.
- * Supports SSH (git@host:owner/repo.git) and HTTPS (https://host/owner/repo.git) formats.
+ * Supports SCP-style SSH (git@host:owner/repo.git), `ssh://` URLs
+ * (ssh://git@host/owner/repo.git), and HTTPS (https://host/owner/repo.git).
  */
 export function parseGitRemoteUrl(url: string): RepoInfo | null {
-  // SSH: git@github.com:owner/repo.git (or ssh://git@github.com/owner/repo.git)
+  // SCP-style SSH: git@github.com:owner/repo.git
   const sshMatch = url.match(/^[\w.-]+@([^:]+):([^/]+)\/(.+?)(?:\.git)?$/);
   if (sshMatch) {
     return { host: sshMatch[1], owner: sshMatch[2], repo: sshMatch[3] };
+  }
+  // ssh:// scheme: ssh://git@github.com/owner/repo.git
+  // (what `gh repo clone` emits for repos without SCP support; previously
+  // landed in the parse-failure branch and silently flipped `hasOrigin`
+  // to false — see issue #458 review feedback.)
+  const sshSchemeMatch = url.match(/^ssh:\/\/[\w.-]+@([^/]+)\/([^/]+)\/(.+?)(?:\.git)?$/);
+  if (sshSchemeMatch) {
+    return {
+      host: sshSchemeMatch[1],
+      owner: sshSchemeMatch[2],
+      repo: sshSchemeMatch[3],
+    };
   }
   // HTTPS: https://github.com/owner/repo.git
   const httpsMatch = url.match(/^https?:\/\/([^/]+)\/([^/]+)\/(.+?)(?:\.git)?$/);

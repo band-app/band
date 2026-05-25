@@ -152,24 +152,35 @@ async function getGitStatus(worktreePath: string): Promise<GitStatus> {
  * and is logged at debug.
  */
 async function getBatchedCIStatuses(workspaces: WorkspaceInfo[]): Promise<Map<string, CIStatus>> {
+  // Dedupe `getRepoInfo` calls by project path. A project with N
+  // worktrees produces N `WorkspaceInfo` entries that all share the
+  // same `projectPath`; without this, each tick fans out to N
+  // identical `git remote get-url origin` subprocesses. One probe per
+  // unique project per tick is all we need.
+  const uniqueProjectPaths = [...new Set(workspaces.map((ws) => ws.projectPath))];
+  const repoInfoByPath = new Map<string, RepoInfo | null>();
+  await Promise.all(
+    uniqueProjectPaths.map(async (path) => {
+      repoInfoByPath.set(path, await getRepoInfo(path));
+    }),
+  );
+
   const resolved: Array<{
     ws: WorkspaceInfo;
     repoInfo: RepoInfo;
     alias: string;
   }> = [];
-  await Promise.allSettled(
-    workspaces.map(async (ws, index) => {
-      const repoInfo = await getRepoInfo(ws.projectPath);
-      if (repoInfo) {
-        resolved.push({ ws, repoInfo, alias: `ws_${index}` });
-      }
-      // Silent skip on null: `hasOrigin` was true at `getWorkspaces()` time
-      // but the probe just now returned null — a transient race after
-      // origin was removed externally. `syncWorktrees` will rewrite
-      // `hasOrigin` on the next sync tick and steady state resumes.
-      // `getRepoInfo` already logged the underlying reason at debug.
-    }),
-  );
+  for (const [index, ws] of workspaces.entries()) {
+    const repoInfo = repoInfoByPath.get(ws.projectPath);
+    if (repoInfo) {
+      resolved.push({ ws, repoInfo, alias: `ws_${index}` });
+    }
+    // Silent skip on null: `hasOrigin` was true at `getWorkspaces()` time
+    // but the probe just now returned null — a transient race after
+    // origin was removed externally. `syncWorktrees` will rewrite
+    // `hasOrigin` on the next sync tick and steady state resumes.
+    // `getRepoInfo` already logged the underlying reason at debug.
+  }
 
   // If no workspaces have repo info, return empty
   if (resolved.length === 0) {
