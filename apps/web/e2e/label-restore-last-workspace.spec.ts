@@ -19,7 +19,7 @@
  */
 
 import { expect, test } from "@playwright/test";
-import { LABEL_FILTER_KEY, LABEL_LAST_WORKSPACE_KEY, toWorkspaceId } from "@/dashboard";
+import { toWorkspaceId } from "@/dashboard";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -106,21 +106,12 @@ test.afterAll(async () => {
 });
 
 // Clear the per-test state we care about — the label filter and the
-// "last workspace" map both live in localStorage. The page hasn't
-// navigated yet, so land on a workspace first (any will do) to get
-// access to localStorage in the right origin. Routed through
-// `WorkspacePage.goto` so URL construction stays inside the page
-// object per the integration-test doctrine.
+// "last workspace" map both live in localStorage. Encapsulated in the
+// page object so the test body never touches raw `page.evaluate` /
+// localStorage keys, per the integration-test doctrine.
 test.beforeEach(async ({ page }) => {
   const workspacePage = new WorkspacePage(page, server.url, TOKEN);
-  await workspacePage.goto(WS_PERSONAL_1);
-  await page.evaluate(
-    ([filterKey, mapKey]) => {
-      localStorage.removeItem(filterKey);
-      localStorage.removeItem(mapKey);
-    },
-    [LABEL_FILTER_KEY, LABEL_LAST_WORKSPACE_KEY] as const,
-  );
+  await workspacePage.resetLabelStateAndGoto(WS_PERSONAL_1);
 });
 
 test.describe("Label switch restores last-used workspace (issue #505)", () => {

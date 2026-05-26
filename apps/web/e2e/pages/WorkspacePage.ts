@@ -13,7 +13,7 @@
  */
 
 import { type Locator, type Page, test } from "@playwright/test";
-import { LABEL_LAST_WORKSPACE_KEY } from "@/dashboard";
+import { LABEL_FILTER_KEY, LABEL_LAST_WORKSPACE_KEY } from "@/dashboard";
 
 /** localStorage key prefix used by `SharedDockviewLayout` for per-workspace
  *  state (matches `ACTIVE_STATE_KEY_PREFIX` in the source). */
@@ -147,6 +147,26 @@ export class WorkspacePage {
       // during the fade-out, which Playwright would detect as
       // "element was detached from the DOM" mid-click).
       await item.waitFor({ state: "hidden" });
+    });
+  }
+
+  /** Reset both label-related localStorage entries (active filter +
+   *  per-label "last workspace" map) and navigate to `workspaceId`, so
+   *  tests start from a known-clean slate. Two-step: navigate first to
+   *  land on the origin (localStorage isn't accessible until a same-
+   *  origin page is loaded), then evaluate the clear. Keeps the raw
+   *  `page.evaluate` out of test bodies and centralises the
+   *  storage-key constants in this page object. */
+  async resetLabelStateAndGoto(workspaceId: string): Promise<void> {
+    await test.step(`Reset label state, navigate to ${workspaceId}`, async () => {
+      await this.goto(workspaceId);
+      await this.page.evaluate(
+        ([filterKey, mapKey]) => {
+          localStorage.removeItem(filterKey);
+          localStorage.removeItem(mapKey);
+        },
+        [LABEL_FILTER_KEY, LABEL_LAST_WORKSPACE_KEY] as const,
+      );
     });
   }
 
