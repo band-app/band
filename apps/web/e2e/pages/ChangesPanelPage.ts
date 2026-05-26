@@ -100,30 +100,24 @@ export class ChangesPanelPage {
   }
 
   /** Locate the diff-row header button for a specific filename + git
-   *  status (e.g. `M` for modified). The accessible name is built from
-   *  the disclosure arrow + filename + status badge in `LazyFileRow`
-   *  (e.g. `▶ src/foo.ts M`), so we anchor on the leading `▶` to
-   *  disambiguate from the file tree sidebar's same-named button,
-   *  which exposes the bare `<filename> <status>` name. The role-name
-   *  match is the locator the doctrine prefers over text / CSS.
-   *
-   *  FRAGILITY: the `▶` Unicode triangle is rendered text in
-   *  `DiffView.tsx`'s JSX, not a system-controlled ARIA label. If the
-   *  disclosure indicator is ever swapped for an SVG icon (which
-   *  wouldn't contribute to the accessible name), this locator
-   *  silently matches nothing. The mitigation would be to add a stable
-   *  `data-testid` on the row button — left out for now because the
-   *  current JSX has been stable across several refactors and
-   *  introducing a testid just to defend against a hypothetical icon
-   *  change is over-engineering. Revisit if/when DiffView's
-   *  disclosure UI is reworked. */
+   *  status (e.g. `M` for modified). The row's `<button>` carries a
+   *  `data-testid="diff-view__file-row-toggle"` set in
+   *  `LazyFileRow`'s JSX — that's the system-controlled anchor the
+   *  doctrine prefers. We then filter by the accessible name (which
+   *  is the disclosure arrow + filename + status, e.g.
+   *  `▶ src/foo.ts M`) so callers can target a specific row when
+   *  multiple file rows are visible. Filtering instead of matching the
+   *  full name keeps the locator tolerant of changes to the
+   *  disclosure indicator (SVG icon swap, label tweaks, etc.) — only
+   *  the filename + status badge have to remain in the accessible
+   *  name for the locator to keep working. */
   fileRowButton(filename: string, status: string): Locator {
     // Escape `.` and other regex meta-characters in the filename so a
     // path like `src/foo.ts` doesn't accidentally match
     // `src/foo<anychar>ts`.
     const escapedFilename = filename.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    return this.page.getByRole("button", {
-      name: new RegExp(`▶\\s+${escapedFilename}\\s+${status}`),
+    return this.page.getByTestId("diff-view__file-row-toggle").filter({
+      hasText: new RegExp(`${escapedFilename}\\s+${status}`),
     });
   }
 

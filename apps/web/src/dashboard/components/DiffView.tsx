@@ -93,6 +93,21 @@ const UNCOMMITTED_VALUE = "__uncommitted__";
 
 const EXPAND_ALL_KEY = "band:diff-expand-all";
 
+/**
+ * Soft cap on how many editors stay alive per workspace under the
+ * mount-once policy in `LazyFileRow`. Sized so a typical reviewer
+ * pays for what they've actually visited (10–30 files in a normal
+ * PR) without growing unbounded on a 200-file refactor — the (cap+1)th
+ * distinct file scrolled into view evicts the LRU one. The cap is
+ * intentionally generous: each MergeView is on the order of hundreds
+ * of KB of JS state, so 50 instances is well inside the memory budget
+ * of a modern dashboard tab, and the cost of evicting (a re-mount +
+ * re-paint on scroll-back) is what we're spending the headroom to
+ * avoid in the common case. Hoisted to module scope so the tuning is
+ * discoverable without reading the component internals.
+ */
+const MAX_MOUNTED_EDITORS = 50;
+
 function getStoredExpandAll(): boolean {
   try {
     return localStorage.getItem(EXPAND_ALL_KEY) === "true";
@@ -957,6 +972,7 @@ function LazyFileRow({
       <button
         type="button"
         onClick={toggle}
+        data-testid="diff-view__file-row-toggle"
         className="sticky top-0 z-10 flex w-full items-center gap-2 bg-muted px-4 py-2.5 text-left text-sm hover:bg-accent"
       >
         <span
@@ -1266,16 +1282,6 @@ export function DiffView({
   // even when two rows enter the viewport within the same millisecond.
   const mountRecencyRef = useRef<Map<string, number>>(new Map());
   const recencyCounterRef = useRef<number>(0);
-  // Soft cap on how many editors stay alive per workspace. Sized so a
-  // typical reviewer pays for what they've actually visited (10–30 files
-  // in a normal PR) without growing unbounded on a 200-file refactor —
-  // the 51st distinct file scrolled into view evicts the LRU one. The
-  // cap is intentionally generous: each MergeView is on the order of
-  // hundreds of KB of JS state, so 50 instances is well inside the
-  // memory budget of a modern dashboard tab, and the cost of evicting
-  // (a re-mount + re-paint on scroll-back) is what we're spending the
-  // headroom to avoid in the common case.
-  const MAX_MOUNTED_EDITORS = 50;
   // Called by `LazyFileRow` on every IntersectionObserver `isIntersecting`
   // event. Bumps the recency counter for `filename`, adds it to
   // `mountedFiles` if it's not already in, and evicts the LRU member when
