@@ -335,6 +335,13 @@ const projectsRouter = t.router({
         worktrees,
         label: input.label ?? undefined,
         kind,
+        // For git projects, default to `true` so the first CI poll
+        // still runs the GraphQL query — `syncWorktrees` writes the
+        // real value on the next tick. For plain projects there's no
+        // remote by construction, so set `false` directly: sync skips
+        // plain projects (`kind !== "plain"` filter), so this initial
+        // value sticks for the lifetime of the row. See issue #458.
+        hasOrigin: kind === "git",
       };
 
       state.projects.push(project);

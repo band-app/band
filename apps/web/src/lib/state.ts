@@ -68,6 +68,20 @@ export interface ProjectState {
    *  project path — no isolation, no branch, git-specific features disabled.
    */
   kind: ProjectKind;
+  /**
+   * Whether the project's git repo has an `origin` remote.
+   *
+   * Populated by `syncWorktrees` at the CI tick cadence and used by
+   * `branch-status-poller` to skip the CI / `getRepoInfo` query for
+   * origin-less repos — that's an expected steady state for some
+   * projects and the query just produces log noise (issue #458).
+   *
+   * Defaults to `true` for plain (non-git) projects and for freshly
+   * added projects that sync hasn't reached yet, so the first CI tick
+   * after boot still issues the query. The real value lands on the
+   * next sync pass and sticks until the remote configuration changes.
+   */
+  hasOrigin: boolean;
 }
 
 export interface WorktreeState {
@@ -172,9 +186,28 @@ export function loadState(): AppState {
       defaultBranch: row.defaultBranch,
       label: row.label ?? undefined,
       kind: (row.kind ?? "git") as ProjectKind,
+      hasOrigin: row.hasOrigin,
       worktrees: wtByProject.get(row.name) ?? [],
     })),
   };
+}
+
+/**
+ * Targeted UPDATE for `projects.has_origin` only — does NOT go through
+ * the whole-tree `saveState` rewrite.
+ *
+ * `saveState` deletes every row in `projects` + `worktrees` and re-inserts
+ * from its in-memory snapshot. That's fine for the existing "worktrees /
+ * defaultBranch changed" path (it carries the latest worktree list), but
+ * it races badly with concurrent `workspaces.create` / `workspaces.remove`
+ * traffic for the new "hasOrigin changed" path: a stale `syncWorktrees`
+ * copy would clobber a just-saved worktree. Doing the hasOrigin update
+ * as a focused single-column UPDATE sidesteps the issue — the worktrees
+ * table is untouched. See issue #458.
+ */
+export function setProjectHasOrigin(name: string, hasOrigin: boolean): void {
+  const db = getDb();
+  db.update(projectsTable).set({ hasOrigin }).where(eq(projectsTable.name, name)).run();
 }
 
 export function saveState(state: AppState): void {
@@ -194,6 +227,10 @@ export function saveState(state: AppState): void {
           label: project.label ?? null,
           sortOrder: i,
           kind: project.kind,
+          // Default to true for any caller that hasn't probed yet (e.g.
+          // `projects.add` creating a brand-new row before the first
+          // sync tick has run). The real value lands at the next sync.
+          hasOrigin: project.hasOrigin ?? true,
         })
         .run();
 

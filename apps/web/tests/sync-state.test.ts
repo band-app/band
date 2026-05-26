@@ -108,6 +108,10 @@ describe("syncWorktrees", () => {
     const repoPath = createRepo(tmp);
     const head = git(repoPath, ["rev-parse", "HEAD"]).trim();
 
+    // Seed `hasOrigin: false` to match reality — `createRepo` doesn't add
+    // an origin remote, so `syncWorktrees` would otherwise rewrite the
+    // default `true` to `false` and the "no write" assertion below would
+    // fail. See `ProjectState.hasOrigin` and issue #458.
     saveState({
       projects: [
         {
@@ -115,6 +119,7 @@ describe("syncWorktrees", () => {
           path: repoPath,
           defaultBranch: "main",
           worktrees: [{ branch: "main", path: repoPath, head }],
+          hasOrigin: false,
         },
       ],
     });
@@ -126,6 +131,57 @@ describe("syncWorktrees", () => {
     const stateAfter = loadState();
     // Data should be identical — syncWorktrees should not have written
     expect(stateAfter).toEqual(stateBefore);
+  });
+
+  // `hasOrigin` is the persisted "should we even probe CI for this
+  // project" flag introduced for issue #458. It must flip between true
+  // and false based on whether the on-disk repo has an `origin` remote,
+  // so the branch-status poller can skip the CI query without a
+  // per-tick `git remote get-url origin` retry / cache.
+  it("sets hasOrigin=true when the repo has an origin remote", async () => {
+    const repoPath = createRepo(tmp);
+    // A fake remote URL is fine — `getRepoInfo` only cares that the
+    // ref exists and parses, not that the URL is reachable.
+    git(repoPath, ["remote", "add", "origin", "git@github.com:band-app/band.git"]);
+
+    saveState({
+      projects: [
+        {
+          name: "with-origin",
+          path: repoPath,
+          defaultBranch: "main",
+          worktrees: [{ branch: "main", path: repoPath }],
+          hasOrigin: false, // seeded false so we can prove the sync flips it
+        },
+      ],
+    });
+
+    await syncWorktrees();
+
+    expect(loadState().projects[0].hasOrigin).toBe(true);
+  });
+
+  it("sets hasOrigin=false when the repo has no origin remote", async () => {
+    const repoPath = createRepo(tmp);
+    // No `git remote add` here — the seeded `hasOrigin: true` (the
+    // schema default for fresh projects, see `projects.add`) should be
+    // overwritten by the sync.
+
+    saveState({
+      projects: [
+        {
+          name: "no-origin",
+          path: repoPath,
+          defaultBranch: "main",
+          worktrees: [{ branch: "main", path: repoPath }],
+          hasOrigin: true,
+        },
+      ],
+    });
+
+    await syncWorktrees();
+
+    expect(loadState().projects[0].hasOrigin).toBe(false);
   });
 
   it("skips projects where git fails", async () => {

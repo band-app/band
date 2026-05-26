@@ -38,6 +38,14 @@ export const projects = sqliteTable("projects", {
   kind: text("kind", { enum: ["git", "plain"] })
     .notNull()
     .default("git"),
+  // Whether the project's git repo has an `origin` remote we can use for
+  // CI / PR queries. Populated by `syncWorktrees` (see `sync-state.ts`) at
+  // the CI tick cadence — `null` means "not yet probed" and is treated as
+  // `true` (best-effort) so the first poll after a fresh boot still issues
+  // the CI query before sync has had a chance to write the real value.
+  // Defaults to 1 (true) so existing rows behave the same after migration.
+  // See issue #458.
+  hasOrigin: integer("has_origin", { mode: "boolean" }).notNull().default(true),
 });
 
 export const worktrees = sqliteTable("worktrees", {

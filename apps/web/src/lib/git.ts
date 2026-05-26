@@ -1,6 +1,9 @@
 import { execFile } from "node:child_process";
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
+import { createLogger } from "@band-app/logger";
+
+const log = createLogger("git");
 
 export interface WorktreeInfo {
   branch: string;
@@ -17,13 +20,36 @@ export interface RepoInfo {
 
 /**
  * Parse a git remote URL into host, owner, and repo components.
- * Supports SSH (git@host:owner/repo.git) and HTTPS (https://host/owner/repo.git) formats.
+ * Supports SCP-style SSH (git@host:owner/repo.git), `ssh://` URLs
+ * (ssh://git@host/owner/repo.git), and HTTPS (https://host/owner/repo.git).
  */
 export function parseGitRemoteUrl(url: string): RepoInfo | null {
-  // SSH: git@github.com:owner/repo.git (or ssh://git@github.com/owner/repo.git)
+  // SCP-style SSH: git@github.com:owner/repo.git
   const sshMatch = url.match(/^[\w.-]+@([^:]+):([^/]+)\/(.+?)(?:\.git)?$/);
   if (sshMatch) {
     return { host: sshMatch[1], owner: sshMatch[2], repo: sshMatch[3] };
+  }
+  // ssh:// scheme, all of:
+  //   ssh://git@github.com/owner/repo.git           (with user)
+  //   ssh://github.com/owner/repo.git               (userless)
+  //   ssh://git@github.com:22/owner/repo.git        (explicit port)
+  //   ssh://github.com:2222/owner/repo.git          (userless + port)
+  // The `(?::\d+)?` strips the port from the host capture — without it
+  // the bare `[^/]+` host group eats the colon and we'd persist a host
+  // like `"github.com:22"`, which then mismatches the gh CLI's
+  // `--hostname` and breaks the GraphQL query. (`gh repo clone` emits
+  // these for repos without SCP-style aliasing; before #502 review the
+  // whole `ssh://` shape fell through and silently flipped `hasOrigin`
+  // to false — issue #458 review feedback.)
+  const sshSchemeMatch = url.match(
+    /^ssh:\/\/(?:[\w.-]+@)?([^/:]+)(?::\d+)?\/([^/]+)\/(.+?)(?:\.git)?$/,
+  );
+  if (sshSchemeMatch) {
+    return {
+      host: sshSchemeMatch[1],
+      owner: sshSchemeMatch[2],
+      repo: sshSchemeMatch[3],
+    };
   }
   // HTTPS: https://github.com/owner/repo.git
   const httpsMatch = url.match(/^https?:\/\/([^/]+)\/([^/]+)\/(.+?)(?:\.git)?$/);
@@ -41,13 +67,21 @@ export async function getRepoInfo(worktreePath: string): Promise<RepoInfo | null
     const remoteUrl = (await execGit(["remote", "get-url", "origin"], worktreePath)).trim();
     const parsed = parseGitRemoteUrl(remoteUrl);
     if (!parsed) {
-      console.error(`getRepoInfo: failed to parse remote URL "${remoteUrl}" for ${worktreePath}`);
+      // Steady-state condition (e.g. self-hosted remote with an unusual URL
+      // shape) — debug-level, not error-level. The caller decides whether the
+      // absent metadata is actually a problem.
+      log.debug('getRepoInfo: failed to parse remote URL "%s" for %s', remoteUrl, worktreePath);
     }
     return parsed;
   } catch (err) {
-    console.error(
-      `getRepoInfo: failed for ${worktreePath}:`,
-      err instanceof Error ? err.message : err,
+    // `getRepoInfo` is best-effort metadata: a project directory may legitimately
+    // not be a git checkout, or may lack an `origin` remote. Those are expected
+    // steady states, not error paths — log at debug so the server log isn't
+    // spammed every CI poll tick. See issue #458.
+    log.debug(
+      "getRepoInfo: failed for %s: %s",
+      worktreePath,
+      err instanceof Error ? err.message : String(err),
     );
     return null;
   }

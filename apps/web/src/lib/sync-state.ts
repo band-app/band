@@ -1,9 +1,10 @@
-import { execGit, listWorktrees } from "./git";
+import { execGit, getRepoInfo, listWorktrees } from "./git";
 import {
   loadState,
   type ProjectState,
   reconcileKindForProject,
   saveState,
+  setProjectHasOrigin,
   type WorktreeState,
 } from "./state";
 
@@ -129,7 +130,16 @@ async function reconcileOneProject(project: ProjectState): Promise<boolean> {
         pinned: pinnedByBranch.get(wt.branch) ?? false,
       }));
   } catch {
-    // If git fails for this project (e.g. path doesn't exist), skip it
+    // If git fails for this project (e.g. path was deleted, NFS mount is
+    // gone), it has no usable origin — clear `hasOrigin` so the CI poller
+    // stops including its workspaces in the batched GraphQL query. Without
+    // this, a "ghost" project keeps its schema-default `hasOrigin: true`
+    // and the poller wastes a `getRepoInfo` subprocess on every CI tick
+    // forever. See issue #458 review feedback.
+    if (project.hasOrigin) {
+      setProjectHasOrigin(project.name, false);
+      project.hasOrigin = false;
+    }
     return false;
   }
 
@@ -149,6 +159,41 @@ async function reconcileOneProject(project: ProjectState): Promise<boolean> {
   if (remoteBranch && remoteBranch !== project.defaultBranch) {
     project.defaultBranch = remoteBranch;
     mutated = true;
+  }
+
+  // Sync `hasOrigin` so the CI poller can skip origin-less projects
+  // without re-probing on every tick (issue #458). This is the same
+  // probe `branch-status-poller` would have run inline — moving it
+  // here piggy-backs on the existing sync cadence (30 s / 3 min / 10
+  // min) and gives the poller a property read instead of a subprocess.
+  //
+  // We persist via the focused `setProjectHasOrigin` UPDATE rather than
+  // returning a mutation flag and rolling into the caller's full-tree
+  // `saveState`. The whole-tree rewrite would race with concurrent
+  // `workspaces.create` traffic — a stale in-memory copy from before the
+  // create would clobber the just-saved worktree row. The targeted
+  // UPDATE leaves the worktrees table alone. The in-memory `project`
+  // object is mutated too so the rest of the sync (and any caller that
+  // re-reads the state object) sees the fresh value.
+  const hasOrigin = (await getRepoInfo(project.path)) !== null;
+  if (hasOrigin !== project.hasOrigin) {
+    // DB write first, in-memory mirror second. If `setProjectHasOrigin`
+    // throws (SQLite locked, disk full), the in-memory value stays in
+    // sync with what's actually persisted; the next sync tick will try
+    // again rather than the two diverging.
+    //
+    // Swallow the throw rather than letting it propagate. `reconcileOneProject`
+    // runs inside `Promise.all` in `syncWorktrees`; an unhandled rejection
+    // here aborts the entire batch and skips the trailing `saveState` for
+    // every project's worktree/defaultBranch reconciliation. A failed
+    // `hasOrigin` write is recoverable on the next sync tick; losing the
+    // rest of the batch isn't.
+    try {
+      setProjectHasOrigin(project.name, hasOrigin);
+      project.hasOrigin = hasOrigin;
+    } catch {
+      // Next sync tick retries — see comment above.
+    }
   }
 
   return mutated;

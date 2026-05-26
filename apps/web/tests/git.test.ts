@@ -1,9 +1,9 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { listWorktrees } from "../src/lib/git.ts";
+import { getRepoInfo, listWorktrees } from "../src/lib/git.ts";
 
 const gitEnv = {
   ...process.env,
@@ -124,5 +124,92 @@ describe("listWorktrees", () => {
     const detached = worktrees.find((wt) => wt.path === wtPath);
     expect(detached).toBeDefined();
     expect(detached!.branch).toBe("");
+  });
+});
+
+// `getRepoInfo` is best-effort metadata — issue #458. The two failure
+// branches below ("not a git checkout" and "no origin remote") are
+// expected steady states for some project directories, not error paths.
+// These tests pin down that the function returns `null` cleanly for both,
+// so the `hasOrigin` flag that `syncWorktrees` derives from it has a
+// stable contract. The success branches exercise the three remote-URL
+// formats `parseGitRemoteUrl` accepts (SCP-style SSH, `ssh://` scheme,
+// HTTPS) — the `ssh://` case was added in response to PR #502 review.
+describe("getRepoInfo", () => {
+  const tmpDirs: string[] = [];
+  afterEach(() => {
+    for (const dir of tmpDirs) {
+      try {
+        rmSync(dir, { recursive: true, force: true });
+      } catch {}
+    }
+    tmpDirs.length = 0;
+  });
+
+  it("returns null for a non-git directory", async () => {
+    const tmp = realpathSync(mkdtempSync(join(tmpdir(), "band-no-git-")));
+    tmpDirs.push(tmp);
+    const info = await getRepoInfo(tmp);
+    expect(info).toBeNull();
+  });
+
+  it("returns null when the repo has no `origin` remote", async () => {
+    const { repoPath, tmp } = createRepo();
+    tmpDirs.push(tmp);
+    const info = await getRepoInfo(repoPath);
+    expect(info).toBeNull();
+  });
+
+  it("parses an SCP-style SSH origin remote", async () => {
+    const { repoPath, tmp } = createRepo();
+    tmpDirs.push(tmp);
+    git(repoPath, ["remote", "add", "origin", "git@github.com:band-app/band.git"]);
+    const info = await getRepoInfo(repoPath);
+    expect(info).toEqual({ host: "github.com", owner: "band-app", repo: "band" });
+  });
+
+  it("parses an `ssh://` scheme origin remote with user@", async () => {
+    // `ssh://git@github.com/owner/repo.git` is what `gh repo clone`
+    // emits for repos without SCP-style aliasing. Before #502 review
+    // this fell into the `parseGitRemoteUrl` null branch and silently
+    // set `hasOrigin = false`, permanently suppressing CI for the repo.
+    const { repoPath, tmp } = createRepo();
+    tmpDirs.push(tmp);
+    git(repoPath, ["remote", "add", "origin", "ssh://git@github.com/band-app/band.git"]);
+    const info = await getRepoInfo(repoPath);
+    expect(info).toEqual({ host: "github.com", owner: "band-app", repo: "band" });
+  });
+
+  it("parses an `ssh://` scheme origin remote without user@", async () => {
+    // The `[\w.-]+@` user-info component is optional in RFC 3986 — and
+    // `ssh://github.com/owner/repo.git` is a valid clone URL that some
+    // CI configs and `gh` paths emit. Originally the regex required
+    // user@; the make-it-optional fix landed via #502 review.
+    const { repoPath, tmp } = createRepo();
+    tmpDirs.push(tmp);
+    git(repoPath, ["remote", "add", "origin", "ssh://github.com/band-app/band.git"]);
+    const info = await getRepoInfo(repoPath);
+    expect(info).toEqual({ host: "github.com", owner: "band-app", repo: "band" });
+  });
+
+  it("strips the explicit port from an `ssh://` scheme origin", async () => {
+    // Self-hosted Git servers commonly bind SSH on a non-22 port and
+    // emit URLs like `ssh://git@gitea.example.com:2222/owner/repo.git`.
+    // The host group must not capture the `:2222` — `gh --hostname` and
+    // `parseBatchedCIResponse` both key on bare host. Bug surfaced via
+    // #502 review.
+    const { repoPath, tmp } = createRepo();
+    tmpDirs.push(tmp);
+    git(repoPath, ["remote", "add", "origin", "ssh://git@github.com:22/band-app/band.git"]);
+    const info = await getRepoInfo(repoPath);
+    expect(info).toEqual({ host: "github.com", owner: "band-app", repo: "band" });
+  });
+
+  it("parses an HTTPS origin remote", async () => {
+    const { repoPath, tmp } = createRepo();
+    tmpDirs.push(tmp);
+    git(repoPath, ["remote", "add", "origin", "https://github.com/band-app/band.git"]);
+    const info = await getRepoInfo(repoPath);
+    expect(info).toEqual({ host: "github.com", owner: "band-app", repo: "band" });
   });
 });

@@ -1,3 +1,4 @@
+import { createLogger } from "@band-app/logger";
 import { eq } from "drizzle-orm";
 import { toWorkspaceId } from "@/dashboard";
 import { getDb } from "./db/connection";
@@ -7,6 +8,8 @@ import { buildBatchedCIQuery, type CIStatus, parseBatchedCIResponse } from "./gi
 import { loadState } from "./state";
 import { syncWorktrees } from "./sync-state";
 import { emit } from "./watcher";
+
+const log = createLogger("branch-status-poller");
 
 interface GitStatus {
   dirty: boolean;
@@ -23,6 +26,13 @@ interface WorkspaceInfo {
   defaultBranch: string;
   worktreePath: string;
   projectPath: string;
+  /**
+   * Whether the project's git repo has an `origin` remote. Populated
+   * from `ProjectState.hasOrigin`, which `syncWorktrees` keeps in sync
+   * at the CI tick cadence. Used to skip the CI / GraphQL probe for
+   * origin-less repos — see issue #458.
+   */
+  hasOrigin: boolean;
 }
 
 /**
@@ -54,10 +64,6 @@ let pollerTimer: ReturnType<typeof setInterval> | null = null;
 let tickCount = 0;
 let currentActivity: ActivityLevel = "active";
 
-// Cache repo info per project path within a single CI poll tick.
-// Cleared on each CI tick so transferred repos or new remotes are picked up.
-const repoInfoCache = new Map<string, RepoInfo>();
-
 function getWorkspaces(): WorkspaceInfo[] {
   const state = loadState();
   const workspaces: WorkspaceInfo[] = [];
@@ -74,6 +80,7 @@ function getWorkspaces(): WorkspaceInfo[] {
         defaultBranch: project.defaultBranch,
         worktreePath: wt.path,
         projectPath: project.path,
+        hasOrigin: project.hasOrigin,
       });
     }
   }
@@ -133,49 +140,61 @@ async function getGitStatus(worktreePath: string): Promise<GitStatus> {
 }
 
 /**
- * Resolve repo info for a project path, with caching.
- */
-async function resolveRepoInfo(projectPath: string): Promise<RepoInfo | null> {
-  const cached = repoInfoCache.get(projectPath);
-  if (cached !== undefined) return cached;
-  const info = await getRepoInfo(projectPath);
-  // Only cache successful lookups — null means the remote wasn't available yet
-  // (e.g. project added before git remote was configured) and should be retried.
-  if (info) {
-    repoInfoCache.set(projectPath, info);
-  }
-  return info;
-}
-
-/**
  * Fetch CI status for all workspaces using batched GraphQL queries.
  *
  * Groups workspaces by GitHub host and executes one GraphQL query per host,
  * fetching PR status and check suite results for all branches in a single request.
- * Falls back to individual gh CLI calls if the GraphQL query fails.
+ *
+ * The caller is responsible for pre-filtering to workspaces whose project
+ * has `hasOrigin === true` (see `ProjectState.hasOrigin`, written by
+ * `syncWorktrees`). That removes the no-origin / not-a-git-checkout
+ * steady-state failures from this path entirely — no per-tick `getRepoInfo`
+ * retry loop, no negative cache (issue #458). Because the caller has
+ * pre-filtered, a `getRepoInfo` null result here is genuinely unexpected
+ * (origin was removed externally between sync and poll, or git itself is
+ * misbehaving) and is logged at `warn` — `syncWorktrees` will rewrite
+ * `hasOrigin` on the next sync tick and the noise stops on its own.
  */
 async function getBatchedCIStatuses(workspaces: WorkspaceInfo[]): Promise<Map<string, CIStatus>> {
-  // Clear cache so transferred repos or newly configured remotes are picked up
-  repoInfoCache.clear();
+  // Dedupe `getRepoInfo` calls by project path. A project with N
+  // worktrees produces N `WorkspaceInfo` entries that all share the
+  // same `projectPath`; without this, each tick fans out to N
+  // identical `git remote get-url origin` subprocesses. One probe per
+  // unique project per tick is all we need.
+  const uniqueProjectPaths = [...new Set(workspaces.map((ws) => ws.projectPath))];
+  const repoInfoByPath = new Map<string, RepoInfo | null>();
+  await Promise.all(
+    uniqueProjectPaths.map(async (path) => {
+      repoInfoByPath.set(path, await getRepoInfo(path));
+    }),
+  );
 
-  // Resolve repo info for all workspaces in parallel
+  // Caller already filtered to `hasOrigin === true`, so a null result
+  // here is genuinely unexpected — origin was removed externally
+  // between the last sync tick and this CI tick, OR git itself is
+  // misbehaving (binary missing, auth broken, FS perms). Surface those
+  // at `warn` so operators don't miss them. `syncWorktrees` will rewrite
+  // `hasOrigin` on its next tick and the noise stops on its own.
+  for (const path of uniqueProjectPaths) {
+    if (repoInfoByPath.get(path) === null) {
+      log.warn(
+        "CI poll: getRepoInfo returned null for %s despite hasOrigin=true; will reconcile on next sync tick",
+        path,
+      );
+    }
+  }
+
   const resolved: Array<{
     ws: WorkspaceInfo;
     repoInfo: RepoInfo;
     alias: string;
   }> = [];
-  await Promise.allSettled(
-    workspaces.map(async (ws, index) => {
-      const repoInfo = await resolveRepoInfo(ws.projectPath);
-      if (repoInfo) {
-        resolved.push({ ws, repoInfo, alias: `ws_${index}` });
-      } else {
-        console.error(
-          `CI poll: failed to resolve repo info for ${ws.workspaceId} (${ws.projectPath})`,
-        );
-      }
-    }),
-  );
+  for (const [index, ws] of workspaces.entries()) {
+    const repoInfo = repoInfoByPath.get(ws.projectPath);
+    if (repoInfo) {
+      resolved.push({ ws, repoInfo, alias: `ws_${index}` });
+    }
+  }
 
   // If no workspaces have repo info, return empty
   if (resolved.length === 0) {
@@ -282,10 +301,19 @@ async function pollTick() {
 
   const db = getDb();
 
-  // Fetch CI statuses in batch on CI ticks
+  // Fetch CI statuses in batch on CI ticks. Filter to workspaces whose
+  // project has an `origin` remote — by construction, an origin-less
+  // project has no PR / CI status to report and the GraphQL query would
+  // need a `getRepoInfo` probe that's guaranteed to fail (issue #458).
+  // `hasOrigin` is maintained by `syncWorktrees`, which runs in the same
+  // tick body just above; freshly-discovered origin changes land in the
+  // map before this filter reads it.
   let ciStatuses = new Map<string, CIStatus>();
   if (isCITick) {
-    ciStatuses = await getBatchedCIStatuses(workspaces);
+    const ciWorkspaces = workspaces.filter((w) => w.hasOrigin);
+    if (ciWorkspaces.length > 0) {
+      ciStatuses = await getBatchedCIStatuses(ciWorkspaces);
+    }
   }
 
   await Promise.allSettled(
