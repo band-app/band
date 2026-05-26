@@ -103,6 +103,73 @@ export class WorkspacePage {
     });
   }
 
+  /** Trigger button for the label filter dropdown in the dashboard
+   *  sidebar toolbar (issue #505). Only rendered when at least one label
+   *  is defined in settings. */
+  labelFilterTrigger(): Locator {
+    return this.page.getByTestId("dashboard__label-filter-trigger");
+  }
+
+  /** Menu item inside the label-filter dropdown. Pass `null` for the
+   *  "All" (no-filter) item, or a label id for a specific label. */
+  labelFilterItem(labelId: string | null): Locator {
+    const key = labelId ?? "all";
+    return this.page.getByTestId(`dashboard__label-filter-item--${key}`);
+  }
+
+  /** Open the label-filter dropdown and click the item for `labelId`.
+   *  `null` selects the "All" item. Mirrors what `setLabelFilter` would
+   *  produce — including the per-label "last workspace" restore added in
+   *  issue #505 — so this is the right path for tests that need the
+   *  full click→restore behaviour.
+   *
+   *  Only the SharedDockviewLayout's DashboardShell is mounted on
+   *  desktop (see `apps/web/src/routes/index.tsx` and the comment in
+   *  `SharedDockviewLayout` § ProjectsPanelComponent), so a single
+   *  trigger / item pair is in the DOM at any time. The Radix
+   *  DropdownMenu portals its content to `document.body` with a fade
+   *  animation on close, so a back-to-back reopen can briefly see the
+   *  previous portal animating out while the new one mounts. Waiting
+   *  for the new portal to be both visible AND stable before clicking
+   *  (via Locator's auto-waits + `state: "visible"`) avoids the
+   *  `element was detached from the DOM` flake. */
+  async selectLabelFilter(labelId: string | null): Promise<void> {
+    const label = labelId ?? "all";
+    await test.step(`Select label filter "${label}" via dropdown`, async () => {
+      // Wait until the previous portal (if any) has finished its fade-out
+      // before opening a new one. The trigger is always in the DOM, so
+      // we anchor on the item we expect to disappear after a previous
+      // selection.
+      await this.labelFilterItem(labelId).waitFor({ state: "hidden" });
+      await this.labelFilterTrigger().click();
+      const item = this.labelFilterItem(labelId);
+      await item.waitFor({ state: "visible" });
+      await item.click();
+      // Wait for the menu to close so the next call can detect its
+      // own "previous portal gone" state cleanly.
+      await item.waitFor({ state: "hidden" });
+    });
+  }
+
+  /** Read the persisted per-label "last workspace" map from
+   *  localStorage. Returns an empty object when nothing has been
+   *  recorded yet. */
+  async readLabelLastWorkspaces(): Promise<Record<string, string>> {
+    return await this.page.evaluate(() => {
+      const raw = localStorage.getItem("band.projects-list.label-last-workspace");
+      if (!raw) return {};
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          return parsed as Record<string, string>;
+        }
+      } catch {
+        // Corrupted entry — treat as empty.
+      }
+      return {};
+    });
+  }
+
   /** Locate a tab in the OUTER shared-dockview tab strip by its panel
    *  component id ("chat" | "changes" | "files" | "terminal" |
    *  "browser"). `data-testid` is set by `DefaultTab` / `BadgeTab` in
