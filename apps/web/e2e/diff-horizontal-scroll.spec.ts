@@ -55,11 +55,12 @@ const BRANCH = "main";
 const FILE_PATH = "long-line.txt";
 
 // A line wide enough that it's guaranteed to exceed the editor viewport
-// at our 1280-px viewport, even after accounting for the file tree
-// sidebar, gutters, and padding. Repeating `the_quick_brown_fox_jumps_over_the_lazy_dog_`
-// (44 chars) 30× gives a ~1300-char line, roughly 8000 px in a
-// 13-px monospaced font — well past the ~600 px the editor pane gets
-// inside the dockview at 1280 viewport.
+// at our 2400-px viewport, even after accounting for the project
+// sidebar, chat panel, file tree, gutters, and padding. Repeating
+// `the_quick_brown_fox_jumps_over_the_lazy_dog_` (44 chars) 30× gives a
+// ~1300-char line, roughly 8000 px in a 13-px monospaced font — well
+// past the ~800–900 px the editor pane gets inside the dockview at
+// the 2400 viewport.
 const LONG_LINE = "the_quick_brown_fox_jumps_over_the_lazy_dog_".repeat(30);
 
 // Initial committed content — short enough that there's no horizontal
@@ -203,19 +204,14 @@ async function assertScrollerHorizontallyScrolls(changes: ChangesPanelPage): Pro
   expect(overflowing!.clientHeight).toBeGreaterThan(20);
   expect(overflowing!.scrollHeight).toBeLessThanOrEqual(overflowing!.clientHeight + 1);
 
-  // 4. Round-trip a horizontal scroll. The first scroller may or
-  //    may not be the one with overflow (split mode puts the
-  //    "before" scroller first), so target it explicitly via a
-  //    locator that scrolls the overflowing scroller. Falling back
-  //    to the first scroller is fine in unified mode where there's
-  //    only one. In split mode the overflowing scroller is the
-  //    second one — we round-trip its scrollLeft via the page
-  //    object's all-scrollers locator.
+  // 4. Round-trip a horizontal scroll on the overflowing scroller.
+  //    Unified mode has a single scroller; split mode puts the
+  //    "before" scroller first and the overflowing "after" scroller
+  //    second. The page object owns the locator chain — the spec just
+  //    asks for "scroll the Nth scroller and tell me what scrollLeft
+  //    landed at", per the integration-test doctrine.
   const overflowingIndex = metrics.findIndex((m) => m.scrollWidth > m.clientWidth);
-  const finalScrollLeft = await changes.cmScrollers.nth(overflowingIndex).evaluate((el) => {
-    el.scrollLeft = 200;
-    return el.scrollLeft;
-  });
+  const finalScrollLeft = await changes.roundTripScrollLeftAt(overflowingIndex, 200);
   expect(finalScrollLeft).toBeGreaterThan(0);
 }
 

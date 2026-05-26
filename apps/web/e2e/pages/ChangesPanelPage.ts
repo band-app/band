@@ -150,7 +150,9 @@ export class ChangesPanelPage {
    *  toggle exposes the same control surface the user has. */
   async setViewMode(mode: DiffViewMode): Promise<void> {
     const label = mode === "split" ? "Split view" : "Unified view";
-    await this.page.getByRole("button", { name: label, exact: true }).click();
+    await test.step(`Set diff view mode to ${mode}`, async () => {
+      await this.page.getByRole("button", { name: label, exact: true }).click();
+    });
   }
 
   /** Mark the first rendered `.cm-editor` element with a JS property so
@@ -172,6 +174,19 @@ export class ChangesPanelPage {
       .evaluate(
         (el) => (el as HTMLElement & { __bandMountOnceMarker?: string }).__bandMountOnceMarker,
       );
+  }
+
+  /** Write to the `scrollLeft` of the Nth `.cm-scroller` and read the
+   *  committed value back. The round-trip is what the horizontal-
+   *  scroll test uses to prove the scroller actually accepts
+   *  horizontal-scroll input — the pre-fix `overflow: visible` path
+   *  silently clamps the write to 0, so a non-zero read here is the
+   *  most direct behavioural assertion of the fix. */
+  async roundTripScrollLeftAt(index: number, target: number): Promise<number> {
+    return await this.cmScrollers.nth(index).evaluate((el, value) => {
+      el.scrollLeft = value;
+      return el.scrollLeft;
+    }, target);
   }
 
   /** Per-scroller metrics for ALL rendered `.cm-scroller` elements.
