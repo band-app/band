@@ -700,11 +700,22 @@ function LazyFileRow({
   // back to false when the row scrolls out of the zone. We hold the
   // editor alive across scroll-aways so a return to the same row is
   // instant (no `loadLanguage` re-await, no MergeView re-construction).
-  // The only paths back to false are:
-  //   1. The user collapses the row (`isOpen = false`).
-  //   2. The parent's LRU evicts this filename (`isMountedAllowed = false`).
-  //   3. The diff target / workspace changes (DiffView clears state).
-  // In all three cases the row's effects fire below to reset this.
+  //
+  // The render gate is `shouldRender = everMounted && isMountedAllowed`,
+  // so these two flags drive different unmount paths:
+  //   - `isMountedAllowed = false` (parent LRU evicts this filename):
+  //     `shouldRender` flips false, `DiffFileContent` unmounts and tears
+  //     down the editor — but `everMounted` stays true. A future re-add
+  //     to the LRU (parent calls `handleRowVisible` again, typically
+  //     after the next IO intersect) restores `isMountedAllowed = true`
+  //     and the editor remounts. This is the cap-driven recycle path.
+  //   - `everMounted = false` happens in only two situations:
+  //       1. The user collapses the row (`isOpen = false`) — the
+  //          `useEffect` below resets `everMounted` so the next expand
+  //          starts fresh.
+  //       2. The row's React component itself unmounts (diff target
+  //          change drops the row from the `filenames` list, workspace
+  //          tab close, etc.) — local state is gone with the component.
   const [everMounted, setEverMounted] = useState(false);
   // Whether the editor renders right now. Folds the row's own
   // `everMounted` with the parent's LRU gate so eviction (or a never-

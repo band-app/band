@@ -207,16 +207,19 @@ async function assertScrollerHorizontallyScrolls(changes: ChangesPanelPage): Pro
 
   // 2. Behavioural: at least one scroller has horizontal overflow
   //    (the "after" side in split mode, or the only scroller in
-  //    unified mode). Pull that scroller's full metrics including
-  //    scrollHeight for the natural-height guard below.
+  //    unified mode).
   const overflowing = metrics.find((m) => m.scrollWidth > m.clientWidth);
   expect(overflowing).toBeDefined();
   // 3. Natural-height guard on the overflowing scroller — no
-  //    internal vertical scrollbar (scrollHeight matches
-  //    clientHeight). This is what guards against the PR #501
-  //    natural-height regression coming back together with the
-  //    horizontal-scroll fix.
+  //    internal vertical scrollbar (`scrollHeight` matches
+  //    `clientHeight`) and a non-trivial height. This is what
+  //    guards against PR #501's natural-height fix regressing in
+  //    tandem with this horizontal-scroll change — if `height: auto`
+  //    ever dropped off `.cm-scroller`, content would overflow
+  //    vertically and `scrollHeight` would diverge from
+  //    `clientHeight`.
   expect(overflowing!.clientHeight).toBeGreaterThan(20);
+  expect(overflowing!.scrollHeight).toBe(overflowing!.clientHeight);
 
   // 4. Round-trip a horizontal scroll. The first scroller may or
   //    may not be the one with overflow (split mode puts the

@@ -174,69 +174,35 @@ export class ChangesPanelPage {
       );
   }
 
-  /** Measurements of the first rendered `.cm-scroller` — used by the
-   *  horizontal-scroll test. Returns the geometric properties as a
-   *  single object so the test only pays one round-trip per assertion
-   *  block. */
-  async firstScrollerMetrics(): Promise<{
-    scrollWidth: number;
-    clientWidth: number;
-    clientHeight: number;
-    scrollHeight: number;
-    computedOverflowX: string;
-    computedOverflowY: string;
-  }> {
-    return await this.cmScrollers.first().evaluate((el) => ({
-      scrollWidth: el.scrollWidth,
-      clientWidth: el.clientWidth,
-      clientHeight: el.clientHeight,
-      scrollHeight: el.scrollHeight,
-      computedOverflowX: window.getComputedStyle(el).overflowX,
-      computedOverflowY: window.getComputedStyle(el).overflowY,
-    }));
-  }
-
   /** Per-scroller metrics for ALL rendered `.cm-scroller` elements.
    *  Used by the split-mode assertion path — MergeView renders one
    *  scroller per side, and both should report horizontal-scroll
-   *  capability for the fix to be considered complete. */
+   *  capability for the fix to be considered complete.
+   *
+   *  Implemented via `locator.evaluateAll` (single round-trip across
+   *  the page boundary) rather than `elementHandles` (one round-trip
+   *  per element + holds JS handles across the serialisation
+   *  boundary). `scrollHeight` is included so the test can assert
+   *  it equals `clientHeight` — the natural-height regression guard
+   *  for PR #501.
+   */
   async allScrollerMetrics(): Promise<
     Array<{
       scrollWidth: number;
       clientWidth: number;
       clientHeight: number;
+      scrollHeight: number;
       computedOverflowX: string;
     }>
   > {
-    const handles = await this.cmScrollers.elementHandles();
-    const out: Array<{
-      scrollWidth: number;
-      clientWidth: number;
-      clientHeight: number;
-      computedOverflowX: string;
-    }> = [];
-    for (const handle of handles) {
-      out.push(
-        await handle.evaluate((el) => ({
-          scrollWidth: el.scrollWidth,
-          clientWidth: el.clientWidth,
-          clientHeight: el.clientHeight,
-          computedOverflowX: window.getComputedStyle(el).overflowX,
-        })),
-      );
-    }
-    return out;
-  }
-
-  /** Write to the first scroller's `scrollLeft` and read back the
-   *  committed value. The round-trip is what the horizontal-scroll
-   *  test uses to prove the scroller actually accepts horizontal
-   *  scroll input (the pre-fix `overflow: visible` path silently
-   *  clamps the write to 0). */
-  async roundTripFirstScrollLeft(value: number): Promise<number> {
-    return await this.cmScrollers.first().evaluate((el, target) => {
-      el.scrollLeft = target;
-      return el.scrollLeft;
-    }, value);
+    return await this.cmScrollers.evaluateAll((els) =>
+      els.map((el) => ({
+        scrollWidth: el.scrollWidth,
+        clientWidth: el.clientWidth,
+        clientHeight: el.clientHeight,
+        scrollHeight: el.scrollHeight,
+        computedOverflowX: window.getComputedStyle(el).overflowX,
+      })),
+    );
   }
 }
