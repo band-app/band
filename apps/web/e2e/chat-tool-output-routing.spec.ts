@@ -211,18 +211,16 @@ test.describe("chat tool-output routing — issue #509 regression", () => {
     // implementation detail. Two container instances are expected (the
     // scenario emits two `tool_use` blocks); both must reach
     // `data-status="complete"` and neither may linger in `in-progress`.
-    const toolContainers = page.getByTestId("tool-call__container");
-    await expect(toolContainers).toHaveCount(2);
-    await expect(toolContainers.nth(0)).toHaveAttribute("data-status", "complete");
-    await expect(toolContainers.nth(1)).toHaveAttribute("data-status", "complete");
+    await expect(chatPane.toolCallContainers).toHaveCount(2);
+    await expect(chatPane.toolCallContainers.nth(0)).toHaveAttribute("data-status", "complete");
+    await expect(chatPane.toolCallContainers.nth(1)).toHaveAttribute("data-status", "complete");
 
     // Status dots must mirror the container status — pinning both
     // surfaces guards against a regression that updates one and
     // forgets the other.
-    const statusDots = page.getByTestId("tool-call__status-dot");
-    await expect(statusDots).toHaveCount(2);
-    await expect(statusDots.nth(0)).toHaveAttribute("data-status", "complete");
-    await expect(statusDots.nth(1)).toHaveAttribute("data-status", "complete");
+    await expect(chatPane.toolCallStatusDots).toHaveCount(2);
+    await expect(chatPane.toolCallStatusDots.nth(0)).toHaveAttribute("data-status", "complete");
+    await expect(chatPane.toolCallStatusDots.nth(1)).toHaveAttribute("data-status", "complete");
 
     // No spurious `tool-output-available` drops. The fix's
     // console.warn fires only when a tool result has no owning
