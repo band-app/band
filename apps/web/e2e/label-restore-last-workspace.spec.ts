@@ -190,8 +190,11 @@ test.describe("Label switch restores last-used workspace (issue #505)", () => {
     await expect(page).toHaveURL(new RegExp(encodeURIComponent(WS_WORK_2)));
 
     // Sanity check: no per-label entry has been recorded yet — selecting
-    // a workspace while on ALL must not write to the map.
-    expect(await workspacePage.readLabelLastWorkspaces()).toEqual({});
+    // a workspace while on ALL must not write to the map. `expect.poll`
+    // here (rather than a bare `expect(await ...)`) so a micro-task
+    // delay between the user click and the `localStorage` write doesn't
+    // race the assertion.
+    await expect.poll(() => workspacePage.readLabelLastWorkspaces()).toEqual({});
 
     // Switch to Personal — no history yet, so the workspace shouldn't
     // change. (We assert this so the next step's "ALL keeps current
@@ -211,8 +214,9 @@ test.describe("Label switch restores last-used workspace (issue #505)", () => {
     // → ALL, which records Personal's outgoing activeWorkspaceId — but
     // WS_WORK_2's project is labelled Work, not Personal, so the
     // "only save when project matches outgoing label" guard skips the
-    // write entirely. The map stays empty.
-    expect(await workspacePage.readLabelLastWorkspaces()).toEqual({});
+    // write entirely. The map stays empty. Use `expect.poll` to ride
+    // out the React state→localStorage write micro-task.
+    await expect.poll(() => workspacePage.readLabelLastWorkspaces()).toEqual({});
   });
 
   test("keyboard shortcut path shares the same restore logic as the dropdown", async ({ page }) => {
