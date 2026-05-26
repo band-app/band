@@ -72,6 +72,11 @@ export function getRandomPort(): Promise<number> {
  * about whether a test wants to assert on a successful response
  * shape or on an error body. Auth is via the `band_token` cookie;
  * pass the same token the test passed to `seedSettings`.
+ *
+ * `input` is treated as the procedure input. Both `undefined` and
+ * `null` are treated as "no input" — `JSON.stringify(null)` would
+ * otherwise send the literal string `"null"`, which the tRPC server
+ * rejects with a parse error.
  */
 export function trpcMutate(
   serverUrl: string,
@@ -85,7 +90,7 @@ export function trpcMutate(
       "Content-Type": "application/json",
       Cookie: `band_token=${token}`,
     },
-    body: input !== undefined ? JSON.stringify(input) : "{}",
+    body: input != null ? JSON.stringify(input) : "{}",
   });
 }
 

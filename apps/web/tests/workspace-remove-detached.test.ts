@@ -132,11 +132,16 @@ describe("workspaces.remove on a detached-HEAD worktree", () => {
     const body = await res.text();
 
     // The pre-fix bug was a TRPCError with message ending in
-    // `Workspace "detached-<sha>" not found`. Pin both the status and
-    // the body so a future regression that returns 200 with an error
-    // payload also fails the assertion.
+    // `Workspace "detached-<sha>" not found`. Pin status, error
+    // absence, AND the positive success shape — a future regression
+    // that returns 200 with a mangled body (e.g. `{ result: { data:
+    // null } }`) would still pass the loose checks alone, so the
+    // shape assertion catches that case explicitly. The tRPC
+    // response envelope is `{ result: { data: <procedure return> } }`,
+    // and `workspaces.remove` returns `{ ok: true }`.
     expect(res.status, `unexpected status; body=${body}`).toBe(200);
     expect(body).not.toContain("not found");
+    expect(JSON.parse(body)).toEqual({ result: { data: { ok: true } } });
 
     // The persisted row for the detached branch must be gone; `main`
     // must still be there (the filter has to be branch-scoped).
