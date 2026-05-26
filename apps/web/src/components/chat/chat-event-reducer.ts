@@ -425,16 +425,45 @@ export function chatEventReducer(
     }
 
     case "tool-output-available": {
-      const assistantId = state.currentAssistantId;
-      if (!assistantId) return { ...state, lastEventId };
-      const asstMsg = state.messages.find((m) => m.id === assistantId);
-      const prevPart = asstMsg?.parts.find((p) => {
-        const pp = p as unknown as { toolCallId?: string };
-        return pp.toolCallId === event.toolCallId;
-      }) as unknown as AssistantToolPart | undefined;
+      // Route by `toolCallId` rather than `state.currentAssistantId`.
+      //
+      // `currentAssistantId` is reset to `undefined` by five events
+      // (`user-message` ×2 paths, `task-started`, `task-completed`,
+      // `task-error`), so any tool result that arrives *after* one of those
+      // — agent flushes asynchronously, user interrupts with a new
+      // message, reconnect during JSONL backfill — would be silently
+      // dropped. The stuck `input-available` parts kept their
+      // `animate-pulse` dots alive forever (issue #509). `toolCallId` is
+      // globally unique, so a reverse-walk of the message list will find
+      // the owning assistant message regardless of which task is "current".
+      let ownerId: string | undefined;
+      let prevPart: AssistantToolPart | undefined;
+      for (let i = state.messages.length - 1; i >= 0; i--) {
+        const msg = state.messages[i];
+        if (msg.role !== "assistant") continue;
+        const part = msg.parts.find((p) => {
+          const pp = p as unknown as { toolCallId?: string };
+          return pp.toolCallId === event.toolCallId;
+        });
+        if (part) {
+          ownerId = msg.id;
+          prevPart = part as unknown as AssistantToolPart;
+          break;
+        }
+      }
+      if (!ownerId) {
+        // Genuinely unknown toolCallId — log loudly. Silent drops are how
+        // this bug went undetected for so long; a visible warning lets
+        // future regressions surface in normal usage.
+        console.warn(
+          "[chat] tool-output-available for unknown toolCallId — dropping",
+          event.toolCallId,
+        );
+        return { ...state, lastEventId };
+      }
       const messages = replaceToolPart(
         state.messages,
-        assistantId,
+        ownerId,
         event.toolCallId,
         makeToolOutputPart(prevPart, event),
       );

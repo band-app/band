@@ -30,13 +30,34 @@ export interface ToolCallItem {
 }
 
 function StatusDot({ isError, isInProgress }: { isError: boolean; isInProgress: boolean }) {
+  // `data-status` is the test seam — Playwright asserts on it to verify
+  // tool-call completion without coupling to Tailwind class strings.
+  // The three values mirror the three branches below.
   if (isError) {
-    return <span className="size-2 shrink-0 rounded-full bg-red-500" />;
+    return (
+      <span
+        data-testid="tool-call__status-dot"
+        data-status="error"
+        className="size-2 shrink-0 rounded-full bg-red-500"
+      />
+    );
   }
   if (isInProgress) {
-    return <span className="size-2 shrink-0 animate-pulse rounded-full bg-orange-500" />;
+    return (
+      <span
+        data-testid="tool-call__status-dot"
+        data-status="in-progress"
+        className="size-2 shrink-0 animate-pulse rounded-full bg-orange-500"
+      />
+    );
   }
-  return <span className="size-2 shrink-0 rounded-full bg-green-500" />;
+  return (
+    <span
+      data-testid="tool-call__status-dot"
+      data-status="complete"
+      className="size-2 shrink-0 rounded-full bg-green-500"
+    />
+  );
 }
 
 export function ToolCall({ item }: { item: ToolCallItem }) {
@@ -73,9 +94,18 @@ export function ToolCall({ item }: { item: ToolCallItem }) {
 
   const markdown = extractMarkdown(item);
 
+  // Coarse status string mirrors the StatusDot branches — surfaced as a
+  // data attribute on the container so tests can poll a single tool by
+  // toolCallId without inspecting child class strings.
+  const status = item.isError ? "error" : item.isInProgress ? "in-progress" : "complete";
+
   return (
     <>
-      <Collapsible className="group not-prose w-full rounded border border-border/30 bg-muted/20">
+      <Collapsible
+        data-testid="tool-call__container"
+        data-status={status}
+        className="group not-prose w-full rounded border border-border/30 bg-muted/20"
+      >
         <CollapsibleTrigger className="flex w-full items-center justify-between gap-4 px-2 py-1.5">
           <div className="flex min-w-0 items-center gap-2">
             <StatusDot isError={item.isError} isInProgress={item.isInProgress} />
