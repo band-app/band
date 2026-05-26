@@ -423,31 +423,39 @@ describe("chatEventReducer", () => {
    * undetected for so long).
    */
   it("orphan tool-output-available (no owner) is dropped with a warn, lastEventId advances", () => {
+    // try/finally so an assertion failure can't leak the spy into the
+    // next test — vitest does not auto-restore inline spies. Without
+    // this any subsequent test that calls `console.warn` would see the
+    // mocked no-op instead of the real implementation and debug output
+    // would silently disappear.
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const before: ChatSubscriptionState = {
-      ...INITIAL_STATE,
-      lastEventId: 5,
-      messages: [],
-    };
-    const after = chatEventReducer(before, {
-      type: "tool-output-available",
-      toolCallId: "orphan-id",
-      output: "this should not show up",
-      isError: false,
-      eventId: 6,
-    });
-    // No new messages, no new tool part anywhere.
-    expect(after.messages).toEqual([]);
-    expect(after.currentAssistantId).toBeUndefined();
-    // Cursor still advances — we processed the event, we just had
-    // nothing to attach it to.
-    expect(after.lastEventId).toBe(6);
-    // Loud warning so silent drops never hide a regression again.
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("tool-output-available for unknown toolCallId"),
-      "orphan-id",
-    );
-    warnSpy.mockRestore();
+    try {
+      const before: ChatSubscriptionState = {
+        ...INITIAL_STATE,
+        lastEventId: 5,
+        messages: [],
+      };
+      const after = chatEventReducer(before, {
+        type: "tool-output-available",
+        toolCallId: "orphan-id",
+        output: "this should not show up",
+        isError: false,
+        eventId: 6,
+      });
+      // No new messages, no new tool part anywhere.
+      expect(after.messages).toEqual([]);
+      expect(after.currentAssistantId).toBeUndefined();
+      // Cursor still advances — we processed the event, we just had
+      // nothing to attach it to.
+      expect(after.lastEventId).toBe(6);
+      // Loud warning so silent drops never hide a regression again.
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("tool-output-available for unknown toolCallId"),
+        "orphan-id",
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   /**
