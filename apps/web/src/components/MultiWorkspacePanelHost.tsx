@@ -157,9 +157,15 @@ export function MultiWorkspacePanelHost({ emptyState, children }: MultiWorkspace
   // "query resolved to an empty list". `useProjects()` returns the empty
   // array fallback in both cases, so without this guard the initial render
   // before the query resolves would evict every cached workspace.
-  const { projects, isLoading } = useProjects();
+  //
+  // The `error` guard covers the same shape but for the FAILURE path:
+  // `isLoading: false` + `data: undefined` (e.g. network blip, server
+  // not yet ready) also collapses to `projects: EMPTY_PROJECTS`, which
+  // would otherwise evict every cached workspace on a transient hiccup.
+  // We keep the cache as-is until the next successful fetch heals it.
+  const { projects, isLoading, error } = useProjects();
   useEffect(() => {
-    if (isLoading) return;
+    if (isLoading || error) return;
     const validIds = new Set<string>();
     for (const project of projects) {
       for (const worktree of project.worktrees) {
@@ -186,7 +192,7 @@ export function MultiWorkspacePanelHost({ emptyState, children }: MultiWorkspace
       }
       return next;
     });
-  }, [projects, isLoading, activeWorkspaceId]);
+  }, [projects, isLoading, error, activeWorkspaceId]);
 
   // Detect evictions by diffing the cache key set across commits and clear
   // the dropped workspaces' cross-panel state. Lives in an effect (not the

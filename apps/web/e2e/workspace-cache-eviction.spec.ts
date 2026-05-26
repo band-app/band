@@ -85,7 +85,13 @@ function git(cwd: string, args: string[], home: string): string {
   return execFileSync("git", args, { cwd, env: makeGitEnv(home), encoding: "utf-8" });
 }
 
-let server: ServerHandle;
+// `ServerHandle | undefined` (rather than the definite-assignment `!`
+// shorthand) so TypeScript forces the `if (typeof server !== "undefined")`
+// guard in `afterAll`. Same shape as `resources.spec.ts`. Without it, a
+// `startServer` failure in `beforeAll` would surface as a confusing
+// `TypeError: Cannot read properties of undefined (reading 'close')` in
+// the teardown and mask the real boot error.
+let server: ServerHandle | undefined;
 let tmpHome: string;
 let repoPath: string;
 let worktreeAPath: string;
@@ -140,7 +146,7 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  await server.close();
+  if (typeof server !== "undefined") await server.close();
   cleanupTmpHome(tmpHome);
 });
 
