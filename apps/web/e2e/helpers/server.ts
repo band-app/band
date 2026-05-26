@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -22,6 +22,25 @@ export function createTmpHome(): string {
   mkdirSync(bandDir, { recursive: true });
   mkdirSync(join(bandDir, "status"), { recursive: true });
   return tmp;
+}
+
+/**
+ * Recursively remove a tmp home directory created with `createTmpHome()`.
+ *
+ * Use this in every `afterAll` instead of a bare `rmSync(tmpHome, {
+ * recursive: true, force: true })`. The `maxRetries`/`retryDelay` options
+ * are Node's documented escape hatch for the `ENOTEMPTY` race that fires
+ * when the server process's background subprocesses (du, branch-status
+ * pollers, SQLite WAL flushers) are still writing to the tree as we
+ * walk it bottom-up — see flake reports on issue #508 and the matching
+ * resources / cache-eviction afterAll failures. `rmSync`'s recursive
+ * walker retries on `EBUSY`, `EMFILE`, `ENFILE`, `ENOTEMPTY`, and
+ * `EPERM`, so 10 × 100 ms gives ~1 s of headroom — well within the
+ * window for `du` to wrap up on a small fixture but short enough that a
+ * truly stuck cleanup still fails fast.
+ */
+export function cleanupTmpHome(tmpHome: string): void {
+  rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }
 
 interface SeedProject {
@@ -91,6 +110,16 @@ export async function startServer(
     // The production bundle runs under Node (see apps/web/README.md) and
     // uses Node's built-in `node:sqlite` for storage. Vitest integration
     // tests use the same spawn pattern via `tests/helpers/server-runtime.ts`.
+    //
+    // `detached: true` puts the child in its own process group. The
+    // server spawns grandchildren (`du` for resource accounting, `git`
+    // for the branch-status poller, terminal PTYs, …) and a plain
+    // `child.kill('SIGTERM')` only signals the direct child — the
+    // grandchildren are re-parented to init and keep writing to the
+    // tmp home as we try to `rmSync` it, producing the `ENOTEMPTY`
+    // race documented on the cleanup helper above. Putting the child
+    // in its own group lets us signal the WHOLE TREE via the negative
+    // pid trick in `close()` below.
     const child = spawn("node", ["dist/start-server.mjs"], {
       cwd: PROJECT_ROOT,
       env: {
@@ -101,10 +130,28 @@ export async function startServer(
         ...opts.env,
       },
       stdio: ["pipe", "pipe", "pipe"],
+      detached: true,
     });
 
     let stderr = "";
     let settled = false;
+
+    // Signal the whole process group, not just the direct child, so
+    // grandchildren spawned by the server (du, git, terminal PTYs,
+    // language servers) are torn down before `rmSync(tmpHome)` runs.
+    // `process.kill(-pgid, signal)` with a NEGATIVE pid targets the
+    // group. Falls back to a plain `child.kill` if the pid is missing
+    // (process already exited / never started). Wrapped in try/catch:
+    // a benign ESRCH means "group already gone" — fine to ignore.
+    const killGroup = (signal: NodeJS.Signals) => {
+      const pid = child.pid;
+      try {
+        if (typeof pid === "number") process.kill(-pid, signal);
+        else child.kill(signal);
+      } catch {
+        // group already torn down
+      }
+    };
 
     child.stderr!.on("data", (chunk: Buffer) => {
       stderr += chunk.toString();
@@ -120,7 +167,11 @@ export async function startServer(
           close: () =>
             new Promise<void>((r) => {
               child.on("exit", () => r());
-              child.kill("SIGTERM");
+              killGroup("SIGTERM");
+              // Hard backstop: if the group hasn't drained in 5 s,
+              // escalate to SIGKILL so test teardown can't hang
+              // forever waiting on a stuck PTY or language server.
+              setTimeout(() => killGroup("SIGKILL"), 5_000).unref();
             }),
         });
       }
@@ -143,7 +194,7 @@ export async function startServer(
     setTimeout(() => {
       if (!settled) {
         settled = true;
-        child.kill("SIGTERM");
+        killGroup("SIGTERM");
         reject(new Error(`Server did not start within 15 s.\nstderr: ${stderr}`));
       }
     }, 15_000);

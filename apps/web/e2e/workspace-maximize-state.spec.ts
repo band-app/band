@@ -23,10 +23,10 @@
  * restored when the user later exits maximize).
  */
 
-import { rmSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
 import {
+  cleanupTmpHome,
   createTmpHome,
   type ServerHandle,
   seedSettings,
@@ -75,7 +75,7 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   await server.close();
-  rmSync(tmpHome, { recursive: true, force: true });
+  cleanupTmpHome(tmpHome);
 });
 
 // Each test starts on a clean slate so it doesn't observe state another
@@ -318,8 +318,14 @@ test.describe("Workspace maximize state (issue #490)", () => {
     // the `Terminal input` aria-name) which can take multiple
     // seconds in CI even when correctness is fine, so we give the
     // textbox a generous timeout instead of relying on Playwright's
-    // 5 s default.
+    // 5 s default. The 25 s bound is a relaxation of the original
+    // 15 s after the suite started racing against the new
+    // workspace-cache-eviction.spec — under that load the xterm
+    // boot occasionally exceeded the 15 s budget despite passing
+    // correctness; bumping the budget keeps the fast path
+    // identical (toBeVisible() returns immediately when ready) while
+    // tolerating worst-case scheduler latency.
     await expect(workspacePage.changesHeading).not.toBeVisible();
-    await expect(workspacePage.terminalInput).toBeVisible({ timeout: 15_000 });
+    await expect(workspacePage.terminalInput).toBeVisible({ timeout: 25_000 });
   });
 });

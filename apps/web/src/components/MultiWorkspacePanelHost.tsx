@@ -1,6 +1,6 @@
 import { useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
-import { useSettingsQuery } from "@/dashboard";
+import { toWorkspaceId, useProjects, useSettingsQuery } from "@/dashboard";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
 import { clearPerWorkspaceState } from "./per-workspace-state-store";
 
@@ -123,6 +123,71 @@ export function MultiWorkspacePanelHost({ emptyState, children }: MultiWorkspace
     });
   }, [activeWorkspaceId]);
 
+  // Reconcile the cache against the projects query (issue #508). Capacity-based
+  // LRU eviction only fires when a NEW workspace is added — it never notices
+  // when a workspace *disappears* from the projects list. Without this effect a
+  // deleted workspace's chat/file/terminal/browser subtrees stay mounted
+  // forever, keeping their tRPC subscriptions, event listeners, stuck
+  // "in-progress" tool-call animations, and React state alive against a
+  // workspaceId the server no longer recognises (renderer observed at 1.68 GB
+  // heap, 167k listeners, 656 stuck animate-pulse spans after ~2 days of use).
+  //
+  // Using the projects query as the source of truth self-heals for ANY
+  // disappearance path — dashboard delete button, manual worktree rm, external
+  // git operation — not just `useRemoveWorkspace`.
+  //
+  // The `id !== activeWorkspaceId` guard is structural, not a UX nicety.
+  // `activeWorkspaceId` is URL-derived (`parseWorkspaceFromPath(pathname)`),
+  // so it stays pointing at a deleted workspace until the user navigates
+  // away — `useRemoveWorkspace.onSuccess` only updates the Zustand store's
+  // `activeWorkspaceId`, not the URL, so the two diverge during the
+  // delete-the-active-workspace window. Without the guard:
+  //   1. Effect notices the active workspace isn't in `validIds`, evicts.
+  //   2. The synchronous "add active workspace to cache" branch above re-
+  //      adds it on the next render.
+  //   3. Effect runs again, evicts again. Infinite render loop.
+  // Consequence: deleting the *currently-active* workspace leaves its
+  // cache entry alive until the user navigates somewhere else (clicking
+  // any other card in the sidebar fires the eviction on the next render).
+  // That's an acceptable trade-off — the original bug was about *non-
+  // active* cached workspaces accumulating across days of use; the active
+  // case self-heals at the next workspace switch.
+  //
+  // The `isLoading` guard distinguishes "query hasn't resolved yet" from
+  // "query resolved to an empty list". `useProjects()` returns the empty
+  // array fallback in both cases, so without this guard the initial render
+  // before the query resolves would evict every cached workspace.
+  const { projects, isLoading } = useProjects();
+  useEffect(() => {
+    if (isLoading) return;
+    const validIds = new Set<string>();
+    for (const project of projects) {
+      for (const worktree of project.worktrees) {
+        validIds.add(toWorkspaceId(project.name, worktree.branch));
+      }
+    }
+    setCache((prev) => {
+      // Steady-state fast-path: the projects query refetches every 30 s,
+      // so this effect fires repeatedly with no actual eviction work to
+      // do. Scan once to detect a stale id before allocating the new Map.
+      let hasStale = false;
+      for (const id of prev.keys()) {
+        if (!validIds.has(id) && id !== activeWorkspaceId) {
+          hasStale = true;
+          break;
+        }
+      }
+      if (!hasStale) return prev;
+      const next = new Map(prev);
+      for (const id of next.keys()) {
+        if (!validIds.has(id) && id !== activeWorkspaceId) {
+          next.delete(id);
+        }
+      }
+      return next;
+    });
+  }, [projects, isLoading, activeWorkspaceId]);
+
   // Detect evictions by diffing the cache key set across commits and clear
   // the dropped workspaces' cross-panel state. Lives in an effect (not the
   // setState updater) so React-driven double-invocations don't repeatedly
@@ -155,6 +220,17 @@ export function MultiWorkspacePanelHost({ emptyState, children }: MultiWorkspace
         return (
           <div
             key={workspaceId}
+            // The testid exposes the LRU cache shape to integration tests
+            // (see `apps/web/e2e/workspace-cache-eviction.spec.ts`): one
+            // entry per cached workspace makes "did the cache evict this
+            // deleted workspace?" observable through the DOM without
+            // exporting internals. Embedding the workspaceId in the
+            // attribute lets a test target a specific entry directly.
+            // No `data-active` here — `WorkspaceCard` already exposes
+            // that attribute on the sidebar card, and adding it to the
+            // cached entry divs would multiply-match the existing
+            // `locator('[data-active="true"]')` queries other specs use.
+            data-testid={`workspace-panel-host__cached-entry--${workspaceId}`}
             className="absolute inset-0 transition-opacity duration-150 ease-out"
             style={{
               opacity: isActive ? 1 : 0,
