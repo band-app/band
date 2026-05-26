@@ -109,11 +109,14 @@ PRs opened by project collaborators (OWNER / MEMBER / COLLABORATOR on this repo)
 
 This project uses **integration tests** as the primary testing approach. Do not write unit tests with mocked dependencies.
 
-- **Black-box testing only.** Test through public interfaces: HTTP endpoints, CLI commands, file system outputs.
+- **Black-box testing only.** Test through public interfaces: HTTP endpoints, CLI commands, file system outputs, the rendered DOM (frontend).
+- **The real binary runs inside the test.** Backend and frontend tests both boot the production server process — no shallow renders, no in-memory React mounts, no test-only build flags.
 - **Real infrastructure.** Use test containers for databases, temporary directories for file-based state, real servers on random ports.
-- **MSW for external APIs.** Mock only third-party APIs you don't own, using [MSW](https://mswjs.io/) at the network layer.
-- **Node.js built-in test runner.** Use `node:test` with `node:assert/strict`.
-- **Never modify production code to make a test pass.**
+- **External services get Express stubs.** Mock only services your process calls *out* to (third-party APIs, GitHub, agent binaries) using an Express stub on a random port + an env-var override read at request time. Do **not** use [MSW](https://mswjs.io/) — it misses subprocess-originated traffic. Do **not** use `page.route()` to intercept your own backend's routes from a Playwright test.
+- **Test framework matches the package.** `node:test` + `node:assert/strict` is the default for new code. The web app (`apps/web`) uses `vitest`.
+- **Never modify production code to make a test pass.** The only allowed production-code change a test may introduce is a `data-testid` attribute on a JSX element, or refactoring an outbound URL to be read from an env var at request time so the test can override it.
+
+For the full doctrine — backend + frontend test patterns, Express-stub examples, page-object conventions, and worked examples — see [`CLAUDE.md`](CLAUDE.md#testing-strategy) and the [`write-integration-test`](.claude/skills/write-integration-test/SKILL.md) skill. Those are the authoritative sources; this section is a summary.
 
 ## Building Locally vs. Signed Releases
 
