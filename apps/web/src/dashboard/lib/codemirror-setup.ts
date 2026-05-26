@@ -175,17 +175,26 @@ export function baseViewerExtensions(
     rootLightStyles.height = "100%";
   }
   // Natural-height callers need `.cm-scroller` to flow with its content
-  // instead of becoming a fixed-height scroll container. Per CSS Overflow
-  // L3 spec, mixing `visible` with a non-`visible`/`clip` value on the
-  // orthogonal axis (e.g. `overflowX: auto, overflowY: visible`) makes
-  // the `visible` compute as `auto` in every browser — silently
-  // re-introducing the fixed-height scroller that breaks our parent's
-  // auto-height chain. So both axes must be `visible`. Long lines fall
-  // back to the existing `overflow-clip` on `LazyFileRow`'s root, which
-  // is the same horizontal-clipping behaviour the codebase had before
-  // this PR (no regression).
+  // *vertically* (no fixed scrolling container) but still let long lines
+  // scroll *horizontally* — otherwise minified JS, generated SQL, or any
+  // unwrapped long line in a diff is silently clipped by `overflow-clip`
+  // on `LazyFileRow`'s root and the user can't reach it (issue: Changes
+  // view doesn't scroll horizontally).
+  //
+  // The subtlety: per CSS Overflow L3, setting `overflowX: auto,
+  // overflowY: visible` computes to `auto, auto` because `visible`
+  // resolves to `auto` whenever the orthogonal axis is non-`visible`.
+  // That alone would re-introduce the bug PR #501 fixed — CodeMirror's
+  // base theme sets `.cm-scroller { height: 100% }`, and a 100%
+  // percentage against an auto-height `.cm-editor` collapses to ~0 the
+  // moment `.cm-scroller` becomes a scroll container. The fix is to
+  // *also* override the scroller's `height` to `auto`, so the percentage
+  // chain is broken and the scroller sizes to its content. With
+  // `height: auto`, the computed `overflowY: auto` is harmless — content
+  // fits exactly, so no vertical scrollbar ever appears, while
+  // horizontal still scrolls when a line is wider than the viewport.
   const scrollerStyles: Record<string, string> = naturalHeight
-    ? { overflow: "visible" }
+    ? { overflowX: "auto", overflowY: "visible", height: "auto" }
     : { overflow: "auto" };
 
   return [
