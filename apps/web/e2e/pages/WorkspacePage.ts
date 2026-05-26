@@ -13,6 +13,7 @@
  */
 
 import { type Locator, type Page, test } from "@playwright/test";
+import { LABEL_LAST_WORKSPACE_KEY } from "../../src/dashboard/hooks/use-label-last-workspace";
 
 /** localStorage key prefix used by `SharedDockviewLayout` for per-workspace
  *  state (matches `ACTIVE_STATE_KEY_PREFIX` in the source). */
@@ -155,8 +156,8 @@ export class WorkspacePage {
    *  localStorage. Returns an empty object when nothing has been
    *  recorded yet. */
   async readLabelLastWorkspaces(): Promise<Record<string, string>> {
-    return await this.page.evaluate(() => {
-      const raw = localStorage.getItem("band.projects-list.label-last-workspace");
+    return await this.page.evaluate((key) => {
+      const raw = localStorage.getItem(key);
       if (!raw) return {};
       try {
         const parsed = JSON.parse(raw);
@@ -167,6 +168,35 @@ export class WorkspacePage {
         // Corrupted entry — treat as empty.
       }
       return {};
+    }, LABEL_LAST_WORKSPACE_KEY);
+  }
+
+  /** Sidebar project-list root — the keyboard nav anchor in
+   *  `ProjectList.tsx` (a `tabindex=-1` div). `DashboardShell`'s
+   *  keydown handler skips the Cmd+1..9 / Ctrl+1..9 label shortcuts
+   *  when `e.target.tagName` is `INPUT` / `TEXTAREA` / `SELECT` /
+   *  `contentEditable`, so tests that fire the shortcut must route the
+   *  keystroke through a non-editable target. The project list root
+   *  fits the bill — it's both keyboard-focusable and intentionally
+   *  not editable. */
+  projectListRoot(): Locator {
+    return this.page.getByTestId("project-list__root");
+  }
+
+  /** Drive the ⌘1..9 / Ctrl+1..9 label shortcut as a real user keypress.
+   *  Uses `projectListRoot.press(...)` so Playwright moves focus there
+   *  before dispatching the key, bypassing the chat textarea autofocus
+   *  on the workspace route. The keydown bubbles to the window listener
+   *  in `DashboardShell` where the shortcut is wired up. `index` is
+   *  0-based; 0 picks "All" (⌘0), 1..9 pick the Nth label (⌘1..9). */
+  async pressLabelShortcut(index: number): Promise<void> {
+    if (index < 0 || index > 9) {
+      throw new Error(`pressLabelShortcut: index must be 0..9, got ${index}`);
+    }
+    await test.step(`Press Control+${index} (label shortcut)`, async () => {
+      const root = this.projectListRoot();
+      await root.waitFor({ state: "visible" });
+      await root.press(`Control+${index}`);
     });
   }
 

@@ -20,6 +20,8 @@
 
 import { expect, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
+import { LABEL_FILTER_KEY } from "../src/dashboard/hooks/use-label-filter";
+import { LABEL_LAST_WORKSPACE_KEY } from "../src/dashboard/hooks/use-label-last-workspace";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -111,10 +113,13 @@ test.afterAll(async () => {
 // access to localStorage in the right origin.
 test.beforeEach(async ({ page }) => {
   await page.goto(`${server.url}/workspace/${encodeURIComponent(WS_PERSONAL_1)}?token=${TOKEN}`);
-  await page.evaluate(() => {
-    localStorage.removeItem("band.projects-list.label-filter");
-    localStorage.removeItem("band.projects-list.label-last-workspace");
-  });
+  await page.evaluate(
+    ([filterKey, mapKey]) => {
+      localStorage.removeItem(filterKey);
+      localStorage.removeItem(mapKey);
+    },
+    [LABEL_FILTER_KEY, LABEL_LAST_WORKSPACE_KEY] as const,
+  );
 });
 
 test.describe("Label switch restores last-used workspace (issue #505)", () => {
@@ -216,43 +221,30 @@ test.describe("Label switch restores last-used workspace (issue #505)", () => {
     // orchestration as the dropdown by exercising a round-trip via the
     // accelerator registered in `DashboardShell`'s keydown listener.
     //
-    // The handler explicitly skips when focus is inside an editable
-    // element (so users can type "⌘1" into a chat without hijacking it),
-    // so the test focuses the project-list root before each press. That
-    // element is the keyboard nav target the app already uses for arrow
-    // navigation, and it's confirmed not editable. Sending the shortcut
-    // via `locator.press` routes the keystroke to that element directly,
-    // bypassing the chat textarea autofocus on the workspace route.
+    // `WorkspacePage.pressLabelShortcut` handles the focus-and-press
+    // dance (the chat textarea autofocuses on the workspace route, and
+    // the keydown handler in DashboardShell skips when focus is on an
+    // editable element); see the page-object method for the rationale.
 
     const workspacePage = new WorkspacePage(page, server.url, TOKEN);
     await workspacePage.goto(WS_PERSONAL_1);
 
-    // The project list container has `tabindex="-1"` and isn't editable;
-    // pressing keys against it lets the bubble-phase handler in
-    // DashboardShell see `e.target.tagName === "DIV"` and not skip. We
-    // target it by testid rather than `[tabindex="-1"]` because the
-    // dockview's file tab bar also exposes a tabindex=-1 element and a
-    // generic selector would pick the wrong one (project list lives in
-    // the sidebar; the file tab bar lives in the main area).
-    const projectListRoot = page.getByTestId("project-list__root");
-    await projectListRoot.waitFor({ state: "visible" });
-
     // Build up: Ctrl+1 → Personal, then click a Personal workspace.
-    await projectListRoot.press("Control+1");
+    await workspacePage.pressLabelShortcut(1);
     await workspacePage.switchWorkspace(WS_PERSONAL_1);
     await expect(page).toHaveURL(new RegExp(encodeURIComponent(WS_PERSONAL_1)));
 
     // Ctrl+2 → Work, click a Work workspace.
-    await projectListRoot.press("Control+2");
+    await workspacePage.pressLabelShortcut(2);
     await workspacePage.switchWorkspace(WS_WORK_2);
     await expect(page).toHaveURL(new RegExp(encodeURIComponent(WS_WORK_2)));
 
     // Round-trip: Ctrl+1 should restore Personal → WS_PERSONAL_1.
-    await projectListRoot.press("Control+1");
+    await workspacePage.pressLabelShortcut(1);
     await expect(page).toHaveURL(new RegExp(encodeURIComponent(WS_PERSONAL_1)));
 
     // Ctrl+2 should restore Work → WS_WORK_2.
-    await projectListRoot.press("Control+2");
+    await workspacePage.pressLabelShortcut(2);
     await expect(page).toHaveURL(new RegExp(encodeURIComponent(WS_WORK_2)));
 
     // Final state of the map mirrors what the click-path test produces.

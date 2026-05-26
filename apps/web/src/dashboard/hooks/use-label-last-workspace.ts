@@ -81,13 +81,21 @@ export function useLabelLastWorkspace(): UseLabelLastWorkspaceReturn {
 
   const getLastWorkspace = useCallback((labelId: string) => map[labelId], [map]);
 
+  // Two-step write: persist + dispatch FIRST, then update local React state.
+  // Calling `write()` inside the functional updater would dispatch
+  // SYNC_EVENT during the setter, which queues `setMap(read())` from the
+  // sync handler — a state setter invoked from inside another setter's
+  // updater is unsupported by React (the nested call can be silently
+  // dropped). `useLabelFilter` uses the same two-step pattern; mirror it
+  // here. Reading the current map via `read()` (rather than the closed-
+  // over `map`) keeps the no-op short-circuit correct across rapid
+  // back-to-back calls where `map` hasn't yet committed.
   const setLastWorkspace = useCallback((labelId: string, workspaceId: string) => {
-    setMap((prev) => {
-      if (prev[labelId] === workspaceId) return prev;
-      const next = { ...prev, [labelId]: workspaceId };
-      write(next);
-      return next;
-    });
+    const current = read();
+    if (current[labelId] === workspaceId) return;
+    const next = { ...current, [labelId]: workspaceId };
+    write(next);
+    setMap(next);
   }, []);
 
   return { getLastWorkspace, setLastWorkspace };
