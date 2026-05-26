@@ -11,6 +11,15 @@
 // tests should import from here. The pre-existing tests are not
 // migrated in this PR to keep its diff focused on the
 // detached-HEAD bug fix.
+//
+// TODO: migrate `trpc.test.ts`, `task-cleanup.test.ts`, and
+// `trpc-batch-url.test.ts` to import from this module instead of
+// inlining their own copies of `createTmpHome` / `getRandomPort` /
+// `startServer` / `trpcMutate`. The longer those copies live, the
+// more they will drift from this one — and the SIGKILL fallback +
+// the `trpcMutate` shape are improvements that should reach the
+// older tests too. Tracked as a follow-up rather than done here so
+// this PR stays scoped to the detached-HEAD bug.
 
 import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync } from "node:fs";
@@ -53,6 +62,30 @@ export function getRandomPort(): Promise<number> {
       srv.close(() => resolve(port));
     });
     srv.on("error", reject);
+  });
+}
+
+/**
+ * POST a tRPC mutation against a running test server and return the
+ * raw `Response`. Caller is responsible for status / body assertions
+ * — leaving the JSON parsing to the caller keeps the helper neutral
+ * about whether a test wants to assert on a successful response
+ * shape or on an error body. Auth is via the `band_token` cookie;
+ * pass the same token the test passed to `seedSettings`.
+ */
+export function trpcMutate(
+  serverUrl: string,
+  procedure: string,
+  input: unknown,
+  token: string,
+): Promise<Response> {
+  return fetch(`${serverUrl}/trpc/${procedure}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Cookie: `band_token=${token}`,
+    },
+    body: input !== undefined ? JSON.stringify(input) : "{}",
   });
 }
 

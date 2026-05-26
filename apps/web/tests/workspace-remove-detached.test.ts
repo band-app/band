@@ -25,7 +25,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
-import { createTmpHome, type ServerHandle, startServer } from "./helpers/server";
+import { createTmpHome, type ServerHandle, startServer, trpcMutate } from "./helpers/server";
 
 const DEFAULT_TOKEN = "workspace-remove-detached-token";
 
@@ -123,14 +123,12 @@ describe("workspaces.remove on a detached-HEAD worktree", () => {
     // seed.
     expect(listWorktreeBranches(tmpHome, "proj").sort()).toEqual(["main", detachedBranch].sort());
 
-    const res = await fetch(`${server.url}/trpc/workspaces.remove`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Cookie: `band_token=${DEFAULT_TOKEN}`,
-      },
-      body: JSON.stringify({ project: "proj", branch: detachedBranch }),
-    });
+    const res = await trpcMutate(
+      server.url,
+      "workspaces.remove",
+      { project: "proj", branch: detachedBranch },
+      DEFAULT_TOKEN,
+    );
     const body = await res.text();
 
     // The pre-fix bug was a TRPCError with message ending in
