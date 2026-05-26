@@ -8,6 +8,7 @@ import type {
   ToolInputAvailableEvent,
 } from "../lib/chat-events";
 import { getChat } from "../lib/chat-manager";
+import { jsonlMessageToEvents } from "../lib/jsonl-message-to-events";
 import {
   getQueuedMessages,
   subscribeQueue,
@@ -435,85 +436,10 @@ async function replayPast(opts: {
   }
 }
 
-/**
- * Strip the `[File sharing: …]` agent-context hint that `task-runner`
- * appends to the FIRST user prompt of a new session (see `fileSharingHint`
- * in `apps/web/src/lib/task-runner.ts`). The hint is meant for the agent,
- * not the user — and the live `user-message` broadcast already strips it
- * by using `task.prompt` (the clean original) instead of `task.agentPrompt`.
- * On JSONL replay we read whatever the agent persisted, which DOES include
- * the hint suffix — so we strip it here too.
- */
-function stripFileSharingHint(text: string): string {
-  return text.replace(/\n\n\[File sharing:[\s\S]*?\]\s*$/, "");
-}
-
-/**
- * Map a SessionMessageItem (from agent JSONL) to a synthetic ChatEvent
- * sequence. We synthesise the same events the live stream would produce so
- * the reducer doesn't need a special-case path for "this came from JSONL".
- */
-function jsonlMessageToEvents(
-  msg: {
-    role: "user" | "assistant";
-    id: string;
-    content: Array<
-      | { type: "text"; text: string }
-      | {
-          type: "tool_use";
-          toolCallId: string;
-          toolName: string;
-          displayTitle?: string;
-          input: unknown;
-        }
-      | { type: "tool_result"; toolCallId: string; output: string; isError: boolean }
-    >;
-  },
-  startId: number,
-): ChatEvent[] {
-  const events: ChatEvent[] = [];
-  let id = startId;
-
-  if (msg.role === "user") {
-    const textPart = msg.content.find(
-      (p): p is { type: "text"; text: string } => p.type === "text",
-    );
-    events.push({
-      type: "user-message",
-      text: stripFileSharingHint(textPart?.text ?? ""),
-      eventId: id++,
-    });
-    return events;
-  }
-
-  // Assistant message → translate parts into the live-stream event sequence.
-  for (const part of msg.content) {
-    if (part.type === "text") {
-      const textPartId = `${msg.id}-text-${id}`;
-      events.push({ type: "text-start", id: textPartId, eventId: id++ });
-      events.push({ type: "text-delta", id: textPartId, delta: part.text, eventId: id++ });
-      events.push({ type: "text-end", id: textPartId, eventId: id++ });
-    } else if (part.type === "tool_use") {
-      events.push({
-        type: "tool-input-available",
-        toolCallId: part.toolCallId,
-        toolName: part.toolName,
-        displayTitle: part.displayTitle,
-        input: part.input,
-        eventId: id++,
-      });
-    } else if (part.type === "tool_result") {
-      events.push({
-        type: "tool-output-available",
-        toolCallId: part.toolCallId,
-        output: part.output,
-        isError: part.isError,
-        eventId: id++,
-      });
-    }
-  }
-  return events;
-}
+// JSONL-message → ChatEvent translation lives in
+// `lib/jsonl-message-to-events.ts` so a unit test can exercise it
+// without coupling the test to the agent SDK's on-disk JSONL format.
+// See that file for the full contract.
 
 /**
  * Translate a task-runner broadcast chunk into a ChatEvent payload.

@@ -33,6 +33,17 @@ export class ChatPanePage {
   /** Stop / cancel button — only present while the current task is in
    *  the streaming phase (post-`text-start`, pre-`task-completed`). */
   readonly stopButton: Locator;
+  /** All tool-call container rows in the conversation (one per
+   *  `tool-input-available` event). Each carries a `data-status`
+   *  attribute mirroring the StatusDot branch
+   *  (`in-progress` / `complete` / `error`) — tests assert against
+   *  that rather than the underlying Tailwind classes. */
+  readonly toolCallContainers: Locator;
+  /** Status dots inside each tool-call row. Same `data-status` shape
+   *  as `toolCallContainers`; both surfaces are pinned in the issue
+   *  #509 regression spec so a future change that updates one and
+   *  forgets the other still trips the test. */
+  readonly toolCallStatusDots: Locator;
 
   constructor(
     private readonly page: Page,
@@ -46,6 +57,8 @@ export class ChatPanePage {
     this.sessionHistoryButton = page.getByRole("button", { name: "Session history" });
     this.newSessionMenuItem = page.getByRole("menuitem", { name: /New session/ });
     this.stopButton = page.getByTestId("prompt-input__stop-button");
+    this.toolCallContainers = page.getByTestId("tool-call__container");
+    this.toolCallStatusDots = page.getByTestId("tool-call__status-dot");
   }
 
   /** Navigate to the workspace's chat view. The only place URLs are

@@ -3,7 +3,7 @@
  * that mirror what the server actually emits. Pure, no I/O.
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   applyEvents,
   type ChatSubscriptionState,
@@ -414,33 +414,150 @@ describe("chatEventReducer", () => {
   });
 
   /**
-   * Edge case identified in the audit: `tool-output-available` arriving
-   * with no `currentAssistantId` (no live assistant message in flight).
-   * Real-world trigger is a malformed JSONL transcript with an orphan
-   * `tool_result` block, or an event ordering race where the assistant
-   * message was cleared by a `task-completed` before the tool result
-   * arrived. The reducer must drop the orphan silently — appending it
-   * to a stale assistant or creating a new one would corrupt the chat.
+   * Edge case: `tool-output-available` arriving with no message that
+   * owns its `toolCallId` (no prior `tool-input-available`). Real-world
+   * trigger is a malformed JSONL transcript with an orphan `tool_result`
+   * block. The reducer must drop the event (no message corruption) but
+   * log a console.warn so silent drops can't hide future regressions
+   * (issue #509 — the silent return was half of why that bug went
+   * undetected for so long).
    */
-  it("orphan tool-output-available (no currentAssistantId) is dropped, lastEventId advances", () => {
-    const before: ChatSubscriptionState = {
-      ...INITIAL_STATE,
-      lastEventId: 5,
-      messages: [],
+  it("orphan tool-output-available (no owner) is dropped with a warn, lastEventId advances", () => {
+    // try/finally so an assertion failure can't leak the spy into the
+    // next test — vitest does not auto-restore inline spies. Without
+    // this any subsequent test that calls `console.warn` would see the
+    // mocked no-op instead of the real implementation and debug output
+    // would silently disappear.
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const before: ChatSubscriptionState = {
+        ...INITIAL_STATE,
+        lastEventId: 5,
+        messages: [],
+      };
+      const after = chatEventReducer(before, {
+        type: "tool-output-available",
+        toolCallId: "orphan-id",
+        output: "this should not show up",
+        isError: false,
+        eventId: 6,
+      });
+      // No new messages, no new tool part anywhere.
+      expect(after.messages).toEqual([]);
+      expect(after.currentAssistantId).toBeUndefined();
+      // Cursor still advances — we processed the event, we just had
+      // nothing to attach it to.
+      expect(after.lastEventId).toBe(6);
+      // Loud warning so silent drops never hide a regression again.
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("tool-output-available for unknown toolCallId"),
+        "orphan-id",
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  /**
+   * Regression for issue #509 — Mode 1.
+   *
+   * The pre-fix reducer gated `tool-output-available` on
+   * `state.currentAssistantId`, which is reset to `undefined` by
+   * `user-message`. If the user typed a follow-up while a prior tool
+   * was still running, the tool's eventual result was silently dropped,
+   * leaving the part stuck in `input-available` (its orange pulse
+   * never stopped).
+   *
+   * Under the fix, the reducer routes by globally-unique `toolCallId`
+   * — the prior assistant message gets the output applied even though
+   * `currentAssistantId` has been cleared.
+   */
+  it("regression #509: tool-output-available arriving AFTER a follow-up user-message resolves on the original assistant message", () => {
+    const state = applyEvents(
+      INITIAL_STATE,
+      seq([
+        { type: "user-message", text: "list files" },
+        { type: "task-started", taskId: "t1" },
+        {
+          type: "tool-input-available",
+          toolCallId: "tc-1",
+          toolName: "Bash",
+          input: { command: "ls" },
+          displayTitle: "Bash(ls)",
+        },
+        // User types a follow-up while the first tool is still running.
+        // This used to reset `currentAssistantId` and cause the next
+        // tool-output to be dropped.
+        { type: "user-message", text: "actually never mind" },
+        // Late tool result for tc-1 — must still resolve on the
+        // original assistant message.
+        {
+          type: "tool-output-available",
+          toolCallId: "tc-1",
+          output: "file1\nfile2",
+        },
+      ]),
+    );
+
+    // user, assistant (the one that owns tc-1), user
+    expect(state.messages).toHaveLength(3);
+    const originalAssistant = state.messages[1];
+    expect(originalAssistant.role).toBe("assistant");
+    const toolPart = originalAssistant.parts[0] as unknown as {
+      type: string;
+      state: string;
+      output: string;
+      input: { command: string };
+      title: string;
     };
-    const after = chatEventReducer(before, {
-      type: "tool-output-available",
-      toolCallId: "orphan-id",
-      output: "this should not show up",
-      isError: false,
-      eventId: 6,
-    });
-    // No new messages, no new tool part anywhere.
-    expect(after.messages).toEqual([]);
-    expect(after.currentAssistantId).toBeUndefined();
-    // Cursor still advances — we processed the event, we just had
-    // nothing to attach it to.
-    expect(after.lastEventId).toBe(6);
+    expect(toolPart.type).toBe("tool-Bash");
+    expect(toolPart.state).toBe("output-available");
+    expect(toolPart.output).toBe("file1\nfile2");
+    // Metadata preserved — no `tool-unknown` fallback (the pre-fix
+    // Mode 2 failure would have wiped these).
+    expect(toolPart.input).toEqual({ command: "ls" });
+    expect(toolPart.title).toBe("Bash(ls)");
+  });
+
+  /**
+   * Regression for issue #509 — `task-completed` reset path.
+   *
+   * Race between the agent flushing `tool-result` and broadcasting
+   * `task-completed`: if the latter wins, the pre-fix reducer cleared
+   * `currentAssistantId` and silently dropped the tool result. Under
+   * the fix the result still resolves correctly.
+   */
+  it("regression #509: tool-output-available arriving AFTER task-completed resolves on the original assistant message", () => {
+    const state = applyEvents(
+      INITIAL_STATE,
+      seq([
+        { type: "user-message", text: "read README" },
+        { type: "task-started", taskId: "t1" },
+        {
+          type: "tool-input-available",
+          toolCallId: "tc-2",
+          toolName: "Read",
+          input: { path: "README.md" },
+        },
+        // task-completed races ahead of the final tool-result flush.
+        { type: "task-completed", taskId: "t1" },
+        {
+          type: "tool-output-available",
+          toolCallId: "tc-2",
+          output: "# README",
+        },
+      ]),
+    );
+
+    const assistant = state.messages[1];
+    const toolPart = assistant.parts[0] as unknown as {
+      type: string;
+      state: string;
+      output: string;
+    };
+    expect(toolPart.type).toBe("tool-Read");
+    expect(toolPart.state).toBe("output-available");
+    expect(toolPart.output).toBe("# README");
   });
 
   /**
