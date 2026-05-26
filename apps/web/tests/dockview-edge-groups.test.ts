@@ -29,8 +29,10 @@
 
 import { describe, expect, it, vi } from "vitest";
 import {
+  attachEdgeGroupDragVisibility,
   EDGE_GROUP_IDS,
   type EdgeDirection,
+  ensureEdgeGroups,
   findFocusedInnerDockview,
   refreshEdgeGroupVisibility,
   registerInnerDockview,
@@ -61,6 +63,13 @@ interface StubGroup {
 interface StubApi {
   groups: StubGroup[];
   setEdgeGroupVisible: ReturnType<typeof vi.fn>;
+  getEdgeGroup?: ReturnType<typeof vi.fn>;
+  removeEdgeGroup?: ReturnType<typeof vi.fn>;
+  addEdgeGroup?: ReturnType<typeof vi.fn>;
+  onWillDragPanel?: ReturnType<typeof vi.fn>;
+  onWillDragGroup?: ReturnType<typeof vi.fn>;
+  onDidMovePanel?: ReturnType<typeof vi.fn>;
+  onDidRemovePanel?: ReturnType<typeof vi.fn>;
 }
 
 function makeGroup(id: string, panelIds: string[], collapsed = false): StubGroup {
@@ -83,6 +92,74 @@ function makeApi(groups: StubGroup[]): StubApi {
   return {
     groups,
     setEdgeGroupVisible: vi.fn(),
+  };
+}
+
+/**
+ * Builds an api with the surface area `ensureEdgeGroups` and
+ * `attachEdgeGroupDragVisibility` touch:
+ *   - `getEdgeGroup(position)` → returns a sentinel group when
+ *     `existingEdges` includes that position (used to test the "top"
+ *     cleanup path).
+ *   - `removeEdgeGroup` / `addEdgeGroup` → tracked spies the tests
+ *     assert against.
+ *   - `onWillDragPanel` / `onWillDragGroup` / `onDidMovePanel` /
+ *     `onDidRemovePanel` → record the registered listener and return a
+ *     disposable so the drag-visibility tests can fire events directly.
+ */
+function makeRichApi(
+  groups: StubGroup[],
+  existingEdges: Set<string> = new Set(),
+): StubApi & {
+  // Exposed so tests can drive the listener directly.
+  fireWillDragPanel: () => void;
+  fireWillDragGroup: () => void;
+  fireDidMovePanel: () => void;
+  fireDidRemovePanel: () => void;
+  // Spies tracking disposer calls — assert at end of test that the
+  // returned cleanup actually disposed each subscription.
+  dragPanelDisposed: ReturnType<typeof vi.fn>;
+  dragGroupDisposed: ReturnType<typeof vi.fn>;
+  movePanelDisposed: ReturnType<typeof vi.fn>;
+  removePanelDisposed: ReturnType<typeof vi.fn>;
+} {
+  const listeners: Record<string, () => void> = {};
+  const dragPanelDisposed = vi.fn();
+  const dragGroupDisposed = vi.fn();
+  const movePanelDisposed = vi.fn();
+  const removePanelDisposed = vi.fn();
+  return {
+    groups,
+    setEdgeGroupVisible: vi.fn(),
+    getEdgeGroup: vi.fn((pos: string) =>
+      existingEdges.has(pos) ? { id: `edge-${pos}` } : undefined,
+    ),
+    removeEdgeGroup: vi.fn(),
+    addEdgeGroup: vi.fn(),
+    onWillDragPanel: vi.fn((fn: () => void) => {
+      listeners.willDragPanel = fn;
+      return { dispose: dragPanelDisposed };
+    }),
+    onWillDragGroup: vi.fn((fn: () => void) => {
+      listeners.willDragGroup = fn;
+      return { dispose: dragGroupDisposed };
+    }),
+    onDidMovePanel: vi.fn((fn: () => void) => {
+      listeners.didMovePanel = fn;
+      return { dispose: movePanelDisposed };
+    }),
+    onDidRemovePanel: vi.fn((fn: () => void) => {
+      listeners.didRemovePanel = fn;
+      return { dispose: removePanelDisposed };
+    }),
+    fireWillDragPanel: () => listeners.willDragPanel?.(),
+    fireWillDragGroup: () => listeners.willDragGroup?.(),
+    fireDidMovePanel: () => listeners.didMovePanel?.(),
+    fireDidRemovePanel: () => listeners.didRemovePanel?.(),
+    dragPanelDisposed,
+    dragGroupDisposed,
+    movePanelDisposed,
+    removePanelDisposed,
   };
 }
 
@@ -192,6 +269,14 @@ describe("refreshEdgeGroupVisibility", () => {
 // vitest's default jsdom environment is fine. Each test cleans up its
 // registrations + DOM elements to prevent cross-test leakage through
 // the module-level registry singleton.
+//
+// MAINTAINER NOTE: `innerDockviewRegistrations` is a process-wide Set
+// that persists across tests in this file (vitest does not reset the
+// module). Every test below MUST call the disposer returned by
+// `registerInnerDockview` before exiting — a leaked registration
+// would silently bleed into the next test's `findFocusedInnerDockview`
+// lookup. The `dispose()` + `document.body.removeChild()` pair at the
+// bottom of each test is non-negotiable.
 
 describe("registerInnerDockview / findFocusedInnerDockview", () => {
   it("returns null when no inner dockview is registered", () => {
@@ -274,6 +359,169 @@ describe("registerInnerDockview / findFocusedInnerDockview", () => {
     disposeB();
     document.body.removeChild(containerA);
     document.body.removeChild(containerB);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ensureEdgeGroups
+// ---------------------------------------------------------------------------
+
+describe("ensureEdgeGroups", () => {
+  it("adds all three cardinal edge groups when none exist", () => {
+    const api = makeRichApi([]);
+    ensureEdgeGroups(asApi(api));
+    expect(api.addEdgeGroup).toHaveBeenCalledTimes(3);
+    expect(api.addEdgeGroup).toHaveBeenCalledWith("left", {
+      id: EDGE_GROUP_IDS.left,
+      collapsed: true,
+    });
+    expect(api.addEdgeGroup).toHaveBeenCalledWith("right", {
+      id: EDGE_GROUP_IDS.right,
+      collapsed: true,
+    });
+    expect(api.addEdgeGroup).toHaveBeenCalledWith("bottom", {
+      id: EDGE_GROUP_IDS.bottom,
+      collapsed: true,
+    });
+  });
+
+  it("is idempotent — skips edge groups that already exist", () => {
+    // Mimic a restored layout: edge groups already present in api.groups
+    // via their EDGE_GROUP_IDS ids. addEdgeGroup must not be called.
+    const groups = [
+      makeGroup(EDGE_GROUP_IDS.left, []),
+      makeGroup(EDGE_GROUP_IDS.right, []),
+      makeGroup(EDGE_GROUP_IDS.bottom, []),
+    ];
+    const api = makeRichApi(groups);
+    ensureEdgeGroups(asApi(api));
+    expect(api.addEdgeGroup).not.toHaveBeenCalled();
+  });
+
+  it("removes a stale 'top' edge group restored from an older layout", () => {
+    // Older saved layouts may carry a "top" edge group that none of
+    // our layouts want — the helper has to clean it up.
+    const api = makeRichApi([], new Set(["top"]));
+    ensureEdgeGroups(asApi(api));
+    expect(api.removeEdgeGroup).toHaveBeenCalledWith("top");
+  });
+
+  it("does not call removeEdgeGroup when there is no 'top' group", () => {
+    // Skip the cleanup branch entirely when `getEdgeGroup("top")`
+    // returns undefined — the truthy check is the actual guard, not
+    // the try/catch (which is narrow on purpose, see the helper).
+    const api = makeRichApi([]);
+    ensureEdgeGroups(asApi(api));
+    expect(api.removeEdgeGroup).not.toHaveBeenCalled();
+  });
+
+  it("refreshes visibility after adding the edge groups", () => {
+    // The final `refreshEdgeGroupVisibility(api, false)` call should
+    // fire setEdgeGroupVisible(_, false) for each direction since all
+    // newly-added groups start empty. The groups argument is what's
+    // visible to refreshEdgeGroupVisibility — so we seed them.
+    const groups = [
+      makeGroup(EDGE_GROUP_IDS.left, []),
+      makeGroup(EDGE_GROUP_IDS.right, []),
+      makeGroup(EDGE_GROUP_IDS.bottom, []),
+    ];
+    const api = makeRichApi(groups);
+    ensureEdgeGroups(asApi(api));
+    expect(api.setEdgeGroupVisible).toHaveBeenCalledWith("left", false);
+    expect(api.setEdgeGroupVisible).toHaveBeenCalledWith("right", false);
+    expect(api.setEdgeGroupVisible).toHaveBeenCalledWith("bottom", false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// attachEdgeGroupDragVisibility
+// ---------------------------------------------------------------------------
+
+describe("attachEdgeGroupDragVisibility", () => {
+  it("subscribes to the four dockview drag events", () => {
+    const api = makeRichApi([]);
+    const dispose = attachEdgeGroupDragVisibility(asApi(api));
+    expect(api.onWillDragPanel).toHaveBeenCalledTimes(1);
+    expect(api.onWillDragGroup).toHaveBeenCalledTimes(1);
+    expect(api.onDidMovePanel).toHaveBeenCalledTimes(1);
+    expect(api.onDidRemovePanel).toHaveBeenCalledTimes(1);
+    dispose();
+  });
+
+  it("force-shows every edge group when a drag starts (onWillDragPanel)", () => {
+    // Drag-start needs the empty edges visible so the user has a
+    // drop target on each side. After `attach`, `setEdgeGroupVisible`
+    // should be called with `true` for each edge.
+    const groups = [
+      makeGroup(EDGE_GROUP_IDS.left, []),
+      makeGroup(EDGE_GROUP_IDS.right, []),
+      makeGroup(EDGE_GROUP_IDS.bottom, []),
+    ];
+    const api = makeRichApi(groups);
+    const dispose = attachEdgeGroupDragVisibility(asApi(api));
+    api.setEdgeGroupVisible.mockClear(); // ignore the initial refresh
+    api.fireWillDragPanel();
+    expect(api.setEdgeGroupVisible).toHaveBeenCalledWith("left", true);
+    expect(api.setEdgeGroupVisible).toHaveBeenCalledWith("right", true);
+    expect(api.setEdgeGroupVisible).toHaveBeenCalledWith("bottom", true);
+    dispose();
+  });
+
+  it("returns empty edges to hidden when the drag ends (onDidMovePanel)", () => {
+    const groups = [
+      makeGroup(EDGE_GROUP_IDS.left, []), // empty after drag
+      makeGroup(EDGE_GROUP_IDS.right, ["docked"]), // non-empty after drag
+      makeGroup(EDGE_GROUP_IDS.bottom, []),
+    ];
+    const api = makeRichApi(groups);
+    const dispose = attachEdgeGroupDragVisibility(asApi(api));
+    api.fireWillDragPanel(); // force visible
+    api.setEdgeGroupVisible.mockClear();
+    api.fireDidMovePanel(); // drag ended
+    expect(api.setEdgeGroupVisible).toHaveBeenCalledWith("left", false); // empty → hidden
+    expect(api.setEdgeGroupVisible).toHaveBeenCalledWith("right", true); // non-empty → visible
+    expect(api.setEdgeGroupVisible).toHaveBeenCalledWith("bottom", false);
+    dispose();
+  });
+
+  it("treats onDidRemovePanel as a drag-end signal too", () => {
+    // Dropping a panel from one group to another fires onDidRemovePanel
+    // on the source side. Both onDidMovePanel and onDidRemovePanel
+    // should reset the drag-visibility state.
+    const groups = [makeGroup(EDGE_GROUP_IDS.left, [])];
+    const api = makeRichApi(groups);
+    const dispose = attachEdgeGroupDragVisibility(asApi(api));
+    api.fireWillDragPanel();
+    api.setEdgeGroupVisible.mockClear();
+    api.fireDidRemovePanel();
+    expect(api.setEdgeGroupVisible).toHaveBeenCalledWith("left", false);
+    dispose();
+  });
+
+  it("disposer cleans up all four dockview subscriptions", () => {
+    const api = makeRichApi([]);
+    const dispose = attachEdgeGroupDragVisibility(asApi(api));
+    dispose();
+    expect(api.dragPanelDisposed).toHaveBeenCalledTimes(1);
+    expect(api.dragGroupDisposed).toHaveBeenCalledTimes(1);
+    expect(api.movePanelDisposed).toHaveBeenCalledTimes(1);
+    expect(api.removePanelDisposed).toHaveBeenCalledTimes(1);
+  });
+
+  it("disposer detaches the native drop / dragend listeners on document", () => {
+    // The handler also wires `document.addEventListener("drop", …, true)`
+    // and `"dragend"` as the Escape-cancel safety net. After dispose,
+    // firing those events should NOT call setEdgeGroupVisible.
+    const groups = [makeGroup(EDGE_GROUP_IDS.left, [])];
+    const api = makeRichApi(groups);
+    const dispose = attachEdgeGroupDragVisibility(asApi(api));
+    api.fireWillDragPanel(); // mark dragging
+    dispose();
+    api.setEdgeGroupVisible.mockClear();
+    // Dispatch a native drop event — the listener should already be
+    // detached, so this is a no-op.
+    document.dispatchEvent(new Event("drop", { bubbles: true }));
+    expect(api.setEdgeGroupVisible).not.toHaveBeenCalled();
   });
 });
 

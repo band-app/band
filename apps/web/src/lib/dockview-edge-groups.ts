@@ -202,7 +202,11 @@ export function attachEdgeGroupDragVisibility(api: DockviewApi): () => void {
     refresh();
   };
 
-  refresh();
+  // Initial visibility is `ensureEdgeGroups`' responsibility — every
+  // caller in this codebase invokes that helper in `onReady` before
+  // this one, and re-running the refresh here would be a redundant
+  // round of `setEdgeGroupVisible` for each edge. The next `startDrag`
+  // / `endDrag` event fires the refresh as needed.
 
   const d1 = api.onWillDragPanel(startDrag);
   const d2 = api.onWillDragGroup(startDrag);

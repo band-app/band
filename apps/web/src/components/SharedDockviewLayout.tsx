@@ -1128,6 +1128,10 @@ export function SharedDockviewLayout() {
         toggleEdgeGroup(api, "right");
       } else if (key === "j" && !e.shiftKey && !e.altKey && api) {
         // ⌘J → toggle BOTTOM edge. Same focus-aware fallback as ⌘B.
+        // Unlike the ⌥⌘B branch above, this branch uses `key` instead
+        // of `e.code` — there's no Alt variant to disambiguate (⌥⌘J
+        // would produce "∆" in `e.key`, but the `!e.altKey` guard
+        // already excludes that case before the letter check runs).
         e.preventDefault();
         const inner = findFocusedInnerDockview();
         if (inner && toggleEdgeGroup(inner, "bottom")) return;
