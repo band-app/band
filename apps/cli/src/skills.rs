@@ -583,11 +583,11 @@ fn validate_frontmatter(name: &str, template: &str) -> Result<(), String> {
     let block = extract_frontmatter_block(template).ok_or_else(|| {
         format!("skill '{name}': template is missing YAML frontmatter delimited by `---`")
     })?;
-    serde_yaml::from_str::<serde_yaml::Value>(block).map_err(|err| {
-        // serde_yaml's Display format already includes the line/column,
+    serde_yml::from_str::<serde_yml::Value>(block).map_err(|err| {
+        // serde_yml's Display format already includes the line/column,
         // but the block we hand it starts at the line *after* the opening
-        // `---`, so adjust the reported line back to the source file's
-        // numbering by adding 1.
+        // `---` (whether `\n` or `\r\n`), so adjust the reported line
+        // back to the source file's numbering by adding 1.
         let location = err.location();
         let line = location.map(|l| l.line() + 1);
         match line {

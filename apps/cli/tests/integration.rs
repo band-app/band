@@ -3164,7 +3164,7 @@ fn skills_install_emits_yaml_frontmatter_that_parses_strictly() {
             .next()
             .unwrap_or_else(|| panic!("{name}: missing opening `---`"));
 
-        let value: serde_yaml::Value = serde_yaml::from_str(block).unwrap_or_else(|e| {
+        let value: serde_yml::Value = serde_yml::from_str(block).unwrap_or_else(|e| {
             panic!("{name}: SKILL.md frontmatter does not parse as YAML: {e}\nblock:\n{block}")
         });
 
@@ -3175,7 +3175,7 @@ fn skills_install_emits_yaml_frontmatter_that_parses_strictly() {
             .as_mapping()
             .unwrap_or_else(|| panic!("{name}: frontmatter is not a YAML mapping"));
         let arg_hint = mapping
-            .get(serde_yaml::Value::String("argument-hint".to_string()))
+            .get(serde_yml::Value::String("argument-hint".to_string()))
             .unwrap_or_else(|| panic!("{name}: missing argument-hint"));
         assert!(
             arg_hint.is_string(),
