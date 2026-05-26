@@ -85,13 +85,14 @@ function git(cwd: string, args: string[], home: string): string {
   return execFileSync("git", args, { cwd, env: makeGitEnv(home), encoding: "utf-8" });
 }
 
-// `ServerHandle | undefined` (rather than the definite-assignment `!`
-// shorthand) so TypeScript forces the `if (typeof server !== "undefined")`
-// guard in `afterAll`. Same shape as `resources.spec.ts`. Without it, a
-// `startServer` failure in `beforeAll` would surface as a confusing
-// `TypeError: Cannot read properties of undefined (reading 'close')` in
-// the teardown and mask the real boot error.
-let server: ServerHandle | undefined;
+// Definite-assignment shorthand — matches `resources.spec.ts`, the
+// canonical pattern for specs that need to guard `server` in
+// `afterAll`. The `if (server)` check below covers the only path
+// that could leave it unassigned: `startServer` throwing before
+// resolving in `beforeAll`. Without the guard, an unrelated
+// `TypeError: Cannot read properties of undefined (reading 'close')`
+// would mask the real boot failure.
+let server!: ServerHandle;
 let tmpHome: string;
 let repoPath: string;
 let worktreeAPath: string;
@@ -146,7 +147,7 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  if (typeof server !== "undefined") await server.close();
+  if (server) await server.close();
   cleanupTmpHome(tmpHome);
 });
 
@@ -205,7 +206,11 @@ test.describe("MultiWorkspacePanelHost cache eviction (issue #508)", () => {
     // Workspace B (the still-active one) must remain cached — eviction
     // is for *disappeared* workspaces only. Without this counter-anchor
     // a buggy implementation that wipes the entire cache would also
-    // pass the negative assertion above.
-    expect(await workspacePage.cachedPanelEntries(WORKSPACE_B).count()).toBeGreaterThan(0);
+    // pass the negative assertion above. Uses `toBeVisible()` (which
+    // auto-retries) rather than a synchronous `.count()` snapshot so
+    // it doesn't race the asynchronous reconcile effect; the test
+    // only needs to prove *some* cached entry for B survives, not a
+    // particular count.
+    await expect(workspacePage.cachedPanelEntries(WORKSPACE_B).first()).toBeVisible();
   });
 });
