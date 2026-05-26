@@ -13,6 +13,7 @@
  */
 
 import { type Locator, type Page, test } from "@playwright/test";
+import { LABEL_FILTER_KEY, LABEL_LAST_WORKSPACE_KEY } from "@/dashboard";
 
 /** localStorage key prefix used by `SharedDockviewLayout` for per-workspace
  *  state (matches `ACTIVE_STATE_KEY_PREFIX` in the source). */
@@ -100,6 +101,129 @@ export class WorkspacePage {
   async switchWorkspace(workspaceId: string): Promise<void> {
     await test.step(`Switch workspace to ${workspaceId} via sidebar click`, async () => {
       await this.workspaceCard(workspaceId).click();
+    });
+  }
+
+  /** Trigger button for the label filter dropdown in the dashboard
+   *  sidebar toolbar (issue #505). Only rendered when at least one label
+   *  is defined in settings. */
+  labelFilterTrigger(): Locator {
+    return this.page.getByTestId("dashboard__label-filter-trigger");
+  }
+
+  /** Menu item inside the label-filter dropdown. Pass `null` for the
+   *  "All" (no-filter) item, or a label id for a specific label. */
+  labelFilterItem(labelId: string | null): Locator {
+    const key = labelId ?? "all";
+    return this.page.getByTestId(`dashboard__label-filter-item--${key}`);
+  }
+
+  /** Open the label-filter dropdown and click the item for `labelId`.
+   *  `null` selects the "All" item. Mirrors what `setLabelFilter` would
+   *  produce — including the per-label "last workspace" restore added in
+   *  issue #505 — so this is the right path for tests that need the
+   *  full click→restore behaviour.
+   *
+   *  Only the SharedDockviewLayout's DashboardShell is mounted on
+   *  desktop (see `apps/web/src/routes/index.tsx` and the comment in
+   *  `SharedDockviewLayout` § ProjectsPanelComponent), so a single
+   *  trigger / item pair is in the DOM at any time. The Radix
+   *  DropdownMenu portals its content to `document.body` with a fade
+   *  animation on close, so a back-to-back reopen can briefly see the
+   *  previous portal animating out while the new one mounts. Waiting
+   *  for the new portal to be both visible AND stable before clicking
+   *  (via Locator's auto-waits + `state: "visible"`) avoids the
+   *  `element was detached from the DOM` flake. */
+  async selectLabelFilter(labelId: string | null): Promise<void> {
+    const label = labelId ?? "all";
+    await test.step(`Select label filter "${label}" via dropdown`, async () => {
+      await this.labelFilterTrigger().click();
+      const item = this.labelFilterItem(labelId);
+      await item.waitFor({ state: "visible" });
+      await item.click();
+      // Wait for the menu to close before returning so a back-to-back
+      // call doesn't try to interact with the previous portal as it
+      // animates out (Radix DropdownMenu keeps the portal mounted
+      // during the fade-out, which Playwright would detect as
+      // "element was detached from the DOM" mid-click).
+      await item.waitFor({ state: "hidden" });
+    });
+  }
+
+  /** Reset both label-related localStorage entries (active filter +
+   *  per-label "last workspace" map) and navigate to `workspaceId`, so
+   *  tests start from a known-clean slate. Two-step: navigate first to
+   *  land on the origin (localStorage isn't accessible until a same-
+   *  origin page is loaded), then evaluate the clear. Keeps the raw
+   *  `page.evaluate` out of test bodies and centralises the
+   *  storage-key constants in this page object.
+   *
+   *  IMPORTANT: the clear runs AFTER the page mounts, so the React
+   *  tree's in-memory copies of those values (e.g. `useLabelFilter`'s
+   *  state, `lastSeenActiveRef`) still reflect what was in storage at
+   *  mount time. Tests that call this helper should follow up with
+   *  another `goto(...)` (or `reload()`) before exercising label-state
+   *  behaviour, so the React tree re-reads the now-clean storage on
+   *  remount. All in-tree callers already do — every test body opens
+   *  with its own `goto(...)`. */
+  async resetLabelStateAndGoto(workspaceId: string): Promise<void> {
+    await test.step(`Reset label state, navigate to ${workspaceId}`, async () => {
+      await this.goto(workspaceId);
+      await this.page.evaluate(
+        ([filterKey, mapKey]) => {
+          localStorage.removeItem(filterKey);
+          localStorage.removeItem(mapKey);
+        },
+        [LABEL_FILTER_KEY, LABEL_LAST_WORKSPACE_KEY] as const,
+      );
+    });
+  }
+
+  /** Read the persisted per-label "last workspace" map from
+   *  localStorage. Returns an empty object when nothing has been
+   *  recorded yet. */
+  async readLabelLastWorkspaces(): Promise<Record<string, string>> {
+    return await this.page.evaluate((key) => {
+      const raw = localStorage.getItem(key);
+      if (!raw) return {};
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          return parsed as Record<string, string>;
+        }
+      } catch {
+        // Corrupted entry — treat as empty.
+      }
+      return {};
+    }, LABEL_LAST_WORKSPACE_KEY);
+  }
+
+  /** Sidebar project-list root — the keyboard nav anchor in
+   *  `ProjectList.tsx` (a `tabindex=-1` div). `DashboardShell`'s
+   *  keydown handler skips the Cmd+1..9 / Ctrl+1..9 label shortcuts
+   *  when `e.target.tagName` is `INPUT` / `TEXTAREA` / `SELECT` /
+   *  `contentEditable`, so tests that fire the shortcut must route the
+   *  keystroke through a non-editable target. The project list root
+   *  fits the bill — it's both keyboard-focusable and intentionally
+   *  not editable. */
+  projectListRoot(): Locator {
+    return this.page.getByTestId("project-list__root");
+  }
+
+  /** Drive the ⌘1..9 / Ctrl+1..9 label shortcut as a real user keypress.
+   *  Uses `projectListRoot.press(...)` so Playwright moves focus there
+   *  before dispatching the key, bypassing the chat textarea autofocus
+   *  on the workspace route. The keydown bubbles to the window listener
+   *  in `DashboardShell` where the shortcut is wired up. `index` is
+   *  0-based; 0 picks "All" (⌘0), 1..9 pick the Nth label (⌘1..9). */
+  async pressLabelShortcut(index: number): Promise<void> {
+    if (index < 0 || index > 9) {
+      throw new Error(`pressLabelShortcut: index must be 0..9, got ${index}`);
+    }
+    await test.step(`Press Control+${index} (label shortcut)`, async () => {
+      const root = this.projectListRoot();
+      await root.waitFor({ state: "visible" });
+      await root.press(`Control+${index}`);
     });
   }
 

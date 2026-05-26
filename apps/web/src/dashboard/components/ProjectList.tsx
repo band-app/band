@@ -838,6 +838,7 @@ export function ProjectList({ labelFilter }: ProjectListProps) {
       <div
         ref={containerRef}
         tabIndex={-1}
+        data-testid="project-list__root"
         onKeyDown={handleKeyDown}
         onPointerDown={() => {
           keyboardNavRef.current = false;

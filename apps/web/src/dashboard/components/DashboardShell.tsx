@@ -19,6 +19,7 @@ import {
 } from "@band-app/ui";
 import { Check, ChevronsDownUp, FolderPlus, Menu, Plus, Settings, Tag, X } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCapabilities } from "../context";
 import { useAppUpdate } from "../hooks/use-app-update";
 import { useCliSetup } from "../hooks/use-cli-setup";
 import {
@@ -31,6 +32,7 @@ import {
 } from "../hooks/use-collapse-state";
 import { useHooksSetup } from "../hooks/use-hooks-setup";
 import { useLabelFilter } from "../hooks/use-label-filter";
+import { useLabelLastWorkspace } from "../hooks/use-label-last-workspace";
 import { useProjects } from "../hooks/use-projects";
 import { useSettingsQuery } from "../hooks/use-settings-query";
 import {
@@ -38,7 +40,9 @@ import {
   useSetupStatusWatcher,
   useStatusWatcher,
 } from "../hooks/use-status";
+import { toWorkspaceId } from "../lib/workspace-id";
 import { useDashboardStore } from "../stores/index";
+import type { ProjectInfo } from "../types";
 import { AddProjectDialog } from "./AddProjectDialog";
 import { ProjectList } from "./ProjectList";
 import { SettingsPage } from "./SettingsPage";
@@ -85,7 +89,10 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar, hideMenu }: Das
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [showErrorDialog, setShowErrorDialog] = useState(false);
   const [showSettingsDialog, setShowSettingsDialog] = useState(false);
-  const [labelFilter, setLabelFilter] = useLabelFilter();
+  const [labelFilter, persistLabelFilter] = useLabelFilter();
+  const { getLastWorkspace, setLastWorkspace } = useLabelLastWorkspace();
+  const capabilities = useCapabilities();
+  const activeWorkspaceId = useDashboardStore((s) => s.activeWorkspaceId);
   const { state: hooksState, install: installHooks } = useHooksSetup();
   const { state: cliState, install: installCli } = useCliSetup();
   const { state: updateState, install: installUpdate } = useAppUpdate();
@@ -124,6 +131,121 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar, hideMenu }: Das
   const activeLabel = useMemo(
     () => (labelFilter ? labels.find((l) => l.id === labelFilter) : null),
     [labelFilter, labels],
+  );
+
+  // Find the project that owns `workspaceId` in the current project list, or
+  // `undefined` when the workspace no longer exists (deleted / renamed). Kept
+  // as a helper rather than a Map<workspaceId, ProjectInfo> because the
+  // project list churns rarely and the per-call O(projects × worktrees) walk
+  // is dominated by render cost anyway.
+  const findProjectForWorkspace = useCallback(
+    (workspaceId: string): ProjectInfo | undefined =>
+      projects.find((p) =>
+        p.worktrees.some((wt) => toWorkspaceId(p.name, wt.branch) === workspaceId),
+      ),
+    [projects],
+  );
+
+  // Per-label "last workspace" tracking for issue #505. Two write sites
+  // cooperate so the user's selection is captured whether they click a
+  // workspace card (effect below) or switch label without clicking
+  // anything (`setLabelFilter` further down):
+  //
+  //   - The effect records each fresh `activeWorkspaceId` under the
+  //     currently-active label. The `lastSeenActiveRef` guard skips
+  //     reruns triggered by `labelFilter` changing without
+  //     `activeWorkspaceId` changing — i.e. immediately after a label
+  //     switch, before the restore-driven navigation has propagated. If
+  //     we didn't skip, the effect would briefly stamp the *incoming*
+  //     label with the *outgoing* label's workspace and undo the
+  //     restoration we just initiated.
+  //
+  //   - `setLabelFilter` does an imperative save of the outgoing label
+  //     so the user's most recent selection is captured even when they
+  //     never explicitly clicked the workspace card after navigating to
+  //     it (e.g. direct URL / Cmd+R picker / page reload).
+  const lastSeenActiveRef = useRef<string | null>(activeWorkspaceId);
+  useEffect(() => {
+    if (!activeWorkspaceId) {
+      lastSeenActiveRef.current = null;
+      return;
+    }
+    if (!labelFilter) {
+      // ALL has no per-label memory, but we still update the ref so a
+      // subsequent label switch correctly recognises the workspace as
+      // unchanged (and skips the cross-label stamp).
+      lastSeenActiveRef.current = activeWorkspaceId;
+      return;
+    }
+    if (lastSeenActiveRef.current === activeWorkspaceId) return;
+    lastSeenActiveRef.current = activeWorkspaceId;
+    // Only save when the active workspace's project is actually labelled
+    // with the current filter — see the comment block on the
+    // `setLabelFilter` invariants below for the rationale.
+    const project = findProjectForWorkspace(activeWorkspaceId);
+    if (!project || project.label !== labelFilter) return;
+    setLastWorkspace(labelFilter, activeWorkspaceId);
+  }, [labelFilter, activeWorkspaceId, setLastWorkspace, findProjectForWorkspace]);
+
+  // Per-label "last workspace" plumbing for issue #505. The orchestration
+  // lives in `setLabelFilter` below; the helper here keeps the bookkeeping
+  // out of the keyboard / dropdown handlers.
+  //
+  // Invariants enforced by the caller:
+  //   1. Saves only happen when the outgoing label is non-null (ALL has no
+  //      per-label memory) AND the active workspace's project is actually
+  //      labelled with the outgoing label. If the user navigated to a
+  //      workspace under a different label via the Cmd+R picker, we don't
+  //      want to record that workspace as Personal's "last" just because
+  //      the filter happened to be Personal at the time.
+  //   2. Restores only happen when the saved workspace still exists AND its
+  //      project is still labelled with the target label (labels can be
+  //      reassigned at any time). If validation fails we fall through to
+  //      the "no history" branch — current behaviour, i.e. keep the
+  //      previous active workspace, leaving the user to pick one.
+  const setLabelFilter = useCallback(
+    (newLabel: string | null) => {
+      if (newLabel === labelFilter) return;
+
+      // Save the outgoing label's active workspace before mutating state.
+      // Doing this synchronously (rather than via an effect on
+      // labelFilter/activeWorkspaceId) avoids a race where the effect would
+      // fire after the label changed but before the restore-driven
+      // navigation propagated activeWorkspaceId, briefly re-stamping the
+      // incoming label with the outgoing label's workspace.
+      if (labelFilter && activeWorkspaceId) {
+        const project = findProjectForWorkspace(activeWorkspaceId);
+        if (project && project.label === labelFilter) {
+          setLastWorkspace(labelFilter, activeWorkspaceId);
+        }
+      }
+
+      persistLabelFilter(newLabel);
+
+      // ALL is the explicit no-op case (per the issue): keep the user on
+      // whatever workspace they were last viewing. Restoration only applies
+      // when switching to a *specific* label.
+      if (!newLabel) return;
+
+      const target = getLastWorkspace(newLabel);
+      if (!target || target === activeWorkspaceId) return;
+      const targetProject = findProjectForWorkspace(target);
+      if (!targetProject || targetProject.label !== newLabel) return;
+
+      const href = capabilities.getWorkspaceHref?.(target);
+      if (href && capabilities.navigate) {
+        capabilities.navigate(href);
+      }
+    },
+    [
+      labelFilter,
+      activeWorkspaceId,
+      persistLabelFilter,
+      setLastWorkspace,
+      getLastWorkspace,
+      findProjectForWorkspace,
+      capabilities,
+    ],
   );
 
   // The desktop shell's native menu (Cmd+,) and the in-app DesktopTitleBar
@@ -281,6 +403,7 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar, hideMenu }: Das
                   <Button
                     size="sm"
                     variant="ghost"
+                    data-testid="dashboard__label-filter-trigger"
                     className={`min-w-0 text-sm h-7 px-2 gap-1.5 ${labelFilter ? "bg-accent text-accent-foreground" : "text-muted-foreground"}`}
                   >
                     {activeLabel ? (
@@ -300,7 +423,10 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar, hideMenu }: Das
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start">
-                  <DropdownMenuItem onClick={() => setLabelFilter(null)}>
+                  <DropdownMenuItem
+                    data-testid="dashboard__label-filter-item--all"
+                    onClick={() => setLabelFilter(null)}
+                  >
                     <Tag className="size-3.5 shrink-0 mr-2 text-muted-foreground" />
                     <span className="truncate">All</span>
                     {!labelFilter && <Check className="size-3 ml-2 shrink-0" />}
@@ -309,7 +435,11 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar, hideMenu }: Das
                     </span>
                   </DropdownMenuItem>
                   {labels.map((lbl, idx) => (
-                    <DropdownMenuItem key={lbl.id} onClick={() => setLabelFilter(lbl.id)}>
+                    <DropdownMenuItem
+                      key={lbl.id}
+                      data-testid={`dashboard__label-filter-item--${lbl.id}`}
+                      onClick={() => setLabelFilter(lbl.id)}
+                    >
                       <span
                         className="size-2.5 rounded-full shrink-0 mr-2"
                         style={{ backgroundColor: lbl.color }}
