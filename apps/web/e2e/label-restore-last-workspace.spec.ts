@@ -19,9 +19,7 @@
  */
 
 import { expect, test } from "@playwright/test";
-import { toWorkspaceId } from "@/dashboard";
-import { LABEL_FILTER_KEY } from "../src/dashboard/hooks/use-label-filter";
-import { LABEL_LAST_WORKSPACE_KEY } from "../src/dashboard/hooks/use-label-last-workspace";
+import { LABEL_FILTER_KEY, LABEL_LAST_WORKSPACE_KEY, toWorkspaceId } from "@/dashboard";
 import {
   cleanupTmpHome,
   createTmpHome,

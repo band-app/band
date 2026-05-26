@@ -13,7 +13,7 @@
  */
 
 import { type Locator, type Page, test } from "@playwright/test";
-import { LABEL_LAST_WORKSPACE_KEY } from "../../src/dashboard/hooks/use-label-last-workspace";
+import { LABEL_LAST_WORKSPACE_KEY } from "@/dashboard";
 
 /** localStorage key prefix used by `SharedDockviewLayout` for per-workspace
  *  state (matches `ACTIVE_STATE_KEY_PREFIX` in the source). */
