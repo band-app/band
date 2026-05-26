@@ -19,9 +19,16 @@
 import type { ChatEvent } from "./chat-events";
 
 /** Minimal shape of a persisted message we accept — matches
- *  `SessionMessageItem` from `@band-app/coding-agent` but kept local so
- *  this module has no cross-package import. The runtime shape is
- *  identical. */
+ *  `SessionMessageItem` from `@band-app/coding-agent` but kept local
+ *  so this module has no cross-package import.
+ *
+ *  Drift safety: at the only call site (`chat-events.ts::replayPast`),
+ *  `agent.getSessionMessages()` returns `SessionMessageItem[]` and the
+ *  result is fed directly into `jsonlMessageToEvents(msg, ...)`.
+ *  TypeScript structurally checks `SessionMessageItem` → `JsonlMessage`
+ *  there, so if `SessionMessageItem.content` ever gains a new variant
+ *  this local type doesn't handle, the call site fails to compile and
+ *  forces an update here. No extra TODO / runtime check needed. */
 export interface JsonlMessage {
   role: "user" | "assistant";
   id: string;
