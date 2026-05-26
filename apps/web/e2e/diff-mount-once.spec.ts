@@ -110,9 +110,17 @@ test("LazyFileRow keeps the CodeMirror editor mounted across scroll-aways", asyn
   await expect(changes.scroller).toBeVisible();
 
   // Wait for both editors to mount on first paint. With expand-all on
-  // and the spacer being long, the first row's editor mounts immediately
-  // (it intersects the viewport) and the spacer's mounts because its
-  // top edge is inside the 800-px IO rootMargin.
+  // and the 1280×800 viewport: the Changes panel takes the bottom of
+  // the dockview right group, so its scroll container starts roughly
+  // 80–100 px below the viewport top (header + toolbar chrome). The
+  // first row's editor (a.txt, one-line diff ≈ 80 px) mounts
+  // immediately — it intersects the viewport. The spacer's header
+  // button is positioned right under it, so its top edge lands well
+  // inside the 800-px IO rootMargin zone and its editor auto-mounts
+  // on the same paint. If a future layout change pushes the panel
+  // chrome past ~600 px tall, the spacer might no longer auto-mount
+  // and the assertion below would time out — that's the layout
+  // dependency to revisit.
   await expect(changes.cmEditors).toHaveCount(2, { timeout: 15_000 });
 
   // Tag the first file's editor (`a.txt` — alphabetical first per the
