@@ -23,7 +23,7 @@
  *    reload step that activates them.
  */
 
-import { type Locator, type Page, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 
 /** localStorage keys read on first paint by DiffView. */
 const EXPAND_ALL_KEY = "band:diff-expand-all";
@@ -55,6 +55,40 @@ export class ChangesPanelPage {
     this.scroller = page.getByTestId("diff-view__scroller");
     this.cmEditors = page.locator(".cm-editor");
     this.cmScrollers = page.locator(".cm-scroller");
+  }
+
+  /** Factory method that bundles the common "open the Changes panel
+   *  with expand-all on, then optionally switch to split mode" setup
+   *  used by both `diff-horizontal-scroll.spec.ts` and any future spec
+   *  that needs a populated diff view. Owning this on the page object
+   *  (rather than as a module-level helper in the spec file) keeps the
+   *  navigation + locator-await logic inside the page-object layer per
+   *  the `write-integration-test` doctrine.
+   *
+   *  Returns the constructed `ChangesPanelPage` so the caller can
+   *  continue driving the panel via instance methods. */
+  static async openWithFileExpanded(opts: {
+    page: Page;
+    baseUrl: string;
+    token: string;
+    workspaceId: string;
+    filename: string;
+    /** Git status badge expected on the file row (e.g. `"M"`). */
+    fileStatus: string;
+    viewMode: DiffViewMode;
+  }): Promise<ChangesPanelPage> {
+    const changes = new ChangesPanelPage(opts.page, opts.baseUrl, opts.token);
+    await changes.openWorkspace(opts.workspaceId, { expandAll: true });
+    // The file row appears in two places (the file tree sidebar AND
+    // the diff row header button) — wait on the diff row explicitly
+    // since that's the surface the editor hangs off.
+    await expect(changes.fileRowButton(opts.filename, opts.fileStatus)).toBeVisible({
+      timeout: 15_000,
+    });
+    if (opts.viewMode === "split") {
+      await changes.setViewMode("split");
+    }
+    return changes;
   }
 
   /** Locate the diff-row header button for a specific filename + git

@@ -25,7 +25,7 @@
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { expect, type Page, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
 import { git } from "./helpers/git";
 import {
@@ -36,7 +36,7 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
-import { ChangesPanelPage, type DiffViewMode } from "./pages/ChangesPanelPage";
+import { ChangesPanelPage } from "./pages/ChangesPanelPage";
 
 // Wide viewport so `useIsDesktop()` reports true and the shared dockview
 // renders. The default dockview layout splits horizontally between the
@@ -109,31 +109,6 @@ test.afterAll(async () => {
   await server.close();
   cleanupTmpHome(tmpHome);
 });
-
-/**
- * Open the workspace's Changes panel with `expandAll` on (so the file's
- * editor mounts on first paint), then switch to the requested viewMode
- * via its toggle button. We switch via the toggle rather than seeding
- * localStorage because DiffView's `effectiveViewMode` can silently
- * downgrade split → unified on narrow scroll containers — the toggle
- * exposes the same surface a real user has, and the resulting UI
- * state is what we want to assert against.
- */
-async function openChangesWithFileExpanded(
-  page: Page,
-  viewMode: DiffViewMode,
-): Promise<ChangesPanelPage> {
-  const changes = new ChangesPanelPage(page, server.url, TOKEN);
-  await changes.openWorkspace(workspaceId, { expandAll: true });
-  // The file row appears in two places (the file tree sidebar AND the
-  // diff row header button) — wait for the diff row button explicitly
-  // since that's the surface the editor hangs off.
-  await expect(changes.fileRowButton(FILE_PATH, "M")).toBeVisible({ timeout: 15_000 });
-  if (viewMode === "split") {
-    await changes.setViewMode("split");
-  }
-  return changes;
-}
 
 /**
  * Assert horizontal scrolling works.
@@ -216,14 +191,30 @@ async function assertScrollerHorizontallyScrolls(changes: ChangesPanelPage): Pro
 }
 
 test("Changes view scrolls horizontally (unified mode)", async ({ page }) => {
-  const changes = await openChangesWithFileExpanded(page, "unified");
+  const changes = await ChangesPanelPage.openWithFileExpanded({
+    page,
+    baseUrl: server.url,
+    token: TOKEN,
+    workspaceId,
+    filename: FILE_PATH,
+    fileStatus: "M",
+    viewMode: "unified",
+  });
   // Unified mode renders one `.cm-scroller` per visible expanded file.
   await expect(changes.cmScrollers).toHaveCount(1, { timeout: 15_000 });
   await assertScrollerHorizontallyScrolls(changes);
 });
 
 test("Changes view scrolls horizontally (split mode)", async ({ page }) => {
-  const changes = await openChangesWithFileExpanded(page, "split");
+  const changes = await ChangesPanelPage.openWithFileExpanded({
+    page,
+    baseUrl: server.url,
+    token: TOKEN,
+    workspaceId,
+    filename: FILE_PATH,
+    fileStatus: "M",
+    viewMode: "split",
+  });
   // Split mode (MergeView) renders TWO scrollers per file — one for
   // the "before" side and one for the "after" side. The fix has to
   // apply to both since both editors go through
