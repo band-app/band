@@ -110,9 +110,12 @@ test.afterAll(async () => {
 // Clear the per-test state we care about — the label filter and the
 // "last workspace" map both live in localStorage. The page hasn't
 // navigated yet, so land on a workspace first (any will do) to get
-// access to localStorage in the right origin.
+// access to localStorage in the right origin. Routed through
+// `WorkspacePage.goto` so URL construction stays inside the page
+// object per the integration-test doctrine.
 test.beforeEach(async ({ page }) => {
-  await page.goto(`${server.url}/workspace/${encodeURIComponent(WS_PERSONAL_1)}?token=${TOKEN}`);
+  const workspacePage = new WorkspacePage(page, server.url, TOKEN);
+  await workspacePage.goto(WS_PERSONAL_1);
   await page.evaluate(
     ([filterKey, mapKey]) => {
       localStorage.removeItem(filterKey);

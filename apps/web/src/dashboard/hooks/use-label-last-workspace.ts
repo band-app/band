@@ -44,10 +44,16 @@ function write(value: Record<string, string>): void {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(LABEL_LAST_WORKSPACE_KEY, JSON.stringify(value));
+    // Only dispatch on a successful write. If `setItem` throws (quota
+    // exceeded, private-mode storage disabled, etc.) the on-disk value
+    // is unchanged, so notifying other consumers would make them
+    // `read()` the stale value and overwrite their in-memory map —
+    // a split-brain between this caller's React state and everyone
+    // else's read of localStorage.
+    window.dispatchEvent(new CustomEvent(SYNC_EVENT));
   } catch {
-    // localStorage full or unavailable — ignore.
+    // localStorage full or unavailable — ignore, and skip the dispatch.
   }
-  window.dispatchEvent(new CustomEvent(SYNC_EVENT));
 }
 
 export interface UseLabelLastWorkspaceReturn {

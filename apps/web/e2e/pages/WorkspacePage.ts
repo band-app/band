@@ -137,17 +137,15 @@ export class WorkspacePage {
   async selectLabelFilter(labelId: string | null): Promise<void> {
     const label = labelId ?? "all";
     await test.step(`Select label filter "${label}" via dropdown`, async () => {
-      // Wait until the previous portal (if any) has finished its fade-out
-      // before opening a new one. The trigger is always in the DOM, so
-      // we anchor on the item we expect to disappear after a previous
-      // selection.
-      await this.labelFilterItem(labelId).waitFor({ state: "hidden" });
       await this.labelFilterTrigger().click();
       const item = this.labelFilterItem(labelId);
       await item.waitFor({ state: "visible" });
       await item.click();
-      // Wait for the menu to close so the next call can detect its
-      // own "previous portal gone" state cleanly.
+      // Wait for the menu to close before returning so a back-to-back
+      // call doesn't try to interact with the previous portal as it
+      // animates out (Radix DropdownMenu keeps the portal mounted
+      // during the fade-out, which Playwright would detect as
+      // "element was detached from the DOM" mid-click).
       await item.waitFor({ state: "hidden" });
     });
   }
