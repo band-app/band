@@ -14,11 +14,11 @@
  * the no-paint path.
  */
 
-import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
+import { git } from "./helpers/git";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -63,18 +63,6 @@ const MARKDOWN_CONTENT = [
 let server: ServerHandle;
 let tmpHome: string;
 let workspaceId: string;
-
-const gitEnv = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "Test",
-  GIT_AUTHOR_EMAIL: "test@test.com",
-  GIT_COMMITTER_NAME: "Test",
-  GIT_COMMITTER_EMAIL: "test@test.com",
-};
-
-function git(cwd: string, args: string[]): void {
-  execFileSync("git", args, { cwd, env: gitEnv });
-}
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();

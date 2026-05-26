@@ -93,6 +93,21 @@ const UNCOMMITTED_VALUE = "__uncommitted__";
 
 const EXPAND_ALL_KEY = "band:diff-expand-all";
 
+/**
+ * Soft cap on how many editors stay alive per workspace under the
+ * mount-once policy in `LazyFileRow`. Sized so a typical reviewer
+ * pays for what they've actually visited (10–30 files in a normal
+ * PR) without growing unbounded on a 200-file refactor — the (cap+1)th
+ * distinct file scrolled into view evicts the LRU one. The cap is
+ * intentionally generous: each MergeView is on the order of hundreds
+ * of KB of JS state, so 50 instances is well inside the memory budget
+ * of a modern dashboard tab, and the cost of evicting (a re-mount +
+ * re-paint on scroll-back) is what we're spending the headroom to
+ * avoid in the common case. Hoisted to module scope so the tuning is
+ * discoverable without reading the component internals.
+ */
+const MAX_MOUNTED_EDITORS = 50;
+
 function getStoredExpandAll(): boolean {
   try {
     return localStorage.getItem(EXPAND_ALL_KEY) === "true";
@@ -627,6 +642,29 @@ interface LazyFileRowProps {
    * CodeMirror editors the user can't even see.
    */
   scrollContainerEl: HTMLDivElement | null;
+  /**
+   * Parent-owned gate on whether this row's CodeMirror editor should be
+   * mounted right now. True means the parent's mount-once LRU is keeping
+   * this filename alive — combined with the row's local `everMounted`
+   * flag, this is what controls whether `<DiffFileContent>` renders or
+   * a placeholder takes its place.
+   *
+   * False can happen in two situations:
+   *  - The row hasn't been scrolled into view yet (so the parent's LRU
+   *    has no entry for it). The row mounts on first IO intersect.
+   *  - The parent's LRU evicted this filename (cap exceeded, or diff
+   *    target / summary turnover cleared the set). The row tears its
+   *    editor down via DiffFileContent's cleanup and reverts to the
+   *    placeholder; a subsequent scroll-into-view re-adds it.
+   */
+  isMountedAllowed: boolean;
+  /**
+   * Called by this row on every IntersectionObserver `isIntersecting`
+   * fire — both the initial cross-into-zone and subsequent re-entries
+   * after a scroll-away. Bumps the parent's LRU recency and ensures the
+   * filename is in `mountedFiles` (evicting another file if needed).
+   */
+  onRowVisible: (filename: string) => void;
   onToggle: (filename: string) => void;
   onLoadMoreContext: (filename: string) => void;
   onShowFullFile: (filename: string) => void;
@@ -649,6 +687,8 @@ function LazyFileRow({
   isOpen,
   isActive,
   scrollContainerEl,
+  isMountedAllowed,
+  onRowVisible,
   onToggle,
   onLoadMoreContext,
   onShowFullFile,
@@ -668,23 +708,46 @@ function LazyFileRow({
   // unmount/remount cycles (scroll, dockview tab switch) produce zero
   // layout shift after the first paint.
   const diffBodyRef = useRef<HTMLDivElement>(null);
-  // Whether this row's CodeMirror editor should be mounted right now.
-  // Driven by an IntersectionObserver scoped to the scroll container: we
-  // mount when the row is within `rootMargin` of the viewport (so editors
-  // are ready by the time the user scrolls to them), and unmount once it
-  // leaves that zone so a workspace with 100+ expanded diffs only ever
-  // pays for the handful of editors actually near the screen.
-  const [shouldMount, setShouldMount] = useState(false);
+  // Whether this row's CodeMirror editor has *ever* been mounted in its
+  // current open-state lifetime. Flips true the first time the
+  // IntersectionObserver reports the row inside the rootMargin zone, and
+  // — unlike the pre-mount-once `shouldMount` it replaces — does NOT flip
+  // back to false when the row scrolls out of the zone. We hold the
+  // editor alive across scroll-aways so a return to the same row is
+  // instant (no `loadLanguage` re-await, no MergeView re-construction).
+  //
+  // The render gate is `shouldRender = everMounted && isMountedAllowed`,
+  // so these two flags drive different unmount paths:
+  //   - `isMountedAllowed = false` (parent LRU evicts this filename):
+  //     `shouldRender` flips false, `DiffFileContent` unmounts and tears
+  //     down the editor — but `everMounted` stays true. A future re-add
+  //     to the LRU (parent calls `handleRowVisible` again, typically
+  //     after the next IO intersect) restores `isMountedAllowed = true`
+  //     and the editor remounts. This is the cap-driven recycle path.
+  //   - `everMounted = false` happens in only two situations:
+  //       1. The user collapses the row (`isOpen = false`) — the
+  //          `useEffect` below resets `everMounted` so the next expand
+  //          starts fresh.
+  //       2. The row's React component itself unmounts (diff target
+  //          change drops the row from the `filenames` list, workspace
+  //          tab close, etc.) — local state is gone with the component.
+  const [everMounted, setEverMounted] = useState(false);
+  // Whether the editor renders right now. Folds the row's own
+  // `everMounted` with the parent's LRU gate so eviction (or a never-
+  // visited row) shows the placeholder, while a visited-but-currently-
+  // off-screen row keeps its CodeMirror alive at its natural height —
+  // the whole point of mount-once.
+  const shouldRender = everMounted && isMountedAllowed;
   // Tracks whether the CodeMirror editor has finished its first paint.
-  // Distinct from `shouldMount`: between the moment the wrapper renders
-  // (shouldMount=true → placeholder gone) and the moment CodeMirror's
+  // Distinct from `shouldRender`: between the moment the wrapper renders
+  // (shouldRender=true → placeholder gone) and the moment CodeMirror's
   // async setup finishes (await loadLanguage + new MergeView + first
   // layout pass), the wrapper would otherwise be auto-height and
   // collapse to the "Show full file" bar (~30px), pushing rows below it
   // upward. Once the editor reports it has views, we drop the
   // placeholder-height hold on the wrapper and let the editor's natural
   // height drive layout. Re-armed on every unmount so a remount in the
-  // same row (scroll-away/back, viewMode change) still benefits.
+  // same row (LRU eviction → return-trip, viewMode change) still benefits.
   const [editorRendered, setEditorRendered] = useState(false);
   // Pending raf for the editorRendered transition. Held in a ref so the
   // cleanup effect can cancel it on unmount, avoiding a setState into a
@@ -700,9 +763,22 @@ function LazyFileRow({
     };
   }, []);
 
+  // Hold a ref to the latest `onRowVisible` so the IO callback always
+  // hits the parent's current closure even though the effect below is
+  // only keyed on stable inputs (the prop's identity is unstable
+  // because it's bound to a `useCallback` whose own deps may change).
+  const onRowVisibleRef = useRef(onRowVisible);
+  onRowVisibleRef.current = onRowVisible;
+
   useEffect(() => {
     if (!isOpen) {
-      setShouldMount(false);
+      // Collapsing the row resets the mount-once flag so the next
+      // expansion starts fresh — the editor is torn down via
+      // DiffFileContent's cleanup, and a future expand-and-scroll-into-
+      // view path re-mounts cleanly. (The parent's LRU entry for this
+      // filename is left in place; the row simply won't render the
+      // editor while `isOpen` is false.)
+      setEverMounted(false);
       return;
     }
     const el = containerRef.current;
@@ -732,7 +808,20 @@ function LazyFileRow({
         // of flipping everything to unmounted.
         const root = entry.rootBounds;
         if (root && root.width === 0 && root.height === 0) return;
-        setShouldMount(entry.isIntersecting);
+        if (entry.isIntersecting) {
+          // Mount-once: flag this row as "ever mounted" so the editor
+          // stays alive across subsequent scroll-aways. The parent is
+          // the source of truth for whether the editor is *actually*
+          // allowed to render (via `isMountedAllowed`); the IO fire here
+          // also signals "user is paying attention" so the parent's LRU
+          // can keep this filename anchored as recent.
+          setEverMounted(true);
+          onRowVisibleRef.current(filename);
+        }
+        // Crucially, the `false` branch from `entry.isIntersecting` does
+        // NOT flip `everMounted` back to false. That's the entire point
+        // of the change — scrolling past should leave the editor mounted
+        // so the return trip is instant.
       },
       {
         root: scrollContainerEl,
@@ -745,10 +834,10 @@ function LazyFileRow({
     );
     observer.observe(el);
     return () => observer.disconnect();
-  }, [isOpen, scrollContainerEl]);
+  }, [isOpen, scrollContainerEl, filename]);
 
   // Measure the rendered diff body whenever CodeMirror is mounted, and
-  // forward the height to the parent. We only observe while `shouldMount`
+  // forward the height to the parent. We only observe while `shouldRender`
   // is true AND the editor has actually painted (`editorRendered`),
   // because:
   //   - The placeholder branch deliberately renders the cached height —
@@ -766,7 +855,7 @@ function LazyFileRow({
   // frames). Without this, each fire would dispatch a setState in the
   // parent and trigger a re-render of every row in the list.
   useEffect(() => {
-    if (!shouldMount || !editorRendered || !onMeasureHeight) return;
+    if (!shouldRender || !editorRendered || !onMeasureHeight) return;
     const el = diffBodyRef.current;
     if (!el) return;
     if (typeof ResizeObserver === "undefined") return;
@@ -795,7 +884,7 @@ function LazyFileRow({
       if (frame != null) cancelAnimationFrame(frame);
       observer.disconnect();
     };
-  }, [shouldMount, editorRendered, filename, onMeasureHeight]);
+  }, [shouldRender, editorRendered, filename, onMeasureHeight]);
 
   const handleEditorViews = useCallback(
     (views: EditorView[]) => {
@@ -837,11 +926,11 @@ function LazyFileRow({
   // would run the previous render's cleanup AND the new body, hitting
   // the parent twice on every collapse / mount-toggle.
   useEffect(() => {
-    if (!isOpen || !shouldMount) return;
+    if (!isOpen || !shouldRender) return;
     return () => {
       onEditorViews?.(filename, []);
     };
-  }, [isOpen, shouldMount, filename, onEditorViews]);
+  }, [isOpen, shouldRender, filename, onEditorViews]);
 
   const toggle = useCallback(() => {
     onToggle(filename);
@@ -883,6 +972,7 @@ function LazyFileRow({
       <button
         type="button"
         onClick={toggle}
+        data-testid="diff-view__file-row-toggle"
         className="sticky top-0 z-10 flex w-full items-center gap-2 bg-muted px-4 py-2.5 text-left text-sm hover:bg-accent"
       >
         <span
@@ -987,26 +1077,39 @@ function LazyFileRow({
         <div className="border-t border-border/20 bg-muted/30">
           {diffError && <div className="px-4 py-4 text-sm text-destructive">{diffError}</div>}
           {diff !== null &&
-            (shouldMount ? (
+            (shouldRender ? (
               // Wrapper is observed by the ResizeObserver in the effect
               // above. Its rendered height — "Show full file" bar plus the
               // CodeMirror editor — is reported back as
               // `measuredHeight`, then reused verbatim as the placeholder
-              // height on the next unmount cycle.
+              // height on the next unmount cycle (a never-visited row or
+              // an LRU-evicted one).
               //
               // The `minHeight` hold prevents a layout shift during the
-              // window between (a) shouldMount flipping to true and (b)
-              // the editor's async `setup` finishing (loadLanguage await
-              // + new MergeView() + first paint). Without it the wrapper
-              // is empty-auto-height for that window, collapsing the row
-              // to the "Show full file" bar (~30px) and pushing every
-              // row below it upward; when the editor paints they snap
-              // back down. We pin the wrapper to the cached/estimated
-              // height (the same value the placeholder uses) until
-              // `editorRendered` flips, then let the editor's natural
-              // height take over. The ResizeObserver only attaches once
-              // `editorRendered` is true (see deps above), so the held
-              // value never bleeds into the measuredHeight cache.
+              // window between (a) `shouldRender` flipping to true and
+              // (b) the editor's async `setup` finishing (loadLanguage
+              // await + new MergeView() + first paint). Without it the
+              // wrapper is empty-auto-height for that window, collapsing
+              // the row to the "Show full file" bar (~30px) and pushing
+              // every row below it upward; when the editor paints they
+              // snap back down. We pin the wrapper to the
+              // cached/estimated height (the same value the placeholder
+              // uses) until `editorRendered` flips, then let the
+              // editor's natural height take over. The ResizeObserver
+              // only attaches once `editorRendered` is true (see deps
+              // above), so the held value never bleeds into the
+              // measuredHeight cache.
+              //
+              // Mount-once: once `shouldRender` flips true, it stays
+              // true across scroll-aways. The editor's natural height
+              // remains in the layout — the row stays the same size
+              // whether the user is currently looking at it or
+              // scrolled past — so there's no scroll-shift trade-off
+              // to manage. The browser handles culling offscreen tiles
+              // cheaply; the only thing that brings `shouldRender`
+              // back to false is collapse / LRU eviction / target
+              // change, all of which deliberately tear the editor
+              // down.
               <div
                 ref={diffBodyRef}
                 style={editorRendered ? undefined : { minHeight: placeholderHeight }}
@@ -1033,10 +1136,12 @@ function LazyFileRow({
             ) : (
               // Placeholder occupying the SAME pixel height the CodeMirror
               // editor would render at, so the row's overall size doesn't
-              // change when the observer mounts/unmounts the editor. Without
-              // this, scrolling past a row would collapse it back to header
-              // size and push everything below upward — visually identical
-              // to a layout shift, even though no content actually moved.
+              // change when LRU eviction tears the editor down (or while
+              // a never-visited row waits for its first IO intersect).
+              // Without this, switching the body between editor and
+              // placeholder would push everything below upward —
+              // visually identical to a layout shift, even though no
+              // content actually moved.
               <div aria-hidden style={{ height: placeholderHeight }} />
             ))}
         </div>
@@ -1054,13 +1159,21 @@ function LazyFileRow({
  * traversed in `filenames` order so the match counter ("3 of 17") is
  * stable across navigations.
  *
- * KNOWN LIMITATION (introduced by virtualization, issue #489): only mounted
- * rows contribute matches. A file that's marked "expanded" but scrolled
- * far enough offscreen to be virtualized away has no live `EditorView`,
- * so its diff isn't searched until the user scrolls it back into view.
- * This is a deliberate trade-off — the alternative was keeping dozens of
- * `MergeView` instances alive at once, which made scrolling unusably
- * janky on large workspaces.
+ * Search coverage caveat (issue #489): only files whose `EditorView` is
+ * live at search time contribute matches. The "mount-once + LRU cap"
+ * policy in `DiffView` keeps any file the user has already scrolled into
+ * view alive for the rest of the workspace session (up to
+ * MAX_MOUNTED_EDITORS), so the practical impact is narrow:
+ *  - Files the user has never scrolled past contribute nothing. Their
+ *    placeholder is in the DOM but the editor isn't mounted.
+ *  - Files evicted by the LRU cap (only possible on workspaces with
+ *    >50 distinct visited files in one session) drop out until the
+ *    user scrolls back to them.
+ * In both cases the fix is the same — scroll the row into view, which
+ * (re-)mounts its editor and the next match-count refresh picks it up.
+ * The trade-off rejected here was "mount everything upfront", which
+ * blew out scroll perf on large workspaces; see the rationale comment
+ * on the `mountedFiles` / `MAX_MOUNTED_EDITORS` block in DiffView.
  */
 function collectAllMatches(
   editorViewsMap: Map<string, EditorView[]>,
@@ -1136,9 +1249,11 @@ export function DiffView({
   const diffCacheRef = useRef<Map<string, FileDiffCacheEntry>>(new Map());
   diffCacheRef.current = diffCache;
   // Tracks which files are currently expanded. State (not just a ref) because
-  // it drives `isOpen` on each LazyFileRow — virtualization unmounts and
-  // remounts rows as they scroll in/out of view, so this state has to live
-  // here in the parent for the open/closed status to survive the round trip.
+  // it drives `isOpen` on each LazyFileRow — the mount-once policy may
+  // unmount and remount a row's CodeMirror editor (LRU eviction, target
+  // change), and the per-row React component itself does unmount when the
+  // workspace switches into the LRU's evicted slot in MultiWorkspacePanelHost,
+  // so this state lives in the parent to survive both round trips.
   const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
   // Ref mirror so callbacks (fetchFileDiff, fetchSummary, expandAll toggle)
   // can read the latest set without depending on the state. The fetch effect
@@ -1146,6 +1261,70 @@ export function DiffView({
   // set to re-request diffs for files that should still be open.
   const expandedFilesRef = useRef<Set<string>>(expandedFiles);
   expandedFilesRef.current = expandedFiles;
+  // ---------------------------------------------------------------------------
+  // Mount-once + LRU cap for CodeMirror editors
+  // ---------------------------------------------------------------------------
+  // Files whose CodeMirror editor should stay mounted right now. Pre-mount,
+  // a filename isn't here at all — the IntersectionObserver in `LazyFileRow`
+  // signals "I just entered the viewport" via `handleRowVisible`, which adds
+  // the filename. The row then mounts its editor and keeps it mounted across
+  // subsequent scroll-aways: only an explicit eviction (LRU cap exceeded, file
+  // collapsed, or summary turnover) flips the filename back out, which is what
+  // the row's `isMountedAllowed` prop reads. State (not just a ref) because
+  // toggling `isMountedAllowed` for any single row has to trigger that row's
+  // re-render — the eviction path uses setState to fan out to React.
+  const [mountedFiles, setMountedFiles] = useState<Set<string>>(() => new Set());
+  // Recency map for LRU ordering. Updated on every IO entry (not just first
+  // mount) so a row the user scrolls past and comes back to gets re-anchored
+  // as "recent" — keeping the LRU semantics aligned with what the user is
+  // actually paying attention to, not what they happened to mount first.
+  // A monotonic counter beats `Date.now()` because the counter never repeats
+  // even when two rows enter the viewport within the same millisecond.
+  const mountRecencyRef = useRef<Map<string, number>>(new Map());
+  const recencyCounterRef = useRef<number>(0);
+  // Called by `LazyFileRow` on every IntersectionObserver `isIntersecting`
+  // event. Bumps the recency counter for `filename`, adds it to
+  // `mountedFiles` if it's not already in, and evicts the LRU member when
+  // the set exceeds `MAX_MOUNTED_EDITORS`. Eviction is via setState so the
+  // evicted row's `isMountedAllowed` prop flips false and that row tears
+  // down its editor (the standard cleanup path — same as the
+  // pre-mount-once code).
+  const handleRowVisible = useCallback((filename: string) => {
+    recencyCounterRef.current += 1;
+    mountRecencyRef.current.set(filename, recencyCounterRef.current);
+    setMountedFiles((prev) => {
+      // Short-circuit when the filename is already tracked AND the set
+      // is at or under the cap — there's nothing for the updater to do
+      // (recency was already bumped above, and no eviction is needed
+      // because no new entry is being added). The `<=` is deliberate:
+      // when `prev.size === MAX_MOUNTED_EDITORS` and `filename` is
+      // already in `prev`, this branch correctly avoids reallocating
+      // the Set just to re-add an existing key.
+      if (prev.has(filename) && prev.size <= MAX_MOUNTED_EDITORS) return prev;
+      const next = new Set(prev);
+      next.add(filename);
+      if (next.size > MAX_MOUNTED_EDITORS) {
+        // Find the LRU entry currently in the set and drop it. Pulling
+        // from `mountRecencyRef` (rather than tracking insertion order on
+        // the Set itself) lets us measure recency against IntersectionObserver
+        // fires — the most useful proxy for "user is paying attention" —
+        // rather than "first time we ever saw this file". A file the user
+        // hasn't looked at in a while is the right one to evict, even if
+        // it was mounted before any of the currently-in-view rows.
+        let oldestFilename: string | null = null;
+        let oldestRecency = Number.POSITIVE_INFINITY;
+        for (const candidate of next) {
+          const r = mountRecencyRef.current.get(candidate) ?? 0;
+          if (r < oldestRecency) {
+            oldestRecency = r;
+            oldestFilename = candidate;
+          }
+        }
+        if (oldestFilename !== null) next.delete(oldestFilename);
+      }
+      return next;
+    });
+  }, []);
   // Tracks the filename set we last saw, so the "auto-expand new entries
   // when expand-all is on" effect (declared further down) can detect
   // which filenames are genuinely new vs carried over. Declared up here
@@ -1823,6 +2002,13 @@ export function DiffView({
     // Clear diff cache when this effect re-runs (e.g. diffMode change)
     setDiffCache(new Map());
     setExpandedFiles(new Set());
+    // Reset the mount-once LRU too — the filenames in the new diff target
+    // are not the same set of files (and even where they are, their diff
+    // content has changed), so any live editor for the previous target is
+    // stale. Letting the row unmount via `isMountedAllowed=false` is what
+    // triggers `DiffFileContent`'s cleanup and frees the MergeView.
+    setMountedFiles(new Set());
+    mountRecencyRef.current.clear();
     // Reset the "previously-seen filenames" record too — otherwise after a
     // ref switch (diffMode / compareBranch), any filename that exists in
     // both the old AND new targets (e.g. src/index.ts modified on both
@@ -2159,6 +2345,31 @@ export function DiffView({
       if (shouldDispatchFetch(diffCacheRef.current.get(n))) fetchFileDiff(n);
     }
   }, [filenames, expandAll, fetchFileDiff]);
+
+  // Drop mount-once LRU entries whose filename no longer appears in the
+  // summary (e.g. user reverted a file, or branch advanced past the
+  // change). The row that owned the editor unmounts anyway — its
+  // `key={filename}` is gone from the list — so the editor itself is
+  // already destroyed via DiffFileContent's cleanup; this prune just
+  // keeps the `mountedFiles` Set and `mountRecencyRef` Map from growing
+  // monotonically across summary refreshes.
+  useEffect(() => {
+    const live = new Set(filenames);
+    setMountedFiles((prev) => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const name of prev) {
+        if (!live.has(name)) {
+          next.delete(name);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+    for (const name of Array.from(mountRecencyRef.current.keys())) {
+      if (!live.has(name)) mountRecencyRef.current.delete(name);
+    }
+  }, [filenames]);
 
   // Jump-to-file from ChangesFileTree.
   //
@@ -2652,14 +2863,22 @@ export function DiffView({
           </div>
         )}
         {hasChanges && (
-          <div ref={setScrollContainerNode} className="min-h-0 flex-1 overflow-y-auto">
+          <div
+            ref={setScrollContainerNode}
+            data-testid="diff-view__scroller"
+            className="min-h-0 flex-1 overflow-y-auto"
+          >
             {/* Every row is rendered as a lightweight wrapper card; the
                 expensive CodeMirror editor inside each one is gated by a
-                per-row IntersectionObserver (see LazyFileRow). That keeps
-                the DOM structure simple — native scroll, sticky headers,
-                scrollIntoView all just work — while still capping the
-                number of live editors to whatever fits in the viewport
-                plus a small overscan zone. See issue #489. */}
+                per-row IntersectionObserver (see LazyFileRow). Mount
+                policy is "lazy on first scroll-into-view, then sticky
+                until LRU eviction": rows the user has never scrolled
+                near show only a placeholder, rows the user has visited
+                stay mounted across subsequent scroll-aways so a return
+                trip is instant, and the parent's LRU cap
+                (`MAX_MOUNTED_EDITORS`) bounds memory growth on
+                workspaces with hundreds of changed files. See issue
+                #489. */}
             <div className="flex flex-col gap-3 p-3">
               {filenames.map((filename, index) => {
                 const isLast = index === filenames.length - 1;
@@ -2673,6 +2892,8 @@ export function DiffView({
                     isOpen={expandedFiles.has(filename)}
                     isActive={activeFile === filename}
                     scrollContainerEl={scrollContainerEl}
+                    isMountedAllowed={mountedFiles.has(filename)}
+                    onRowVisible={handleRowVisible}
                     onToggle={handleToggleFile}
                     onLoadMoreContext={handleLoadMoreContext}
                     onShowFullFile={handleShowFullFile}

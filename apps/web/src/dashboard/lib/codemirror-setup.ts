@@ -175,17 +175,31 @@ export function baseViewerExtensions(
     rootLightStyles.height = "100%";
   }
   // Natural-height callers need `.cm-scroller` to flow with its content
-  // instead of becoming a fixed-height scroll container. Per CSS Overflow
-  // L3 spec, mixing `visible` with a non-`visible`/`clip` value on the
-  // orthogonal axis (e.g. `overflowX: auto, overflowY: visible`) makes
-  // the `visible` compute as `auto` in every browser — silently
-  // re-introducing the fixed-height scroller that breaks our parent's
-  // auto-height chain. So both axes must be `visible`. Long lines fall
-  // back to the existing `overflow-clip` on `LazyFileRow`'s root, which
-  // is the same horizontal-clipping behaviour the codebase had before
-  // this PR (no regression).
+  // *vertically* (no fixed scrolling container) but still let long lines
+  // scroll *horizontally* — otherwise minified JS, generated SQL, or any
+  // unwrapped long line in a diff is silently clipped by `overflow-clip`
+  // on `LazyFileRow`'s root and the user can't reach it (issue: Changes
+  // view doesn't scroll horizontally).
+  //
+  // Only `overflowX: auto` is authored explicitly. `overflow-y` defaults
+  // to `visible`, which per CSS Overflow L3 resolves to `auto` whenever
+  // the orthogonal axis is non-`visible` — so the *computed* style is
+  // `overflowX: auto, overflowY: auto` regardless. Authoring it as
+  // `visible` would diverge from the computed value and become a
+  // footgun the next reader has to reason past; omitting it lets the
+  // browser do the resolution and the object literal matches reality.
+  //
+  // The load-bearing invariant is `height: auto`. What actually
+  // prevents PR #501's collapse-to-0 bug from coming back is this
+  // explicit override of CodeMirror's base theme `.cm-scroller {
+  // height: 100% }`: the moment the scroller becomes a scroll
+  // container (overflowX != visible), that percentage resolves to 0
+  // against an auto-height `.cm-editor` parent. `height: auto` breaks
+  // the percentage chain so the scroller sizes to its content — no
+  // vertical scrollbar ever appears (content fits exactly), while
+  // horizontal still scrolls when a line is wider than the viewport.
   const scrollerStyles: Record<string, string> = naturalHeight
-    ? { overflow: "visible" }
+    ? { overflowX: "auto", height: "auto" }
     : { overflow: "auto" };
 
   return [
