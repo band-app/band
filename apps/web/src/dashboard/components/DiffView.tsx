@@ -1287,6 +1287,13 @@ export function DiffView({
     recencyCounterRef.current += 1;
     mountRecencyRef.current.set(filename, recencyCounterRef.current);
     setMountedFiles((prev) => {
+      // Short-circuit when the filename is already tracked AND the set
+      // is at or under the cap — there's nothing for the updater to do
+      // (recency was already bumped above, and no eviction is needed
+      // because no new entry is being added). The `<=` is deliberate:
+      // when `prev.size === MAX_MOUNTED_EDITORS` and `filename` is
+      // already in `prev`, this branch correctly avoids reallocating
+      // the Set just to re-add an existing key.
       if (prev.has(filename) && prev.size <= MAX_MOUNTED_EDITORS) return prev;
       const next = new Set(prev);
       next.add(filename);
