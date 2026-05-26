@@ -121,7 +121,12 @@ test("LazyFileRow keeps the CodeMirror editor mounted across scroll-aways", asyn
   // chrome past ~600 px tall, the spacer might no longer auto-mount
   // and the assertion below would time out — that's the layout
   // dependency to revisit.
-  await expect(changes.cmEditors).toHaveCount(2, { timeout: 15_000 });
+  await expect
+    .poll(async () => await changes.mountedEditorCount(), {
+      message: "both file rows should have mounted editors on first paint",
+      timeout: 15_000,
+    })
+    .toBe(2);
 
   // Tag the first file's editor (`a.txt` — alphabetical first per the
   // tree flatten order) with a stable marker so we can verify DOM
@@ -171,5 +176,5 @@ test("LazyFileRow keeps the CodeMirror editor mounted across scroll-aways", asyn
   // Sanity: only two editors are mounted (one per file), so the LRU
   // cap is nowhere near triggered. This is a defensive check that
   // the test isn't accidentally exercising an eviction code path.
-  await expect(changes.cmEditors).toHaveCount(2);
+  expect(await changes.mountedEditorCount()).toBe(2);
 });

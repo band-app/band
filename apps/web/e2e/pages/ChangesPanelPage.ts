@@ -39,12 +39,20 @@ export class ChangesPanelPage {
   readonly scroller: Locator;
   /** Every `.cm-editor` rendered inside the panel. In unified mode
    *  there's one per visible expanded file; in split mode each visible
-   *  expanded file contributes two (one per side of the MergeView). */
+   *  expanded file contributes two (one per side of the MergeView).
+   *
+   *  FRAGILITY: this is a CSS-class locator against a class owned by
+   *  CodeMirror (`@codemirror/view`'s baseTheme), which the doctrine
+   *  prefers we avoid for elements we own. CodeMirror doesn't expose a
+   *  testid hook on its own DOM, so this is the least-bad anchor —
+   *  but a major-version upgrade that renames `.cm-editor` (or splits
+   *  it into multiple class names) silently breaks every test that
+   *  uses this locator. The mitigation is to centralise the literal
+   *  here so a CM upgrade flows through one file. */
   readonly cmEditors: Locator;
   /** Every `.cm-scroller` rendered inside the panel. Same per-file
-   *  cardinality as `cmEditors`. The class is owned by CodeMirror; we
-   *  hide that fact behind this locator so the test body doesn't
-   *  reach for the literal class name. */
+   *  cardinality as `cmEditors`, same FRAGILITY caveat against
+   *  CodeMirror class-name renames in major upgrades. */
   readonly cmScrollers: Locator;
 
   constructor(
@@ -97,7 +105,18 @@ export class ChangesPanelPage {
    *  (e.g. `▶ src/foo.ts M`), so we anchor on the leading `▶` to
    *  disambiguate from the file tree sidebar's same-named button,
    *  which exposes the bare `<filename> <status>` name. The role-name
-   *  match is the locator the doctrine prefers over text / CSS. */
+   *  match is the locator the doctrine prefers over text / CSS.
+   *
+   *  FRAGILITY: the `▶` Unicode triangle is rendered text in
+   *  `DiffView.tsx`'s JSX, not a system-controlled ARIA label. If the
+   *  disclosure indicator is ever swapped for an SVG icon (which
+   *  wouldn't contribute to the accessible name), this locator
+   *  silently matches nothing. The mitigation would be to add a stable
+   *  `data-testid` on the row button — left out for now because the
+   *  current JSX has been stable across several refactors and
+   *  introducing a testid just to defend against a hypothetical icon
+   *  change is over-engineering. Revisit if/when DiffView's
+   *  disclosure UI is reworked. */
   fileRowButton(filename: string, status: string): Locator {
     // Escape `.` and other regex meta-characters in the filename so a
     // path like `src/foo.ts` doesn't accidentally match

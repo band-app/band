@@ -6,9 +6,12 @@
  * because the naturalHeight CodeMirror config set
  * `.cm-scroller { overflow: visible }` on both axes. The fix in
  * `baseViewerExtensions` switches the scroller to
- * `overflowX: auto, overflowY: visible, height: auto` so horizontal
- * scrolling works while the vertical axis still flows with the
- * auto-height parent chain (no regression of PR #501).
+ * `overflowX: auto, height: auto` (overflowY is left to default to
+ * `visible` so the browser's CSS Overflow L3 resolution to `auto` is
+ * what lands at runtime — see `codemirror-setup.ts` for the full
+ * rationale). Horizontal scrolling works while the vertical axis
+ * still flows with the auto-height parent chain (no regression of
+ * PR #501).
  *
  * Both viewModes are exercised:
  *  - "unified" (the default) — one `.cm-scroller` per file.
