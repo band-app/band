@@ -1,9 +1,10 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DropdownMenuItem } from "@band-app/ui";
-import { Globe, ListTodo, Timer } from "lucide-react";
+import { Activity, Globe, ListTodo, Timer } from "lucide-react";
 import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from "react";
 import { useTunnel } from "@/hooks/use-tunnel";
 import { CronjobsPageContent } from "./CronjobsPageContent";
 import { PrereqDialog } from "./PrereqDialog";
+import { ResourcesPage } from "./ResourcesPage";
 import { TasksPageContent } from "./TasksPageContent";
 import { TunnelDialog } from "./TunnelDialog";
 
@@ -11,11 +12,13 @@ interface ToolbarOverflowContextValue {
   openTasks: () => void;
   openCronjobs: () => void;
   openTunnel: () => void;
+  openResources: () => void;
   /** Tunnel state hint for the menu item (so we can show running/error coloring). */
   tunnelStatus: "idle" | "running" | "error";
-  /** True when any toolbar dialog (Tasks, Cronjobs, Tunnel, Prereq) is open.
-   *  SharedDockviewLayout merges this with its own dialog state to hide
-   *  Electron BrowserView webviews that would otherwise render on top. */
+  /** True when any toolbar dialog (Tasks, Cronjobs, Tunnel, Prereq,
+   *  Resources) is open. SharedDockviewLayout merges this with its
+   *  own dialog state to hide Electron BrowserView webviews that
+   *  would otherwise render on top. */
   anyDialogOpen: boolean;
 }
 
@@ -37,6 +40,7 @@ export function useAnyToolbarDialogOpen(): boolean {
 export function ToolbarOverflowProvider({ children }: { children: ReactNode }) {
   const [showTasksDialog, setShowTasksDialog] = useState(false);
   const [showCronjobsDialog, setShowCronjobsDialog] = useState(false);
+  const [showResourcesDialog, setShowResourcesDialog] = useState(false);
 
   const {
     webServerRunning,
@@ -55,6 +59,7 @@ export function ToolbarOverflowProvider({ children }: { children: ReactNode }) {
   const openTasks = useCallback(() => setShowTasksDialog(true), []);
   const openCronjobs = useCallback(() => setShowCronjobsDialog(true), []);
   const openTunnel = useCallback(() => openTunnelDialog(), [openTunnelDialog]);
+  const openResources = useCallback(() => setShowResourcesDialog(true), []);
 
   const tunnelStatus: ToolbarOverflowContextValue["tunnelStatus"] = tunnelError
     ? "error"
@@ -62,11 +67,19 @@ export function ToolbarOverflowProvider({ children }: { children: ReactNode }) {
       ? "running"
       : "idle";
 
-  const anyDialogOpen = showTasksDialog || showCronjobsDialog || showTunnelDialog || showPrereq;
+  const anyDialogOpen =
+    showTasksDialog || showCronjobsDialog || showTunnelDialog || showPrereq || showResourcesDialog;
 
   const value = useMemo(
-    () => ({ openTasks, openCronjobs, openTunnel, tunnelStatus, anyDialogOpen }),
-    [openTasks, openCronjobs, openTunnel, tunnelStatus, anyDialogOpen],
+    () => ({
+      openTasks,
+      openCronjobs,
+      openTunnel,
+      openResources,
+      tunnelStatus,
+      anyDialogOpen,
+    }),
+    [openTasks, openCronjobs, openTunnel, openResources, tunnelStatus, anyDialogOpen],
   );
 
   return (
@@ -90,6 +103,20 @@ export function ToolbarOverflowProvider({ children }: { children: ReactNode }) {
             <DialogTitle>Cronjobs</DialogTitle>
           </DialogHeader>
           <CronjobsPageContent />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showResourcesDialog} onOpenChange={setShowResourcesDialog}>
+        <DialogContent
+          className="sm:max-w-6xl h-[80vh] flex flex-col p-0 gap-0"
+          data-testid="resources-dialog"
+        >
+          <DialogHeader className="px-6 pt-6 pb-4 border-b border-border/50 shrink-0">
+            <DialogTitle>Resources</DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 min-h-0">
+            <ResourcesPage />
+          </div>
         </DialogContent>
       </Dialog>
 
@@ -138,6 +165,10 @@ export function ToolbarOverflowMenuItems() {
           }
         />
         {ctx.tunnelStatus === "running" ? "Mobile access" : "Start tunnel"}
+      </DropdownMenuItem>
+      <DropdownMenuItem onClick={ctx.openResources} data-testid="menu__resources">
+        <Activity className="size-4" />
+        Resources
       </DropdownMenuItem>
     </>
   );
