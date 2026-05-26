@@ -3128,6 +3128,92 @@ fn skills_install_filter_limits_to_matching_skills_only() {
     assert_eq!(result["symlinks"]["linked"].as_array().unwrap().len(), 1);
 }
 
+/// Regression test for the "Skipped loading N skill(s) due to invalid SKILL.md
+/// files" error that Codex emitted on startup (issue: `argument-hint:
+/// [command] [args...]` in `apps/cli/skills/band.md` was parsed by strict
+/// YAML as a malformed flow sequence).
+///
+/// Install all 6 templates via the public CLI surface, then parse each
+/// installed file's YAML frontmatter with a strict parser. Any template that
+/// regresses to invalid YAML (unquoted flow-sequence-looking values, stray
+/// colons, bad indentation) will fail here before it reaches a user's
+/// coding agent.
+#[test]
+fn skills_install_emits_yaml_frontmatter_that_parses_strictly() {
+    let tmp = skills_sandbox(&[]);
+    let home = tmp.path();
+    let _ = run_install_json(home);
+
+    let shared_dir = home.join(".agents").join("skills");
+    for name in [
+        "band",
+        "band-chat",
+        "band-terminal",
+        "band-browser",
+        "band-start",
+        "band-loop",
+    ] {
+        let path = shared_dir.join(name).join("SKILL.md");
+        let content =
+            fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+
+        // Frontmatter block lives between the first two `---` lines.
+        let mut parts = content.splitn(3, "---\n");
+        let _leading_empty = parts.next().expect("split prefix");
+        let block = parts
+            .next()
+            .unwrap_or_else(|| panic!("{name}: missing opening `---`"));
+
+        let value: serde_yaml::Value = serde_yaml::from_str(block).unwrap_or_else(|e| {
+            panic!("{name}: SKILL.md frontmatter does not parse as YAML: {e}\nblock:\n{block}")
+        });
+
+        // Sanity-check that the fields the agent reads are present and the
+        // right shape (not an accidental flow sequence). Catches the exact
+        // regression that prompted this test.
+        let mapping = value
+            .as_mapping()
+            .unwrap_or_else(|| panic!("{name}: frontmatter is not a YAML mapping"));
+        let arg_hint = mapping
+            .get(serde_yaml::Value::String("argument-hint".to_string()))
+            .unwrap_or_else(|| panic!("{name}: missing argument-hint"));
+        assert!(
+            arg_hint.is_string(),
+            "{name}: argument-hint must be a string, got {arg_hint:?} (looks like an unquoted \
+             flow sequence — quote the value in the template)"
+        );
+    }
+}
+
+/// Defense-in-depth: when a template's YAML frontmatter is malformed, the
+/// renderer must fail loudly with a message that names the skill and
+/// surfaces the YAML parser's error.
+///
+/// The renderer reads `SKILL_TEMPLATES` baked in via `include_str!`, so we
+/// can't inject a bad template at runtime through the public CLI. The
+/// validator itself is exercised by a unit test in
+/// `src/skills.rs::tests::validate_frontmatter_*` — both call sites
+/// (`generate-skills`, `skills install`) share the same `render_skills`
+/// entry point, so locking down the validator there covers both routes
+/// without spawning a process.
+///
+/// What this integration test asserts at the CLI boundary is the
+/// happy-path inverse: with the canonical templates checked into the
+/// repo, the renderer succeeds. Combined with the unit test on the
+/// validator, future bad templates fail at `cargo test` before ever
+/// reaching a release build.
+#[test]
+fn generate_skills_succeeds_with_canonical_templates() {
+    let tmp = tempfile::tempdir().expect("create tempdir");
+    let out = tmp.path();
+    let output = band_offline(&["generate-skills", "--output-dir", out.to_str().unwrap()]);
+    assert!(
+        output.status.success(),
+        "generate-skills failed: stderr: {}",
+        stderr(&output)
+    );
+}
+
 // --- Open command tests ---
 
 /// Call the test helper that posts to `editor.setActiveWorkspace` on the
