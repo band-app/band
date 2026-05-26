@@ -16,112 +16,18 @@
 //   1. The mutation returns 200 (no "not found" throw).
 //   2. The persisted `worktrees` row for that branch is gone after.
 //
-// Integration-only — no mocks, no internal imports. Same shape as
-// `task-cleanup.test.ts`, just without the SQLite task-table writes.
+// Integration-only — no mocks, no internal-module imports for the
+// system under test.
 
-import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:net";
-import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { detachedShaLabel } from "../src/lib/git";
 import { seedSettings, seedState } from "./helpers/seed-state";
-import { SERVER_RUNTIME, SERVER_SCRIPT } from "./helpers/server-runtime";
+import { createTmpHome, type ServerHandle, startServer } from "./helpers/server";
 
-// TODO: extract `createTmpHome`, `getRandomPort`, and `startServer`
-// into `apps/web/tests/helpers/server.ts`. The same shape is now
-// duplicated across `trpc.test.ts`, `task-cleanup.test.ts`,
-// `trpc-batch-url.test.ts`, and this file, and the copies have
-// already started drifting (e.g. the `close()` SIGKILL fallback
-// added here is missing in `trpc.test.ts`). A future PR should
-// consolidate them — kept inline here to keep the regression fix
-// focused on the bug.
-
-const PROJECT_ROOT = join(import.meta.dirname, "..");
 const DEFAULT_TOKEN = "workspace-remove-detached-token";
-
-interface ServerHandle {
-  url: string;
-  home: string;
-  close: () => Promise<void>;
-}
-
-function createTmpHome(): string {
-  const tmp = realpathSync(mkdtempSync(join(tmpdir(), "band-detached-remove-")));
-  mkdirSync(join(tmp, ".band"), { recursive: true });
-  return tmp;
-}
-
-function getRandomPort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.listen(0, "127.0.0.1", () => {
-      const { port } = srv.address() as { port: number };
-      srv.close(() => resolve(port));
-    });
-    srv.on("error", reject);
-  });
-}
-
-async function startServer(tmpHome: string): Promise<ServerHandle> {
-  const port = await getRandomPort();
-  return new Promise((resolve, reject) => {
-    const child = spawn(SERVER_RUNTIME, [SERVER_SCRIPT], {
-      cwd: PROJECT_ROOT,
-      env: {
-        ...process.env,
-        HOME: tmpHome,
-        PORT: String(port),
-        NODE_ENV: "production",
-      },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    let stderr = "";
-    let settled = false;
-    child.stderr!.on("data", (c: Buffer) => {
-      stderr += c.toString();
-    });
-    child.stdout!.on("data", (c: Buffer) => {
-      if (c.toString().includes("listening") && !settled) {
-        settled = true;
-        resolve({
-          url: `http://127.0.0.1:${port}`,
-          home: tmpHome,
-          close: () =>
-            new Promise<void>((r) => {
-              const fallback = setTimeout(() => child.kill("SIGKILL"), 5_000);
-              child.on("exit", () => {
-                clearTimeout(fallback);
-                r();
-              });
-              child.kill("SIGTERM");
-            }),
-        });
-      }
-    });
-    child.on("error", (err) => {
-      if (!settled) {
-        settled = true;
-        reject(err);
-      }
-    });
-    child.on("exit", (code) => {
-      if (!settled) {
-        settled = true;
-        reject(new Error(`server exited with code ${code}\nstderr: ${stderr}`));
-      }
-    });
-    setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        child.kill("SIGTERM");
-        reject(new Error(`server did not start within 15 s\nstderr: ${stderr}`));
-      }
-    }, 15_000);
-  });
-}
 
 const gitEnv = {
   ...process.env,
@@ -158,7 +64,7 @@ describe("workspaces.remove on a detached-HEAD worktree", () => {
   let detachedBranch: string;
 
   beforeAll(async () => {
-    tmpHome = createTmpHome();
+    tmpHome = createTmpHome("band-detached-remove-");
 
     // Real repo with two commits so we can check out the older SHA in
     // the detached worktree. The shape (main + a detached HEAD parked
@@ -177,11 +83,15 @@ describe("workspaces.remove on a detached-HEAD worktree", () => {
     const detachedPath = join(tmpHome, "proj-detached");
     git(repoPath, ["worktree", "add", "--detach", detachedPath, olderSha]);
 
-    // Build the synthetic label via `detachedShaLabel` rather than
-    // re-spelling the format inline. That way a change to the label
-    // shape (length, prefix, …) flows into the test automatically and
-    // the regression keeps exercising the real code path.
-    detachedBranch = detachedShaLabel(olderSha);
+    // Spell the synthetic label inline rather than importing
+    // `detachedShaLabel` from `src/lib/git.ts`. This is a black-box
+    // integration test — keeping the label format inline means that
+    // if `detachedShaLabel` is ever changed (different prefix,
+    // different sha length), the seed and the server's reconciled
+    // view diverge and the assertions fail loudly, which is exactly
+    // the signal we want. The format is also pinned by `git.test.ts`
+    // unit tests, so two redundant checks guard against silent drift.
+    detachedBranch = `detached-${olderSha.slice(0, 7)}`;
 
     seedState(tmpHome, {
       projects: [
@@ -198,7 +108,7 @@ describe("workspaces.remove on a detached-HEAD worktree", () => {
     });
     seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
 
-    server = await startServer(tmpHome);
+    server = await startServer({ tmpHome });
   });
 
   afterAll(async () => {
