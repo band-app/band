@@ -23,12 +23,13 @@
  * doctrine.
  */
 
-import { execFileSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, type Page, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
+import { git } from "./helpers/git";
 import {
+  cleanupTmpHome,
   createTmpHome,
   type ServerHandle,
   seedSettings,
@@ -72,18 +73,6 @@ let server: ServerHandle;
 let tmpHome: string;
 let workspaceId: string;
 
-const gitEnv = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "Test",
-  GIT_AUTHOR_EMAIL: "test@test.com",
-  GIT_COMMITTER_NAME: "Test",
-  GIT_COMMITTER_EMAIL: "test@test.com",
-};
-
-function git(cwd: string, args: string[]): void {
-  execFileSync("git", args, { cwd, env: gitEnv });
-}
-
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
   const repoPath = join(tmpHome, REPO_NAME);
@@ -117,17 +106,7 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   await server.close();
-  // The Band server writes status files in the background (HTTP /healthz
-  // probes, branch-status SSE, etc.) and a SIGTERM cleanup race can leave
-  // a fresh file in `~/.band/status` between our final `await` and the
-  // `rmSync`. Swallowing the ENOTEMPTY keeps the test result anchored on
-  // the assertions rather than tmp-cleanup noise — Playwright's per-run
-  // tmp isolation means we don't accumulate cruft across runs anyway.
-  try {
-    rmSync(tmpHome, { recursive: true, force: true });
-  } catch {
-    /* tmp directory cleanup is best-effort */
-  }
+  cleanupTmpHome(tmpHome);
 });
 
 /**
@@ -211,15 +190,18 @@ async function assertScrollerHorizontallyScrolls(changes: ChangesPanelPage): Pro
   const overflowing = metrics.find((m) => m.scrollWidth > m.clientWidth);
   expect(overflowing).toBeDefined();
   // 3. Natural-height guard on the overflowing scroller — no
-  //    internal vertical scrollbar (`scrollHeight` matches
-  //    `clientHeight`) and a non-trivial height. This is what
-  //    guards against PR #501's natural-height fix regressing in
-  //    tandem with this horizontal-scroll change — if `height: auto`
-  //    ever dropped off `.cm-scroller`, content would overflow
-  //    vertically and `scrollHeight` would diverge from
-  //    `clientHeight`.
+  //    internal vertical scrollbar (`scrollHeight` ≈ `clientHeight`)
+  //    and a non-trivial height. This is what guards against PR
+  //    #501's natural-height fix regressing in tandem with this
+  //    horizontal-scroll change — if `height: auto` ever dropped off
+  //    `.cm-scroller`, content would overflow vertically and
+  //    `scrollHeight` would diverge from `clientHeight` by far more
+  //    than the 1-px subpixel-rounding tolerance below. We allow
+  //    that 1-px slop because some browsers / device-pixel ratios
+  //    round `scrollHeight` up by one even when there's no actual
+  //    overflow.
   expect(overflowing!.clientHeight).toBeGreaterThan(20);
-  expect(overflowing!.scrollHeight).toBe(overflowing!.clientHeight);
+  expect(overflowing!.scrollHeight).toBeLessThanOrEqual(overflowing!.clientHeight + 1);
 
   // 4. Round-trip a horizontal scroll. The first scroller may or
   //    may not be the one with overflow (split mode puts the

@@ -29,12 +29,13 @@
  * `pages/ChangesPanelPage.ts` per the same doctrine.
  */
 
-import { execFileSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
+import { git } from "./helpers/git";
 import {
+  cleanupTmpHome,
   createTmpHome,
   type ServerHandle,
   seedSettings,
@@ -59,18 +60,6 @@ const SPACER_NEW_LINES = Array.from({ length: 400 }, (_, i) => `spacer line ${i}
 let server: ServerHandle;
 let tmpHome: string;
 let workspaceId: string;
-
-const gitEnv = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "Test",
-  GIT_AUTHOR_EMAIL: "test@test.com",
-  GIT_COMMITTER_NAME: "Test",
-  GIT_COMMITTER_EMAIL: "test@test.com",
-};
-
-function git(cwd: string, args: string[]): void {
-  execFileSync("git", args, { cwd, env: gitEnv });
-}
 
 test.beforeAll(async () => {
   tmpHome = createTmpHome();
@@ -107,13 +96,7 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   await server.close();
-  // Best-effort tmp cleanup — see diff-horizontal-scroll.spec.ts for
-  // the rationale on swallowing ENOTEMPTY here.
-  try {
-    rmSync(tmpHome, { recursive: true, force: true });
-  } catch {
-    /* tmp directory cleanup is best-effort */
-  }
+  cleanupTmpHome(tmpHome);
 });
 
 test("LazyFileRow keeps the CodeMirror editor mounted across scroll-aways", async ({ page }) => {

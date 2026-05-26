@@ -181,18 +181,20 @@ export function baseViewerExtensions(
   // on `LazyFileRow`'s root and the user can't reach it (issue: Changes
   // view doesn't scroll horizontally).
   //
-  // The subtlety: per CSS Overflow L3, setting `overflowX: auto,
-  // overflowY: visible` computes to `auto, auto` because `visible`
-  // resolves to `auto` whenever the orthogonal axis is non-`visible`.
-  // That alone would re-introduce the bug PR #501 fixed — CodeMirror's
-  // base theme sets `.cm-scroller { height: 100% }`, and a 100%
-  // percentage against an auto-height `.cm-editor` collapses to ~0 the
-  // moment `.cm-scroller` becomes a scroll container. The fix is to
-  // *also* override the scroller's `height` to `auto`, so the percentage
-  // chain is broken and the scroller sizes to its content. With
-  // `height: auto`, the computed `overflowY: auto` is harmless — content
-  // fits exactly, so no vertical scrollbar ever appears, while
-  // horizontal still scrolls when a line is wider than the viewport.
+  // The load-bearing invariant is `height: auto`, NOT the authored
+  // `overflowY: "visible"`. Per CSS Overflow L3, `overflowY: visible`
+  // resolves to `auto` whenever the orthogonal axis is non-`visible`,
+  // so the *computed* style is `overflowX: auto, overflowY: auto` —
+  // the authored `visible` is purely documentary intent. What actually
+  // prevents PR #501's collapse-to-0 bug from coming back is the
+  // explicit `height: auto`: CodeMirror's base theme sets
+  // `.cm-scroller { height: 100% }`, and the moment the scroller is
+  // treated as a scroll container that percentage resolves to 0
+  // against an auto-height `.cm-editor` parent. Overriding `height` to
+  // `auto` breaks the percentage chain so the scroller sizes to its
+  // content — no vertical scrollbar ever appears (content fits
+  // exactly), while horizontal still scrolls when a line is wider than
+  // the viewport.
   const scrollerStyles: Record<string, string> = naturalHeight
     ? { overflowX: "auto", overflowY: "visible", height: "auto" }
     : { overflow: "auto" };
