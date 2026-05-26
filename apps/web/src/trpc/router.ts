@@ -85,7 +85,7 @@ import { duBytes } from "../lib/disk-usage";
 import { subscribeToFileChanges } from "../lib/file-watcher";
 import { FormatterError, formatFile } from "../lib/formatter";
 import { fuzzyScore } from "../lib/fuzzy-score";
-import { execGit, gitCmd, listWorktrees } from "../lib/git";
+import { DETACHED_BRANCH_PREFIX, execGit, gitCmd, listWorktrees } from "../lib/git";
 import { checkHooks, installHooks } from "../lib/hooks";
 import { killWorkspaceServers } from "../lib/lsp-manager";
 import { hasPendingInputForWorkspace, resolvePendingInput } from "../lib/pending-inputs";
@@ -656,7 +656,7 @@ const workspacesRouter = t.router({
       // ("branch not found") — the catch below swallows it cleanly, but
       // skipping the call up front keeps the background logs free of
       // noise that's hard to distinguish from a genuine problem.
-      const branchToDelete = match.branch.startsWith("detached-") ? null : input.branch;
+      const branchToDelete = match.branch.startsWith(DETACHED_BRANCH_PREFIX) ? null : input.branch;
       setImmediate(() => {
         (async () => {
           // Run teardown script before removing worktree so it can access project files

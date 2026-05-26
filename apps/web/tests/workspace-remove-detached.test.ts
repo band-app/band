@@ -26,8 +26,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { detachedShaLabel } from "../src/lib/git";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { SERVER_RUNTIME, SERVER_SCRIPT } from "./helpers/server-runtime";
+
+// TODO: extract `createTmpHome`, `getRandomPort`, and `startServer`
+// into `apps/web/tests/helpers/server.ts`. The same shape is now
+// duplicated across `trpc.test.ts`, `task-cleanup.test.ts`,
+// `trpc-batch-url.test.ts`, and this file, and the copies have
+// already started drifting (e.g. the `close()` SIGKILL fallback
+// added here is missing in `trpc.test.ts`). A future PR should
+// consolidate them — kept inline here to keep the regression fix
+// focused on the bug.
 
 const PROJECT_ROOT = join(import.meta.dirname, "..");
 const DEFAULT_TOKEN = "workspace-remove-detached-token";
@@ -125,6 +135,11 @@ function git(cwd: string, args: string[]): string {
   return execFileSync("git", args, { cwd, env: gitEnv, encoding: "utf-8" });
 }
 
+// Read directly from SQLite rather than going through `projects.list`
+// over tRPC. The mutation's effect on the persisted state is the
+// invariant we're pinning here, and reading via the same DB the server
+// writes to keeps the assertion independent of an unrelated endpoint's
+// behaviour. (Same pattern as `task-cleanup.test.ts`.)
 function listWorktreeBranches(tmpHome: string, projectName: string): string[] {
   const sqlite = new DatabaseSync(join(tmpHome, ".band", "band.db"));
   try {
@@ -162,10 +177,11 @@ describe("workspaces.remove on a detached-HEAD worktree", () => {
     const detachedPath = join(tmpHome, "proj-detached");
     git(repoPath, ["worktree", "add", "--detach", detachedPath, olderSha]);
 
-    // Match the synthetic label `listWorktrees` produces. Keep this in
-    // lockstep with `detachedShaLabel` in apps/web/src/lib/git.ts —
-    // they have to agree or the regression isn't being exercised.
-    detachedBranch = `detached-${olderSha.slice(0, 7)}`;
+    // Build the synthetic label via `detachedShaLabel` rather than
+    // re-spelling the format inline. That way a change to the label
+    // shape (length, prefix, …) flows into the test automatically and
+    // the regression keeps exercising the real code path.
+    detachedBranch = detachedShaLabel(olderSha);
 
     seedState(tmpHome, {
       projects: [

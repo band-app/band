@@ -206,9 +206,17 @@ export async function listWorktrees(repoPath: string): Promise<WorktreeInfo[]> {
  * would still collide, but git doesn't actually produce empty `HEAD` lines
  * in practice — the marker is defensive, not load-bearing.
  */
-function detachedShaLabel(head: string): string {
+/**
+ * Prefix used by `detachedShaLabel`. Exported so callers that need to
+ * recognise the synthetic label (e.g. `workspaces.remove` skipping
+ * `git branch -D` for a non-real ref) can do so without re-spelling
+ * the literal `"detached-"` in two places.
+ */
+export const DETACHED_BRANCH_PREFIX = "detached-";
+
+export function detachedShaLabel(head: string): string {
   const sha = head.trim().slice(0, 7);
-  return sha ? `detached-${sha}` : "detached";
+  return sha ? `${DETACHED_BRANCH_PREFIX}${sha}` : "detached";
 }
 
 /**
