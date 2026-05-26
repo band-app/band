@@ -23,6 +23,11 @@ import { useAdapter } from "@/dashboard";
 import { injectInitialUrls } from "../lib/browser-layout";
 import { invoke as desktopInvoke, listen as desktopListen } from "../lib/desktop-ipc";
 import {
+  attachEdgeGroupDragVisibility,
+  ensureEdgeGroups,
+  registerInnerDockview,
+} from "../lib/dockview-edge-groups";
+import {
   cycleGridGroups,
   cycleTabsInActiveGroup,
   selectNeighbourBeforeRemove,
@@ -321,25 +326,43 @@ const closeTabRef: { current: ((browserId: string) => void) | null } = {
 const RightHeaderActions = React.memo(function RightHeaderActions(
   props: IDockviewHeaderActionsProps,
 ) {
+  // Edge groups (left/right/bottom) don't support splits — dockview's
+  // `addPanel` with `position: { referenceGroup: <edge>, direction }`
+  // silently ignores the direction and just adds a tab. We still show
+  // the "+" button there so users can add another browser tab to the
+  // edge group; only the split buttons are hidden. Defaults to "grid"
+  // when `location` is missing (older dockview versions / tests).
+  const isGridGroup = (props.location?.type ?? "grid") === "grid";
   const groupId = props.group.id;
+  // `w-full justify-center` keeps the "+" centered horizontally inside
+  // the vertical (left/right) edge action strip, which dockview sizes
+  // to `--dv-tabs-and-actions-container-height` (~35px wide) via
+  // `.dv-groupview-header-vertical`. In horizontal tab strips the
+  // right-actions container shrink-wraps to its content, so `w-full`
+  // resolves to the same content width and the button row looks
+  // identical to before.
   return (
-    <div className="flex h-full items-center">
-      <button
-        type="button"
-        className="inline-flex size-8 items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent rounded transition-colors"
-        onClick={() => addTabRef.current.onSplit(groupId, "right")}
-        title="Split right"
-      >
-        <Columns2 className="size-3.5" />
-      </button>
-      <button
-        type="button"
-        className="inline-flex size-8 items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent rounded transition-colors"
-        onClick={() => addTabRef.current.onSplit(groupId, "below")}
-        title="Split down"
-      >
-        <Rows2 className="size-3.5" />
-      </button>
+    <div className="flex h-full w-full items-center justify-center">
+      {isGridGroup && (
+        <>
+          <button
+            type="button"
+            className="inline-flex size-8 items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent rounded transition-colors"
+            onClick={() => addTabRef.current.onSplit(groupId, "right")}
+            title="Split right"
+          >
+            <Columns2 className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            className="inline-flex size-8 items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent rounded transition-colors"
+            onClick={() => addTabRef.current.onSplit(groupId, "below")}
+            title="Split down"
+          >
+            <Rows2 className="size-3.5" />
+          </button>
+        </>
+      )}
       <button
         type="button"
         className="inline-flex size-8 items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent rounded transition-colors"
@@ -390,6 +413,14 @@ export function DockviewBrowserContainer({
   const apiRef = useRef<DockviewApi | null>(null);
   const isRestoringRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  // Tracks the cleanup function returned by `attachEdgeGroupDragVisibility`
+  // so the drag-visibility listeners can be detached on unmount (or on a
+  // hypothetical re-`onReady`).
+  const edgeDragDisposerRef = useRef<(() => void) | null>(null);
+  // Tracks the unregister fn from `registerInnerDockview` so the global
+  // sidebar-toggle shortcuts (⌘B / ⌥⌘B / ⌘J in SharedDockviewLayout) stop
+  // routing into this dockview after unmount.
+  const innerRegisterDisposerRef = useRef<(() => void) | null>(null);
 
   // Fetch layout AND browser records via React Query — cached across mounts
   // so re-visiting a workspace renders instantly from the cache.
@@ -992,6 +1023,17 @@ export function DockviewBrowserContainer({
   addTabRef.current = { onAdd: handleAddTab, onSplit: handleSplit };
   closeTabRef.current = closeTab;
 
+  // Detach edge-group drag-visibility listeners + inner-dockview
+  // registration on unmount.
+  useEffect(() => {
+    return () => {
+      edgeDragDisposerRef.current?.();
+      edgeDragDisposerRef.current = null;
+      innerRegisterDisposerRef.current?.();
+      innerRegisterDisposerRef.current = null;
+    };
+  }, []);
+
   // Use refs for the initial data so onReady's closure captures the latest
   const initialLayoutRef = useRef<unknown | null>(null);
   initialLayoutRef.current = initialData?.layout ?? null;
@@ -1063,6 +1105,30 @@ export function DockviewBrowserContainer({
         // No saved layout — create a default tab
         createDefaultPanel(event.api, workspaceId);
         persistToServer(workspaceId, event.api.toJSON(), { queryClient: queryClientRef.current });
+      }
+
+      // Ensure the three cardinal edge groups (left/right/bottom) exist so
+      // future panels can be docked to the edges of this inner container.
+      // MUST be called BEFORE the `onDidLayoutChange` registration below —
+      // `ensureEdgeGroups` may synchronously add edge groups and call
+      // `setEdgeGroupVisible`, and routing those events through
+      // `schedulePersist` would write a spurious initial save. Idempotent
+      // on restored layouts.
+      ensureEdgeGroups(event.api);
+
+      // Drag-visibility: while the user drags a panel/group, force every
+      // edge group visible so it can accept a drop; once the drag ends,
+      // hide any edge groups that are still empty. Dispose the previous
+      // registration if onReady somehow fires twice.
+      edgeDragDisposerRef.current?.();
+      edgeDragDisposerRef.current = attachEdgeGroupDragVisibility(event.api);
+
+      // Register with the global edge-shortcut registry so ⌘B / ⌥⌘B / ⌘J
+      // in SharedDockviewLayout's keydown can route to this inner dockview
+      // when focus is inside it. Same defensive double-onReady guard.
+      innerRegisterDisposerRef.current?.();
+      if (containerRef.current) {
+        innerRegisterDisposerRef.current = registerInnerDockview(containerRef.current, event.api);
       }
 
       // Listen for any layout changes and auto-persist
