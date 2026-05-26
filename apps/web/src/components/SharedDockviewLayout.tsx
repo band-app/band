@@ -42,6 +42,7 @@ import {
   extractActiveState,
   walkGridNode,
 } from "../lib/dockview-active-state";
+import { findFocusedInnerDockview, toggleEdgeGroup } from "../lib/dockview-edge-groups";
 import { isDesktop } from "../lib/is-desktop";
 import { parseWorkspaceFromPath } from "../lib/parse-workspace";
 import { trpc } from "../lib/trpc-client";
@@ -1098,13 +1099,39 @@ export function SharedDockviewLayout() {
             window.dispatchEvent(new CustomEvent("band:focus-browser"));
           });
         }
-      } else if (key === "b" && !e.shiftKey && api) {
+      } else if (key === "b" && !e.shiftKey && !e.altKey && api) {
+        // ⌘B → toggle LEFT edge. Focus-aware: if an inner dockview
+        // (terminal / chat / browser) is focused AND has panels on
+        // its left edge, toggle that inner edge; otherwise fall back
+        // to the main layout's left edge (Projects).
+        //
+        // The fallback is driven by `toggleEdgeGroup`'s return value
+        // (`true` when it acted on a non-empty edge, `false` when
+        // there was nothing to act on) — so empty inner edges
+        // transparently delegate to the main layout. See
+        // `dockview-edge-groups.ts` for the registry that makes the
+        // focus lookup possible.
         e.preventDefault();
-        const left = api.groups.find((g) => g.id === EDGE_GROUP_IDS.left);
-        if (left) {
-          if (left.api.isCollapsed()) left.api.expand();
-          else left.api.collapse();
-        }
+        const inner = findFocusedInnerDockview();
+        if (inner && toggleEdgeGroup(inner, "left")) return;
+        toggleEdgeGroup(api, "left");
+      } else if (e.code === "KeyB" && e.altKey && !e.shiftKey && api) {
+        // ⌥⌘B → toggle RIGHT edge. Uses `e.code === "KeyB"` instead
+        // of `key === "b"` because macOS substitutes Alt-layer
+        // characters into `e.key` (Alt+B → "∫"), making the letter
+        // check unreliable when Alt is held. `e.code` is keyboard-
+        // layout independent and matches the pattern used by the
+        // ⇧⌥F format-current-file shortcut above.
+        e.preventDefault();
+        const inner = findFocusedInnerDockview();
+        if (inner && toggleEdgeGroup(inner, "right")) return;
+        toggleEdgeGroup(api, "right");
+      } else if (key === "j" && !e.shiftKey && !e.altKey && api) {
+        // ⌘J → toggle BOTTOM edge. Same focus-aware fallback as ⌘B.
+        e.preventDefault();
+        const inner = findFocusedInnerDockview();
+        if (inner && toggleEdgeGroup(inner, "bottom")) return;
+        toggleEdgeGroup(api, "bottom");
       } else if (key === "m" && e.shiftKey && api) {
         e.preventDefault();
         const active = api.activeGroup;

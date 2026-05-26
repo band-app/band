@@ -68,7 +68,10 @@ interface StubGroup {
     moveToNext: ReturnType<typeof vi.fn>;
     moveToPrevious: ReturnType<typeof vi.fn>;
   };
-  api: { location: { type: "grid" | "floating" | "popout" } };
+  // `edge` groups carry an extra `position` field on the real dockview
+  // `DockviewGroupLocation`; the helpers don't read it, so we drop it
+  // from the stub.
+  api: { location: { type: "grid" | "floating" | "popout" | "edge" } };
   /** Stand-in for the runtime `element` getter dockview exposes via
    * `BasePanelView`. `cycleGridGroups` reads this through an
    * `unknown`-cast so we don't need to fake the rest of HTMLElement. */
@@ -82,7 +85,7 @@ function makePanel(id: string): StubPanel {
 }
 
 interface MakeGroupOpts {
-  location?: "grid" | "floating" | "popout";
+  location?: "grid" | "floating" | "popout" | "edge";
   activeIndex?: number;
   rect?: StubRect;
 }
@@ -355,7 +358,7 @@ describe("cycleGridGroups", () => {
   });
 
   it("enters the cycle from the first group when active group is floating/popout (direction 1)", () => {
-    // `getGridGroupsInVisualOrder` filters to grid groups, so a floating
+    // `getNavigableGroupsInVisualOrder` excludes floating/popout, so a floating
     // active group has `idx === -1`. The naive `(-1 + 1 + n) % n` formula
     // gives 0 (first group, ok), but the corresponding backward case
     // would give `n - 2` (skipping the last group) — see the next test.
@@ -434,6 +437,48 @@ describe("cycleGridGroups", () => {
     cycleGridGroups(asApi(api), 1);
     expect(visible1.panels[0].api.setActive).toHaveBeenCalledTimes(1);
     expect(ghost.panels[0].api.setActive).not.toHaveBeenCalled();
+  });
+
+  // --- Edge group inclusion ---
+  //
+  // Edge groups (left/right/bottom) are part of the cycle when they hold
+  // at least one panel, so Cmd+[/] can hop into and out of edge-docked
+  // sections. Empty edge groups stay hidden (via setEdgeGroupVisible)
+  // and must not steal a cycle stop.
+
+  it("includes an edge group with panels in the cycle", () => {
+    // Layout: edge-left strip at x=0 (width 60), grid panel at x=60.
+    // Reading order: edge-left → grid. From grid, forward should hit edge-left.
+    const edgeLeft = makeGroup("edge-left", ["e"], {
+      location: "edge",
+      rect: { left: 0, top: 0, width: 60, height: 400 },
+    });
+    const grid0 = makeGroup("g0", ["a"], {
+      rect: { left: 60, top: 0, width: 400, height: 400 },
+    });
+    const api = makeApi([edgeLeft, grid0], 1);
+    cycleGridGroups(asApi(api), 1);
+    expect(edgeLeft.panels[0].api.setActive).toHaveBeenCalledTimes(1);
+  });
+
+  it("excludes an empty edge group from the cycle", () => {
+    // Empty edge groups exist in the dockview model (added at mount,
+    // collapsed) but should never appear as a focus stop — otherwise
+    // Cmd+] from a grid panel would activate a hidden 0-panel group.
+    const emptyEdge = makeGroup("edge-bottom", [], {
+      location: "edge",
+      rect: { left: 0, top: 400, width: 400, height: 0 },
+    });
+    const grid0 = makeGroup("g0", ["a"], {
+      rect: { left: 0, top: 0, width: 400, height: 400 },
+    });
+    const grid1 = makeGroup("g1", ["b"], {
+      rect: { left: 400, top: 0, width: 400, height: 400 },
+    });
+    const api = makeApi([grid0, grid1, emptyEdge], 0);
+    cycleGridGroups(asApi(api), 1);
+    // Should jump grid0 → grid1, not grid0 → emptyEdge.
+    expect(grid1.panels[0].api.setActive).toHaveBeenCalledTimes(1);
   });
 });
 
