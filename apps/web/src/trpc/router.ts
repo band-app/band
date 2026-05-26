@@ -545,7 +545,7 @@ const workspacesRouter = t.router({
 
   remove: publicProcedure
     .input(z.object({ project: z.string(), branch: z.string() }))
-    .mutation(({ input }) => {
+    .mutation(async ({ input }) => {
       const state = loadState();
       const proj = state.projects.find((p) => p.name === input.project);
       if (!proj) {
@@ -564,162 +564,156 @@ const workspacesRouter = t.router({
 
       const { command, env: gitEnv } = gitCmd();
 
-      const output = execFileSync(command, ["worktree", "list", "--porcelain"], {
-        cwd: proj.path,
-        env: gitEnv,
-        encoding: "utf-8",
-      });
+      // Resolve the worktree path via `listWorktrees` rather than re-parsing
+      // `git worktree list --porcelain` inline. `listWorktrees` applies the
+      // detached-HEAD → `detached-<short-sha>` fallback that the rest of the
+      // app sees in `proj.worktrees` and that the dashboard sends back here
+      // as `input.branch`. Re-parsing porcelain without the fallback would
+      // leave `currentBranch === ""` for detached worktrees and fall through
+      // to the "Workspace not found" throw below, breaking the "Delete
+      // workspace" context-menu action on every detached-HEAD card.
+      const worktrees = await listWorktrees(proj.path);
+      const match = worktrees.find((wt) => wt.branch === input.branch);
+      if (!match) {
+        throw new Error(`Workspace "${input.branch}" not found`);
+      }
+      const worktreePath = match.path;
 
-      let currentPath = "";
-      let currentBranch = "";
-      for (const line of output.split("\n")) {
-        if (line.startsWith("worktree ")) {
-          currentPath = line.slice("worktree ".length);
-        } else if (line.startsWith("branch ")) {
-          const branchRef = line.slice("branch ".length);
-          currentBranch = branchRef.startsWith("refs/heads/")
-            ? branchRef.slice("refs/heads/".length)
-            : branchRef;
-        } else if (line === "" && currentPath) {
-          if (currentBranch === input.branch) {
-            const worktreePath = currentPath;
-
-            // Capture config before returning — the directory may be removed
-            // by background cleanup before loadProjectConfig can read it.
-            let teardownCmd: string | undefined;
-            try {
-              const config = loadProjectConfig(worktreePath, proj.path);
-              if (config?.teardown && typeof config.teardown === "string") {
-                teardownCmd = config.teardown;
-              }
-            } catch {
-              // Config may not exist
-            }
-
-            // ── Fast path: update state and return immediately ──
-            proj.worktrees = proj.worktrees.filter((wt) => wt.branch !== input.branch);
-            saveState(state);
-
-            const workspaceId = toWorkspaceId(input.project, input.branch);
-            try {
-              unlinkSync(join(bandHome(), "workspace-prompts", `${workspaceId}.json`));
-            } catch {
-              // Prompt file may not exist
-            }
-            deleteWorkspaceStatus(workspaceId);
-            deleteBranchStatus(workspaceId);
-
-            // Clean up all chat panes and their agent processes
-            removeWorkspaceChats(workspaceId);
-
-            // Clean up chat layout tree
-            deleteChatLayout(workspaceId);
-
-            // Clean up all browser tabs
-            removeWorkspaceBrowsers(workspaceId);
-
-            // Clean up browser layout tree
-            deleteBrowserLayout(workspaceId);
-
-            // Kill any running terminal PTY sessions
-            killWorkspaceTerminals(workspaceId);
-
-            // Clean up terminal layout tree
-            deleteTerminalLayout(workspaceId);
-
-            // Kill any running language server processes
-            killWorkspaceServers(workspaceId);
-
-            // Clean up workspace-scoped cronjobs
-            stopJobsForKey(workspaceId);
-            deleteCronjobFile(workspaceId);
-
-            // Delete persisted task history for the workspace (issue #416).
-            // Tasks aren't covered by a FK cascade because workspaces aren't a
-            // first-class DB row, so the cleanup is explicit here next to the
-            // other workspace-scoped removals. Task cleanup is best-effort —
-            // a DB lock or WAL timeout must not abort the whole removal or
-            // suppress the `emit` below, otherwise the dashboard would keep
-            // showing the just-deleted workspace.
-            try {
-              const deletedTasks = deleteWorkspaceTasks(workspaceId);
-              if (deletedTasks > 0) {
-                log.info(
-                  { workspaceId, count: deletedTasks },
-                  "deleted workspace tasks on removal",
-                );
-              }
-            } catch (err) {
-              log.error({ workspaceId, err }, "failed to delete workspace tasks on removal");
-            }
-
-            // Notify subscribers (dashboard status stream) that this workspace is gone
-            emit({ kind: "remove", workspaceId });
-
-            // ── Background cleanup: slow git/fs operations ──
-            const projPath = proj.path;
-            setImmediate(() => {
-              (async () => {
-                // Run teardown script before removing worktree so it can access project files
-                if (teardownCmd) {
-                  try {
-                    await execFileAsync("bash", ["-c", teardownCmd], {
-                      cwd: worktreePath,
-                      env: {
-                        ...process.env,
-                        PATH: `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH}`,
-                      },
-                      encoding: "utf-8",
-                      timeout: 60_000,
-                    });
-                  } catch (err) {
-                    log.warn({ err, workspaceId }, "teardown script failed");
-                  }
-                }
-
-                try {
-                  await execFileAsync(command, ["worktree", "remove", "--force", worktreePath], {
-                    cwd: projPath,
-                    env: gitEnv,
-                    encoding: "utf-8",
-                  });
-                } catch {
-                  // Worktree may be corrupted (e.g. missing .git file).
-                  // Manually remove the directory and prune stale entries.
-                  await rm(worktreePath, { recursive: true, force: true });
-                  try {
-                    await execFileAsync(command, ["worktree", "prune"], {
-                      cwd: projPath,
-                      env: gitEnv,
-                      encoding: "utf-8",
-                    });
-                  } catch (err) {
-                    log.warn({ err, workspaceId }, "git worktree prune failed");
-                  }
-                }
-
-                try {
-                  await execFileAsync(command, ["branch", "-D", input.branch], {
-                    cwd: projPath,
-                    env: gitEnv,
-                    encoding: "utf-8",
-                  });
-                } catch {
-                  // Branch may already be deleted
-                }
-              })().catch((err) => {
-                log.error({ err, workspaceId }, "background workspace cleanup failed");
-              });
-            });
-
-            return { ok: true };
-          }
-          currentPath = "";
-          currentBranch = "";
+      // Capture config before returning — the directory may be removed
+      // by background cleanup before loadProjectConfig can read it.
+      let teardownCmd: string | undefined;
+      try {
+        const config = loadProjectConfig(worktreePath, proj.path);
+        if (config?.teardown && typeof config.teardown === "string") {
+          teardownCmd = config.teardown;
         }
+      } catch {
+        // Config may not exist
       }
 
-      throw new Error(`Workspace "${input.branch}" not found`);
+      // ── Fast path: update state and return immediately ──
+      proj.worktrees = proj.worktrees.filter((wt) => wt.branch !== input.branch);
+      saveState(state);
+
+      const workspaceId = toWorkspaceId(input.project, input.branch);
+      try {
+        unlinkSync(join(bandHome(), "workspace-prompts", `${workspaceId}.json`));
+      } catch {
+        // Prompt file may not exist
+      }
+      deleteWorkspaceStatus(workspaceId);
+      deleteBranchStatus(workspaceId);
+
+      // Clean up all chat panes and their agent processes
+      removeWorkspaceChats(workspaceId);
+
+      // Clean up chat layout tree
+      deleteChatLayout(workspaceId);
+
+      // Clean up all browser tabs
+      removeWorkspaceBrowsers(workspaceId);
+
+      // Clean up browser layout tree
+      deleteBrowserLayout(workspaceId);
+
+      // Kill any running terminal PTY sessions
+      killWorkspaceTerminals(workspaceId);
+
+      // Clean up terminal layout tree
+      deleteTerminalLayout(workspaceId);
+
+      // Kill any running language server processes
+      killWorkspaceServers(workspaceId);
+
+      // Clean up workspace-scoped cronjobs
+      stopJobsForKey(workspaceId);
+      deleteCronjobFile(workspaceId);
+
+      // Delete persisted task history for the workspace (issue #416).
+      // Tasks aren't covered by a FK cascade because workspaces aren't a
+      // first-class DB row, so the cleanup is explicit here next to the
+      // other workspace-scoped removals. Task cleanup is best-effort —
+      // a DB lock or WAL timeout must not abort the whole removal or
+      // suppress the `emit` below, otherwise the dashboard would keep
+      // showing the just-deleted workspace.
+      try {
+        const deletedTasks = deleteWorkspaceTasks(workspaceId);
+        if (deletedTasks > 0) {
+          log.info({ workspaceId, count: deletedTasks }, "deleted workspace tasks on removal");
+        }
+      } catch (err) {
+        log.error({ workspaceId, err }, "failed to delete workspace tasks on removal");
+      }
+
+      // Notify subscribers (dashboard status stream) that this workspace is gone
+      emit({ kind: "remove", workspaceId });
+
+      // ── Background cleanup: slow git/fs operations ──
+      const projPath = proj.path;
+      // Synthetic "detached-<short-sha>" labels generated by
+      // `listWorktrees` for detached-HEAD worktrees do not correspond to a
+      // real git ref. Trying to `git branch -D detached-abc1234` would error
+      // ("branch not found") — the catch below swallows it cleanly, but
+      // skipping the call up front keeps the background logs free of
+      // noise that's hard to distinguish from a genuine problem.
+      const branchToDelete = match.branch.startsWith("detached-") ? null : input.branch;
+      setImmediate(() => {
+        (async () => {
+          // Run teardown script before removing worktree so it can access project files
+          if (teardownCmd) {
+            try {
+              await execFileAsync("bash", ["-c", teardownCmd], {
+                cwd: worktreePath,
+                env: {
+                  ...process.env,
+                  PATH: `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH}`,
+                },
+                encoding: "utf-8",
+                timeout: 60_000,
+              });
+            } catch (err) {
+              log.warn({ err, workspaceId }, "teardown script failed");
+            }
+          }
+
+          try {
+            await execFileAsync(command, ["worktree", "remove", "--force", worktreePath], {
+              cwd: projPath,
+              env: gitEnv,
+              encoding: "utf-8",
+            });
+          } catch {
+            // Worktree may be corrupted (e.g. missing .git file).
+            // Manually remove the directory and prune stale entries.
+            await rm(worktreePath, { recursive: true, force: true });
+            try {
+              await execFileAsync(command, ["worktree", "prune"], {
+                cwd: projPath,
+                env: gitEnv,
+                encoding: "utf-8",
+              });
+            } catch (err) {
+              log.warn({ err, workspaceId }, "git worktree prune failed");
+            }
+          }
+
+          if (branchToDelete) {
+            try {
+              await execFileAsync(command, ["branch", "-D", branchToDelete], {
+                cwd: projPath,
+                env: gitEnv,
+                encoding: "utf-8",
+              });
+            } catch {
+              // Branch may already be deleted
+            }
+          }
+        })().catch((err) => {
+          log.error({ err, workspaceId }, "background workspace cleanup failed");
+        });
+      });
+
+      return { ok: true };
     }),
 
   setPinned: publicProcedure
@@ -2783,19 +2777,15 @@ const servicesRouter = t.router({
         .map(async (project) => {
           try {
             const list = await listWorktrees(project.path);
+            // `listWorktrees` guarantees a non-empty branch for non-bare
+            // worktrees: detached HEADs (mid-rebase, mid-bisect, or
+            // explicit `git checkout <sha>`) are labelled with the
+            // rebase head-name when available, otherwise
+            // `detached-<short-sha>`. So every row here has a real
+            // label and gets counted in the disk accounting.
             const worktrees = list
               .filter((wt) => !wt.isBare)
-              .map((wt) => ({
-                // Detached HEAD (mid-rebase, mid-bisect, or
-                // explicit `git checkout <sha>`) produces an empty
-                // branch string. Keep the row with a sentinel
-                // label so the size still gets counted — silently
-                // dropping it would make a developer's largest
-                // worktree disappear from the accounting whenever
-                // they happened to be on a detached HEAD.
-                branch: wt.branch || "(detached HEAD)",
-                path: wt.path,
-              }));
+              .map((wt) => ({ branch: wt.branch, path: wt.path }));
             return {
               project: project.name,
               path: project.path,
@@ -2834,14 +2824,11 @@ const servicesRouter = t.router({
       let worktreePaths: { branch: string; path: string }[];
       try {
         const list = await listWorktrees(project.path);
+        // See `resourcesProjects` above — `listWorktrees` already
+        // gives every non-bare worktree a non-empty branch label.
         worktreePaths = list
           .filter((wt) => !wt.isBare)
-          .map((wt) => ({
-            // See `resourcesProjects` above — detached HEAD gets a
-            // sentinel label rather than being dropped.
-            branch: wt.branch || "(detached HEAD)",
-            path: wt.path,
-          }));
+          .map((wt) => ({ branch: wt.branch, path: wt.path }));
       } catch (err) {
         return {
           project: project.name,
