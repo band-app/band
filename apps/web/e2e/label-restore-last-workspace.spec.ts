@@ -213,9 +213,10 @@ test.describe("Label switch restores last-used workspace (issue #505)", () => {
   test("keyboard shortcut path shares the same restore logic as the dropdown", async ({ page }) => {
     // Per the issue: "Keyboard shortcut path AND click path should both
     // use the same restore logic — don't fix only one." This test
-    // verifies that ⌘N (Cmd+N / Ctrl+N) drives the same `setLabelFilter`
-    // orchestration as the dropdown by exercising a round-trip via the
-    // accelerator registered in `DashboardShell`'s keydown listener.
+    // verifies that the ⌘1..9 (Cmd+1..9 / Ctrl+1..9) digit accelerators
+    // drive the same `setLabelFilter` orchestration as the dropdown by
+    // exercising a round-trip via the listener registered in
+    // `DashboardShell`'s `useEffect`.
     //
     // `WorkspacePage.pressLabelShortcut` handles the focus-and-press
     // dance (the chat textarea autofocuses on the workspace route, and
@@ -275,10 +276,12 @@ test.describe("Label switch restores last-used workspace (issue #505)", () => {
     // localStorage, and restoring to Personal should still land us on
     // WS_PERSONAL_2.
     await workspacePage.reload();
-    expect(await workspacePage.readLabelLastWorkspaces()).toEqual({
-      [LABEL_PERSONAL]: WS_PERSONAL_2,
-      [LABEL_WORK]: WS_WORK_1,
-    });
+    await expect
+      .poll(() => workspacePage.readLabelLastWorkspaces())
+      .toEqual({
+        [LABEL_PERSONAL]: WS_PERSONAL_2,
+        [LABEL_WORK]: WS_WORK_1,
+      });
 
     await workspacePage.selectLabelFilter(LABEL_PERSONAL);
     await expect(page).toHaveURL(new RegExp(encodeURIComponent(WS_PERSONAL_2)));

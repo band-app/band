@@ -156,7 +156,16 @@ export class WorkspacePage {
    *  land on the origin (localStorage isn't accessible until a same-
    *  origin page is loaded), then evaluate the clear. Keeps the raw
    *  `page.evaluate` out of test bodies and centralises the
-   *  storage-key constants in this page object. */
+   *  storage-key constants in this page object.
+   *
+   *  IMPORTANT: the clear runs AFTER the page mounts, so the React
+   *  tree's in-memory copies of those values (e.g. `useLabelFilter`'s
+   *  state, `lastSeenActiveRef`) still reflect what was in storage at
+   *  mount time. Tests that call this helper should follow up with
+   *  another `goto(...)` (or `reload()`) before exercising label-state
+   *  behaviour, so the React tree re-reads the now-clean storage on
+   *  remount. All in-tree callers already do — every test body opens
+   *  with its own `goto(...)`. */
   async resetLabelStateAndGoto(workspaceId: string): Promise<void> {
     await test.step(`Reset label state, navigate to ${workspaceId}`, async () => {
       await this.goto(workspaceId);
