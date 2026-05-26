@@ -1,6 +1,6 @@
-import { rmSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import {
+  cleanupTmpHome,
   createTmpHome,
   type ServerHandle,
   seedSettings,
@@ -22,7 +22,7 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   await server.close();
-  rmSync(tmpHome, { recursive: true, force: true });
+  cleanupTmpHome(tmpHome);
 });
 
 // ---------------------------------------------------------------------------

@@ -13,10 +13,10 @@
  * multi-workspace fixture, no real git repos needed.
  */
 
-import { rmSync } from "node:fs";
 import { expect, type Page, test } from "@playwright/test";
 import { toWorkspaceId } from "@/dashboard";
 import {
+  cleanupTmpHome,
   createTmpHome,
   type ServerHandle,
   seedSettings,
@@ -56,7 +56,7 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   await server.close();
-  rmSync(tmpHome, { recursive: true, force: true });
+  cleanupTmpHome(tmpHome);
 });
 
 interface DiffSummaryCounters {

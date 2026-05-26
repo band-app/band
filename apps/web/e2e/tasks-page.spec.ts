@@ -1,10 +1,10 @@
-import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { expect, type Page, test } from "@playwright/test";
 import { drizzle } from "drizzle-orm/node-sqlite";
 import { migrate } from "drizzle-orm/node-sqlite/migrator";
 import {
+  cleanupTmpHome,
   createTmpHome,
   type ServerHandle,
   seedSettings,
@@ -16,6 +16,18 @@ const TOKEN = "e2e-test-token";
 
 let server: ServerHandle;
 let tmpHome: string;
+
+// All test-side writes to the same `band.db` the server is using must
+// set `busy_timeout` so a concurrent server transaction doesn't fail
+// us with `SQLITE_BUSY: database is locked`. Phase-B cleanup,
+// branch-status-poller writes, and the task store all hold the
+// write lock briefly — on CI with 2 workers the test's open + write
+// can land exactly inside one of those windows and fail outright
+// instead of waiting. 5 s is generous enough to absorb a runner
+// stall but short enough that a truly deadlocked server still fails
+// fast. (Pre-existing flake surfaced by issue #508's e2e test;
+// reads stay readOnly and need no timeout under WAL mode.)
+const DB_BUSY_TIMEOUT_MS = 5_000;
 
 function seedTask(
   tmpHome: string,
@@ -34,6 +46,7 @@ function seedTask(
   const dbPath = join(tmpHome, ".band", "band.db");
   const sqlite = new DatabaseSync(dbPath);
   sqlite.exec("PRAGMA journal_mode = WAL");
+  sqlite.exec(`PRAGMA busy_timeout = ${DB_BUSY_TIMEOUT_MS}`);
   const db = drizzle({ client: sqlite });
   migrate(db, { migrationsFolder: join(import.meta.dirname, "../src/lib/db/migrations") });
   sqlite
@@ -70,6 +83,7 @@ function readTaskStatus(tmpHome: string, taskId: string): string | undefined {
 function deleteTask(tmpHome: string, taskId: string): void {
   const sqlite = new DatabaseSync(join(tmpHome, ".band", "band.db"));
   try {
+    sqlite.exec(`PRAGMA busy_timeout = ${DB_BUSY_TIMEOUT_MS}`);
     sqlite.prepare("DELETE FROM tasks WHERE id = ?").run(taskId);
   } finally {
     sqlite.close();
@@ -193,7 +207,7 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   await server.close();
-  rmSync(tmpHome, { recursive: true, force: true });
+  cleanupTmpHome(tmpHome);
 });
 
 test.beforeEach(async ({ page }) => {

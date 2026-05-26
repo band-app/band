@@ -177,6 +177,11 @@ export const WorkspaceCard = memo(function WorkspaceCard({
     // "currently-active link in a list of related links".
     "data-active": isActive || undefined,
     "aria-current": isActive ? ("page" as const) : undefined,
+    // Stable test hook keyed by workspaceId so integration tests can right-
+    // click the specific card (issue #508). Branches with `/` in them are
+    // collapsed to `-` by `toWorkspaceId` so the attribute value matches
+    // the canonical workspace id used everywhere else in the UI.
+    "data-testid": `project-list__workspace-card--${workspaceId}`,
     onClick: (e: React.MouseEvent) => {
       e.stopPropagation();
       handleClick();
