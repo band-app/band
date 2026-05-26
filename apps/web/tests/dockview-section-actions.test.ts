@@ -578,4 +578,43 @@ describe("selectNeighbourBeforeRemove", () => {
     expect(tl.panels[0].api.setActive).not.toHaveBeenCalled();
     expect(br.panels[0].api.setActive).not.toHaveBeenCalled();
   });
+
+  // --- Single-tab group: edge-group fallback ---
+  //
+  // `selectNeighbourBeforeRemove` shares its reading-order walk with
+  // `cycleGridGroups` via `getNavigableGroupsInVisualOrder` — so an
+  // edge group with panels is a valid fallback target when the user
+  // closes the last tab in the only grid group. Without this, focus
+  // would snap to dockview's arbitrary first-in-list choice instead
+  // of the visible edge-docked panel next door.
+
+  it("falls back to an edge group with panels when the last grid tab closes", () => {
+    // Layout: grid (left, 400px wide) + edge-bottom strip (bottom, 100px tall).
+    // Closing the grid group's last tab should activate the edge group's panel.
+    const grid = makeGroup("grid", ["g-only"], {
+      rect: { left: 0, top: 0, width: 400, height: 300 },
+    });
+    const edge = makeGroup("edge-bottom", ["e-only"], {
+      location: "edge",
+      rect: { left: 0, top: 300, width: 400, height: 100 },
+    });
+    selectNeighbourBeforeRemove(asApi(makeApi([grid, edge], 0)), "g-only");
+    expect(edge.panels[0].api.setActive).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips empty edge groups when picking the cross-group fallback", () => {
+    // Edge groups with no panels are NOT navigable (matches `cycleGridGroups`
+    // behaviour). With only one grid group and an empty edge, the fallback
+    // chain should find nothing — early-out via the `ordered.length <= 1`
+    // guard inside `selectNeighbourBeforeRemove`, leaving setActive untouched.
+    const grid = makeGroup("grid", ["g-only"], {
+      rect: { left: 0, top: 0, width: 400, height: 300 },
+    });
+    const emptyEdge = makeGroup("edge-bottom", [], {
+      location: "edge",
+      rect: { left: 0, top: 300, width: 400, height: 0 },
+    });
+    selectNeighbourBeforeRemove(asApi(makeApi([grid, emptyEdge], 0)), "g-only");
+    expect(grid.panels[0].api.setActive).not.toHaveBeenCalled();
+  });
 });

@@ -44,11 +44,16 @@ export type EdgeDirection = keyof typeof EDGE_GROUP_IDS;
  * persist the augmented layout naturally.
  */
 export function ensureEdgeGroups(api: DockviewApi): void {
-  // Best-effort cleanup: dockview throws if the edge group doesn't exist,
-  // hence the try.
-  try {
-    if (api.getEdgeGroup("top")) api.removeEdgeGroup("top");
-  } catch {}
+  // Best-effort cleanup of any stale "top" edge group restored from an
+  // older saved layout. `getEdgeGroup` returns `undefined` rather than
+  // throwing for an absent direction, so the truthy check is the actual
+  // guard; the `try/catch` is narrowly scoped around `removeEdgeGroup`
+  // alone (it's the only call here that can throw).
+  if (api.getEdgeGroup("top")) {
+    try {
+      api.removeEdgeGroup("top");
+    } catch {}
+  }
 
   for (const direction of Object.keys(EDGE_GROUP_IDS) as EdgeDirection[]) {
     const id = EDGE_GROUP_IDS[direction];
@@ -101,6 +106,13 @@ interface InnerDockviewRegistration {
   api: DockviewApi;
 }
 
+// Intentionally a per-module-instance singleton — not per React tree.
+// Each `DockviewTerminalContainer` / `DockviewChatContainer` /
+// `DockviewBrowserContainer` contributes at most one entry while
+// mounted. If a future SSR/Playwright setup ever loads this module
+// twice in the same process (e.g. `vi.resetModules()` between tests),
+// each module copy would have its own registry — that's fine because
+// the React trees also bind to the matching module copy.
 const innerDockviewRegistrations = new Set<InnerDockviewRegistration>();
 
 /**
@@ -194,6 +206,12 @@ export function attachEdgeGroupDragVisibility(api: DockviewApi): () => void {
 
   const d1 = api.onWillDragPanel(startDrag);
   const d2 = api.onWillDragGroup(startDrag);
+  // `onDidMovePanel` / `onDidRemovePanel` are the dockview-level
+  // signals for a successful drop. They do NOT fire when the user
+  // cancels a drag with Escape or drops outside the dockview — the
+  // native `dragend` listener on `document` below is the safety net
+  // for those cases, so an unfinished drag can't leave edge groups
+  // stuck in force-visible state.
   const d3 = api.onDidMovePanel(endDrag);
   const d4 = api.onDidRemovePanel(endDrag);
 

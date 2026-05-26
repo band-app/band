@@ -1109,9 +1109,11 @@ export function DockviewBrowserContainer({
 
       // Ensure the three cardinal edge groups (left/right/bottom) exist so
       // future panels can be docked to the edges of this inner container.
-      // Runs BEFORE listener registration so the synchronous add doesn't
-      // trigger a persist write — the next user-driven change saves the
-      // augmented layout naturally. Idempotent on restored layouts.
+      // MUST be called BEFORE the `onDidLayoutChange` registration below —
+      // `ensureEdgeGroups` may synchronously add edge groups and call
+      // `setEdgeGroupVisible`, and routing those events through
+      // `schedulePersist` would write a spurious initial save. Idempotent
+      // on restored layouts.
       ensureEdgeGroups(event.api);
 
       // Drag-visibility: while the user drags a panel/group, force every
