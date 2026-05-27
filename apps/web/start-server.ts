@@ -200,10 +200,13 @@ function getOpenApiSpec(): Promise<string> {
       // Resolve the router path against this file's own directory rather
       // than `process.cwd()` so running `tsx apps/web/start-server.ts`
       // from the repo root still finds the source.
-      const doc = await generateOpenAPIDocument(join(SERVER_ROOT, "src", "trpc", "router.ts"), {
-        title: "Band API",
-        version: "1.0.0",
-      });
+      const doc = await generateOpenAPIDocument(
+        join(SERVER_ROOT, "src", "server", "api", "router.ts"),
+        {
+          title: "Band API",
+          version: "1.0.0",
+        },
+      );
       doc.servers = [{ url: "/trpc" }];
       return JSON.stringify(doc, null, 2);
     }

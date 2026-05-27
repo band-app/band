@@ -1,8 +1,8 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { appRouter } from "../server/api/router.ts";
 import { createContext } from "../trpc/context.ts";
-import { appRouter } from "../trpc/router.ts";
 
 // ---------------------------------------------------------------------------
 // Discover tRPC procedures and extract metadata
