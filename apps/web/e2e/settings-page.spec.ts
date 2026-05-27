@@ -94,8 +94,11 @@ test("settings dialog renders every section in a single scrolling list", async (
   }
 
   // The "Default coding agent" dropdown only renders when at least one
-  // agent is enabled. The first-time-setup hook auto-detects installed
-  // CLIs in the test environment, so we expect it to be visible.
+  // agent is enabled. We seed Claude Code as an enabled agent in the
+  // `beforeAll` above (and set it as the default), so the dropdown renders
+  // deterministically regardless of which CLIs are on the test runner's
+  // PATH — `ensureDefaultCodingAgents()` in `lib/setup.ts` returns early
+  // when `codingAgents` is non-empty, skipping the `whichBinary()` probe.
   await settingsPage.expectRowVisible(settingsPage.defaultAgentSelect());
 });
 

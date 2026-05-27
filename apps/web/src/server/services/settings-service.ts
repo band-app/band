@@ -28,6 +28,14 @@ import {
  * in those keys are caught by Zod rather than slipping through to disk.
  * The `Settings` interface uses an `[key: string]: unknown` index signature
  * for the same reason.
+ *
+ * NOTE: `.passthrough()` only relaxes validation for *unknown* top-level
+ * keys. Known keys with hard enums (`theme`) still 400 the entire update
+ * if a future client sends a value outside the closed set. That's the
+ * intended trade-off for `theme` — it's a dashboard-owned closed enum, so
+ * any new theme name (`"high-contrast"`, …) lands in this file alongside
+ * the dashboard change that introduces it. Relax the enum to `z.string()`
+ * if forward-compat for a specific known key ever outweighs the typo-catch.
  */
 export const settingsUpdateInput = z
   .object({
