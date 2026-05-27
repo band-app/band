@@ -44,6 +44,11 @@ export class SettingsPage {
    *  (set in `DashboardShell.tsx`) because the bare `aria-label="Menu"`
    *  is ambiguous across the dashboard chrome. */
   readonly menuTrigger: Locator;
+  /** "Settings" menuitem inside the open toolbar dropdown. Promoted to a
+   *  named property (rather than inlined in `openDialog`) so the locator
+   *  lives alongside every other actionable element this POM owns — every
+   *  control elsewhere in this class is exposed the same way. */
+  readonly settingsMenuItem: Locator;
 
   constructor(
     private readonly page: Page,
@@ -53,6 +58,7 @@ export class SettingsPage {
     this.dialog = page.getByRole("dialog", { name: "Settings" });
     this.menuTrigger = page.getByTestId("dashboard__menu-trigger");
     this.saveButton = this.dialog.getByRole("button", { name: "Save" });
+    this.settingsMenuItem = page.getByRole("menuitem", { name: "Settings" });
   }
 
   /** Navigate to the dashboard root with the test token. */
@@ -94,7 +100,7 @@ export class SettingsPage {
         await this.menuTrigger.click();
         await expect(this.page.getByRole("menu")).toBeVisible({ timeout: 1_000 });
       }).toPass({ timeout: 15_000 });
-      await this.page.getByRole("menuitem", { name: "Settings" }).click();
+      await this.settingsMenuItem.click();
       await expect(this.dialog).toBeVisible();
     });
   }

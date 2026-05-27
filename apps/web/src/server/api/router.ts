@@ -27,6 +27,12 @@ import { t } from "./trpc";
 // migrated `settingsRouter` without a build error. Each subsequent phase of
 // the 3-tier migration adds a key here and removes it from the legacy router
 // in the same diff; the invariant must hold for every key composed below.
+//
+// Live guard: the `tRPC — settings CRUD` describe block in
+// `apps/web/tests/trpc.test.ts` (currently around line 383) exercises
+// `settings.get` and `settings.update` end-to-end through the merged router,
+// so a regression that masks the migrated `settingsRouter` with a stale
+// legacy entry trips at least one of those assertions.
 export const appRouter = t.mergeRouters(legacyAppRouter, t.router({ settings: settingsRouter }));
 
 export type AppRouter = typeof appRouter;

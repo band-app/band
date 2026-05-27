@@ -71,6 +71,26 @@ export interface Settings {
    * See `docs/experiments/partial-messages.md`.
    */
   claudeCodePartialMessages?: boolean;
+  /** Enable Language Server Protocol features (file preview hovers, etc.). */
+  enableLSP?: boolean;
+  /**
+   * When true (default in the dashboard), single-clicking a file in the tree
+   * opens it in a shared "preview" tab slot rather than pinning a new tab.
+   * Mirrors `dashboard/types.ts::Settings.enableFilePreviewTabs`.
+   */
+  enableFilePreviewTabs?: boolean;
+  /** Dashboard theme preference. */
+  theme?: "system" | "light" | "dark";
+  /**
+   * GPU-accelerated WebGL terminal renderer. Mirrors
+   * `dashboard/types.ts::Settings.useWebGLTerminalRenderer`.
+   */
+  useWebGLTerminalRenderer?: boolean;
+  /**
+   * Experimental Web Browser pane CDP screencast toggle. Mirrors
+   * `dashboard/types.ts::Settings.webBrowserCdpEnabled`.
+   */
+  webBrowserCdpEnabled?: boolean;
   /** Extra fields not explicitly modeled. Preserved across read/write. */
   [key: string]: unknown;
 }

@@ -1,11 +1,81 @@
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
+import { z } from "zod";
 import {
   bandHome,
   type CodingAgentDefinition,
   type Settings,
   SettingsQueries,
 } from "../infra/db/queries/settings";
+
+/**
+ * Zod schema for an in-flight settings update.
+ *
+ * Lives in the service tier (not the API router) so the service and any
+ * future non-tRPC entry points (CLI, scripts, the desktop bridge) share a
+ * single source of truth for the accepted shape. The settings router
+ * imports this schema as its `.input(...)` validator; `SettingsService.update`
+ * accepts the inferred type, so adding a field to the schema (or removing
+ * one) is a compile error at every call site instead of silently drifting
+ * between two definitions.
+ *
+ * `.passthrough()` is deliberate: the on-disk settings document is a
+ * forward-compat JSON file that the desktop shell and future client versions
+ * may write additional keys into. Rejecting unknown keys here would corrupt
+ * the file on the next `update` round-trip from an older client. The
+ * known-key schema below still narrows the common write paths — every key
+ * the dashboard's `SettingsPage.tsx` writes today is enumerated, so typos
+ * in those keys are caught by Zod rather than slipping through to disk.
+ * The `Settings` interface uses an `[key: string]: unknown` index signature
+ * for the same reason.
+ */
+export const settingsUpdateInput = z
+  .object({
+    // `null` is allowed because the dashboard sends `worktreesDir.trim() || null`
+    // when the field is cleared — the legacy behavior preserved across the
+    // 3-tier migration.
+    worktreesDir: z.string().nullish(),
+    codingAgents: z
+      .array(
+        z.object({
+          id: z.string(),
+          type: z.string(),
+          label: z.string(),
+          command: z.string().optional(),
+          model: z.string().optional(),
+        }),
+      )
+      .optional(),
+    defaultCodingAgent: z.string().optional(),
+    webServerPort: z.number().optional(),
+    notifications: z
+      .object({
+        soundOnNeedsAttention: z.boolean().optional(),
+        sound: z.string().optional(),
+      })
+      .optional(),
+    labels: z.array(z.object({ id: z.string(), name: z.string(), color: z.string() })).optional(),
+    tokenSecret: z.string().optional(),
+    autoStartTunnel: z.boolean().optional(),
+    maxCachedWorkspaces: z.number().optional(),
+    claudeCodePartialMessages: z.boolean().optional(),
+    // Dashboard-UI-controlled boolean toggles. Enumerated so typos in keys
+    // the SettingsPage actually writes are caught by Zod rather than
+    // silently slipping through `.passthrough()`.
+    enableLSP: z.boolean().optional(),
+    enableFilePreviewTabs: z.boolean().optional(),
+    useWebGLTerminalRenderer: z.boolean().optional(),
+    webBrowserCdpEnabled: z.boolean().optional(),
+    theme: z.enum(["system", "light", "dark"]).optional(),
+  })
+  .passthrough();
+
+/**
+ * Inferred update shape. Use this everywhere the schema's shape needs to
+ * appear in a TypeScript signature (e.g. `SettingsService.update`, helper
+ * functions that hand a patch to the service).
+ */
+export type SettingsUpdate = z.infer<typeof settingsUpdateInput>;
 
 /**
  * Business logic for reading and updating Band settings.
@@ -35,11 +105,13 @@ export class SettingsService {
    *
    * The Infra layer handles the actual merge + atomic write; this method
    * is a thin pass-through that lets callers (and tests) target the
-   * service rather than the underlying file I/O. The shared
-   * `Partial<Settings>` parameter type makes the partial-update semantics
-   * explicit at both tiers.
+   * service rather than the underlying file I/O. The parameter type is
+   * `SettingsUpdate` (inferred from the shared Zod schema above) so the
+   * service tier and the tRPC router's `.input(...)` validator stay in
+   * lock-step — adding or removing a field in the schema is a compile
+   * error at every call site instead of silent drift.
    */
-  update(patch: Partial<Settings>): void {
+  update(patch: SettingsUpdate): void {
     this.queries.save(patch);
   }
 
@@ -83,10 +155,29 @@ export class SettingsService {
   /**
    * Where Band creates new workspace worktrees. Defaults to
    * `$BAND_HOME/worktrees` when the user hasn't overridden it.
+   *
+   * Both `undefined` ("key was never written") and `null` ("user explicitly
+   * cleared the field") collapse to the built-in default here — callers of
+   * this method want a usable path on disk, not the raw sentinel. Callers
+   * that need to distinguish "cleared" from "never set" (e.g. to render an
+   * empty text box in the Settings dialog) should read `rawWorktreesDir()`
+   * or `get().worktreesDir` directly instead of going through this method.
    */
   worktreesDir(): string {
-    const settings = this.queries.load();
-    return settings.worktreesDir ?? join(bandHome(), "worktrees");
+    const raw = this.rawWorktreesDir();
+    return raw ?? join(bandHome(), "worktrees");
+  }
+
+  /**
+   * Return the raw `worktreesDir` value from settings without applying the
+   * default, preserving the `null` vs `undefined` distinction documented on
+   * the `Settings` interface (`null` = user explicitly cleared the field,
+   * `undefined` = key was never written). Use this when the caller cares
+   * about the sentinel itself (e.g. the dashboard's empty-text-box rendering
+   * vs. "the user never opened Settings yet").
+   */
+  rawWorktreesDir(): string | null | undefined {
+    return this.queries.load().worktreesDir;
   }
 
   /**
