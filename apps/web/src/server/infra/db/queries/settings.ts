@@ -43,7 +43,14 @@ export interface LabelDefinition {
  * store.
  */
 export interface Settings {
-  worktreesDir?: string;
+  /**
+   * Worktrees directory. `null` is an intentional sentinel meaning "the user
+   * explicitly cleared this field" (the dashboard sends `null` when the
+   * input is empty); callers that resolve a usable path should fall back to
+   * the default with `?? defaultDir` rather than treating `null` as "not
+   * configured". `undefined` means "key was never written".
+   */
+  worktreesDir?: string | null;
   codingAgents?: CodingAgentDefinition[];
   defaultCodingAgent?: string;
   webServerPort?: number;

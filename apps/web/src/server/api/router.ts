@@ -21,6 +21,12 @@ import { appRouter as legacyAppRouter } from "../../trpc/router";
 import { settingsRouter } from "./settings/router";
 import { t } from "./trpc";
 
+// INVARIANT: the legacy router (`apps/web/src/trpc/router.ts`) must not contain
+// a `settings:` key. `t.mergeRouters` accepts two routers and silently picks
+// last-write-wins for duplicate keys, so a stray legacy entry would mask the
+// migrated `settingsRouter` without a build error. Each subsequent phase of
+// the 3-tier migration adds a key here and removes it from the legacy router
+// in the same diff; the invariant must hold for every key composed below.
 export const appRouter = t.mergeRouters(legacyAppRouter, t.router({ settings: settingsRouter }));
 
 export type AppRouter = typeof appRouter;

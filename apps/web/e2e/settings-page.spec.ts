@@ -84,6 +84,11 @@ test("settings dialog renders every section in a single scrolling list", async (
   // Coding Agents — the agent labels appear in two places (the per-agent
   // row and, when enabled, the default-agent dropdown's selected value),
   // so target the agent's enable switch which is uniquely keyed.
+  //
+  // `SettingsPage.tsx` renders one row per entry in its `KNOWN_AGENTS`
+  // constant regardless of what is seeded in `codingAgents`, so OpenCode
+  // is visible here even though only `claude-code` and `codex` are in the
+  // beforeAll seed above.
   for (const agent of ["Claude Code", "Codex", "OpenCode"]) {
     await settingsPage.expectRowVisible(settingsPage.agentEnableSwitch(agent));
   }
@@ -139,11 +144,16 @@ test("coding agents section renders and toggling an agent doesn't crash", async 
 
   // Toggle Claude Code so listModels() is called and the model Select
   // potentially mounts. The toggle alone is enough to exercise the
-  // listModels effect — saving would close the dialog.
+  // listModels effect — saving would close the dialog. We don't assume a
+  // starting state (the seed enables claude-code, so the switch starts
+  // checked; an unseeded test would start unchecked) — instead we record
+  // the initial `data-state` and assert it flipped.
+  const initialState = await claudeSwitch.getAttribute("data-state");
+  const targetState = initialState === "checked" ? "unchecked" : "checked";
   await claudeSwitch.click({ force: true });
 
   // Wait for the toggle to take effect at the DOM level. Once the switch
-  // reports `data-state="checked"`, React has applied the state update
+  // reports the flipped `data-state`, React has applied the state update
   // and the `codingAgents`-keyed effect that calls `listModels()` has
   // fired (the auto-retry inside `toHaveAttribute` doubles as a settling
   // window for the SDK-rendered Select). This is the strongest
@@ -155,7 +165,7 @@ test("coding agents section renders and toggling an agent doesn't crash", async 
   // attribute flips; the async-throw case (post-listModels render) is
   // genuinely uncovered here and would require an Express stub fronting
   // listModels to surface deterministically.
-  await expect(claudeSwitch).toHaveAttribute("data-state", "checked");
+  await expect(claudeSwitch).toHaveAttribute("data-state", targetState);
 
   // The dialog must still be visible — if Radix had thrown, the React tree
   // would have unmounted into an error boundary.

@@ -59,6 +59,13 @@ export class SettingsPage {
   async goto(): Promise<void> {
     await test.step("Open dashboard", async () => {
       await this.page.goto(`${this.baseUrl}/?token=${this.token}`);
+      // The dashboard React app fetches projects via tRPC on mount, so the
+      // toolbar's React click handlers may not be bound by the time `load`
+      // fires. Wait for the network to settle before any subsequent step
+      // tries to drive the dropdown — without this, the first click on the
+      // menu trigger is silently lost in CI (matches the workaround already
+      // in `tasks-page.spec.ts:openTasksDialog`).
+      await this.page.waitForLoadState("networkidle");
     });
   }
 
@@ -70,9 +77,19 @@ export class SettingsPage {
    * `expect(...).toPass({ timeout })` poll — clicking too early loses the
    * event before the menu mounts. Once the menu is visible we click the
    * "Settings" item and wait for the dialog to render.
+   *
+   * The bare `getByRole("menu")` locator does not carry an accessible name —
+   * Radix's `DropdownMenuContent` portal does not accept an `aria-label`
+   * without further plumbing, and on the dashboard root the toolbar menu
+   * is the only `role="menu"` element in the DOM until something else
+   * opens (the label-filter dropdown is gated on `labels.length > 0` and
+   * the test seeds an empty project list). If a second menu is ever added
+   * unconditionally to the toolbar, scope this locator via an explicit
+   * `aria-label` on the `DropdownMenuContent`.
    */
   async openDialog(): Promise<void> {
     await test.step("Open Settings dialog from toolbar menu", async () => {
+      await expect(this.menuTrigger).toBeVisible();
       await expect(async () => {
         await this.menuTrigger.click();
         await expect(this.page.getByRole("menu")).toBeVisible({ timeout: 1_000 });
@@ -82,12 +99,11 @@ export class SettingsPage {
     });
   }
 
-  /** Locator for every SettingsSection card in the dialog. The
-   *  `[data-slot="settings-section-card"]` attribute is set by
-   *  `SettingsSection.tsx`, so it's a system-controlled anchor rather
-   *  than user-visible copy. */
+  /** Locator for every SettingsSection card in the dialog. Anchored on the
+   *  `data-testid="settings__section-card"` attribute set by
+   *  `SettingsSection.tsx` (BEM convention). */
   sectionCards(): Locator {
-    return this.dialog.locator('[data-slot="settings-section-card"]');
+    return this.dialog.getByTestId("settings__section-card");
   }
 
   /** Theme dropdown trigger — `aria-label="Theme"` is set in

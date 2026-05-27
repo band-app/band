@@ -35,7 +35,9 @@ export class SettingsService {
    *
    * The Infra layer handles the actual merge + atomic write; this method
    * is a thin pass-through that lets callers (and tests) target the
-   * service rather than the underlying file I/O.
+   * service rather than the underlying file I/O. The shared
+   * `Partial<Settings>` parameter type makes the partial-update semantics
+   * explicit at both tiers.
    */
   update(patch: Partial<Settings>): void {
     this.queries.save(patch);
