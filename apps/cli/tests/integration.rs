@@ -3142,7 +3142,14 @@ fn skills_install_filter_limits_to_matching_skills_only() {
 fn skills_install_emits_yaml_frontmatter_that_parses_strictly() {
     let tmp = skills_sandbox(&[]);
     let home = tmp.path();
-    let _ = run_install_json(home);
+    // Assert the install itself succeeded so a failure here surfaces as an
+    // install error rather than a confusing "file not found" downstream.
+    let result = run_install_json(home);
+    assert_eq!(
+        result["shared"]["written"].as_array().map(Vec::len),
+        Some(6),
+        "install did not write 6 shared skills: {result}"
+    );
 
     let shared_dir = home.join(".agents").join("skills");
     for name in [
@@ -3170,7 +3177,11 @@ fn skills_install_emits_yaml_frontmatter_that_parses_strictly() {
 
         // Sanity-check that the fields the agent reads are present and the
         // right shape (not an accidental flow sequence). Catches the exact
-        // regression that prompted this test.
+        // regression that prompted this test. All 6 Band skills are
+        // expected to declare `argument-hint` — the hard unwrap below is
+        // intentional, not an oversight. A future skill without
+        // `argument-hint` should add the field rather than soften the
+        // assertion here.
         let mapping = value
             .as_mapping()
             .unwrap_or_else(|| panic!("{name}: frontmatter is not a YAML mapping"));

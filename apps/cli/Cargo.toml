@@ -12,6 +12,9 @@ path = "src/main.rs"
 clap = { version = "4", features = ["derive", "env"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Pre-1.0 crate; the `0.0.x` semver range is `>=0.0.12, <0.0.13`,
+# so patch bumps need a manual `cargo update -p serde_yml`. Intentional
+# while the API is still settling — revisit once it ships a 0.1.x line.
 serde_yml = "0.0.12"
 dirs = "6"
 ureq = { version = "3", features = ["json"] }
