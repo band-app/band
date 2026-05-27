@@ -337,6 +337,13 @@ export function ChatView({
       setSelectedMode(mode);
       trpc.chats.update
         .mutate({ chatId, mode: mode ?? "" })
+        // Since issue #520, `chats.update` returns 404 (not the previous
+        // silent 200) when `chatId` no longer resolves — e.g. the user
+        // deleted this chat in another tab between the local state
+        // update and this fire-and-forget mutation. The 404 surfaces as
+        // a TRPCClientError here; absorbing it keeps the UI from
+        // surfacing a stale-chat error toast when the component is
+        // already on its way out.
         .catch((err) => console.error("[ChatView] error persisting mode:", err));
     },
     [chatId],
@@ -435,6 +442,9 @@ export function ChatView({
       setUserModelOverride(model);
       trpc.chats.update
         .mutate({ chatId, model: model ?? "" })
+        // See `handleModeSelect` above — `chats.update` now 404s on a
+        // stale chatId since #520. Absorbing the error keeps the
+        // fire-and-forget UX intact.
         .catch((err) => console.error("[ChatView] error persisting model:", err));
     },
     [chatId],

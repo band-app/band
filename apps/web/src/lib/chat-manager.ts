@@ -47,8 +47,16 @@ const MAX_LABEL_KEYS = 20;
 /** Maximum length of a label value. */
 const MAX_LABEL_VALUE_LENGTH = 256;
 
-/** Regex for valid label keys: alphanumerics, `_`, `:`, `-`; 1-64 chars. */
-const LABEL_KEY_REGEX = /^[a-zA-Z0-9_:-]{1,64}$/;
+/** Regex for valid label keys: alphanumerics, `_`, `:`, `-`; 1-64 chars.
+ *
+ * The hyphen is escaped (`\-`) rather than relying on its end-of-class
+ * literal position. Functionally identical today, but if the regex is ever
+ * rewritten with the `u` flag (which makes most ranges stricter), an
+ * unescaped trailing `-` between `:` and the closing `]` is more likely
+ * to be misread by a future maintainer than to actually break — flipping
+ * the order of `_`, `:`, `-` would silently turn the class into a range.
+ * Escaping makes the literal intent obvious. */
+const LABEL_KEY_REGEX = /^[a-zA-Z0-9_:\-]{1,64}$/;
 
 /** Printable-ASCII regex used to validate label values. */
 const PRINTABLE_VALUE_REGEX = /^[\x20-\x7E]+$/;
@@ -204,7 +212,7 @@ function validateLabels(
     // empty strings via the `{1,64}` length quantifier, and the regex
     // message is self-explanatory (`key "" must match /^.../`).
     if (!LABEL_KEY_REGEX.test(key)) {
-      throw new InvalidLabelsError(`labels: key "${key}" must match /^[a-zA-Z0-9_:-]{1,64}$/`);
+      throw new InvalidLabelsError(`labels: key "${key}" must match ${LABEL_KEY_REGEX}`);
     }
     if (options.rejectReservedPrefix && key.startsWith(BAND_LABEL_PREFIX)) {
       throw new InvalidLabelsError(
@@ -257,7 +265,13 @@ function validateLabels(
  * today, which is the only invariant downstream code relies on; the
  * day a use case needs to distinguish them, introduce a sentinel
  * (e.g. `"{}"` for explicitly cleared, `NULL` for never-set) or a
- * separate column rather than re-encoding it onto this one. */
+ * separate column rather than re-encoding it onto this one.
+ *
+ * Cross-reference: `updateChat` preserves `band:`-prefixed labels across
+ * user-facing replacement updates, so a user clearing labels via
+ * `chats.update { labels: {} }` does NOT strip the cronjob's
+ * `band:cronId` — the disk row will reflect `{"band:cronId": ...}`,
+ * not `null`, after a "clear" against a cron-owned chat. */
 function serializeLabels(labels: Record<string, string>): string | null {
   if (!labels || Object.keys(labels).length === 0) return null;
   return JSON.stringify(labels);
@@ -435,9 +449,34 @@ export function updateChat(chatId: string, updates: UpdateChatOptions): ChatSess
   if (updates.mode !== undefined) session.mode = updates.mode ?? undefined;
   const labelsTouched = updates.labels !== undefined;
   if (labelsTouched) {
-    session.labels = validateLabels(updates.labels!, {
-      rejectReservedPrefix: !updates.allowReservedLabels,
-    });
+    const rejectReservedPrefix = !updates.allowReservedLabels;
+    let next = validateLabels(updates.labels!, { rejectReservedPrefix });
+    if (rejectReservedPrefix) {
+      // Preserve any pre-existing `band:`-prefixed labels that the
+      // caller's full-set replacement would otherwise drop. The reserved
+      // prefix is meant to mean "user-facing surfaces can't touch
+      // these" — but because `chats.update` semantics are "replace the
+      // whole record", a user who calls `band chats unlabel <id>
+      // band:cronId` (or just sends a labels payload that omits the
+      // reserved keys) would silently strip the server's internal
+      // bookkeeping, orphaning the chat from its cronjob and causing
+      // the next fire to create a fresh one. Validation can't catch
+      // that on its own — the new payload is well-formed. Merging the
+      // existing reserved keys back in makes the invariant hold for
+      // the lifecycle of those keys, not just for the moment they're
+      // first written. Internal callers passing `allowReservedLabels`
+      // intentionally skip this preservation step (they may need to
+      // explicitly clear a reserved key during teardown).
+      const reservedKeys = Object.keys(session.labels).filter((k) =>
+        k.startsWith(BAND_LABEL_PREFIX),
+      );
+      if (reservedKeys.length > 0) {
+        const merged: Record<string, string> = { ...next };
+        for (const k of reservedKeys) merged[k] = session.labels[k];
+        next = validateLabels(merged, { rejectReservedPrefix: false });
+      }
+    }
+    session.labels = next;
   }
 
   // Only rewrite the labels column when the caller actually touched

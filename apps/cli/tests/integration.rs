@@ -1941,7 +1941,12 @@ fn chats_list_renders_labels_column() {
         "chats label should merge `owner`, not replace existing labels"
     );
 
-    // The default text output should be the rendered cell.
+    // The default text output should be the rendered cell. Also verify
+    // the JSON output of the same operation so a regression that
+    // accidentally renders an old in-memory snapshot (vs. the
+    // server-confirmed labels) would show up on the structured side
+    // rather than only via the text rendering — text could happen to
+    // agree with the wrong source if both went through the same sort.
     let label_text = env.band(&["chats", "label", &labeled_id, "priority=low"]);
     assert!(
         label_text.status.success(),
@@ -1952,6 +1957,26 @@ fn chats_list_renders_labels_column() {
         stdout(&label_text).trim(),
         "owner=alice,phase=plan,priority=low",
         "text output should show the chat's final labels in sorted k=v,k=v form"
+    );
+    let label_json = env.band(&[
+        "chats",
+        "label",
+        &labeled_id,
+        "priority=low",
+        "--output",
+        "json",
+    ]);
+    assert!(
+        label_json.status.success(),
+        "stderr: {}",
+        stderr(&label_json)
+    );
+    let after_second_label =
+        serde_json::from_str::<serde_json::Value>(&stdout(&label_json)).unwrap()["chat"].clone();
+    assert_eq!(
+        after_second_label["labels"],
+        serde_json::json!({ "owner": "alice", "phase": "plan", "priority": "low" }),
+        "JSON output of the second `chats label` should reflect the full server-confirmed state"
     );
 
     // ----- chats unlabel: removes the listed keys, preserves the rest -----

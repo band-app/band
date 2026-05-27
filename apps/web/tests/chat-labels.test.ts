@@ -8,6 +8,7 @@ import {
   createTmpHome,
   type ServerHandle,
   trpcMutate as sharedTrpcMutate,
+  trpcQuery as sharedTrpcQuery,
   startServer,
 } from "./helpers/server";
 
@@ -28,27 +29,18 @@ const FAKE_AGENT_PATH = join(import.meta.dirname, "fake-agent.mjs");
 const DEFAULT_TOKEN = "chat-labels-test-token";
 
 // ---------------------------------------------------------------------------
-// tRPC HTTP helpers — `trpcMutate` lives in `./helpers/server` (shared with
-// `workspace-remove-detached.test.ts`); `trpcQuery` is local because none of
-// the other migrated suites need it yet. If a third caller appears, lift it.
+// tRPC HTTP helpers — `trpcMutate` and `trpcQuery` live in
+// `./helpers/server` (shared with `workspace-remove-detached.test.ts`).
+// The wrappers below bake in `DEFAULT_TOKEN` so call sites in this suite
+// don't have to thread it through every invocation.
 // ---------------------------------------------------------------------------
 
-const defaultAuthHeader = { Cookie: `band_token=${DEFAULT_TOKEN}` };
-
-async function trpcQuery(serverUrl: string, procedure: string, input?: unknown) {
-  const url =
-    input !== undefined
-      ? `${serverUrl}/trpc/${procedure}?input=${encodeURIComponent(JSON.stringify(input))}`
-      : `${serverUrl}/trpc/${procedure}`;
-  return fetch(url, { headers: defaultAuthHeader });
-}
-
-// Wrap the shared `trpcMutate` so call sites in this suite don't need to
-// thread `DEFAULT_TOKEN` through every invocation. The 4-arg shared
-// helper takes the token explicitly precisely so different suites can
-// bind their own.
 function trpcMutate(serverUrl: string, procedure: string, input?: unknown) {
   return sharedTrpcMutate(serverUrl, procedure, input, DEFAULT_TOKEN);
+}
+
+function trpcQuery(serverUrl: string, procedure: string, input?: unknown) {
+  return sharedTrpcQuery(serverUrl, procedure, input, DEFAULT_TOKEN);
 }
 
 async function trpcData<T>(res: Response): Promise<T> {
@@ -356,6 +348,20 @@ describe("chats — label validation", () => {
     const data = await trpcData<{ chat: ChatRecord }>(res);
     expect(data.chat.labels).toEqual({ "user:phase": "plan" });
   });
+
+  it("accepts hyphens in keys (kebab-case labels)", async () => {
+    // The hyphen is one of the four allowed non-alphanumeric chars in
+    // `LABEL_KEY_REGEX`. Pinning it in a real test so a future regex
+    // rewrite (e.g. introducing the `u` flag) that misorders the
+    // character class doesn't silently start rejecting kebab-case.
+    const res = await trpcMutate(server.url, "chats.create", {
+      workspaceId,
+      labels: { "my-feature-flag": "on", priority: "p1" },
+    });
+    expect(res.status).toBe(200);
+    const data = await trpcData<{ chat: ChatRecord }>(res);
+    expect(data.chat.labels).toEqual({ "my-feature-flag": "on", priority: "p1" });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -573,6 +579,39 @@ describe("cronjobs — labeled chat dispatch", () => {
     expect(matching[0].id).toBe(triggerData.chatId);
 
     await waitForChatIdle(triggerData.chatId);
+  });
+
+  it("user chats.update cannot strip the chat's `band:cronId` label", async () => {
+    // The reserved `band:` prefix is meant to be untouchable from
+    // user-facing surfaces. Validation already blocks adding such a
+    // key, but `chats.update` semantics are "replace the whole record"
+    // — without preservation, a user passing `labels: {}` (or any set
+    // omitting `band:cronId`) would silently orphan the chat from its
+    // cronjob. `updateChat` merges existing reserved labels back into
+    // every user-facing payload to keep the invariant lifecycle-wide.
+    const listRes = await trpcQuery(server.url, "chats.list", { workspaceId });
+    const listData = await trpcData<{ chats: ChatRecord[] }>(listRes);
+    const cronChat = listData.chats.find((c) => c.labels[`band:cronId`] === jobId);
+    expect(cronChat).toBeDefined();
+
+    const updateRes = await trpcMutate(server.url, "chats.update", {
+      chatId: cronChat!.id,
+      labels: { phase: "user-tag" },
+    });
+    expect(updateRes.status).toBe(200);
+    const updated = await trpcData<{ chat: ChatRecord }>(updateRes);
+    expect(updated.chat.labels[`band:cronId`]).toBe(jobId);
+    expect(updated.chat.labels.phase).toBe("user-tag");
+
+    // Try harder — clear everything.
+    const clearRes = await trpcMutate(server.url, "chats.update", {
+      chatId: cronChat!.id,
+      labels: {},
+    });
+    expect(clearRes.status).toBe(200);
+    const cleared = await trpcData<{ chat: ChatRecord }>(clearRes);
+    expect(cleared.chat.labels[`band:cronId`]).toBe(jobId);
+    expect(Object.keys(cleared.chat.labels)).toEqual([`band:cronId`]);
   });
 
   it("a second cronjob in the same workspace gets its own chat", async () => {
