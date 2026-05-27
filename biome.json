@@ -70,7 +70,7 @@
       "!**/.astro",
       "!**/test-results",
       "!**/playwright-report",
-      "!**/apps/web/src/lib/db/migrations"
+      "!**/apps/web/src/server/infra/db/migrations"
     ]
   }
 }

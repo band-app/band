@@ -4,13 +4,13 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { eq, or, sql } from "drizzle-orm";
 import { toWorkspaceId } from "@/dashboard";
-import { getDb } from "./db/connection";
+import { getDb } from "../server/infra/db/connection";
 import {
   branchStatuses as branchStatusesTable,
   projects as projectsTable,
   workspaceStatuses as workspaceStatusesTable,
   worktrees as worktreesTable,
-} from "./db/schema";
+} from "../server/infra/db/schema";
 
 export type ProjectKind = "git" | "plain";
 

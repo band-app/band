@@ -8,7 +8,7 @@ import { drizzle } from "drizzle-orm/node-sqlite";
 import { migrate } from "drizzle-orm/node-sqlite/migrator";
 
 const PROJECT_ROOT = join(import.meta.dirname, "../..");
-const MIGRATIONS_FOLDER = join(PROJECT_ROOT, "src/lib/db/migrations");
+const MIGRATIONS_FOLDER = join(PROJECT_ROOT, "src/server/infra/db/migrations");
 
 export interface ServerHandle {
   url: string;

@@ -1,6 +1,6 @@
 # Web App Architecture
 
-> **Status: target architecture, not current state.** The existing `apps/web/src/` layout is flatter — most server logic lives directly under `apps/web/src/lib/` (e.g. `chat-manager.ts`, `agent-pool.ts`, `git.ts`, `lsp-manager.ts`) and tRPC procedures live under `apps/web/src/trpc/`. This document describes the **API → Services → Infra** structure that new code should be migrated toward, not the layout you will find today. See `apps/web/src/trpc/router.ts` for the actual entry point.
+> **Status: target architecture, not current state.** The existing `apps/web/src/` layout is flatter — most server logic lives directly under `apps/web/src/lib/` (e.g. `chat-manager.ts`, `agent-pool.ts`, `git.ts`, `lsp-manager.ts`) and tRPC procedures still live under `apps/web/src/trpc/router.ts`. This document describes the **API → Services → Infra** structure that new code should be migrated toward, not the layout you will find today. See `apps/web/src/server/api/router.ts` for the canonical entry point (a Phase 0 re-export shim that will absorb per-domain sub-routers in later phases).
 
 The web server (`apps/web`) is moving toward a 3-tier architecture: **API**, **Services**, and **Infra**. Each tier has a single responsibility and a clear dependency direction.
 

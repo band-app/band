@@ -1,5 +1,5 @@
 import { createTRPCClient, createWSClient, httpBatchLink, splitLink, wsLink } from "@trpc/client";
-import type { AppRouter } from "../trpc/router";
+import type { AppRouter } from "../server/api/router";
 
 const wsClient = createWSClient({
   url: () => {

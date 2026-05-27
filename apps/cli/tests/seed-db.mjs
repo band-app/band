@@ -26,7 +26,7 @@ mkdirSync(bandDir, { recursive: true });
 
 const migrationsDir = resolve(
   import.meta.dirname,
-  "../../web/src/lib/db/migrations"
+  "../../web/src/server/infra/db/migrations"
 );
 
 const db = new DatabaseSync(join(bandDir, "band.db"));

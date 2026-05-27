@@ -25,7 +25,15 @@ import { SERVER_RUNTIME, SERVER_SCRIPT } from "./helpers/server-runtime";
 
 const PROJECT_ROOT = join(import.meta.dirname, "..");
 const DEFAULT_TOKEN = "task-cleanup-test-token";
-const MIGRATIONS_FOLDER = join(import.meta.dirname, "..", "src", "lib", "db", "migrations");
+const MIGRATIONS_FOLDER = join(
+  import.meta.dirname,
+  "..",
+  "src",
+  "server",
+  "infra",
+  "db",
+  "migrations",
+);
 
 // ---------------------------------------------------------------------------
 // Server lifecycle (mirrors the pattern used in `tasks-crud.test.ts`)

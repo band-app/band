@@ -43,12 +43,12 @@ import { drizzle } from "drizzle-orm/node-sqlite";
 import { migrate } from "drizzle-orm/node-sqlite/migrator";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
-import * as schema from "../src/lib/db/schema";
 import { findFreePort } from "../src/lib/port-utils";
+import * as schema from "../src/server/infra/db/schema";
 import { seedSettings, seedState } from "./helpers/seed-state";
 
 const PROJECT_ROOT = join(import.meta.dirname, "..");
-const MIGRATIONS_FOLDER = join(PROJECT_ROOT, "src", "lib", "db", "migrations");
+const MIGRATIONS_FOLDER = join(PROJECT_ROOT, "src", "server", "infra", "db", "migrations");
 const ROOT_ROUTE_PATH = join(PROJECT_ROOT, "src", "routes", "__root.tsx");
 
 // In dev mode the server skips auth (matches the prior `vite dev`
@@ -218,7 +218,7 @@ function seedRunningTask(tmpHome: string, taskId: string): void {
   migrate(drizzle({ client: sqlite, schema }), { migrationsFolder: MIGRATIONS_FOLDER });
 
   const now = Date.now();
-  // Mirror the schema in src/lib/db/schema.ts. The columns here are
+  // Mirror the schema in src/server/infra/db/schema.ts. The columns here are
   // deliberately written by name (not via drizzle's API) so this test
   // breaks loudly if the schema changes — the corresponding production
   // fix needs to be reflected in `cleanupStaleTasks` too.

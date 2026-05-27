@@ -48,13 +48,13 @@ import { DatabaseSync } from "node:sqlite";
 import { drizzle } from "drizzle-orm/node-sqlite";
 import { migrate } from "drizzle-orm/node-sqlite/migrator";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { closeDb, getDb } from "../src/lib/db/connection";
-import * as schema from "../src/lib/db/schema";
+import { closeDb, getDb } from "../src/server/infra/db/connection";
+import * as schema from "../src/server/infra/db/schema";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { SERVER_RUNTIME, SERVER_SCRIPT } from "./helpers/server-runtime";
 
 const PROJECT_ROOT = join(import.meta.dirname, "..");
-const MIGRATIONS_FOLDER = join(PROJECT_ROOT, "src", "lib", "db", "migrations");
+const MIGRATIONS_FOLDER = join(PROJECT_ROOT, "src", "server", "infra", "db", "migrations");
 const DEFAULT_TOKEN = "cold-start-test-token";
 const WORKSPACE_ID = "coldstart-main";
 

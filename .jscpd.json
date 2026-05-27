@@ -11,7 +11,7 @@
     "**/*.gen.ts",
     "**/pnpm-lock.yaml",
     "**/*.lock",
-    "**/apps/web/src/lib/db/migrations/**",
+    "**/apps/web/src/server/infra/db/migrations/**",
     "**/tests/**",
     "**/e2e/**",
     "**/__tests__/**",

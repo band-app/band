@@ -1,0 +1,6 @@
+# Phase 0 placeholder — keeps the `services/` directory under version control
+# until the first real `*-service.ts` file lands. See `docs/web-architecture.md`
+# (Tier 2: Services) and the parent refactor issue #310 for what goes here.
+#
+# DELETE THIS FILE the moment a real `*-service.ts` is added to this directory —
+# leaving a `.gitkeep` next to real source files just confuses readers.

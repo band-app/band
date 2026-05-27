@@ -2,11 +2,11 @@ import { createLogger } from "@band-app/logger";
 import { Cron } from "croner";
 import { eq } from "drizzle-orm";
 import { toWorkspaceId } from "@/dashboard";
+import { getDb } from "../server/infra/db/connection";
+import { cronjobs } from "../server/infra/db/schema";
 import { BAND_CRON_ID_LABEL, type ChatSession, createChat, findChatByLabels } from "./chat-manager";
 import { listAllCronjobs, loadCronjobFile } from "./cronjob-store";
 import type { CronjobDefinition } from "./cronjob-types";
-import { getDb } from "./db/connection";
-import { cronjobs } from "./db/schema";
 import { loadState } from "./state";
 import { submitTask, TaskConflictError } from "./task-runner";
 

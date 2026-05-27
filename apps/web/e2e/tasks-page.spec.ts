@@ -48,7 +48,7 @@ function seedTask(
   sqlite.exec("PRAGMA journal_mode = WAL");
   sqlite.exec(`PRAGMA busy_timeout = ${DB_BUSY_TIMEOUT_MS}`);
   const db = drizzle({ client: sqlite });
-  migrate(db, { migrationsFolder: join(import.meta.dirname, "../src/lib/db/migrations") });
+  migrate(db, { migrationsFolder: join(import.meta.dirname, "../src/server/infra/db/migrations") });
   sqlite
     .prepare(
       `INSERT OR REPLACE INTO tasks (id, workspace_id, project, branch, prompt, status, session_id, started_at, completed_at)

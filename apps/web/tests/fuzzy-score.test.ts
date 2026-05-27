@@ -131,7 +131,7 @@ describe("fuzzyScore – real-world ranking", () => {
   const FILES = [
     "apps/web/src/lib/fuzzy-score.ts",
     "apps/web/src/trpc/router.ts",
-    "apps/web/src/lib/db/schema.ts",
+    "apps/web/src/server/infra/db/schema.ts",
     "apps/web/src/dashboard/components/QuickOpenDialog.tsx",
     "apps/web/src/lib/state.ts",
     "apps/web/src/lib/git.ts",
@@ -148,7 +148,7 @@ describe("fuzzyScore – real-world ranking", () => {
 
   it("'schema' ranks db/schema.ts above scattered matches", () => {
     const result = ranked("schema", FILES);
-    const schemaIdx = result.indexOf("apps/web/src/lib/db/schema.ts");
+    const schemaIdx = result.indexOf("apps/web/src/server/infra/db/schema.ts");
     const scatteredIdx = result.indexOf("src/old/scattered_chars_hema.ts");
     expect(schemaIdx).toBeLessThan(scatteredIdx);
   });
