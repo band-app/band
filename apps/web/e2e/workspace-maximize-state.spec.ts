@@ -225,6 +225,27 @@ test.describe("Workspace maximize state (issue #490)", () => {
   test("regression — non-maximized group's saved active view is restored on workspace switch", async ({
     page,
   }) => {
+    // Phase 2 of this test (the `terminalInput` visibility check) is
+    // the slowest assertion in the suite — it requires xterm.js to
+    // boot its DOM after restore (panel activate → React render →
+    // xterm init → textbox emitted with the `Terminal input` aria-
+    // name). The 45 s assertion budget plus 60 s test budget below is
+    // the relaxation log:
+    //   - 15 s (original) — passed reliably until the new
+    //     workspace-cache-eviction.spec landed and started racing
+    //     against this one under CI's 2-worker parallelism.
+    //   - 25 s — held until PR #523 added four `settings-page.spec`
+    //     tests, pushing 2-worker contention high enough that the
+    //     xterm boot exceeded 25 s on at least one CI run (#26537498794).
+    //   - 45 s (current) — comfortably above observed worst-case xterm
+    //     boot under contention, paired with a 60 s test-level
+    //     timeout (default is 30 s) so the assertion budget plus the
+    //     setup steps fit inside one test.
+    // Locally the test still completes in ~1.1 s in isolation and
+    // ~4–5 s under parallel load, so the higher ceiling is only paid
+    // when CI actually needs it (`toBeVisible` returns as soon as the
+    // element appears).
+    test.setTimeout(60_000);
     // This guards the second bug the reviewer surfaced on this PR
     // (`SharedDockviewLayout.tsx:1473`): an earlier fix attempt
     // skipped `setActive` on hidden groups to avoid exiting maximize
@@ -313,19 +334,13 @@ test.describe("Workspace maximize state (issue #490)", () => {
     // negative regression check — if the wrong tab (Changes) leaked
     // across the workspace switch, its "Files changed" heading
     // renders quickly and fails the test deterministically. Phase 2
-    // is the slow positive: xterm.js needs to mount its DOM (panel
-    // activate → React render → xterm init → textbox emitted with
-    // the `Terminal input` aria-name) which can take multiple
-    // seconds in CI even when correctness is fine, so we give the
-    // textbox a generous timeout instead of relying on Playwright's
-    // 5 s default. The 25 s bound is a relaxation of the original
-    // 15 s after the suite started racing against the new
-    // workspace-cache-eviction.spec — under that load the xterm
-    // boot occasionally exceeded the 15 s budget despite passing
-    // correctness; bumping the budget keeps the fast path
-    // identical (toBeVisible() returns immediately when ready) while
-    // tolerating worst-case scheduler latency.
+    // is the slow positive: xterm.js mounts its DOM after the panel
+    // activate → React render → xterm init handshake, which can take
+    // multiple seconds in CI even when correctness is fine, so we
+    // give the textbox a generous timeout instead of relying on
+    // Playwright's 5 s default. See the `test.setTimeout(60_000)`
+    // call at the top of this test for the budget rationale.
     await expect(workspacePage.changesHeading).not.toBeVisible();
-    await expect(workspacePage.terminalInput).toBeVisible({ timeout: 25_000 });
+    await expect(workspacePage.terminalInput).toBeVisible({ timeout: 45_000 });
   });
 });
