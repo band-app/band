@@ -142,16 +142,25 @@ test("coding agents section renders and toggling an agent doesn't crash", async 
   // listModels effect — saving would close the dialog.
   await claudeSwitch.click({ force: true });
 
-  // Poll for `errors.length === 0` for up to 2 seconds — this gives the
-  // listModels() effect a chance to settle (and crash, if Radix were to
-  // throw) without a hardcoded `page.waitForTimeout`, which CLAUDE.md
-  // explicitly forbids. If no pageerror fires in that window we can
-  // confidently say the regression is still fixed.
-  await expect.poll(() => errors.length, { timeout: 2_000 }).toBe(0);
+  // Wait for the toggle to take effect at the DOM level. Once the switch
+  // reports `data-state="checked"`, React has applied the state update
+  // and the `codingAgents`-keyed effect that calls `listModels()` has
+  // fired (the auto-retry inside `toHaveAttribute` doubles as a settling
+  // window for the SDK-rendered Select). This is the strongest
+  // deterministic signal we have without stubbing the listModels
+  // response itself — the CI environment ships no agent binaries, so
+  // listModels() returns no models and the Default-model dropdown never
+  // mounts. Any *synchronous* Radix throw during the re-render would
+  // already have hit the `pageerror` listener by the time the data-state
+  // attribute flips; the async-throw case (post-listModels render) is
+  // genuinely uncovered here and would require an Express stub fronting
+  // listModels to surface deterministically.
+  await expect(claudeSwitch).toHaveAttribute("data-state", "checked");
 
   // The dialog must still be visible — if Radix had thrown, the React tree
   // would have unmounted into an error boundary.
   await expect(claudeSwitch).toBeVisible();
+  expect(errors).toEqual([]);
 });
 
 test("changing theme via the dropdown persists the new theme", async ({ page }) => {

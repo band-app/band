@@ -17,6 +17,19 @@
  * "Menu" trigger button is anchored via its `data-testid` (set in
  * `DashboardShell.tsx`) since `aria-label="Menu"` is a generic value and
  * there are other "Menu" buttons elsewhere in the dashboard chrome.
+ *
+ * CARVE-OUT (CLAUDE.md locator priority): a strict reading of the doctrine
+ * bans `getByText`/`getByRole({ name })` against user-visible English copy
+ * because that copy may be localised in the future. The row-control names
+ * used here (`"Worktrees folder"`, `"Code intelligence (LSP)"`, `"Port"`,
+ * `"GPU-accelerated rendering"`, etc.) come from the same `SettingsPage.tsx`
+ * source the test targets and Band does not ship localisation today; the
+ * name strings are effectively a system-controlled enum of UI affordances
+ * rather than translatable product copy. We accept that compromise here
+ * to avoid sprinkling a `data-testid` on every `<Input>`/`<Switch>` in the
+ * settings dialog — if localisation lands, swapping these to
+ * `getByTestId("settings__<row>")` is a mechanical refactor confined to
+ * this file plus the matching `data-testid` attributes in the JSX.
  */
 
 import { expect, type Locator, type Page, test } from "@playwright/test";

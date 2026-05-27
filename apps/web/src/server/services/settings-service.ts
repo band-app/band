@@ -116,8 +116,14 @@ export class SettingsService {
     const settings = this.queries.load();
     if (settings.tokenSecret) return settings.tokenSecret;
     const token = randomBytes(32).toString("hex");
-    settings.tokenSecret = token;
-    this.queries.save(settings);
+    // Pass just the patch — `SettingsQueries.save` re-reads the file and
+    // unions our patch with whatever is currently on disk, so any keys
+    // written between our `load` above and this `save` survive. Passing
+    // the full snapshot would happen to be correct today thanks to the
+    // re-read inside `save`, but it would silently regress if `save` were
+    // ever changed to trust its caller's snapshot — the `Partial<Settings>`
+    // signature already advertises the right call shape.
+    this.queries.save({ tokenSecret: token });
     return token;
   }
 }
