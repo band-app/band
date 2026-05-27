@@ -112,18 +112,74 @@ describe("listWorktrees", () => {
     expect(detached!.branch).toBe("my-applied-branch");
   });
 
-  it("returns empty branch for detached HEAD without rebase state", async () => {
+  it("returns a SHA-based label for detached HEAD without rebase state", async () => {
+    // Regression for the "blank workspace label" bug. A detached worktree
+    // that isn't mid-rebase used to flow through with `branch: ""`, which
+    // (a) rendered as a blank label next to the branch icon + "M" dirty
+    // badge in `WorkspaceCard.tsx`, and (b) collided every detached
+    // worktree in the same project onto the same `toWorkspaceId(...)`
+    // output, breaking selection / pinning / the `data-testid` hook.
+    //
+    // `listWorktrees` now falls back to `detached-<short-sha>`, which is
+    // non-empty, unique per HEAD, and `[a-z0-9-]`-only so it survives
+    // every place `workspaceId` is used as a filesystem path component or
+    // URL segment.
     const { repoPath, tmp } = createRepo();
 
+    // Add a second commit so the detached HEAD has a distinct SHA from
+    // any branch tip, which is the realistic shape of the failure mode
+    // (`git checkout <some-old-sha>` inside a worktree).
+    writeFileSync(join(repoPath, "file.txt"), "hello-v2");
+    git(repoPath, ["add", "file.txt"]);
+    git(repoPath, ["commit", "-m", "second"]);
+    const detachedSha = git(repoPath, ["rev-parse", "HEAD~1"]).trim();
+
     const wtPath = join(tmp, "wt-plain-detached");
-    git(repoPath, ["worktree", "add", "--detach", wtPath, "HEAD"]);
+    git(repoPath, ["worktree", "add", "--detach", wtPath, detachedSha]);
     cleanups.push(() => git(repoPath, ["worktree", "remove", "--force", wtPath]));
 
     const worktrees = await listWorktrees(repoPath);
 
     const detached = worktrees.find((wt) => wt.path === wtPath);
     expect(detached).toBeDefined();
-    expect(detached!.branch).toBe("");
+    expect(detached!.branch).toBe(`detached-${detachedSha.slice(0, 7)}`);
+    // Spell the invariants out so a future refactor that re-introduces
+    // empty branches or unsafe characters fails loudly here rather than
+    // silently regressing the WorkspaceCard / toWorkspaceId chain.
+    expect(detached!.branch).not.toBe("");
+    expect(detached!.branch).toMatch(/^[a-z0-9-]+$/);
+    expect(detached!.head).toBe(detachedSha);
+  });
+
+  it("gives two detached worktrees at different commits distinct branch labels", async () => {
+    // The user-reported failure was ~9 detached worktrees in one project
+    // all sharing the empty-string branch. Asserting uniqueness here pins
+    // down the property that fixed it: two detached worktrees at
+    // different SHAs map to different `branch` values, so
+    // `toWorkspaceId(projectName, branch)` no longer collides.
+    const { repoPath, tmp } = createRepo();
+
+    const firstSha = git(repoPath, ["rev-parse", "HEAD"]).trim();
+    writeFileSync(join(repoPath, "file.txt"), "hello-v2");
+    git(repoPath, ["add", "file.txt"]);
+    git(repoPath, ["commit", "-m", "second"]);
+    const secondSha = git(repoPath, ["rev-parse", "HEAD"]).trim();
+
+    const wt1 = join(tmp, "wt-detached-a");
+    const wt2 = join(tmp, "wt-detached-b");
+    git(repoPath, ["worktree", "add", "--detach", wt1, firstSha]);
+    cleanups.push(() => git(repoPath, ["worktree", "remove", "--force", wt1]));
+    git(repoPath, ["worktree", "add", "--detach", wt2, secondSha]);
+    cleanups.push(() => git(repoPath, ["worktree", "remove", "--force", wt2]));
+
+    const worktrees = await listWorktrees(repoPath);
+    const a = worktrees.find((wt) => wt.path === wt1);
+    const b = worktrees.find((wt) => wt.path === wt2);
+    expect(a).toBeDefined();
+    expect(b).toBeDefined();
+    expect(a!.branch).not.toBe(b!.branch);
+    expect(a!.branch).toBe(`detached-${firstSha.slice(0, 7)}`);
+    expect(b!.branch).toBe(`detached-${secondSha.slice(0, 7)}`);
   });
 });
 
