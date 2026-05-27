@@ -64,6 +64,18 @@ fn render_skills(filter: Option<&str>) -> Result<Vec<RenderedSkill>, String> {
         let prefixes = parse_command_prefixes(template);
         let has_placeholder = template.contains(COMMANDS_PLACEHOLDER);
 
+        // Defense in depth: parse the YAML frontmatter with a strict parser
+        // before we ship the rendered file. A bad template (e.g. an
+        // unquoted `argument-hint: [foo] [bar]` that YAML reads as a
+        // malformed flow sequence) would otherwise serialise to disk and
+        // only surface at agent-load time as "Skipped loading N skill(s)
+        // due to invalid SKILL.md files". Fail the build instead.
+        //
+        // Runs *before* the filter check so `band skills install
+        // --filter chat` still fast-fails if any other template has
+        // regressed, even though it isn't being rendered this run.
+        validate_frontmatter(&name, template)?;
+
         if !matches_filter(&name, filter) {
             continue;
         }
@@ -554,6 +566,49 @@ fn parse_command_prefixes(content: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Extract the YAML frontmatter block (without the `---` delimiters) from a
+/// skill template. Returns `None` if the template doesn't open with `---`
+/// or doesn't have a closing `---` line — those templates are also invalid,
+/// but the caller's job is to validate what's present rather than impose
+/// the delimiter convention here.
+///
+/// **Required shape:** the closing `---` must be followed by a newline
+/// (`\n` or `\r\n`). A file ending with `---` at EOF without a trailing
+/// newline is treated as missing the closing delimiter and surfaces as
+/// "missing YAML frontmatter". Every checked-in template ends with a body
+/// paragraph and trailing newline, so this is documentation of the
+/// invariant rather than a runtime concern.
+fn extract_frontmatter_block(content: &str) -> Option<&str> {
+    let rest = content
+        .strip_prefix("---\n")
+        .or_else(|| content.strip_prefix("---\r\n"))?;
+    let end = rest.find("\n---\n").or_else(|| rest.find("\n---\r\n"))?;
+    Some(&rest[..end])
+}
+
+/// Parse the skill template's YAML frontmatter with a strict parser to
+/// catch malformed values before we write the rendered file. Returns
+/// an error string of the form
+/// `skill '<name>': invalid YAML frontmatter at line N: <msg>`.
+fn validate_frontmatter(name: &str, template: &str) -> Result<(), String> {
+    let block = extract_frontmatter_block(template).ok_or_else(|| {
+        format!("skill '{name}': template is missing YAML frontmatter delimited by `---`")
+    })?;
+    serde_yml::from_str::<serde_yml::Value>(block).map_err(|err| {
+        // serde_yml's Display format already includes the line/column,
+        // but the block we hand it starts at the line *after* the opening
+        // `---` (whether `\n` or `\r\n`), so adjust the reported line
+        // back to the source file's numbering by adding 1.
+        let location = err.location();
+        let line = location.map(|l| l.line() + 1);
+        match line {
+            Some(n) => format!("skill '{name}': invalid YAML frontmatter at line {n}: {err}"),
+            None => format!("skill '{name}': invalid YAML frontmatter: {err}"),
+        }
+    })?;
+    Ok(())
+}
+
 /// Parse a single field from YAML frontmatter delimited by `---`.
 fn parse_frontmatter_field(content: &str, key: &str) -> Option<String> {
     let mut in_frontmatter = false;
@@ -667,6 +722,70 @@ mod tests {
             "Rust SUPPORTED_AGENTS drifted from the canonical list; update both this slice and \
              packages/coding-agent/src/install-skills.ts::SUPPORTED_AGENT_TYPES (plus the \
              matching test on each side) when adding/removing an agent"
+        );
+    }
+
+    /// Every checked-in skill template under `apps/cli/skills/` must have
+    /// strictly-parseable YAML frontmatter. Catches the regression that
+    /// shipped `argument-hint: [command] [args...]` (parsed as a malformed
+    /// flow sequence) at `cargo test` time, before the build ever
+    /// generates files for a user's coding agent.
+    #[test]
+    fn checked_in_templates_have_valid_yaml_frontmatter() {
+        for (name, template) in SKILL_TEMPLATES {
+            validate_frontmatter(name, template)
+                .unwrap_or_else(|e| panic!("template `{name}` is invalid: {e}"));
+        }
+    }
+
+    /// Regression: the exact failure mode that caused Codex to skip the
+    /// `band` skill. An unquoted `argument-hint: [command] [args...]` is
+    /// parsed as a one-element flow sequence followed by garbage and must
+    /// be rejected by the validator.
+    #[test]
+    fn validate_frontmatter_rejects_unquoted_flow_sequence_then_text() {
+        let bad = "---\nname: bad\nargument-hint: [command] [args...]\n---\n\nbody\n";
+        let err = validate_frontmatter("bad", bad)
+            .expect_err("must reject unquoted flow-sequence-then-text value");
+        assert!(
+            err.starts_with("skill 'bad': invalid YAML frontmatter"),
+            "error should name the skill and signal a YAML parse failure: {err}"
+        );
+    }
+
+    /// The validator's error message must include a line number so a
+    /// future template author can find the offending line without
+    /// guessing — and the number must be in the source file's
+    /// frame, not the post-strip block's.
+    #[test]
+    fn validate_frontmatter_error_reports_source_line_number() {
+        // Line 1: `---`
+        // Line 2: `name: bad`
+        // Line 3: `argument-hint: [command] [args...]`  <-- error
+        let bad = "---\nname: bad\nargument-hint: [command] [args...]\n---\n";
+        let err = validate_frontmatter("bad", bad).expect_err("must reject");
+        assert!(
+            err.contains("line 3"),
+            "expected 'line 3' (source-frame line of the broken value), got: {err}"
+        );
+    }
+
+    /// Sanity: well-formed templates with bracketed-but-quoted values pass.
+    #[test]
+    fn validate_frontmatter_accepts_quoted_bracket_value() {
+        let ok = "---\nname: ok\nargument-hint: \"[command] [args...]\"\n---\n\nbody\n";
+        validate_frontmatter("ok", ok).expect("quoted bracketed value should parse");
+    }
+
+    /// A template with no frontmatter at all is invalid — surface a clear
+    /// message instead of silently rendering a file with no header.
+    #[test]
+    fn validate_frontmatter_rejects_missing_block() {
+        let no_fm = "# just a markdown body, no frontmatter at all\n";
+        let err = validate_frontmatter("no-fm", no_fm).expect_err("must reject");
+        assert!(
+            err.contains("missing YAML frontmatter"),
+            "expected missing-frontmatter error, got: {err}"
         );
     }
 }

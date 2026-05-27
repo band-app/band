@@ -3,7 +3,7 @@ name: band
 version: 0.1.0
 description: Programmatic workspace management for Band. Use when the user wants to create, list, or remove Band workspaces or projects, manage tunnels, manage cronjobs, or check settings via the Band CLI. Triggers include "create workspace", "list projects", "band workspace", "band project", "schedule a job". For sending chat messages to coding agents, see the `band-chat` skill.
 allowed-tools: Bash
-argument-hint: [command] [args...]
+argument-hint: "[command] [args...]"
 commands: projects, workspaces, cronjobs, tunnel, settings, open, notify, schema, generate-skills, skills
 ---
 
