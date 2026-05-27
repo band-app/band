@@ -3625,6 +3625,13 @@ const chatsRouter = t.router({
           // the route only touched cosmetic fields, but the new `labels`
           // semantic is "replace the whole record" — a silent no-op on a
           // typo'd id would let a caller believe their relabel succeeded.
+          //
+          // Existing UI callers (`ChatView.tsx`'s `trpc.chats.update.mutate`
+          // for `mode` / `model` changes) wrap the call in `.catch` and log
+          // — they used to absorb the silent success, and they'll now
+          // absorb the 404 the same way. Intentional: the 404 is the
+          // correct shape for a stale chatId; any new caller (CLI
+          // `chats label` / `chats unlabel`) wants it surfaced.
           throw new TRPCError({ code: "NOT_FOUND", message: "Chat not found" });
         }
         return { chat };

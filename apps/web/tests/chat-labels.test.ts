@@ -1,12 +1,15 @@
-import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:net";
-import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
-import { SERVER_RUNTIME, SERVER_SCRIPT } from "./helpers/server-runtime";
+import {
+  createTmpHome,
+  type ServerHandle,
+  trpcMutate as sharedTrpcMutate,
+  startServer,
+} from "./helpers/server";
 
 // Integration tests for issue #520 — panel labels + cronjob chat dispatch.
 //
@@ -21,126 +24,31 @@ import { SERVER_RUNTIME, SERVER_SCRIPT } from "./helpers/server-runtime";
 //     deleted between fires.
 //   • Two cronjobs in the same workspace produce two distinct chats.
 
-const PROJECT_ROOT = join(import.meta.dirname, "..");
 const FAKE_AGENT_PATH = join(import.meta.dirname, "fake-agent.mjs");
 const DEFAULT_TOKEN = "chat-labels-test-token";
 
 // ---------------------------------------------------------------------------
-// Server harness — duplicated from cronjobs.test.ts on purpose. The two
-// suites are independent and isolating their fixtures keeps a flake in one
-// from cascading into the other.
+// tRPC HTTP helpers — `trpcMutate` lives in `./helpers/server` (shared with
+// `workspace-remove-detached.test.ts`); `trpcQuery` is local because none of
+// the other migrated suites need it yet. If a third caller appears, lift it.
 // ---------------------------------------------------------------------------
 
-interface ServerHandle {
-  url: string;
-  home: string;
-  close: () => Promise<void>;
-}
-
-function createTmpHome(): string {
-  const tmp = realpathSync(mkdtempSync(join(tmpdir(), "band-chat-labels-")));
-  const bandDir = join(tmp, ".band");
-  mkdirSync(bandDir, { recursive: true });
-  return tmp;
-}
-
-function getRandomPort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.listen(0, "127.0.0.1", () => {
-      const { port } = srv.address() as { port: number };
-      srv.close(() => resolve(port));
-    });
-    srv.on("error", reject);
-  });
-}
-
-async function startServer(
-  opts: { tmpHome?: string; env?: Record<string, string> } = {},
-): Promise<ServerHandle> {
-  const home = opts.tmpHome || createTmpHome();
-  const port = await getRandomPort();
-
-  return new Promise((resolve, reject) => {
-    const child = spawn(SERVER_RUNTIME, [SERVER_SCRIPT], {
-      cwd: PROJECT_ROOT,
-      env: {
-        ...process.env,
-        HOME: home,
-        PORT: String(port),
-        NODE_ENV: "production",
-        ...opts.env,
-      },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-
-    let stderr = "";
-    let settled = false;
-
-    child.stderr!.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString();
-    });
-
-    child.stdout!.on("data", (chunk: Buffer) => {
-      const text = chunk.toString();
-      if (text.includes("listening") && !settled) {
-        settled = true;
-        resolve({
-          url: `http://127.0.0.1:${port}`,
-          home,
-          close: () =>
-            new Promise<void>((r) => {
-              child.on("exit", () => r());
-              child.kill("SIGTERM");
-            }),
-        });
-      }
-    });
-
-    child.on("error", (err) => {
-      if (!settled) {
-        settled = true;
-        reject(err);
-      }
-    });
-
-    child.on("exit", (code) => {
-      if (!settled) {
-        settled = true;
-        reject(new Error(`Server exited with code ${code} before listening.\nstderr: ${stderr}`));
-      }
-    });
-
-    setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        child.kill("SIGTERM");
-        reject(new Error(`Server did not start within 15 s.\nstderr: ${stderr}`));
-      }
-    }, 15_000);
-  });
-}
-
-// ---------------------------------------------------------------------------
-// tRPC HTTP helpers
-// ---------------------------------------------------------------------------
-
-const defaultHeaders = { Cookie: `band_token=${DEFAULT_TOKEN}` };
+const defaultAuthHeader = { Cookie: `band_token=${DEFAULT_TOKEN}` };
 
 async function trpcQuery(serverUrl: string, procedure: string, input?: unknown) {
   const url =
     input !== undefined
       ? `${serverUrl}/trpc/${procedure}?input=${encodeURIComponent(JSON.stringify(input))}`
       : `${serverUrl}/trpc/${procedure}`;
-  return fetch(url, { headers: defaultHeaders });
+  return fetch(url, { headers: defaultAuthHeader });
 }
 
-async function trpcMutate(serverUrl: string, procedure: string, input?: unknown) {
-  return fetch(`${serverUrl}/trpc/${procedure}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...defaultHeaders },
-    body: input !== undefined ? JSON.stringify(input) : "{}",
-  });
+// Wrap the shared `trpcMutate` so call sites in this suite don't need to
+// thread `DEFAULT_TOKEN` through every invocation. The 4-arg shared
+// helper takes the token explicitly precisely so different suites can
+// bind their own.
+function trpcMutate(serverUrl: string, procedure: string, input?: unknown) {
+  return sharedTrpcMutate(serverUrl, procedure, input, DEFAULT_TOKEN);
 }
 
 async function trpcData<T>(res: Response): Promise<T> {
@@ -196,7 +104,7 @@ describe("chats — label round-trip", () => {
   const workspaceId = "myproject-main";
 
   beforeAll(async () => {
-    tmpHome = createTmpHome();
+    tmpHome = createTmpHome("band-chat-labels-");
     const repoPath = createGitRepo(tmpHome, "myproject");
     seedState(tmpHome, {
       projects: [
@@ -220,6 +128,18 @@ describe("chats — label round-trip", () => {
   afterAll(async () => {
     await server.close();
     rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("rejects chats.create without the band_token cookie (401)", async () => {
+    // Negative-auth test for the integration-test doctrine: error paths
+    // are part of the contract. The shared `trpcMutate` always sends the
+    // cookie, so we have to call `fetch` directly to omit it.
+    const res = await fetch(`${server.url}/trpc/chats.create`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workspaceId, labels: { phase: "plan" } }),
+    });
+    expect(res.status).toBe(401);
   });
 
   it("creates a chat with labels and persists them through chats.list", async () => {
@@ -343,7 +263,7 @@ describe("chats — label validation", () => {
   const workspaceId = "myproject-main";
 
   beforeAll(async () => {
-    tmpHome = createTmpHome();
+    tmpHome = createTmpHome("band-chat-labels-");
     const repoPath = createGitRepo(tmpHome, "myproject");
     seedState(tmpHome, {
       projects: [
@@ -448,7 +368,7 @@ describe("chats — legacy panel_states rows load with empty labels", () => {
   const workspaceId = "myproject-main";
 
   beforeAll(async () => {
-    tmpHome = createTmpHome();
+    tmpHome = createTmpHome("band-chat-labels-");
     const repoPath = createGitRepo(tmpHome, "myproject");
     seedState(tmpHome, {
       projects: [
@@ -522,7 +442,7 @@ describe("cronjobs — labeled chat dispatch", () => {
   const workspaceId = "triggerproj-main";
 
   beforeAll(async () => {
-    tmpHome = createTmpHome();
+    tmpHome = createTmpHome("band-chat-labels-");
     const repoPath = createGitRepo(tmpHome, "triggerproj");
 
     // Multi-message scenario: the fake agent emits these for *every* run.
@@ -582,19 +502,26 @@ describe("cronjobs — labeled chat dispatch", () => {
   });
 
   /** Poll chats.list until the task on the cronjob's chat has finished, so
-   * the next trigger doesn't trip TaskConflictError. */
-  async function waitForChatIdle(chatId: string, timeoutMs = 10_000): Promise<void> {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      const res = await trpcQuery(server.url, "chats.list", { workspaceId });
-      const data = await trpcData<{
-        chats: Array<{ id: string; status: string }>;
-      }>(res);
-      const chat = data.chats.find((c) => c.id === chatId);
-      if (!chat || chat.status === "idle") return;
-      await new Promise((r) => setTimeout(r, 100));
-    }
-    throw new Error(`chat ${chatId} did not return to idle within ${timeoutMs}ms`);
+   * the next trigger doesn't trip TaskConflictError. Uses `expect.poll` to
+   * follow the integration-test doctrine (auto-retry with a built-in
+   * timeout/interval) — a hand-rolled `setTimeout` loop would silently
+   * absorb the polling cadence into the test runtime instead of letting
+   * vitest log it. A missing chat is treated as idle (the
+   * delete-and-recreate test removes the chat between triggers). */
+  async function waitForChatIdle(chatId: string): Promise<void> {
+    await expect
+      .poll(
+        async () => {
+          const res = await trpcQuery(server.url, "chats.list", { workspaceId });
+          const data = await trpcData<{
+            chats: Array<{ id: string; status: string }>;
+          }>(res);
+          const chat = data.chats.find((c) => c.id === chatId);
+          return chat?.status ?? "idle";
+        },
+        { timeout: 10_000, interval: 100 },
+      )
+      .toBe("idle");
   }
 
   it("first trigger creates a chat tagged with band:cronId", async () => {

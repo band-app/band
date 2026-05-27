@@ -999,6 +999,15 @@ fn parse_label_pairs(
         if k.is_empty() {
             return Err(format!("label \"{raw}\" has an empty key"));
         }
+        // Catch empty values at the CLI boundary so the user sees an
+        // actionable message tied to their input instead of the server's
+        // generic "value must be a non-empty string" tRPC error — same
+        // rule the server enforces but with the offending pair quoted
+        // back at them. Aligns the CLI-side check with the server-side
+        // one in `validateLabels`.
+        if v.is_empty() {
+            return Err(format!("label \"{raw}\" has an empty value"));
+        }
         // Later duplicates overwrite earlier ones — `--label k=a --label k=b`
         // ends up as `k=b`, matching how kubectl handles the same input.
         out.insert(k.to_string(), serde_json::Value::String(v.to_string()));
@@ -1039,14 +1048,19 @@ fn cmd_chats_label(chat_id: &str, label_args: &[String]) -> Result<CommandResult
     for (k, v) in additions {
         labels.insert(k, v);
     }
-    let labels_value = serde_json::Value::Object(labels);
+    let intended = serde_json::Value::Object(labels);
     let data = client.trpc_mutate(
         "chats.update",
-        &serde_json::json!({"chatId": chat_id, "labels": labels_value.clone()}),
+        &serde_json::json!({"chatId": chat_id, "labels": intended.clone()}),
     )?;
     let chat = data.get("chat").cloned().unwrap_or(serde_json::Value::Null);
     Ok(CommandResult {
-        text: format_labels_cell(&labels_value),
+        // Prefer the server-confirmed labels so the text output can't drift
+        // from the JSON output if the server ever normalises keys differently
+        // (today they always agree because validation runs the same sort).
+        // Fall back to the intended set only if the response somehow omits
+        // the field — that's a server bug we'd want to see surfaced.
+        text: format_labels_cell(server_labels(&chat).unwrap_or(&intended)),
         json: serde_json::json!({"chat": chat}),
     })
 }
@@ -1057,21 +1071,46 @@ fn cmd_chats_unlabel(chat_id: &str, keys: &[String]) -> Result<CommandResult, St
     for k in keys {
         labels.remove(k);
     }
-    let labels_value = serde_json::Value::Object(labels);
+    let intended = serde_json::Value::Object(labels);
     let data = client.trpc_mutate(
         "chats.update",
-        &serde_json::json!({"chatId": chat_id, "labels": labels_value.clone()}),
+        &serde_json::json!({"chatId": chat_id, "labels": intended.clone()}),
     )?;
     let chat = data.get("chat").cloned().unwrap_or(serde_json::Value::Null);
     Ok(CommandResult {
-        text: format_labels_cell(&labels_value),
+        // See `cmd_chats_label` — prefer server-confirmed labels for text
+        // output so it can't silently diverge from the JSON output.
+        text: format_labels_cell(server_labels(&chat).unwrap_or(&intended)),
         json: serde_json::json!({"chat": chat}),
     })
+}
+
+/// Extract the `labels` field from a `chats.update` server response.
+/// Returns `None` if the response is missing the field or if it's the wrong
+/// shape — in which case the caller should fall back to the locally-computed
+/// set rather than silently rendering an empty cell.
+fn server_labels(chat: &serde_json::Value) -> Option<&serde_json::Value> {
+    let labels = chat.get("labels")?;
+    if labels.is_object() {
+        Some(labels)
+    } else {
+        None
+    }
 }
 
 /// Render a labels record as `k=v,k=v\n` with sorted keys. Shared
 /// between `band chats label` and `band chats unlabel` so both surface
 /// the final state of the chat in the same format `chats list` uses.
+///
+/// **Sort-order assumption:** uses Rust's default byte-order `cmp`, which
+/// matches the server's `localeCompare` sort in `validateLabels` only
+/// because the label-key regex `^[a-zA-Z0-9_:-]{1,64}$` restricts keys to
+/// ASCII. If that regex is ever relaxed to allow Unicode, the two sorts
+/// will diverge and the CLI table will display the same chat differently
+/// from the JSON output. The fix at that point is to either align both
+/// sides on byte order (preferred — locale-aware sort is rarely what the
+/// user wants for machine-readable labels) or to thread the server's
+/// ordering into the CLI explicitly.
 fn format_labels_cell(labels: &serde_json::Value) -> String {
     let Some(obj) = labels.as_object() else {
         return String::from("\n");
