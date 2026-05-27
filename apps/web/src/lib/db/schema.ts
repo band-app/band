@@ -81,6 +81,11 @@ export const panelStates = sqliteTable("panel_states", {
   workspaceId: text("workspace_id").notNull(),
   panelType: text("panel_type").notNull(),
   state: text("state").notNull(), // JSON blob — panel-type-specific
+  // Free-form labels for taxonomy and dispatch lookups (issue #520). JSON-encoded
+  // `Record<string, string>`. Nullable: existing rows migrate to NULL and are
+  // treated as `{}` by the reader. The `band:` key prefix is reserved for
+  // server-internal use (e.g. `band:cronId` set by the cronjob scheduler).
+  labels: text("labels"),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
 });

@@ -25,6 +25,34 @@ const log = createLogger("chat-manager");
 
 const PANEL_TYPE = "chat";
 
+// ---------------------------------------------------------------------------
+// Label constants (issue #520)
+// ---------------------------------------------------------------------------
+
+/**
+ * Reserved prefix for Band-internal label keys. Writes to keys with this
+ * prefix are rejected from user-facing surfaces (CLI flags, future UI) — only
+ * server-side code paths (e.g. the cronjob scheduler) may set them. Kept
+ * module-private — external callers should compose with `BAND_CRON_ID_LABEL`
+ * (and future siblings) rather than constructing keys from the prefix.
+ */
+const BAND_LABEL_PREFIX = "band:";
+
+/** Canonical label key used by the cronjob scheduler to claim its own chat. */
+export const BAND_CRON_ID_LABEL = "band:cronId";
+
+/** Maximum number of label keys per chat. */
+const MAX_LABEL_KEYS = 20;
+
+/** Maximum length of a label value. */
+const MAX_LABEL_VALUE_LENGTH = 256;
+
+/** Regex for valid label keys: alphanumerics, `_`, `:`, `-`; 1-64 chars. */
+const LABEL_KEY_REGEX = /^[a-zA-Z0-9_:-]{1,64}$/;
+
+/** Printable-ASCII regex used to validate label values. */
+const PRINTABLE_VALUE_REGEX = /^[\x20-\x7E]+$/;
+
 export type ChatStatus = "running" | "idle" | "stopped" | "error";
 
 export interface ChatSession {
@@ -49,6 +77,12 @@ export interface ChatSession {
    */
   activeSessionLastModified?: number;
   status: ChatStatus;
+  /**
+   * Free-form labels (issue #520). Empty record when none are set — the
+   * `panel_states.labels` column may be NULL for legacy rows but consumers
+   * always see `{}` in that case so they don't need to null-check.
+   */
+  labels: Record<string, string>;
 }
 
 /** Shape of the JSON blob stored in `panel_states.state` for chat panels. */
@@ -117,6 +151,128 @@ function generateChatId(): string {
   return `chat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+// ---------------------------------------------------------------------------
+// Label validation (issue #520)
+// ---------------------------------------------------------------------------
+
+/**
+ * Thrown when a labels payload fails validation. Callers (tRPC routes, CLI
+ * surface, internal helpers) should let this propagate so the framework
+ * maps it to a 400-class response — the helpful message in `.message`
+ * already names the specific rule that was violated.
+ */
+export class InvalidLabelsError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidLabelsError";
+  }
+}
+
+interface LabelValidationOptions {
+  /**
+   * When `true`, writes to keys starting with `band:` are rejected. tRPC
+   * routes and other user-facing surfaces pass `true`; the cronjob scheduler
+   * (and any other internal caller that legitimately needs to write a
+   * reserved key) passes `false`.
+   */
+  rejectReservedPrefix: boolean;
+}
+
+/**
+ * Validate a labels record. Returns the input on success so call sites can
+ * chain `chat.labels = validateLabels(input, ...)`. Throws
+ * `InvalidLabelsError` with a precise message on failure.
+ *
+ * Rules:
+ *  - At most 20 keys.
+ *  - Keys match `/^[a-zA-Z0-9_:-]{1,64}$/` (colons allowed for namespacing).
+ *  - Values are printable ASCII (0x20–0x7E), 1–256 chars, non-empty.
+ *  - When `rejectReservedPrefix: true`, `band:`-prefixed keys are forbidden.
+ */
+function validateLabels(
+  labels: Record<string, string>,
+  options: LabelValidationOptions,
+): Record<string, string> {
+  const keys = Object.keys(labels);
+  if (keys.length > MAX_LABEL_KEYS) {
+    throw new InvalidLabelsError(
+      `labels: too many keys (${keys.length}); max is ${MAX_LABEL_KEYS}`,
+    );
+  }
+  for (const key of keys) {
+    if (key.length === 0) {
+      throw new InvalidLabelsError("labels: empty keys are not allowed");
+    }
+    if (!LABEL_KEY_REGEX.test(key)) {
+      throw new InvalidLabelsError(`labels: key "${key}" must match /^[a-zA-Z0-9_:-]{1,64}$/`);
+    }
+    if (options.rejectReservedPrefix && key.startsWith(BAND_LABEL_PREFIX)) {
+      throw new InvalidLabelsError(
+        `labels: key "${key}" uses reserved "${BAND_LABEL_PREFIX}" prefix`,
+      );
+    }
+    const value = labels[key];
+    if (typeof value !== "string" || value.length === 0) {
+      throw new InvalidLabelsError(`labels: value for "${key}" must be a non-empty string`);
+    }
+    if (value.length > MAX_LABEL_VALUE_LENGTH) {
+      throw new InvalidLabelsError(
+        `labels: value for "${key}" exceeds ${MAX_LABEL_VALUE_LENGTH} chars`,
+      );
+    }
+    if (!PRINTABLE_VALUE_REGEX.test(value)) {
+      throw new InvalidLabelsError(
+        `labels: value for "${key}" must be printable ASCII (0x20-0x7E)`,
+      );
+    }
+  }
+  // Return a fresh object whose keys are sorted by `localeCompare`. JS
+  // preserves insertion order for string keys, so this gives every
+  // downstream consumer (JSON.stringify for the DB blob, tRPC
+  // serialization for `chats.list`, the CLI table renderer) a stable,
+  // alphabetical iteration — without each consumer needing to sort
+  // independently. Cost is O(k log k) at write time with k ≤ 20.
+  const sorted: Record<string, string> = {};
+  for (const key of keys.slice().sort((a, b) => a.localeCompare(b))) {
+    sorted[key] = labels[key];
+  }
+  return sorted;
+}
+
+/** Serialize labels for DB storage — `null` when empty to keep the on-disk
+ * representation compact and to make migrated rows indistinguishable from
+ * "no labels". */
+function serializeLabels(labels: Record<string, string>): string | null {
+  if (!labels || Object.keys(labels).length === 0) return null;
+  return JSON.stringify(labels);
+}
+
+/** Parse the JSON stored in `panel_states.labels`. Null/empty/malformed all
+ * collapse to `{}` so downstream consumers can treat labels as always-present.
+ * Malformed input (bad JSON, wrong top-level type) is warned about so an
+ * operator can correlate "where did my labels go?" with the corrupted row;
+ * skipped non-string values stay silent because they only happen when a
+ * future code change writes the wrong shape — which would already show up
+ * as a type error at the call site. */
+function parseLabels(raw: string | null | undefined, chatId?: string): Record<string, string> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      log.warn({ chatId, raw }, "labels column had unexpected top-level shape, falling back to {}");
+      return {};
+    }
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      if (typeof v === "string") out[k] = v;
+    }
+    return out;
+  } catch (err) {
+    log.warn({ chatId, raw, err }, "labels column failed to parse as JSON, falling back to {}");
+    return {};
+  }
+}
+
 function serializeState(session: ChatSession): string {
   const blob: ChatPanelState = {
     name: session.name,
@@ -142,6 +298,18 @@ export interface CreateChatOptions {
   agent?: string;
   model?: string;
   mode?: string;
+  /**
+   * Initial label set (issue #520). Validated before persistence — see
+   * `validateLabels`. Internal callers that need to write reserved
+   * `band:`-prefixed keys must pass `allowReservedLabels: true`.
+   */
+  labels?: Record<string, string>;
+  /**
+   * Bypass the `band:` prefix guard for trusted, server-internal callers
+   * (e.g. the cronjob scheduler). Defaults to `false` — tRPC routes and the
+   * CLI must NOT set this.
+   */
+  allowReservedLabels?: boolean;
 }
 
 /**
@@ -153,6 +321,12 @@ export function createChat(workspaceId: string, options?: CreateChatOptions): Ch
   const defaultAgent = getAgentDefinition(settings);
   const now = Date.now();
 
+  const labels = options?.labels
+    ? validateLabels(options.labels, {
+        rejectReservedPrefix: !options.allowReservedLabels,
+      })
+    : {};
+
   const session: ChatSession = {
     id: options?.id ?? generateChatId(),
     workspaceId,
@@ -161,6 +335,7 @@ export function createChat(workspaceId: string, options?: CreateChatOptions): Ch
     model: options?.model,
     mode: options?.mode,
     status: "idle",
+    labels,
   };
 
   insertPanelState({
@@ -168,6 +343,7 @@ export function createChat(workspaceId: string, options?: CreateChatOptions): Ch
     workspaceId: session.workspaceId,
     panelType: PANEL_TYPE,
     state: serializeState(session),
+    labels: serializeLabels(session.labels),
     createdAt: now,
     updatedAt: now,
   });
@@ -220,6 +396,14 @@ export interface UpdateChatOptions {
   agent?: string;
   model?: string | null;
   mode?: string | null;
+  /**
+   * Replace the chat's full label set (issue #520). Pass `{}` to clear.
+   * Validated before persistence — see `validateLabels`. Reserved
+   * `band:`-prefixed keys are rejected unless `allowReservedLabels: true`.
+   */
+  labels?: Record<string, string>;
+  /** Bypass the `band:` prefix guard for trusted internal callers. */
+  allowReservedLabels?: boolean;
 }
 
 /**
@@ -233,13 +417,23 @@ export function updateChat(chatId: string, updates: UpdateChatOptions): ChatSess
   if (updates.agent !== undefined) session.agent = updates.agent;
   if (updates.model !== undefined) session.model = updates.model ?? undefined;
   if (updates.mode !== undefined) session.mode = updates.mode ?? undefined;
+  if (updates.labels !== undefined) {
+    session.labels = validateLabels(updates.labels, {
+      rejectReservedPrefix: !updates.allowReservedLabels,
+    });
+  }
 
   updatePanelState(chatId, {
     state: serializeState(session),
+    labels: serializeLabels(session.labels),
     updatedAt: Date.now(),
   });
 
-  log.info({ chatId, updates }, "chat pane updated");
+  // Log only which fields changed, not their values: users may use labels
+  // (256-char printable strings) as ad-hoc context (env=prod, branch=...)
+  // that we shouldn't dump into logs. Names/agents/models are also values
+  // that don't need to be in info-level logs to be debuggable.
+  log.info({ chatId, updatedFields: Object.keys(updates) }, "chat pane updated");
   return session;
 }
 
@@ -421,6 +615,7 @@ export function loadChatsFromDb(): number {
       // race — wrote between the UPDATE and the SELECT, we never want to
       // hand the rest of the server a session in a non-idle state on boot.
       status: "idle",
+      labels: parseLabels(row.labels, row.id),
     };
     addToIndex(session);
   }
@@ -429,6 +624,37 @@ export function loadChatsFromDb(): number {
     log.info({ count: rows.length }, "loaded chat panes from database");
   }
   return rows.length;
+}
+
+/**
+ * Find the first chat in `workspaceId` whose labels match every key/value
+ * pair in `match` (AND semantics; extra labels on the chat are ignored).
+ * Returns `null` when no chat matches.
+ *
+ * In-memory filter over `listChats(workspaceId)` — fast for the workspace
+ * sizes we deal with (typically <50 chats) and avoids a per-key SQL query.
+ * Used by the cronjob scheduler to claim its own chat via the canonical
+ * `band:cronId` label.
+ */
+export function findChatByLabels(
+  workspaceId: string,
+  match: Record<string, string>,
+): ChatSession | null {
+  ensureInitialized();
+  const keys = Object.keys(match);
+  if (keys.length === 0) return null;
+  const chats = listChats(workspaceId);
+  for (const chat of chats) {
+    let allMatch = true;
+    for (const k of keys) {
+      if (chat.labels[k] !== match[k]) {
+        allMatch = false;
+        break;
+      }
+    }
+    if (allMatch) return chat;
+  }
+  return null;
 }
 
 /**

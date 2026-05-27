@@ -1,7 +1,7 @@
 ---
 name: band-chat
 version: 0.1.0
-description: Send messages to coding agents, stream their output, and manage chat panes via the Band CLI. Use when the user wants to send a chat message, watch a chat's running task, list, create, stop, or remove agent chat panes. Triggers include "send message to chat", "chat with agent", "watch chat", "stream chat output", "create chat pane", "list chats", "stop chat", "remove chat", "submit prompt to workspace".
+description: Send messages to coding agents, stream their output, and manage chat panes via the Band CLI. Use when the user wants to send a chat message, watch a chat's running task, list, create, stop, remove, or label agent chat panes. Triggers include "send message to chat", "chat with agent", "watch chat", "stream chat output", "create chat pane", "list chats", "stop chat", "remove chat", "label chat", "tag chat", "submit prompt to workspace".
 allowed-tools: Bash
 argument-hint: chats [args...]
 commands: chats
@@ -117,6 +117,26 @@ band chats remove
 # Or target a specific chat by ID
 band chats stop chat_abc
 band chats remove chat_abc
+```
+
+### Tag chats with labels
+
+Labels are free-form `key=value` metadata you can use to organize chats (e.g. a plan/implement/review pipeline, tagging by feature area, or marking chats owned by a particular workflow). They appear in the `LABELS` column of `band chats list` as `k=v,k=v` (sorted by key).
+
+The `band:` key prefix is reserved for server-internal labels (e.g. `band:cronId` set automatically when the cronjob scheduler owns a chat) and is rejected from the CLI.
+
+```sh
+# Seed labels at creation time (repeat --label for each pair)
+band chats create --name "Plan" --label phase=plan --label owner=alice
+
+# Add or overwrite labels on an existing chat (additive merge — other labels are preserved)
+band chats label chat_abc phase=implement priority=high
+
+# Remove labels by key (other labels are preserved; unknown keys are ignored)
+band chats unlabel chat_abc priority
+
+# Filter the list client-side with jq
+band chats list --output json | jq '.chats[] | select(.labels.phase == "plan")'
 ```
 
 ## Cross-references

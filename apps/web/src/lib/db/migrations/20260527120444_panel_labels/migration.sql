@@ -1,0 +1,1 @@
+ALTER TABLE `panel_states` ADD `labels` text;
