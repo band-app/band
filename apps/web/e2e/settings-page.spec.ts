@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { expect, type Page, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import {
   cleanupTmpHome,
   createTmpHome,
@@ -9,6 +9,7 @@ import {
   seedState,
   startServer,
 } from "./helpers/server";
+import { SettingsPage } from "./pages/SettingsPage";
 
 const TOKEN = "e2e-settings-test-token";
 
@@ -39,26 +40,6 @@ test.afterAll(async () => {
   cleanupTmpHome(tmpHome);
 });
 
-/**
- * Open the Settings dialog from the dashboard's "Manage" toolbar dropdown.
- * Returns the dialog locator.
- */
-async function openSettingsDialog(page: Page) {
-  await page.waitForLoadState("networkidle");
-  // The "Manage" trigger is the first dropdown trigger rendered in the
-  // dashboard toolbar (it opens a menu containing the "Settings" item).
-  const trigger = page.locator('[aria-haspopup="menu"]').first();
-  await expect(async () => {
-    await trigger.click();
-    await expect(page.getByRole("menu")).toBeVisible({ timeout: 1_000 });
-  }).toPass({ timeout: 15_000 });
-
-  await page.getByRole("menuitem", { name: "Settings" }).click();
-  const dialog = page.getByRole("dialog", { name: "Settings" });
-  await expect(dialog).toBeVisible();
-  return dialog;
-}
-
 function readSettings(): Record<string, unknown> {
   return JSON.parse(readFileSync(join(tmpHome, ".band", "settings.json"), "utf-8"));
 }
@@ -68,70 +49,63 @@ function readSettings(): Record<string, unknown> {
 // ---------------------------------------------------------------------------
 
 test("settings dialog renders every section in a single scrolling list", async ({ page }) => {
-  await page.goto(`${server.url}/?token=${TOKEN}`);
-  const dialog = await openSettingsDialog(page);
+  const settingsPage = new SettingsPage(page, server.url, TOKEN);
+  await settingsPage.goto();
+  await settingsPage.openDialog();
 
   // Every section is now rendered at once — there is no master/detail
   // navigation. We expect eight SettingsSection cards to be present and
   // every section's first row to be visible (after scrolling, if needed).
   // The eight sections are: Appearance, General, Browser, Labels, Coding
   // Agents, Notifications, Web Server, Terminal.
-  await expect(dialog.locator('[data-slot="settings-section-card"]')).toHaveCount(8);
+  await expect(settingsPage.sectionCards()).toHaveCount(8);
 
   // Appearance — Theme dropdown rendered by SettingsRow.
-  await expect(dialog.getByText("Theme", { exact: true })).toBeVisible();
-  await expect(dialog.getByRole("combobox", { name: "Theme" })).toBeVisible();
+  await expect(settingsPage.themeSelect()).toBeVisible();
 
-  // Subsequent sections live in the same scrolling column. Use scrollIntoView
-  // before asserting visibility because the dialog viewport is fixed-height.
-  for (const label of [
-    "Worktrees folder",
-    "Code intelligence (LSP)",
-    "Stream desktop tabs to web (experimental)",
-    "No labels yet",
-    "Play sound on needs attention",
-    "Port",
-    "Auto-start tunnel",
-    "GPU-accelerated rendering",
+  // Subsequent sections live in the same scrolling column. Use
+  // `expectRowVisible` (scroll-then-assert) because the dialog viewport
+  // is fixed-height. Each row is anchored on its control's accessible
+  // name; the empty-Labels-state row is anchored on its "Add label"
+  // button (the only stable system-controlled name there).
+  for (const row of [
+    settingsPage.worktreesFolderInput(),
+    settingsPage.lspSwitch(),
+    settingsPage.webBrowserCdpSwitch(),
+    settingsPage.addLabelButton().first(),
+    settingsPage.soundOnNeedsAttentionSwitch(),
+    settingsPage.webServerPortInput(),
+    settingsPage.autoStartTunnelSwitch(),
+    settingsPage.webGLTerminalRendererSwitch(),
   ]) {
-    const row = dialog.getByText(label, { exact: true });
-    await row.scrollIntoViewIfNeeded();
-    await expect(row).toBeVisible();
+    await settingsPage.expectRowVisible(row);
   }
 
   // Coding Agents — the agent labels appear in two places (the per-agent
   // row and, when enabled, the default-agent dropdown's selected value),
   // so target the agent's enable switch which is uniquely keyed.
   for (const agent of ["Claude Code", "Codex", "OpenCode"]) {
-    const sw = dialog.getByRole("switch", { name: `Enable ${agent}` });
-    await sw.scrollIntoViewIfNeeded();
-    await expect(sw).toBeVisible();
+    await settingsPage.expectRowVisible(settingsPage.agentEnableSwitch(agent));
   }
 
   // The "Default coding agent" dropdown only renders when at least one
   // agent is enabled. The first-time-setup hook auto-detects installed
   // CLIs in the test environment, so we expect it to be visible.
-  const defaultAgentTrigger = dialog.getByRole("combobox", { name: "Default coding agent" });
-  await defaultAgentTrigger.scrollIntoViewIfNeeded();
-  await expect(defaultAgentTrigger).toBeVisible();
+  await settingsPage.expectRowVisible(settingsPage.defaultAgentSelect());
 });
 
 test("toggling LSP and saving persists to settings.json", async ({ page }) => {
-  await page.goto(`${server.url}/?token=${TOKEN}`);
-  const dialog = await openSettingsDialog(page);
+  const settingsPage = new SettingsPage(page, server.url, TOKEN);
+  await settingsPage.goto();
+  await settingsPage.openDialog();
 
-  // No sidebar — the LSP switch is in the General section, somewhere down
-  // the scrolling column. Scroll to it before clicking.
-  const lspSwitch = dialog.locator("#enable-lsp");
-  await lspSwitch.scrollIntoViewIfNeeded();
-  await expect(lspSwitch).toBeVisible();
-  await expect(lspSwitch).toHaveAttribute("data-state", "unchecked");
-
-  await lspSwitch.click();
-  await expect(lspSwitch).toHaveAttribute("data-state", "checked");
+  // Sanity check the starting state, then toggle (the POM asserts the
+  // visual state change after the click).
+  await expect(settingsPage.lspSwitch()).toHaveAttribute("data-state", "unchecked");
+  await settingsPage.toggleLsp();
 
   // Save (the icon button in the page header).
-  await dialog.getByRole("button", { name: "Save" }).click();
+  await settingsPage.save();
 
   // Wait for the mutation to complete by polling the persisted JSON.
   await expect(() => {
@@ -152,44 +126,44 @@ test("coding agents section renders and toggling an agent doesn't crash", async 
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
 
-  await page.goto(`${server.url}/?token=${TOKEN}`);
-  const dialog = await openSettingsDialog(page);
+  const settingsPage = new SettingsPage(page, server.url, TOKEN);
+  await settingsPage.goto();
+  await settingsPage.openDialog();
 
   // The Coding Agents section is part of the single scrolling list. Scroll
   // to Claude Code's enable switch (the per-agent row label and the
   // default-agent dropdown both contain the text "Claude Code", so use
   // the uniquely-named switch instead).
-  const claudeSwitch = dialog.getByRole("switch", { name: "Enable Claude Code" });
-  await claudeSwitch.scrollIntoViewIfNeeded();
-  await expect(claudeSwitch).toBeVisible();
+  const claudeSwitch = settingsPage.agentEnableSwitch("Claude Code");
+  await settingsPage.expectRowVisible(claudeSwitch);
 
   // Toggle Claude Code so listModels() is called and the model Select
   // potentially mounts. The toggle alone is enough to exercise the
   // listModels effect — saving would close the dialog.
   await claudeSwitch.click({ force: true });
 
-  // Allow listModels() + any subsequent renders to settle.
-  await page.waitForTimeout(500);
+  // Poll for `errors.length === 0` for up to 2 seconds — this gives the
+  // listModels() effect a chance to settle (and crash, if Radix were to
+  // throw) without a hardcoded `page.waitForTimeout`, which CLAUDE.md
+  // explicitly forbids. If no pageerror fires in that window we can
+  // confidently say the regression is still fixed.
+  await expect.poll(() => errors.length, { timeout: 2_000 }).toBe(0);
 
   // The dialog must still be visible — if Radix had thrown, the React tree
   // would have unmounted into an error boundary.
   await expect(claudeSwitch).toBeVisible();
-  expect(errors).toEqual([]);
 });
 
 test("changing theme via the dropdown persists the new theme", async ({ page }) => {
-  await page.goto(`${server.url}/?token=${TOKEN}`);
-  const dialog = await openSettingsDialog(page);
+  const settingsPage = new SettingsPage(page, server.url, TOKEN);
+  await settingsPage.goto();
+  await settingsPage.openDialog();
 
   // Open the Theme dropdown and pick Light.
-  const trigger = dialog.getByRole("combobox", { name: "Theme" });
-  await expect(trigger).toBeVisible();
-  await trigger.click();
-  await page.getByRole("option", { name: "Light" }).click();
-  await expect(trigger).toContainText("Light");
+  await settingsPage.selectTheme("Light");
 
   // Save and verify persistence.
-  await dialog.getByRole("button", { name: "Save" }).click();
+  await settingsPage.save();
 
   await expect(() => {
     const settings = readSettings();

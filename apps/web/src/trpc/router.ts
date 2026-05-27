@@ -4612,4 +4612,11 @@ export const appRouter = t.router({
   terminalLayout: terminalLayoutRouter,
 });
 
-export type AppRouter = typeof appRouter;
+// NOTE: the canonical `AppRouter` type now lives in
+// `apps/web/src/server/api/router.ts` and reflects the merged tRPC surface
+// (legacy router + migrated 3-tier sub-routers like `settings.*`). This
+// file's `appRouter` is the legacy half only; it is consumed by
+// `server/api/router.ts` via `mergeRouters` and should not be re-exported
+// as `AppRouter` from here — doing so would describe a strictly-smaller
+// router shape under the same name and silently mask the migrated
+// procedures from any caller that imported from this module.

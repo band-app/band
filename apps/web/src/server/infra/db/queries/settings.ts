@@ -92,6 +92,15 @@ function settingsFile(): string {
  * on every call so tests that mutate `HOME`/`BAND_HOME` mid-suite still see
  * the right file. Higher tiers (`SettingsService`) layer the merge semantics,
  * defaults, and token generation on top.
+ *
+ * NOTE on the "queries" naming: this class lives under `server/infra/db/queries/`
+ * to mirror the relational query classes (`ProjectsQueries`, `WorkspacesQueries`,
+ * …) even though there's no database involved — settings are persisted as a
+ * single JSON document, not relational rows. "Queries" here refers to the
+ * architecture pattern (typed, store-agnostic data-access) rather than SQL.
+ * The on-disk format and the bypass-the-server desktop-shell write path make
+ * a JSON file the right backing store; placing the class alongside the
+ * relational queries keeps the Infra-tier shape uniform for callers.
  */
 export class SettingsQueries {
   /**
@@ -116,8 +125,14 @@ export class SettingsQueries {
    * from the web server. The write is atomic — we stage to a `.tmp.<pid>`
    * sibling and `rename` over the target — to avoid a torn file if the
    * process exits mid-write.
+   *
+   * `Partial<Settings>` honestly declares the merge semantics: callers may
+   * pass a single key (`{ tokenSecret: "x" }`) and the load+merge step
+   * preserves every other key. Typing the parameter as the full `Settings`
+   * shape would mislead callers into thinking `save` is a wholesale
+   * replace.
    */
-  save(patch: Settings): void {
+  save(patch: Partial<Settings>): void {
     const filePath = settingsFile();
     let existing: Record<string, unknown> = {};
     try {

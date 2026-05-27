@@ -35,10 +35,7 @@ export class SettingsService {
    *
    * The Infra layer handles the actual merge + atomic write; this method
    * is a thin pass-through that lets callers (and tests) target the
-   * service rather than the underlying file I/O. `Partial<Settings>`
-   * makes the merge semantics explicit at the call site — every field on
-   * `Settings` is already optional, but typing the parameter as the full
-   * shape would invite callers to assume `update` is a wholesale replace.
+   * service rather than the underlying file I/O.
    */
   update(patch: Partial<Settings>): void {
     this.queries.save(patch);
@@ -100,6 +97,20 @@ export class SettingsService {
    * and our `save` survive — `SettingsQueries.save` merges into whatever
    * is currently on disk rather than overwriting the file with a
    * single-key document.
+   *
+   * TODO(tokens): there is a check-then-act TOCTOU window between the
+   * `load` and `save` here — two processes booting concurrently against
+   * the same `~/.band/settings.json` (e.g. dev server + desktop shell)
+   * can each observe the absence of `tokenSecret`, mint a different
+   * token, and race their writes. The atomic merge in `SettingsQueries.save`
+   * means the last writer wins, leaving the other process running with
+   * an invalidated token. The race is rare in practice (token is minted
+   * once per fresh install) but worth fixing — most likely via a
+   * file-level advisory lock around the load+save pair, or by hoisting
+   * the bootstrap into a single coordinator (e.g. the first-time-setup
+   * step in `runFirstTimeSetup`). Pattern preserved from the pre-3-tier
+   * `lib/state.ts` implementation; fixing it is out of scope for the
+   * settings refactor.
    */
   getOrCreateToken(): string {
     const settings = this.queries.load();
