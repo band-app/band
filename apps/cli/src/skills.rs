@@ -64,17 +64,21 @@ fn render_skills(filter: Option<&str>) -> Result<Vec<RenderedSkill>, String> {
         let prefixes = parse_command_prefixes(template);
         let has_placeholder = template.contains(COMMANDS_PLACEHOLDER);
 
-        if !matches_filter(&name, filter) {
-            continue;
-        }
-
         // Defense in depth: parse the YAML frontmatter with a strict parser
         // before we ship the rendered file. A bad template (e.g. an
         // unquoted `argument-hint: [foo] [bar]` that YAML reads as a
         // malformed flow sequence) would otherwise serialise to disk and
         // only surface at agent-load time as "Skipped loading N skill(s)
         // due to invalid SKILL.md files". Fail the build instead.
+        //
+        // Runs *before* the filter check so `band skills install
+        // --filter chat` still fast-fails if any other template has
+        // regressed, even though it isn't being rendered this run.
         validate_frontmatter(&name, template)?;
+
+        if !matches_filter(&name, filter) {
+            continue;
+        }
 
         // `commands:` frontmatter and the `<!-- COMMANDS -->` placeholder are
         // a pair: reference-shaped skills need both, workflow-shaped skills
