@@ -3604,6 +3604,24 @@ const chatsRouter = t.router({
     return { chat };
   }),
 
+  /**
+   * Update one or more fields on an existing chat pane.
+   *
+   * Behavior contract:
+   *   - `labels` replaces the **full** record. Pass `{}` to clear.
+   *   - Returns `NOT_FOUND` (404) if `chatId` doesn't resolve. This is
+   *     a behavior change from before issue #520, when this route
+   *     returned `200 { chat: undefined }` on an unknown id. The
+   *     previous silent-no-op was harmless for cosmetic edits but
+   *     would let a `labels: {}` "clear" against a stale id succeed
+   *     misleadingly, which is why the route now surfaces the error.
+   *     Existing UI callers (`ChatView.tsx` `.catch(...)` handlers
+   *     for mode/model changes) absorb the new 404 the same way they
+   *     absorbed the silent 200; new callers should expect it.
+   *   - Returns `BAD_REQUEST` (400) if `labels` violates validation
+   *     rules in `validateLabels` (max 20 keys, key regex, value
+   *     rules, reserved `band:` prefix).
+   */
   update: publicProcedure
     .input(
       z.object({

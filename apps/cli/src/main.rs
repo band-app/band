@@ -1103,14 +1103,13 @@ fn server_labels(chat: &serde_json::Value) -> Option<&serde_json::Value> {
 /// the final state of the chat in the same format `chats list` uses.
 ///
 /// **Sort-order assumption:** uses Rust's default byte-order `cmp`, which
-/// matches the server's `localeCompare` sort in `validateLabels` only
-/// because the label-key regex `^[a-zA-Z0-9_:-]{1,64}$` restricts keys to
-/// ASCII. If that regex is ever relaxed to allow Unicode, the two sorts
-/// will diverge and the CLI table will display the same chat differently
-/// from the JSON output. The fix at that point is to either align both
-/// sides on byte order (preferred — locale-aware sort is rarely what the
-/// user wants for machine-readable labels) or to thread the server's
-/// ordering into the CLI explicitly.
+/// matches the server's byte-order sort in `validateLabels` (codepoint
+/// comparison via `a < b ? -1 : a > b ? 1 : 0`). Both sides deliberately
+/// avoid locale-aware sort so the CLI table and JSON output show the
+/// same chat with the same key ordering under every locale. If the
+/// server's sort ever changes — or if the label-key regex
+/// `^[a-zA-Z0-9_:-]{1,64}$` is relaxed to allow Unicode — re-audit both
+/// sites together so they stay aligned.
 fn format_labels_cell(labels: &serde_json::Value) -> String {
     // Empty string (not `"\n"`) when there's nothing to render — the
     // caller checks `!output.text.is_empty()` before printing, so a

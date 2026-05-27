@@ -433,16 +433,23 @@ export function updateChat(chatId: string, updates: UpdateChatOptions): ChatSess
   if (updates.agent !== undefined) session.agent = updates.agent;
   if (updates.model !== undefined) session.model = updates.model ?? undefined;
   if (updates.mode !== undefined) session.mode = updates.mode ?? undefined;
-  if (updates.labels !== undefined) {
-    session.labels = validateLabels(updates.labels, {
+  const labelsTouched = updates.labels !== undefined;
+  if (labelsTouched) {
+    session.labels = validateLabels(updates.labels!, {
       rejectReservedPrefix: !updates.allowReservedLabels,
     });
   }
 
+  // Only rewrite the labels column when the caller actually touched
+  // labels — cosmetic updates (name/model/mode-only) shouldn't churn
+  // the column or bump `updated_at` on a field they didn't change.
+  // Drizzle's `set` silently skips `undefined` properties, so we
+  // conditionally include `labels` rather than passing `undefined`
+  // (which would also skip but is less explicit).
   updatePanelState(chatId, {
     state: serializeState(session),
-    labels: serializeLabels(session.labels),
     updatedAt: Date.now(),
+    ...(labelsTouched ? { labels: serializeLabels(session.labels) } : {}),
   });
 
   // Log only which fields changed, not their values: users may use labels
