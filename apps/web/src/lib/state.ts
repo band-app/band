@@ -1,16 +1,30 @@
-import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { eq, or, sql } from "drizzle-orm";
 import { toWorkspaceId } from "@/dashboard";
 import { getDb } from "../server/infra/db/connection";
+import {
+  bandHome,
+  type CodingAgentDefinition,
+  type LabelDefinition,
+  type NotificationSettings,
+  type Settings,
+} from "../server/infra/db/queries/settings";
 import {
   branchStatuses as branchStatusesTable,
   projects as projectsTable,
   workspaceStatuses as workspaceStatusesTable,
   worktrees as worktreesTable,
 } from "../server/infra/db/schema";
+import { SettingsService, settingsService } from "../server/services/settings-service";
+
+// Settings types live in the Infra layer now (issue #312, Phase 1 of the
+// 3-tier refactor). Re-export them so existing callers that still import
+// from `lib/state` keep compiling — subsequent phases will rewrite those
+// callers to import directly from `server/services/settings-service` /
+// `server/infra/db/queries/settings`.
+export type { CodingAgentDefinition, LabelDefinition, NotificationSettings, Settings };
+export { bandHome };
 
 export type ProjectKind = "git" | "plain";
 
@@ -111,56 +125,6 @@ export interface WorkspaceStatus {
   agent?: AgentInfo;
 }
 
-export interface LabelDefinition {
-  id: string;
-  name: string;
-  color: string;
-}
-
-export interface NotificationSettings {
-  soundOnNeedsAttention?: boolean;
-  sound?: string;
-}
-
-export interface CodingAgentDefinition {
-  id: string;
-  type: string;
-  label: string;
-  command?: string;
-  model?: string;
-}
-
-export interface Settings {
-  worktreesDir?: string;
-  codingAgents?: CodingAgentDefinition[];
-  defaultCodingAgent?: string;
-  webServerPort?: number;
-  notifications?: NotificationSettings;
-  labels?: LabelDefinition[];
-  tokenSecret?: string;
-  autoStartTunnel?: boolean;
-  /**
-   * Maximum number of workspace dockview instances kept alive in memory at
-   * once. Higher values speed up switching back to recent workspaces at the
-   * cost of memory and background work. Defaults to 3 in the client.
-   */
-  maxCachedWorkspaces?: number;
-  /**
-   * Experimental: forward Claude Code's partial-message stream events
-   * (SDK's `includePartialMessages`) so the chat bubble types in
-   * token-by-token instead of in per-block bursts. Off by default.
-   * See `docs/experiments/partial-messages.md`.
-   */
-  claudeCodePartialMessages?: boolean;
-  /** Extra fields not explicitly modeled. Preserved across read/write. */
-  [key: string]: unknown;
-}
-
-export function bandHome(): string {
-  if (process.env.BAND_HOME) return process.env.BAND_HOME;
-  return join(homedir(), ".band");
-}
-
 export function loadState(): AppState {
   const db = getDb();
   const projectRows = db.select().from(projectsTable).orderBy(projectsTable.sortOrder).all();
@@ -249,69 +213,46 @@ export function saveState(state: AppState): void {
   });
 }
 
-function settingsFile(): string {
-  return join(bandHome(), "settings.json");
-}
+// -----------------------------------------------------------------------------
+// Settings — re-exported from the new 3-tier infra/service layer.
+//
+// The real implementations live under `server/infra/db/queries/settings.ts`
+// (file I/O) and `server/services/settings-service.ts` (business logic).
+// These wrappers preserve the old `lib/state` import surface so the rest of
+// the codebase (chat-manager, agent-pool, setup, …) keeps compiling while
+// later refactor phases move each caller to import the service directly.
+// -----------------------------------------------------------------------------
 
 export function loadSettings(): Settings {
-  try {
-    const data = readFileSync(settingsFile(), "utf-8");
-    return JSON.parse(data) as Settings;
-  } catch {
-    return {};
-  }
+  return settingsService.get();
+}
+
+export function saveSettings(settings: Settings): void {
+  settingsService.update(settings);
 }
 
 /**
  * Resolve a coding agent definition by ID.
  * Falls back to the default agent, then the first in the list, then a built-in claude-code default.
+ *
+ * Back-compat shim around `SettingsService.resolveAgent` — preserves the
+ * legacy `(settings, agentId)` signature so existing callers that have
+ * already loaded a settings snapshot can keep passing it in without a
+ * second file read. The fallback logic itself lives in the service so
+ * this wrapper stays a one-line delegate (no logic duplication / drift).
+ * Later phases of the 3-tier refactor (issue #312 onward) will rewrite
+ * each caller to use the service directly and delete this shim.
  */
 export function getAgentDefinition(settings: Settings, agentId?: string): CodingAgentDefinition {
-  const agents = settings.codingAgents ?? [];
-  if (agentId) {
-    const found = agents.find((a) => a.id === agentId);
-    if (found) return found;
-  }
-  if (settings.defaultCodingAgent) {
-    const found = agents.find((a) => a.id === settings.defaultCodingAgent);
-    if (found) return found;
-  }
-  if (agents.length > 0) return agents[0];
-  return { id: "claude-code", type: "claude-code", label: "Claude Code" };
-}
-
-export function saveSettings(settings: Settings): void {
-  const filePath = settingsFile();
-  // Merge with existing file contents to preserve unknown fields (e.g. desktop-shell extras)
-  let existing: Record<string, unknown> = {};
-  try {
-    existing = JSON.parse(readFileSync(filePath, "utf-8"));
-  } catch {
-    // File doesn't exist or is invalid — start fresh
-  }
-  const merged = { ...existing, ...settings };
-  const data = `${JSON.stringify(merged, null, 2)}\n`;
-  // Atomic write: write to temp file then rename
-  const dir = dirname(filePath);
-  mkdirSync(dir, { recursive: true });
-  const tmpPath = `${filePath}.tmp.${process.pid}`;
-  writeFileSync(tmpPath, data, "utf-8");
-  renameSync(tmpPath, filePath);
+  return SettingsService.resolveAgent(settings, agentId);
 }
 
 export function getOrCreateToken(): string {
-  const settings = loadSettings();
-  if (settings.tokenSecret) return settings.tokenSecret;
-  const token = randomBytes(32).toString("hex");
-  const current = loadSettings();
-  current.tokenSecret = token;
-  saveSettings(current);
-  return token;
+  return settingsService.getOrCreateToken();
 }
 
 export function worktreesDir(): string {
-  const settings = loadSettings();
-  return settings.worktreesDir ?? join(bandHome(), "worktrees");
+  return settingsService.worktreesDir();
 }
 
 export function loadCurrentStatuses(): WorkspaceStatus[] {

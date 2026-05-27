@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { createLogger } from "@band-app/logger";
 import { drizzle } from "drizzle-orm/node-sqlite";
 import { migrate } from "drizzle-orm/node-sqlite/migrator";
-import { bandHome } from "../../../lib/state";
+import { bandHome } from "./queries/settings";
 import * as schema from "./schema";
 
 const log = createLogger("db");

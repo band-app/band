@@ -3,16 +3,24 @@
  *
  * Per `docs/web-architecture.md`, the API tier lives under
  * `apps/web/src/server/api/`. Each domain (projects, workspaces, chats,
- * tasks, …) will eventually own a sub-router under
- * `apps/web/src/server/api/<domain>/router.ts` and this file will merge
- * them via `t.router({ … })`.
+ * tasks, …) owns a sub-router under `apps/web/src/server/api/<domain>/router.ts`
+ * and this file merges them via `t.mergeRouters(…)`.
  *
- * Phase 0 (issue #311) only scaffolds the directory and wires the entry
- * point. The full router still lives at `apps/web/src/trpc/router.ts` —
- * we re-export it from here so `start-server.ts` (and any other entry
- * point) can import from the new location without breaking anything.
- * Subsequent phases will move procedures into per-domain sub-routers
- * and replace this re-export with a real `t.router({ … })` composition.
+ * Phase 1 (issue #312) migrates the first sub-router (`settings/`) into the
+ * new 3-tier shape. The rest of the procedures still live in the legacy
+ * `apps/web/src/trpc/router.ts`; we merge that legacy router with the
+ * migrated `settingsRouter` so the public tRPC surface stays identical
+ * during the multi-phase migration. Subsequent phases will lift more
+ * sub-routers out of the legacy file and pull them in here one at a time.
+ *
+ * Both routers must be built with the same tRPC builder (see `./trpc.ts`)
+ * for `mergeRouters` to accept them.
  */
 
-export { type AppRouter, appRouter } from "../../trpc/router.ts";
+import { appRouter as legacyAppRouter } from "../../trpc/router";
+import { settingsRouter } from "./settings/router";
+import { t } from "./trpc";
+
+export const appRouter = t.mergeRouters(legacyAppRouter, t.router({ settings: settingsRouter }));
+
+export type AppRouter = typeof appRouter;

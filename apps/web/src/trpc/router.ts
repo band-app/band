@@ -12,7 +12,7 @@ import { cp, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from 
 import { basename, dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { createLogger } from "@band-app/logger";
-import { initTRPC, TRPCError } from "@trpc/server";
+import { TRPCError } from "@trpc/server";
 import { rgPath } from "@vscode/ripgrep";
 import { Cron } from "croner";
 import { z } from "zod";
@@ -121,7 +121,6 @@ import {
   loadState,
   type ProjectKind,
   reconcileKindForProject,
-  saveSettings,
   saveState,
   upsertWorkspaceStatus,
   worktreesDir,
@@ -149,14 +148,10 @@ import { getTunnelStatus, startTunnel, stopTunnel } from "../lib/tunnel";
 import { saveUploadedFiles, saveUploadedFilesDetailed } from "../lib/upload-utils";
 import { emit, subscribe as subscribeStatus } from "../lib/watcher";
 import { resolveWorkspace } from "../lib/workspace";
-import type { Context } from "./context";
+import { publicProcedure, t } from "../server/api/trpc";
 
 const execFileAsync = promisify(execFile);
 const log = createLogger("trpc");
-
-const t = initTRPC.context<Context>().create();
-
-const publicProcedure = t.procedure;
 
 // ---------------------------------------------------------------------------
 // Projects
@@ -825,19 +820,10 @@ const workspacesRouter = t.router({
 });
 
 // ---------------------------------------------------------------------------
-// Settings
+// Settings — migrated to `server/api/settings/router.ts` (issue #312).
+// The legacy declaration lived here; it is now merged into the root
+// router from `server/api/router.ts` so the wire shape is unchanged.
 // ---------------------------------------------------------------------------
-
-const settingsRouter = t.router({
-  get: publicProcedure.query(() => {
-    return loadSettings();
-  }),
-
-  update: publicProcedure.input(z.record(z.string(), z.unknown())).mutation(({ input }) => {
-    saveSettings(input);
-    return { ok: true };
-  }),
-});
 
 // ---------------------------------------------------------------------------
 // Hooks
@@ -4587,10 +4573,17 @@ const terminalRouter = t.router({
 // App Router
 // ---------------------------------------------------------------------------
 
+/**
+ * Legacy app router — every domain still lives here except the ones
+ * already migrated to `server/api/<domain>/router.ts`. The root router
+ * at `server/api/router.ts` merges this with the migrated sub-routers
+ * (e.g. `settings`, see issue #312) so the wire shape is unchanged
+ * while the codebase moves toward the 3-tier layout described in
+ * `docs/web-architecture.md`.
+ */
 export const appRouter = t.router({
   projects: projectsRouter,
   workspaces: workspacesRouter,
-  settings: settingsRouter,
   hooks: hooksRouter,
   cli: cliRouter,
   workspace: workspaceRouter,
