@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { toWorkspaceId } from "@/dashboard";
-import { closeDb } from "../src/lib/db/connection";
 import { getWorkspaceStatus, upsertWorkspaceStatus } from "../src/lib/state";
+import { closeDb } from "../src/server/infra/db/connection";
 import { seedState, seedWorkspaceStatuses } from "./helpers/seed-state";
 
 // Read `updated_at` directly from SQLite — used to assert that the

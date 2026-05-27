@@ -8,8 +8,8 @@
  */
 
 import { and, eq, sql } from "drizzle-orm";
-import { getDb } from "./db/connection";
-import { panelStates } from "./db/schema";
+import { getDb } from "../server/infra/db/connection";
+import { panelStates } from "../server/infra/db/schema";
 
 export interface PanelStateRow {
   id: string;

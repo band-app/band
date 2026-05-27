@@ -1,7 +1,7 @@
 import { createLogger } from "@band-app/logger";
 import { and, desc, eq, isNotNull, isNull, lt, or } from "drizzle-orm";
-import { getDb } from "./db/connection";
-import { tasks } from "./db/schema";
+import { getDb } from "../server/infra/db/connection";
+import { tasks } from "../server/infra/db/schema";
 
 const log = createLogger("task-store");
 

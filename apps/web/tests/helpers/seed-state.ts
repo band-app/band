@@ -3,9 +3,9 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { drizzle } from "drizzle-orm/node-sqlite";
 import { migrate } from "drizzle-orm/node-sqlite/migrator";
-import * as schema from "../../src/lib/db/schema";
+import * as schema from "../../src/server/infra/db/schema";
 
-const migrationsFolder = join(import.meta.dirname, "../../src/lib/db/migrations");
+const migrationsFolder = join(import.meta.dirname, "../../src/server/infra/db/migrations");
 
 interface WorktreeData {
   branch: string;

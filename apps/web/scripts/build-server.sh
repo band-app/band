@@ -221,4 +221,4 @@ fi
 
 # Copy Drizzle migrations
 rm -rf dist/migrations
-cp -R src/lib/db/migrations dist/migrations
+cp -R src/server/infra/db/migrations dist/migrations

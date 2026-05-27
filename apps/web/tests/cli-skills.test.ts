@@ -33,7 +33,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { findBandBinary } from "../src/lib/cli-skills";
-import { closeDb } from "../src/lib/db/connection";
+import { closeDb } from "../src/server/infra/db/connection";
 
 const SKILL_NAMES = [
   "band",

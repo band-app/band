@@ -1,8 +1,8 @@
 import { createLogger } from "@band-app/logger";
 import { eq } from "drizzle-orm";
 import { toWorkspaceId } from "@/dashboard";
-import { getDb } from "./db/connection";
-import { branchStatuses as branchStatusesTable } from "./db/schema";
+import { getDb } from "../server/infra/db/connection";
+import { branchStatuses as branchStatusesTable } from "../server/infra/db/schema";
 import { execGh, execGit, getRepoInfo, type RepoInfo } from "./git";
 import { buildBatchedCIQuery, type CIStatus, parseBatchedCIResponse } from "./github-graphql";
 import { loadState } from "./state";

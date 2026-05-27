@@ -233,7 +233,7 @@ function makeSpawnOptions(
  * works even when the user has no system Node installed (or has the wrong
  * version, or a sparse `PATH` from a Finder/Spotlight launch). It also
  * guarantees the runtime ships `node:sqlite` as a built-in, which our
- * `apps/web/src/lib/db/connection.ts` relies on.
+ * `apps/web/src/server/infra/db/connection.ts` relies on.
  */
 export async function spawnWebServer(opts: SpawnWebServerOptions): Promise<ChildProcess> {
   const startScript = join(opts.webDir, "dist/start-server.mjs");

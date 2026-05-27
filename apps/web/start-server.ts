@@ -14,8 +14,6 @@ import { listBrowsers } from "./src/lib/browser-manager.ts";
 import { handleCdpConnection } from "./src/lib/cdp-proxy.ts";
 import { captureSnapshot } from "./src/lib/cdp-targets.ts";
 import { startCronjobScheduler, stopCronjobScheduler } from "./src/lib/cronjob-scheduler.ts";
-import { closeDb } from "./src/lib/db/connection.ts";
-import { runMigrations } from "./src/lib/db/migrate.ts";
 import { killAllServers } from "./src/lib/lsp-manager.ts";
 import { handleLspConnection } from "./src/lib/lsp-proxy.ts";
 import { mimeTypeFromFilename } from "./src/lib/mime-types.ts";
@@ -33,9 +31,11 @@ import { handleTerminalConnection } from "./src/lib/terminal-ws.ts";
 import { startTunnel, stopTunnel } from "./src/lib/tunnel.ts";
 import { resolveWorkspace } from "./src/lib/workspace.ts";
 import { handleMcpRequest } from "./src/mcp/server.ts";
+import { appRouter } from "./src/server/api/router.ts";
+import { closeDb } from "./src/server/infra/db/connection.ts";
+import { runMigrations } from "./src/server/infra/db/migrate.ts";
 import { createContext } from "./src/trpc/context.ts";
 import { getScalarHtml } from "./src/trpc/openapi.ts";
-import { appRouter } from "./src/trpc/router.ts";
 
 // ---------------------------------------------------------------------------
 // Crash handlers — log to file since stdout/stderr may be piped to a log file
