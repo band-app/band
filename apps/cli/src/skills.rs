@@ -567,6 +567,13 @@ fn parse_command_prefixes(content: &str) -> Vec<String> {
 /// or doesn't have a closing `---` line — those templates are also invalid,
 /// but the caller's job is to validate what's present rather than impose
 /// the delimiter convention here.
+///
+/// **Required shape:** the closing `---` must be followed by a newline
+/// (`\n` or `\r\n`). A file ending with `---` at EOF without a trailing
+/// newline is treated as missing the closing delimiter and surfaces as
+/// "missing YAML frontmatter". Every checked-in template ends with a body
+/// paragraph and trailing newline, so this is documentation of the
+/// invariant rather than a runtime concern.
 fn extract_frontmatter_block(content: &str) -> Option<&str> {
     let rest = content
         .strip_prefix("---\n")
