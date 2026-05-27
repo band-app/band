@@ -193,6 +193,10 @@ enum ChatsCmd {
         /// Mode (e.g. 'plan', 'edit')
         #[arg(long)]
         mode: Option<String>,
+        /// Label in the form `key=value` (repeatable). Keys with the
+        /// reserved `band:` prefix are rejected by the server.
+        #[arg(long = "label")]
+        labels: Vec<String>,
     },
     /// Send a message to a workspace chat (defaults to the workspace's active chat panel)
     Send {
@@ -231,6 +235,24 @@ enum ChatsCmd {
     Remove {
         /// Chat pane ID (defaults to the cwd workspace's first chat pane)
         chat_id: Option<String>,
+    },
+    /// Add or overwrite labels on a chat pane (additive merge — other
+    /// labels are preserved).
+    Label {
+        /// Chat pane ID
+        chat_id: String,
+        /// One or more `key=value` pairs. Keys with the reserved
+        /// `band:` prefix are rejected by the server.
+        #[arg(required = true)]
+        labels: Vec<String>,
+    },
+    /// Remove labels from a chat pane by key (other labels are preserved).
+    Unlabel {
+        /// Chat pane ID
+        chat_id: String,
+        /// One or more label keys to remove. Unknown keys are ignored.
+        #[arg(required = true)]
+        keys: Vec<String>,
     },
 }
 
@@ -490,12 +512,14 @@ fn main() {
                 agent,
                 model,
                 mode,
+                labels,
             } => cmd_chats_create(
                 workspace_id.as_deref(),
                 name.as_deref(),
                 agent.as_deref(),
                 model.as_deref(),
                 mode.as_deref(),
+                &labels,
             ),
             ChatsCmd::Send {
                 chat_id,
@@ -517,6 +541,8 @@ fn main() {
             ChatsCmd::Watch { .. } => unreachable!(),
             ChatsCmd::Stop { chat_id } => cmd_chats_stop(chat_id.as_deref()),
             ChatsCmd::Remove { chat_id } => cmd_chats_remove(chat_id.as_deref()),
+            ChatsCmd::Label { chat_id, labels } => cmd_chats_label(&chat_id, &labels),
+            ChatsCmd::Unlabel { chat_id, keys } => cmd_chats_unlabel(&chat_id, &keys),
         },
         Commands::Browsers { cmd } => match cmd {
             BrowsersCmd::List { workspace_id } => cmd_browser_list(workspace_id.as_deref()),
@@ -876,23 +902,42 @@ fn cmd_chats_list(workspace_id: Option<&str>) -> Result<CommandResult, String> {
         .cloned()
         .unwrap_or_default();
 
-    let mut rows: Vec<[String; 4]> = Vec::new();
+    let mut rows: Vec<[String; 5]> = Vec::new();
     let mut json_chats = Vec::new();
     for chat in &chats {
         let id = chat.get("id").and_then(|v| v.as_str()).unwrap_or("");
         let name = chat.get("name").and_then(|v| v.as_str()).unwrap_or("");
         let agent = chat.get("agent").and_then(|v| v.as_str()).unwrap_or("");
         let status = chat.get("status").and_then(|v| v.as_str()).unwrap_or("");
+        // Labels are persisted as a Record<string, string> on the server and
+        // returned inline on each chat. Render them as `k=v,k=v` to keep the
+        // table compact — empty record or missing field both render as an
+        // empty cell. Keys are sorted for stable output (the server doesn't
+        // promise insertion order across rehydrations).
+        let labels = chat
+            .get("labels")
+            .and_then(|v| v.as_object())
+            .map(|obj| {
+                let mut pairs: Vec<(&String, &serde_json::Value)> = obj.iter().collect();
+                pairs.sort_by(|a, b| a.0.cmp(b.0));
+                pairs
+                    .into_iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| format!("{k}={s}")))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            })
+            .unwrap_or_default();
         rows.push([
             id.to_string(),
             name.to_string(),
             agent.to_string(),
             status.to_string(),
+            labels,
         ]);
         json_chats.push(chat.clone());
     }
 
-    let text = format_table(&["ID", "NAME", "AGENT", "STATUS"], &rows);
+    let text = format_table(&["ID", "NAME", "AGENT", "STATUS", "LABELS"], &rows);
 
     Ok(CommandResult {
         text,
@@ -906,6 +951,7 @@ fn cmd_chats_create(
     agent: Option<&str>,
     model: Option<&str>,
     mode: Option<&str>,
+    label_args: &[String],
 ) -> Result<CommandResult, String> {
     let client = api::ApiClient::from_settings()?;
     let workspace_id = resolve_workspace_id(&client, workspace_id)?;
@@ -922,6 +968,10 @@ fn cmd_chats_create(
     if let Some(m) = mode {
         input["mode"] = serde_json::json!(m);
     }
+    if !label_args.is_empty() {
+        let labels = parse_label_pairs(label_args)?;
+        input["labels"] = serde_json::Value::Object(labels);
+    }
     let data = client.trpc_mutate("chats.create", &input)?;
     let chat = data.get("chat").cloned().unwrap_or(serde_json::Value::Null);
     let id = chat.get("id").and_then(|v| v.as_str()).unwrap_or("");
@@ -930,6 +980,154 @@ fn cmd_chats_create(
         text: format!("{id}\n"),
         json: serde_json::json!({"chat": chat}),
     })
+}
+
+/// Parse a list of `key=value` strings into a JSON object. Splits each
+/// pair on the **first** `=` so values may legitimately contain further
+/// `=` characters (e.g. base64 or URL fragments). Refuses any pair that
+/// lacks `=` or has an empty key, so a typo like `--label phaseplan`
+/// fails loudly with a clear message instead of being silently dropped
+/// or sent to the server as a no-key validation failure.
+fn parse_label_pairs(
+    pairs: &[String],
+) -> Result<serde_json::Map<String, serde_json::Value>, String> {
+    let mut out = serde_json::Map::new();
+    for raw in pairs {
+        let (k, v) = raw
+            .split_once('=')
+            .ok_or_else(|| format!("label \"{raw}\" must be in the form key=value"))?;
+        if k.is_empty() {
+            return Err(format!("label \"{raw}\" has an empty key"));
+        }
+        // Catch empty values at the CLI boundary so the user sees an
+        // actionable message tied to their input instead of the server's
+        // generic "value must be a non-empty string" tRPC error — same
+        // rule the server enforces but with the offending pair quoted
+        // back at them. Aligns the CLI-side check with the server-side
+        // one in `validateLabels`.
+        if v.is_empty() {
+            return Err(format!("label \"{raw}\" has an empty value"));
+        }
+        // Later duplicates overwrite earlier ones — `--label k=a --label k=b`
+        // ends up as `k=b`, matching how kubectl handles the same input.
+        out.insert(k.to_string(), serde_json::Value::String(v.to_string()));
+    }
+    Ok(out)
+}
+
+/// Fetch the current labels record for a chat via `chats.get`. Returns
+/// an empty `Map` for unlabeled chats (and for chats whose server
+/// response omits the field entirely — defensive read).
+///
+/// Used as the "read" half of the label/unlabel read-modify-write loop.
+/// The intervening server-side `chats.update` is a full-set replace, so
+/// the CLI has to fetch the current labels, merge locally, and send the
+/// full intended set back. Two callers mutating labels on the same
+/// chat concurrently can race; for the single-user workflow this is
+/// targeting that's acceptable.
+fn fetch_chat_labels(
+    client: &api::ApiClient,
+    chat_id: &str,
+) -> Result<serde_json::Map<String, serde_json::Value>, String> {
+    let data = client.trpc_query("chats.get", &serde_json::json!({"chatId": chat_id}))?;
+    let chat = data.get("chat").cloned().unwrap_or(serde_json::Value::Null);
+    if chat.is_null() {
+        return Err(format!("Chat \"{chat_id}\" not found"));
+    }
+    Ok(chat
+        .get("labels")
+        .and_then(serde_json::Value::as_object)
+        .cloned()
+        .unwrap_or_default())
+}
+
+fn cmd_chats_label(chat_id: &str, label_args: &[String]) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let additions = parse_label_pairs(label_args)?;
+    let mut labels = fetch_chat_labels(&client, chat_id)?;
+    for (k, v) in additions {
+        labels.insert(k, v);
+    }
+    let intended = serde_json::Value::Object(labels);
+    let data = client.trpc_mutate(
+        "chats.update",
+        &serde_json::json!({"chatId": chat_id, "labels": intended.clone()}),
+    )?;
+    let chat = data.get("chat").cloned().unwrap_or(serde_json::Value::Null);
+    Ok(CommandResult {
+        // Prefer the server-confirmed labels so the text output can't drift
+        // from the JSON output if the server ever normalises keys differently
+        // (today they always agree because validation runs the same sort).
+        // Fall back to the intended set only if the response somehow omits
+        // the field — that's a server bug we'd want to see surfaced.
+        text: format_labels_cell(server_labels(&chat).unwrap_or(&intended)),
+        json: serde_json::json!({"chat": chat}),
+    })
+}
+
+fn cmd_chats_unlabel(chat_id: &str, keys: &[String]) -> Result<CommandResult, String> {
+    let client = api::ApiClient::from_settings()?;
+    let mut labels = fetch_chat_labels(&client, chat_id)?;
+    for k in keys {
+        labels.remove(k);
+    }
+    let intended = serde_json::Value::Object(labels);
+    let data = client.trpc_mutate(
+        "chats.update",
+        &serde_json::json!({"chatId": chat_id, "labels": intended.clone()}),
+    )?;
+    let chat = data.get("chat").cloned().unwrap_or(serde_json::Value::Null);
+    Ok(CommandResult {
+        // See `cmd_chats_label` — prefer server-confirmed labels for text
+        // output so it can't silently diverge from the JSON output.
+        text: format_labels_cell(server_labels(&chat).unwrap_or(&intended)),
+        json: serde_json::json!({"chat": chat}),
+    })
+}
+
+/// Extract the `labels` field from a `chats.update` server response.
+/// Returns `None` if the response is missing the field or if it's the wrong
+/// shape — in which case the caller should fall back to the locally-computed
+/// set rather than silently rendering an empty cell.
+fn server_labels(chat: &serde_json::Value) -> Option<&serde_json::Value> {
+    let labels = chat.get("labels")?;
+    if labels.is_object() {
+        Some(labels)
+    } else {
+        None
+    }
+}
+
+/// Render a labels record as `k=v,k=v\n` with sorted keys. Shared
+/// between `band chats label` and `band chats unlabel` so both surface
+/// the final state of the chat in the same format `chats list` uses.
+///
+/// **Sort-order assumption:** uses Rust's default byte-order `cmp`, which
+/// matches the server's byte-order sort in `validateLabels` (codepoint
+/// comparison via `a < b ? -1 : a > b ? 1 : 0`). Both sides deliberately
+/// avoid locale-aware sort so the CLI table and JSON output show the
+/// same chat with the same key ordering under every locale. If the
+/// server's sort ever changes — or if the label-key regex
+/// `^[a-zA-Z0-9_:-]{1,64}$` is relaxed to allow Unicode — re-audit both
+/// sites together so they stay aligned.
+fn format_labels_cell(labels: &serde_json::Value) -> String {
+    // Empty string (not `"\n"`) when there's nothing to render — the
+    // caller checks `!output.text.is_empty()` before printing, so a
+    // bare `"\n"` would emit a spurious blank line on the
+    // edge case where the server response lacks a labels object.
+    let Some(obj) = labels.as_object() else {
+        return String::new();
+    };
+    if obj.is_empty() {
+        return String::new();
+    }
+    let mut pairs: Vec<(&String, &serde_json::Value)> = obj.iter().collect();
+    pairs.sort_by(|a, b| a.0.cmp(b.0));
+    let rendered: Vec<String> = pairs
+        .into_iter()
+        .filter_map(|(k, v)| v.as_str().map(|s| format!("{k}={s}")))
+        .collect();
+    format!("{}\n", rendered.join(","))
 }
 
 /// Send a message to a workspace chat, defaulting to the workspace's active
@@ -2464,7 +2662,7 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
             "parameters": [
                 {"name": "workspace_id", "type": "string", "required": false, "positional": true, "description": "Workspace ID (auto-detected from cwd if omitted)"},
             ],
-            "notes": "Text output: `ID\\tNAME\\tAGENT\\tSTATUS` (tab-separated table).\nJSON output: `{\"chats\": [{\"id\": \"...\", \"name\": \"...\", \"agent\": \"...\", \"status\": \"...\"}]}`"
+            "notes": "Text output: `ID\\tNAME\\tAGENT\\tSTATUS\\tLABELS` (space-padded table; LABELS renders as `k=v,k=v` and is empty when the chat has no labels).\nJSON output: `{\"chats\": [{\"id\": \"...\", \"name\": \"...\", \"agent\": \"...\", \"status\": \"...\", \"labels\": {\"k\": \"v\"}}]}`. The `band:` key prefix is reserved for server-internal labels (e.g. `band:cronId` set by the cronjob scheduler when it owns a chat) and is not user-settable."
         }),
         serde_json::json!({
             "name": "chats create",
@@ -2475,8 +2673,9 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "--agent", "type": "string", "required": false, "description": "Coding agent ID (e.g. 'claude-code')"},
                 {"name": "--model", "type": "string", "required": false, "description": "Model override"},
                 {"name": "--mode", "type": "string", "required": false, "description": "Mode (e.g. 'plan', 'edit')"},
+                {"name": "--label", "type": "string", "required": false, "repeatable": true, "description": "Label in the form `key=value` (repeatable). Keys with the reserved `band:` prefix are rejected."},
             ],
-            "notes": "Creates a new independent chat pane with its own agent process. Returns the chat ID.\nJSON output: `{\"chat\": {\"id\": \"...\", \"name\": \"...\", \"agent\": \"...\", \"status\": \"idle\"}}`"
+            "notes": "Creates a new independent chat pane with its own agent process. Returns the chat ID.\nJSON output: `{\"chat\": {\"id\": \"...\", \"name\": \"...\", \"agent\": \"...\", \"status\": \"idle\", \"labels\": {\"k\": \"v\"}}}`"
         }),
         serde_json::json!({
             "name": "chats send",
@@ -2515,6 +2714,24 @@ pub(crate) fn build_schema(command: Option<&str>) -> Result<serde_json::Value, S
                 {"name": "chat_id", "type": "string", "required": false, "positional": true, "description": "Chat pane ID (defaults to the cwd workspace's first chat pane)"},
             ],
             "notes": "Removes the chat pane, kills the associated agent process, and cleans up state."
+        }),
+        serde_json::json!({
+            "name": "chats label",
+            "description": "Add or overwrite labels on a chat pane (additive merge)",
+            "parameters": [
+                {"name": "chat_id", "type": "string", "required": true, "positional": true, "description": "Chat pane ID"},
+                {"name": "labels", "type": "string", "required": true, "positional": true, "repeatable": true, "description": "One or more `key=value` pairs"},
+            ],
+            "notes": "Reads the chat's current labels, merges the new pairs in (later wins for duplicate keys, other labels untouched), and persists via `chats.update`. Keys with the reserved `band:` prefix are rejected by the server. Two callers labeling the same chat concurrently can race; intended for single-user workflows.\n\nText output: the chat's final labels rendered as `k=v,k=v` with sorted keys.\nJSON output: `{\"chat\": {...}}` — the full chat record after the update."
+        }),
+        serde_json::json!({
+            "name": "chats unlabel",
+            "description": "Remove labels from a chat pane by key",
+            "parameters": [
+                {"name": "chat_id", "type": "string", "required": true, "positional": true, "description": "Chat pane ID"},
+                {"name": "keys", "type": "string", "required": true, "positional": true, "repeatable": true, "description": "One or more label keys to remove"},
+            ],
+            "notes": "Reads the chat's current labels, drops the listed keys (unknown keys are ignored), and persists via `chats.update`. Other labels are preserved.\n\nText output: the chat's final labels rendered as `k=v,k=v` with sorted keys.\nJSON output: `{\"chat\": {...}}` — the full chat record after the update."
         }),
         serde_json::json!({
             "name": "browsers list",

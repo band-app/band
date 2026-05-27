@@ -94,6 +94,34 @@ export function trpcMutate(
   });
 }
 
+/**
+ * GET a tRPC query against a running test server and return the raw
+ * `Response`. Mirrors `trpcMutate` — leaves status / body assertions to
+ * the caller. Auth is via the `band_token` cookie; pass the same token
+ * the test passed to `seedSettings`.
+ *
+ * `input` is URL-encoded into the standard tRPC GET shape
+ * (`?input=<json>`) when provided, omitted otherwise.
+ *
+ * Production clients use the `httpBatchLink` (`?batch=1&input=...`) but
+ * the un-batched GET path is also accepted by the server and is the
+ * convention every existing inline-helper test in this folder uses, so
+ * the helper exposes the same shape to keep new tests symmetric with
+ * the old ones rather than mixing GET shapes within the suite.
+ */
+export function trpcQuery(
+  serverUrl: string,
+  procedure: string,
+  input: unknown,
+  token: string,
+): Promise<Response> {
+  const url =
+    input !== undefined
+      ? `${serverUrl}/trpc/${procedure}?input=${encodeURIComponent(JSON.stringify(input))}`
+      : `${serverUrl}/trpc/${procedure}`;
+  return fetch(url, { headers: { Cookie: `band_token=${token}` } });
+}
+
 export interface StartServerOptions {
   tmpHome: string;
   env?: Record<string, string>;

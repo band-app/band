@@ -13,7 +13,7 @@ Thin client for the Band web server. All state, git operations, and script execu
 
 This skill covers **core workspace, project, cronjob, and tunnel** management. For domain-specific commands, see the sibling skills:
 
-- **`band-chat`** — chat panes (`band chats list/create/send/watch/stop/remove`)
+- **`band-chat`** — chat panes (`band chats list/create/send/watch/stop/remove/label/unlabel`)
 - **`band-terminal`** — terminal sessions (`band terminals list/create/send/output/kill/attach`)
 - **`band-browser`** — browser tabs (`band browsers list/create/navigate/get/remove`)
 

@@ -60,6 +60,7 @@ import {
   createChat,
   getChat,
   getOrCreateDefaultChat,
+  InvalidLabelsError,
   listChats,
   removeChat,
   removeWorkspaceChats,
@@ -72,7 +73,12 @@ import {
   scheduleActiveSessionRefresh,
 } from "../lib/chat-session-summary";
 import { checkCli, installCli, resolveCliPaths } from "../lib/cli";
-import { reloadSchedules, stopJobsForKey } from "../lib/cronjob-scheduler";
+import {
+  getOrCreateCronjobChat,
+  reloadSchedules,
+  resolveCronjobWorkspaceId,
+  stopJobsForKey,
+} from "../lib/cronjob-scheduler";
 import {
   deleteCronjobFile,
   generateCronjobId,
@@ -3396,25 +3402,18 @@ const cronjobsRouter = t.router({
         throw new TRPCError({ code: "NOT_FOUND", message: "Cronjob not found" });
       }
 
-      let workspaceId: string;
-      if (job.scope === "workspace" && job.workspaceId) {
-        workspaceId = job.workspaceId;
-      } else {
-        const state = loadState();
-        const project = state.projects.find((p) => p.name === input.key);
-        if (!project) {
-          throw new TRPCError({
-            code: "NOT_FOUND",
-            message: "Project not found",
-          });
-        }
-        workspaceId = toWorkspaceId(project.name, project.defaultBranch);
+      const workspaceId = resolveCronjobWorkspaceId(job, input.key);
+      if (!workspaceId) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Project not found" });
       }
 
-      const cronChat = getOrCreateDefaultChat(workspaceId);
+      // Issue #520: manual trigger uses the same `band:cronId`-labeled chat
+      // as the scheduled fire so the user sees both paths converge on a
+      // single dedicated conversation.
+      const cronChat = getOrCreateCronjobChat(workspaceId, job);
       try {
         const task = submitTask({ workspaceId, chatId: cronChat.id, prompt: job.prompt });
-        return { taskId: task.id, workspaceId };
+        return { taskId: task.id, workspaceId, chatId: cronChat.id };
       } catch (err) {
         if (err instanceof TaskConflictError) {
           throw new TRPCError({
@@ -3553,17 +3552,28 @@ const chatsRouter = t.router({
         agent: z.string().optional(),
         model: z.string().optional(),
         mode: z.string().optional(),
+        labels: z.record(z.string(), z.string()).optional(),
       }),
     )
     .mutation(({ input }) => {
-      const chat = createChat(input.workspaceId, {
-        id: input.id,
-        name: input.name,
-        agent: input.agent,
-        model: input.model,
-        mode: input.mode,
-      });
-      return { chat };
+      try {
+        const chat = createChat(input.workspaceId, {
+          id: input.id,
+          name: input.name,
+          agent: input.agent,
+          model: input.model,
+          mode: input.mode,
+          labels: input.labels,
+          // tRPC is a user-facing surface — never allow callers to set
+          // reserved `band:`-prefixed labels.
+        });
+        return { chat };
+      } catch (err) {
+        if (err instanceof InvalidLabelsError) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
+        }
+        throw err;
+      }
     }),
 
   get: publicProcedure.input(z.object({ chatId: z.string() })).query(async ({ input }) => {
@@ -3594,6 +3604,24 @@ const chatsRouter = t.router({
     return { chat };
   }),
 
+  /**
+   * Update one or more fields on an existing chat pane.
+   *
+   * Behavior contract:
+   *   - `labels` replaces the **full** record. Pass `{}` to clear.
+   *   - Returns `NOT_FOUND` (404) if `chatId` doesn't resolve. This is
+   *     a behavior change from before issue #520, when this route
+   *     returned `200 { chat: undefined }` on an unknown id. The
+   *     previous silent-no-op was harmless for cosmetic edits but
+   *     would let a `labels: {}` "clear" against a stale id succeed
+   *     misleadingly, which is why the route now surfaces the error.
+   *     Existing UI callers (`ChatView.tsx` `.catch(...)` handlers
+   *     for mode/model changes) absorb the new 404 the same way they
+   *     absorbed the silent 200; new callers should expect it.
+   *   - Returns `BAD_REQUEST` (400) if `labels` violates validation
+   *     rules in `validateLabels` (max 20 keys, key regex, value
+   *     rules, reserved `band:` prefix).
+   */
   update: publicProcedure
     .input(
       z.object({
@@ -3602,12 +3630,35 @@ const chatsRouter = t.router({
         agent: z.string().optional(),
         model: z.string().optional(),
         mode: z.string().optional(),
+        labels: z.record(z.string(), z.string()).optional(),
       }),
     )
     .mutation(({ input }) => {
       const { chatId, ...updates } = input;
-      const chat = updateChat(chatId, updates);
-      return { chat };
+      try {
+        const chat = updateChat(chatId, updates);
+        if (!chat) {
+          // Issue #520: `chats.update` previously returned 200 with
+          // `chat: undefined` when the chatId didn't resolve. Harmless when
+          // the route only touched cosmetic fields, but the new `labels`
+          // semantic is "replace the whole record" — a silent no-op on a
+          // typo'd id would let a caller believe their relabel succeeded.
+          //
+          // Existing UI callers (`ChatView.tsx`'s `trpc.chats.update.mutate`
+          // for `mode` / `model` changes) wrap the call in `.catch` and log
+          // — they used to absorb the silent success, and they'll now
+          // absorb the 404 the same way. Intentional: the 404 is the
+          // correct shape for a stale chatId; any new caller (CLI
+          // `chats label` / `chats unlabel`) wants it surfaced.
+          throw new TRPCError({ code: "NOT_FOUND", message: "Chat not found" });
+        }
+        return { chat };
+      } catch (err) {
+        if (err instanceof InvalidLabelsError) {
+          throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
+        }
+        throw err;
+      }
     }),
 
   remove: publicProcedure.input(z.object({ chatId: z.string() })).mutation(({ input }) => {

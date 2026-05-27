@@ -2,7 +2,7 @@ import { createLogger } from "@band-app/logger";
 import { Cron } from "croner";
 import { eq } from "drizzle-orm";
 import { toWorkspaceId } from "@/dashboard";
-import { getOrCreateDefaultChat } from "./chat-manager";
+import { BAND_CRON_ID_LABEL, type ChatSession, createChat, findChatByLabels } from "./chat-manager";
 import { listAllCronjobs, loadCronjobFile } from "./cronjob-store";
 import type { CronjobDefinition } from "./cronjob-types";
 import { getDb } from "./db/connection";
@@ -69,27 +69,64 @@ function scheduleJob(job: CronjobDefinition, fileKey: string): void {
   }
 }
 
-async function executeCronjob(job: CronjobDefinition, fileKey: string): Promise<void> {
-  let workspaceId: string;
+/**
+ * Find — or create — the dedicated chat this cronjob writes into.
+ *
+ * Issue #520: each cronjob owns its own chat in the workspace, looked up by
+ * the canonical `band:cronId` label. First call creates the chat; subsequent
+ * calls reuse it. If the user deletes the chat, the next call recreates it
+ * (intentional soft reset). This replaces the old `getOrCreateDefaultChat`
+ * dispatch, which silently latched onto whatever chat the user happened to
+ * be focused on. Shared between the scheduled fire path (`executeCronjob`)
+ * and the manual `cronjobs.trigger` tRPC route so both stay aligned.
+ */
+export function getOrCreateCronjobChat(
+  workspaceId: string,
+  job: Pick<CronjobDefinition, "id" | "name">,
+): ChatSession {
+  const labelMatch = { [BAND_CRON_ID_LABEL]: job.id };
+  const existing = findChatByLabels(workspaceId, labelMatch);
+  if (existing) return existing;
+  return createChat(workspaceId, {
+    name: job.name,
+    labels: labelMatch,
+    // Cronjob scheduler is a trusted server-side caller — it's allowed
+    // to write the reserved `band:` prefix that user-facing surfaces
+    // are blocked from touching.
+    allowReservedLabels: true,
+  });
+}
 
+/**
+ * Resolve the workspace the cronjob fires into.
+ *
+ * Returns `null` for project-scoped jobs whose project no longer exists
+ * (which the scheduled fire path treats as a soft failure — see
+ * `executeCronjob`). The manual trigger route maps the same condition to
+ * a `NOT_FOUND` response.
+ */
+export function resolveCronjobWorkspaceId(job: CronjobDefinition, fileKey: string): string | null {
   if (job.scope === "workspace" && job.workspaceId) {
-    workspaceId = job.workspaceId;
-  } else {
-    // Project-scoped: find the project and use its default branch
-    const appState = loadState();
-    const project = appState.projects.find((p) => p.name === fileKey);
-    if (!project) {
-      log.warn({ jobId: job.id, fileKey }, "project not found for cronjob, skipping");
-      updateLastRun(job.id, "failed");
-      return;
-    }
-    workspaceId = toWorkspaceId(project.name, project.defaultBranch);
+    return job.workspaceId;
+  }
+  const appState = loadState();
+  const project = appState.projects.find((p) => p.name === fileKey);
+  if (!project) return null;
+  return toWorkspaceId(project.name, project.defaultBranch);
+}
+
+async function executeCronjob(job: CronjobDefinition, fileKey: string): Promise<void> {
+  const workspaceId = resolveCronjobWorkspaceId(job, fileKey);
+  if (!workspaceId) {
+    log.warn({ jobId: job.id, fileKey }, "project not found for cronjob, skipping");
+    updateLastRun(job.id, "failed");
+    return;
   }
 
   log.info({ jobId: job.id, name: job.name, workspaceId }, "executing cronjob");
 
   try {
-    const chat = getOrCreateDefaultChat(workspaceId);
+    const chat = getOrCreateCronjobChat(workspaceId, job);
     submitTask({ workspaceId, chatId: chat.id, prompt: job.prompt });
     updateLastRun(job.id, "completed");
   } catch (err) {

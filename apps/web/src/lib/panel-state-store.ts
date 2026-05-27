@@ -16,6 +16,14 @@ export interface PanelStateRow {
   workspaceId: string;
   panelType: string;
   state: string; // raw JSON string
+  /**
+   * Free-form labels for this panel. JSON-encoded `Record<string, string>` on
+   * disk; `null` (or absent) for legacy rows and panel types that don't use
+   * labels — readers should treat both as `{}`. See `chat-manager.ts` for
+   * validation rules — the store itself is intentionally schema-agnostic so
+   * other panel types can adopt labels without changes here.
+   */
+  labels?: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -23,11 +31,18 @@ export interface PanelStateRow {
 /** Insert a new panel state row. */
 export function insertPanelState(row: PanelStateRow): void {
   const db = getDb();
-  db.insert(panelStates).values(row).run();
+  // Normalize undefined → null so SQLite stores a real NULL rather than the
+  // string "undefined" when the caller doesn't supply labels.
+  db.insert(panelStates)
+    .values({ ...row, labels: row.labels ?? null })
+    .run();
 }
 
 /** Update a panel state row's state blob and updatedAt. */
-export function updatePanelState(id: string, updates: { state: string; updatedAt: number }): void {
+export function updatePanelState(
+  id: string,
+  updates: { state: string; updatedAt: number; labels?: string | null },
+): void {
   const db = getDb();
   db.update(panelStates).set(updates).where(eq(panelStates.id, id)).run();
 }

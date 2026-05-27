@@ -1829,6 +1829,241 @@ fn workspaces_create_prompt_adds_chat_to_layout() {
     );
 }
 
+/// Issue #520: end-to-end exercise of the label-management CLI surface.
+///
+/// Drives every CLI command that touches labels — `chats create --label`,
+/// `chats list` (text + JSON), `chats label`, `chats unlabel` — and
+/// asserts both the rendered text and the JSON state at each step.
+/// Locks in the LABELS column header, the `k=v,k=v` rendering with
+/// sorted keys, the additive-merge semantics of `chats label`, and the
+/// key-stripping semantics of `chats unlabel`. A regression that drops
+/// the column, changes the separator, or flips merge to replace will
+/// be caught at CI rather than by a confused user.
+#[test]
+fn chats_list_renders_labels_column() {
+    let env = TestEnv::new();
+    let create = env.band(&["workspaces", "create", "my-project", "feat/labels-col"]);
+    assert!(create.status.success(), "stderr: {}", stderr(&create));
+    let workspace_id = "my-project-feat-labels-col";
+
+    // ----- chats create --label seeds labels at creation time -----
+    // Deliberately use insertion order that's reverse-alphabetical so a
+    // bug that drops the server-side sort surfaces in the rendered text
+    // below.
+    let labeled = env.band(&[
+        "chats",
+        "create",
+        workspace_id,
+        "--name",
+        "Tagged",
+        "--label",
+        "priority=high",
+        "--label",
+        "phase=plan",
+        "--output",
+        "json",
+    ]);
+    assert!(labeled.status.success(), "stderr: {}", stderr(&labeled));
+    let labeled_chat =
+        serde_json::from_str::<serde_json::Value>(&stdout(&labeled)).unwrap()["chat"].clone();
+    let labeled_id = labeled_chat["id"].as_str().unwrap().to_string();
+    assert_eq!(
+        labeled_chat["labels"],
+        serde_json::json!({ "phase": "plan", "priority": "high" }),
+        "chats create --label should round-trip both pairs"
+    );
+
+    let _unlabeled = env.band(&[
+        "chats",
+        "create",
+        workspace_id,
+        "--name",
+        "Bare",
+        "--output",
+        "json",
+    ]);
+
+    // ----- Text output (default): header + sorted rendering -----
+    let list_text = env.band(&["chats", "list", workspace_id]);
+    assert!(list_text.status.success(), "stderr: {}", stderr(&list_text));
+    let text = stdout(&list_text);
+    assert!(
+        text.contains("LABELS"),
+        "expected LABELS column header in `chats list` text output, got:\n{text}"
+    );
+    assert!(
+        text.contains("phase=plan,priority=high"),
+        "expected sorted `phase=plan,priority=high` rendering in text output, got:\n{text}"
+    );
+
+    // ----- JSON output: labels round-trip as a real record -----
+    let list_json = env.band(&["chats", "list", workspace_id, "--output", "json"]);
+    assert!(list_json.status.success(), "stderr: {}", stderr(&list_json));
+    let parsed: serde_json::Value = serde_json::from_str(&stdout(&list_json)).unwrap();
+    let chats = parsed["chats"].as_array().expect("chats array");
+
+    let labeled_row = chats
+        .iter()
+        .find(|c| c["id"].as_str() == Some(&labeled_id))
+        .unwrap_or_else(|| panic!("labeled chat missing from JSON output: {parsed}"));
+    assert_eq!(
+        labeled_row["labels"],
+        serde_json::json!({ "phase": "plan", "priority": "high" }),
+        "labels should round-trip through chats.list JSON output"
+    );
+
+    let unlabeled_row = chats
+        .iter()
+        .find(|c| c["name"].as_str() == Some("Bare"))
+        .unwrap_or_else(|| panic!("unlabeled chat missing from JSON output: {parsed}"));
+    assert!(
+        unlabeled_row["labels"]
+            .as_object()
+            .is_some_and(serde_json::Map::is_empty),
+        "expected empty labels {{}} for the unlabeled chat: {unlabeled_row}"
+    );
+
+    // ----- chats label: additive merge keeps `phase`/`priority`, adds `owner` -----
+    let label = env.band(&[
+        "chats",
+        "label",
+        &labeled_id,
+        "owner=alice",
+        "--output",
+        "json",
+    ]);
+    assert!(label.status.success(), "stderr: {}", stderr(&label));
+    let after_label =
+        serde_json::from_str::<serde_json::Value>(&stdout(&label)).unwrap()["chat"].clone();
+    assert_eq!(
+        after_label["labels"],
+        serde_json::json!({ "owner": "alice", "phase": "plan", "priority": "high" }),
+        "chats label should merge `owner`, not replace existing labels"
+    );
+
+    // The default text output should be the rendered cell. Also verify
+    // the JSON output of the same operation so a regression that
+    // accidentally renders an old in-memory snapshot (vs. the
+    // server-confirmed labels) would show up on the structured side
+    // rather than only via the text rendering — text could happen to
+    // agree with the wrong source if both went through the same sort.
+    let label_text = env.band(&["chats", "label", &labeled_id, "priority=low"]);
+    assert!(
+        label_text.status.success(),
+        "stderr: {}",
+        stderr(&label_text)
+    );
+    assert_eq!(
+        stdout(&label_text).trim(),
+        "owner=alice,phase=plan,priority=low",
+        "text output should show the chat's final labels in sorted k=v,k=v form"
+    );
+    let label_json = env.band(&[
+        "chats",
+        "label",
+        &labeled_id,
+        "priority=low",
+        "--output",
+        "json",
+    ]);
+    assert!(
+        label_json.status.success(),
+        "stderr: {}",
+        stderr(&label_json)
+    );
+    let after_second_label =
+        serde_json::from_str::<serde_json::Value>(&stdout(&label_json)).unwrap()["chat"].clone();
+    assert_eq!(
+        after_second_label["labels"],
+        serde_json::json!({ "owner": "alice", "phase": "plan", "priority": "low" }),
+        "JSON output of the second `chats label` should reflect the full server-confirmed state"
+    );
+
+    // ----- chats unlabel: removes the listed keys, preserves the rest -----
+    let unlabel = env.band(&[
+        "chats",
+        "unlabel",
+        &labeled_id,
+        "owner",
+        "nonexistent", // unknown keys are silently ignored
+        "--output",
+        "json",
+    ]);
+    assert!(unlabel.status.success(), "stderr: {}", stderr(&unlabel));
+    let after_unlabel =
+        serde_json::from_str::<serde_json::Value>(&stdout(&unlabel)).unwrap()["chat"].clone();
+    assert_eq!(
+        after_unlabel["labels"],
+        serde_json::json!({ "phase": "plan", "priority": "low" }),
+        "chats unlabel should strip only the listed keys"
+    );
+
+    // ----- Reserved `band:` prefix is rejected at the server boundary -----
+    let reserved = env.band(&["chats", "label", &labeled_id, "band:custom=denied"]);
+    assert!(
+        !reserved.status.success(),
+        "chats label with `band:` prefix should fail; stdout={} stderr={}",
+        stdout(&reserved),
+        stderr(&reserved),
+    );
+    // The chat's labels should be unchanged after the rejected mutation.
+    let after_reject = env.band(&["chats", "list", workspace_id, "--output", "json"]);
+    let after_reject_json: serde_json::Value =
+        serde_json::from_str(&stdout(&after_reject)).unwrap();
+    let still = after_reject_json["chats"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"].as_str() == Some(&labeled_id))
+        .unwrap()
+        .clone();
+    assert_eq!(
+        still["labels"],
+        serde_json::json!({ "phase": "plan", "priority": "low" }),
+        "rejected mutation must not touch existing labels"
+    );
+
+    // ----- Malformed `key=value` argument fails at the CLI -----
+    let malformed = env.band(&["chats", "label", &labeled_id, "no-equals-here"]);
+    assert!(
+        !malformed.status.success(),
+        "label without `=` should fail at the CLI parser"
+    );
+    let err = stderr(&malformed);
+    assert!(
+        err.contains("key=value"),
+        "expected guidance about `key=value` form in stderr, got:\n{err}"
+    );
+
+    // ----- Empty `key=` argument is rejected at the CLI -----
+    let empty_value = env.band(&["chats", "label", &labeled_id, "phase="]);
+    assert!(
+        !empty_value.status.success(),
+        "label with empty value should fail at the CLI parser"
+    );
+    let err = stderr(&empty_value);
+    assert!(
+        err.contains("empty value"),
+        "expected `empty value` guidance in stderr, got:\n{err}"
+    );
+
+    // ----- Strip everything: text output is empty (no spurious newline) -----
+    // Regression coverage for the `format_labels_cell` blocker — a
+    // missing-labels-object response used to render as `"\n"`, which the
+    // command runner would print as a spurious blank line. The fix
+    // returns `String::new()` so the runner's `!output.text.is_empty()`
+    // gate skips printing entirely. Assert on raw bytes (not `stdout()`,
+    // which trims) so a future regression that re-introduces the
+    // trailing newline shows up here.
+    let strip = env.band(&["chats", "unlabel", &labeled_id, "phase", "priority"]);
+    assert!(strip.status.success(), "stderr: {}", stderr(&strip));
+    assert!(
+        strip.stdout.is_empty(),
+        "expected fully empty stdout when no labels remain, got: {:?}",
+        String::from_utf8_lossy(&strip.stdout)
+    );
+}
+
 #[test]
 fn chat_creates_default_panel_when_workspace_has_no_chats() {
     let env = TestEnv::new();
