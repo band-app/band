@@ -37,4 +37,13 @@ band chats list                                  # text table with LABELS column
 band chats list --output json | jq '.chats[].labels'
 ```
 
+**Concurrency note.** `band chats label` and `band chats unlabel` implement
+read–modify–write client-side: they call `chats.get`, merge or strip the keys
+locally, then call `chats.update` with the full intended set. Two callers
+mutating the same chat within the read–write window can overwrite each other
+(classic TOCTOU race). The CLI is intended for single-user workflows where
+this is acceptable; if you need concurrent labelling from automation, drive
+`chats.update` directly with the desired full set or serialize the callers
+upstream.
+
 See [`apps/cli/skills/band-chat.md`](../apps/cli/skills/band-chat.md) for the full per-command reference and more workflows.

@@ -1112,9 +1112,16 @@ fn server_labels(chat: &serde_json::Value) -> Option<&serde_json::Value> {
 /// user wants for machine-readable labels) or to thread the server's
 /// ordering into the CLI explicitly.
 fn format_labels_cell(labels: &serde_json::Value) -> String {
+    // Empty string (not `"\n"`) when there's nothing to render — the
+    // caller checks `!output.text.is_empty()` before printing, so a
+    // bare `"\n"` would emit a spurious blank line on the
+    // edge case where the server response lacks a labels object.
     let Some(obj) = labels.as_object() else {
-        return String::from("\n");
+        return String::new();
     };
+    if obj.is_empty() {
+        return String::new();
+    }
     let mut pairs: Vec<(&String, &serde_json::Value)> = obj.iter().collect();
     pairs.sort_by(|a, b| a.0.cmp(b.0));
     let rendered: Vec<String> = pairs

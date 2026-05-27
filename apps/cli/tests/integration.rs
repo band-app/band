@@ -2009,6 +2009,34 @@ fn chats_list_renders_labels_column() {
         err.contains("key=value"),
         "expected guidance about `key=value` form in stderr, got:\n{err}"
     );
+
+    // ----- Empty `key=` argument is rejected at the CLI -----
+    let empty_value = env.band(&["chats", "label", &labeled_id, "phase="]);
+    assert!(
+        !empty_value.status.success(),
+        "label with empty value should fail at the CLI parser"
+    );
+    let err = stderr(&empty_value);
+    assert!(
+        err.contains("empty value"),
+        "expected `empty value` guidance in stderr, got:\n{err}"
+    );
+
+    // ----- Strip everything: text output is empty (no spurious newline) -----
+    // Regression coverage for the `format_labels_cell` blocker — a
+    // missing-labels-object response used to render as `"\n"`, which the
+    // command runner would print as a spurious blank line. The fix
+    // returns `String::new()` so the runner's `!output.text.is_empty()`
+    // gate skips printing entirely. Assert on raw bytes (not `stdout()`,
+    // which trims) so a future regression that re-introduces the
+    // trailing newline shows up here.
+    let strip = env.band(&["chats", "unlabel", &labeled_id, "phase", "priority"]);
+    assert!(strip.status.success(), "stderr: {}", stderr(&strip));
+    assert!(
+        strip.stdout.is_empty(),
+        "expected fully empty stdout when no labels remain, got: {:?}",
+        String::from_utf8_lossy(&strip.stdout)
+    );
 }
 
 #[test]

@@ -434,6 +434,15 @@ describe("chats — legacy panel_states rows load with empty labels", () => {
 // Cronjob dispatch — owns its own chat via band:cronId label
 // ---------------------------------------------------------------------------
 
+// NOTE: tests in this describe block share a single `server` and depend on
+// each other's side effects — the first test creates the labelled chat, the
+// second asserts re-use, the third creates a second chat, and the fourth
+// deletes-and-recreates the first. Each test gates on `waitForChatIdle` so
+// the next trigger doesn't trip `TaskConflictError`. This works under
+// vitest's default sequential execution; adding `{ concurrent: true }` to
+// this describe block would break the ordering and the inter-test
+// dependencies. Keep them sequential (vitest's default — no extra config
+// needed) until a follow-up refactors them to be independent.
 describe("cronjobs — labeled chat dispatch", () => {
   let server: ServerHandle;
   let tmpHome: string;

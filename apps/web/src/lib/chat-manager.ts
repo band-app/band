@@ -200,9 +200,9 @@ function validateLabels(
     );
   }
   for (const key of keys) {
-    if (key.length === 0) {
-      throw new InvalidLabelsError("labels: empty keys are not allowed");
-    }
+    // No standalone empty-key guard — `LABEL_KEY_REGEX` already rejects
+    // empty strings via the `{1,64}` length quantifier, and the regex
+    // message is self-explanatory (`key "" must match /^.../`).
     if (!LABEL_KEY_REGEX.test(key)) {
       throw new InvalidLabelsError(`labels: key "${key}" must match /^[a-zA-Z0-9_:-]{1,64}$/`);
     }
@@ -226,14 +226,21 @@ function validateLabels(
       );
     }
   }
-  // Return a fresh object whose keys are sorted by `localeCompare`. JS
-  // preserves insertion order for string keys, so this gives every
-  // downstream consumer (JSON.stringify for the DB blob, tRPC
-  // serialization for `chats.list`, the CLI table renderer) a stable,
-  // alphabetical iteration — without each consumer needing to sort
-  // independently. Cost is O(k log k) at write time with k ≤ 20.
+  // Return a fresh object whose keys are sorted by byte-order
+  // (codepoint) comparison. JS preserves insertion order for string
+  // keys, so this gives every downstream consumer (JSON.stringify for
+  // the DB blob, tRPC serialization for `chats.list`, the CLI table
+  // renderer) a stable iteration — without each consumer needing to
+  // sort independently. Cost is O(k log k) at write time with k ≤ 20.
+  //
+  // Byte-order — not `localeCompare` — so the order matches Rust's
+  // `String::cmp` used by the CLI's `format_labels_cell`. Under some
+  // V8 locales `localeCompare` reorders even ASCII `-` / `:` (both
+  // permitted by `LABEL_KEY_REGEX`) relative to byte order, which
+  // would surface as the CLI table showing the same chat in a
+  // different key order than the JSON output.
   const sorted: Record<string, string> = {};
-  for (const key of keys.slice().sort((a, b) => a.localeCompare(b))) {
+  for (const key of keys.slice().sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))) {
     sorted[key] = labels[key];
   }
   return sorted;
@@ -241,7 +248,16 @@ function validateLabels(
 
 /** Serialize labels for DB storage — `null` when empty to keep the on-disk
  * representation compact and to make migrated rows indistinguishable from
- * "no labels". */
+ * "no labels".
+ *
+ * Intentional limitation: `null` on disk represents both "never had labels"
+ * (pre-migration row) AND "had labels, now cleared via `chats.update`
+ * { labels: {} }". A future query like `WHERE labels IS NOT NULL` would
+ * miss the latter category. Both paths converge to `{}` for readers
+ * today, which is the only invariant downstream code relies on; the
+ * day a use case needs to distinguish them, introduce a sentinel
+ * (e.g. `"{}"` for explicitly cleared, `NULL` for never-set) or a
+ * separate column rather than re-encoding it onto this one. */
 function serializeLabels(labels: Record<string, string>): string | null {
   if (!labels || Object.keys(labels).length === 0) return null;
   return JSON.stringify(labels);
