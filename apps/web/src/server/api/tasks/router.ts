@@ -1,3 +1,4 @@
+import { createLogger } from "@band-app/logger";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { toWorkspaceId } from "@/dashboard";
@@ -15,6 +16,8 @@ import {
   WorkspaceNotFoundError,
 } from "../../services/task-service";
 import { publicProcedure, t } from "../trpc";
+
+const log = createLogger("tasks-router");
 
 /**
  * Tasks sub-router (Phase 6 of the 3-tier migration — issue #317).
@@ -122,6 +125,18 @@ export const tasksRouter = t.router({
       let displayFiles: { mediaType: string; url: string; filename?: string }[] | undefined;
       if (input.files && input.files.length > 0) {
         const savedFiles = await saveUploadedFilesDetailed(input.files);
+        // Surface the count mismatch when `saveUploadedFilesDetailed`
+        // silently skips an entry (its data-URL regex requires the exact
+        // `data:<mime>;base64,...` shape, so a malformed payload from a
+        // non-browser client — CLI, curl, third-party — would otherwise
+        // disappear into a 200 OK with no signal back to the caller).
+        // Mirrors the warning in `chat-submit.ts:112-117`.
+        if (savedFiles.length !== input.files.length) {
+          log.warn(
+            { chatId, submitted: input.files.length, saved: savedFiles.length },
+            "tasks.submit: some file uploads were dropped (malformed data URL?)",
+          );
+        }
         if (savedFiles.length > 0) {
           const fileList = savedFiles.map((s) => `- ${s.path}`).join("\n");
           agentPrompt = `I'm sharing these files with you:\n${fileList}\n\n${input.prompt}`;
