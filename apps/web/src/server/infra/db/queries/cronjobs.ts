@@ -91,28 +91,35 @@ export class CronjobQueries {
    * The legacy implementation used the same delete-then-insert pattern; the
    * write is fast (cronjobs are small, low-cardinality) and skipping the
    * delta computation keeps this method as simple as possible.
+   *
+   * Wrapped in a Drizzle transaction so a crash or lock error between the
+   * `delete` and the last `insert` doesn't leave the table in an
+   * incomplete state (some jobs missing) — the legacy `cronjob-store.ts`
+   * had the same gap; the migration is the appropriate moment to fix it.
    */
   saveFile(key: string, file: CronjobFile): void {
     const db = getDb();
-    db.delete(cronjobs).where(eq(cronjobs.fileKey, key)).run();
+    db.transaction((tx) => {
+      tx.delete(cronjobs).where(eq(cronjobs.fileKey, key)).run();
 
-    for (const job of file.jobs) {
-      db.insert(cronjobs)
-        .values({
-          id: job.id,
-          fileKey: key,
-          name: job.name,
-          prompt: job.prompt,
-          cronExpression: job.cronExpression,
-          scope: job.scope,
-          workspaceId: job.workspaceId ?? null,
-          enabled: job.enabled,
-          createdAt: job.createdAt,
-          lastRunAt: job.lastRunAt ?? null,
-          lastRunStatus: job.lastRunStatus ?? null,
-        })
-        .run();
-    }
+      for (const job of file.jobs) {
+        tx.insert(cronjobs)
+          .values({
+            id: job.id,
+            fileKey: key,
+            name: job.name,
+            prompt: job.prompt,
+            cronExpression: job.cronExpression,
+            scope: job.scope,
+            workspaceId: job.workspaceId ?? null,
+            enabled: job.enabled,
+            createdAt: job.createdAt,
+            lastRunAt: job.lastRunAt ?? null,
+            lastRunStatus: job.lastRunStatus ?? null,
+          })
+          .run();
+      }
+    });
   }
 
   /** List every cronjob across every key. */

@@ -1,136 +1,19 @@
-import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:net";
-import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { seedSettings, seedState } from "./helpers/seed-state";
-import { SERVER_RUNTIME, SERVER_SCRIPT } from "./helpers/server-runtime";
+import {
+  createTmpHome,
+  type ServerHandle,
+  startServer,
+  trpcData,
+  trpcMutate,
+  trpcQuery,
+} from "./helpers/server";
 
-const PROJECT_ROOT = join(import.meta.dirname, "..");
 const FAKE_AGENT_PATH = join(import.meta.dirname, "fake-agent.mjs");
 const DEFAULT_TOKEN = "cronjob-test-token";
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-interface ServerHandle {
-  url: string;
-  home: string;
-  close: () => Promise<void>;
-}
-
-function createTmpHome(): string {
-  const tmp = realpathSync(mkdtempSync(join(tmpdir(), "band-cronjob-test-")));
-  const bandDir = join(tmp, ".band");
-  mkdirSync(bandDir, { recursive: true });
-  return tmp;
-}
-
-function getRandomPort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.listen(0, "127.0.0.1", () => {
-      const { port } = srv.address() as { port: number };
-      srv.close(() => resolve(port));
-    });
-    srv.on("error", reject);
-  });
-}
-
-async function startServer(
-  opts: { tmpHome?: string; env?: Record<string, string> } = {},
-): Promise<ServerHandle> {
-  const home = opts.tmpHome || createTmpHome();
-  const port = await getRandomPort();
-
-  return new Promise((resolve, reject) => {
-    const child = spawn(SERVER_RUNTIME, [SERVER_SCRIPT], {
-      cwd: PROJECT_ROOT,
-      env: {
-        ...process.env,
-        HOME: home,
-        PORT: String(port),
-        NODE_ENV: "production",
-        ...opts.env,
-      },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-
-    let stderr = "";
-    let settled = false;
-
-    child.stderr!.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString();
-    });
-
-    child.stdout!.on("data", (chunk: Buffer) => {
-      const text = chunk.toString();
-      if (text.includes("listening") && !settled) {
-        settled = true;
-        resolve({
-          url: `http://127.0.0.1:${port}`,
-          home,
-          close: () =>
-            new Promise<void>((r) => {
-              child.on("exit", () => r());
-              child.kill("SIGTERM");
-            }),
-        });
-      }
-    });
-
-    child.on("error", (err) => {
-      if (!settled) {
-        settled = true;
-        reject(err);
-      }
-    });
-
-    child.on("exit", (code) => {
-      if (!settled) {
-        settled = true;
-        reject(new Error(`Server exited with code ${code} before listening.\nstderr: ${stderr}`));
-      }
-    });
-
-    setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        child.kill("SIGTERM");
-        reject(new Error(`Server did not start within 15 s.\nstderr: ${stderr}`));
-      }
-    }, 15_000);
-  });
-}
-
-// ---------------------------------------------------------------------------
-// tRPC HTTP helpers
-// ---------------------------------------------------------------------------
-
-const defaultHeaders = { Cookie: `band_token=${DEFAULT_TOKEN}` };
-
-async function trpcQuery(serverUrl: string, procedure: string, input?: unknown) {
-  const url =
-    input !== undefined
-      ? `${serverUrl}/trpc/${procedure}?input=${encodeURIComponent(JSON.stringify(input))}`
-      : `${serverUrl}/trpc/${procedure}`;
-  return fetch(url, { headers: defaultHeaders });
-}
-
-async function trpcMutate(serverUrl: string, procedure: string, input?: unknown) {
-  return fetch(`${serverUrl}/trpc/${procedure}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...defaultHeaders },
-    body: input !== undefined ? JSON.stringify(input) : "{}",
-  });
-}
-
-async function trpcData<T>(res: Response): Promise<T> {
-  const body = (await res.json()) as { result: { data: T } };
-  return body.result.data;
-}
 
 // ---------------------------------------------------------------------------
 // Git helpers
@@ -168,7 +51,7 @@ describe("tRPC — cronjobs CRUD", () => {
   let repoPath: string;
 
   beforeAll(async () => {
-    tmpHome = createTmpHome();
+    tmpHome = createTmpHome("band-cronjob-test-");
     repoPath = createGitRepo(tmpHome, "myproject");
     seedState(tmpHome, {
       projects: [
@@ -190,21 +73,26 @@ describe("tRPC — cronjobs CRUD", () => {
   });
 
   it("cronjobs.list returns empty list initially", async () => {
-    const res = await trpcQuery(server.url, "cronjobs.list");
+    const res = await trpcQuery(server.url, "cronjobs.list", undefined, DEFAULT_TOKEN);
     expect(res.status).toBe(200);
     const data = await trpcData<{ jobs: unknown[] }>(res);
     expect(data.jobs).toEqual([]);
   });
 
   it("cronjobs.create creates a project-scoped job", async () => {
-    const res = await trpcMutate(server.url, "cronjobs.create", {
-      key: "myproject",
-      name: "Daily dep check",
-      prompt: "Check for outdated dependencies",
-      cronExpression: "0 9 * * 1",
-      scope: "project",
-      enabled: true,
-    });
+    const res = await trpcMutate(
+      server.url,
+      "cronjobs.create",
+      {
+        key: "myproject",
+        name: "Daily dep check",
+        prompt: "Check for outdated dependencies",
+        cronExpression: "0 9 * * 1",
+        scope: "project",
+        enabled: true,
+      },
+      DEFAULT_TOKEN,
+    );
     expect(res.status).toBe(200);
     const data = await trpcData<{ job: { id: string; name: string; scope: string } }>(res);
     expect(data.job.name).toBe("Daily dep check");
@@ -213,18 +101,44 @@ describe("tRPC — cronjobs CRUD", () => {
   });
 
   it("cronjobs.create rejects invalid cron expression", async () => {
-    const res = await trpcMutate(server.url, "cronjobs.create", {
-      key: "myproject",
-      name: "Bad cron",
-      prompt: "This should fail",
-      cronExpression: "not a cron",
-      scope: "project",
-    });
+    const res = await trpcMutate(
+      server.url,
+      "cronjobs.create",
+      {
+        key: "myproject",
+        name: "Bad cron",
+        prompt: "This should fail",
+        cronExpression: "not a cron",
+        scope: "project",
+      },
+      DEFAULT_TOKEN,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("cronjobs.create rejects workspace scope without workspaceId", async () => {
+    // CronjobWorkspaceMissingError path: the service requires `workspaceId`
+    // for workspace-scoped jobs and the router maps the typed error to a
+    // 400 Bad Request. Pinning the path here keeps the validation honest
+    // — without this test, a refactor that lost the check would only
+    // surface at runtime against a real workspace-scoped create.
+    const res = await trpcMutate(
+      server.url,
+      "cronjobs.create",
+      {
+        key: "myproject",
+        name: "Missing workspace",
+        prompt: "Should be rejected",
+        cronExpression: "0 9 * * 1",
+        scope: "workspace",
+      },
+      DEFAULT_TOKEN,
+    );
     expect(res.status).toBe(400);
   });
 
   it("cronjobs.list returns the created job", async () => {
-    const res = await trpcQuery(server.url, "cronjobs.list");
+    const res = await trpcQuery(server.url, "cronjobs.list", undefined, DEFAULT_TOKEN);
     expect(res.status).toBe(200);
     const data = await trpcData<{ jobs: Array<{ name: string; fileKey: string }> }>(res);
     expect(data.jobs).toHaveLength(1);
@@ -233,67 +147,109 @@ describe("tRPC — cronjobs CRUD", () => {
   });
 
   it("cronjobs.list filters by project", async () => {
-    const res = await trpcQuery(server.url, "cronjobs.list", { project: "myproject" });
+    const res = await trpcQuery(
+      server.url,
+      "cronjobs.list",
+      { project: "myproject" },
+      DEFAULT_TOKEN,
+    );
     expect(res.status).toBe(200);
     const data = await trpcData<{ jobs: unknown[] }>(res);
     expect(data.jobs).toHaveLength(1);
 
-    const empty = await trpcQuery(server.url, "cronjobs.list", { project: "nonexistent" });
+    const empty = await trpcQuery(
+      server.url,
+      "cronjobs.list",
+      { project: "nonexistent" },
+      DEFAULT_TOKEN,
+    );
     const emptyData = await trpcData<{ jobs: unknown[] }>(empty);
     expect(emptyData.jobs).toEqual([]);
   });
 
   it("cronjobs.create creates a second job", async () => {
-    const res = await trpcMutate(server.url, "cronjobs.create", {
-      key: "myproject",
-      name: "Code quality sweep",
-      prompt: "Run linting and fix issues",
-      cronExpression: "0 */6 * * *",
-      scope: "project",
-      enabled: false,
-    });
+    const res = await trpcMutate(
+      server.url,
+      "cronjobs.create",
+      {
+        key: "myproject",
+        name: "Code quality sweep",
+        prompt: "Run linting and fix issues",
+        cronExpression: "0 */6 * * *",
+        scope: "project",
+        enabled: false,
+      },
+      DEFAULT_TOKEN,
+    );
     expect(res.status).toBe(200);
     const data = await trpcData<{ job: { enabled: boolean } }>(res);
     expect(data.job.enabled).toBe(false);
   });
 
   it("cronjobs.list returns both jobs", async () => {
-    const res = await trpcQuery(server.url, "cronjobs.list", { project: "myproject" });
+    const res = await trpcQuery(
+      server.url,
+      "cronjobs.list",
+      { project: "myproject" },
+      DEFAULT_TOKEN,
+    );
     expect(res.status).toBe(200);
     const data = await trpcData<{ jobs: unknown[] }>(res);
     expect(data.jobs).toHaveLength(2);
   });
 
   it("cronjobs.get returns a specific job", async () => {
-    const listRes = await trpcQuery(server.url, "cronjobs.list", { project: "myproject" });
+    const listRes = await trpcQuery(
+      server.url,
+      "cronjobs.list",
+      { project: "myproject" },
+      DEFAULT_TOKEN,
+    );
     const listData = await trpcData<{ jobs: Array<{ id: string }> }>(listRes);
     const jobId = listData.jobs[0].id;
 
-    const res = await trpcQuery(server.url, "cronjobs.get", { key: "myproject", id: jobId });
+    const res = await trpcQuery(
+      server.url,
+      "cronjobs.get",
+      { key: "myproject", id: jobId },
+      DEFAULT_TOKEN,
+    );
     expect(res.status).toBe(200);
     const data = await trpcData<{ job: { id: string; name: string } }>(res);
     expect(data.job.id).toBe(jobId);
   });
 
   it("cronjobs.get returns NOT_FOUND for missing job", async () => {
-    const res = await trpcQuery(server.url, "cronjobs.get", {
-      key: "myproject",
-      id: "cj_nonexistent",
-    });
+    const res = await trpcQuery(
+      server.url,
+      "cronjobs.get",
+      { key: "myproject", id: "cj_nonexistent" },
+      DEFAULT_TOKEN,
+    );
     expect(res.status).toBe(404);
   });
 
   it("cronjobs.update modifies job properties", async () => {
-    const listRes = await trpcQuery(server.url, "cronjobs.list", { project: "myproject" });
+    const listRes = await trpcQuery(
+      server.url,
+      "cronjobs.list",
+      { project: "myproject" },
+      DEFAULT_TOKEN,
+    );
     const listData = await trpcData<{ jobs: Array<{ id: string }> }>(listRes);
     const jobId = listData.jobs[0].id;
 
-    const res = await trpcMutate(server.url, "cronjobs.update", {
-      key: "myproject",
-      id: jobId,
-      name: "Updated name",
-      cronExpression: "0 12 * * *",
-    });
+    const res = await trpcMutate(
+      server.url,
+      "cronjobs.update",
+      {
+        key: "myproject",
+        id: jobId,
+        name: "Updated name",
+        cronExpression: "0 12 * * *",
+      },
+      DEFAULT_TOKEN,
+    );
     expect(res.status).toBe(200);
     const data = await trpcData<{ job: { name: string; cronExpression: string } }>(res);
     expect(data.job.name).toBe("Updated name");
@@ -301,63 +257,102 @@ describe("tRPC — cronjobs CRUD", () => {
   });
 
   it("cronjobs.update rejects invalid cron expression", async () => {
-    const listRes = await trpcQuery(server.url, "cronjobs.list", { project: "myproject" });
+    const listRes = await trpcQuery(
+      server.url,
+      "cronjobs.list",
+      { project: "myproject" },
+      DEFAULT_TOKEN,
+    );
     const listData = await trpcData<{ jobs: Array<{ id: string }> }>(listRes);
     const jobId = listData.jobs[0].id;
 
-    const res = await trpcMutate(server.url, "cronjobs.update", {
-      key: "myproject",
-      id: jobId,
-      cronExpression: "invalid",
-    });
+    const res = await trpcMutate(
+      server.url,
+      "cronjobs.update",
+      {
+        key: "myproject",
+        id: jobId,
+        cronExpression: "invalid",
+      },
+      DEFAULT_TOKEN,
+    );
     expect(res.status).toBe(400);
   });
 
   it("cronjobs.update toggles enabled state", async () => {
-    const listRes = await trpcQuery(server.url, "cronjobs.list", { project: "myproject" });
+    const listRes = await trpcQuery(
+      server.url,
+      "cronjobs.list",
+      { project: "myproject" },
+      DEFAULT_TOKEN,
+    );
     const listData = await trpcData<{ jobs: Array<{ id: string; enabled: boolean }> }>(listRes);
     const job = listData.jobs[0];
 
-    const res = await trpcMutate(server.url, "cronjobs.update", {
-      key: "myproject",
-      id: job.id,
-      enabled: !job.enabled,
-    });
+    const res = await trpcMutate(
+      server.url,
+      "cronjobs.update",
+      {
+        key: "myproject",
+        id: job.id,
+        enabled: !job.enabled,
+      },
+      DEFAULT_TOKEN,
+    );
     expect(res.status).toBe(200);
     const data = await trpcData<{ job: { enabled: boolean } }>(res);
     expect(data.job.enabled).toBe(!job.enabled);
   });
 
   it("cronjobs.update returns NOT_FOUND for missing job", async () => {
-    const res = await trpcMutate(server.url, "cronjobs.update", {
-      key: "myproject",
-      id: "cj_nonexistent",
-      name: "nope",
-    });
+    const res = await trpcMutate(
+      server.url,
+      "cronjobs.update",
+      {
+        key: "myproject",
+        id: "cj_nonexistent",
+        name: "nope",
+      },
+      DEFAULT_TOKEN,
+    );
     expect(res.status).toBe(404);
   });
 
   it("cronjobs.delete removes a job", async () => {
-    const listRes = await trpcQuery(server.url, "cronjobs.list", { project: "myproject" });
+    const listRes = await trpcQuery(
+      server.url,
+      "cronjobs.list",
+      { project: "myproject" },
+      DEFAULT_TOKEN,
+    );
     const listData = await trpcData<{ jobs: Array<{ id: string }> }>(listRes);
     const jobId = listData.jobs[1].id;
 
-    const res = await trpcMutate(server.url, "cronjobs.delete", {
-      key: "myproject",
-      id: jobId,
-    });
+    const res = await trpcMutate(
+      server.url,
+      "cronjobs.delete",
+      { key: "myproject", id: jobId },
+      DEFAULT_TOKEN,
+    );
     expect(res.status).toBe(200);
 
-    const afterRes = await trpcQuery(server.url, "cronjobs.list", { project: "myproject" });
+    const afterRes = await trpcQuery(
+      server.url,
+      "cronjobs.list",
+      { project: "myproject" },
+      DEFAULT_TOKEN,
+    );
     const afterData = await trpcData<{ jobs: unknown[] }>(afterRes);
     expect(afterData.jobs).toHaveLength(1);
   });
 
   it("cronjobs.delete returns NOT_FOUND for missing job", async () => {
-    const res = await trpcMutate(server.url, "cronjobs.delete", {
-      key: "myproject",
-      id: "cj_nonexistent",
-    });
+    const res = await trpcMutate(
+      server.url,
+      "cronjobs.delete",
+      { key: "myproject", id: "cj_nonexistent" },
+      DEFAULT_TOKEN,
+    );
     expect(res.status).toBe(404);
   });
 });
@@ -372,7 +367,7 @@ describe("tRPC — cronjobs cleanup on project removal", () => {
   let repoPath: string;
 
   beforeAll(async () => {
-    tmpHome = createTmpHome();
+    tmpHome = createTmpHome("band-cronjob-cleanup-");
     repoPath = createGitRepo(tmpHome, "removeme");
     seedState(tmpHome, {
       projects: [
@@ -395,26 +390,46 @@ describe("tRPC — cronjobs cleanup on project removal", () => {
 
   it("removes project-scoped cronjobs when project is removed", async () => {
     // Create a cronjob for the project
-    const createRes = await trpcMutate(server.url, "cronjobs.create", {
-      key: "removeme",
-      name: "Project job",
-      prompt: "Do something",
-      cronExpression: "0 * * * *",
-      scope: "project",
-    });
+    const createRes = await trpcMutate(
+      server.url,
+      "cronjobs.create",
+      {
+        key: "removeme",
+        name: "Project job",
+        prompt: "Do something",
+        cronExpression: "0 * * * *",
+        scope: "project",
+      },
+      DEFAULT_TOKEN,
+    );
     expect(createRes.status).toBe(200);
 
     // Verify the job exists
-    const listRes = await trpcQuery(server.url, "cronjobs.list", { project: "removeme" });
+    const listRes = await trpcQuery(
+      server.url,
+      "cronjobs.list",
+      { project: "removeme" },
+      DEFAULT_TOKEN,
+    );
     const listData = await trpcData<{ jobs: unknown[] }>(listRes);
     expect(listData.jobs).toHaveLength(1);
 
     // Remove the project
-    const removeRes = await trpcMutate(server.url, "projects.remove", { name: "removeme" });
+    const removeRes = await trpcMutate(
+      server.url,
+      "projects.remove",
+      { name: "removeme" },
+      DEFAULT_TOKEN,
+    );
     expect(removeRes.status).toBe(200);
 
     // Verify the cronjobs are gone
-    const afterRes = await trpcQuery(server.url, "cronjobs.list", { project: "removeme" });
+    const afterRes = await trpcQuery(
+      server.url,
+      "cronjobs.list",
+      { project: "removeme" },
+      DEFAULT_TOKEN,
+    );
     const afterData = await trpcData<{ jobs: unknown[] }>(afterRes);
     expect(afterData.jobs).toEqual([]);
   });
@@ -436,7 +451,7 @@ describe("tRPC — cronjobs.trigger", () => {
   let jobId: string;
 
   beforeAll(async () => {
-    tmpHome = createTmpHome();
+    tmpHome = createTmpHome("band-cronjob-trigger-");
     const repoPath = createGitRepo(tmpHome, "triggerproj");
 
     const scenarioPath = writeScenario(tmpHome, [
@@ -470,13 +485,18 @@ describe("tRPC — cronjobs.trigger", () => {
     });
 
     // Create a cronjob to trigger
-    const res = await trpcMutate(server.url, "cronjobs.create", {
-      key: "triggerproj",
-      name: "Triggerable job",
-      prompt: "Run automated check",
-      cronExpression: "0 0 * * *",
-      scope: "project",
-    });
+    const res = await trpcMutate(
+      server.url,
+      "cronjobs.create",
+      {
+        key: "triggerproj",
+        name: "Triggerable job",
+        prompt: "Run automated check",
+        cronExpression: "0 0 * * *",
+        scope: "project",
+      },
+      DEFAULT_TOKEN,
+    );
     const data = await trpcData<{ job: { id: string } }>(res);
     jobId = data.job.id;
   });
@@ -487,19 +507,24 @@ describe("tRPC — cronjobs.trigger", () => {
   });
 
   it("triggers a cronjob and creates a task", async () => {
-    const res = await trpcMutate(server.url, "cronjobs.trigger", {
-      key: "triggerproj",
-      id: jobId,
-    });
+    const res = await trpcMutate(
+      server.url,
+      "cronjobs.trigger",
+      { key: "triggerproj", id: jobId },
+      DEFAULT_TOKEN,
+    );
     expect(res.status).toBe(200);
     const data = await trpcData<{ taskId: string; workspaceId: string }>(res);
     expect(data.taskId).toBeDefined();
     expect(data.workspaceId).toBe("triggerproj-main");
 
     // Verify the task was created via tasks.list
-    const listRes = await trpcQuery(server.url, "tasks.list", {
-      workspaceId: "triggerproj-main",
-    });
+    const listRes = await trpcQuery(
+      server.url,
+      "tasks.list",
+      { workspaceId: "triggerproj-main" },
+      DEFAULT_TOKEN,
+    );
     const listData = await trpcData<{ tasks: Array<{ id: string; prompt: string }> }>(listRes);
     const task = listData.tasks.find((t) => t.id === data.taskId);
     expect(task).toBeDefined();
@@ -507,19 +532,23 @@ describe("tRPC — cronjobs.trigger", () => {
   });
 
   it("returns NOT_FOUND for non-existent cronjob", async () => {
-    const res = await trpcMutate(server.url, "cronjobs.trigger", {
-      key: "triggerproj",
-      id: "cj_nonexistent",
-    });
+    const res = await trpcMutate(
+      server.url,
+      "cronjobs.trigger",
+      { key: "triggerproj", id: "cj_nonexistent" },
+      DEFAULT_TOKEN,
+    );
     expect(res.status).toBe(404);
   });
 
   it("returns CONFLICT when task is already running", async () => {
     // The previous trigger should have started a task; triggering again should conflict
-    const res = await trpcMutate(server.url, "cronjobs.trigger", {
-      key: "triggerproj",
-      id: jobId,
-    });
+    const res = await trpcMutate(
+      server.url,
+      "cronjobs.trigger",
+      { key: "triggerproj", id: jobId },
+      DEFAULT_TOKEN,
+    );
     // Depending on timing, this may be 409 (conflict) or 200 (if previous finished)
     // Just verify it doesn't 500
     expect([200, 409]).toContain(res.status);

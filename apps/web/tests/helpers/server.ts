@@ -122,6 +122,19 @@ export function trpcQuery(
   return fetch(url, { headers: { Cookie: `band_token=${token}` } });
 }
 
+/**
+ * Parse a tRPC success response into its typed `result.data` payload.
+ *
+ * Sugar so test bodies don't have to repeat the `body.result.data` cast
+ * after every `trpcQuery` / `trpcMutate` call. Use only on successful
+ * responses — error bodies do not match this shape, and callers should
+ * assert `res.status` first.
+ */
+export async function trpcData<T>(res: Response): Promise<T> {
+  const body = (await res.json()) as { result: { data: T } };
+  return body.result.data;
+}
+
 export interface StartServerOptions {
   tmpHome: string;
   env?: Record<string, string>;

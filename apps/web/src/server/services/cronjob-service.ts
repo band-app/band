@@ -130,7 +130,7 @@ export class CronjobProjectNotFoundError extends Error {
  *
  * The service holds the scheduler state externally on a `globalThis`-keyed
  * symbol (see `SCHEDULER_KEY` above) because:
- *   - `startCronjobScheduler` is called once from `start-server.ts` and the
+ *   - `cronjobService.start()` is called once from `start-server.ts` and the
  *     service instance must not be tied to a single request lifecycle.
  *   - Dev reloads re-import this module without resetting `globalThis`, so
  *     timers survive HMR rather than orphaning.
@@ -360,7 +360,7 @@ export class CronjobService {
    * fire path (`executeCronjob` below) and the manual `trigger` route so
    * both stay aligned.
    */
-  getOrCreateCronjobChat(
+  private getOrCreateCronjobChat(
     workspaceId: string,
     job: Pick<CronjobDefinition, "id" | "name">,
   ): ChatSession {
@@ -385,7 +385,7 @@ export class CronjobService {
    * `executeCronjob`). The manual trigger route maps the same condition to
    * a `CronjobProjectNotFoundError`.
    */
-  resolveWorkspaceId(job: CronjobDefinition, fileKey: string): string | null {
+  private resolveWorkspaceId(job: CronjobDefinition, fileKey: string): string | null {
     if (job.scope === "workspace" && job.workspaceId) {
       return job.workspaceId;
     }
