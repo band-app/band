@@ -26,7 +26,7 @@
  */
 
 import { createLogger } from "@band-app/logger";
-import { getOrCreateAgent } from "../server/infra/agents/agent-pool";
+import { getOrCreateAgent } from "../infra/agents/agent-pool";
 import { type ChatSession, getChat, updateChatSessionSummary } from "./chat-manager";
 
 const log = createLogger("chat-session-summary");

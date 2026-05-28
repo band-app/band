@@ -2,21 +2,21 @@ import { mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { createLogger } from "@band-app/logger";
 import type { UIMessageChunk } from "ai";
-import { getChat, updateChatActiveSession, updateChatStatus } from "../../lib/chat-manager";
-import { mimeTypeFromFilename } from "../../lib/mime-types";
-import { shiftQueuedMessage } from "../../lib/queued-message-store";
-import { bandHome, upsertWorkspaceStatus } from "../../lib/state";
-import { emit as emitStatusEvent } from "../../lib/watcher";
+import { WorkspaceNotFoundError } from "../errors";
+import { getAgent, getOrCreateAgent, replaceAgent } from "../infra/agents/agent-pool";
+import { generateTaskId, TaskQueries } from "../infra/db/queries/tasks";
+import { getChat, updateChatActiveSession, updateChatStatus } from "./chat-manager";
+import { mimeTypeFromFilename } from "./mime-types";
+import { shiftQueuedMessage } from "./queued-message-store";
+import { bandHome, upsertWorkspaceStatus } from "./state";
+import { emit as emitStatusEvent } from "./watcher";
 // FRAGILE: ESM cycle leg — `lib/workspace` imports `workspaceService` from
 // `server/services/workspace-service`, which imports `submitTask` back from
 // this file. The cycle is safe only because every cross-module call below
 // is inside a function body (live binding). See `lib/workspace.ts` for the
 // cycle note before capturing `resolveWorkspace` (or any service-tier
 // symbol via this hop) at module load.
-import { resolveWorkspace } from "../../lib/workspace";
-import { WorkspaceNotFoundError } from "../errors";
-import { getAgent, getOrCreateAgent, replaceAgent } from "../infra/agents/agent-pool";
-import { generateTaskId, TaskQueries } from "../infra/db/queries/tasks";
+import { resolveWorkspace } from "./workspace";
 
 const log = createLogger("task-service");
 

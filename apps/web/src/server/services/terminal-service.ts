@@ -1,16 +1,6 @@
 import { createLogger } from "@band-app/logger";
 import { z } from "zod";
 import type { WorkspaceTerminalConfig } from "@/dashboard";
-import { loadProjectConfig } from "../../lib/project-config";
-import {
-  addTerminalToLayout,
-  deleteTerminalLayout,
-  getTerminalLayout,
-  removeTerminalFromLayout,
-  saveTerminalLayout,
-} from "../../lib/terminal-layout-manager";
-import { emit } from "../../lib/watcher";
-import { resolveWorkspace } from "../../lib/workspace";
 import {
   type SpawnOptions,
   type TerminalListEntry,
@@ -18,6 +8,21 @@ import {
   type TerminalSession,
   terminalPool,
 } from "../infra/terminals/terminal-pool";
+import { loadProjectConfig } from "./project-config";
+import {
+  addTerminalToLayout,
+  deleteTerminalLayout,
+  getTerminalLayout,
+  removeTerminalFromLayout,
+  saveTerminalLayout,
+} from "./terminal-layout-manager";
+import { emit } from "./watcher";
+import { resolveWorkspace } from "./workspace";
+
+// Re-export the PTY types so the API tier (`terminals/router.ts`,
+// `terminals/ws.ts`) can reference them without reaching into infra.
+// Per `docs/web-architecture.md`, routers must go through services.
+export type { SpawnOptions, TerminalListEntry, TerminalSession };
 
 const log = createLogger("terminal-service");
 

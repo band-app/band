@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { createMetadataAgent } from "../../infra/agents/agent-pool";
+import { createMetadataAgent } from "../../services/agent-service";
 import { publicProcedure, t } from "../trpc";
 
 /**

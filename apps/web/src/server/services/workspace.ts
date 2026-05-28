@@ -1,6 +1,6 @@
 // FRAGILE: ESM cycle leg — see the CYCLE note below before adding any
 // module-scope reference to `workspaceService` in this file.
-import { workspaceService } from "../server/services/workspace-service";
+import { workspaceService } from "../services/workspace-service";
 
 /**
  * Back-compat shim around `WorkspaceService.resolve` — preserves the legacy

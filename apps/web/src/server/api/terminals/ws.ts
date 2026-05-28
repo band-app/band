@@ -1,8 +1,11 @@
 import type { IncomingMessage } from "node:http";
 import { createLogger } from "@band-app/logger";
 import type { WebSocket } from "ws";
-import type { SpawnOptions, TerminalSession } from "../../infra/terminals/terminal-pool";
-import { terminalService } from "../../services/terminal-service";
+import {
+  type SpawnOptions,
+  type TerminalSession,
+  terminalService,
+} from "../../services/terminal-service";
 
 const log = createLogger("terminal-ws");
 

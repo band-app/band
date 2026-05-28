@@ -16,7 +16,7 @@
  * the same pattern (`chat-event-reducer.ts`).
  */
 
-import type { ChatEvent } from "./chat-events";
+import type { ChatEvent } from "../../lib/chat-events";
 
 /** Minimal shape of a persisted message we accept — matches
  *  `SessionMessageItem` from `@band-app/coding-agent` but kept local

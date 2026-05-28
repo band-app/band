@@ -1,13 +1,14 @@
 /**
- * Shared types for persistent browser history.
+ * Renderer-side mirror of the browser history row shape.
  *
  * Lives in its own file (and intentionally has no runtime imports
  * — no `drizzle-orm`, no `node:*`) so the renderer can import the
  * shape without dragging the server-only Drizzle dependency tree
- * with it. Both `browser-history-store.ts` (server) and the
- * renderer-side components (`HistoryPopover`, address-bar
- * autocomplete) use this single source of truth so the DB schema
- * and UI can't drift silently.
+ * with it. The canonical definition lives in
+ * `server/infra/db/queries/browser-history.ts`; this copy is the
+ * renderer-facing mirror. Keep both in sync if the schema gains a
+ * column — structural equality across the tRPC wire is what makes
+ * the duplication safe.
  */
 
 export interface HistoryEntry {

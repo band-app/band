@@ -1,5 +1,5 @@
 import { type FSWatcher, watch as fsWatch } from "node:fs";
-import { resolveWorkspace } from "../../lib/workspace";
+import { resolveWorkspace } from "./workspace";
 
 // ---------------------------------------------------------------------------
 // Server-side file watcher

@@ -3,17 +3,12 @@ import { Cron, type CronOptions } from "croner";
 import { z } from "zod";
 import { toWorkspaceId } from "@/dashboard";
 import {
-  BAND_CRON_ID_LABEL,
-  type ChatSession,
-  createChat,
-  findChatByLabels,
-} from "../../lib/chat-manager";
-import { loadState } from "../../lib/state";
-import {
   type CronjobDefinition,
   CronjobQueries,
   generateCronjobId,
 } from "../infra/db/queries/cronjobs";
+import { BAND_CRON_ID_LABEL, type ChatSession, createChat, findChatByLabels } from "./chat-manager";
+import { loadState } from "./state";
 import { submitTask, TaskConflictError } from "./task-service";
 
 const log = createLogger("cronjob-service");

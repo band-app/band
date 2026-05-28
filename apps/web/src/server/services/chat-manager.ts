@@ -21,7 +21,7 @@ import {
   chatService,
   InvalidLabelsError,
   type UpdateChatOptions,
-} from "../server/services/chat-service";
+} from "../services/chat-service";
 
 export type { ChatSession, ChatStatus, CreateChatOptions, UpdateChatOptions, ActiveSessionUpdate };
 export { InvalidLabelsError, BAND_CRON_ID_LABEL };

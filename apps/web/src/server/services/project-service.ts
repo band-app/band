@@ -2,7 +2,6 @@ import { existsSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { TRPCError } from "@trpc/server";
 import { toWorkspaceId } from "@/dashboard";
-import { loadCurrentStatuses } from "../../lib/state";
 import {
   type ProjectKind,
   ProjectQueries,
@@ -12,6 +11,7 @@ import {
 } from "../infra/db/queries/projects";
 import { GitClient } from "../infra/git/git-client";
 import { type SettingsService, settingsService } from "./settings-service";
+import { loadCurrentStatuses } from "./state";
 
 /**
  * Business logic for managing Band projects — Phase 2 of the 3-tier

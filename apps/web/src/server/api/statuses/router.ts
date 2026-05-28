@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { toWorkspaceId } from "@/dashboard";
-import { getWorkspaceStatus, loadState, upsertWorkspaceStatus } from "../../../lib/state";
-import { emit, subscribe as subscribeStatus } from "../../../lib/watcher";
+import { getWorkspaceStatus, loadState, upsertWorkspaceStatus } from "../../services/state";
 import { hasPendingInputForWorkspace } from "../../services/task-service";
+import { emit, subscribe as subscribeStatus } from "../../services/watcher";
 import { publicProcedure, t } from "../trpc";
 
 /**

@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { z } from "zod";
 import {
@@ -192,40 +191,15 @@ export class SettingsService {
    * Return the persisted auth token, generating + saving one on first call.
    *
    * The token gates all tRPC requests, so the first boot has to mint one
-   * before the server can accept traffic. The `load()` here is the one
-   * whose snapshot we mutate + persist, so concurrent writes by the
-   * desktop shell (or another web-server tab) made between this `load`
-   * and our `save` survive — `SettingsQueries.save` merges into whatever
-   * is currently on disk rather than overwriting the file with a
-   * single-key document.
-   *
-   * TODO(tokens): there is a check-then-act TOCTOU window between the
-   * `load` and `save` here — two processes booting concurrently against
-   * the same `~/.band/settings.json` (e.g. dev server + desktop shell)
-   * can each observe the absence of `tokenSecret`, mint a different
-   * token, and race their writes. The atomic merge in `SettingsQueries.save`
-   * means the last writer wins, leaving the other process running with
-   * an invalidated token. The race is rare in practice (token is minted
-   * once per fresh install) but worth fixing — most likely via a
-   * file-level advisory lock around the load+save pair, or by hoisting
-   * the bootstrap into a single coordinator (e.g. the first-time-setup
-   * step in `runFirstTimeSetup`). Pattern preserved from the pre-3-tier
-   * `lib/state.ts` implementation; fixing it is out of scope for the
-   * settings refactor.
+   * before the server can accept traffic. Implementation lives in Infra
+   * (`SettingsQueries.getOrCreateToken`) so infra-tier modules that need
+   * the token (e.g. the cloudflared tunnel client) can read it without
+   * crossing back up through this service tier; the wrapper here keeps
+   * the existing service-tier surface unchanged for callers (settings
+   * router, state.ts re-export, start-server boot sequence).
    */
   getOrCreateToken(): string {
-    const settings = this.queries.load();
-    if (settings.tokenSecret) return settings.tokenSecret;
-    const token = randomBytes(32).toString("hex");
-    // Pass just the patch — `SettingsQueries.save` re-reads the file and
-    // unions our patch with whatever is currently on disk, so any keys
-    // written between our `load` above and this `save` survive. Passing
-    // the full snapshot would happen to be correct today thanks to the
-    // re-read inside `save`, but it would silently regress if `save` were
-    // ever changed to trust its caller's snapshot — the `Partial<Settings>`
-    // signature already advertises the right call shape.
-    this.queries.save({ tokenSecret: token });
-    return token;
+    return this.queries.getOrCreateToken();
   }
 }
 

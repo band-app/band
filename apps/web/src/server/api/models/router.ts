@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { getAgentDefinition, loadSettings } from "../../../lib/state";
-import { createMetadataAgent } from "../../infra/agents/agent-pool";
+import { createMetadataAgent } from "../../services/agent-service";
+import { getAgentDefinition, loadSettings } from "../../services/state";
 import { publicProcedure, t } from "../trpc";
 
 /**

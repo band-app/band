@@ -3,9 +3,9 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { loadState, saveState } from "../src/lib/state";
-import { syncWorktrees } from "../src/lib/sync-state";
 import { closeDb } from "../src/server/infra/db/connection";
+import { loadState, saveState } from "../src/server/services/state";
+import { syncWorktrees } from "../src/server/services/sync-state";
 
 const gitEnv = {
   ...process.env,

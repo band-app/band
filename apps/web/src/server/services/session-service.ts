@@ -1,9 +1,9 @@
 import type { SessionListItem } from "@band-app/coding-agent";
 import { createLogger } from "@band-app/logger";
-import { getChat, getOrCreateDefaultChat } from "../../lib/chat-manager";
-import { resolveWorkspace } from "../../lib/workspace";
 import { WorkspaceNotFoundError } from "../errors";
 import { getOrCreateAgent } from "../infra/agents/agent-pool";
+import { getChat, getOrCreateDefaultChat } from "./chat-manager";
+import { resolveWorkspace } from "./workspace";
 
 const log = createLogger("session-service");
 

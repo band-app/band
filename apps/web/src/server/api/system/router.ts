@@ -12,9 +12,9 @@ import { z } from "zod";
 // fold `branch-status-poller` into a `StatusService`. The same pattern
 // applies to `statuses/`, `skills/`, `modes/`, `models/` — see
 // `apps/web/src/server/api/router.ts` for the consolidated checklist.
-import { getPollerActivity, setPollerActivity } from "../../../lib/branch-status-poller";
-import { listWorktrees } from "../../../lib/git";
-import { loadState } from "../../../lib/state";
+import { getPollerActivity, setPollerActivity } from "../../services/branch-status-poller";
+import { listWorktrees } from "../../services/git";
+import { loadState } from "../../services/state";
 import { systemService } from "../../services/system-service";
 import { tunnelService } from "../../services/tunnel-service";
 import { publicProcedure, t } from "../trpc";

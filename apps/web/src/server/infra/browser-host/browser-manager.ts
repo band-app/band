@@ -1,15 +1,15 @@
 /**
- * Back-compat shim — re-exports the browser-service API under the legacy
- * `lib/browser-manager.ts` function-shaped surface so existing callers
- * (`browser-host.ts`, the CLI adapter, …) keep compiling without touching
- * their imports.
+ * Function-shaped façade over `browser-service` consumed by the colocated
+ * CDP adapters (`host-state.ts`, `cdp-targets.ts`, `cdp-proxy.ts`).
  *
- * The real implementation lives in `server/services/browser-service.ts`.
- * New code should import the `browserService` singleton (or the
- * `BrowserService` class) directly from there — this file exists only to
- * ease the migration started in issue #316 (Phase 5 of the 3-tier
- * refactor) and will be deleted in a follow-up phase once every call
- * site has moved.
+ * The real implementation lives in `server/services/browser-service.ts`;
+ * this module exposes the subset that the infra-tier browser-host adapters
+ * need to drive CDP without crossing back up to the services tier. New
+ * services-tier callers should import the `browserService` singleton (or
+ * the `BrowserService` class) directly from `services/browser-service.ts`.
+ *
+ * Originally lived at `lib/browser-manager.ts`; lifted into
+ * `server/infra/browser-host/` as part of Phase 8 (issue #319).
  */
 
 import {
@@ -18,7 +18,7 @@ import {
   browserService,
   type CreateBrowserOptions,
   type UpdateBrowserOptions,
-} from "../server/services/browser-service";
+} from "../../services/browser-service";
 
 export type { BrowserStatus, BrowserTab, CreateBrowserOptions, UpdateBrowserOptions };
 
