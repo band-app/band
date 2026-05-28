@@ -1,7 +1,7 @@
 /**
  * Back-compat shim — re-exports the chat-service API under the legacy
  * `lib/chat-manager.ts` function-shaped surface so existing callers
- * (`task-runner.ts`, `chat-session-summary.ts`, the CLI adapter, the API
+ * (`task-service.ts`, `chat-session-summary.ts`, the CLI adapter, the API
  * handlers in `apps/web/src/api/`, …) keep compiling without touching
  * their imports.
  *

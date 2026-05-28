@@ -277,7 +277,7 @@ describe("tRPC — queue CRUD", () => {
 
     // A malicious (or careless) client could enqueue a path that
     // points at a sensitive file — without containment the drain in
-    // task-runner would inject `I'm sharing these files with you:\n
+    // task-service would inject `I'm sharing these files with you:\n
     // - /home/user/.ssh/id_rsa` into the agent prompt, and the agent
     // would happily read+stream the contents back. Reject any path
     // not under `<HOME>/.band/uploads/`, including traversal attempts.

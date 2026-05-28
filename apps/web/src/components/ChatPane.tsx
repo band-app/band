@@ -45,7 +45,7 @@ export interface ChatPaneState {
    * Background-notify path: called when the subscription resolves a new
    * session id on its own (server auto-started one on first message). Just
    * refreshes the chatQuery so the tab title updates — server-side
-   * task-runner already persisted `activeSessionId` on `session-start`, so
+   * task-service already persisted `activeSessionId` on `session-start`, so
    * no client mutation is needed and no remount is triggered.
    */
   onSessionDiscovered: (sessionId: string) => void;
@@ -229,7 +229,7 @@ export function useChatPaneState(workspaceId: string, chatId: string): ChatPaneS
   // server's chat-events handler picks up the new chat.activeSessionId
   // for replay.
   // Background-notify path. Called when the subscription resolves a session
-  // id on its own (server's task-runner.session-start already persisted
+  // id on its own (server's task-service.session-start already persisted
   // chat.activeSessionId — we just need to refresh the chatQuery so the
   // tab title / cached summary update). Crucially: NO remount. The user
   // is mid-conversation; tearing down the subscription would lose state.

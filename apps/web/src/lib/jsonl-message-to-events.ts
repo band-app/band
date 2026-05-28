@@ -46,9 +46,9 @@ export interface JsonlMessage {
 }
 
 /**
- * Strip the agent-only `[File sharing: …]` suffix that `task-runner`
+ * Strip the agent-only `[File sharing: …]` suffix that `task-service`
  * appends to the FIRST user prompt of a new session (see
- * `fileSharingHint` in `apps/web/src/lib/task-runner.ts`). The hint is
+ * `fileSharingHint` in `apps/web/src/server/services/task-service.ts`). The hint is
  * meant for the agent, not the user — and the live `user-message`
  * broadcast already strips it by using `task.prompt` (the clean
  * original) instead of `task.agentPrompt`. On JSONL replay we read

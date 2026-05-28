@@ -20,11 +20,6 @@ import { listenWithFallback } from "./src/lib/port-utils.ts";
 import { checkPrereqs } from "./src/lib/process-utils.ts";
 import { runFirstTimeSetup } from "./src/lib/setup.ts";
 import { bandHome, getOrCreateToken, loadSettings, resetAgentStatuses } from "./src/lib/state.ts";
-import {
-  cleanupStaleTasks,
-  startTaskPruneScheduler,
-  stopTaskPruneScheduler,
-} from "./src/lib/task-store.ts";
 import { startTunnel, stopTunnel } from "./src/lib/tunnel.ts";
 import { resolveWorkspace } from "./src/lib/workspace.ts";
 import { handleMcpRequest } from "./src/mcp/server.ts";
@@ -32,6 +27,11 @@ import { appRouter } from "./src/server/api/router.ts";
 import { handleTerminalConnection } from "./src/server/api/terminals/ws.ts";
 import { closeDb } from "./src/server/infra/db/connection.ts";
 import { runMigrations } from "./src/server/infra/db/migrate.ts";
+import {
+  startTaskPruneScheduler,
+  stopTaskPruneScheduler,
+  TaskQueries,
+} from "./src/server/infra/db/queries/tasks.ts";
 import { cronjobService } from "./src/server/services/cronjob-service.ts";
 import { terminalService } from "./src/server/services/terminal-service.ts";
 import { createContext } from "./src/trpc/context.ts";
@@ -972,7 +972,7 @@ async function main() {
   // Phase B — fire-and-forget bookkeeping that runs AFTER `listen()`.
   //
   // None of these steps gate the first request:
-  //   - `cleanupStaleTasks` flips persisted `running` rows to `failed` /
+  //   - `TaskQueries.cleanupStale()` flips persisted `running` rows to `failed` /
   //     `idle` and runs immediately on the event-loop turn after the
   //     listen callback. Until it does, the worst case is that
   //     `tasks.list` reports a stale row as `running` for a few ms.
@@ -1002,7 +1002,7 @@ async function main() {
     // fallback to `startedAt`. Swapping these two calls would leave
     // very old in-flight rows wedged in `running` state for one extra
     // boot cycle.
-    cleanupStaleTasks();
+    new TaskQueries().cleanupStale();
 
     // Kick off the periodic task-history sweep (issue #416). Runs one
     // pass immediately, then every 24h, deleting rows older than 30

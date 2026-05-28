@@ -21,22 +21,23 @@ import {
   type WorktreeState,
   worktreesDir,
 } from "../../lib/state";
-// FRAGILE: ESM cycle leg — `lib/task-runner` imports `lib/workspace`,
+import { emit } from "../../lib/watcher";
+import { WorkspaceNotFoundError } from "../errors";
+// FRAGILE: ESM cycle leg — `services/task-service` imports `lib/workspace`,
 // which imports `workspaceService` from this file. The cycle is safe only
 // because every `workspaceService` reference is inside a function body
 // (live binding). See `lib/workspace.ts` for the cycle note before
 // capturing `submitTask` (or anything else here) at module load.
-import { submitTask } from "../../lib/task-runner";
-import { deleteWorkspaceTasks } from "../../lib/task-store";
-import { emit } from "../../lib/watcher";
+import { TaskQueries } from "../infra/db/queries/tasks";
 import { WorkspaceQueries } from "../infra/db/queries/workspaces";
 // FRAGILE: ESM cycle leg #2 — `./cronjob-service` imports `submitTask`
-// from `lib/task-runner`, which imports `lib/workspace`, which imports
+// from `./task-service`, which imports `lib/workspace`, which imports
 // `workspaceService` from this file. Same live-binding constraint as the
 // `submitTask` import above: keep every `cronjobService` reference inside
 // a function body. Capturing `const cs = cronjobService;` at module load
 // on this leg would silently get `undefined`.
 import { cronjobService } from "./cronjob-service";
+import { submitTask } from "./task-service";
 import { terminalService } from "./terminal-service";
 
 const execFileAsync = promisify(execFile);
@@ -124,14 +125,14 @@ export class ProjectNotFoundError extends Error {
 }
 
 /**
- * Branch named in the workspace mutation does not exist on the project.
+ * Re-export the canonical `WorkspaceNotFoundError` so existing imports
+ * (`api/workspaces/router.ts`) keep working. The class is defined in
+ * `server/errors.ts` (imported at the top of this file for internal throws)
+ * and shared with `session-service` and `task-service` — see `errors.ts`
+ * for the consolidation rationale and the per-router HTTP mapping
+ * (workspaces stays 500 to honor the pinned legacy contract).
  */
-export class WorkspaceNotFoundError extends Error {
-  constructor(branch: string) {
-    super(`Workspace "${branch}" not found`);
-    this.name = "WorkspaceNotFoundError";
-  }
-}
+export { WorkspaceNotFoundError };
 
 /**
  * Workspace mutation invoked on a plain (non-git) project. Plain projects
@@ -419,7 +420,7 @@ export class WorkspaceService {
     // suppress the `emit` below, otherwise the dashboard would keep
     // showing the just-deleted workspace.
     try {
-      const deletedTasks = deleteWorkspaceTasks(workspaceId);
+      const deletedTasks = new TaskQueries().deleteWorkspaceTasks(workspaceId);
       if (deletedTasks > 0) {
         log.info({ workspaceId, count: deletedTasks }, "deleted workspace tasks on removal");
       }

@@ -15,14 +15,14 @@ import { workspaceService } from "../server/services/workspace-service";
  *
  * CYCLE: this module sits on an ESM cycle —
  *   server/services/workspace-service.ts
- *     → lib/task-runner.ts
+ *     → server/services/task-service.ts
  *       → lib/workspace.ts (this file)
  *         → server/services/workspace-service.ts
  *
  * It works today only because every reference to `workspaceService` is
  * inside a function body (live binding), not at module top. Any future
  * commit that captures `workspaceService` at module load on one of those
- * legs (e.g. `const ws = workspaceService;` at the top of `task-runner.ts`
+ * legs (e.g. `const ws = workspaceService;` at the top of `task-service.ts`
  * or this file) will silently get `undefined`. Keep all refs in function
  * scope until this shim is deleted alongside its last consumer.
  *

@@ -1,6 +1,5 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { TaskConflictError } from "../../../lib/task-runner";
 import {
   CronjobNotFoundError,
   CronjobProjectNotFoundError,
@@ -11,6 +10,7 @@ import {
   cronjobUpdateInput,
   InvalidCronExpressionError,
 } from "../../services/cronjob-service";
+import { TaskConflictError } from "../../services/task-service";
 import { publicProcedure, t } from "../trpc";
 
 /**

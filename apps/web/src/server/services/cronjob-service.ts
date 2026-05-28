@@ -9,12 +9,12 @@ import {
   findChatByLabels,
 } from "../../lib/chat-manager";
 import { loadState } from "../../lib/state";
-import { submitTask, TaskConflictError } from "../../lib/task-runner";
 import {
   type CronjobDefinition,
   CronjobQueries,
   generateCronjobId,
 } from "../infra/db/queries/cronjobs";
+import { submitTask, TaskConflictError } from "./task-service";
 
 const log = createLogger("cronjob-service");
 
@@ -25,7 +25,7 @@ const log = createLogger("cronjob-service");
 // symbol so the service survives module reloads in dev (vite/HMR re-imports
 // this file but keeps the same module-graph identity for `globalThis`). The
 // alternative — a top-level `Map` — would silently re-register every job on
-// reload and leak timers. Pattern mirrors `task-runner.ts`.
+// reload and leak timers. Pattern mirrors `task-service.ts`.
 // ---------------------------------------------------------------------------
 
 interface SchedulerState {

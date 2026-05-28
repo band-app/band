@@ -10,7 +10,7 @@
  * Source of truth shared by:
  *   • `apps/web/src/api/chat-events.ts`            — emits these events
  *   • `apps/web/src/api/chat-submit.ts`            — round-trip target
- *   • `apps/web/src/lib/task-runner.ts`            — broadcasts them
+ *   • `apps/web/src/server/services/task-service.ts` — broadcasts them
  *   • `apps/web/src/components/chat/*`             — consumes them
  *   • `apps/web/tests/chat-events.test.ts`         — integration tests
  */
@@ -147,7 +147,7 @@ export interface ErrorEvent {
 }
 
 /** An assistant-produced file the user can render inline (image, download
- *  link, …). Emitted by `task-runner` either when the agent emits a
+ *  link, …). Emitted by `task-service` either when the agent emits a
  *  `file` event explicitly or when a tool call drops a new file into the
  *  workspace shared dir. The client attaches it as a `file` part on the
  *  current assistant message — never a stand-alone bubble. */

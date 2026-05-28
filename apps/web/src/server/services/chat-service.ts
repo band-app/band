@@ -20,9 +20,9 @@
  */
 
 import { createLogger } from "@band-app/logger";
-import { removeAgent } from "../../lib/agent-pool";
 import { DockviewLayoutManager, defaultPanelIdFromLayout } from "../../lib/dockview-layout-manager";
 import { emit } from "../../lib/watcher";
+import { removeAgent } from "../infra/agents/agent-pool";
 import {
   ChatQueries,
   type ChatRow,
@@ -236,7 +236,7 @@ function validateLabels(
  *
  * Stateful by design — there's exactly one instance (`chatService` below).
  * The `lib/chat-manager.ts` back-compat shim delegates every call here so
- * existing modules (`task-runner.ts`, `chat-session-summary.ts`, the CLI
+ * existing modules (`task-service.ts`, `chat-session-summary.ts`, the CLI
  * adapter, …) keep working without touching their imports.
  *
  * Object-identity contract: `update*` methods do NOT mutate the prior
@@ -246,7 +246,7 @@ function validateLabels(
  * new values. (The pre-refactor `lib/chat-manager.ts` mutated in place;
  * the shim continues to expose the function-shaped API so wire callers
  * see no behaviour change as long as they re-read on each access, which
- * every current caller — `task-runner`, `chat-events`, the routers —
+ * every current caller — `task-service`, `chat-events`, the routers —
  * already does.)
  */
 export class ChatService {

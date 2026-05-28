@@ -7,9 +7,27 @@ import {
   createCodingAgent,
 } from "@band-app/coding-agent";
 import { createLogger } from "@band-app/logger";
-import { bandHome, getAgentDefinition, loadSettings } from "./state";
+import { bandHome, getAgentDefinition, loadSettings } from "../../../lib/state";
 
 const log = createLogger("agent-pool");
+
+/**
+ * Coding-agent process pool (Phase 6 of the 3-tier refactor — issue #317).
+ *
+ * Moved from `lib/agent-pool.ts` to the infra tier because the pool wraps
+ * external processes (the agent CLIs) — same category as `terminal-pool`
+ * and the future `lsp-client` / `tunnel-client`. The service tier
+ * (`TaskService` and `SessionService`) consumes this module via
+ * the function exports below.
+ *
+ * Kept as plain functions (rather than a class) because the pool's
+ * `globalThis`-keyed singleton state survives module re-evaluation and
+ * concurrent callers, and exposing the singleton through a class would
+ * leak the symbol-keyed state into the type signature without buying any
+ * additional encapsulation. Other infra modules with the same shape (e.g.
+ * `task-prune-scheduler` in `db/queries/tasks.ts`) follow the same
+ * convention.
+ */
 
 /** Pool entry: agent instance + the definition ID it was created with. */
 interface PoolEntry {
