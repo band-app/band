@@ -3,7 +3,7 @@ import { z } from "zod";
 import { toWorkspaceId } from "@/dashboard";
 import { createChat, getChat, getOrCreateDefaultChat } from "../../../lib/chat-manager";
 import { loadState } from "../../../lib/state";
-import { saveUploadedFiles } from "../../../lib/upload-utils";
+import { saveUploadedFilesDetailed } from "../../../lib/upload-utils";
 import {
   abortTask,
   cancelTask,
@@ -109,12 +109,27 @@ export const tasksRouter = t.router({
         chatId = getOrCreateDefaultChat(input.workspaceId).id;
       }
 
+      // Persist any uploaded files first and capture the full SavedFile
+      // records so we can build BOTH the agent prompt (which references
+      // absolute on-disk paths) AND the displayFiles array (which carries
+      // the stable `/api/uploads/<storedName>` URL + media type for the
+      // user-bubble rendering and JSONL replay). This mirrors the legacy
+      // `chat-submit.ts` flow — without `displayFiles`, the user bubble
+      // would be text-only on any page refresh and the JSONL replay path
+      // would have no `file` parts. See chat-submit.ts:106-126 for the
+      // canonical shape.
       let agentPrompt: string | undefined;
+      let displayFiles: { mediaType: string; url: string; filename?: string }[] | undefined;
       if (input.files && input.files.length > 0) {
-        const savedPaths = await saveUploadedFiles(input.files);
-        if (savedPaths.length > 0) {
-          const fileList = savedPaths.map((p) => `- ${p}`).join("\n");
+        const savedFiles = await saveUploadedFilesDetailed(input.files);
+        if (savedFiles.length > 0) {
+          const fileList = savedFiles.map((s) => `- ${s.path}`).join("\n");
           agentPrompt = `I'm sharing these files with you:\n${fileList}\n\n${input.prompt}`;
+          displayFiles = savedFiles.map((s) => ({
+            mediaType: s.mediaType,
+            url: `/api/uploads/${s.storedName}`,
+            filename: s.originalName,
+          }));
         }
       }
 
@@ -125,6 +140,7 @@ export const tasksRouter = t.router({
           prompt: input.prompt,
           sessionId: input.sessionId,
           agentPrompt,
+          displayFiles,
           maxTurns: input.maxTurns,
           mode: input.mode,
           model: input.model,

@@ -45,9 +45,18 @@ export interface TaskFilters {
   chatId?: string;
 }
 
-/** Mint a process-unique task id. */
+/**
+ * Mint a process-unique task id.
+ *
+ * The random suffix is required: `Date.now()` has millisecond resolution
+ * and two tasks started in the same millisecond (e.g. during a burst of
+ * cron-triggered submissions) would otherwise collide. Because `save()`
+ * uses `onConflictDoUpdate` on `tasks.id`, a collision would silently
+ * overwrite an in-flight task row with a different task's data rather
+ * than fail loudly, so we guarantee uniqueness here.
+ */
 export function generateTaskId(): string {
-  return `tsk_${Date.now()}`;
+  return `tsk_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
 /** Retention window for completed/abandoned task rows. */
