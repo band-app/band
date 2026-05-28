@@ -186,6 +186,21 @@ export class WorkspaceService {
    * be migrated incrementally. Returns `null` when the workspace ID
    * doesn't match any worktree (the caller decides whether that's a 404
    * or a fall-through).
+   *
+   * NOTE: deliberately uses `loadState()` (full projects + worktrees walk)
+   * rather than the targeted `WorkspaceQueries.findIdentity()` SQL lookup
+   * that lives in the same PR. The return shape is `ResolvedWorkspace =
+   * { project: ProjectState, worktree: WorktreeState }` — callers (e.g.
+   * `gitPull`/`gitPush`) read `project.kind` to gate plain-project
+   * rejections, and the legacy shim in `lib/workspace.ts` exposes the
+   * same shape to existing consumers. `findIdentity()` only returns
+   * `(project, branch, worktreePath)` — no `kind`, no full project row —
+   * so swapping it in here would require a second `ProjectQueries`-tier
+   * lookup we don't have yet (Phase 2 ships that surface). Once the
+   * projects-domain queries land, this can drop to one `findIdentity()` +
+   * one targeted project read. Call frequency is low (user-initiated
+   * git pull/push only), so the O(n) JS walk is acceptable in the
+   * interim.
    */
   resolve(workspaceId: string): ResolvedWorkspace | null {
     const state = loadState();
@@ -242,6 +257,16 @@ export class WorkspaceService {
 
     const wtDir = worktreesDir();
     const worktreePath = join(wtDir, input.project, input.branch);
+    // Pre-create the `<project>` subdir under the worktrees root so the
+    // first `workspaces.create` call on a freshly-installed Band has
+    // somewhere to land. For slash-containing branch names (e.g.
+    // `feature/my-feature` → `<wtDir>/<project>/feature/my-feature`)
+    // we deliberately do NOT pre-create the in-between segments
+    // (`feature/`): `git worktree add` itself creates every intermediate
+    // directory under its target path, so an extra mkdir here would be
+    // redundant. Verified against `git 2.x` — `git worktree add
+    // /tmp/wt/feature/login -b feature/login` succeeds without the
+    // parent existing.
     mkdirSync(join(wtDir, input.project), { recursive: true });
 
     const { command, env } = gitCmd();
