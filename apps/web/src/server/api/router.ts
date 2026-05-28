@@ -92,7 +92,7 @@ import { workspacesRouter } from "./workspaces/router";
 //     regression that masks any of those migrated sub-routers with a
 //     stale legacy entry trips the corresponding describe block.
 //     `chatLayout.*`, `chats.stop`, and `chats.resume` are not yet
-//     covered — adding them is tracked as a follow-up.
+//     covered — adding them is tracked in issue #529.
 //   - `apps/web/tests/terminal-ws.test.ts` (and any other terminal-*
 //     integration tests) hit the merged router through the same /trpc
 //     endpoint, so a regression that masks the migrated terminal

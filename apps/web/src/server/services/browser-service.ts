@@ -301,13 +301,19 @@ export class BrowserService {
     const ids = this.workspaceBrowsers.get(workspaceId);
 
     if (ids) {
+      // Snapshot the id set before mutating — `removeFromIndex` rewrites
+      // `workspaceBrowsers` underneath the iterator. `removeFromIndex`
+      // (instead of an inline `browserTabs.delete`) keeps the reverse-
+      // index invariant self-enforcing: it empties + deletes the
+      // `workspaceBrowsers` set when the last browserId is dropped, so
+      // no separate post-loop `workspaceBrowsers.delete(workspaceId)`
+      // is needed and a future refactor of the loop can't desync the
+      // two indexes. Mirrors `ChatService.removeAllForWorkspace`.
       for (const browserId of [...ids]) {
-        this.browserTabs.delete(browserId);
+        this.removeFromIndex(browserId);
       }
 
       this.queries.removeAllForWorkspace(workspaceId);
-
-      this.workspaceBrowsers.delete(workspaceId);
     }
 
     // Always drop the saved layout, even when no in-memory tabs exist —

@@ -584,15 +584,21 @@ export class ChatService {
     const ids = this.workspaceChats.get(workspaceId);
 
     if (ids) {
+      // Snapshot the id set before mutating — `removeFromIndex` rewrites
+      // `workspaceChats` underneath the iterator. `removeFromIndex`
+      // (instead of an inline `chatSessions.delete`) keeps the reverse-
+      // index invariant self-enforcing: it empties + deletes the
+      // `workspaceChats` set when the last chatId is dropped, so no
+      // separate post-loop `workspaceChats.delete(workspaceId)` is
+      // needed and a future refactor of the loop can't desync the two
+      // indexes.
       for (const chatId of [...ids]) {
         removeAgent(chatId);
-        this.chatSessions.delete(chatId);
+        this.removeFromIndex(chatId);
       }
 
       // Bulk delete chat panel states from DB
       this.queries.removeAllForWorkspace(workspaceId);
-
-      this.workspaceChats.delete(workspaceId);
     }
 
     // Always drop the saved layout, even when no in-memory chats exist —

@@ -233,6 +233,18 @@ describe("browsers — CRUD round-trip", () => {
     expect(parsed.name).toBe("Fresh name");
   });
 
+  it("browsers.update returns 404 for an unknown browserId (no silent no-op)", async () => {
+    // Pre-Phase-5 behaviour was 200 + `browser: undefined`. Mirrors the
+    // 404 contract `chats.update` adopted in issue #520 — a silent
+    // no-op on a typo'd id would let a caller believe their rename
+    // succeeded.
+    const res = await trpcMutate(server.url, "browsers.update", {
+      browserId: "browser_does_not_exist",
+      name: "Doomed",
+    });
+    expect(res.status).toBe(404);
+  });
+
   it("browsers.navigate updates the persisted URL", async () => {
     const createRes = await trpcMutate(server.url, "browsers.create", {
       workspaceId,

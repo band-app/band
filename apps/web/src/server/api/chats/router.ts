@@ -147,8 +147,13 @@ export const chatsRouter = t.router({
         chatId: z.string(),
         name: z.string().optional(),
         agent: z.string().optional(),
-        model: z.string().optional(),
-        mode: z.string().optional(),
+        // `model`/`mode` are nullable so callers can explicitly clear them
+        // ("use the agent's default"). The service's `UpdateChatOptions`
+        // type already accepts `string | null`; the legacy router's
+        // `.string().optional()` Zod schema dropped `null` on the floor,
+        // which made the "clear" path unreachable via tRPC.
+        model: z.string().nullable().optional(),
+        mode: z.string().nullable().optional(),
         labels: z.record(z.string(), z.string()).optional(),
       }),
     )

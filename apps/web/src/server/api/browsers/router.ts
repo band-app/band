@@ -20,6 +20,7 @@
  * part of the chats/browsers domain.
  */
 
+import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { emit } from "../../../lib/watcher";
 import { browserService } from "../../services/browser-service";
@@ -90,6 +91,14 @@ export const browsersRouter = t.router({
     .mutation(({ input }) => {
       const { browserId, ...updates } = input;
       const browser = browserService.update(browserId, updates);
+      if (!browser) {
+        // Mirror the 404 contract `chats.update` adopted in issue #520:
+        // returning `200 { browser: undefined }` would let a caller treat a
+        // typo'd browserId as a successful no-op rather than surfacing the
+        // stale id. Existing UI callers wrap the mutation in `.catch`, so
+        // the new 404 is absorbed the same way the silent 200 was.
+        throw new TRPCError({ code: "NOT_FOUND", message: "Browser not found" });
+      }
       return { browser };
     }),
 
