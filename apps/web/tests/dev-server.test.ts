@@ -344,7 +344,7 @@ describe("dev server — parity with prod", () => {
     // in dev and prod, so this catches "dev didn't wire up tRPC" /
     // "dev didn't mount the cronjobs router" regressions.
     //
-    // NB: this is NOT a proof that `startCronjobScheduler()` actually
+    // NB: this is NOT a proof that `cronjobService.start()` actually
     // bound — `cronjobs.create` writes to disk regardless of whether
     // the scheduler's file watcher is running. A stronger version
     // would seed an immediately-firing cronjob and poll for evidence

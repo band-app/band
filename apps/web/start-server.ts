@@ -13,7 +13,6 @@ import { isDesktopHostConnected } from "./src/lib/browser-host.ts";
 import { listBrowsers } from "./src/lib/browser-manager.ts";
 import { handleCdpConnection } from "./src/lib/cdp-proxy.ts";
 import { captureSnapshot } from "./src/lib/cdp-targets.ts";
-import { startCronjobScheduler, stopCronjobScheduler } from "./src/lib/cronjob-scheduler.ts";
 import { killAllServers } from "./src/lib/lsp-manager.ts";
 import { handleLspConnection } from "./src/lib/lsp-proxy.ts";
 import { mimeTypeFromFilename } from "./src/lib/mime-types.ts";
@@ -34,6 +33,7 @@ import { handleMcpRequest } from "./src/mcp/server.ts";
 import { appRouter } from "./src/server/api/router.ts";
 import { closeDb } from "./src/server/infra/db/connection.ts";
 import { runMigrations } from "./src/server/infra/db/migrate.ts";
+import { cronjobService } from "./src/server/services/cronjob-service.ts";
 import { createContext } from "./src/trpc/context.ts";
 import { getScalarHtml } from "./src/trpc/openapi.ts";
 
@@ -978,7 +978,7 @@ async function main() {
   //     `tasks.list` reports a stale row as `running` for a few ms.
   //   - `resetAgentStatuses` is similar — at-most a brief window where
   //     `workspaceStatuses.agentStatus` looks busy.
-  //   - `startTaskPruneScheduler` and `startCronjobScheduler` just bind
+  //   - `startTaskPruneScheduler` and `cronjobService.start` just bind
   //     interval timers; the user can wait the few ms before their
   //     cron fires.
   //   - `runFirstTimeSetup` does file-system bookkeeping (editor
@@ -1020,7 +1020,7 @@ async function main() {
     //
     // Sequential by design: `runFirstTimeSetup` writes default settings
     // (default-disable for cronjobs, notification defaults, etc.) that
-    // `startCronjobScheduler`'s first load needs to see. If we kicked
+    // `cronjobService.start`'s first load needs to see. If we kicked
     // them off concurrently — as an earlier iteration of this PR did —
     // newly-installed cronjobs would fire before
     // `runFirstTimeSetup` had a chance to flip them off, causing
@@ -1047,7 +1047,7 @@ async function main() {
       // Start cronjob scheduler AFTER setup so any setting tweaks
       // `runFirstTimeSetup` applied (default-disable etc.) are visible
       // to the first scheduled load.
-      startCronjobScheduler();
+      cronjobService.start();
 
       // Auto-start tunnel if configured.
       const settings = loadSettings() as Record<string, unknown>;
@@ -1065,7 +1065,7 @@ async function main() {
   // Graceful shutdown
   const shutdown = async () => {
     stopBranchStatusPoller();
-    stopCronjobScheduler();
+    cronjobService.stop();
     stopTaskPruneScheduler();
     killAllTerminals();
     killAllServers();

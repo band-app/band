@@ -12,14 +12,15 @@
 // migrated in this PR to keep its diff focused on the
 // detached-HEAD bug fix.
 //
-// TODO: migrate `trpc.test.ts`, `task-cleanup.test.ts`, and
-// `trpc-batch-url.test.ts` to import from this module instead of
-// inlining their own copies of `createTmpHome` / `getRandomPort` /
-// `startServer` / `trpcMutate`. The longer those copies live, the
-// more they will drift from this one — and the SIGKILL fallback +
-// the `trpcMutate` shape are improvements that should reach the
-// older tests too. Tracked as a follow-up rather than done here so
-// this PR stays scoped to the detached-HEAD bug.
+// TODO: migrate `trpc.test.ts`, `task-cleanup.test.ts`,
+// `trpc-batch-url.test.ts`, and `terminal-config.test.ts` to import
+// from this module instead of inlining their own copies of
+// `createTmpHome` / `getRandomPort` / `startServer` / `trpcMutate` /
+// `trpcQuery` / `trpcData`. The longer those copies live, the more
+// they will drift from this one — and the SIGKILL fallback + the
+// `trpcMutate` shape are improvements that should reach the older
+// tests too. Tracked as a follow-up rather than done here so this
+// PR stays scoped to the cronjobs migration.
 
 import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync } from "node:fs";
@@ -120,6 +121,19 @@ export function trpcQuery(
       ? `${serverUrl}/trpc/${procedure}?input=${encodeURIComponent(JSON.stringify(input))}`
       : `${serverUrl}/trpc/${procedure}`;
   return fetch(url, { headers: { Cookie: `band_token=${token}` } });
+}
+
+/**
+ * Parse a tRPC success response into its typed `result.data` payload.
+ *
+ * Sugar so test bodies don't have to repeat the `body.result.data` cast
+ * after every `trpcQuery` / `trpcMutate` call. Use only on successful
+ * responses — error bodies do not match this shape, and callers should
+ * assert `res.status` first.
+ */
+export async function trpcData<T>(res: Response): Promise<T> {
+  const body = (await res.json()) as { result: { data: T } };
+  return body.result.data;
 }
 
 export interface StartServerOptions {

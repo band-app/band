@@ -207,7 +207,7 @@ export const TASK_PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 // the singleton survives module re-evaluation (HMR in dev, vitest worker
 // module isolation). Without this, a second `startTaskPruneScheduler()`
 // call after a reload would schedule a second timer instead of being a
-// no-op. Same pattern as `cronjob-scheduler.ts`.
+// no-op. Same pattern as `server/services/cronjob-service.ts`.
 const PRUNE_SCHEDULER_KEY = Symbol.for("band.task-prune-scheduler");
 const pruneG = globalThis as unknown as Record<symbol, unknown>;
 

@@ -345,9 +345,9 @@ export class ProjectService {
   /**
    * Remove a project row (and its worktree children, by FK cascade).
    *
-   * Project-scoped cronjob cleanup (`stopJobsForKey` + `deleteCronjobFile`)
-   * stays in the API router so the cross-domain composition is visible
-   * at the call site — see `docs/web-architecture.md` for the rationale.
+   * Project-scoped cronjob cleanup (`cronjobService.removeForKey`) stays
+   * in the API router so the cross-domain composition is visible at the
+   * call site — see `docs/web-architecture.md` for the rationale.
    */
   remove(name: string): void {
     const projects = this.queries.loadAll();
