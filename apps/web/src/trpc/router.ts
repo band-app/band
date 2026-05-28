@@ -9,7 +9,7 @@ import {
   unlinkSync,
 } from "node:fs";
 import { cp, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { basename, dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
+import { dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { createLogger } from "@band-app/logger";
 import { TRPCError } from "@trpc/server";
@@ -116,11 +116,8 @@ import {
   deleteWorkspaceStatus,
   getAgentDefinition,
   getWorkspaceStatus,
-  loadCurrentStatuses,
   loadSettings,
   loadState,
-  type ProjectKind,
-  reconcileKindForProject,
   saveState,
   upsertWorkspaceStatus,
   worktreesDir,
@@ -154,305 +151,14 @@ const execFileAsync = promisify(execFile);
 const log = createLogger("trpc");
 
 // ---------------------------------------------------------------------------
-// Projects
+// Projects — migrated to `server/api/projects/router.ts` in Phase 2 of the
+// 3-tier refactor (issue #313). The merged tRPC surface still exposes
+// `projects.*` because `server/api/router.ts` composes the migrated
+// sub-router with this legacy file. Do NOT re-add a `projects` key below;
+// `mergeRouters` is last-write-wins for duplicate keys, so a stray
+// re-definition would silently mask the migrated router. See the
+// INVARIANT comment in `server/api/router.ts`.
 // ---------------------------------------------------------------------------
-
-const projectsRouter = t.router({
-  list: publicProcedure.query(async () => {
-    const state = loadState();
-    const settings = loadSettings();
-    const statuses = loadCurrentStatuses();
-    const statusMap = new Map(statuses.map((s) => [s.workspaceId, s]));
-
-    // Inline, read-only kind re-detection via the shared helper.
-    // Persistence lives in `syncWorktrees` (called on every branch-
-    // status-poller tick and once at boot from `runFirstTimeSetup`) so
-    // this query doesn't write to the DB — but the response still
-    // needs to reflect on-disk reality, otherwise a freshly-booted
-    // dashboard showing pre-migration "git" rows would render
-    // incorrectly until the first poller tick fires AND the next 30 s
-    // refetch lands. We discard the return value (not persisting) and
-    // just rely on the helper to mutate `project.kind` /
-    // `project.worktrees` in place.
-    for (const project of state.projects) {
-      reconcileKindForProject(project);
-    }
-
-    const projects = await Promise.all(
-      state.projects.map(async (project) => {
-        // Plain projects have a single implicit workspace whose path equals
-        // the project path. They don't have a `.git` directory, so we skip
-        // the `git worktree list` enrichment entirely and rely on the
-        // workspace row that `projects.add` synthesized into state.
-        let worktrees = project.worktrees;
-        if (project.kind === "git") {
-          // state.json is the canonical "tracked workspaces" set — git's view
-          // is just used to enrich each entry with current path/head. We
-          // intersect the two so a workspace removed from state.json (e.g.
-          // by workspaces.remove, which updates state.json synchronously and
-          // defers the slow `git worktree remove` / `git branch -D` to a
-          // background task) disappears from the list immediately, even
-          // before the async cleanup has finished pruning the on-disk
-          // worktree. Without this filter, `projects.list` reads stale data
-          // from `git worktree list` and shows just-deleted workspaces until
-          // the background cleanup completes.
-          const trackedBranches = new Set(project.worktrees.map((wt) => wt.branch));
-          // Map by branch so we can preserve metadata (e.g. `pinned`) that git
-          // doesn't know about when merging git's view with our tracked state.
-          const trackedByBranch = new Map(project.worktrees.map((wt) => [wt.branch, wt]));
-          try {
-            const gitWorktrees = await listWorktrees(project.path);
-            worktrees = gitWorktrees
-              .filter((wt) => !wt.isBare && trackedBranches.has(wt.branch))
-              .map((wt) => ({
-                branch: wt.branch,
-                path: wt.path,
-                head: wt.head,
-                pinned: trackedByBranch.get(wt.branch)?.pinned ?? false,
-              }));
-          } catch {
-            // Fall back to state.json worktrees
-          }
-        }
-
-        return {
-          name: project.name,
-          path: project.path,
-          defaultBranch: project.defaultBranch,
-          label: project.label,
-          kind: project.kind,
-          worktrees: worktrees.map((wt) => {
-            const workspaceId = toWorkspaceId(project.name, wt.branch);
-            const status = statusMap.get(workspaceId);
-            return {
-              ...wt,
-              workspaceId,
-              agent: status?.agent ?? null,
-            };
-          }),
-        };
-      }),
-    );
-
-    return { projects, labels: settings.labels ?? [] };
-  }),
-
-  checkPath: publicProcedure.input(z.object({ path: z.string() })).query(({ input }) => {
-    const resolvedPath = resolve(input.path);
-    const isGitRepo = existsSync(join(resolvedPath, ".git"));
-    return { isGitRepo };
-  }),
-
-  gitInit: publicProcedure.input(z.object({ path: z.string() })).mutation(async ({ input }) => {
-    const resolvedPath = resolve(input.path);
-    await execGit(["init"], resolvedPath);
-  }),
-
-  add: publicProcedure
-    .input(z.object({ path: z.string(), label: z.string().optional() }))
-    .mutation(async ({ input }) => {
-      const state = loadState();
-      const name = basename(input.path);
-
-      if (state.projects.some((p) => p.name === name)) {
-        throw new Error(`Project "${name}" already registered`);
-      }
-
-      if (input.label) {
-        const settings = loadSettings();
-        const validIds = (settings.labels ?? []).map((l) => l.id);
-        if (!validIds.includes(input.label)) {
-          throw new Error(
-            `Label "${input.label}" does not exist. Valid labels: ${validIds.join(", ") || "(none)"}`,
-          );
-        }
-      }
-
-      // Detect project kind from the presence of `.git`. Plain (non-git)
-      // folders skip the symbolic-ref / listWorktrees probes entirely and
-      // get a single synthesized workspace pointing at the project path —
-      // this is the whole point of #427: lower the barrier for adding a
-      // scratch directory, design docs, or any folder that hasn't been
-      // `git init`-ed.
-      //
-      // Note: `existsSync(.git)` returns true for both directories AND
-      // files. Git submodules and secondary worktrees embed a `.git` file
-      // (rather than a directory) that points at the parent repo, and
-      // we want those classified as "git" too — so a directory-only
-      // check would be wrong here.
-      const resolvedPath = resolve(input.path);
-      const kind: ProjectKind = existsSync(join(resolvedPath, ".git")) ? "git" : "plain";
-
-      let defaultBranch = "main";
-      let worktrees: { branch: string; path: string; head?: string; pinned: boolean }[] = [];
-
-      if (kind === "git") {
-        try {
-          const env = { ...process.env };
-          if (env.PATH) {
-            env.PATH = `/opt/homebrew/bin:/usr/local/bin:${env.PATH}`;
-          }
-          const output = execFileSync("git", ["symbolic-ref", "--short", "HEAD"], {
-            cwd: resolvedPath,
-            env,
-            encoding: "utf-8",
-          }).trim();
-          if (output) defaultBranch = output;
-        } catch {
-          // Fall back to "main"
-        }
-
-        try {
-          const gitWorktrees = await listWorktrees(resolvedPath);
-          worktrees = gitWorktrees
-            .filter((wt) => !wt.isBare)
-            .map((wt) => ({ branch: wt.branch, path: wt.path, head: wt.head, pinned: false }));
-        } catch {
-          // No worktrees
-        }
-      } else {
-        // Plain projects get exactly one implicit workspace whose path is
-        // the project path. We use "main" as the synthetic branch name so
-        // workspaceId stays deterministic (`{name}-main`), even though the
-        // folder has no actual branch. UI gating prevents the user from
-        // creating other workspaces or invoking branch/PR features.
-        //
-        // Use `resolvedPath` (not `input.path`) so paths with trailing
-        // slashes, `./` prefixes, or `..` segments are normalized — keeps
-        // the stored workspace path consistent with the `.git` probe and
-        // with the implicit assumption elsewhere that workspace paths are
-        // canonical.
-        worktrees = [{ branch: "main", path: resolvedPath, pinned: false }];
-      }
-
-      const project = {
-        name,
-        // Store the canonical path so downstream consumers
-        // (cronjob-scheduler, branch-status-poller, etc.) and the
-        // self-heal loop in projects.list can compare against
-        // `existsSync(project.path)` without false negatives from
-        // unnormalized input.
-        path: resolvedPath,
-        defaultBranch,
-        worktrees,
-        label: input.label ?? undefined,
-        kind,
-        // For git projects, default to `true` so the first CI poll
-        // still runs the GraphQL query — `syncWorktrees` writes the
-        // real value on the next tick. For plain projects there's no
-        // remote by construction, so set `false` directly: sync skips
-        // plain projects (`kind !== "plain"` filter), so this initial
-        // value sticks for the lifetime of the row. See issue #458.
-        hasOrigin: kind === "git",
-      };
-
-      state.projects.push(project);
-      saveState(state);
-
-      return project;
-    }),
-
-  /**
-   * Run `git init` inside a plain project and flip its kind to "git".
-   * The "promote to git" escape hatch from #427: lets a user start with a
-   * plain folder and later opt into branches/PRs without re-adding the
-   * project. After promotion, the existing implicit workspace becomes the
-   * project's default-branch worktree (its path is already the project
-   * path, which matches git's convention for the main worktree).
-   */
-  promoteToGit: publicProcedure
-    .input(z.object({ name: z.string() }))
-    .mutation(async ({ input }) => {
-      const state = loadState();
-      const project = state.projects.find((p) => p.name === input.name);
-      if (!project) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: `Project "${input.name}" not found`,
-        });
-      }
-      if (project.kind === "git") {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: `Project "${input.name}" is already a git project`,
-        });
-      }
-      // Pre-flight: if the folder was moved/deleted between `projects.add`
-      // and the promote click, `execGit` would surface a raw subprocess
-      // ENOENT ("cannot change to '...'") with no diagnostic context.
-      // Bail with a clear message instead so the user knows to re-add.
-      if (!existsSync(project.path)) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: `Project path "${project.path}" no longer exists. Remove the project and re-add it.`,
-        });
-      }
-
-      // `git init -b main` pins HEAD to refs/heads/main so the implicit
-      // "main" workspace's branch matches the repo's HEAD regardless of
-      // the user's `init.defaultBranch` config. Without this, a user whose
-      // git defaults to "master" would end up with a workspaceId
-      // (`{name}-main`) that doesn't correspond to any real branch.
-      // `git init` is idempotent — if `.git` somehow appeared between the
-      // initial `projects.add` probe and now, this is a no-op rather than
-      // an error.
-      //
-      // The on-disk `.git` is created BEFORE saveState persists `kind:
-      // "git"`. If the process crashes in this window, the next
-      // `projects.list` will self-heal (see the kind re-detection loop
-      // there): the folder has `.git` so the recorded kind flips to
-      // "git" automatically. So the non-atomic ordering is intentional
-      // and self-correcting; don't reorder.
-      await execGit(["init", "-b", "main"], project.path);
-
-      project.kind = "git";
-      project.defaultBranch = "main";
-      saveState(state);
-
-      return { ok: true, kind: project.kind, defaultBranch: project.defaultBranch };
-    }),
-
-  remove: publicProcedure.input(z.object({ name: z.string() })).mutation(({ input }) => {
-    const state = loadState();
-    state.projects = state.projects.filter((p) => p.name !== input.name);
-    saveState(state);
-
-    // Clean up project-scoped cronjobs
-    stopJobsForKey(input.name);
-    deleteCronjobFile(input.name);
-
-    return { ok: true };
-  }),
-
-  reorder: publicProcedure.input(z.object({ names: z.array(z.string()) })).mutation(({ input }) => {
-    const state = loadState();
-    state.projects.sort((a, b) => {
-      const ai = input.names.indexOf(a.name);
-      const bi = input.names.indexOf(b.name);
-      return (ai === -1 ? Infinity : ai) - (bi === -1 ? Infinity : bi);
-    });
-    saveState(state);
-    return { ok: true };
-  }),
-
-  updateLabel: publicProcedure
-    .input(z.object({ name: z.string(), label: z.string().nullable() }))
-    .mutation(({ input }) => {
-      const state = loadState();
-      const project = state.projects.find((p) => p.name === input.name);
-      if (!project) {
-        throw new Error("Project not found");
-      }
-
-      if (input.label === null || input.label === undefined) {
-        delete project.label;
-      } else {
-        project.label = input.label;
-      }
-      saveState(state);
-      return { ok: true };
-    }),
-});
 
 // ---------------------------------------------------------------------------
 // Workspaces
@@ -4582,7 +4288,6 @@ const terminalRouter = t.router({
  * `docs/web-architecture.md`.
  */
 export const appRouter = t.router({
-  projects: projectsRouter,
   workspaces: workspacesRouter,
   hooks: hooksRouter,
   cli: cliRouter,

@@ -1,8 +1,13 @@
-import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { eq, or, sql } from "drizzle-orm";
 import { toWorkspaceId } from "@/dashboard";
 import { getDb } from "../server/infra/db/connection";
+import {
+  type ProjectKind,
+  ProjectQueries,
+  type ProjectState,
+  reconcileKindForProject,
+  type WorktreeState,
+} from "../server/infra/db/queries/projects";
 import {
   bandHome,
   type CodingAgentDefinition,
@@ -12,7 +17,6 @@ import {
 } from "../server/infra/db/queries/settings";
 import {
   branchStatuses as branchStatusesTable,
-  projects as projectsTable,
   workspaceStatuses as workspaceStatusesTable,
   worktrees as worktreesTable,
 } from "../server/infra/db/schema";
@@ -26,84 +30,29 @@ import { SettingsService, settingsService } from "../server/services/settings-se
 export type { CodingAgentDefinition, LabelDefinition, NotificationSettings, Settings };
 export { bandHome };
 
-export type ProjectKind = "git" | "plain";
+// Project types + the kind reconciliation helper live in the Infra layer
+// now (issue #313, Phase 2 of the 3-tier refactor). Re-export from this
+// module so existing callers (sync-state, branch-status-poller,
+// cronjob-scheduler, workspace.ts, …) keep compiling. The real
+// implementations live under `server/infra/db/queries/projects.ts`;
+// subsequent refactor phases will rewrite each caller to import from
+// there directly and this shim will go away.
+export type { ProjectKind, ProjectState, WorktreeState };
+export { reconcileKindForProject };
 
-/**
- * Re-detect `kind` from the filesystem and reconcile the in-memory
- * project row IN PLACE. The function always mutates `project.kind`
- * (and `project.worktrees` on a `git → plain` flip) when the
- * detected value disagrees with the stored one — the caller's only
- * decision is whether to flush the mutated row to disk.
- *
- * Today two call sites share this: `syncWorktrees` propagates the
- * return value into its `changed` flag and persists via `saveState`
- * at the end of the loop; the inline path in `projects.list`
- * discards the return value and lets the next sync tick persist.
- *
- * Returns `true` when the row was mutated, `false` otherwise.
- */
-export function reconcileKindForProject(project: ProjectState): boolean {
-  // Skip rows whose path no longer exists — leave kind alone rather
-  // than synthesize a workspace under a missing directory.
-  if (!existsSync(project.path)) return false;
-  // `existsSync(.git)` returns true for both directories AND files. Git
-  // submodules and secondary worktrees embed a `.git` file (rather
-  // than a directory) that points at the parent repo — we want those
-  // classified as "git" too.
-  const detectedKind: ProjectKind = existsSync(join(project.path, ".git")) ? "git" : "plain";
-  if (detectedKind === project.kind) return false;
+// -----------------------------------------------------------------------------
+// Project state — back-compat shims around the new infra/service layer.
+//
+// `ProjectQueries` (in `server/infra/db/queries/projects.ts`) owns the
+// real CRUD for the `projects` + `worktrees` tables. The wrappers below
+// preserve the old `lib/state` import surface so unmigrated callers (the
+// legacy tRPC router, sync-state, cronjob-scheduler, workspace.ts, …)
+// keep compiling unchanged. Later refactor phases will migrate each
+// caller to talk to the infra/service tiers directly and this section
+// will be deleted.
+// -----------------------------------------------------------------------------
 
-  project.kind = detectedKind;
-  // On a `git → plain` flip (`.git` disappeared from under us — e.g. a
-  // `rm -rf .git` from a terminal), replace any existing worktree
-  // rows with the implicit `{branch: "main", path: project.path}`
-  // workspace. We do this unconditionally for `plain` (not only when
-  // worktrees is empty) because a real git project flipping to plain
-  // will still have its old `feat/foo` / `fix/bar` entries; leaving
-  // them would orphan the rows (their worktree paths under
-  // `worktreesDir/{project}/{branch}` are now broken git worktrees
-  // with no `.git` to reach back to) and the flattened plain UI would
-  // render the wrong branch label.
-  if (detectedKind === "plain") {
-    project.worktrees = [{ branch: "main", path: project.path, pinned: false }];
-  }
-  return true;
-}
-
-export interface ProjectState {
-  name: string;
-  path: string;
-  defaultBranch: string;
-  worktrees: WorktreeState[];
-  label?: string;
-  /**
-   * "git" projects use git worktrees for per-workspace isolation.
-   * "plain" projects have a single implicit workspace whose path equals the
-   *  project path — no isolation, no branch, git-specific features disabled.
-   */
-  kind: ProjectKind;
-  /**
-   * Whether the project's git repo has an `origin` remote.
-   *
-   * Populated by `syncWorktrees` at the CI tick cadence and used by
-   * `branch-status-poller` to skip the CI / `getRepoInfo` query for
-   * origin-less repos — that's an expected steady state for some
-   * projects and the query just produces log noise (issue #458).
-   *
-   * Defaults to `true` for plain (non-git) projects and for freshly
-   * added projects that sync hasn't reached yet, so the first CI tick
-   * after boot still issues the query. The real value lands on the
-   * next sync pass and sticks until the remote configuration changes.
-   */
-  hasOrigin: boolean;
-}
-
-export interface WorktreeState {
-  branch: string;
-  path: string;
-  head?: string;
-  pinned: boolean;
-}
+const projectQueries = new ProjectQueries();
 
 export interface AppState {
   projects: ProjectState[];
@@ -126,91 +75,20 @@ export interface WorkspaceStatus {
 }
 
 export function loadState(): AppState {
-  const db = getDb();
-  const projectRows = db.select().from(projectsTable).orderBy(projectsTable.sortOrder).all();
-
-  const worktreeRows = db.select().from(worktreesTable).all();
-
-  const wtByProject = new Map<string, WorktreeState[]>();
-  for (const row of worktreeRows) {
-    const list = wtByProject.get(row.projectName) ?? [];
-    list.push({
-      branch: row.branch,
-      path: row.path,
-      head: row.head ?? undefined,
-      pinned: row.pinned,
-    });
-    wtByProject.set(row.projectName, list);
-  }
-
-  return {
-    projects: projectRows.map((row) => ({
-      name: row.name,
-      path: row.path,
-      defaultBranch: row.defaultBranch,
-      label: row.label ?? undefined,
-      kind: (row.kind ?? "git") as ProjectKind,
-      hasOrigin: row.hasOrigin,
-      worktrees: wtByProject.get(row.name) ?? [],
-    })),
-  };
+  return { projects: projectQueries.loadAll() };
 }
 
 /**
  * Targeted UPDATE for `projects.has_origin` only — does NOT go through
- * the whole-tree `saveState` rewrite.
- *
- * `saveState` deletes every row in `projects` + `worktrees` and re-inserts
- * from its in-memory snapshot. That's fine for the existing "worktrees /
- * defaultBranch changed" path (it carries the latest worktree list), but
- * it races badly with concurrent `workspaces.create` / `workspaces.remove`
- * traffic for the new "hasOrigin changed" path: a stale `syncWorktrees`
- * copy would clobber a just-saved worktree. Doing the hasOrigin update
- * as a focused single-column UPDATE sidesteps the issue — the worktrees
- * table is untouched. See issue #458.
+ * the whole-tree `saveState` rewrite. See `ProjectQueries.setHasOrigin`
+ * for the full rationale.
  */
 export function setProjectHasOrigin(name: string, hasOrigin: boolean): void {
-  const db = getDb();
-  db.update(projectsTable).set({ hasOrigin }).where(eq(projectsTable.name, name)).run();
+  projectQueries.setHasOrigin(name, hasOrigin);
 }
 
 export function saveState(state: AppState): void {
-  const db = getDb();
-
-  db.transaction((tx) => {
-    tx.delete(worktreesTable).run();
-    tx.delete(projectsTable).run();
-
-    for (let i = 0; i < state.projects.length; i++) {
-      const project = state.projects[i];
-      tx.insert(projectsTable)
-        .values({
-          name: project.name,
-          path: project.path,
-          defaultBranch: project.defaultBranch,
-          label: project.label ?? null,
-          sortOrder: i,
-          kind: project.kind,
-          // Default to true for any caller that hasn't probed yet (e.g.
-          // `projects.add` creating a brand-new row before the first
-          // sync tick has run). The real value lands at the next sync.
-          hasOrigin: project.hasOrigin ?? true,
-        })
-        .run();
-
-      for (const wt of project.worktrees) {
-        tx.insert(worktreesTable)
-          .values({
-            projectName: project.name,
-            branch: wt.branch,
-            path: wt.path,
-            head: wt.head ?? null,
-            pinned: wt.pinned,
-          })
-          .run();
-      }
-    }
-  });
+  projectQueries.saveAll(state.projects);
 }
 
 // -----------------------------------------------------------------------------
