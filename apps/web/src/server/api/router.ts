@@ -6,11 +6,16 @@
  * tasks, …) owns a sub-router under `apps/web/src/server/api/<domain>/router.ts`
  * and this file merges them via `t.mergeRouters(…)`.
  *
- * Migration order:
- *   - Phase 1 (issue #312): `settings/`.
- *   - Phase 2 (issue #313): `projects/`.
- *   - Phase 3 (issue #314): `workspaces/`.
- *   - Phase 4 (issue #315): `cronjobs/`.
+ * Migrated sub-routers so far (each phase removes its keys from the legacy
+ * router at `apps/web/src/trpc/router.ts` in the same diff that adds them
+ * here, so `t.mergeRouters` always sees disjoint key sets):
+ *
+ *   - Phase 1 (issue #312): `settings.*`.
+ *   - Phase 2 (issue #313): `projects.*`.
+ *   - Phase 3 (issue #314): `workspaces.*`.
+ *   - Phase 4 (issue #315): `cronjobs.*`.
+ *   - Phase 5 (issue #316): `chats.*`, `chatLayout.*`, `browsers.*`,
+ *     `browserLayout.*`.
  *   - Phase 7 (issue #318): `terminals/` (exposes `terminal` + `terminalLayout`).
  *
  * Phase 4 landed ahead of Phase 3 because cronjobs is a small, self-contained
@@ -29,6 +34,8 @@
  */
 
 import { appRouter as legacyAppRouter } from "../../trpc/router";
+import { browserLayoutRouter, browsersRouter } from "./browsers/router";
+import { chatLayoutRouter, chatsRouter } from "./chats/router";
 import { cronjobsRouter } from "./cronjobs/router";
 import { projectsRouter } from "./projects/router";
 import { settingsRouter } from "./settings/router";
@@ -38,7 +45,8 @@ import { workspacesRouter } from "./workspaces/router";
 
 // INVARIANT: the legacy router (`apps/web/src/trpc/router.ts`) must not
 // contain any key that this file also defines (`settings`, `projects`,
-// `workspaces`, `cronjobs`, `terminal`, `terminalLayout`, …).
+// `workspaces`, `cronjobs`, `chats`, `chatLayout`, `browsers`,
+// `browserLayout`, `terminal`, `terminalLayout`, …).
 // `t.mergeRouters` accepts two routers and silently picks last-write-wins
 // for duplicate keys, so a stray legacy entry would mask the migrated
 // router without a build error. Each phase of the 3-tier migration adds a
@@ -50,6 +58,10 @@ import { workspacesRouter } from "./workspaces/router";
 //   - `projects`        (Phase 2, issue #313)
 //   - `workspaces`      (Phase 3, issue #314)
 //   - `cronjobs`        (Phase 4, issue #315)
+//   - `chats`           (Phase 5, issue #316)
+//   - `chatLayout`      (Phase 5, issue #316)
+//   - `browsers`        (Phase 5, issue #316)
+//   - `browserLayout`   (Phase 5, issue #316)
 //   - `terminal`        (Phase 7, issue #318)
 //   - `terminalLayout`  (Phase 7, issue #318)
 //
@@ -71,6 +83,16 @@ import { workspacesRouter } from "./workspaces/router";
 //   - `apps/web/tests/cronjobs.test.ts` exercises `cronjobs.*` end-to-end,
 //     so a regression that masks the migrated `cronjobsRouter` with a
 //     stale legacy entry trips one of those assertions.
+//   - `apps/web/tests/cold-start.test.ts` covers `chats.list` and
+//     `browsers.list` (rehydration on boot); `apps/web/tests/chat-labels.test.ts`
+//     covers `chats.create` / `chats.update` / `chats.remove`; and
+//     `apps/web/tests/browsers.test.ts` covers `browsers.create` /
+//     `browsers.update` / `browsers.navigate` / `browsers.remove` /
+//     `browsers.get` plus `browserLayout.get` / `browserLayout.save`. A
+//     regression that masks any of those migrated sub-routers with a
+//     stale legacy entry trips the corresponding describe block.
+//     `chatLayout.*`, `chats.stop`, and `chats.resume` are not yet
+//     covered — adding them is tracked in issue #529.
 //   - `apps/web/tests/terminal-ws.test.ts` (and any other terminal-*
 //     integration tests) hit the merged router through the same /trpc
 //     endpoint, so a regression that masks the migrated terminal
@@ -83,6 +105,10 @@ export const appRouter = t.mergeRouters(
     projects: projectsRouter,
     workspaces: workspacesRouter,
     cronjobs: cronjobsRouter,
+    chats: chatsRouter,
+    chatLayout: chatLayoutRouter,
+    browsers: browsersRouter,
+    browserLayout: browserLayoutRouter,
     ...terminalsRouters,
   }),
 );

@@ -6,9 +6,7 @@ import { promisify } from "node:util";
 import { createLogger } from "@band-app/logger";
 import { z } from "zod";
 import { toWorkspaceId } from "@/dashboard";
-import { deleteBrowserLayout } from "../../lib/browser-layout-manager";
 import { removeWorkspaceBrowsers } from "../../lib/browser-manager";
-import { deleteChatLayout } from "../../lib/chat-layout-manager";
 import { getOrCreateDefaultChat, removeWorkspaceChats } from "../../lib/chat-manager";
 import { DETACHED_BRANCH_PREFIX, execGit, gitCmd, listWorktrees } from "../../lib/git";
 import { killWorkspaceServers } from "../../lib/lsp-manager";
@@ -393,13 +391,15 @@ export class WorkspaceService {
     deleteWorkspaceStatus(workspaceId);
     this.queries.deleteBranchStatus(workspaceId);
 
-    // Clean up all chat panes and their agent processes
+    // Clean up all chat panes and their agent processes. The service
+    // tears down the saved layout as part of the same call (see
+    // `ChatService.removeAllForWorkspace`) so a separate `deleteChatLayout`
+    // step is no longer required here.
     removeWorkspaceChats(workspaceId);
-    deleteChatLayout(workspaceId);
 
-    // Clean up all browser tabs + layout
+    // Clean up all browser tabs + layout. Same contract as chats —
+    // `BrowserService.removeAllForWorkspace` drops the layout row itself.
     removeWorkspaceBrowsers(workspaceId);
-    deleteBrowserLayout(workspaceId);
 
     // Kill any running terminal PTY sessions + layout
     terminalService.killWorkspace(workspaceId);
