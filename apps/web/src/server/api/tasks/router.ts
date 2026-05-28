@@ -5,6 +5,7 @@ import { toWorkspaceId } from "@/dashboard";
 import { createChat, getChat, getOrCreateDefaultChat } from "../../../lib/chat-manager";
 import { loadState } from "../../../lib/state";
 import { saveUploadedFilesDetailed } from "../../../lib/upload-utils";
+import { WorkspaceNotFoundError } from "../../errors";
 import {
   abortTask,
   cancelTask,
@@ -13,9 +14,21 @@ import {
   loadTaskRecord,
   submitTask,
   TaskConflictError,
-  WorkspaceNotFoundError,
 } from "../../services/task-service";
 import { publicProcedure, t } from "../trpc";
+
+interface SubmitResult {
+  id: string;
+  workspaceId: string;
+  chatId: string;
+  sessionId: string | undefined;
+}
+
+interface RerunResult {
+  workspaceId: string;
+  chatId: string;
+  sessionId: string | undefined;
+}
 
 const log = createLogger("tasks-router");
 
@@ -92,7 +105,13 @@ export const tasksRouter = t.router({
           .optional(),
       }),
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input }): Promise<SubmitResult> => {
+      // Explicit return-type annotation pins the wire contract even though
+      // TypeScript infers `Promise<SubmitResult>` correctly today (the
+      // `never` from `throwAsTrpcError` is propagated out of the catch).
+      // Pinning the annotation guards against a future edit that adds an
+      // unguarded code path silently widening the procedure's return union.
+      // Same pattern in `rerun` below and in `sessions/router.ts`.
       // Resolve chatId: if the client provides one, lazily ensure the server
       // record exists. If not provided, fall back to the default chat.
       let chatId: string;
@@ -216,30 +235,33 @@ export const tasksRouter = t.router({
     return { cancelled: true };
   }),
 
-  rerun: publicProcedure.input(z.object({ taskId: z.string() })).mutation(({ input }) => {
-    const record = loadTaskRecord(input.taskId);
-    if (!record) {
-      throw new TRPCError({ code: "NOT_FOUND", message: "Task not found" });
-    }
+  rerun: publicProcedure
+    .input(z.object({ taskId: z.string() }))
+    .mutation(({ input }): RerunResult => {
+      // Explicit return type — see comment on `submit` above.
+      const record = loadTaskRecord(input.taskId);
+      if (!record) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "Task not found" });
+      }
 
-    // Use original chat pane or default for workspace
-    const chatId = record.chatId ?? getOrCreateDefaultChat(record.workspaceId).id;
+      // Use original chat pane or default for workspace
+      const chatId = record.chatId ?? getOrCreateDefaultChat(record.workspaceId).id;
 
-    try {
-      const task = submitTask({
-        workspaceId: record.workspaceId,
-        chatId,
-        prompt: record.prompt,
-        maxTurns: record.maxTurns,
-        mode: record.mode,
-        model: record.model,
-        codingAgentId: record.codingAgentId,
-      });
-      return { workspaceId: task.workspaceId, chatId: task.chatId, sessionId: task.sessionId };
-    } catch (err) {
-      throwAsTrpcError(err);
-    }
-  }),
+      try {
+        const task = submitTask({
+          workspaceId: record.workspaceId,
+          chatId,
+          prompt: record.prompt,
+          maxTurns: record.maxTurns,
+          mode: record.mode,
+          model: record.model,
+          codingAgentId: record.codingAgentId,
+        });
+        return { workspaceId: task.workspaceId, chatId: task.chatId, sessionId: task.sessionId };
+      } catch (err) {
+        throwAsTrpcError(err);
+      }
+    }),
 });
 
 export type TasksRouter = typeof tasksRouter;

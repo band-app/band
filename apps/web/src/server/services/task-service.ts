@@ -14,6 +14,7 @@ import { emit as emitStatusEvent } from "../../lib/watcher";
 // cycle note before capturing `resolveWorkspace` (or any service-tier
 // symbol via this hop) at module load.
 import { resolveWorkspace } from "../../lib/workspace";
+import { WorkspaceNotFoundError } from "../errors";
 import { getAgent, getOrCreateAgent, replaceAgent } from "../infra/agents/agent-pool";
 import { generateTaskId, TaskQueries } from "../infra/db/queries/tasks";
 
@@ -1132,20 +1133,14 @@ export class TaskConflictError extends Error {
 }
 
 /**
- * Thrown by `submitTask` when the workspace id can't be resolved.
- *
- * Distinct from `WorkspaceService.WorkspaceNotFoundError` (which is keyed
- * on branch, not workspace id) — the two error classes intentionally don't
- * collide at the import level. The API tier matches on `instanceof` so
- * even if both errors are imported into the same router file the wire
- * mapping stays correct.
+ * Re-export of the canonical `WorkspaceNotFoundError` defined in
+ * `server/errors.ts` (imported at the top of this file for internal throws).
+ * Kept as a re-export so existing callers (the API tier, `lib/chat-submit.ts`)
+ * can keep importing it from the service module without an import path churn.
+ * The class itself is shared with `session-service` and `workspace-service` —
+ * see `errors.ts` for the consolidation rationale.
  */
-export class WorkspaceNotFoundError extends Error {
-  constructor(workspaceId: string) {
-    super(`Workspace not found: ${workspaceId}`);
-    this.name = "WorkspaceNotFoundError";
-  }
-}
+export { WorkspaceNotFoundError };
 
 // ---------------------------------------------------------------------------
 // Session event-buffer accessors (absorbed from `lib/session-store.ts`).

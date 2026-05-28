@@ -22,6 +22,7 @@ import {
   worktreesDir,
 } from "../../lib/state";
 import { emit } from "../../lib/watcher";
+import { WorkspaceNotFoundError } from "../errors";
 // FRAGILE: ESM cycle leg — `services/task-service` imports `lib/workspace`,
 // which imports `workspaceService` from this file. The cycle is safe only
 // because every `workspaceService` reference is inside a function body
@@ -124,14 +125,14 @@ export class ProjectNotFoundError extends Error {
 }
 
 /**
- * Branch named in the workspace mutation does not exist on the project.
+ * Re-export the canonical `WorkspaceNotFoundError` so existing imports
+ * (`api/workspaces/router.ts`) keep working. The class is defined in
+ * `server/errors.ts` (imported at the top of this file for internal throws)
+ * and shared with `session-service` and `task-service` — see `errors.ts`
+ * for the consolidation rationale and the per-router HTTP mapping
+ * (workspaces stays 500 to honor the pinned legacy contract).
  */
-export class WorkspaceNotFoundError extends Error {
-  constructor(branch: string) {
-    super(`Workspace "${branch}" not found`);
-    this.name = "WorkspaceNotFoundError";
-  }
-}
+export { WorkspaceNotFoundError };
 
 /**
  * Workspace mutation invoked on a plain (non-git) project. Plain projects

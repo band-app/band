@@ -2,6 +2,7 @@ import type { SessionListItem } from "@band-app/coding-agent";
 import { createLogger } from "@band-app/logger";
 import { getChat, getOrCreateDefaultChat } from "../../lib/chat-manager";
 import { resolveWorkspace } from "../../lib/workspace";
+import { WorkspaceNotFoundError } from "../errors";
 import { getOrCreateAgent } from "../infra/agents/agent-pool";
 
 const log = createLogger("session-service");
@@ -29,16 +30,14 @@ const log = createLogger("session-service");
 // Service-level error types
 //
 // Surface conditions the API tier needs to translate into HTTP/tRPC error
-// codes without letting the service import the tRPC types directly —
-// services/ is a layer below api/ and must stay framework-agnostic.
+// codes. The actual class lives in `server/errors.ts` (one canonical copy
+// shared by every workspace-owning service); we re-export it here so legacy
+// imports through the service module keep working. See `errors.ts` for the
+// rationale on why three duplicate classes existed before this change and
+// what they collapse into.
 // ---------------------------------------------------------------------------
 
-export class WorkspaceNotFoundError extends Error {
-  constructor(message = "Workspace not found") {
-    super(message);
-    this.name = "WorkspaceNotFoundError";
-  }
-}
+export { WorkspaceNotFoundError };
 
 /**
  * Shape of a single session returned by `SessionService.list`.
@@ -76,7 +75,7 @@ export class SessionService {
   async list(input: { workspaceId: string; chatId?: string }): Promise<ListSessionsResponse> {
     const workspace = resolveWorkspace(input.workspaceId);
     if (!workspace) {
-      throw new WorkspaceNotFoundError();
+      throw new WorkspaceNotFoundError(input.workspaceId);
     }
 
     const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;

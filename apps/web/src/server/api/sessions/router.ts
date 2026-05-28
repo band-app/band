@@ -1,6 +1,8 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { sessionService, WorkspaceNotFoundError } from "../../services/session-service";
+import { WorkspaceNotFoundError } from "../../errors";
+import type { ListSessionsResponse } from "../../services/session-service";
+import { sessionService } from "../../services/session-service";
 import { publicProcedure, t } from "../trpc";
 
 /**
@@ -25,7 +27,15 @@ import { publicProcedure, t } from "../trpc";
 export const sessionsRouter = t.router({
   list: publicProcedure
     .input(z.object({ workspaceId: z.string(), chatId: z.string().optional() }))
-    .query(async ({ input }) => {
+    .query(async ({ input }): Promise<ListSessionsResponse> => {
+      // Explicit return-type annotation pins the wire contract even though
+      // TypeScript infers it correctly today (the `never` from
+      // `throwAsTrpcError` is propagated out of the catch, so the inferred
+      // type is `Promise<ListSessionsResponse>` — not nullable). Pinning the
+      // annotation guards against a future edit that adds an unguarded code
+      // path (e.g. a fall-through `return undefined`) silently widening the
+      // procedure's return union. Same pattern below for `tasks.submit` and
+      // `tasks.rerun` mutation handlers.
       try {
         return await sessionService.list(input);
       } catch (err) {

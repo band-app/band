@@ -48,12 +48,25 @@ export interface TaskFilters {
 /**
  * Mint a process-unique task id.
  *
- * The random suffix is required: `Date.now()` has millisecond resolution
- * and two tasks started in the same millisecond (e.g. during a burst of
- * cron-triggered submissions) would otherwise collide. Because `save()`
- * uses `onConflictDoUpdate` on `tasks.id`, a collision would silently
- * overwrite an in-flight task row with a different task's data rather
- * than fail loudly, so we guarantee uniqueness here.
+ * Format: `tsk_<epoch_ms>_<6-char base36 random suffix>` — e.g.
+ * `tsk_1717024812345_3k9xq2`.
+ *
+ * **Format change in Phase 6 (#317).** The legacy format was
+ * `tsk_<epoch_ms>` with no random suffix. The random suffix is required:
+ * `Date.now()` has millisecond resolution and two tasks started in the
+ * same millisecond (e.g. during a burst of cron-triggered submissions)
+ * would otherwise collide. Because `save()` uses `onConflictDoUpdate`
+ * on `tasks.id`, a collision would silently overwrite an in-flight task
+ * row with a different task's data rather than fail loudly, so we
+ * guarantee uniqueness here.
+ *
+ * **Compatibility:** callers must not assume a digits-only suffix or
+ * regex-match on `tsk_\d+`. The only invariant is the `tsk_` prefix
+ * (which the CLI integration tests already pin via `starts_with`). All
+ * known consumers — CLI (`apps/cli/tests/integration.rs`), web tests,
+ * dashboard routing — use prefix matches or treat the id as opaque, so
+ * the change is non-breaking at the wire level. If a downstream client
+ * adopts a regex parser, it must accept the new shape.
  */
 export function generateTaskId(): string {
   return `tsk_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
