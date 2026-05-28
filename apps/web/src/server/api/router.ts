@@ -136,11 +136,17 @@ import { workspacesRouter } from "./workspaces/router";
 //     endpoint, so a regression that masks the migrated terminal
 //     sub-routers with a stale legacy entry trips at least one of those
 //     assertions.
-//   - The Phase 7.5 routers don't have dedicated test files yet — the
-//     existing surface tests (`tests/trpc.test.ts` + the desktop's manual
-//     "Install CLI" / "Install Hooks" / tunnel flows) cover the wire
-//     shape, and the procedures are intentionally thin pass-throughs to
-//     the underlying services, which carry their own coverage.
+//   - The Phase 7.5 routers don't have dedicated wire-surface
+//     integration tests yet. The existing CI tests
+//     (`tests/cli-sidecar-path.test.ts`, `tests/cli-skills.test.ts`,
+//     `tests/file-watcher.test.ts`, `tests/formatter.test.ts`,
+//     `tests/lsp.test.ts`, `tests/slash-commands.test.ts`) exercise the
+//     migrated *service* layer through its new import paths, but most
+//     of the migrated procedures still don't have an integration test
+//     that hits them through `/trpc`. Adding per-router tests is a
+//     follow-up alongside the deferred `branch-status-poller.ts`
+//     migration; the wire-surface invariant for now is enforced by
+//     `mergeRouters`'s structural type-check at build time.
 export const appRouter = t.mergeRouters(
   legacyAppRouter,
   t.router({

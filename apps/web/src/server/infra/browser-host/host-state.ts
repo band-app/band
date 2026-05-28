@@ -9,9 +9,14 @@ const log = createLogger("browser-host");
 // Lives in the infra tier so the CDP adapters that sit next to it
 // (`cdp-proxy.ts`, `cdp-targets.ts`) can import it without crossing back up
 // to the services tier; the services-tier `BrowserHostService` wraps this
-// module for router consumption. Moved out of `services/browser-host.ts`
-// to fix the Tier 3 → Tier 2 layering violation flagged in the Phase 7.5
-// review (issue #517).
+// module for router consumption. Moved from `lib/browser-host.ts` as part
+// of the Phase 7.5 migration (issue #517).
+//
+// Caveat: this module still imports `getBrowser` from `lib/browser-manager`
+// (an infra → legacy-services dependency). `lib/browser-manager` is itself
+// a transitional staging area that Phase 8 (#319) will lift to the proper
+// services tier; we accept the temporary layering wrinkle here so the rest
+// of the Phase 7.5 migration can land in one PR.
 //
 // The web client and the agent address browser tabs by Band's persistent
 // `browser_<uuid>` id (bandTabId). To actually drive a tab over CDP we need

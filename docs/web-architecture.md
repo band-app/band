@@ -66,7 +66,7 @@ apps/web/src/server/
     settings-service.ts
     tunnel-service.ts
     editor-service.ts        # LSP + file watch + format orchestration
-    browser-host.ts          # CDP proxy + target list
+    browser-host-service.ts  # CDP proxy + target list (wraps infra/browser-host/)
     cli.ts                   # band-CLI binary resolver + symlink installer
     cli-skills.ts            # render + install agent skill templates
     hooks.ts                 # ~/.claude/settings.json read/write
@@ -100,6 +100,9 @@ apps/web/src/server/
     browser-host/
       cdp-proxy.ts           # Chrome DevTools Protocol proxy
       cdp-targets.ts         # CDP target discovery
+      host-state.ts          # bandTabId ↔ cdpTargetId mapping + ensure-view
+    process/
+      path.ts                # interactive-shell $PATH + which-binary helpers
 ```
 
 ## Tier 1: API (Routers)

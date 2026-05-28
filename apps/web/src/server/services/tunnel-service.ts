@@ -17,13 +17,16 @@ export class TunnelService {
    * if the tunnel is already running, the existing URL is re-emitted to
    * SSE listeners and the call returns immediately.
    *
-   * Reads `BAND_PORT` from `process.env`; that value is stamped by the
-   * server boot path (`start-server.ts`) once `listenWithFallback` knows
-   * which port actually got claimed. The default `3456` matches the
-   * historical value used by the desktop shell.
+   * Callers that already know which port the web server claimed (e.g.
+   * `start-server.ts` after `listenWithFallback`) should pass it
+   * explicitly via `opts.port`. The fallback reads `BAND_PORT` from
+   * `process.env`, which is stamped by the server boot path for the
+   * benefit of callers that don't have a direct handle on the bound
+   * port. The literal `3456` default matches the historical value
+   * shipped by the desktop shell.
    */
-  async start(): Promise<void> {
-    const port = parseInt(process.env.BAND_PORT || "3456", 10);
+  async start(opts: { port?: number } = {}): Promise<void> {
+    const port = opts.port ?? parseInt(process.env.BAND_PORT || "3456", 10);
     await this.client.start({ port });
   }
 

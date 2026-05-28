@@ -11,9 +11,10 @@ import { execFile } from "node:child_process";
  * `whichBinary` from here so router-facing code continues to import them
  * via the service singleton.
  *
- * Extracted from `lib/process-utils.ts` (and then `services/system-service.ts`)
- * to fix the Tier 3 → Tier 2 layering violation flagged in the Phase 7.5
- * review (issue #517).
+ * Extracted from `lib/process-utils.ts` and parked in the infra tier as
+ * part of the Phase 7.5 migration (issue #517) so infra-tier callers
+ * (tunnel-client, lsp-manager, terminal-pool) can reach it without
+ * crossing back up to services.
  */
 
 let cachedShellPath: string | null = null;

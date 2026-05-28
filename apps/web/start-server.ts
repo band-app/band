@@ -1054,7 +1054,7 @@ async function main() {
       if (settings.autoStartTunnel) {
         try {
           const prereqs = await systemService.checkPrereqs();
-          if (prereqs.cloudflared) await tunnelService.start();
+          if (prereqs.cloudflared) await tunnelService.start({ port: boundPort });
         } catch (err) {
           console.error("Failed to auto-start tunnel:", err);
         }
