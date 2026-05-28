@@ -57,13 +57,10 @@ const MAX_LABEL_VALUE_LENGTH = 256;
 
 /** Regex for valid label keys: alphanumerics, `_`, `:`, `-`; 1-64 chars.
  *
- * The hyphen is escaped (`\-`) rather than relying on its end-of-class
- * literal position. Functionally identical today, but if the regex is ever
- * rewritten with the `u` flag (which makes most ranges stricter), an
- * unescaped trailing `-` between `:` and the closing `]` is more likely
- * to be misread by a future maintainer than to actually break — flipping
- * the order of `_`, `:`, `-` would silently turn the class into a range.
- * Escaping makes the literal intent obvious. */
+ * The hyphen sits at the end of the character class as a literal —
+ * Biome's `noUselessEscapeInRegex` rule prohibits writing it as `\-`.
+ * Reordering the `_`, `:`, `-` triple would silently turn the class
+ * into a range, so keep the hyphen last. */
 const LABEL_KEY_REGEX = /^[a-zA-Z0-9_:-]{1,64}$/;
 
 /** Printable-ASCII regex used to validate label values. */
@@ -445,8 +442,12 @@ export class ChatService {
     // Log only which fields changed, not their values: users may use labels
     // (256-char printable strings) as ad-hoc context (env=prod, branch=...)
     // that we shouldn't dump into logs. Names/agents/models are also values
-    // that don't need to be in info-level logs to be debuggable.
-    log.info({ chatId, updatedFields: Object.keys(updates) }, "chat pane updated");
+    // that don't need to be in info-level logs to be debuggable. The
+    // internal-only `allowReservedLabels` escape hatch (set by the cronjob
+    // scheduler) is filtered out so it doesn't leak into operator logs as
+    // a phantom "field change".
+    const updatedFields = Object.keys(updates).filter((k) => k !== "allowReservedLabels");
+    log.info({ chatId, updatedFields }, "chat pane updated");
     return merged;
   }
 
