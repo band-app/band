@@ -135,10 +135,7 @@ function serializeState(row: {
  * wrong shape — which would already show up as a type error at the call
  * site.
  */
-export function parseLabels(
-  raw: string | null | undefined,
-  chatId?: string,
-): Record<string, string> {
+function parseLabels(raw: string | null | undefined, chatId?: string): Record<string, string> {
   if (!raw) return {};
   try {
     const parsed = JSON.parse(raw);
@@ -171,7 +168,7 @@ export function parseLabels(
  * (e.g. `"{}"` for explicitly cleared, `NULL` for never-set) or a
  * separate column rather than re-encoding it onto this one.
  */
-export function serializeLabels(labels: Record<string, string>): string | null {
+function serializeLabels(labels: Record<string, string>): string | null {
   if (!labels || Object.keys(labels).length === 0) return null;
   return JSON.stringify(labels);
 }

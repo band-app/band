@@ -139,6 +139,12 @@ export class BrowserService {
   /**
    * Create a new browser tab for a workspace.
    * Persists to panel_states and adds to in-memory registry.
+   *
+   * Intentionally bypasses `ensureInitialized()` — mirrors `ChatService.create`.
+   * `create` is a pure write-through and the on-boot "all statuses reset to
+   * idle" guarantee only matters for callers that read existing rows. Every
+   * public read (`get`/`list`) lazily initializes, so a write-only sequence
+   * still observes the reset before the first read.
    */
   create(workspaceId: string, options?: CreateBrowserOptions): BrowserTab {
     const now = Date.now();

@@ -313,12 +313,10 @@ export class ChatService {
    *
    * Intentionally bypasses `ensureInitialized()` — `create` is a pure
    * write-through and the on-boot "all statuses reset to idle" guarantee
-   * only matters for callers that read existing rows. Production boot
-   * (`start-server.ts`) calls `loadFromDb()` explicitly before any client
-   * traffic, and every public read (`get`/`list`/`findByLabels`) lazily
-   * initializes for dev/test paths, so a write-only sequence (CLI `band
-   * chats create` followed straight by `submitTask`) still observes the
-   * reset before the first read.
+   * only matters for callers that read existing rows. Every public read
+   * (`get`/`list`/`findByLabels`) lazily initializes, so a write-only
+   * sequence (CLI `band chats create` followed straight by `submitTask`)
+   * still observes the reset before the first read.
    */
   create(workspaceId: string, options?: CreateChatOptions): ChatSession {
     const defaultAgent = settingsService.getAgentDefinition();
