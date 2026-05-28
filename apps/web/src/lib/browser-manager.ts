@@ -50,7 +50,11 @@ export function updateBrowserStatus(browserId: string, status: BrowserStatus): v
 }
 
 export function removeBrowser(browserId: string): boolean {
-  return browserService.remove(browserId);
+  // `browserService.remove` returns the removed `BrowserTab` (truthy) or
+  // `false` when no row matched. The shim's historical contract is a plain
+  // boolean, so coerce — callers that need the workspaceId should migrate
+  // to `browserService.remove` directly.
+  return browserService.remove(browserId) !== false;
 }
 
 export function removeWorkspaceBrowsers(workspaceId: string): void {

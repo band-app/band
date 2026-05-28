@@ -193,6 +193,7 @@ export class BrowserService {
    * Update a browser tab's configuration.
    */
   update(browserId: string, updates: UpdateBrowserOptions): BrowserTab | undefined {
+    this.ensureInitialized();
     const tab = this.browserTabs.get(browserId);
     if (!tab) return undefined;
 
@@ -214,6 +215,7 @@ export class BrowserService {
    * Called when the browser navigates (from frontend or CLI).
    */
   updateUrl(browserId: string, url: string): void {
+    this.ensureInitialized();
     const tab = this.browserTabs.get(browserId);
     if (!tab) return;
     const merged = this.queries.update(browserId, tab, {
@@ -227,6 +229,7 @@ export class BrowserService {
    * Update a browser tab's status.
    */
   updateStatus(browserId: string, status: BrowserStatus): void {
+    this.ensureInitialized();
     const tab = this.browserTabs.get(browserId);
     if (!tab) return;
     const merged = this.queries.update(browserId, tab, {
@@ -244,8 +247,14 @@ export class BrowserService {
    * API tier has to remember to do as a second step. Keeps the two pane
    * domains symmetric so callers (the tRPC router today, future direct
    * `browserService.remove` callers tomorrow) get the same one-call cleanup.
+   *
+   * Returns the removed `BrowserTab` snapshot (carrying the workspaceId) so
+   * the API tier can emit a lifecycle event without a separate `get()` pre-
+   * read — which would otherwise be a TOCTOU race against a concurrent
+   * `remove`. Returns `false` when no row matched.
    */
-  remove(browserId: string): boolean {
+  remove(browserId: string): BrowserTab | false {
+    this.ensureInitialized();
     const tab = this.browserTabs.get(browserId);
     if (!tab) return false;
 
@@ -261,7 +270,7 @@ export class BrowserService {
     this.removeFromIndex(browserId);
 
     log.info({ browserId, workspaceId: tab.workspaceId }, "browser tab removed");
-    return true;
+    return tab;
   }
 
   /**

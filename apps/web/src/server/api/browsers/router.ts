@@ -102,14 +102,14 @@ export const browsersRouter = t.router({
 
   remove: publicProcedure.input(z.object({ browserId: z.string() })).mutation(({ input }) => {
     // `browserService.remove` handles DB + layout + in-memory cleanup in
-    // one call (mirrors `chatService.remove`). The pre-remove `get` is
-    // only here to carry the workspaceId into the lifecycle event so any
-    // open dashboard can sync without re-fetching.
-    const browser = browserService.get(input.browserId);
-    browserService.remove(input.browserId);
+    // one call (mirrors `chatService.remove`) and returns the removed tab
+    // so we can carry its `workspaceId` into the lifecycle event without
+    // a pre-remove `get()` — a separate read would race with concurrent
+    // deletes and could surface `workspaceId: undefined` on the event.
+    const removed = browserService.remove(input.browserId);
     emit({
       kind: "browser-removed",
-      workspaceId: browser?.workspaceId,
+      workspaceId: removed === false ? undefined : removed.workspaceId,
       browserId: input.browserId,
     });
     return { ok: true };

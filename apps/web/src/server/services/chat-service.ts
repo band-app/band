@@ -389,6 +389,7 @@ export class ChatService {
    * Update a chat pane's configuration.
    */
   update(chatId: string, updates: UpdateChatOptions): ChatSession | undefined {
+    this.ensureInitialized();
     const session = this.chatSessions.get(chatId);
     if (!session) return undefined;
 
@@ -455,6 +456,7 @@ export class ChatService {
    * Update a chat pane's status.
    */
   updateStatus(chatId: string, status: ChatStatus): void {
+    this.ensureInitialized();
     const session = this.chatSessions.get(chatId);
     if (!session) return;
     const merged = this.queries.update(chatId, session, {
@@ -470,6 +472,7 @@ export class ChatService {
    * provided) the cached title/mtime so first paint avoids a filesystem walk.
    */
   updateActiveSession(chatId: string, update: string | undefined | ActiveSessionUpdate): void {
+    this.ensureInitialized();
     const session = this.chatSessions.get(chatId);
     if (!session) return;
 
@@ -505,6 +508,7 @@ export class ChatService {
     summary: string | undefined,
     lastModified: number | undefined,
   ): boolean {
+    this.ensureInitialized();
     const session = this.chatSessions.get(chatId);
     if (!session) return false;
     // Stale write guard: only apply if the cached row still references the
@@ -532,6 +536,7 @@ export class ChatService {
    * so any open dashboard can sync its dockview.
    */
   remove(chatId: string): boolean {
+    this.ensureInitialized();
     const session = this.chatSessions.get(chatId);
     if (!session) return false;
 
