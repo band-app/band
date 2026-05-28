@@ -29,7 +29,12 @@ export function findCliBinaryAt(opts: { cwd: string; dirname: string }): string 
     resolve(cwd, ".."),
     // cwd = project root (fallback)
     resolve(cwd, "apps"),
-    // From this source file (apps/web/src/lib/ → apps/)
+    // From this source file in dev (apps/web/src/server/services/ → apps/)
+    resolve(dirname, "..", "..", "..", ".."),
+    // From the bundled `dist/` file (<Resources>/web/dist/ → <Resources>/)
+    // — included so a future cargo-target layout under <Resources>/cli/
+    // would still resolve. Harmless in the current Electron bundle where
+    // the binary actually lives under `binaries/` (handled by Strategy B).
     resolve(dirname, "..", "..", ".."),
   ];
 

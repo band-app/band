@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createFrameParser, frameMessage } from "../src/lib/lsp-proxy";
+import { createFrameParser, frameMessage } from "../src/server/infra/lsp/lsp-proxy";
 
 // ---------------------------------------------------------------------------
 // Content-Length framing tests

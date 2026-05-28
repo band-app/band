@@ -1,6 +1,6 @@
 /**
  * Integration tests for the CLI skills sync that runs as part of
- * `runFirstTimeSetup` (apps/web/src/lib/setup.ts → ensureSkillsInstalled).
+ * `runFirstTimeSetup` (apps/web/src/server/services/setup.ts → ensureSkillsInstalled).
  *
  * Black-box: drives the public `runFirstTimeSetup` / `installSkills`
  * entry points with a sandboxed $HOME / $BAND_HOME, then asserts on the
@@ -32,8 +32,8 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { findBandBinary } from "../src/lib/cli-skills";
 import { closeDb } from "../src/server/infra/db/connection";
+import { findBandBinary } from "../src/server/services/cli-skills";
 
 const SKILL_NAMES = [
   "band",
@@ -176,7 +176,7 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
 
   it("writes every CLI skill into the shared ~/.agents/skills/<name>/SKILL.md", async () => {
     expect(bandBinary, "band binary must be resolvable for this suite").not.toBeNull();
-    const { runFirstTimeSetup } = await import("../src/lib/setup");
+    const { runFirstTimeSetup } = await import("../src/server/services/setup");
     await runFirstTimeSetup();
 
     const sharedDir = join(process.env.HOME!, ".agents", "skills");
@@ -195,7 +195,7 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
   });
 
   it("creates a directory symlink at ~/.claude/skills/<name> → ~/.agents/skills/<name>", async () => {
-    const { runFirstTimeSetup } = await import("../src/lib/setup");
+    const { runFirstTimeSetup } = await import("../src/server/services/setup");
     await runFirstTimeSetup();
 
     const home = process.env.HOME!;
@@ -220,7 +220,7 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
   });
 
   it("is a no-op on the second invocation when nothing has changed", async () => {
-    const { runFirstTimeSetup } = await import("../src/lib/setup");
+    const { runFirstTimeSetup } = await import("../src/server/services/setup");
     await runFirstTimeSetup();
 
     const sharedDir = join(process.env.HOME!, ".agents", "skills");
@@ -251,7 +251,7 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
   });
 
   it("overwrites a shared destination whose content drifted from the shipped version", async () => {
-    const { runFirstTimeSetup } = await import("../src/lib/setup");
+    const { runFirstTimeSetup } = await import("../src/server/services/setup");
 
     // Pre-create a tampered SKILL.md in the *shared* location before the
     // first sync. The agent-level symlink isn't there yet on this test
@@ -271,7 +271,7 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
   });
 
   it("does not write outside the sandboxed HOME", async () => {
-    const { runFirstTimeSetup } = await import("../src/lib/setup");
+    const { runFirstTimeSetup } = await import("../src/server/services/setup");
     await runFirstTimeSetup();
 
     expect(process.env.HOME!.startsWith(tmp), "HOME points inside the test tmpdir").toBe(true);
@@ -289,7 +289,7 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
     mkdirSync(join(home, ".gemini"), { recursive: true });
     mkdirSync(join(home, ".config", "opencode"), { recursive: true });
 
-    const { installSkills } = await import("../src/lib/cli-skills");
+    const { installSkills } = await import("../src/server/services/cli-skills");
     const result = await installSkills({ home });
 
     const sharedDir = join(home, ".agents", "skills");
@@ -318,7 +318,7 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
     // Only ~/.claude exists (created by beforeEach). Codex / OpenCode /
     // Gemini config dirs don't, so those agents should be skipped.
     const home = process.env.HOME!;
-    const { installSkills } = await import("../src/lib/cli-skills");
+    const { installSkills } = await import("../src/server/services/cli-skills");
     const result = await installSkills({ home });
 
     expect(existsSync(join(home, ".claude", "skills", "band"))).toBe(true);
@@ -336,7 +336,7 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
     const originalCodexHome = process.env.CODEX_HOME;
     process.env.CODEX_HOME = customCodexHome;
     try {
-      const { installSkills } = await import("../src/lib/cli-skills");
+      const { installSkills } = await import("../src/server/services/cli-skills");
       const result = await installSkills({ home: process.env.HOME! });
 
       for (const name of SKILL_NAMES) {
@@ -362,7 +362,7 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
   });
 
   it("leaves a correct existing symlink untouched (idempotent on re-run)", async () => {
-    const { installSkills } = await import("../src/lib/cli-skills");
+    const { installSkills } = await import("../src/server/services/cli-skills");
     await installSkills({ home: process.env.HOME! });
 
     const link = join(process.env.HOME!, ".claude", "skills", "band");
@@ -387,7 +387,7 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
     const link = join(claudeSkills, "band");
     symlinkSync(decoy, link, "dir");
 
-    const { installSkills } = await import("../src/lib/cli-skills");
+    const { installSkills } = await import("../src/server/services/cli-skills");
     const result = await installSkills({ home });
 
     // Conflict reported, link untouched, shared dir still populated.
@@ -420,7 +420,7 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
     // but explicit makes the intent clear.)
     rmSync(join(home, ".agents", "skills", "band"), { recursive: true, force: true });
 
-    const { installSkills } = await import("../src/lib/cli-skills");
+    const { installSkills } = await import("../src/server/services/cli-skills");
     const result = await installSkills({ home });
 
     // realpathSync on a dangling symlink fails, which the implementation
@@ -446,7 +446,7 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
     const userFile = join(realDir, "SKILL.md");
     writeFileSync(userFile, "# user-authored band skill\n", "utf-8");
 
-    const { installSkills } = await import("../src/lib/cli-skills");
+    const { installSkills } = await import("../src/server/services/cli-skills");
     const result = await installSkills({ home });
 
     expect(result.conflicts.some((c) => c.startsWith(realDir))).toBe(true);
@@ -460,7 +460,7 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
     // Wipe the only config dir beforeEach created so nothing is detected.
     rmSync(join(process.env.HOME!, ".claude"), { recursive: true, force: true });
 
-    const { installSkills } = await import("../src/lib/cli-skills");
+    const { installSkills } = await import("../src/server/services/cli-skills");
     const result = await installSkills({ home: process.env.HOME! });
 
     // Shared files are still written (they're useful on their own).
@@ -478,7 +478,7 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
     // installed. Because cursor-cli isn't in `SUPPORTED_AGENT_TYPES`,
     // detection should still skip it.
     mkdirSync(join(process.env.HOME!, ".cursor"), { recursive: true });
-    const { installSkills } = await import("../src/lib/cli-skills");
+    const { installSkills } = await import("../src/server/services/cli-skills");
     const result = await installSkills({ home: process.env.HOME! });
 
     expect(existsSync(join(process.env.HOME!, ".cursor", "skills"))).toBe(false);

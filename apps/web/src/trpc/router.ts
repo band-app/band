@@ -1,14 +1,11 @@
-import { execFile, spawn } from "node:child_process";
-import { existsSync, constants as fsConstants, realpathSync, statSync } from "node:fs";
-import { cp, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
+import { spawn } from "node:child_process";
+import { existsSync, realpathSync } from "node:fs";
+import { cp, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { dirname, extname, join, resolve, sep } from "node:path";
 import { createLogger } from "@band-app/logger";
 import { TRPCError } from "@trpc/server";
 import { rgPath } from "@vscode/ripgrep";
 import { z } from "zod";
-import { formatFileLocation, toWorkspaceId } from "@/dashboard";
-import { getActiveWorkspace, setActiveWorkspace } from "../lib/active-workspace";
-import { getPollerActivity, setPollerActivity } from "../lib/branch-status-poller";
 import {
   type ClearRange,
   clearHistory,
@@ -18,21 +15,9 @@ import {
   searchHistory,
   updateVisitMeta,
 } from "../lib/browser-history-store";
-import {
-  type EnsureViewEvent,
-  markTargetDestroyed,
-  onEnsureView,
-  resolveTargetReady,
-} from "../lib/browser-host";
-import { getChat, getOrCreateDefaultChat, updateChat } from "../lib/chat-manager";
-import { checkCli, installCli, resolveCliPaths } from "../lib/cli";
-import { duBytes } from "../lib/disk-usage";
-import { subscribeToFileChanges } from "../lib/file-watcher";
-import { FormatterError, formatFile } from "../lib/formatter";
+import { getOrCreateDefaultChat, updateChat } from "../lib/chat-manager";
 import { fuzzyScore } from "../lib/fuzzy-score";
-import { execGit, listWorktrees } from "../lib/git";
-import { checkHooks, installHooks } from "../lib/hooks";
-import { checkPrereqs, shellPath } from "../lib/process-utils";
+import { execGit } from "../lib/git";
 import {
   clearQueuedMessages,
   getQueuedMessages,
@@ -50,25 +35,16 @@ import {
   getAgentDefinition,
   getWorkspaceStatus,
   loadSettings,
-  loadState,
   upsertWorkspaceStatus,
 } from "../lib/state";
-import { getTunnelStatus, startTunnel, stopTunnel } from "../lib/tunnel";
 import { saveUploadedFilesDetailed } from "../lib/upload-utils";
-import { emit, subscribe as subscribeStatus } from "../lib/watcher";
+import { emit } from "../lib/watcher";
 import { resolveWorkspace } from "../lib/workspace";
 import { publicProcedure, t } from "../server/api/trpc";
-import {
-  createMetadataAgent,
-  createWorkspaceAgent,
-  getOrCreateAgent,
-  replaceAgent,
-} from "../server/infra/agents/agent-pool";
-import {
-  abortTask,
-  hasPendingInputForWorkspace,
-  resolvePendingInput,
-} from "../server/services/task-service";
+import { createWorkspaceAgent, replaceAgent } from "../server/infra/agents/agent-pool";
+import { subscribeToFileChanges } from "../server/services/file-watcher";
+import { FormatterError, formatFile } from "../server/services/formatter";
+import { abortTask, resolvePendingInput } from "../server/services/task-service";
 import { terminalService } from "../server/services/terminal-service";
 
 const log = createLogger("trpc");
@@ -97,50 +73,13 @@ const log = createLogger("trpc");
 // router from `server/api/router.ts` so the wire shape is unchanged.
 // ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// Hooks
-// ---------------------------------------------------------------------------
-
-const hooksRouter = t.router({
-  check: publicProcedure.query(async () => {
-    return await checkHooks();
-  }),
-
-  install: publicProcedure.mutation(async () => {
-    try {
-      await installHooks();
-      return { ok: true };
-    } catch (err) {
-      throw new Error(err instanceof Error ? err.message : String(err));
-    }
-  }),
-});
-
-// ---------------------------------------------------------------------------
-// CLI
-// ---------------------------------------------------------------------------
-
-const cliRouter = t.router({
-  check: publicProcedure.query(async () => {
-    const status = await checkCli();
-    return { status };
-  }),
-
-  resolve: publicProcedure.query(() => {
-    return resolveCliPaths();
-  }),
-
-  install: publicProcedure
-    .input(z.object({ allowPrompt: z.boolean().optional() }).optional())
-    .mutation(async ({ input }) => {
-      try {
-        await installCli({ allowPrompt: input?.allowPrompt });
-        return { ok: true };
-      } catch (err) {
-        throw new Error(err instanceof Error ? err.message : String(err));
-      }
-    }),
-});
+// `hooks.*` migrated to `server/api/hooks/router.ts` (and the
+// `~/.claude/settings.json` reader/writer at `services/hooks.ts`) as part
+// of Phase 7.5 (issue #517).
+//
+// `cli.*` migrated to `server/api/cli/router.ts` (and the band-CLI binary
+// resolver + symlink installer at `services/cli.ts`) as part of Phase 7.5
+// (issue #517).
 
 // ---------------------------------------------------------------------------
 // Workspace (file operations)
@@ -1523,220 +1462,17 @@ const workspaceRouter = t.router({
     }),
 });
 
-// ---------------------------------------------------------------------------
-// Host (external file operations — outside any workspace root)
-// ---------------------------------------------------------------------------
+// `host.*` (external file read/save outside any workspace root) migrated to
+// `server/api/browser-host/router.ts` as part of Phase 7.5 (issue #517) —
+// shares a file with `browserHost.*` because both belong to the desktop's
+// host bridge.
 
-/**
- * Read/write files identified by an absolute filesystem path, with no
- * workspace-root containment check. Backs the editor's "Open File…"
- * action: users pick a file via the desktop file picker and edit it
- * in a Band editor tab even though it sits outside the current
- * workspace.
- *
- * Security model:
- *   - The `band_token` cookie/header is enforced at the transport
- *     layer (see start-server.ts), so only the local desktop user
- *     can call these procedures.
- *   - These procedures intentionally bypass the workspace-relative
- *     path traversal guard used by `workspace.getFile` /
- *     `workspace.saveFile`. The renderer is expected to source paths
- *     from the OS file picker, but the server cannot prove that — a
- *     bearer of the token can call `host.saveFile` with any absolute
- *     path. This matches the existing trust boundary of the dashboard
- *     (which already gives the token holder read/write across every
- *     registered worktree) and is acceptable for a single-user
- *     personal-tool model.
- *   - Symlinks are rejected. `stat()` follows symlinks, so a symlink
- *     to `/etc/passwd` (or similar) would satisfy `isFile()` and we'd
- *     happily read/write the target. Open paths with `O_NOFOLLOW` so
- *     the kernel itself refuses to traverse a symlink, eliminating
- *     the TOCTOU window between an `lstat()` check and the subsequent
- *     read/write (an attacker swapping the file for a symlink between
- *     those two syscalls would otherwise slip through).
- *   - Inputs must be absolute paths to regular files. Directories,
- *     symlinks, sockets, devices, FIFOs are all rejected.
- *
- * Cross-platform note: `O_NOFOLLOW` is available on macOS/Linux (the
- * platforms Band's `package.json` declares); Windows lacks a direct
- * equivalent and is explicitly out of scope here.
- */
-function mapFsError(err: unknown): Error {
-  const code = (err as NodeJS.ErrnoException).code;
-  if (code === "ENOENT") return new Error("File not found");
-  if (code === "ELOOP") return new Error("Symbolic links are not allowed");
-  if (code === "EACCES" || code === "EPERM") return new Error("Permission denied");
-  if (code === "EISDIR") return new Error("Cannot operate on a directory");
-  return err as Error;
-}
+// `tunnel.*` migrated to `server/api/tunnel/router.ts` (and the cloudflared
+// process management at `services/tunnel-service.ts` /
+// `infra/tunnels/tunnel-client.ts`) as part of Phase 7.5 (issue #517).
 
-const hostRouter = t.router({
-  readFile: publicProcedure
-    .input(z.object({ absolutePath: z.string().min(1) }))
-    .query(async ({ input }) => {
-      const target = input.absolutePath;
-      if (!isAbsolute(target)) {
-        throw new Error("Absolute path required");
-      }
-
-      // O_RDONLY | O_NOFOLLOW: refuse to traverse a symlink. The kernel
-      // returns ELOOP if the final path component is a symlink, which
-      // we surface as "Symbolic links are not allowed" via mapFsError.
-      let fh: Awaited<ReturnType<typeof open>>;
-      try {
-        fh = await open(target, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
-      } catch (err) {
-        throw mapFsError(err);
-      }
-      try {
-        const stats = await fh.stat();
-        if (stats.isDirectory()) {
-          throw new Error("Cannot operate on a directory");
-        }
-        if (!stats.isFile()) {
-          throw new Error("Not a regular file");
-        }
-        const size = stats.size;
-
-        if (size > MAX_FILE_SIZE) {
-          return { tooLarge: true as const, size };
-        }
-
-        // Sample the first 8KB to detect binary content before allocating
-        // a buffer for the full file. For a binary file that's the whole
-        // story; for a text file we then read the rest.
-        const sampleLen = Math.min(8192, size);
-        const sample = Buffer.alloc(sampleLen);
-        if (sampleLen > 0) {
-          await fh.read(sample, 0, sampleLen, 0);
-          if (sample.includes(0)) {
-            return { binary: true as const, size };
-          }
-        }
-
-        const buffer = await fh.readFile();
-        const ext = extname(target).toLowerCase();
-        const language = LANG_MAP[ext];
-
-        return {
-          content: buffer.toString("utf-8"),
-          size,
-          language,
-        };
-      } finally {
-        await fh.close();
-      }
-    }),
-
-  saveFile: publicProcedure
-    .input(
-      z.object({
-        absolutePath: z.string().min(1),
-        // Match the read-side cap so a misbehaving client can't fill
-        // disk via the save endpoint while the read endpoint refuses
-        // anything that wide.
-        content: z.string().max(MAX_FILE_SIZE),
-      }),
-    )
-    .mutation(async ({ input }) => {
-      const target = input.absolutePath;
-      if (!isAbsolute(target)) {
-        throw new Error("Absolute path required");
-      }
-
-      // O_WRONLY | O_TRUNC | O_NOFOLLOW: open the existing file
-      // exclusively for writing (no symlink traversal, no follow-up
-      // syscall window for an attacker to swap a symlink in). Crucially
-      // we do NOT pass O_CREAT — saveFile is a write-back of an
-      // existing file, not a create.
-      let fh: Awaited<ReturnType<typeof open>>;
-      try {
-        fh = await open(
-          target,
-          fsConstants.O_WRONLY | fsConstants.O_TRUNC | fsConstants.O_NOFOLLOW,
-        );
-      } catch (err) {
-        throw mapFsError(err);
-      }
-      try {
-        const stats = await fh.stat();
-        if (stats.isDirectory()) {
-          throw new Error("Cannot operate on a directory");
-        }
-        if (!stats.isFile()) {
-          throw new Error("Not a regular file");
-        }
-        await fh.writeFile(input.content, "utf-8");
-      } finally {
-        await fh.close();
-      }
-
-      return { ok: true };
-    }),
-});
-
-// ---------------------------------------------------------------------------
-// Tunnel
-// ---------------------------------------------------------------------------
-
-const tunnelRouter = t.router({
-  status: publicProcedure.query(() => {
-    return getTunnelStatus();
-  }),
-
-  start: publicProcedure.input(z.object({}).optional()).mutation(async () => {
-    log.debug("tunnel.start called");
-    const port = parseInt(process.env.BAND_PORT || "3456", 10);
-    log.debug("tunnel.start: port=%d", port);
-    try {
-      await startTunnel({ port });
-    } catch (err) {
-      log.debug({ err }, "tunnel.start: startTunnel failed");
-      return { ok: true, url: null as string | null };
-    }
-    const status = getTunnelStatus();
-    log.debug({ status }, "tunnel.start: after startTunnel");
-    if (status.url) {
-      return { ok: true, url: status.url };
-    }
-    log.debug("tunnel.start: no URL available");
-    return { ok: true, url: null as string | null };
-  }),
-
-  stop: publicProcedure.mutation(async () => {
-    await stopTunnel();
-    return { ok: true };
-  }),
-});
-
-// ---------------------------------------------------------------------------
-// Prerequisites
-// ---------------------------------------------------------------------------
-
-const prereqsRouter = t.router({
-  check: publicProcedure.query(async () => {
-    return await checkPrereqs();
-  }),
-
-  installTunnel: publicProcedure.mutation(async () => {
-    const resolvedPath = await shellPath();
-    await new Promise<void>((resolve, reject) => {
-      execFile(
-        "brew",
-        ["install", "cloudflared"],
-        { env: { ...process.env, PATH: resolvedPath }, timeout: 120_000 },
-        (err, _stdout, stderr) => {
-          if (err) {
-            reject(new Error(stderr || err.message));
-            return;
-          }
-          resolve();
-        },
-      );
-    });
-    return { ok: true };
-  }),
-});
+// `prereqs.*` migrated to `server/api/prereqs/router.ts` as part of
+// Phase 7.5 (issue #517).
 
 // ---------------------------------------------------------------------------
 // Tasks — migrated to `server/api/tasks/router.ts` (Phase 6, issue #317).
@@ -1760,425 +1496,15 @@ const prereqsRouter = t.router({
 // tail in a single subscription. See `docs/experiments/chat-event-log.md`.
 // ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// Services
-// ---------------------------------------------------------------------------
+// `services.*` migrated to `server/api/system/router.ts` (the internal
+// name is `systemRouter` to follow the 3-tier convention, but it's
+// mounted under the public `services` key in `server/api/router.ts` so
+// every existing client keeps calling `trpc.services.*` without change)
+// as part of Phase 7.5 (issue #517).
 
-const servicesRouter = t.router({
-  health: publicProcedure.query(() => {
-    log.debug("services.health called");
-    const tunnel = getTunnelStatus();
-    log.debug({ tunnel }, "services.health: tunnel status");
-
-    const result = {
-      webserver: true,
-      tunnel: tunnel.running,
-      tunnel_url: tunnel.url,
-    };
-    log.debug({ result }, "services.health result");
-    return result;
-  }),
-  // Activity level controls how often the branch-status poller fires.
-  // Driven by the Electron main process based on window focus + power state.
-  // See `apps/desktop/src/main/services/activity-monitor.ts`.
-  setActivity: publicProcedure
-    .input(z.object({ activity: z.enum(["active", "idle", "background"]) }))
-    .mutation(({ input }) => {
-      setPollerActivity(input.activity);
-      return { activity: input.activity };
-    }),
-  getActivity: publicProcedure.query(() => ({ activity: getPollerActivity() })),
-  // Resources dashboard — server CPU/memory snapshot (cheap, instant).
-  // `process.cpuUsage()` is cumulative since process start; the UI labels
-  // it "Total CPU time" so callers don't read it as instantaneous load.
-  resourcesServer: publicProcedure.query(() => {
-    const mem = process.memoryUsage();
-    const cpu = process.cpuUsage();
-    return {
-      pid: process.pid,
-      uptimeSeconds: process.uptime(),
-      nodeVersion: process.version,
-      platform: process.platform,
-      arch: process.arch,
-      memory: {
-        rssBytes: mem.rss,
-        heapTotalBytes: mem.heapTotal,
-        heapUsedBytes: mem.heapUsed,
-        externalBytes: mem.external,
-        arrayBuffersBytes: mem.arrayBuffers,
-      },
-      cpu: {
-        userMicros: cpu.user,
-        systemMicros: cpu.system,
-      },
-    };
-  }),
-  // Resources dashboard — list every tracked git project + its
-  // worktree paths *without* doing any disk walks. Instant: just
-  // reads state + a single `git worktree list --porcelain` per
-  // project (in parallel). The client uses this to paint rows
-  // immediately, then fetches each project's size individually
-  // via `resourcesProjectSize` so the slow `du` work is amortised
-  // and observable per-row.
-  resourcesProjects: publicProcedure.query(async () => {
-    const state = loadState();
-    const projects = await Promise.all(
-      state.projects
-        .filter((p) => p.kind === "git")
-        .map(async (project) => {
-          try {
-            const list = await listWorktrees(project.path);
-            // `listWorktrees` guarantees a non-empty branch for non-bare
-            // worktrees: detached HEADs (mid-rebase, mid-bisect, or
-            // explicit `git checkout <sha>`) are labelled with the
-            // rebase head-name when available, otherwise
-            // `detached-<short-sha>`. So every row here has a real
-            // label and gets counted in the disk accounting.
-            const worktrees = list
-              .filter((wt) => !wt.isBare)
-              .map((wt) => ({ branch: wt.branch, path: wt.path }));
-            return {
-              project: project.name,
-              path: project.path,
-              worktrees,
-              error: undefined as string | undefined,
-            };
-          } catch (err) {
-            return {
-              project: project.name,
-              path: project.path,
-              worktrees: [] as { branch: string; path: string }[],
-              error: err instanceof Error ? err.message : String(err),
-            };
-          }
-        }),
-    );
-    return { projects };
-  }),
-  // Resources dashboard — measure disk usage for a single project.
-  //
-  // Slow: runs `du -sk` once per worktree, in parallel via
-  // Promise.all. The client fan-outs are concurrency-limited so the
-  // server doesn't see a thundering herd of `du` processes from a
-  // single page open. Per-worktree errors are absorbed into the
-  // response (sizeBytes 0, `error` populated) so a single broken
-  // worktree doesn't fail the whole query.
-  resourcesProjectSize: publicProcedure
-    .input(z.object({ project: z.string() }))
-    .query(async ({ input }) => {
-      const state = loadState();
-      const project = state.projects.find((p) => p.name === input.project && p.kind === "git");
-      if (!project) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Project not found" });
-      }
-
-      let worktreePaths: { branch: string; path: string }[];
-      try {
-        const list = await listWorktrees(project.path);
-        // See `resourcesProjects` above — `listWorktrees` already
-        // gives every non-bare worktree a non-empty branch label.
-        worktreePaths = list
-          .filter((wt) => !wt.isBare)
-          .map((wt) => ({ branch: wt.branch, path: wt.path }));
-      } catch (err) {
-        return {
-          project: project.name,
-          sizeBytes: 0,
-          worktrees: [] as Array<{
-            branch: string;
-            path: string;
-            sizeBytes: number;
-            error?: string;
-          }>,
-          error: err instanceof Error ? err.message : String(err),
-        };
-      }
-
-      const worktrees = await Promise.all(
-        worktreePaths.map(async (wt) => {
-          try {
-            const sizeBytes = await duBytes(wt.path);
-            return { branch: wt.branch, path: wt.path, sizeBytes };
-          } catch (err) {
-            return {
-              branch: wt.branch,
-              path: wt.path,
-              sizeBytes: 0,
-              error: err instanceof Error ? err.message : String(err),
-            };
-          }
-        }),
-      );
-
-      worktrees.sort((a, b) => b.sizeBytes - a.sizeBytes);
-      const sizeBytes = worktrees.reduce((sum, wt) => sum + wt.sizeBytes, 0);
-      return { project: project.name, sizeBytes, worktrees };
-    }),
-});
-
-// ---------------------------------------------------------------------------
-// Editor (CLI-driven file open + active-workspace tracking)
-// ---------------------------------------------------------------------------
-
-/**
- * `realpathSync` resolves symlinks but throws ENOENT for paths that don't
- * exist. We need the symlink-resolution part for paths that may or may not
- * exist (e.g. files the user wants to *open* that don't exist yet). Walk
- * up the path until we hit an ancestor that does exist, canonicalize that,
- * then re-append the trailing segments.
- *
- * Returns the input unchanged if no ancestor on disk can be canonicalized
- * (e.g. running on a filesystem mid-delete). Callers fall back to an
- * existence check on the returned value, which produces a clear "file not
- * found" error rather than a confusing IO failure.
- */
-function canonicalizeMaybeMissing(p: string): string {
-  if (existsSync(p)) {
-    try {
-      return realpathSync(p);
-    } catch {
-      return p;
-    }
-  }
-  const parts = p.split(sep);
-  for (let i = parts.length - 1; i > 0; i--) {
-    const prefix = parts.slice(0, i).join(sep) || sep;
-    if (existsSync(prefix)) {
-      try {
-        const canonicalPrefix = realpathSync(prefix);
-        // `path.join` collapses the duplicate separator that arises when
-        // `canonicalPrefix === "/"` (which happens when the walk reaches
-        // `i = 1` — `parts.slice(0, 1).join(sep)` is `""`, falling
-        // through to `sep`). A naive `[..., ...].join(sep)` would
-        // produce `//nonexistent/foo`; functionally equivalent on POSIX
-        // but ugly in error messages.
-        return join(canonicalPrefix, ...parts.slice(i));
-      } catch {
-        return p;
-      }
-    }
-  }
-  return p;
-}
-
-/**
- * Backs the `band open <filePath>` CLI command and the web UI's "I am the
- * currently focused workspace" hint.
- *
- * The web UI calls `editor.setActiveWorkspace` whenever its active workspace
- * changes; the CLI's `band open` reads the same value implicitly via the
- * `openFile` mutation's fallback (`input.workspaceId ?? getActiveWorkspace()`)
- * so the user doesn't need to name the workspace explicitly when firing a
- * file at "wherever I'm currently looking at." The actual open is funnelled
- * through `editor.openFile`, which:
- *   1. Resolves the target workspace (explicit `workspaceId` > active).
- *   2. Validates the file exists and is inside the workspace root —
- *      paths from the CLI can be absolute (resolved against the user's
- *      cwd) or workspace-relative.
- *   3. Emits an `open-file` SSE event so the React shell can navigate
- *      its router to the matching `code/<path>` route.
- *
- * Active-workspace tracking is process-local; the value resets when the
- * web server restarts. That's intentional — no UI mounted → no active
- * workspace, and the next focus event will repopulate it.
- *
- * Security / threat model:
- *   - The `band_token` cookie/header is enforced at the transport layer
- *     (see `start-server.ts`), gating both normal local-server requests
- *     and Band's public tunnel. Only token-bearers can call these
- *     procedures, same constraint as the rest of the router.
- *   - A token-bearer can poison the active-workspace atom via
- *     `setActiveWorkspace` and trigger `openFile` against any workspace
- *     the daemon manages. That's the existing trust boundary: a holder
- *     of the token is already trusted to read/write files via
- *     `workspace.*` and `host.*`, so opening one in the editor is a
- *     proper subset of what they can already do.
- *   - If the desktop ever ships a "share my tunnel without my token"
- *     mode, these (and every other) `publicProcedure` need re-auditing.
- */
-const editorRouter = t.router({
-  // Intentionally no `getActiveWorkspace` query — the only consumer is the
-  // CLI's `band open`, which reads the value implicitly through the
-  // `openFile` fallback in the same round-trip. Adding a separate query
-  // doubles the cost for no benefit.
-
-  setActiveWorkspace: publicProcedure
-    .input(z.object({ workspaceId: z.string().nullable() }))
-    .mutation(({ input }) => {
-      setActiveWorkspace(input.workspaceId);
-      return { ok: true };
-    }),
-
-  openFile: publicProcedure
-    .input(
-      z
-        .object({
-          /**
-           * Workspace to open the file in. When omitted, falls back to the
-           * dashboard's currently active workspace.
-           */
-          workspaceId: z.string().optional(),
-          /**
-           * Either an absolute filesystem path or a workspace-relative
-           * path. Paths inside the workspace root open as normal editor
-           * tabs (the renderer routes to the Files panel via the
-           * `open-file` SSE event; see `dispatchOpenFileEvent`); paths
-           * outside any workspace root open as external tabs (same
-           * surface as desktop Cmd+O / "Open File…"). May include a
-           * trailing line / column suffix in the standard
-           * `path:line[:column]` / `path:line-lineEnd` notation.
-           */
-          filePath: z.string().min(1),
-          line: z.number().int().positive().optional(),
-          lineEnd: z.number().int().positive().optional(),
-          column: z.number().int().positive().optional(),
-          /**
-           * Whether the renderer should bring the dashboard window to the
-           * foreground in addition to navigating to the file. Defaults to
-           * true. Passed through verbatim on the SSE event; the plain web
-           * build ignores it.
-           */
-          focus: z.boolean().optional(),
-        })
-        .refine((v) => !(v.lineEnd !== undefined && v.line === undefined), {
-          message: "lineEnd requires line to be set",
-          path: ["lineEnd"],
-        })
-        .refine((v) => !(v.column !== undefined && v.line === undefined), {
-          message: "column requires line to be set",
-          path: ["column"],
-        })
-        .refine((v) => !(v.line !== undefined && v.lineEnd !== undefined && v.line > v.lineEnd), {
-          message: "lineEnd must be >= line",
-          path: ["lineEnd"],
-        }),
-    )
-    .mutation(({ input }) => {
-      const targetWorkspaceId = input.workspaceId ?? getActiveWorkspace();
-      if (!targetWorkspaceId) {
-        throw new TRPCError({
-          code: "PRECONDITION_FAILED",
-          message:
-            "No active workspace. Open a workspace in the Band dashboard or pass --workspace.",
-        });
-      }
-
-      const workspace = resolveWorkspace(targetWorkspaceId);
-      if (!workspace) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: `Workspace '${targetWorkspaceId}' not found`,
-        });
-      }
-
-      const root = workspace.worktree.path;
-
-      // Resolve the path: absolute paths are taken as-is; relative
-      // paths are resolved against the workspace root.
-      const absoluteTarget = isAbsolute(input.filePath)
-        ? resolve(input.filePath)
-        : resolve(root, input.filePath);
-
-      // Canonicalize the workspace root so symlinked path prefixes
-      // (macOS's `/var/folders` → `/private/var/folders` in particular)
-      // compare equal. The CLI canonicalizes the user's argument before
-      // sending, so a stored worktree path under `/var/...` would
-      // otherwise look "outside" its real location.
-      let canonicalRoot = root;
-      try {
-        canonicalRoot = realpathSync(root);
-      } catch {
-        // worktree may have been deleted out from under us — leave as-is
-      }
-
-      // Canonicalize the user's path the same way. `realpathSync` fails
-      // on missing files, so walk up to the deepest ancestor that does
-      // exist, canonicalize that, then re-append the trailing segments.
-      // That keeps the in-workspace check accurate for paths the user
-      // wants to *create* as well, and sidesteps a confusing IO error
-      // when the real problem is the file is just missing.
-      const canonicalTarget = canonicalizeMaybeMissing(absoluteTarget);
-
-      // `existsSync` is true for directories too. Without the `isFile`
-      // guard, `band open /path/to/some-dir` would pass through to the
-      // renderer as an external "file" and the editor would try to
-      // open the directory as a text buffer. Also covers the
-      // workspace-root edge case (`band open /path/to/workspace`):
-      // a directory there short-circuits before the empty-splat
-      // problem in the renderer.
-      let targetStat: import("node:fs").Stats | null = null;
-      try {
-        targetStat = statSync(canonicalTarget);
-      } catch {
-        // ENOENT or another IO error — surfaced as "File not found"
-        // below, same as a missing path.
-      }
-      if (!targetStat) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: `File not found: ${input.filePath}`,
-        });
-      }
-      if (!targetStat.isFile()) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: `Not a file: ${input.filePath}`,
-        });
-      }
-
-      // Segment-aware containment check (same invariant as the untitled
-      // save flow in CodeBrowserView): a naive `startsWith` would treat
-      // `/a/band-fork/x.ts` as inside `/a/band`.
-      const normalizedRoot = canonicalRoot.replace(/\/+$/, "");
-      const isInside =
-        canonicalTarget === normalizedRoot || canonicalTarget.startsWith(`${normalizedRoot}${sep}`);
-
-      // Two open modes share this procedure:
-      //
-      //   - In-workspace: emit a workspace-relative path so the renderer
-      //     opens it in the workspace's Files panel (same flow as the
-      //     file tree / Quick Open dialog).
-      //   - External: file exists on disk but lives outside the active
-      //     workspace's root. Pass the absolute path through verbatim
-      //     so the FileViewer mounts it as an *external* tab
-      //     (`isExternal: true`), reading via `readExternalFile` and
-      //     skipping LSP / workspace-relative routing. Matches what
-      //     desktop Cmd+O ("Open File…") does — `band open` is just a
-      //     programmatic entrypoint into the same code path.
-      let payloadPath: string;
-      if (isInside) {
-        const relativePath =
-          canonicalTarget === normalizedRoot
-            ? ""
-            : canonicalTarget.slice(normalizedRoot.length + 1);
-        // POSIX separators on the wire — tanstack-router and
-        // `parseFileLocation` both work off `/`-separated paths.
-        payloadPath = relativePath.split(sep).join("/");
-      } else {
-        payloadPath = canonicalTarget;
-      }
-
-      const formatted = formatFileLocation(payloadPath, input.line, {
-        lineEnd: input.lineEnd,
-        column: input.column,
-      });
-
-      emit({
-        kind: "open-file",
-        workspaceId: targetWorkspaceId,
-        filePath: formatted,
-        external: !isInside,
-        focus: input.focus ?? true,
-      });
-
-      return {
-        ok: true,
-        workspaceId: targetWorkspaceId,
-        filePath: formatted,
-        external: !isInside,
-      };
-    }),
-});
+// `editor.*` migrated to `server/api/editor/router.ts` (and the editor
+// domain service at `services/editor-service.ts`) as part of Phase 7.5
+// (issue #517).
 
 // ---------------------------------------------------------------------------
 // Chat
@@ -2199,272 +1525,31 @@ const chatRouter = t.router({
     }),
 });
 
-// ---------------------------------------------------------------------------
-// Statuses
-// ---------------------------------------------------------------------------
+// `statuses.*` migrated to `server/api/statuses/router.ts` as part of
+// Phase 7.5 (issue #517).
 
-const statusesRouter = t.router({
-  get: publicProcedure.input(z.object({ workspaceId: z.string() })).query(({ input }) => {
-    return getWorkspaceStatus(input.workspaceId);
-  }),
-
-  update: publicProcedure
-    .input(
-      z.object({
-        workspaceId: z.string(),
-        agent: z.object({
-          status: z.string(),
-          lastActivity: z.string().optional(),
-        }),
-      }),
-    )
-    .mutation(({ input }) => {
-      const status = upsertWorkspaceStatus(input.workspaceId, input.agent);
-
-      // Emit update directly to SSE listeners
-      emit({ kind: "update", status });
-
-      return { ok: true };
-    }),
-
-  clearNeedsAttention: publicProcedure
-    .input(z.object({ workspaceId: z.string() }))
-    .mutation(({ input }) => {
-      const existing = getWorkspaceStatus(input.workspaceId);
-      if (existing?.agent?.status !== "needs_attention") {
-        if (existing) {
-          emit({ kind: "update", status: existing });
-        }
-        return { ok: true };
-      }
-      // The agent is still blocked on an AskUserQuestion / ExitPlanMode
-      // prompt — the user hasn't answered yet. Don't clear the indicator
-      // just because they navigated to the workspace; the indicator must
-      // stay on until the user actually answers (which calls
-      // resolvePendingInput, and onUserInputNeeded then flips the status
-      // back to "working").
-      if (hasPendingInputForWorkspace(input.workspaceId)) {
-        emit({ kind: "update", status: existing });
-        return { ok: true };
-      }
-      const status = upsertWorkspaceStatus(input.workspaceId, { status: "waiting" });
-      emit({ kind: "update", status });
-      return { ok: true };
-    }),
-
-  resolve: publicProcedure.input(z.object({ cwd: z.string() })).query(({ input }) => {
-    const state = loadState();
-    for (const proj of state.projects) {
-      for (const wt of proj.worktrees) {
-        if (input.cwd === wt.path || input.cwd.startsWith(`${wt.path}/`)) {
-          return { workspaceId: toWorkspaceId(proj.name, wt.branch) };
-        }
-      }
-    }
-    return { workspaceId: null };
-  }),
-});
-
-// ---------------------------------------------------------------------------
-// Status (SSE subscription)
-// ---------------------------------------------------------------------------
-
-const statusRouter = t.router({
-  stream: publicProcedure.subscription(async function* (opts) {
-    type QueueItem = Parameters<Parameters<typeof subscribeStatus>[0]>[0];
-    const queue: QueueItem[] = [];
-    let resolve: (() => void) | null = null;
-
-    const unsubscribe = subscribeStatus((event) => {
-      queue.push(event);
-      resolve?.();
-    });
-
-    opts.signal?.addEventListener("abort", () => {
-      unsubscribe();
-      resolve?.();
-    });
-
-    try {
-      while (!opts.signal?.aborted) {
-        while (queue.length > 0) {
-          yield queue.shift()!;
-        }
-        await new Promise<void>((r) => {
-          resolve = r;
-        });
-        resolve = null;
-      }
-    } finally {
-      unsubscribe();
-    }
-  }),
-});
+// `status.*` migrated to `server/api/statuses/router.ts` as part of Phase 7.5
+// (issue #517). Shares a file with `statuses.*` because the two sub-routers
+// share `lib/watcher` and the same domain.
 
 // Cronjobs have been migrated to `server/api/cronjobs/router.ts` as part of
 // Phase 4 of the 3-tier refactor (issue #315). The sub-router is merged into
 // the public `appRouter` in `server/api/router.ts`; this file no longer
 // declares a `cronjobs` key (see the merge invariant documented there).
 
-// ---------------------------------------------------------------------------
-// Skills
-// ---------------------------------------------------------------------------
+// `skills.*` migrated to `server/api/skills/router.ts` as part of Phase 7.5
+// (issue #517).
 
-const skillsRouter = t.router({
-  list: publicProcedure
-    .input(z.object({ workspaceId: z.string(), chatId: z.string().optional() }))
-    .query(async ({ input }) => {
-      const workspace = resolveWorkspace(input.workspaceId);
-      if (!workspace) {
-        return { skills: [] };
-      }
+// `modes.*` migrated to `server/api/modes/router.ts` as part of Phase 7.5
+// (issue #517).
 
-      const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
-      const chatSession = getChat(chatId);
-      const agent = await getOrCreateAgent(chatId, workspace.worktree.path, chatSession?.agent);
-      if (agent.listSkills) {
-        const skills = await agent.listSkills();
-        return { skills };
-      }
+// `models.*` migrated to `server/api/models/router.ts` as part of Phase 7.5
+// (issue #517).
 
-      return { skills: [] };
-    }),
-});
-
-// ---------------------------------------------------------------------------
-// Modes
-// ---------------------------------------------------------------------------
-
-const modesRouter = t.router({
-  list: publicProcedure
-    .input(z.object({ agentId: z.string().optional() }))
-    .query(async ({ input }) => {
-      const agent = await createMetadataAgent(input.agentId);
-      if (agent.listModes) {
-        return { modes: agent.listModes() };
-      }
-      return { modes: [] };
-    }),
-});
-
-// ---------------------------------------------------------------------------
-// Models
-// ---------------------------------------------------------------------------
-
-const modelsRouter = t.router({
-  list: publicProcedure
-    .input(z.object({ agentId: z.string().optional() }))
-    .query(async ({ input }) => {
-      const agent = await createMetadataAgent(input.agentId);
-      const models = agent.listModels ? await agent.listModels() : [];
-      // Include the agent's configured default model from Band settings
-      const settings = loadSettings();
-      const agentDef = getAgentDefinition(settings, input.agentId);
-      return { models, defaultModel: agentDef.model };
-    }),
-
-  /** List all agents with their models — used by the combined agent/model selector. */
-  listAll: publicProcedure.query(async () => {
-    const settings = loadSettings();
-    const codingAgents = settings.codingAgents ?? [];
-    const defaultAgentId = settings.defaultCodingAgent ?? codingAgents[0]?.id ?? "";
-
-    const agents = await Promise.all(
-      codingAgents.map(async (def) => {
-        try {
-          const agent = await createMetadataAgent(def.id);
-          const models = agent.listModels ? await agent.listModels() : [];
-          return {
-            agentId: def.id,
-            agentType: def.type,
-            agentLabel: def.label,
-            models,
-            defaultModel: def.model,
-          };
-        } catch {
-          return {
-            agentId: def.id,
-            agentType: def.type,
-            agentLabel: def.label,
-            models: [],
-            defaultModel: def.model,
-          };
-        }
-      }),
-    );
-
-    return { agents, defaultAgentId };
-  }),
-});
-
-// ---------------------------------------------------------------------------
-// Browser Host (CDP screencast experiment)
-//
-// The bridge between the web server and the desktop's BrowserViewManager.
-// Workflow:
-//   1. Web client opens /cdp?bandTabId=X (or hits /api/cdp/tabs/X/snapshot).
-//   2. Server calls `ensureCdpTargetId(X)`. Cache miss → `onEnsureView`
-//      listeners fire.
-//   3. Desktop's React (subscribed to `browserHost.ensureView` below)
-//      calls `browser_ensure` IPC, then `browser_get_cdp_target`, then
-//      reports the cdpTargetId back via the `targetReady` mutation.
-//   4. Server resolves the in-flight ensure promise, opens the upstream WS.
-//   5. When the desktop later destroys the view (LRU, explicit close), it
-//      reports via the `viewDestroyed` mutation, clearing the cache.
-// ---------------------------------------------------------------------------
-
-const browserHostRouter = t.router({
-  // Diagnostic: the desktop's BrowserHostBridge calls this on mount so we
-  // can confirm in the server log that the bridge component actually
-  // executed. Drop once the experiment is stable.
-  ping: publicProcedure.input(z.object({ where: z.string() })).mutation(({ input }) => {
-    log.info("browserHost.ping from %s", input.where);
-    return { ok: true };
-  }),
-
-  ensureView: publicProcedure.subscription(async function* (opts) {
-    const queue: EnsureViewEvent[] = [];
-    let resolve: (() => void) | null = null;
-
-    const unsubscribe = onEnsureView((event) => {
-      queue.push(event);
-      resolve?.();
-    });
-
-    opts.signal?.addEventListener("abort", () => {
-      unsubscribe();
-      resolve?.();
-    });
-
-    try {
-      while (!opts.signal?.aborted) {
-        while (queue.length > 0) {
-          yield queue.shift()!;
-        }
-        await new Promise<void>((r) => {
-          resolve = r;
-        });
-        resolve = null;
-      }
-    } finally {
-      unsubscribe();
-    }
-  }),
-
-  targetReady: publicProcedure
-    .input(z.object({ bandTabId: z.string(), cdpTargetId: z.string() }))
-    .mutation(({ input }) => {
-      resolveTargetReady(input.bandTabId, input.cdpTargetId);
-      return { ok: true };
-    }),
-
-  viewDestroyed: publicProcedure
-    .input(z.object({ bandTabId: z.string() }))
-    .mutation(({ input }) => {
-      markTargetDestroyed(input.bandTabId);
-      return { ok: true };
-    }),
-});
+// `browserHost.*` migrated to `server/api/browser-host/router.ts` as part of
+// Phase 7.5 (issue #517). The bridge between the web server and the desktop's
+// BrowserViewManager now lives there; the `browserHost` key is exposed via
+// the merged root router in `server/api/router.ts` (do not re-add it here).
 
 // ---------------------------------------------------------------------------
 // Browser history (persistent per-workspace visit log).
@@ -2997,31 +2082,34 @@ const queueRouter = t.router({
  * `docs/web-architecture.md`.
  */
 export const appRouter = t.router({
-  // `projects` lives in `server/api/projects/router.ts` (issue #313)
-  // and `workspaces` lives in `server/api/workspaces/router.ts` (issue
-  // #314); both are composed into the merged root router via
-  // `server/api/router.ts`. Re-adding either here would shadow the
+  // Migrated sub-routers — these keys live in `server/api/<domain>/router.ts`
+  // and are composed into the merged root router via
+  // `server/api/router.ts`. Re-adding any of them here would shadow the
   // migrated sub-router (`mergeRouters` is last-write-wins), violating
-  // the migration invariant documented next to the merged router.
-  hooks: hooksRouter,
-  cli: cliRouter,
+  // the migration invariant documented next to the merged router:
+  //   `projects`     → `server/api/projects/router.ts`        (issue #313)
+  //   `workspaces`   → `server/api/workspaces/router.ts`      (issue #314)
+  //   `settings`     → `server/api/settings/router.ts`        (issue #312)
+  //   `cronjobs`     → `server/api/cronjobs/router.ts`        (issue #315)
+  //   `chats` / `chatLayout` / `browsers` / `browserLayout`
+  //                  → `server/api/chats|browsers/router.ts`  (issue #316)
+  //   `terminal` / `terminalLayout`
+  //                  → `server/api/terminals/router.ts`       (issue #318)
+  //   `cli`, `hooks`, `host`, `browserHost`, `editor`, `tunnel`,
+  //   `prereqs`, `skills`, `modes`, `models`, `statuses`, `status`,
+  //   `services` (internally `system`)
+  //                  → `server/api/<domain>/router.ts`        (issue #517)
   workspace: workspaceRouter,
-  host: hostRouter,
-  tunnel: tunnelRouter,
-  prereqs: prereqsRouter,
+  // `host`, `tunnel`, `prereqs` live under `server/api/<domain>/router.ts`
+  // (Phase 7.5, issue #517).
   // `tasks` lives in `server/api/tasks/router.ts` (Phase 6, issue #317).
   // `sessions` lives in `server/api/sessions/router.ts` (Phase 6, issue #317).
-  services: servicesRouter,
+  // `services` (internally renamed to `system`) lives in
+  // `server/api/system/router.ts` (Phase 7.5, issue #517). It is mounted
+  // under the public `services` key in `server/api/router.ts` so every
+  // existing client keeps calling `trpc.services.*` without change.
   chat: chatRouter,
-  editor: editorRouter,
-  browserHost: browserHostRouter,
   history: historyRouter,
-  statuses: statusesRouter,
-  status: statusRouter,
-  // `cronjobs` lives in `server/api/cronjobs/router.ts` (Phase 4, issue #315).
-  skills: skillsRouter,
-  modes: modesRouter,
-  models: modelsRouter,
   queue: queueRouter,
 });
 

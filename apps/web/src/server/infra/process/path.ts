@@ -1,5 +1,21 @@
 import { execFile } from "node:child_process";
 
+/**
+ * Resolve the user's interactive `$PATH` by spawning a login shell and
+ * echoing `$PATH`. Cached for the lifetime of the process — the value
+ * doesn't change without a server restart.
+ *
+ * Lives in the infra tier so other infra adapters (tunnel-client,
+ * lsp-manager, terminal-pool) can reach it without crossing back into
+ * services. The services-tier `SystemService` re-exports `shellPath` and
+ * `whichBinary` from here so router-facing code continues to import them
+ * via the service singleton.
+ *
+ * Extracted from `lib/process-utils.ts` (and then `services/system-service.ts`)
+ * to fix the Tier 3 → Tier 2 layering violation flagged in the Phase 7.5
+ * review (issue #517).
+ */
+
 let cachedShellPath: string | null = null;
 
 export async function shellPath(): Promise<string> {
@@ -29,6 +45,7 @@ export async function shellPath(): Promise<string> {
   return fallback;
 }
 
+/** Resolve a binary against the user's interactive `$PATH`, or `null` when absent. */
 export async function whichBinary(name: string): Promise<string | null> {
   const resolvedPath = await shellPath();
   try {
@@ -45,9 +62,4 @@ export async function whichBinary(name: string): Promise<string | null> {
   } catch {
     return null;
   }
-}
-
-export async function checkPrereqs(): Promise<{ cloudflared: boolean }> {
-  const cloudflared = await whichBinary("cloudflared");
-  return { cloudflared: cloudflared !== null };
 }

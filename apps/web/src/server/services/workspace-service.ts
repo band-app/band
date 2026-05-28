@@ -9,9 +9,7 @@ import { toWorkspaceId } from "@/dashboard";
 import { removeWorkspaceBrowsers } from "../../lib/browser-manager";
 import { getOrCreateDefaultChat, removeWorkspaceChats } from "../../lib/chat-manager";
 import { DETACHED_BRANCH_PREFIX, execGit, gitCmd, listWorktrees } from "../../lib/git";
-import { killWorkspaceServers } from "../../lib/lsp-manager";
 import { loadProjectConfig } from "../../lib/project-config";
-import { runSetup } from "../../lib/setup-runner";
 import {
   bandHome,
   deleteWorkspaceStatus,
@@ -30,6 +28,7 @@ import { WorkspaceNotFoundError } from "../errors";
 // capturing `submitTask` (or anything else here) at module load.
 import { TaskQueries } from "../infra/db/queries/tasks";
 import { WorkspaceQueries } from "../infra/db/queries/workspaces";
+import { killWorkspaceServers } from "../infra/lsp/lsp-manager";
 // FRAGILE: ESM cycle leg #2 — `./cronjob-service` imports `submitTask`
 // from `./task-service`, which imports `lib/workspace`, which imports
 // `workspaceService` from this file. Same live-binding constraint as the
@@ -37,6 +36,7 @@ import { WorkspaceQueries } from "../infra/db/queries/workspaces";
 // a function body. Capturing `const cs = cronjobService;` at module load
 // on this leg would silently get `undefined`.
 import { cronjobService } from "./cronjob-service";
+import { runSetup } from "./setup-runner";
 import { submitTask } from "./task-service";
 import { terminalService } from "./terminal-service";
 

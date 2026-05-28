@@ -1,10 +1,17 @@
 import { createLogger } from "@band-app/logger";
-import { getBrowser } from "./browser-manager";
+import { getBrowser } from "../../../lib/browser-manager";
 
 const log = createLogger("browser-host");
 
 // ---------------------------------------------------------------------------
-// CDP screencast experiment — server-side Browser Host
+// CDP screencast experiment — server-side Browser Host state
+//
+// Lives in the infra tier so the CDP adapters that sit next to it
+// (`cdp-proxy.ts`, `cdp-targets.ts`) can import it without crossing back up
+// to the services tier; the services-tier `BrowserHostService` wraps this
+// module for router consumption. Moved out of `services/browser-host.ts`
+// to fix the Tier 3 → Tier 2 layering violation flagged in the Phase 7.5
+// review (issue #517).
 //
 // The web client and the agent address browser tabs by Band's persistent
 // `browser_<uuid>` id (bandTabId). To actually drive a tab over CDP we need

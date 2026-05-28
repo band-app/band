@@ -21,26 +21,60 @@ apps/web/src/server/
       router.ts
     chats/
       router.ts
+    browsers/
+      router.ts              # browser tabs + browserLayout
     tasks/
       router.ts
     cronjobs/
       router.ts
     terminals/
-      router.ts
+      router.ts              # terminal + terminalLayout
     sessions/
       router.ts
     settings/
       router.ts
+    tunnel/
+      router.ts              # cloudflared lifecycle
+    editor/
+      router.ts              # LSP + file watching + formatter
+    browser-host/
+      router.ts              # host.* + browserHost.* (CDP proxy)
+    cli/
+      router.ts              # band-CLI symlink installer
+    hooks/
+      router.ts              # ~/.claude/settings.json hook editor
+    skills/
+      router.ts              # agent skills install/list
+    prereqs/
+      router.ts              # tool/binary prerequisite checks
+    statuses/
+      router.ts              # statuses.* + status.*
+    modes/
+      router.ts              # agent mode catalog
+    models/
+      router.ts              # agent model catalog
     router.ts                # merges all sub-routers
   services/
     project-service.ts
     workspace-service.ts
     chat-service.ts
+    browser-service.ts
     task-service.ts
     cronjob-service.ts
     terminal-service.ts
     session-service.ts
     settings-service.ts
+    tunnel-service.ts
+    editor-service.ts        # LSP + file watch + format orchestration
+    browser-host.ts          # CDP proxy + target list
+    cli.ts                   # band-CLI binary resolver + symlink installer
+    cli-skills.ts            # render + install agent skill templates
+    hooks.ts                 # ~/.claude/settings.json read/write
+    setup.ts                 # first-time-setup orchestration
+    setup-runner.ts          # background runner for setup steps
+    file-watcher.ts          # filesystem watch wiring
+    formatter.ts             # prettier wrapper
+    system-service.ts        # process-utils + disk usage
   infra/
     db/
       schema.ts              # Drizzle schema (all tables)
@@ -61,7 +95,11 @@ apps/web/src/server/
     terminals/
       terminal-pool.ts       # PTY lifecycle
     lsp/
-      lsp-client.ts          # language server process management
+      lsp-manager.ts         # language server process management
+      lsp-proxy.ts           # raw LSP message proxy
+    browser-host/
+      cdp-proxy.ts           # Chrome DevTools Protocol proxy
+      cdp-targets.ts         # CDP target discovery
 ```
 
 ## Tier 1: API (Routers)

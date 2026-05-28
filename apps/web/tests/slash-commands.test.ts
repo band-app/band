@@ -4,7 +4,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { BAND_SKILL_NAMES } from "../src/lib/cli-skills";
+import { BAND_SKILL_NAMES } from "../src/server/services/cli-skills";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { SERVER_RUNTIME, SERVER_SCRIPT } from "./helpers/server-runtime";
 
@@ -13,13 +13,15 @@ const FAKE_AGENT_PATH = join(import.meta.dirname, "fake-agent.mjs");
 const DEFAULT_TOKEN = "slash-test-token";
 
 /**
- * Skills the server's `ensureSkillsInstalled` step (apps/web/src/lib/cli-skills.ts)
- * lays down on every boot for any HOME that has Claude Code in its codingAgents
- * settings. We filter these out of the slash-commands assertions so the tests
- * remain focused on the skills *they* seed.
+ * Skills the server's `ensureSkillsInstalled` step
+ * (apps/web/src/server/services/cli-skills.ts) lays down on every boot for any
+ * HOME that has Claude Code in its codingAgents settings. We filter these out
+ * of the slash-commands assertions so the tests remain focused on the skills
+ * *they* seed.
  *
- * Sourced from `BAND_SKILL_NAMES` (the canonical list in `lib/cli-skills.ts`)
- * so adding a new shipped skill doesn't require touching this filter too.
+ * Sourced from `BAND_SKILL_NAMES` (the canonical list in
+ * `services/cli-skills.ts`) so adding a new shipped skill doesn't require
+ * touching this filter too.
  */
 const AUTO_INSTALLED_SKILL_NAMES = new Set<string>(BAND_SKILL_NAMES);
 

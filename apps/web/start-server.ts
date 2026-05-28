@@ -9,22 +9,16 @@ import { createAuthMiddleware, parseCookies, tokensEqual } from "./auth.ts";
 import { handleChatEvents } from "./src/api/chat-events.ts";
 import { handleChatSubmit } from "./src/api/chat-submit.ts";
 import { stopBranchStatusPoller } from "./src/lib/branch-status-poller.ts";
-import { isDesktopHostConnected } from "./src/lib/browser-host.ts";
 import { listBrowsers } from "./src/lib/browser-manager.ts";
-import { handleCdpConnection } from "./src/lib/cdp-proxy.ts";
-import { captureSnapshot } from "./src/lib/cdp-targets.ts";
-import { killAllServers } from "./src/lib/lsp-manager.ts";
-import { handleLspConnection } from "./src/lib/lsp-proxy.ts";
 import { mimeTypeFromFilename } from "./src/lib/mime-types.ts";
 import { listenWithFallback } from "./src/lib/port-utils.ts";
-import { checkPrereqs } from "./src/lib/process-utils.ts";
-import { runFirstTimeSetup } from "./src/lib/setup.ts";
 import { bandHome, getOrCreateToken, loadSettings, resetAgentStatuses } from "./src/lib/state.ts";
-import { startTunnel, stopTunnel } from "./src/lib/tunnel.ts";
 import { resolveWorkspace } from "./src/lib/workspace.ts";
 import { handleMcpRequest } from "./src/mcp/server.ts";
 import { appRouter } from "./src/server/api/router.ts";
 import { handleTerminalConnection } from "./src/server/api/terminals/ws.ts";
+import { handleCdpConnection } from "./src/server/infra/browser-host/cdp-proxy.ts";
+import { captureSnapshot } from "./src/server/infra/browser-host/cdp-targets.ts";
 import { closeDb } from "./src/server/infra/db/connection.ts";
 import { runMigrations } from "./src/server/infra/db/migrate.ts";
 import {
@@ -32,8 +26,14 @@ import {
   stopTaskPruneScheduler,
   TaskQueries,
 } from "./src/server/infra/db/queries/tasks.ts";
+import { killAllServers } from "./src/server/infra/lsp/lsp-manager.ts";
+import { handleLspConnection } from "./src/server/infra/lsp/lsp-proxy.ts";
+import { browserHostService } from "./src/server/services/browser-host-service.ts";
 import { cronjobService } from "./src/server/services/cronjob-service.ts";
+import { runFirstTimeSetup } from "./src/server/services/setup.ts";
+import { systemService } from "./src/server/services/system-service.ts";
 import { terminalService } from "./src/server/services/terminal-service.ts";
+import { tunnelService } from "./src/server/services/tunnel-service.ts";
 import { createContext } from "./src/trpc/context.ts";
 import { getScalarHtml } from "./src/trpc/openapi.ts";
 
@@ -602,7 +602,7 @@ async function main() {
         url: b.url,
         title: b.name,
       }));
-      const desktopConnected = isDesktopHostConnected();
+      const desktopConnected = browserHostService.isDesktopHostConnected();
       res.writeHead(200, {
         "Content-Type": "application/json",
         "Cache-Control": "no-cache",
@@ -1053,8 +1053,8 @@ async function main() {
       const settings = loadSettings() as Record<string, unknown>;
       if (settings.autoStartTunnel) {
         try {
-          const prereqs = await checkPrereqs();
-          if (prereqs.cloudflared) await startTunnel({ port: boundPort });
+          const prereqs = await systemService.checkPrereqs();
+          if (prereqs.cloudflared) await tunnelService.start();
         } catch (err) {
           console.error("Failed to auto-start tunnel:", err);
         }
@@ -1087,7 +1087,7 @@ async function main() {
       new Promise<void>((resolve) => setTimeout(resolve, 5_000).unref()),
     ]);
 
-    await stopTunnel().catch(() => {});
+    await tunnelService.stop().catch(() => {});
     wssHandler.broadcastReconnectNotification();
     wss.close();
     terminalWss.close();

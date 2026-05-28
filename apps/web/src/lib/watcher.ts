@@ -1,7 +1,7 @@
 import { getDb } from "../server/infra/db/connection";
 import { branchStatuses as branchStatusesTable } from "../server/infra/db/schema";
+import { getRunningSetups } from "../server/services/setup-runner";
 import { startBranchStatusPoller, stopBranchStatusPoller } from "./branch-status-poller";
-import { getRunningSetups } from "./setup-runner";
 import { loadCurrentStatuses, type WorkspaceStatus } from "./state";
 
 interface GitStatus {

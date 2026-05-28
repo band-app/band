@@ -2,8 +2,8 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createLogger } from "@band-app/logger";
-import { shellPath } from "./process-utils";
-import { resolveWorkspace } from "./workspace";
+import { resolveWorkspace } from "../../../lib/workspace";
+import { shellPath } from "../process/path";
 
 /** Directory of this module — used to locate local node_modules/.bin */
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -76,11 +76,12 @@ export async function getOrSpawnServer(
   // lives), workspace node_modules/.bin (where tsserver lives), then
   // the user's shell PATH for anything else (node, etc.).
   //
-  // In development, __dirname is src/lib/ so ../../node_modules/.bin
-  // reaches the project root.  In the bundled DMG, __dirname is dist/
-  // so we need ./node_modules/.bin instead.  Use both so it works in
-  // either environment.
-  const appBin = resolve(__dirname, "../../node_modules/.bin");
+  // In development, __dirname is src/server/infra/lsp/ so we need to walk
+  // up four levels (`../../../..`) to reach apps/web/, then into
+  // node_modules/.bin. In the bundled DMG, __dirname is dist/ so we need
+  // ./node_modules/.bin instead. Use both so it works in either
+  // environment.
+  const appBin = resolve(__dirname, "../../../../node_modules/.bin");
   const bundledBin = resolve(__dirname, "node_modules/.bin");
   const workspaceBin = join(cwd, "node_modules/.bin");
   const pathSep = process.platform === "win32" ? ";" : ":";
