@@ -63,9 +63,8 @@ export const browsersRouter = t.router({
       }),
     )
     .mutation(({ input }) => {
-      // `browserService.create` registers the tab in both the in-memory
-      // registry and the saved dockview layout (mirrors `chatService.create`);
-      // no separate `addToLayout` call needed here.
+      // `browserService.create` also registers the tab in the saved
+      // dockview layout — see `chatService.create` for the same pattern.
       const browser = browserService.create(input.workspaceId, {
         id: input.id,
         name: input.name,

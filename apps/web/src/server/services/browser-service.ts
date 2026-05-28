@@ -68,6 +68,16 @@ export interface UpdateBrowserOptions {
  * The `lib/browser-manager.ts` back-compat shim delegates every call here so
  * existing modules (`browser-host.ts`, the CLI adapter, …) keep working
  * without touching their imports.
+ *
+ * Object-identity contract: `update*` methods do NOT mutate the prior
+ * `BrowserTab` in place — they store a fresh merged object in the
+ * registry and discard the previous reference. Callers that hold a
+ * snapshot from `get`/`list` MUST re-`get` after any mutation to see the
+ * new values. (The pre-refactor `lib/browser-manager.ts` mutated in place;
+ * the shim continues to expose the function-shaped API so wire callers
+ * see no behaviour change as long as they re-read on each access, which
+ * every current caller — `browser-host`, `start-server`, the routers —
+ * already does.)
  */
 export class BrowserService {
   // Primary index: browserId → BrowserTab
