@@ -25,6 +25,9 @@ import { workspaceService } from "../server/services/workspace-service";
  * legs (e.g. `const ws = workspaceService;` at the top of `task-runner.ts`
  * or this file) will silently get `undefined`. Keep all refs in function
  * scope until this shim is deleted alongside its last consumer.
+ *
+ * TODO(#314): delete this shim once all callers migrate to
+ * `workspaceService.resolve` directly.
  */
 export function resolveWorkspace(workspaceId: string) {
   return workspaceService.resolve(workspaceId);

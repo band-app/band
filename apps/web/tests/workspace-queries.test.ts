@@ -27,11 +27,13 @@ import { seedState } from "./helpers/seed-state";
 describe("WorkspaceQueries.findIdentity", () => {
   let tmp: string;
   let originalBandHome: string | undefined;
+  let queries: WorkspaceQueries;
 
   beforeEach(() => {
     tmp = realpathSync(mkdtempSync(join(tmpdir(), "band-workspace-queries-test-")));
     originalBandHome = process.env.BAND_HOME;
     process.env.BAND_HOME = join(tmp, ".band");
+    queries = new WorkspaceQueries();
   });
 
   afterEach(() => {
@@ -61,7 +63,7 @@ describe("WorkspaceQueries.findIdentity", () => {
       ],
     });
 
-    const identity = new WorkspaceQueries().findIdentity(workspaceId);
+    const identity = queries.findIdentity(workspaceId);
     expect(identity).toEqual({ project: projectName, branch, worktreePath: wtPath });
   });
 
@@ -83,7 +85,7 @@ describe("WorkspaceQueries.findIdentity", () => {
       ],
     });
 
-    const identity = new WorkspaceQueries().findIdentity(workspaceId);
+    const identity = queries.findIdentity(workspaceId);
     expect(identity).toEqual({ project: projectName, branch, worktreePath: wtPath });
   });
 
@@ -99,7 +101,7 @@ describe("WorkspaceQueries.findIdentity", () => {
       ],
     });
 
-    const identity = new WorkspaceQueries().findIdentity("ghost-branch");
+    const identity = queries.findIdentity("ghost-branch");
     expect(identity).toBeNull();
   });
 
@@ -140,7 +142,7 @@ describe("WorkspaceQueries.findIdentity", () => {
       ],
     });
 
-    const identity = new WorkspaceQueries().findIdentity(workspaceId);
+    const identity = queries.findIdentity(workspaceId);
     expect(identity).not.toBeNull();
     const candidates = [
       { project: "foo-bar", branch: "main", worktreePath: wtPathA },
