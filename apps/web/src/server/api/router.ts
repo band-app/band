@@ -83,11 +83,16 @@ import { workspacesRouter } from "./workspaces/router";
 //   - `apps/web/tests/cronjobs.test.ts` exercises `cronjobs.*` end-to-end,
 //     so a regression that masks the migrated `cronjobsRouter` with a
 //     stale legacy entry trips one of those assertions.
-//   - `apps/web/tests/cold-start.test.ts` and
-//     `apps/web/tests/chat-labels.test.ts` cover `chats.*` / `browsers.*`
-//     / `chats.create` / `chats.list` / `chats.update`, so a regression
-//     that masks the migrated chats/browsers sub-routers trips the
-//     corresponding describe block.
+//   - `apps/web/tests/cold-start.test.ts` covers `chats.list` and
+//     `browsers.list` (rehydration on boot); `apps/web/tests/chat-labels.test.ts`
+//     covers `chats.create` / `chats.update` / `chats.remove`; and
+//     `apps/web/tests/browsers.test.ts` covers `browsers.create` /
+//     `browsers.update` / `browsers.navigate` / `browsers.remove` /
+//     `browsers.get` plus `browserLayout.get` / `browserLayout.save`. A
+//     regression that masks any of those migrated sub-routers with a
+//     stale legacy entry trips the corresponding describe block.
+//     `chatLayout.*`, `chats.stop`, and `chats.resume` are not yet
+//     covered — adding them is tracked as a follow-up.
 //   - `apps/web/tests/terminal-ws.test.ts` (and any other terminal-*
 //     integration tests) hit the merged router through the same /trpc
 //     endpoint, so a regression that masks the migrated terminal
