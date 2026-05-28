@@ -39,11 +39,13 @@ export interface CronjobDefinition {
 /**
  * The set of jobs that share a `fileKey` (project name or workspace id).
  *
- * Kept as an object (rather than a bare `CronjobDefinition[]`) for parity
- * with the legacy on-disk JSON file format consumed by older clients — the
- * shape leaks into the tRPC response payloads so the cronjob editor in the
- * dashboard can extend it with extra metadata without breaking older
- * deserializers. New code should still prefer reading `.jobs` directly.
+ * Kept as an object (rather than a bare `CronjobDefinition[]`) because this
+ * shape is the tRPC response payload of `cronjobs.list` / `cronjobs.get`:
+ * the dashboard's cronjob editor reads `.jobs` and the wrapper leaves room
+ * to add per-file metadata later without breaking the client contract.
+ * Internally `CronjobQueries` and `CronjobService` always go through this
+ * type rather than passing bare arrays, so the wire shape and the
+ * in-process shape stay in sync.
  */
 export interface CronjobFile {
   jobs: CronjobDefinition[];

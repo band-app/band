@@ -454,8 +454,15 @@ describe("tRPC — cronjobs.trigger", () => {
     tmpHome = createTmpHome("band-cronjob-trigger-");
     const repoPath = createGitRepo(tmpHome, "triggerproj");
 
+    // Long-running scenario: the agent emits `init` and then sleeps for 5s
+    // before the terminal `result`. The 5s window is what makes the
+    // "returns CONFLICT when task is already running" assertion below
+    // deterministic — the previous fake-agent scenario completed in tens of
+    // ms, so a slower test runner would race the result event past the
+    // second trigger and turn the conflict check into a coin flip.
     const scenarioPath = writeScenario(tmpHome, [
       { type: "system", subtype: "init", session_id: "trigger-session" },
+      { _sleep_ms: 5000 },
       {
         type: "result",
         subtype: "success",
@@ -542,15 +549,18 @@ describe("tRPC — cronjobs.trigger", () => {
   });
 
   it("returns CONFLICT when task is already running", async () => {
-    // The previous trigger should have started a task; triggering again should conflict
+    // The fake-agent scenario above sleeps for 5s before emitting `result`,
+    // so by the time this test runs the task started by the first
+    // `triggers a cronjob and creates a task` case is still in-flight and
+    // the second trigger MUST conflict. Assert the exact status code
+    // rather than a [200, 409] union — the union form silently passes if
+    // the conflict path ever stops firing.
     const res = await trpcMutate(
       server.url,
       "cronjobs.trigger",
       { key: "triggerproj", id: jobId },
       DEFAULT_TOKEN,
     );
-    // Depending on timing, this may be 409 (conflict) or 200 (if previous finished)
-    // Just verify it doesn't 500
-    expect([200, 409]).toContain(res.status);
+    expect(res.status).toBe(409);
   });
 });
