@@ -31,10 +31,13 @@ export function findCliBinaryAt(opts: { cwd: string; dirname: string }): string 
     resolve(cwd, "apps"),
     // From this source file in dev (apps/web/src/server/services/ → apps/)
     resolve(dirname, "..", "..", "..", ".."),
-    // From the bundled `dist/` file (<Resources>/web/dist/ → <Resources>/)
-    // — included so a future cargo-target layout under <Resources>/cli/
-    // would still resolve. Harmless in the current Electron bundle where
-    // the binary actually lives under `binaries/` (handled by Strategy B).
+    // From bundled `dist/` file (<Resources>/web/dist/ → <Resources>/) only
+    // — in dev mode this resolves to `apps/web/src/`, which has no
+    // `cli/target/<profile>/band` and is harmless; the four-level walk
+    // above is the actual dev-mode path. Included so a future cargo-target
+    // layout under <Resources>/cli/ would still resolve. Today's Electron
+    // bundle ships the binary under `binaries/` (handled by Strategy B),
+    // so this strategy never hits in production either.
     resolve(dirname, "..", "..", ".."),
   ];
 

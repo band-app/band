@@ -1,3 +1,4 @@
+import { createLogger } from "@band-app/logger";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 // TODO(#319 / Phase 8 follow-up): these legacy `lib/*` imports plus the
@@ -17,6 +18,8 @@ import { loadState } from "../../../lib/state";
 import { systemService } from "../../services/system-service";
 import { tunnelService } from "../../services/tunnel-service";
 import { publicProcedure, t } from "../trpc";
+
+const log = createLogger("trpc.system");
 
 /**
  * System-wide sub-router — migrated from the legacy `servicesRouter`
@@ -44,12 +47,16 @@ export const systemRouter = t.router({
    * an interval to drive the bottom-bar status pill.
    */
   health: publicProcedure.query(() => {
+    log.debug("services.health called");
     const tunnel = tunnelService.getStatus();
-    return {
+    log.debug({ tunnel }, "services.health: tunnel status");
+    const result = {
       webserver: true,
       tunnel: tunnel.running,
       tunnel_url: tunnel.url,
     };
+    log.debug({ result }, "services.health result");
+    return result;
   }),
 
   // Activity level controls how often the branch-status poller fires.
