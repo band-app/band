@@ -14,7 +14,6 @@ import { promisify } from "node:util";
 import { createLogger } from "@band-app/logger";
 import { TRPCError } from "@trpc/server";
 import { rgPath } from "@vscode/ripgrep";
-import { Cron } from "croner";
 import { z } from "zod";
 import { formatFileLocation, toWorkspaceId } from "@/dashboard";
 import { getActiveWorkspace, setActiveWorkspace } from "../lib/active-workspace";
@@ -73,20 +72,6 @@ import {
   scheduleActiveSessionRefresh,
 } from "../lib/chat-session-summary";
 import { checkCli, installCli, resolveCliPaths } from "../lib/cli";
-import {
-  getOrCreateCronjobChat,
-  reloadSchedules,
-  resolveCronjobWorkspaceId,
-  stopJobsForKey,
-} from "../lib/cronjob-scheduler";
-import {
-  deleteCronjobFile,
-  generateCronjobId,
-  listAllCronjobs,
-  loadCronjobFile,
-  saveCronjobFile,
-} from "../lib/cronjob-store";
-import type { CronjobDefinition } from "../lib/cronjob-types";
 import { duBytes } from "../lib/disk-usage";
 import { subscribeToFileChanges } from "../lib/file-watcher";
 import { FormatterError, formatFile } from "../lib/formatter";
@@ -146,6 +131,7 @@ import { saveUploadedFiles, saveUploadedFilesDetailed } from "../lib/upload-util
 import { emit, subscribe as subscribeStatus } from "../lib/watcher";
 import { resolveWorkspace } from "../lib/workspace";
 import { publicProcedure, t } from "../server/api/trpc";
+import { cronjobService } from "../server/services/cronjob-service";
 
 const execFileAsync = promisify(execFile);
 const log = createLogger("trpc");
@@ -333,8 +319,7 @@ const workspacesRouter = t.router({
       killWorkspaceServers(workspaceId);
 
       // Clean up workspace-scoped cronjobs
-      stopJobsForKey(workspaceId);
-      deleteCronjobFile(workspaceId);
+      cronjobService.removeForKey(workspaceId);
 
       // Delete persisted task history for the workspace (issue #416).
       // Tasks aren't covered by a FK cascade because workspaces aren't a
@@ -2948,175 +2933,10 @@ const statusRouter = t.router({
   }),
 });
 
-// ---------------------------------------------------------------------------
-// Cronjobs
-// ---------------------------------------------------------------------------
-
-const cronjobsRouter = t.router({
-  list: publicProcedure
-    .input(
-      z
-        .object({
-          project: z.string().optional(),
-          workspaceId: z.string().optional(),
-        })
-        .optional(),
-    )
-    .query(({ input }) => {
-      if (input?.project) {
-        const file = loadCronjobFile(input.project);
-        return { jobs: file.jobs.map((j) => ({ ...j, fileKey: input.project! })) };
-      }
-      if (input?.workspaceId) {
-        const file = loadCronjobFile(input.workspaceId);
-        return { jobs: file.jobs.map((j) => ({ ...j, fileKey: input.workspaceId! })) };
-      }
-      return { jobs: listAllCronjobs() };
-    }),
-
-  get: publicProcedure.input(z.object({ key: z.string(), id: z.string() })).query(({ input }) => {
-    const file = loadCronjobFile(input.key);
-    const job = file.jobs.find((j) => j.id === input.id);
-    if (!job) {
-      throw new TRPCError({ code: "NOT_FOUND", message: "Cronjob not found" });
-    }
-    return { job };
-  }),
-
-  create: publicProcedure
-    .input(
-      z.object({
-        key: z.string().min(1),
-        name: z.string().min(1),
-        prompt: z.string().min(1),
-        cronExpression: z.string().min(1),
-        scope: z.enum(["project", "workspace"]),
-        workspaceId: z.string().optional(),
-        enabled: z.boolean().default(true),
-      }),
-    )
-    .mutation(({ input }) => {
-      // Validate cron expression
-      try {
-        // eslint-disable-next-line no-new
-        new Cron(input.cronExpression, { maxRuns: 0 });
-      } catch {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "Invalid cron expression",
-        });
-      }
-
-      if (input.scope === "workspace" && !input.workspaceId) {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: "workspaceId is required for workspace-scoped cronjobs",
-        });
-      }
-
-      const file = loadCronjobFile(input.key);
-      const job: CronjobDefinition = {
-        id: generateCronjobId(),
-        name: input.name,
-        prompt: input.prompt,
-        cronExpression: input.cronExpression,
-        scope: input.scope,
-        workspaceId: input.workspaceId,
-        enabled: input.enabled,
-        createdAt: new Date().toISOString(),
-      };
-      file.jobs.push(job);
-      saveCronjobFile(input.key, file);
-      reloadSchedules();
-      return { job };
-    }),
-
-  update: publicProcedure
-    .input(
-      z.object({
-        key: z.string(),
-        id: z.string(),
-        name: z.string().min(1).optional(),
-        prompt: z.string().min(1).optional(),
-        cronExpression: z.string().min(1).optional(),
-        enabled: z.boolean().optional(),
-      }),
-    )
-    .mutation(({ input }) => {
-      if (input.cronExpression) {
-        try {
-          // eslint-disable-next-line no-new
-          new Cron(input.cronExpression, { maxRuns: 0 });
-        } catch {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: "Invalid cron expression",
-          });
-        }
-      }
-
-      const file = loadCronjobFile(input.key);
-      const job = file.jobs.find((j) => j.id === input.id);
-      if (!job) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Cronjob not found" });
-      }
-
-      if (input.name !== undefined) job.name = input.name;
-      if (input.prompt !== undefined) job.prompt = input.prompt;
-      if (input.cronExpression !== undefined) job.cronExpression = input.cronExpression;
-      if (input.enabled !== undefined) job.enabled = input.enabled;
-
-      saveCronjobFile(input.key, file);
-      reloadSchedules();
-      return { job };
-    }),
-
-  delete: publicProcedure
-    .input(z.object({ key: z.string(), id: z.string() }))
-    .mutation(({ input }) => {
-      const file = loadCronjobFile(input.key);
-      const index = file.jobs.findIndex((j) => j.id === input.id);
-      if (index === -1) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Cronjob not found" });
-      }
-      file.jobs.splice(index, 1);
-      saveCronjobFile(input.key, file);
-      reloadSchedules();
-      return { ok: true };
-    }),
-
-  trigger: publicProcedure
-    .input(z.object({ key: z.string(), id: z.string() }))
-    .mutation(({ input }) => {
-      const file = loadCronjobFile(input.key);
-      const job = file.jobs.find((j) => j.id === input.id);
-      if (!job) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Cronjob not found" });
-      }
-
-      const workspaceId = resolveCronjobWorkspaceId(job, input.key);
-      if (!workspaceId) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Project not found" });
-      }
-
-      // Issue #520: manual trigger uses the same `band:cronId`-labeled chat
-      // as the scheduled fire so the user sees both paths converge on a
-      // single dedicated conversation.
-      const cronChat = getOrCreateCronjobChat(workspaceId, job);
-      try {
-        const task = submitTask({ workspaceId, chatId: cronChat.id, prompt: job.prompt });
-        return { taskId: task.id, workspaceId, chatId: cronChat.id };
-      } catch (err) {
-        if (err instanceof TaskConflictError) {
-          throw new TRPCError({
-            code: "CONFLICT",
-            message: "Task already running for this chat pane",
-          });
-        }
-        throw err;
-      }
-    }),
-});
+// Cronjobs have been migrated to `server/api/cronjobs/router.ts` as part of
+// Phase 4 of the 3-tier refactor (issue #315). The sub-router is merged into
+// the public `appRouter` in `server/api/router.ts`; this file no longer
+// declares a `cronjobs` key (see the merge invariant documented there).
 
 // ---------------------------------------------------------------------------
 // Skills
@@ -4308,7 +4128,7 @@ export const appRouter = t.router({
   history: historyRouter,
   statuses: statusesRouter,
   status: statusRouter,
-  cronjobs: cronjobsRouter,
+  // `cronjobs` lives in `server/api/cronjobs/router.ts` (Phase 4, issue #315).
   skills: skillsRouter,
   modes: modesRouter,
   models: modelsRouter,

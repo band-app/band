@@ -1,6 +1,5 @@
 import { z } from "zod";
-import { stopJobsForKey } from "../../../lib/cronjob-scheduler";
-import { deleteCronjobFile } from "../../../lib/cronjob-store";
+import { cronjobService } from "../../services/cronjob-service";
 import { projectService } from "../../services/project-service";
 import { publicProcedure, t } from "../trpc";
 
@@ -14,21 +13,14 @@ import { publicProcedure, t } from "../trpc";
  *
  * The `remove` route is the one place this router composes more than a
  * single service call: removing a project also has to tear down its
- * project-scoped cronjobs (`stopJobsForKey` + `deleteCronjobFile`).
- * Cronjobs aren't part of project state — they live in their own files
- * and scheduler — so the composition happens at the API layer rather
- * than inside `ProjectService.remove`. This keeps the cross-domain
- * coupling visible at the entry point and prevents the project service
- * from reaching into another bounded context. The same pattern will be
- * used when subsequent phases lift workspaces, chats, and tasks; see
+ * project-scoped cronjobs via `cronjobService.removeForKey`. Cronjobs
+ * aren't part of project state — they live in their own files and
+ * scheduler — so the composition happens at the API layer rather than
+ * inside `ProjectService.remove`. This keeps the cross-domain coupling
+ * visible at the entry point and prevents the project service from
+ * reaching into another bounded context. The same pattern will be used
+ * when subsequent phases lift workspaces, chats, and tasks; see
  * `docs/web-architecture.md` § "Tier 1: API".
- *
- * Transitional caveat: the `stopJobsForKey` / `deleteCronjobFile` imports
- * still reach into `lib/cronjob-*` directly because cronjobs haven't been
- * migrated into the 3-tier shape yet. Once `CronjobService` lands (see
- * `docs/web-architecture.md` § "Dependency Direction"), replace the two
- * raw calls with a single `cronjobService.stopAllForProject(name)` so the
- * router only composes services.
  */
 export const projectsRouter = t.router({
   list: publicProcedure.query(() => {
@@ -59,21 +51,19 @@ export const projectsRouter = t.router({
       return projectService.promoteToGit(input.name);
     }),
 
-  // Sync: `projectService.remove`, `stopJobsForKey`, and
-  // `deleteCronjobFile` are all synchronous today. If any of them grows
-  // an async path later (e.g. graceful job drain on shutdown), switch
-  // this handler to `async` and `await` the call so the promise isn't
-  // silently dropped — the response would otherwise return before the
-  // cronjob teardown finished and racy `cronjobs.list` reads could see
-  // the just-deleted project's jobs.
+  // Sync: `projectService.remove` and `cronjobService.removeForKey` are
+  // both synchronous today. If either grows an async path later (e.g.
+  // graceful job drain on shutdown), switch this handler to `async` and
+  // `await` the call so the promise isn't silently dropped — the response
+  // would otherwise return before the cronjob teardown finished and racy
+  // `cronjobs.list` reads could see the just-deleted project's jobs.
   remove: publicProcedure.input(z.object({ name: z.string() })).mutation(({ input }) => {
     projectService.remove(input.name);
 
     // Clean up project-scoped cronjobs. Cronjobs live in their own files
     // + scheduler — not project state — so this teardown is composed at
     // the API layer rather than buried inside `ProjectService.remove`.
-    stopJobsForKey(input.name);
-    deleteCronjobFile(input.name);
+    cronjobService.removeForKey(input.name);
 
     return { ok: true };
   }),
