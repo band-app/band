@@ -11,6 +11,7 @@
  *   - Phase 2 (issue #313): `projects/`.
  *   - Phase 3 (issue #314): `workspaces/`.
  *   - Phase 4 (issue #315): `cronjobs/`.
+ *   - Phase 7 (issue #318): `terminals/` (exposes `terminal` + `terminalLayout`).
  *
  * Phase 4 landed ahead of Phase 3 because cronjobs is a small, self-contained
  * domain (no workspace-graph dependencies on the legacy router) and was a
@@ -31,17 +32,26 @@ import { appRouter as legacyAppRouter } from "../../trpc/router";
 import { cronjobsRouter } from "./cronjobs/router";
 import { projectsRouter } from "./projects/router";
 import { settingsRouter } from "./settings/router";
+import { terminalsRouters } from "./terminals/router";
 import { t } from "./trpc";
 import { workspacesRouter } from "./workspaces/router";
 
 // INVARIANT: the legacy router (`apps/web/src/trpc/router.ts`) must not
 // contain any key that this file also defines (`settings`, `projects`,
-// `workspaces`, `cronjobs`, …). `t.mergeRouters` accepts two routers and
-// silently picks last-write-wins for duplicate keys, so a stray legacy
-// entry would mask the migrated router without a build error. Each phase
-// of the 3-tier migration adds a key here and removes it from the legacy
-// router in the same diff; the invariant must hold for every key
-// composed below.
+// `workspaces`, `cronjobs`, `terminal`, `terminalLayout`, …).
+// `t.mergeRouters` accepts two routers and silently picks last-write-wins
+// for duplicate keys, so a stray legacy entry would mask the migrated
+// router without a build error. Each phase of the 3-tier migration adds a
+// key here and removes it from the legacy router in the same diff; the
+// invariant must hold for every key composed below.
+//
+// Migrated keys so far:
+//   - `settings`        (Phase 1, issue #312)
+//   - `projects`        (Phase 2, issue #313)
+//   - `workspaces`      (Phase 3, issue #314)
+//   - `cronjobs`        (Phase 4, issue #315)
+//   - `terminal`        (Phase 7, issue #318)
+//   - `terminalLayout`  (Phase 7, issue #318)
 //
 // Live guards:
 //   - `tRPC — settings CRUD` in `apps/web/tests/trpc.test.ts` exercises
@@ -61,6 +71,11 @@ import { workspacesRouter } from "./workspaces/router";
 //   - `apps/web/tests/cronjobs.test.ts` exercises `cronjobs.*` end-to-end,
 //     so a regression that masks the migrated `cronjobsRouter` with a
 //     stale legacy entry trips one of those assertions.
+//   - `apps/web/tests/terminal-ws.test.ts` (and any other terminal-*
+//     integration tests) hit the merged router through the same /trpc
+//     endpoint, so a regression that masks the migrated terminal
+//     sub-routers with a stale legacy entry trips at least one of those
+//     assertions.
 export const appRouter = t.mergeRouters(
   legacyAppRouter,
   t.router({
@@ -68,6 +83,7 @@ export const appRouter = t.mergeRouters(
     projects: projectsRouter,
     workspaces: workspacesRouter,
     cronjobs: cronjobsRouter,
+    ...terminalsRouters,
   }),
 );
 
