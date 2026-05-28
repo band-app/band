@@ -1,13 +1,14 @@
 // Integration test for the terminal WebSocket handler.
 //
 // Reproduces the crash reported in production: a stale worktree path
-// triggers `Workspace directory does not exist: <long path>` in
-// terminal-manager, which the WS handler tried to pass to `ws.close(code,
+// triggers `Workspace directory does not exist: <long path>` in the
+// terminal pool, which the WS handler tried to pass to `ws.close(code,
 // reason)`. RFC 6455 caps close reasons at 123 bytes, and `ws` throws an
 // async `RangeError` over the limit — bubbling up as an Unhandled
 // Rejection that crashed the server.
 //
-// This test asserts the production fix (apps/web/src/lib/terminal-ws.ts):
+// This test asserts the production fix
+// (apps/web/src/server/api/terminals/ws.ts):
 //   1. The full error is delivered as a JSON `{type:"error"}` frame so the
 //      client still sees the real message.
 //   2. The close frame carries code 4001 with a clamped reason ≤123 UTF-8
@@ -32,7 +33,7 @@ import { SERVER_RUNTIME, SERVER_SCRIPT } from "./helpers/server-runtime";
 const PROJECT_ROOT = join(import.meta.dirname, "..");
 const DEFAULT_TOKEN = "terminal-ws-test-token";
 
-// A deliberately long, nonexistent worktree path. The terminal-manager
+// A deliberately long, nonexistent worktree path. The terminal pool
 // throws `Workspace directory does not exist: ${cwd}` (36 + cwd bytes), so
 // any cwd longer than 87 bytes will overrun the 123-byte close-reason
 // limit. The path below is 117 bytes — message total ≈ 153 bytes, well
@@ -160,7 +161,7 @@ describe("terminal WebSocket — close-reason byte cap", () => {
     }
 
     // Seed a project with a worktree pointing at a path that DOES NOT exist
-    // on disk. terminal-manager.spawnTerminal will throw the long error
+    // on disk. TerminalPool.spawn will throw the long error
     // message when the WS handler tries to spawn into this workspace.
     seedState(tmpHome, {
       projects: [

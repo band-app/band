@@ -25,15 +25,15 @@ import {
   startTaskPruneScheduler,
   stopTaskPruneScheduler,
 } from "./src/lib/task-store.ts";
-import { killAllTerminals } from "./src/lib/terminal-manager.ts";
-import { handleTerminalConnection } from "./src/lib/terminal-ws.ts";
 import { startTunnel, stopTunnel } from "./src/lib/tunnel.ts";
 import { resolveWorkspace } from "./src/lib/workspace.ts";
 import { handleMcpRequest } from "./src/mcp/server.ts";
 import { appRouter } from "./src/server/api/router.ts";
+import { handleTerminalConnection } from "./src/server/api/terminals/ws.ts";
 import { closeDb } from "./src/server/infra/db/connection.ts";
 import { runMigrations } from "./src/server/infra/db/migrate.ts";
 import { cronjobService } from "./src/server/services/cronjob-service.ts";
+import { terminalService } from "./src/server/services/terminal-service.ts";
 import { createContext } from "./src/trpc/context.ts";
 import { getScalarHtml } from "./src/trpc/openapi.ts";
 
@@ -1067,7 +1067,7 @@ async function main() {
     stopBranchStatusPoller();
     cronjobService.stop();
     stopTaskPruneScheduler();
-    killAllTerminals();
+    terminalService.killAll();
     killAllServers();
 
     // Wait for any still-in-flight Phase B work to settle so we don't

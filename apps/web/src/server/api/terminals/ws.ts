@@ -1,13 +1,8 @@
 import type { IncomingMessage } from "node:http";
 import { createLogger } from "@band-app/logger";
 import type { WebSocket } from "ws";
-import {
-  getTerminalSession,
-  killTerminal,
-  resizeTerminal,
-  type SpawnOptions,
-  spawnTerminal,
-} from "./terminal-manager";
+import type { SpawnOptions, TerminalSession } from "../../infra/terminals/terminal-pool";
+import { terminalService } from "../../services/terminal-service";
 
 const log = createLogger("terminal-ws");
 
@@ -67,7 +62,7 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
   }
 
   // Reconnection: reuse existing PTY session
-  const existing = getTerminalSession(terminalId);
+  const existing = terminalService.getSession(terminalId);
   if (existing) {
     attachSession(ws, terminalId, workspaceId, existing, false);
     return;
@@ -106,9 +101,9 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
       pendingMessage = message;
     }
 
-    let session: Awaited<ReturnType<typeof spawnTerminal>>;
+    let session: TerminalSession;
     try {
-      session = await spawnTerminal(workspaceId, terminalId, spawnOpts);
+      session = await terminalService.spawn(workspaceId, terminalId, spawnOpts);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       log.error("Failed to spawn terminal %s for workspace %s: %s", terminalId, workspaceId, msg);
@@ -133,18 +128,6 @@ export async function handleTerminalConnection(ws: WebSocket, req: IncomingMessa
 // ---------------------------------------------------------------------------
 // Attach a PTY session to a WebSocket
 // ---------------------------------------------------------------------------
-
-interface TerminalSession {
-  pty: {
-    onData: (cb: (data: string) => void) => { dispose: () => void };
-    onExit: (cb: (e: { exitCode: number }) => void) => { dispose: () => void };
-    write: (data: string) => void;
-    /** Name of the foreground process running in the PTY. */
-    readonly process: string;
-  };
-  scrollback: string;
-  workspaceId: string;
-}
 
 function attachSession(
   ws: WebSocket,
@@ -231,11 +214,11 @@ function handleMessage(
     try {
       const parsed = JSON.parse(message);
       if (parsed.type === "resize" && parsed.cols && parsed.rows) {
-        resizeTerminal(terminalId, parsed.cols, parsed.rows);
+        terminalService.resize(terminalId, parsed.cols, parsed.rows);
         return;
       }
       if (parsed.type === "close") {
-        killTerminal(terminalId);
+        terminalService.kill(terminalId);
         ws.close(1000, "Terminal closed by client");
         return;
       }

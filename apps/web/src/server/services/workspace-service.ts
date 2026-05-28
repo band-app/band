@@ -30,8 +30,6 @@ import {
 // capturing `submitTask` (or anything else here) at module load.
 import { submitTask } from "../../lib/task-runner";
 import { deleteWorkspaceTasks } from "../../lib/task-store";
-import { deleteTerminalLayout } from "../../lib/terminal-layout-manager";
-import { killWorkspaceTerminals } from "../../lib/terminal-manager";
 import { emit } from "../../lib/watcher";
 import { WorkspaceQueries } from "../infra/db/queries/workspaces";
 // FRAGILE: ESM cycle leg #2 — `./cronjob-service` imports `submitTask`
@@ -41,6 +39,7 @@ import { WorkspaceQueries } from "../infra/db/queries/workspaces";
 // a function body. Capturing `const cs = cronjobService;` at module load
 // on this leg would silently get `undefined`.
 import { cronjobService } from "./cronjob-service";
+import { terminalService } from "./terminal-service";
 
 const execFileAsync = promisify(execFile);
 const log = createLogger("workspace-service");
@@ -173,10 +172,10 @@ export class PlainProjectError extends Error {
  *     service uses them directly today; the router-facing contract is
  *     unchanged.
  *   - **Workspace-scoped side-effect cleanup.** `removeWorkspaceChats`,
- *     `killWorkspaceTerminals`, `cronjobService.removeForKey`, etc. live
- *     in their own domain modules. Each will migrate to its own service
- *     in a later phase; the orchestration is centralized here for now so
- *     the remove flow remains atomic from the router's perspective.
+ *     `terminalService.killWorkspace`, `cronjobService.removeForKey`, etc.
+ *     live in their own domain modules. Each will migrate to its own
+ *     service in a later phase; the orchestration is centralized here for
+ *     now so the remove flow remains atomic from the router's perspective.
  *
  * Stateless aside from its `queries` dependency, so a single shared
  * instance is safe across callers.
@@ -403,8 +402,8 @@ export class WorkspaceService {
     deleteBrowserLayout(workspaceId);
 
     // Kill any running terminal PTY sessions + layout
-    killWorkspaceTerminals(workspaceId);
-    deleteTerminalLayout(workspaceId);
+    terminalService.killWorkspace(workspaceId);
+    terminalService.deleteLayout(workspaceId);
 
     // Kill any running language server processes
     killWorkspaceServers(workspaceId);
