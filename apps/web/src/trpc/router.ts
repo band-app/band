@@ -1,4 +1,4 @@
-import { execFile, execFileSync, spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, constants as fsConstants, realpathSync, statSync } from "node:fs";
 import { cp, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
@@ -87,7 +87,6 @@ import {
   getWorkspaceStatus,
   loadSettings,
   loadState,
-  saveState,
   upsertWorkspaceStatus,
 } from "../lib/state";
 import { abortTask, cancelTask, getTask, submitTask, TaskConflictError } from "../lib/task-runner";

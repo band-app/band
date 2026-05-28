@@ -81,23 +81,18 @@ export type WorkspacesRouter = typeof workspacesRouter;
 /**
  * Translate `WorkspaceService` domain errors into `TRPCError`s.
  *
- * Each domain error class maps to the legacy router's behaviour:
- *   - `ProjectNotFoundError`        → plain `Error` rethrow (preserves the
- *     pre-migration 500 the dashboard already handles for unknown
- *     projects).
- *   - `WorkspaceNotFoundError`      → plain `Error` rethrow (same — the
- *     legacy `throw new Error("Workspace ... not found")` surfaced as 500).
- *   - `PlainProjectError`           → 400 `BAD_REQUEST` (matched legacy
- *     `TRPCError({code: "BAD_REQUEST", ...})`).
+ * Only `PlainProjectError` has an explicit branch here — it maps to a
+ * 400 `BAD_REQUEST`, matching the legacy router's
+ * `TRPCError({code: "BAD_REQUEST", ...})`. Every other throw
+ * (`ProjectNotFoundError`, `WorkspaceNotFoundError`, plain `Error`,
+ * `TRPCError`, …) falls through unchanged so tRPC surfaces it as
+ * `INTERNAL_SERVER_ERROR` (500) with the original stack — matching how
+ * the legacy router behaved (raw throws bubbled out of `mutation`/
+ * `query` handlers).
  *
- * Anything else is rethrown unchanged so unexpected failures surface as
- * `INTERNAL_SERVER_ERROR` with the original stack — matches how the
- * legacy router behaved (raw throws bubbled out of `mutation`/`query`
- * handlers).
- *
- * `ProjectNotFoundError` and `WorkspaceNotFoundError` deliberately stay
- * on the 500 path rather than upgrading to 404 — a 4xx flip would change
- * the wire-level contract pinned by `apps/web/tests/trpc.test.ts`
+ * `ProjectNotFoundError` / `WorkspaceNotFoundError` deliberately stay
+ * on the 500 path rather than upgrading to 404 — a 4xx flip would
+ * change the wire-level contract pinned by `apps/web/tests/trpc.test.ts`
  * ("workspaces.create returns error for unknown project" and
  * "workspaces.remove returns error for unknown branch" both
  * `expect(res.status).toBe(500)`). A semantic 404 upgrade can ride a
