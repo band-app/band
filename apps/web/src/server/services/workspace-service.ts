@@ -32,7 +32,6 @@ import { submitTask } from "../../lib/task-runner";
 import { deleteWorkspaceTasks } from "../../lib/task-store";
 import { emit } from "../../lib/watcher";
 import { WorkspaceQueries } from "../infra/db/queries/workspaces";
-import { terminalService } from "./terminal-service";
 // FRAGILE: ESM cycle leg #2 — `./cronjob-service` imports `submitTask`
 // from `lib/task-runner`, which imports `lib/workspace`, which imports
 // `workspaceService` from this file. Same live-binding constraint as the
@@ -40,6 +39,7 @@ import { terminalService } from "./terminal-service";
 // a function body. Capturing `const cs = cronjobService;` at module load
 // on this leg would silently get `undefined`.
 import { cronjobService } from "./cronjob-service";
+import { terminalService } from "./terminal-service";
 
 const execFileAsync = promisify(execFile);
 const log = createLogger("workspace-service");

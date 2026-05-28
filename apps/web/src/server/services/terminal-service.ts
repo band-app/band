@@ -141,7 +141,7 @@ export class TerminalService {
    * emits `terminal-killed` so the dashboard's status stream prunes the
    * panel. Safe to call with an unknown terminalId — no-op.
    */
-  kill(terminalId: string): { workspaceId: string | undefined } {
+  kill(terminalId: string): void {
     const session = this.pool.get(terminalId);
     const workspaceId = session?.workspaceId;
     this.pool.kill(terminalId);
@@ -149,7 +149,6 @@ export class TerminalService {
       removeTerminalFromLayout(workspaceId, terminalId);
       emit({ kind: "terminal-killed", workspaceId, terminalId });
     }
-    return { workspaceId };
   }
 
   /**
