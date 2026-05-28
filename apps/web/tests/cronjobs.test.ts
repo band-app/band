@@ -588,6 +588,26 @@ describe("tRPC — cronjobs.trigger", () => {
     // poll fails loudly instead of the conflict check silently flipping
     // to 200. The poll timeout intentionally sits below
     // `FAKE_AGENT_SLEEP_MS` — see the constant definitions above.
+
+    // Pre-flight diagnostic: this test relies on the preceding "triggers a
+    // cronjob and creates a task" case having already submitted a task.
+    // If this test is run in isolation (e.g. via `.only`) or the trigger
+    // test was skipped, no task ever entered the queue and the poll below
+    // would silently time out waiting for `status: "running"`. Asserting
+    // task existence upfront — without the `status` filter — fails fast
+    // with a clear message instead.
+    const initialListRes = await trpcQuery(
+      server.url,
+      "tasks.list",
+      { workspaceId: "triggerproj-main" },
+      DEFAULT_TOKEN,
+    );
+    const initialListData = await trpcData<{ tasks: Array<{ id: string }> }>(initialListRes);
+    expect(
+      initialListData.tasks.length,
+      "preceding 'triggers a cronjob and creates a task' must have run first — no tasks exist in the workspace",
+    ).toBeGreaterThan(0);
+
     await expect
       .poll(
         async () => {

@@ -1,5 +1,5 @@
 import { createLogger } from "@band-app/logger";
-import { Cron } from "croner";
+import { Cron, type CronOptions } from "croner";
 import { z } from "zod";
 import { toWorkspaceId } from "@/dashboard";
 import {
@@ -72,8 +72,14 @@ export const cronjobCreateInput = z.object({
 });
 
 export const cronjobUpdateInput = z.object({
-  key: z.string(),
-  id: z.string(),
+  // `.min(1)` rejects the obviously invalid empty-string `key`/`id` at the
+  // validator instead of letting it reach the service, which would
+  // `loadFile("")` an empty result and 404 on `findIndex`. The legacy
+  // router accepted bare `z.string()` here; the migration is the natural
+  // moment to tighten the boundary so the create + update shapes stay
+  // consistent (`cronjobCreateInput.key` already has `.min(1)`).
+  key: z.string().min(1),
+  id: z.string().min(1),
   name: z.string().min(1).optional(),
   prompt: z.string().min(1).optional(),
   cronExpression: z.string().min(1).optional(),
@@ -281,11 +287,28 @@ export class CronjobService {
    * Stop all timers for jobs in `key` and remove the file rows.
    *
    * Called when a workspace or project is removed. Order matters: stop
-   * timers first so a still-pending fire doesn't observe its row missing
-   * from the database and crash the scheduler tick. The two steps were
-   * previously two separate calls (`stopJobsForKey` + `deleteCronjobFile`)
-   * at every call site — the legacy callers always invoked them in pairs,
-   * so they're collapsed here to make the contract harder to misuse.
+   * timers first so no further fires queue up between the timer-stop and
+   * the row-delete. An in-flight fire is already safe in either order
+   * because `executeCronjob` operates on closed-over `job`/`fileKey` (it
+   * never re-reads the row) and `safeUpdateLastRun` swallows the
+   * row-missing case. The two steps were previously two separate calls
+   * (`stopJobsForKey` + `deleteCronjobFile`) at every call site — the
+   * legacy callers always invoked them in pairs, so they're collapsed
+   * here to make the contract harder to misuse.
+   *
+   * Partial-failure recovery: if `deleteFile` throws (e.g. a transient DB
+   * lock), the timers are already stopped but the rows remain in the DB.
+   * The next `reloadSchedules()` call — triggered by any subsequent
+   * cronjob mutation, or by a server restart — re-reads the rows from the
+   * DB and re-registers the timers, so the orphaned rows self-heal
+   * without manual intervention. We do NOT roll back the `stop()` calls
+   * because re-binding timers for a workspace that's mid-deletion is
+   * worse than leaving them stopped: the workspace path is about to be
+   * removed and any fire that races the removal would target a
+   * non-existent worktree. Re-registration on the next reload is the
+   * intentional recovery strategy; operators encountering a partial
+   * failure on this path should expect the next reload to be a no-op
+   * once the workspace removal completes and the rows are re-attempted.
    */
   removeForKey(key: string): void {
     this.stopJobsForKey(key);
@@ -416,17 +439,17 @@ export class CronjobService {
 
   private assertValidCron(expression: string): void {
     try {
-      // Construct-and-discard is the intended validation pattern: `Cron`
-      // throws on a malformed expression at construction time, and we
-      // never need the instance afterwards. Calling the constructor with
-      // no handler means the instance has nothing to fire on its own;
-      // `maxRuns: 0` is belt-and-braces and makes the no-execute intent
-      // explicit at the call site. The leading `void` makes the
-      // side-effect-only construction obvious for readers (and replaces
-      // the cargo-culted `// eslint-disable-next-line no-new` comment
-      // that lived here when this codebase ran ESLint — it now uses
-      // Biome, which doesn't enforce `no-new`).
-      void new Cron(expression, { maxRuns: 0 });
+      // Construct-and-discard: `Cron` throws on a malformed expression at
+      // construction time, and we never need the instance. `maxRuns: 0`
+      // makes the no-execute intent explicit; `void` flags the
+      // side-effect-only construction. The `CronOptions` annotation pins
+      // the `Cron(pattern, options)` overload — `croner` also exposes
+      // `Cron(pattern, handler)`, so if a future version reshapes
+      // overload resolution this fails at compile time rather than
+      // silently turning the options object into a callback and
+      // regressing validation.
+      const options: CronOptions = { maxRuns: 0 };
+      void new Cron(expression, options);
     } catch {
       throw new InvalidCronExpressionError();
     }
@@ -475,7 +498,14 @@ export class CronjobService {
 
     try {
       const chat = this.getOrCreateCronjobChat(workspaceId, job);
-      submitTask({ workspaceId, chatId: chat.id, prompt: job.prompt });
+      const task = submitTask({ workspaceId, chatId: chat.id, prompt: job.prompt });
+      // Log the resulting task id so operators auditing a scheduled fire
+      // can correlate it back to the `tasks.list` row. Mirrors the
+      // observability the manual `trigger()` path returns to its caller.
+      log.info(
+        { jobId: job.id, taskId: task.id, workspaceId, chatId: chat.id },
+        "cronjob task submitted",
+      );
       this.safeUpdateLastRun(job.id, "completed");
     } catch (err) {
       if (err instanceof TaskConflictError) {
