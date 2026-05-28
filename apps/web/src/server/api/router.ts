@@ -99,7 +99,7 @@ import { workspacesRouter } from "./workspaces/router";
 //     regression that masks any of those migrated sub-routers with a
 //     stale legacy entry trips the corresponding describe block.
 //   - `apps/web/tests/tasks-crud.test.ts` exercises `tasks.list` /
-//     `tasks.submit` / `tasks.cancel` end-to-end, and
+//     `tasks.get` end-to-end, and
 //     `apps/web/tests/session-perf.test.ts` pins `sessions.list` — so
 //     duplicate-key regressions on either key trip through the same
 //     paths.

@@ -27,11 +27,11 @@ export function getDb() {
   // Wait up to 5 s on a writer collision instead of throwing
   // `SQLITE_BUSY` immediately. WAL allows concurrent readers, but only
   // one writer at a time — and since #477 the boot path runs
-  // `cleanupStaleTasks` + `syncWorktrees` (via `runFirstTimeSetup`)
-  // concurrently with the first incoming requests, those collisions
-  // are no longer purely theoretical. Without this, a SQLITE_BUSY
-  // thrown synchronously inside a Phase-B writer would bubble up to
-  // the `uncaughtException` handler and crash the whole server.
+  // `TaskQueries.cleanupStale()` + `syncWorktrees` (via
+  // `runFirstTimeSetup`) concurrently with the first incoming requests,
+  // those collisions are no longer purely theoretical. Without this, a
+  // SQLITE_BUSY thrown synchronously inside a Phase-B writer would bubble
+  // up to the `uncaughtException` handler and crash the whole server.
   _sqlite.exec("PRAGMA busy_timeout = 5000");
 
   _db = drizzle({ client: _sqlite, schema });
