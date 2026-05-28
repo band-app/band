@@ -224,13 +224,27 @@ export class BrowserService {
   }
 
   /**
-   * Remove a browser tab. Removes from DB and in-memory maps.
+   * Remove a browser tab. Removes from DB, the saved layout, and in-memory maps.
+   *
+   * Mirrors `ChatService.remove`: dropping the panel from the saved dockview
+   * layout is part of the service-level "remove" contract, not something the
+   * API tier has to remember to do as a second step. Keeps the two pane
+   * domains symmetric so callers (the tRPC router today, future direct
+   * `browserService.remove` callers tomorrow) get the same one-call cleanup.
    */
   remove(browserId: string): boolean {
     const tab = this.browserTabs.get(browserId);
     if (!tab) return false;
 
     this.queries.remove(browserId);
+
+    // Drop the panel from the saved dockview layout. Done before the
+    // in-memory removal so the workspaceId is still available without a
+    // second lookup. `removePanel` is a no-op if the panel was never
+    // registered (e.g. a browser created before `create()` started auto-
+    // adding to the layout), so this is safe across legacy rows.
+    this.removeFromLayout(tab.workspaceId, browserId);
+
     this.removeFromIndex(browserId);
 
     log.info({ browserId, workspaceId: tab.workspaceId }, "browser tab removed");

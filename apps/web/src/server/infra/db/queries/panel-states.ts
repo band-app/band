@@ -26,9 +26,11 @@ export interface PanelStateRow {
   /**
    * Free-form labels for this panel. JSON-encoded `Record<string, string>` on
    * disk; `null` (or absent) for legacy rows and panel types that don't use
-   * labels — readers should treat both as `{}`. See `chat-manager.ts` for
-   * validation rules — the store itself is intentionally schema-agnostic so
-   * other panel types can adopt labels without changes here.
+   * labels — readers should treat both as `{}`. Validation rules live in
+   * `server/services/chat-service.ts::validateLabels` (the
+   * `lib/chat-manager.ts` shim re-exports them) — the store itself is
+   * intentionally schema-agnostic so other panel types can adopt labels
+   * without changes here.
    */
   labels?: string | null;
   createdAt: number;

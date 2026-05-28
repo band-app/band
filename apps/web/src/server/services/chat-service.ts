@@ -237,6 +237,16 @@ function validateLabels(
  * The `lib/chat-manager.ts` back-compat shim delegates every call here so
  * existing modules (`task-runner.ts`, `chat-session-summary.ts`, the CLI
  * adapter, …) keep working without touching their imports.
+ *
+ * Object-identity contract: `update*` methods do NOT mutate the prior
+ * `ChatSession` in place — they store a fresh merged object in the
+ * registry and discard the previous reference. Callers that hold a
+ * snapshot from `get`/`list` MUST re-`get` after any mutation to see the
+ * new values. (The pre-refactor `lib/chat-manager.ts` mutated in place;
+ * the shim continues to expose the function-shaped API so wire callers
+ * see no behaviour change as long as they re-read on each access, which
+ * every current caller — `task-runner`, `chat-events`, the routers —
+ * already does.)
  */
 export class ChatService {
   // Primary index: chatId → ChatSession
@@ -299,6 +309,15 @@ export class ChatService {
   /**
    * Create a new chat pane for a workspace.
    * Persists to panel_states and adds to in-memory registry.
+   *
+   * Intentionally bypasses `ensureInitialized()` — `create` is a pure
+   * write-through and the on-boot "all statuses reset to idle" guarantee
+   * only matters for callers that read existing rows. Production boot
+   * (`start-server.ts`) calls `loadFromDb()` explicitly before any client
+   * traffic, and every public read (`get`/`list`/`findByLabels`) lazily
+   * initializes for dev/test paths, so a write-only sequence (CLI `band
+   * chats create` followed straight by `submitTask`) still observes the
+   * reset before the first read.
    */
   create(workspaceId: string, options?: CreateChatOptions): ChatSession {
     const defaultAgent = settingsService.getAgentDefinition();
