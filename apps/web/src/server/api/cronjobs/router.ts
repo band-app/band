@@ -5,6 +5,7 @@ import {
   CronjobNotFoundError,
   CronjobProjectNotFoundError,
   CronjobWorkspaceMissingError,
+  cronjobByIdInput,
   cronjobCreateInput,
   cronjobService,
   cronjobUpdateInput,
@@ -41,7 +42,7 @@ export const cronjobsRouter = t.router({
       return cronjobService.list(input);
     }),
 
-  get: publicProcedure.input(z.object({ key: z.string(), id: z.string() })).query(({ input }) => {
+  get: publicProcedure.input(cronjobByIdInput).query(({ input }) => {
     try {
       return cronjobService.get(input.key, input.id);
     } catch (err) {
@@ -65,25 +66,21 @@ export const cronjobsRouter = t.router({
     }
   }),
 
-  delete: publicProcedure
-    .input(z.object({ key: z.string(), id: z.string() }))
-    .mutation(({ input }) => {
-      try {
-        return cronjobService.delete(input.key, input.id);
-      } catch (err) {
-        throwAsTRPCError(err);
-      }
-    }),
+  delete: publicProcedure.input(cronjobByIdInput).mutation(({ input }) => {
+    try {
+      return cronjobService.delete(input.key, input.id);
+    } catch (err) {
+      throwAsTRPCError(err);
+    }
+  }),
 
-  trigger: publicProcedure
-    .input(z.object({ key: z.string(), id: z.string() }))
-    .mutation(({ input }) => {
-      try {
-        return cronjobService.trigger(input.key, input.id);
-      } catch (err) {
-        throwAsTRPCError(err);
-      }
-    }),
+  trigger: publicProcedure.input(cronjobByIdInput).mutation(({ input }) => {
+    try {
+      return cronjobService.trigger(input.key, input.id);
+    } catch (err) {
+      throwAsTRPCError(err);
+    }
+  }),
 });
 
 export type CronjobsRouter = typeof cronjobsRouter;

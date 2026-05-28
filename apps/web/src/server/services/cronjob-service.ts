@@ -86,8 +86,27 @@ export const cronjobUpdateInput = z.object({
   enabled: z.boolean().optional(),
 });
 
+/**
+ * `{ key, id }` lookup shape shared by `get`, `delete`, and `trigger`.
+ *
+ * Each of those endpoints previously inlined `z.object({ key: z.string(), id:
+ * z.string() })` in the router, which is wrong for the same reason
+ * `cronjobUpdateInput` calls out above: an empty `key` reaches
+ * `queries.loadFile("")`, returns an empty `jobs` array, and the handler
+ * throws `CronjobNotFoundError` (-> 404) instead of a clean `BAD_REQUEST`.
+ * Centralising the shape in the service tier (same place
+ * `cronjobCreateInput` / `cronjobUpdateInput` live) keeps the three
+ * endpoints consistent — adding a field here lights up the router and
+ * service signatures together.
+ */
+export const cronjobByIdInput = z.object({
+  key: z.string().min(1),
+  id: z.string().min(1),
+});
+
 export type CronjobCreateInput = z.infer<typeof cronjobCreateInput>;
 export type CronjobUpdateInput = z.infer<typeof cronjobUpdateInput>;
+export type CronjobByIdInput = z.infer<typeof cronjobByIdInput>;
 
 // ---------------------------------------------------------------------------
 // Service-level error types
@@ -266,6 +285,20 @@ export class CronjobService {
    * user sees both paths converge on a single dedicated conversation
    * (issue #520). `submitTask` may throw `TaskConflictError`, which the API
    * tier translates into a 409 Conflict response.
+   *
+   * Atomicity caveat: `getOrCreateCronjobChat` and `submitTask` are not run
+   * inside a single transaction. If `createChat` succeeds but `submitTask`
+   * later throws an unexpected (non-`TaskConflictError`) error, the
+   * freshly-created chat remains in the workspace as an orphan with no
+   * task ever attached. The next manual `trigger` (or scheduled fire)
+   * reuses that chat via its `band:cronId` label, so the orphan
+   * self-heals — but the user may briefly see an empty chat pane. The
+   * legacy implementation had the same gap; preserved here to match
+   * existing behavior. If this ever needs to be tightened, the fix is
+   * either (a) wrap both calls in a try/catch that deletes the chat on
+   * unexpected failure, or (b) defer `createChat` until `submitTask`
+   * succeeds (which would require buffering the chat name/labels on the
+   * task row).
    */
   trigger(key: string, id: string): { taskId: string; workspaceId: string; chatId: string } {
     const job = this.findJob(key, id);
@@ -467,6 +500,15 @@ export class CronjobService {
     if (!job.enabled) return;
 
     try {
+      // `Cron(pattern, handler)` is the deliberately chosen overload here:
+      // this is the "schedule for real" path, and the handler shape is the
+      // whole point of the call. `assertValidCron` above uses the
+      // `Cron(pattern, options)` overload because it never wants a handler
+      // and pins `maxRuns: 0` — that comment explains its overload choice.
+      // The two sites use different overloads intentionally; documenting it
+      // here so a future reader doesn't try to "harmonise" them by
+      // wrapping this in an options object (which would force `croner` to
+      // pick the wrong overload and silently drop the handler).
       const cronInstance = new Cron(job.cronExpression, () => {
         this.executeCronjob(job, fileKey).catch((err) => {
           log.error({ jobId: job.id, err }, "unhandled error in cronjob execution");
