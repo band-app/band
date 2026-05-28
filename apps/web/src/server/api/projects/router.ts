@@ -59,6 +59,13 @@ export const projectsRouter = t.router({
       return projectService.promoteToGit(input.name);
     }),
 
+  // Sync: `projectService.remove`, `stopJobsForKey`, and
+  // `deleteCronjobFile` are all synchronous today. If any of them grows
+  // an async path later (e.g. graceful job drain on shutdown), switch
+  // this handler to `async` and `await` the call so the promise isn't
+  // silently dropped — the response would otherwise return before the
+  // cronjob teardown finished and racy `cronjobs.list` reads could see
+  // the just-deleted project's jobs.
   remove: publicProcedure.input(z.object({ name: z.string() })).mutation(({ input }) => {
     projectService.remove(input.name);
 

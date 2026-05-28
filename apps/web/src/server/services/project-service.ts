@@ -72,7 +72,13 @@ export class ProjectService {
         head?: string;
         pinned: boolean;
         workspaceId: string;
-        agent: ReturnType<typeof loadCurrentStatuses>[number]["agent"] | null;
+        // `loadCurrentStatuses[number]["agent"]` is `AgentInfo | undefined`; the
+        // runtime expression below (`status?.agent ?? null`) discards the
+        // `undefined` arm, so the wire type is `AgentInfo | null`. Use
+        // `NonNullable<…>` to drop `undefined` from the public surface so
+        // RouterOutput consumers don't have to handle a state the API never
+        // produces.
+        agent: NonNullable<ReturnType<typeof loadCurrentStatuses>[number]["agent"]> | null;
       }>;
     }>;
     labels: NonNullable<ReturnType<SettingsService["get"]>["labels"]>;

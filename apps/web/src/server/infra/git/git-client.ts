@@ -372,12 +372,4 @@ export class GitClient {
   getRepoInfo(worktreePath: string): Promise<RepoInfo | null> {
     return getRepoInfo(worktreePath);
   }
-
-  /**
-   * Run `git ARGS` in `cwd` and return stdout. See the module-level
-   * `execGit` for full semantics.
-   */
-  exec(args: string[], cwd: string): Promise<string> {
-    return execGit(args, cwd);
-  }
 }
