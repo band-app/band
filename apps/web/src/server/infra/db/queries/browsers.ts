@@ -12,6 +12,7 @@
  * this class.
  */
 
+import { createLogger } from "@band-app/logger";
 import {
   deletePanelState,
   deletePanelStatesForWorkspace,
@@ -20,6 +21,8 @@ import {
   resetPanelStatesToIdle,
   updatePanelState,
 } from "./panel-states";
+
+const log = createLogger("browser-queries");
 
 /** `panel_states.panelType` value used for browser-tab rows. */
 export const BROWSER_PANEL_TYPE = "browser";
@@ -142,15 +145,30 @@ export class BrowserQueries {
 
   /**
    * Read every browser-tab row from disk. Each row's JSON `state` is
-   * parsed into the typed `BrowserRow` shape; malformed rows throw — the
-   * service hydrates once at boot, so a bad row is a fatal config error
-   * worth surfacing loudly rather than silently dropping.
+   * parsed into the typed `BrowserRow` shape.
+   *
+   * Malformed rows are logged and skipped rather than crashing the
+   * caller. The service hydrates lazily (`ensureInitialized`) on the
+   * first read, so a single corrupted blob would otherwise turn a
+   * `browsers.list` request into a 500 on every request after a deploy.
+   * Skipping the bad row keeps the rest of the workspace's browsers
+   * usable; operators get the broken `id` in the warning so they can
+   * inspect or delete the row manually. Mirrors `ChatQueries.findAll`.
    */
   findAll(): BrowserRow[] {
     const rows = listPanelStates(BROWSER_PANEL_TYPE);
     const out: BrowserRow[] = [];
     for (const row of rows) {
-      const parsed = JSON.parse(row.state) as BrowserStateBlob;
+      let parsed: BrowserStateBlob;
+      try {
+        parsed = JSON.parse(row.state) as BrowserStateBlob;
+      } catch (err) {
+        log.warn(
+          { browserId: row.id, workspaceId: row.workspaceId, err },
+          "browser row state failed to parse as JSON, skipping",
+        );
+        continue;
+      }
       out.push({
         id: row.id,
         workspaceId: row.workspaceId,

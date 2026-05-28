@@ -556,20 +556,34 @@ export class ChatService {
   /**
    * Remove all chat panes for a workspace.
    * Called when a workspace is deleted.
+   *
+   * Drops the saved dockview layout in the same call — mirrors `remove()`,
+   * which calls `removeFromLayout` so layout cleanup is part of the
+   * service-level contract instead of something every caller has to
+   * remember to do as a second step. Keeps `ChatService` and
+   * `BrowserService` symmetric. `deleteLayout` is a no-op when no layout
+   * row exists, so this is safe across workspaces that never opened a chat.
    */
   removeAllForWorkspace(workspaceId: string): void {
     const ids = this.workspaceChats.get(workspaceId);
-    if (!ids) return;
 
-    for (const chatId of [...ids]) {
-      removeAgent(chatId);
-      this.chatSessions.delete(chatId);
+    if (ids) {
+      for (const chatId of [...ids]) {
+        removeAgent(chatId);
+        this.chatSessions.delete(chatId);
+      }
+
+      // Bulk delete chat panel states from DB
+      this.queries.removeAllForWorkspace(workspaceId);
+
+      this.workspaceChats.delete(workspaceId);
     }
 
-    // Bulk delete chat panel states from DB
-    this.queries.removeAllForWorkspace(workspaceId);
+    // Always drop the saved layout, even when no in-memory chats exist —
+    // a row in `chat_layout` can survive a server restart where the
+    // workspace's chats were never hydrated yet.
+    this.deleteLayout(workspaceId);
 
-    this.workspaceChats.delete(workspaceId);
     log.info({ workspaceId }, "all chat panes removed for workspace");
   }
 

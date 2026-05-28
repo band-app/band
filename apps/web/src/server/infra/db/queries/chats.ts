@@ -255,15 +255,31 @@ export class ChatQueries {
 
   /**
    * Read every chat row from disk. Each row's JSON `state` is parsed into
-   * the typed `ChatRow` shape; malformed rows throw — the service hydrates
-   * once at boot, so a bad row is a fatal config error worth surfacing
-   * loudly rather than silently dropping.
+   * the typed `ChatRow` shape.
+   *
+   * Malformed rows are logged and skipped rather than crashing the
+   * caller. The service hydrates lazily (`ensureInitialized`) on the
+   * first read, so a single corrupted blob would otherwise turn a
+   * `chats.list` request into a 500 on every request after a deploy.
+   * Skipping the bad row keeps the rest of the workspace's chats
+   * usable; operators get the broken `id` in the warning so they can
+   * inspect or delete the row manually. Matches `parseLabels`, which
+   * already drops invalid labels via the same warn-and-fallback pattern.
    */
   findAll(): ChatRow[] {
     const rows = listPanelStates(CHAT_PANEL_TYPE);
     const out: ChatRow[] = [];
     for (const row of rows) {
-      const parsed = JSON.parse(row.state) as ChatStateBlob;
+      let parsed: ChatStateBlob;
+      try {
+        parsed = JSON.parse(row.state) as ChatStateBlob;
+      } catch (err) {
+        log.warn(
+          { chatId: row.id, workspaceId: row.workspaceId, err },
+          "chat row state failed to parse as JSON, skipping",
+        );
+        continue;
+      }
       out.push({
         id: row.id,
         workspaceId: row.workspaceId,

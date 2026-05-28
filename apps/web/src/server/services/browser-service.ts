@@ -264,18 +264,32 @@ export class BrowserService {
   /**
    * Remove all browser tabs for a workspace.
    * Called when a workspace is deleted.
+   *
+   * Drops the saved dockview layout in the same call — mirrors `remove()`,
+   * which calls `removeFromLayout` so layout cleanup is part of the
+   * service-level contract instead of something every caller has to
+   * remember to do as a second step. Keeps `BrowserService` and
+   * `ChatService` symmetric. `deleteLayout` is a no-op when no layout row
+   * exists, so this is safe across workspaces that never opened a browser.
    */
   removeAllForWorkspace(workspaceId: string): void {
     const ids = this.workspaceBrowsers.get(workspaceId);
-    if (!ids) return;
 
-    for (const browserId of [...ids]) {
-      this.browserTabs.delete(browserId);
+    if (ids) {
+      for (const browserId of [...ids]) {
+        this.browserTabs.delete(browserId);
+      }
+
+      this.queries.removeAllForWorkspace(workspaceId);
+
+      this.workspaceBrowsers.delete(workspaceId);
     }
 
-    this.queries.removeAllForWorkspace(workspaceId);
+    // Always drop the saved layout, even when no in-memory tabs exist —
+    // a row in `browser_layout` can survive a server restart where the
+    // workspace's browsers were never hydrated yet.
+    this.deleteLayout(workspaceId);
 
-    this.workspaceBrowsers.delete(workspaceId);
     log.info({ workspaceId }, "all browser tabs removed for workspace");
   }
 
