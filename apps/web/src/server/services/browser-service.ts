@@ -274,8 +274,15 @@ export class BrowserService {
    * remember to do as a second step. Keeps `BrowserService` and
    * `ChatService` symmetric. `deleteLayout` is a no-op when no layout row
    * exists, so this is safe across workspaces that never opened a browser.
+   *
+   * `ensureInitialized()` runs first so a workspace deletion that arrives
+   * before any public read has hydrated the registry still cleans up the
+   * persisted `panel_states` rows — otherwise the `if (ids)` guard would
+   * skip the DB delete and leak the rows.
    */
   removeAllForWorkspace(workspaceId: string): void {
+    this.ensureInitialized();
+
     const ids = this.workspaceBrowsers.get(workspaceId);
 
     if (ids) {

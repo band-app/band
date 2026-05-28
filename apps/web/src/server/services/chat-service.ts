@@ -568,8 +568,16 @@ export class ChatService {
    * remember to do as a second step. Keeps `ChatService` and
    * `BrowserService` symmetric. `deleteLayout` is a no-op when no layout
    * row exists, so this is safe across workspaces that never opened a chat.
+   *
+   * `ensureInitialized()` runs first so a workspace deletion that arrives
+   * before any public read has hydrated the registry still cleans up the
+   * persisted `panel_states` rows — otherwise the `if (ids)` guard would
+   * skip the DB delete and leak the rows (and the agents would never be
+   * killed).
    */
   removeAllForWorkspace(workspaceId: string): void {
+    this.ensureInitialized();
+
     const ids = this.workspaceChats.get(workspaceId);
 
     if (ids) {
