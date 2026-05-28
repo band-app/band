@@ -16,6 +16,7 @@
  *   - Phase 4 (issue #315): `cronjobs.*`.
  *   - Phase 5 (issue #316): `chats.*`, `chatLayout.*`, `browsers.*`,
  *     `browserLayout.*`.
+ *   - Phase 6 (issue #317): `tasks.*`, `sessions.*`.
  *   - Phase 7 (issue #318): `terminals/` (exposes `terminal` + `terminalLayout`).
  *
  * Phase 4 landed ahead of Phase 3 because cronjobs is a small, self-contained
@@ -38,7 +39,9 @@ import { browserLayoutRouter, browsersRouter } from "./browsers/router";
 import { chatLayoutRouter, chatsRouter } from "./chats/router";
 import { cronjobsRouter } from "./cronjobs/router";
 import { projectsRouter } from "./projects/router";
+import { sessionsRouter } from "./sessions/router";
 import { settingsRouter } from "./settings/router";
+import { tasksRouter } from "./tasks/router";
 import { terminalsRouters } from "./terminals/router";
 import { t } from "./trpc";
 import { workspacesRouter } from "./workspaces/router";
@@ -46,7 +49,7 @@ import { workspacesRouter } from "./workspaces/router";
 // INVARIANT: the legacy router (`apps/web/src/trpc/router.ts`) must not
 // contain any key that this file also defines (`settings`, `projects`,
 // `workspaces`, `cronjobs`, `chats`, `chatLayout`, `browsers`,
-// `browserLayout`, `terminal`, `terminalLayout`, …).
+// `browserLayout`, `tasks`, `sessions`, `terminal`, `terminalLayout`, …).
 // `t.mergeRouters` accepts two routers and silently picks last-write-wins
 // for duplicate keys, so a stray legacy entry would mask the migrated
 // router without a build error. Each phase of the 3-tier migration adds a
@@ -62,6 +65,8 @@ import { workspacesRouter } from "./workspaces/router";
 //   - `chatLayout`      (Phase 5, issue #316)
 //   - `browsers`        (Phase 5, issue #316)
 //   - `browserLayout`   (Phase 5, issue #316)
+//   - `tasks`           (Phase 6, issue #317)
+//   - `sessions`        (Phase 6, issue #317)
 //   - `terminal`        (Phase 7, issue #318)
 //   - `terminalLayout`  (Phase 7, issue #318)
 //
@@ -93,6 +98,11 @@ import { workspacesRouter } from "./workspaces/router";
 //     `browsers.get` plus `browserLayout.get` / `browserLayout.save`. A
 //     regression that masks any of those migrated sub-routers with a
 //     stale legacy entry trips the corresponding describe block.
+//   - `apps/web/tests/tasks-crud.test.ts` exercises `tasks.list` /
+//     `tasks.submit` / `tasks.cancel` end-to-end, and
+//     `apps/web/tests/session-perf.test.ts` pins `sessions.list` — so
+//     duplicate-key regressions on either key trip through the same
+//     paths.
 //   - `apps/web/tests/terminal-ws.test.ts` (and any other terminal-*
 //     integration tests) hit the merged router through the same /trpc
 //     endpoint, so a regression that masks the migrated terminal
@@ -109,6 +119,8 @@ export const appRouter = t.mergeRouters(
     chatLayout: chatLayoutRouter,
     browsers: browsersRouter,
     browserLayout: browserLayoutRouter,
+    tasks: tasksRouter,
+    sessions: sessionsRouter,
     ...terminalsRouters,
   }),
 );

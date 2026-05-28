@@ -2,22 +2,54 @@ import { mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { createLogger } from "@band-app/logger";
 import type { UIMessageChunk } from "ai";
-import { getAgent, getOrCreateAgent, replaceAgent } from "./agent-pool";
-import { getChat, updateChatActiveSession, updateChatStatus } from "./chat-manager";
-import { mimeTypeFromFilename } from "./mime-types";
-import { createPendingInput, rejectAllPendingInputs } from "./pending-inputs";
-import { shiftQueuedMessage } from "./queued-message-store";
-import { bandHome, upsertWorkspaceStatus } from "./state";
-import { generateTaskId, markTaskFailed, saveTask } from "./task-store";
-import { emit as emitStatusEvent } from "./watcher";
-// FRAGILE: ESM cycle leg — `./workspace` imports `workspaceService` from
+import { getChat, updateChatActiveSession, updateChatStatus } from "../../lib/chat-manager";
+import { mimeTypeFromFilename } from "../../lib/mime-types";
+import { shiftQueuedMessage } from "../../lib/queued-message-store";
+import { bandHome, upsertWorkspaceStatus } from "../../lib/state";
+import { emit as emitStatusEvent } from "../../lib/watcher";
+// FRAGILE: ESM cycle leg — `lib/workspace` imports `workspaceService` from
 // `server/services/workspace-service`, which imports `submitTask` back from
-// this file. See `lib/workspace.ts` for the cycle note before capturing
-// `resolveWorkspace` (or any service-tier symbol via this hop) at module
-// load.
-import { resolveWorkspace } from "./workspace";
+// this file. The cycle is safe only because every cross-module call below
+// is inside a function body (live binding). See `lib/workspace.ts` for the
+// cycle note before capturing `resolveWorkspace` (or any service-tier
+// symbol via this hop) at module load.
+import { resolveWorkspace } from "../../lib/workspace";
+import { getAgent, getOrCreateAgent, replaceAgent } from "../infra/agents/agent-pool";
+import { generateTaskId, TaskQueries } from "../infra/db/queries/tasks";
 
-const log = createLogger("task-runner");
+const log = createLogger("task-service");
+
+/**
+ * Task lifecycle, session-event buffer, and pending-input plumbing
+ * (Phase 6 of the 3-tier refactor — issue #317).
+ *
+ * Absorbs the legacy:
+ *   - `lib/task-runner.ts` — submit/abort/cancel + the agent event loop.
+ *   - `lib/pending-inputs.ts` — `AskUserQuestion` / `ExitPlanMode` resolver
+ *     map. Folded in here because the only producer (the agent event loop)
+ *     and the consumer (the chat `answer` mutation) both live in the task
+ *     domain.
+ *   - `lib/session-store.ts` — session-buffer read helpers used by the
+ *     chat-events stream for gap-fill replay. Lives here because the
+ *     buffer it reads is owned by the task event loop.
+ *
+ * Kept as plain function exports rather than a class because the state
+ * (`tasks`, `listeners`, `sessionBuffers`, `sessionUsage`,
+ * `pendingInputs`) is held on `globalThis` symbols so it survives module
+ * re-evaluation in dev (vite/HMR) and across multiple bundles (esbuild
+ * start-server.mjs vs. Vite SSR server.js produce separate copies of
+ * this module). Wrapping the singletons in a class would either leak the
+ * symbol-keyed state into the type signature or duplicate it per-instance,
+ * defeating the singleton guarantee that all callers see the same buffer.
+ *
+ * Service-tier rule: the only outward-facing dependencies of this module
+ * are infra (`agent-pool`, `TaskQueries`) and other services / shared lib
+ * helpers. The API tier (`server/api/tasks/router.ts` and
+ * `server/api/sessions/router.ts`) calls these exports; this module never
+ * imports from `api/`.
+ */
+
+const taskQueries = new TaskQueries();
 
 /**
  * List filenames in a directory. Returns a Set for quick membership checks.
@@ -123,17 +155,29 @@ interface InternalTask extends TaskInfo {
 }
 
 // Use globalThis to ensure a single shared state across multiple bundles
-// (esbuild start-server.mjs and Vite SSR server.js produce separate copies of this module)
+// (esbuild start-server.mjs and Vite SSR server.js produce separate copies of this module).
+//
+// FROZEN STRINGS: the `band.task-runner.*` / `band.pending-inputs` strings
+// are the singleton keys. Symbol.for(key) returns the same Symbol across
+// modules only when the key string is byte-identical, so renaming any of
+// these strings would split the singleton — a running task started by the
+// pre-rename module would be invisible to the post-rename one, and the
+// dev-time HMR flow this whole block exists to defend against would
+// regress. The strings intentionally keep their legacy `task-runner` /
+// `pending-inputs` names even though the source files were absorbed into
+// this module: they are a keying contract, not a path reference.
 const TASKS_KEY = Symbol.for("band.task-runner.tasks");
 const LISTENERS_KEY = Symbol.for("band.task-runner.listeners");
 const BUFFERS_KEY = Symbol.for("band.task-runner.sessionBuffers");
 const USAGE_KEY = Symbol.for("band.task-runner.sessionUsage");
+const PENDING_KEY = Symbol.for("band.pending-inputs");
 
 const g = globalThis as unknown as Record<symbol, unknown>;
 if (!g[TASKS_KEY]) g[TASKS_KEY] = new Map<string, InternalTask>();
 if (!g[LISTENERS_KEY]) g[LISTENERS_KEY] = new Map<string, Set<Listener>>();
 if (!g[BUFFERS_KEY]) g[BUFFERS_KEY] = new Map<string, SessionBuffer>();
 if (!g[USAGE_KEY]) g[USAGE_KEY] = new Map<string, SessionUsage>();
+if (!g[PENDING_KEY]) g[PENDING_KEY] = new Map<string, PendingInput>();
 
 /** Tasks keyed by chatId — one running task per chat pane. */
 const tasks = g[TASKS_KEY] as Map<string, InternalTask>;
@@ -177,10 +221,75 @@ export interface SessionUsage {
   maxContextTokens?: number;
 }
 
+// ---------------------------------------------------------------------------
+// Pending inputs — `AskUserQuestion` / `ExitPlanMode` approvals
+//
+// Absorbed from `lib/pending-inputs.ts`. The producer (`onUserInputNeeded`
+// inside `runTask`) and the consumer (the chat `answer` mutation) both live
+// in this domain.
+// ---------------------------------------------------------------------------
+
+interface PendingInput {
+  resolve: (answers: Record<string, string>) => void;
+  reject: (error: Error) => void;
+  /** Workspace this approval belongs to — used by hasPendingInputForWorkspace
+   *  so the dashboard can keep the "needs attention" indicator on while the
+   *  agent is still blocked on user input. May be undefined for legacy
+   *  call-sites that didn't pass it. */
+  workspaceId?: string;
+}
+
+const pendingInputs = g[PENDING_KEY] as Map<string, PendingInput>;
+
+export function createPendingInput(
+  approvalId: string,
+  workspaceId?: string,
+): Promise<Record<string, string>> {
+  return new Promise<Record<string, string>>((resolve, reject) => {
+    pendingInputs.set(approvalId, { resolve, reject, workspaceId });
+  });
+}
+
+export function resolvePendingInput(approvalId: string, answers: Record<string, string>): boolean {
+  const pending = pendingInputs.get(approvalId);
+  if (!pending) return false;
+  pendingInputs.delete(approvalId);
+  pending.resolve(answers);
+  return true;
+}
+
+export function rejectPendingInput(approvalId: string, error: Error): boolean {
+  const pending = pendingInputs.get(approvalId);
+  if (!pending) return false;
+  pendingInputs.delete(approvalId);
+  pending.reject(error);
+  return true;
+}
+
+export function rejectAllPendingInputs(error: Error): void {
+  for (const [approvalId, pending] of pendingInputs) {
+    pendingInputs.delete(approvalId);
+    pending.reject(error);
+  }
+}
+
+/**
+ * Returns true if there is at least one pending input request for the given
+ * workspace — meaning the agent is currently blocked on a user-facing
+ * AskUserQuestion / ExitPlanMode prompt. clearNeedsAttention uses this so the
+ * dashboard indicator stays on while the user still owes the agent an answer.
+ */
+export function hasPendingInputForWorkspace(workspaceId: string): boolean {
+  for (const pending of pendingInputs.values()) {
+    if (pending.workspaceId === workspaceId) return true;
+  }
+  return false;
+}
+
 function persistTask(task: InternalTask): void {
   const workspace = resolveWorkspace(task.workspaceId);
   try {
-    saveTask({
+    taskQueries.save({
       id: task.taskRecordId,
       workspaceId: task.workspaceId,
       project: workspace?.project.name ?? "",
@@ -253,7 +362,7 @@ export function submitTask(options: SubmitTaskOptions): TaskInfo {
 
   const workspace = resolveWorkspace(workspaceId);
   if (!workspace) {
-    throw new Error(`Workspace not found: ${workspaceId}`);
+    throw new WorkspaceNotFoundError(workspaceId);
   }
 
   const existing = tasks.get(chatId);
@@ -403,7 +512,7 @@ export function cancelTask(taskId: string): { cancelled: boolean; workspaceId?: 
   }
 
   // Not found in memory — try marking the persisted record as failed (orphaned task)
-  const record = markTaskFailed(taskId);
+  const record = taskQueries.markFailed(taskId);
   if (record) {
     const updated = upsertWorkspaceStatus(record.workspaceId, { status: "waiting" });
     emitStatusEvent({ kind: "update", status: updated });
@@ -926,8 +1035,25 @@ export function getTask(chatId: string): TaskInfo | null {
 }
 
 /**
+ * List persisted task rows. Service-tier façade over `TaskQueries.list`
+ * so the API tier never reaches into infra directly (per the API → Service
+ * → Infra dependency direction in `docs/web-architecture.md`).
+ */
+export function listTaskRecords(filters?: Parameters<TaskQueries["list"]>[0]) {
+  return taskQueries.list(filters);
+}
+
+/**
+ * Load a single persisted task row by id. Service-tier façade over
+ * `TaskQueries.load`. Returns `null` when no row matches.
+ */
+export function loadTaskRecord(id: string) {
+  return taskQueries.load(id);
+}
+
+/**
  * Get the in-memory event buffer for a session.
- * Used by the tRPC router for gap-fill replay and message conversion.
+ * Used by the chat-events stream for gap-fill replay and message conversion.
  */
 export function getSessionBuffer(sessionId: string): SessionBuffer | undefined {
   return sessionBuffers.get(sessionId);
@@ -1003,4 +1129,100 @@ export class TaskConflictError extends Error {
     super(`Task already running for chat ${chatId}`);
     this.name = "TaskConflictError";
   }
+}
+
+/**
+ * Thrown by `submitTask` when the workspace id can't be resolved.
+ *
+ * Distinct from `WorkspaceService.WorkspaceNotFoundError` (which is keyed
+ * on branch, not workspace id) — the two error classes intentionally don't
+ * collide at the import level. The API tier matches on `instanceof` so
+ * even if both errors are imported into the same router file the wire
+ * mapping stays correct.
+ */
+export class WorkspaceNotFoundError extends Error {
+  constructor(workspaceId: string) {
+    super(`Workspace not found: ${workspaceId}`);
+    this.name = "WorkspaceNotFoundError";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Session event-buffer accessors (absorbed from `lib/session-store.ts`).
+//
+// Read helpers over the in-memory ring buffer maintained by `broadcast`
+// above. Used by the chat-events stream for gap-fill replay and message
+// conversion — they live in the service tier because the buffer they read
+// is the task event loop's output.
+// ---------------------------------------------------------------------------
+
+/**
+ * A buffered session event.
+ *
+ * Buffered chunks are kept as already-parsed objects so that callers don't
+ * pay a JSON.stringify/parse cost on every read. With ring buffers up to
+ * MAX_BUFFER_SIZE (2000) entries this loop dominated workspace-switch
+ * latency for active sessions.
+ */
+export interface SessionEventRecord {
+  id: number;
+  sessionId: string;
+  chunkType: string;
+  /** The parsed stream chunk. Treat as read-only. */
+  chunk: StreamChunk;
+  createdAt: number;
+}
+
+function chunkToRecord(sessionId: string, chunk: StreamChunk): SessionEventRecord {
+  return {
+    id: chunk.eventId ?? 0,
+    sessionId,
+    chunkType: chunk.type,
+    chunk,
+    createdAt: Date.now(),
+  };
+}
+
+/**
+ * Get the most recent N events for a session (for initial page load).
+ * Returns events in ascending id order (oldest first).
+ */
+export function getSessionEventsTail(sessionId: string, limit: number): SessionEventRecord[] {
+  const buf = getSessionBuffer(sessionId);
+  if (!buf) return [];
+  const start = Math.max(0, buf.events.length - limit);
+  return buf.events.slice(start).map((c) => chunkToRecord(sessionId, c));
+}
+
+/**
+ * Get events before a given eventId for scroll-up pagination.
+ * Returns events in ascending id order (oldest first).
+ */
+export function getSessionEventsBefore(
+  sessionId: string,
+  beforeEventId: number,
+  limit: number,
+): SessionEventRecord[] {
+  const buf = getSessionBuffer(sessionId);
+  if (!buf) return [];
+  // Find the index of the first event with id >= beforeEventId
+  const cutoff = buf.events.findIndex((e) => (e.eventId ?? 0) >= beforeEventId);
+  if (cutoff <= 0) return [];
+  const start = Math.max(0, cutoff - limit);
+  return buf.events.slice(start, cutoff).map((c) => chunkToRecord(sessionId, c));
+}
+
+/**
+ * Get events after a given eventId (for gap-fill replay).
+ * Returns events in ascending id order.
+ */
+export function getSessionEventsAfter(
+  sessionId: string,
+  afterEventId: number,
+): SessionEventRecord[] {
+  const buf = getSessionBuffer(sessionId);
+  if (!buf) return [];
+  return buf.events
+    .filter((e) => (e.eventId ?? 0) > afterEventId)
+    .map((c) => chunkToRecord(sessionId, c));
 }

@@ -10,7 +10,7 @@
  * Source of truth shared by:
  *   • `apps/web/src/api/chat-events.ts`            — emits these events
  *   • `apps/web/src/api/chat-submit.ts`            — round-trip target
- *   • `apps/web/src/lib/task-runner.ts`            — broadcasts them
+ *   • `apps/web/src/server/services/task-service.ts` — broadcasts them
  *   • `apps/web/src/components/chat/*`             — consumes them
  *   • `apps/web/tests/chat-events.test.ts`         — integration tests
  */

@@ -3,7 +3,7 @@
  *
  * When a user sends a message while the agent is busy, the frontend
  * persists it here so it survives page navigation. When a task
- * completes, the task-runner pops the next message and auto-starts
+ * completes, the task-service pops the next message and auto-starts
  * a new task. The frontend only pushes to and renders the queue.
  *
  * Each queued message can carry file attachments (images, PDFs, etc.)
@@ -12,7 +12,7 @@
  * to disk only when the message is drained and submitted as a real
  * task, mirroring the immediate-submit code path in task-stream.ts.
  *
- * Uses the globalThis Symbol pattern (same as task-runner.ts) to
+ * Uses the globalThis Symbol pattern (same as task-service.ts) to
  * ensure a single shared map across multiple bundles.
  */
 
@@ -29,7 +29,7 @@ export interface QueuedFile {
   url: string;
   /**
    * Absolute on-disk path under `<HOME>/.band/uploads/`. Required so the
-   * drain in `task-runner.ts` can rebuild the `I'm sharing these files
+   * drain in `task-service.ts` can rebuild the `I'm sharing these files
    * with you:\n- <path>` agent prompt WITHOUT re-running
    * `saveUploadedFilesDetailed` (which would silently drop the file —
    * by the time it lands in the queue the URL has already been

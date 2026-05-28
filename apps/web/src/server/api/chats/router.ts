@@ -22,14 +22,14 @@
 import { createLogger } from "@band-app/logger";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { getOrCreateAgent } from "../../../lib/agent-pool";
 import {
   ensureActiveSessionSummary,
   scheduleActiveSessionRefresh,
 } from "../../../lib/chat-session-summary";
-import { abortTask, submitTask, TaskConflictError } from "../../../lib/task-runner";
 import { resolveWorkspace } from "../../../lib/workspace";
+import { getOrCreateAgent } from "../../infra/agents/agent-pool";
 import { chatService, InvalidLabelsError } from "../../services/chat-service";
+import { abortTask, submitTask, TaskConflictError } from "../../services/task-service";
 import { publicProcedure, t } from "../trpc";
 
 const log = createLogger("chats-router");

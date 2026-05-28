@@ -11,7 +11,7 @@
  *   by a real (fake-binary) agent. That doctrine is the single source of
  *   truth for new tests in this repo, so this file boots a real server
  *   and drives it through the same path a user would: the agent emits a
- *   TodoWrite `tool_use` block, the task-runner broadcasts it as a
+ *   TodoWrite `tool_use` block, the task-service broadcasts it as a
  *   `tool-input-available` ChatEvent, the reducer in `ChatView.tsx` lifts
  *   it into the TaskMap, and the TaskListWidget renders.
  *

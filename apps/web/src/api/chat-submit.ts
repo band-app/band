@@ -19,8 +19,12 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { createLogger } from "@band-app/logger";
 import { createChat, getChat } from "../lib/chat-manager";
 import { pushQueuedMessage } from "../lib/queued-message-store";
-import { submitTask, TaskConflictError } from "../lib/task-runner";
 import { saveUploadedFilesDetailed } from "../lib/upload-utils";
+import {
+  submitTask,
+  TaskConflictError,
+  WorkspaceNotFoundError,
+} from "../server/services/task-service";
 
 const log = createLogger("chat-submit");
 
@@ -142,7 +146,7 @@ export async function handleChatSubmit(
       // Already running — queue instead. The subscriber sees a
       // `queue-updated` event automatically via subscribeQueue.
       // Carry the absolute disk path through so the drain path in
-      // task-runner.ts can rebuild `I'm sharing these files…\n- <path>`
+      // task-service.ts can rebuild `I'm sharing these files…\n- <path>`
       // without re-uploading (the URLs are already
       // `/api/uploads/<storedName>` at this point, so re-running
       // `saveUploadedFilesDetailed` would silently drop them).
@@ -161,7 +165,7 @@ export async function handleChatSubmit(
       sendJson(res, 200, { ok: true, queued: true });
       return;
     }
-    if (err instanceof Error && err.message.startsWith("Workspace not found")) {
+    if (err instanceof WorkspaceNotFoundError) {
       sendJson(res, 404, { error: err.message });
       return;
     }

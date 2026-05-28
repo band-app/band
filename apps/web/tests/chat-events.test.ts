@@ -674,9 +674,9 @@ describe("chat-events — cold subscribe replays history from chats.activeSessio
   it("JSONL replay strips the [File sharing: …] hint from the user-message text", async () => {
     const chatId = newChatId("hint-strip");
 
-    // Phase 1: submit on a brand-new session so task-runner appends the
+    // Phase 1: submit on a brand-new session so task-service appends the
     // hint to the agent prompt (the hint is only appended when there's
-    // no incoming sessionId — see `task-runner.ts::fileSharingHint`).
+    // no incoming sessionId — see `task-service.ts::fileSharingHint`).
     const initialPromise = collectEvents(server.url, chatId, {
       until: (e) => e.type === "task-completed",
       timeoutMs: 15_000,
@@ -878,7 +878,7 @@ describe("chat-events — sequential submits resume the previous session", () =>
    * rendered" bug:
    *
    *   1. Each session has its own per-buffer eventId counter starting at 1
-   *      (`apps/web/src/lib/task-runner.ts` -> `broadcast`).
+   *      (`apps/web/src/server/services/task-service.ts` -> `broadcast`).
    *   2. Before the fix, every `POST /api/chats/:chatId/messages` submitted
    *      with no `sessionId` started a brand-new agent session.
    *   3. So turn 2's events lived in session-B with eventIds 1, 2, 3, …,

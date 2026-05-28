@@ -1,6 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createLogger } from "@band-app/logger";
-import { getOrCreateAgent } from "../lib/agent-pool";
 import type {
   ChatEvent,
   ChatEventPayload,
@@ -14,16 +13,17 @@ import {
   subscribeQueue,
   toWireQueuedMessages,
 } from "../lib/queued-message-store";
-import { getSessionEventsAfter } from "../lib/session-store";
 import { openSseStream, type SseWriter } from "../lib/sse-writer";
+import { resolveWorkspace } from "../lib/workspace";
+import { getOrCreateAgent } from "../server/infra/agents/agent-pool";
 import {
   getSessionBuffer,
+  getSessionEventsAfter,
   getSessionUsage,
   getTask,
   type StreamChunk,
   subscribe as subscribeTask,
-} from "../lib/task-runner";
-import { resolveWorkspace } from "../lib/workspace";
+} from "../server/services/task-service";
 
 const log = createLogger("chat-events");
 
@@ -46,7 +46,7 @@ const log = createLogger("chat-events");
  *      requested range and the session has JSONL on disk, page in JSONL
  *      with synthetic event ids that sort before the buffer's first event.
  *
- *   3. **Live tail.** Subscribe to `task-runner` broadcasts + queued-message
+ *   3. **Live tail.** Subscribe to `task-service` broadcasts + queued-message
  *      updates; translate each to `ChatEvent` and emit live.
  *
  *   4. **Close.** When the task transitions to completed/error AND the
@@ -100,7 +100,7 @@ export async function handleChatEvents(
 
   // Counter local to *this subscription* — only used for events the server
   // synthesises (subscription-opened, queue-updated, JSONL backfill). Real
-  // task events keep their `task-runner`-assigned buffer eventIds.
+  // task events keep their `task-service`-assigned buffer eventIds.
   // Synthetic ids are negative so they sort before any real buffer ids.
   let nextSyntheticId = -1;
 
@@ -150,7 +150,7 @@ export async function handleChatEvents(
   }
 
   // Register the live-tail subscribers BEFORE replayPast so that
-  // task-runner broadcasts arriving during replay (the most important
+  // task-service broadcasts arriving during replay (the most important
   // case: a fast agent crash that fires `task-error` while we're still
   // reading JSONL) land in our queue instead of being dropped because no
   // listener was registered. We dedup against `lastEmittedId` (running
@@ -414,7 +414,7 @@ async function replayPast(opts: {
   if (buf) {
     // Intentional: we replay EVERY buffer event past the cursor regardless
     // of which task produced it. Auto-queued sends reuse `sessionId`
-    // (see `task-runner.ts::submitTask` after `shiftQueuedMessage`), so the
+    // (see `task-service.ts::submitTask` after `shiftQueuedMessage`), so the
     // buffer can hold events from multiple sequential tasks under one
     // session. A client reconnecting mid-session with a stale cursor needs
     // those prior-task tail events to reconstruct its state — they are NOT
@@ -442,7 +442,7 @@ async function replayPast(opts: {
 // See that file for the full contract.
 
 /**
- * Translate a task-runner broadcast chunk into a ChatEvent payload.
+ * Translate a task-service broadcast chunk into a ChatEvent payload.
  * Returns `undefined` for chunks that don't surface to the chat-event stream
  * (e.g. `finish`, `finish-step` — replaced by `task-completed`).
  */

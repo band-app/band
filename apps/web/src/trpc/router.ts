@@ -8,12 +8,6 @@ import { rgPath } from "@vscode/ripgrep";
 import { z } from "zod";
 import { formatFileLocation, toWorkspaceId } from "@/dashboard";
 import { getActiveWorkspace, setActiveWorkspace } from "../lib/active-workspace";
-import {
-  createMetadataAgent,
-  createWorkspaceAgent,
-  getOrCreateAgent,
-  replaceAgent,
-} from "../lib/agent-pool";
 import { getPollerActivity, setPollerActivity } from "../lib/branch-status-poller";
 import {
   type ClearRange,
@@ -30,7 +24,7 @@ import {
   onEnsureView,
   resolveTargetReady,
 } from "../lib/browser-host";
-import { createChat, getChat, getOrCreateDefaultChat, updateChat } from "../lib/chat-manager";
+import { getChat, getOrCreateDefaultChat, updateChat } from "../lib/chat-manager";
 import { checkCli, installCli, resolveCliPaths } from "../lib/cli";
 import { duBytes } from "../lib/disk-usage";
 import { subscribeToFileChanges } from "../lib/file-watcher";
@@ -38,7 +32,6 @@ import { FormatterError, formatFile } from "../lib/formatter";
 import { fuzzyScore } from "../lib/fuzzy-score";
 import { execGit, listWorktrees } from "../lib/git";
 import { checkHooks, installHooks } from "../lib/hooks";
-import { hasPendingInputForWorkspace, resolvePendingInput } from "../lib/pending-inputs";
 import { checkPrereqs, shellPath } from "../lib/process-utils";
 import {
   clearQueuedMessages,
@@ -60,13 +53,22 @@ import {
   loadState,
   upsertWorkspaceStatus,
 } from "../lib/state";
-import { abortTask, cancelTask, getTask, submitTask, TaskConflictError } from "../lib/task-runner";
-import { listTasks, loadTask } from "../lib/task-store";
 import { getTunnelStatus, startTunnel, stopTunnel } from "../lib/tunnel";
-import { saveUploadedFiles, saveUploadedFilesDetailed } from "../lib/upload-utils";
+import { saveUploadedFilesDetailed } from "../lib/upload-utils";
 import { emit, subscribe as subscribeStatus } from "../lib/watcher";
 import { resolveWorkspace } from "../lib/workspace";
 import { publicProcedure, t } from "../server/api/trpc";
+import {
+  createMetadataAgent,
+  createWorkspaceAgent,
+  getOrCreateAgent,
+  replaceAgent,
+} from "../server/infra/agents/agent-pool";
+import {
+  abortTask,
+  hasPendingInputForWorkspace,
+  resolvePendingInput,
+} from "../server/services/task-service";
 import { terminalService } from "../server/services/terminal-service";
 
 const log = createLogger("trpc");
@@ -1737,236 +1739,26 @@ const prereqsRouter = t.router({
 });
 
 // ---------------------------------------------------------------------------
-// Tasks
+// Tasks — migrated to `server/api/tasks/router.ts` (Phase 6, issue #317).
+// The merged tRPC surface still exposes `tasks.*` because
+// `server/api/router.ts` composes the migrated sub-router with this legacy
+// file. Do NOT re-add a `tasks` key below; `mergeRouters` is
+// last-write-wins for duplicate keys, so a stray re-definition would
+// silently mask the migrated router. See the INVARIANT comment in
+// `server/api/router.ts`.
 // ---------------------------------------------------------------------------
 
-const tasksRouter = t.router({
-  list: publicProcedure
-    .input(
-      z
-        .object({
-          project: z.string().optional(),
-          workspaceId: z.string().optional(),
-          status: z.enum(["running", "completed", "failed"]).optional(),
-          sessionId: z.string().optional(),
-          chatId: z.string().optional(),
-        })
-        .optional(),
-    )
-    .query(({ input }) => {
-      const tasks = listTasks(input);
-      const state = loadState();
-      const workspaceIds = new Set<string>();
-      for (const p of state.projects) {
-        for (const wt of p.worktrees) {
-          workspaceIds.add(toWorkspaceId(p.name, wt.branch));
-        }
-      }
-      return {
-        tasks: tasks.map((t) => ({
-          ...t,
-          workspaceExists: workspaceIds.has(t.workspaceId),
-        })),
-      };
-    }),
-
-  submit: publicProcedure
-    .input(
-      z.object({
-        workspaceId: z.string(),
-        chatId: z.string().optional(),
-        prompt: z.string(),
-        sessionId: z.string().optional(),
-        maxTurns: z.number().int().positive().optional(),
-        mode: z.string().optional(),
-        model: z.string().optional(),
-        codingAgentId: z.string().optional(),
-        files: z
-          .array(
-            z.object({
-              mediaType: z.string(),
-              url: z.string(),
-              filename: z.string().optional(),
-            }),
-          )
-          .optional(),
-      }),
-    )
-    .mutation(async ({ input }) => {
-      // Resolve chatId: if the client provides one, lazily ensure the server
-      // record exists. If not provided, fall back to the default chat.
-      let chatId: string;
-      if (input.chatId) {
-        const existing = getChat(input.chatId);
-        if (!existing) {
-          // Lazily create the chat record.  Preserve the agent from the
-          // task so the correct agent type is used (not the default).
-          createChat(input.workspaceId, {
-            id: input.chatId,
-            name: "Chat",
-            agent: input.codingAgentId,
-          });
-        }
-        chatId = input.chatId;
-      } else {
-        chatId = getOrCreateDefaultChat(input.workspaceId).id;
-      }
-
-      let agentPrompt: string | undefined;
-      if (input.files && input.files.length > 0) {
-        const savedPaths = await saveUploadedFiles(input.files);
-        if (savedPaths.length > 0) {
-          const fileList = savedPaths.map((p) => `- ${p}`).join("\n");
-          agentPrompt = `I'm sharing these files with you:\n${fileList}\n\n${input.prompt}`;
-        }
-      }
-
-      try {
-        const task = submitTask({
-          workspaceId: input.workspaceId,
-          chatId,
-          prompt: input.prompt,
-          sessionId: input.sessionId,
-          agentPrompt,
-          maxTurns: input.maxTurns,
-          mode: input.mode,
-          model: input.model,
-          codingAgentId: input.codingAgentId,
-        });
-        return {
-          id: task.id,
-          workspaceId: task.workspaceId,
-          chatId: task.chatId,
-          sessionId: task.sessionId,
-        };
-      } catch (err) {
-        if (err instanceof TaskConflictError) {
-          throw new TRPCError({
-            code: "CONFLICT",
-            message: "Task already running for this chat pane",
-          });
-        }
-        if (err instanceof Error && err.message.startsWith("Workspace not found")) {
-          throw new TRPCError({
-            code: "NOT_FOUND",
-            message: err.message,
-          });
-        }
-        throw err;
-      }
-    }),
-
-  get: publicProcedure
-    .input(z.object({ workspaceId: z.string(), chatId: z.string().optional() }))
-    .query(({ input }) => {
-      const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
-      const task = getTask(chatId);
-      return { task };
-    }),
-
-  /**
-   * Lightweight existence check — used by the client during reconnect retries
-   * to distinguish "server says nothing's running, give up" from "server says
-   * a task IS running, keep retrying". This avoids a noisy `task` payload
-   * round-trip on every retry tick.
-   */
-  isRunning: publicProcedure
-    .input(z.object({ workspaceId: z.string(), chatId: z.string().optional() }))
-    .query(({ input }) => {
-      const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
-      const task = getTask(chatId);
-      return { running: task?.status === "running" };
-    }),
-
-  abort: publicProcedure
-    .input(z.object({ workspaceId: z.string(), chatId: z.string().optional() }))
-    .mutation(({ input }) => {
-      const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
-      const aborted = abortTask(chatId);
-      if (!aborted) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "No running task found" });
-      }
-      return { aborted: true };
-    }),
-
-  cancel: publicProcedure.input(z.object({ taskId: z.string() })).mutation(({ input }) => {
-    const result = cancelTask(input.taskId);
-    if (!result.cancelled) {
-      throw new TRPCError({
-        code: "NOT_FOUND",
-        message: "Task not found or not running",
-      });
-    }
-    return { cancelled: true };
-  }),
-
-  rerun: publicProcedure.input(z.object({ taskId: z.string() })).mutation(({ input }) => {
-    const record = loadTask(input.taskId);
-    if (!record) {
-      throw new TRPCError({ code: "NOT_FOUND", message: "Task not found" });
-    }
-
-    // Use original chat pane or default for workspace
-    const chatId = record.chatId ?? getOrCreateDefaultChat(record.workspaceId).id;
-
-    try {
-      const task = submitTask({
-        workspaceId: record.workspaceId,
-        chatId,
-        prompt: record.prompt,
-        maxTurns: record.maxTurns,
-        mode: record.mode,
-        model: record.model,
-        codingAgentId: record.codingAgentId,
-      });
-      return { workspaceId: task.workspaceId, chatId: task.chatId, sessionId: task.sessionId };
-    } catch (err) {
-      if (err instanceof TaskConflictError) {
-        throw new TRPCError({
-          code: "CONFLICT",
-          message: "Task already running for this chat pane",
-        });
-      }
-      throw err;
-    }
-  }),
-});
-
 // ---------------------------------------------------------------------------
-// Sessions
+// Sessions — migrated to `server/api/sessions/router.ts` (Phase 6, issue
+// #317). Same invariant as `tasks` above: do NOT re-declare `sessions`
+// here.
+//
+// The legacy `sessions.messages` query was the AI-SDK-shaped history
+// endpoint used by the old `loadMessages → reconnectToStream` dance in
+// ChatView. It has been replaced by the chat-events stream
+// (`GET /api/chats/:chatId/events`), which handles JSONL backfill + live
+// tail in a single subscription. See `docs/experiments/chat-event-log.md`.
 // ---------------------------------------------------------------------------
-
-const sessionsRouter = t.router({
-  list: publicProcedure
-    .input(z.object({ workspaceId: z.string(), chatId: z.string().optional() }))
-    .query(async ({ input }) => {
-      const workspace = resolveWorkspace(input.workspaceId);
-      if (!workspace) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Workspace not found" });
-      }
-
-      // Resolve the agent from the chat pane if chatId is provided
-      const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
-      const chatSession = getChat(chatId);
-      const agent = await getOrCreateAgent(chatId, workspace.worktree.path, chatSession?.agent);
-
-      if (!agent.supportedFeatures.sessionListing || !agent.listSessions) {
-        return { sessions: [], supported: false };
-      }
-
-      // Each agent's listSessions() already scopes to the workspace
-      // directory — no additional filtering needed.  This shows all
-      // sessions for the agent type, including ones created outside Band.
-      const allSessions = await agent.listSessions(workspace.worktree.path);
-      return { sessions: allSessions, supported: true };
-    }),
-
-  // The legacy `sessions.messages` query was the AI-SDK-shaped history
-  // endpoint used by the old `loadMessages → reconnectToStream` dance in
-  // ChatView. It has been replaced by the chat-events stream
-  // (`GET /api/chats/:chatId/events`), which handles JSONL backfill +
-  // live tail in a single subscription. See `docs/experiments/chat-event-log.md`.
-});
 
 // ---------------------------------------------------------------------------
 // Services
@@ -2856,7 +2648,7 @@ type QueuedFileInput = z.infer<typeof queuedFileSchema>;
  * Reject client-supplied paths that aren't under `<HOME>/.band/uploads/`.
  * Without this, an authenticated caller (local UI, CLI, or anyone with
  * the band_token) could enqueue `path: "/home/user/.ssh/id_rsa"` — the
- * drain in `task-runner.ts` would inject the path verbatim into the
+ * drain in `task-service.ts` would inject the path verbatim into the
  * agent prompt as `I'm sharing these files with you:\n- /…/id_rsa`,
  * and the agent would happily read and stream the contents.
  *
@@ -3217,8 +3009,8 @@ export const appRouter = t.router({
   host: hostRouter,
   tunnel: tunnelRouter,
   prereqs: prereqsRouter,
-  tasks: tasksRouter,
-  sessions: sessionsRouter,
+  // `tasks` lives in `server/api/tasks/router.ts` (Phase 6, issue #317).
+  // `sessions` lives in `server/api/sessions/router.ts` (Phase 6, issue #317).
   services: servicesRouter,
   chat: chatRouter,
   editor: editorRouter,

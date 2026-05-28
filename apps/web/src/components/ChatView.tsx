@@ -244,7 +244,7 @@ interface ChatViewProps {
    * brand-new chat). Parent should refresh tab-title cache only — must
    * NOT remount this component, or the in-flight conversation gets torn
    * down. Server already persisted `chat.activeSessionId` via
-   * task-runner.session-start.
+   * task-service.session-start.
    */
   onSessionDiscovered?: (sessionId: string) => void;
   /**

@@ -20,7 +20,7 @@
  */
 
 import { createLogger } from "@band-app/logger";
-import { removeAgent } from "../../lib/agent-pool";
+import { removeAgent } from "../infra/agents/agent-pool";
 import { DockviewLayoutManager, defaultPanelIdFromLayout } from "../../lib/dockview-layout-manager";
 import { emit } from "../../lib/watcher";
 import {
