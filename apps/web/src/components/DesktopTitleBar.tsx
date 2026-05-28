@@ -113,6 +113,17 @@ export function DesktopTitleBar({
                       type="button"
                       className="flex items-center justify-center rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
                       aria-label="Menu"
+                      // Mirrors the testid on the DashboardShell-version of
+                      // the same trigger (`DashboardShell.tsx`). The two
+                      // triggers are mutually exclusive by layout: the
+                      // DesktopTitleBar mounts when `useDesktopLayout` is
+                      // true, and the DashboardShell trigger is suppressed
+                      // by `hideMenu` in that case (see
+                      // `SharedDockviewLayout.ProjectsPanelComponent`).
+                      // Sharing the testid lets test page-objects target
+                      // "the toolbar menu trigger" without branching on
+                      // layout mode.
+                      data-testid="dashboard__menu-trigger"
                     >
                       <Menu className="size-5" />
                     </button>

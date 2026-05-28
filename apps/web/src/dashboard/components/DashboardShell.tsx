@@ -381,6 +381,7 @@ export function DashboardShell({ toolbarMenuItems, hideTitleBar, hideMenu }: Das
                         variant="ghost"
                         className="text-muted-foreground"
                         aria-label="Menu"
+                        data-testid="dashboard__menu-trigger"
                       >
                         <Menu className="size-5" />
                       </Button>

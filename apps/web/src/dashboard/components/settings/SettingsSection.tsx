@@ -36,6 +36,7 @@ export function SettingsSection({
       {description ? <p className="px-1 text-xs text-muted-foreground">{description}</p> : null}
       <div
         data-slot="settings-section-card"
+        data-testid="settings__section-card"
         className={cn(
           // Group rows share the page background; only the outer border and
           // 1px row dividers separate them visually.

@@ -3,16 +3,36 @@
  *
  * Per `docs/web-architecture.md`, the API tier lives under
  * `apps/web/src/server/api/`. Each domain (projects, workspaces, chats,
- * tasks, …) will eventually own a sub-router under
- * `apps/web/src/server/api/<domain>/router.ts` and this file will merge
- * them via `t.router({ … })`.
+ * tasks, …) owns a sub-router under `apps/web/src/server/api/<domain>/router.ts`
+ * and this file merges them via `t.mergeRouters(…)`.
  *
- * Phase 0 (issue #311) only scaffolds the directory and wires the entry
- * point. The full router still lives at `apps/web/src/trpc/router.ts` —
- * we re-export it from here so `start-server.ts` (and any other entry
- * point) can import from the new location without breaking anything.
- * Subsequent phases will move procedures into per-domain sub-routers
- * and replace this re-export with a real `t.router({ … })` composition.
+ * Phase 1 (issue #312) migrates the first sub-router (`settings/`) into the
+ * new 3-tier shape. The rest of the procedures still live in the legacy
+ * `apps/web/src/trpc/router.ts`; we merge that legacy router with the
+ * migrated `settingsRouter` so the public tRPC surface stays identical
+ * during the multi-phase migration. Subsequent phases will lift more
+ * sub-routers out of the legacy file and pull them in here one at a time.
+ *
+ * Both routers must be built with the same tRPC builder (see `./trpc.ts`)
+ * for `mergeRouters` to accept them.
  */
 
-export { type AppRouter, appRouter } from "../../trpc/router.ts";
+import { appRouter as legacyAppRouter } from "../../trpc/router";
+import { settingsRouter } from "./settings/router";
+import { t } from "./trpc";
+
+// INVARIANT: the legacy router (`apps/web/src/trpc/router.ts`) must not contain
+// a `settings:` key. `t.mergeRouters` accepts two routers and silently picks
+// last-write-wins for duplicate keys, so a stray legacy entry would mask the
+// migrated `settingsRouter` without a build error. Each subsequent phase of
+// the 3-tier migration adds a key here and removes it from the legacy router
+// in the same diff; the invariant must hold for every key composed below.
+//
+// Live guard: the `tRPC — settings CRUD` describe block in
+// `apps/web/tests/trpc.test.ts` (currently around line 383) exercises
+// `settings.get` and `settings.update` end-to-end through the merged router,
+// so a regression that masks the migrated `settingsRouter` with a stale
+// legacy entry trips at least one of those assertions.
+export const appRouter = t.mergeRouters(legacyAppRouter, t.router({ settings: settingsRouter }));
+
+export type AppRouter = typeof appRouter;
