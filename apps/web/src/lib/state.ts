@@ -1,5 +1,4 @@
-import { eq, or, sql } from "drizzle-orm";
-import { toWorkspaceId } from "@/dashboard";
+import { eq, or } from "drizzle-orm";
 import { getDb } from "../server/infra/db/connection";
 import {
   type ProjectKind,
@@ -15,12 +14,15 @@ import {
   type NotificationSettings,
   type Settings,
 } from "../server/infra/db/queries/settings";
-import {
-  branchStatuses as branchStatusesTable,
-  workspaceStatuses as workspaceStatusesTable,
-  worktrees as worktreesTable,
-} from "../server/infra/db/schema";
+import { type WorkspaceIdentity, WorkspaceQueries } from "../server/infra/db/queries/workspaces";
+import { workspaceStatuses as workspaceStatusesTable } from "../server/infra/db/schema";
 import { SettingsService, settingsService } from "../server/services/settings-service";
+
+// Workspace-identity resolution lives in the Infra tier now (issue #314,
+// Phase 3 of the 3-tier refactor). The legacy private helper below
+// delegates to it so the SQL exists in exactly one place; the long-form
+// docstring lives on `WorkspaceQueries.findIdentity`.
+const workspaceQueriesForIdentity = new WorkspaceQueries();
 
 // Settings types live in the Infra layer now (issue #312, Phase 1 of the
 // 3-tier refactor). Re-export them so existing callers that still import
@@ -33,10 +35,10 @@ export { bandHome };
 // Project types + the kind reconciliation helper live in the Infra layer
 // now (issue #313, Phase 2 of the 3-tier refactor). Re-export from this
 // module so existing callers (sync-state, branch-status-poller,
-// cronjob-scheduler, workspace.ts, …) keep compiling. The real
-// implementations live under `server/infra/db/queries/projects.ts`;
-// subsequent refactor phases will rewrite each caller to import from
-// there directly and this shim will go away.
+// workspace.ts, …) keep compiling. The real implementations live under
+// `server/infra/db/queries/projects.ts`; subsequent refactor phases will
+// rewrite each caller to import from there directly and this shim will
+// go away.
 export type { ProjectKind, ProjectState, WorktreeState };
 export { reconcileKindForProject };
 
@@ -46,10 +48,9 @@ export { reconcileKindForProject };
 // `ProjectQueries` (in `server/infra/db/queries/projects.ts`) owns the
 // real CRUD for the `projects` + `worktrees` tables. The wrappers below
 // preserve the old `lib/state` import surface so unmigrated callers (the
-// legacy tRPC router, sync-state, cronjob-scheduler, workspace.ts, …)
-// keep compiling unchanged. Later refactor phases will migrate each
-// caller to talk to the infra/service tiers directly and this section
-// will be deleted.
+// legacy tRPC router, sync-state, workspace.ts, …) keep compiling
+// unchanged. Later refactor phases will migrate each caller to talk to
+// the infra/service tiers directly and this section will be deleted.
 // -----------------------------------------------------------------------------
 
 const projectQueries = new ProjectQueries();
@@ -318,45 +319,12 @@ export function resetAgentStatuses(): number {
   return result.changes;
 }
 
-function resolveWorkspaceIdentity(
-  workspaceId: string,
-): { project: string; branch: string; worktreePath: string } | null {
-  // Push the `toWorkspaceId` match down into SQL: scan the worktrees
-  // table directly, filter server-side, and read at most one row. The
-  // previous implementation called `loadState()`, which did
-  // `SELECT * FROM projects` + `SELECT * FROM worktrees` and built the
-  // full ProjectState[] tree just to find a single workspace.
-  //
-  // The match expression mirrors `toWorkspaceId(project, branch)`:
-  //   `${project}-${branch.replaceAll("/", "-")}`
-  // SQLite's `REPLACE(str, "/", "-")` is also a replace-all, so this
-  // is bit-identical to the JS computation.
-  //
-  // TODO: `toWorkspaceId`'s encoding is not injective — project
-  // `foo-bar` + branch `main` and project `foo` + branch `bar/main`
-  // both serialize to `foo-bar-main`. `.get()` returns whichever row
-  // SQLite finds first, and the sanity check below cannot
-  // disambiguate (both candidates satisfy it). Fixing this requires
-  // changing the workspace-id encoding, which is a cross-cutting
-  // change tracked separately from this PR.
-  const db = getDb();
-  const row = db
-    .select({
-      project: worktreesTable.projectName,
-      branch: worktreesTable.branch,
-      worktreePath: worktreesTable.path,
-    })
-    .from(worktreesTable)
-    .where(
-      sql`${worktreesTable.projectName} || '-' || REPLACE(${worktreesTable.branch}, '/', '-') = ${workspaceId}`,
-    )
-    .get();
-  // Use the `toWorkspaceId` helper as a runtime sanity check in case
-  // the helper's encoding ever evolves to disagree with the SQL above.
-  if (row && toWorkspaceId(row.project, row.branch) === workspaceId) {
-    return { project: row.project, branch: row.branch, worktreePath: row.worktreePath };
-  }
-  return null;
+function resolveWorkspaceIdentity(workspaceId: string): WorkspaceIdentity | null {
+  // Delegate to `WorkspaceQueries.findIdentity` so the SQL match
+  // expression (`project || '-' || REPLACE(branch, '/', '-')`) lives in
+  // exactly one place. See that method's docstring for the encoding
+  // details and the non-injective-encoding TODO.
+  return workspaceQueriesForIdentity.findIdentity(workspaceId);
 }
 
 export function deleteWorkspaceStatus(workspaceId: string): void {
@@ -364,9 +332,4 @@ export function deleteWorkspaceStatus(workspaceId: string): void {
   db.delete(workspaceStatusesTable)
     .where(eq(workspaceStatusesTable.workspaceId, workspaceId))
     .run();
-}
-
-export function deleteBranchStatus(workspaceId: string): void {
-  const db = getDb();
-  db.delete(branchStatusesTable).where(eq(branchStatusesTable.workspaceId, workspaceId)).run();
 }

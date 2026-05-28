@@ -49,14 +49,13 @@ const MAX_LABEL_VALUE_LENGTH = 256;
 
 /** Regex for valid label keys: alphanumerics, `_`, `:`, `-`; 1-64 chars.
  *
- * The hyphen is escaped (`\-`) rather than relying on its end-of-class
- * literal position. Functionally identical today, but if the regex is ever
- * rewritten with the `u` flag (which makes most ranges stricter), an
- * unescaped trailing `-` between `:` and the closing `]` is more likely
- * to be misread by a future maintainer than to actually break — flipping
- * the order of `_`, `:`, `-` would silently turn the class into a range.
- * Escaping makes the literal intent obvious. */
-const LABEL_KEY_REGEX = /^[a-zA-Z0-9_:\-]{1,64}$/;
+ * The hyphen sits at the end of the character class as a literal — moving
+ * it between two other characters would silently turn the class into a
+ * range. Biome's `noUselessEscapeInRegex` rule prohibits writing it as
+ * `\-`, so the literal-at-end form is the only way to keep the intent
+ * explicit. Any future edit that shuffles the class order must keep `-`
+ * (or `_`) at the end. */
+const LABEL_KEY_REGEX = /^[a-zA-Z0-9_:-]{1,64}$/;
 
 /** Printable-ASCII regex used to validate label values. */
 const PRINTABLE_VALUE_REGEX = /^[\x20-\x7E]+$/;

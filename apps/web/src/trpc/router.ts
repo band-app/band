@@ -1,16 +1,8 @@
-import { execFile, execFileSync, spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import {
-  existsSync,
-  constants as fsConstants,
-  mkdirSync,
-  realpathSync,
-  statSync,
-  unlinkSync,
-} from "node:fs";
+import { existsSync, constants as fsConstants, realpathSync, statSync } from "node:fs";
 import { cp, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
-import { promisify } from "node:util";
 import { createLogger } from "@band-app/logger";
 import { TRPCError } from "@trpc/server";
 import { rgPath } from "@vscode/ripgrep";
@@ -40,7 +32,6 @@ import {
   resolveTargetReady,
 } from "../lib/browser-host";
 import {
-  deleteBrowserLayout,
   getBrowserLayout,
   removeBrowserFromLayout,
   saveBrowserLayout,
@@ -50,11 +41,10 @@ import {
   getBrowser,
   listBrowsers,
   removeBrowser,
-  removeWorkspaceBrowsers,
   updateBrowser,
   updateBrowserUrl,
 } from "../lib/browser-manager";
-import { deleteChatLayout, getChatLayout, saveChatLayout } from "../lib/chat-layout-manager";
+import { getChatLayout, saveChatLayout } from "../lib/chat-layout-manager";
 import {
   createChat,
   getChat,
@@ -62,7 +52,6 @@ import {
   InvalidLabelsError,
   listChats,
   removeChat,
-  removeWorkspaceChats,
   updateChat,
   updateChatActiveSession,
   updateChatStatus,
@@ -76,12 +65,10 @@ import { duBytes } from "../lib/disk-usage";
 import { subscribeToFileChanges } from "../lib/file-watcher";
 import { FormatterError, formatFile } from "../lib/formatter";
 import { fuzzyScore } from "../lib/fuzzy-score";
-import { DETACHED_BRANCH_PREFIX, execGit, gitCmd, listWorktrees } from "../lib/git";
+import { execGit, listWorktrees } from "../lib/git";
 import { checkHooks, installHooks } from "../lib/hooks";
-import { killWorkspaceServers } from "../lib/lsp-manager";
 import { hasPendingInputForWorkspace, resolvePendingInput } from "../lib/pending-inputs";
 import { checkPrereqs, shellPath } from "../lib/process-utils";
-import { loadProjectConfig } from "../lib/project-config";
 import {
   clearQueuedMessages,
   getQueuedMessages,
@@ -94,24 +81,18 @@ import {
   toWireQueuedMessages,
   updateQueuedMessage,
 } from "../lib/queued-message-store";
-import { runSetup } from "../lib/setup-runner";
 import {
   bandHome,
-  deleteBranchStatus,
-  deleteWorkspaceStatus,
   getAgentDefinition,
   getWorkspaceStatus,
   loadSettings,
   loadState,
-  saveState,
   upsertWorkspaceStatus,
-  worktreesDir,
 } from "../lib/state";
 import { abortTask, cancelTask, getTask, submitTask, TaskConflictError } from "../lib/task-runner";
-import { deleteWorkspaceTasks, listTasks, loadTask } from "../lib/task-store";
+import { listTasks, loadTask } from "../lib/task-store";
 import { loadWorkspaceTerminalConfig } from "../lib/terminal-config";
 import {
-  deleteTerminalLayout,
   getTerminalLayout,
   removeTerminalFromLayout,
   saveTerminalLayout,
@@ -120,7 +101,6 @@ import {
   getScrollback,
   getTerminalSession,
   killTerminal,
-  killWorkspaceTerminals,
   listTerminals,
   spawnTerminal,
   subscribeTerminalOutput,
@@ -131,9 +111,7 @@ import { saveUploadedFiles, saveUploadedFilesDetailed } from "../lib/upload-util
 import { emit, subscribe as subscribeStatus } from "../lib/watcher";
 import { resolveWorkspace } from "../lib/workspace";
 import { publicProcedure, t } from "../server/api/trpc";
-import { cronjobService } from "../server/services/cronjob-service";
 
-const execFileAsync = promisify(execFile);
 const log = createLogger("trpc");
 
 // ---------------------------------------------------------------------------
@@ -147,368 +125,12 @@ const log = createLogger("trpc");
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// Workspaces
+// Workspaces — migrated to `server/api/workspaces/router.ts` (issue #314).
+// The legacy declaration lived here; it is now merged into the root router
+// from `server/api/router.ts` so the wire shape is unchanged. The
+// `workspaceRouter` (file ops, diffs) below is a different surface and
+// remains legacy until its own migration phase.
 // ---------------------------------------------------------------------------
-
-const workspacesRouter = t.router({
-  create: publicProcedure
-    .input(
-      z.object({
-        project: z.string(),
-        branch: z.string(),
-        base: z.string().optional(),
-        prompt: z.string().optional(),
-        maxTurns: z.number().int().positive().optional(),
-        mode: z.string().optional(),
-        model: z.string().optional(),
-        codingAgentId: z.string().optional(),
-      }),
-    )
-    .mutation(({ input }) => {
-      const state = loadState();
-      const proj = state.projects.find((p) => p.name === input.project);
-      if (!proj) {
-        throw new Error(`Project "${input.project}" not found`);
-      }
-
-      // Plain projects have exactly one implicit workspace, created at
-      // project-add time. Creating additional workspaces is meaningless
-      // without git worktrees, so reject the call as a backstop — the UI
-      // should already be hiding the "New workspace" button.
-      if (proj.kind === "plain") {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: `Project "${input.project}" is a plain (non-git) folder and cannot have additional workspaces. Promote it to git (right-click the project → "Promote to git") to enable branches.`,
-        });
-      }
-
-      const existing = proj.worktrees.find((wt) => wt.branch === input.branch);
-      if (existing) {
-        return { ok: true, path: existing.path };
-      }
-
-      const wtDir = worktreesDir();
-      const worktreePath = join(wtDir, input.project, input.branch);
-      mkdirSync(join(wtDir, input.project), { recursive: true });
-
-      const { command, env } = gitCmd();
-      const args = ["worktree", "add"];
-      if (input.base) {
-        args.push("-b", input.branch, worktreePath, input.base);
-      } else {
-        args.push("-b", input.branch, worktreePath);
-      }
-
-      try {
-        execFileSync(command, args, { cwd: proj.path, env, encoding: "utf-8" });
-      } catch (e) {
-        throw new Error(e instanceof Error ? e.message : String(e));
-      }
-
-      proj.worktrees.push({ branch: input.branch, path: worktreePath, pinned: false });
-      saveState(state);
-
-      const workspaceId = toWorkspaceId(input.project, input.branch);
-
-      // Run setup script in the background (non-blocking).
-      // If a prompt is provided, defer task submission until setup completes
-      // so the agent has dependencies installed.
-      const defaultChat = getOrCreateDefaultChat(workspaceId);
-      const onSetupComplete = input.prompt
-        ? () =>
-            submitTask({
-              workspaceId,
-              chatId: defaultChat.id,
-              prompt: input.prompt!,
-              maxTurns: input.maxTurns,
-              mode: input.mode,
-              model: input.model,
-              codingAgentId: input.codingAgentId,
-            })
-        : undefined;
-
-      runSetup(workspaceId, worktreePath, proj.path, onSetupComplete);
-
-      // If there's no setup command, runSetup calls onComplete synchronously,
-      // so the task is submitted immediately. If there IS a setup command,
-      // the task will be submitted when setup finishes.
-
-      return { ok: true, path: worktreePath };
-    }),
-
-  remove: publicProcedure
-    .input(z.object({ project: z.string(), branch: z.string() }))
-    .mutation(async ({ input }) => {
-      const state = loadState();
-      const proj = state.projects.find((p) => p.name === input.project);
-      if (!proj) {
-        throw new Error(`Project "${input.project}" not found`);
-      }
-
-      // Plain projects can't have their (single, implicit) workspace
-      // removed — the workspace is the project. The user must remove the
-      // project entirely instead.
-      if (proj.kind === "plain") {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: `Project "${input.project}" is a plain (non-git) project. Remove the project instead of the workspace.`,
-        });
-      }
-
-      const { command, env: gitEnv } = gitCmd();
-
-      // Resolve the worktree path via `listWorktrees` rather than re-parsing
-      // `git worktree list --porcelain` inline. `listWorktrees` applies the
-      // detached-HEAD → `detached-<short-sha>` fallback that the rest of the
-      // app sees in `proj.worktrees` and that the dashboard sends back here
-      // as `input.branch`. Re-parsing porcelain without the fallback would
-      // leave `currentBranch === ""` for detached worktrees and fall through
-      // to the "Workspace not found" throw below, breaking the "Delete
-      // workspace" context-menu action on every detached-HEAD card.
-      const worktrees = await listWorktrees(proj.path);
-      const match = worktrees.find((wt) => wt.branch === input.branch);
-      if (!match) {
-        throw new Error(`Workspace "${input.branch}" not found`);
-      }
-      const worktreePath = match.path;
-
-      // Capture config before returning — the directory may be removed
-      // by background cleanup before loadProjectConfig can read it.
-      let teardownCmd: string | undefined;
-      try {
-        const config = loadProjectConfig(worktreePath, proj.path);
-        if (config?.teardown && typeof config.teardown === "string") {
-          teardownCmd = config.teardown;
-        }
-      } catch {
-        // Config may not exist
-      }
-
-      // ── Fast path: update state and return immediately ──
-      proj.worktrees = proj.worktrees.filter((wt) => wt.branch !== input.branch);
-      saveState(state);
-
-      const workspaceId = toWorkspaceId(input.project, input.branch);
-      try {
-        unlinkSync(join(bandHome(), "workspace-prompts", `${workspaceId}.json`));
-      } catch {
-        // Prompt file may not exist
-      }
-      deleteWorkspaceStatus(workspaceId);
-      deleteBranchStatus(workspaceId);
-
-      // Clean up all chat panes and their agent processes
-      removeWorkspaceChats(workspaceId);
-
-      // Clean up chat layout tree
-      deleteChatLayout(workspaceId);
-
-      // Clean up all browser tabs
-      removeWorkspaceBrowsers(workspaceId);
-
-      // Clean up browser layout tree
-      deleteBrowserLayout(workspaceId);
-
-      // Kill any running terminal PTY sessions
-      killWorkspaceTerminals(workspaceId);
-
-      // Clean up terminal layout tree
-      deleteTerminalLayout(workspaceId);
-
-      // Kill any running language server processes
-      killWorkspaceServers(workspaceId);
-
-      // Clean up workspace-scoped cronjobs
-      cronjobService.removeForKey(workspaceId);
-
-      // Delete persisted task history for the workspace (issue #416).
-      // Tasks aren't covered by a FK cascade because workspaces aren't a
-      // first-class DB row, so the cleanup is explicit here next to the
-      // other workspace-scoped removals. Task cleanup is best-effort —
-      // a DB lock or WAL timeout must not abort the whole removal or
-      // suppress the `emit` below, otherwise the dashboard would keep
-      // showing the just-deleted workspace.
-      try {
-        const deletedTasks = deleteWorkspaceTasks(workspaceId);
-        if (deletedTasks > 0) {
-          log.info({ workspaceId, count: deletedTasks }, "deleted workspace tasks on removal");
-        }
-      } catch (err) {
-        log.error({ workspaceId, err }, "failed to delete workspace tasks on removal");
-      }
-
-      // Notify subscribers (dashboard status stream) that this workspace is gone
-      emit({ kind: "remove", workspaceId });
-
-      // ── Background cleanup: slow git/fs operations ──
-      const projPath = proj.path;
-      // Synthetic "detached-<short-sha>" labels generated by
-      // `listWorktrees` for detached-HEAD worktrees do not correspond to a
-      // real git ref. Trying to `git branch -D detached-abc1234` would error
-      // ("branch not found") — the catch below swallows it cleanly, but
-      // skipping the call up front keeps the background logs free of
-      // noise that's hard to distinguish from a genuine problem.
-      const branchToDelete = match.branch.startsWith(DETACHED_BRANCH_PREFIX) ? null : input.branch;
-      setImmediate(() => {
-        (async () => {
-          // Run teardown script before removing worktree so it can access project files
-          if (teardownCmd) {
-            try {
-              await execFileAsync("bash", ["-c", teardownCmd], {
-                cwd: worktreePath,
-                env: {
-                  ...process.env,
-                  PATH: `/opt/homebrew/bin:/usr/local/bin:${process.env.PATH}`,
-                },
-                encoding: "utf-8",
-                timeout: 60_000,
-              });
-            } catch (err) {
-              log.warn({ err, workspaceId }, "teardown script failed");
-            }
-          }
-
-          try {
-            await execFileAsync(command, ["worktree", "remove", "--force", worktreePath], {
-              cwd: projPath,
-              env: gitEnv,
-              encoding: "utf-8",
-            });
-          } catch {
-            // Worktree may be corrupted (e.g. missing .git file).
-            // Manually remove the directory and prune stale entries.
-            await rm(worktreePath, { recursive: true, force: true });
-            try {
-              await execFileAsync(command, ["worktree", "prune"], {
-                cwd: projPath,
-                env: gitEnv,
-                encoding: "utf-8",
-              });
-            } catch (err) {
-              log.warn({ err, workspaceId }, "git worktree prune failed");
-            }
-          }
-
-          if (branchToDelete) {
-            try {
-              await execFileAsync(command, ["branch", "-D", branchToDelete], {
-                cwd: projPath,
-                env: gitEnv,
-                encoding: "utf-8",
-              });
-            } catch {
-              // Branch may already be deleted
-            }
-          }
-        })().catch((err) => {
-          log.error({ err, workspaceId }, "background workspace cleanup failed");
-        });
-      });
-
-      return { ok: true };
-    }),
-
-  setPinned: publicProcedure
-    .input(z.object({ project: z.string(), branch: z.string(), pinned: z.boolean() }))
-    .mutation(({ input }) => {
-      const state = loadState();
-      const proj = state.projects.find((p) => p.name === input.project);
-      if (!proj) {
-        throw new Error(`Project "${input.project}" not found`);
-      }
-      // Plain (non-git) projects don't surface in the Pinned section —
-      // they're already flat at the project level — so pinning has no
-      // visible effect and accidentally leaving `pinned=true` strands the
-      // UI with an empty `worktrees` array. Reject the call as a backstop;
-      // the UI also omits the menu item.
-      if (proj.kind === "plain") {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: `Project "${input.project}" is a plain (non-git) project. Pinning is not available.`,
-        });
-      }
-      const wt = proj.worktrees.find((w) => w.branch === input.branch);
-      if (!wt) {
-        throw new Error(`Workspace "${input.branch}" not found`);
-      }
-      wt.pinned = input.pinned;
-      saveState(state);
-      return { ok: true };
-    }),
-
-  gitPull: publicProcedure
-    .input(z.object({ project: z.string(), branch: z.string() }))
-    .mutation(async ({ input }) => {
-      const workspaceId = toWorkspaceId(input.project, input.branch);
-      const workspace = resolveWorkspace(workspaceId);
-      if (!workspace) {
-        throw new Error("Workspace not found");
-      }
-      if (workspace.project.kind === "plain") {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: `Project "${input.project}" is a plain (non-git) project. Git pull is not available.`,
-        });
-      }
-      const cwd = workspace.worktree.path;
-      try {
-        await execGit(["pull", "--rebase"], cwd);
-      } catch (e) {
-        // git pull --rebase can exit non-zero with "Cannot rebase onto multiple
-        // branches" when the fetch step already fast-forwarded the working tree.
-        // The pull effectively succeeded, so swallow this specific error.
-        const msg = String(e);
-        if (msg.includes("Cannot rebase onto multiple branches")) {
-          return { ok: true };
-        }
-        throw e;
-      }
-      return { ok: true };
-    }),
-
-  gitPush: publicProcedure
-    .input(z.object({ project: z.string(), branch: z.string() }))
-    .mutation(async ({ input }) => {
-      const workspaceId = toWorkspaceId(input.project, input.branch);
-      const workspace = resolveWorkspace(workspaceId);
-      if (!workspace) {
-        throw new Error("Workspace not found");
-      }
-      if (workspace.project.kind === "plain") {
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: `Project "${input.project}" is a plain (non-git) project. Git push is not available.`,
-        });
-      }
-      const cwd = workspace.worktree.path;
-      try {
-        await execGit(["push"], cwd);
-      } catch {
-        // First push may need to set upstream
-        await execGit(["push", "--set-upstream", "origin", input.branch], cwd);
-      }
-      return { ok: true };
-    }),
-
-  runScript: publicProcedure
-    .input(z.object({ path: z.string(), scriptType: z.string() }))
-    .mutation(({ input }) => {
-      const scriptPath = join(input.path, ".band", input.scriptType);
-      if (!existsSync(scriptPath)) {
-        throw new Error(`Script "${input.scriptType}" not found`);
-      }
-
-      return new Promise<{ ok: true }>((resolve, reject) => {
-        execFile("bash", [scriptPath], { cwd: input.path }, (err) => {
-          if (err) {
-            reject(new Error(err.message));
-          } else {
-            resolve({ ok: true });
-          }
-        });
-      });
-    }),
-});
 
 // ---------------------------------------------------------------------------
 // Settings — migrated to `server/api/settings/router.ts` (issue #312).
@@ -4108,7 +3730,12 @@ const terminalRouter = t.router({
  * `docs/web-architecture.md`.
  */
 export const appRouter = t.router({
-  workspaces: workspacesRouter,
+  // `projects` lives in `server/api/projects/router.ts` (issue #313)
+  // and `workspaces` lives in `server/api/workspaces/router.ts` (issue
+  // #314); both are composed into the merged root router via
+  // `server/api/router.ts`. Re-adding either here would shadow the
+  // migrated sub-router (`mergeRouters` is last-write-wins), violating
+  // the migration invariant documented next to the merged router.
   hooks: hooksRouter,
   cli: cliRouter,
   workspace: workspaceRouter,
