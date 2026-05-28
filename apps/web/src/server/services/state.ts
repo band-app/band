@@ -24,21 +24,19 @@ import { SettingsService, settingsService } from "../services/settings-service";
 // docstring lives on `WorkspaceQueries.findIdentity`.
 const workspaceQueriesForIdentity = new WorkspaceQueries();
 
-// Settings types live in the Infra layer now (issue #312, Phase 1 of the
-// 3-tier refactor). Re-export them so existing callers that still import
-// from `lib/state` keep compiling — subsequent phases will rewrite those
-// callers to import directly from `server/services/settings-service` /
+// Settings types live in the Infra layer (issue #312, Phase 1 of the
+// 3-tier refactor). Re-exported here as a convenience so callers that
+// already import from `services/state` get the types alongside the
+// state-level helpers below. The canonical home is
 // `server/infra/db/queries/settings`.
 export type { CodingAgentDefinition, LabelDefinition, NotificationSettings, Settings };
 export { bandHome };
 
 // Project types + the kind reconciliation helper live in the Infra layer
-// now (issue #313, Phase 2 of the 3-tier refactor). Re-export from this
-// module so existing callers (sync-state, branch-status-poller,
-// workspace.ts, …) keep compiling. The real implementations live under
-// `server/infra/db/queries/projects.ts`; subsequent refactor phases will
-// rewrite each caller to import from there directly and this shim will
-// go away.
+// (issue #313, Phase 2 of the 3-tier refactor). Re-exported here as a
+// convenience for callers (sync-state, branch-status-poller,
+// workspace.ts, …) that already import from this module. The canonical
+// home is `server/infra/db/queries/projects.ts`.
 export type { ProjectKind, ProjectState, WorktreeState };
 export { reconcileKindForProject };
 

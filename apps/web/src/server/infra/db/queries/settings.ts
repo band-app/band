@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -174,5 +175,38 @@ export class SettingsQueries {
     const tmpPath = `${filePath}.tmp.${process.pid}`;
     writeFileSync(tmpPath, data, "utf-8");
     renameSync(tmpPath, filePath);
+  }
+
+  /**
+   * Read the persisted auth token, generating + persisting one if absent.
+   *
+   * Lives in Infra so other infra-tier modules (e.g. the cloudflared
+   * tunnel client) can read the token without crossing back up through
+   * `services/`. `SettingsService.getOrCreateToken()` delegates here so
+   * service-tier callers keep their existing surface unchanged.
+   *
+   * TODO(tokens): there is a check-then-act TOCTOU window between the
+   * `load` and `save` here — two processes booting concurrently against
+   * the same `~/.band/settings.json` (e.g. dev server + desktop shell)
+   * can each observe the absence of `tokenSecret`, mint a different
+   * token, and race their writes. The atomic merge in `save()` means the
+   * last writer wins, leaving the other process running with an
+   * invalidated token. The race is rare in practice (token is minted
+   * once per fresh install) but worth fixing — most likely via a
+   * file-level advisory lock around the load+save pair, or by hoisting
+   * the bootstrap into a single coordinator (e.g. the first-time-setup
+   * step in `runFirstTimeSetup`). Pattern preserved from the pre-3-tier
+   * `lib/state.ts` implementation; fixing it is out of scope for the
+   * settings refactor.
+   */
+  getOrCreateToken(): string {
+    const settings = this.load();
+    if (settings.tokenSecret) return settings.tokenSecret;
+    const token = randomBytes(32).toString("hex");
+    // Pass just the patch — `save` re-reads the file and unions our
+    // patch with whatever is currently on disk, so any keys written
+    // between our `load` above and this `save` survive.
+    this.save({ tokenSecret: token });
+    return token;
   }
 }

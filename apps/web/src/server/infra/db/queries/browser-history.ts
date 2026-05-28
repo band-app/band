@@ -11,14 +11,30 @@
  */
 
 import { and, desc, eq, gte, or, sql } from "drizzle-orm";
-import type { ClearRange, HistoryEntry } from "../../../../lib/browser-history-types";
 import { getDb } from "../connection";
 import { browserHistory } from "../schema";
 
-// Re-export the shared types so existing call sites that imported
-// from `browser-history-store` still resolve. New code should import
-// directly from `browser-history-types` to avoid pulling Drizzle.
-export type { ClearRange, HistoryEntry };
+/**
+ * One row in the persistent browser history.
+ *
+ * Defined here in Infra so this module has no upward imports — the
+ * renderer-side copy in `src/lib/browser-history-types.ts` is the
+ * client-facing mirror of the same shape (structural-equality is enough
+ * across the tRPC wire, the two copies don't need a shared TypeScript
+ * source). Keep them in sync if the schema gains a column.
+ */
+export interface HistoryEntry {
+  id: number;
+  workspaceId: string;
+  url: string;
+  title: string | null;
+  faviconUrl: string | null;
+  lastVisitedAt: number;
+  visitCount: number;
+}
+
+/** Window options for `clearHistory` / the `history.clear` tRPC mutation. */
+export type ClearRange = "hour" | "day" | "week" | "all";
 
 // URL prefixes that must never be recorded — Chromium-internal,
 // extension surface, devtools, and local-file paths leak nothing useful

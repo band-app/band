@@ -27,12 +27,11 @@ const log = createLogger("trpc.queue");
  * outbox that the agent drain pulls from when an agent finishes its current
  * turn, plus the dashboard's drag-to-reorder UI.
  *
- * The store now lives in `server/services/queued-message-store` and is
- * consumed by the agent drain (`task-service`) and the non-tRPC SSE
- * endpoints (`api/chat-events.ts`, `api/chat-submit.ts`) directly.
- * Splitting it into a thin DB-backed `infra/db/queries/queue.ts` plus a
- * service shim is a follow-up that doesn't affect this router's wire
- * shape.
+ * The store lives in `server/services/queued-message-store` (an
+ * in-memory store; queue state is process-local and intentionally not
+ * persisted) and is consumed by the agent drain (`task-service`) and
+ * the non-tRPC SSE endpoints (`api/chat-events.ts`, `api/chat-submit.ts`)
+ * directly.
  */
 
 /**
