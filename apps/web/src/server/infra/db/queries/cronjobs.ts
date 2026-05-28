@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { getDb } from "../connection";
 import { cronjobs } from "../schema";
@@ -14,7 +15,7 @@ import { cronjobs } from "../schema";
 export type CronjobScope = "project" | "workspace";
 
 export interface CronjobDefinition {
-  /** Unique identifier, e.g. "cj_1710000000000" */
+  /** Unique identifier, e.g. "cj_1710000000000_a1b2c3d4" */
   id: string;
   /** Human-readable name for the job */
   name: string;
@@ -54,16 +55,19 @@ export interface CronjobFile {
 /**
  * Mint a process-unique cronjob id.
  *
- * `Date.now()` is good enough — cronjobs are user-created from the UI, never
- * in a tight loop, so the collision window is well below the millisecond
- * resolution we'd need to see one in practice. Kept as a top-level helper
- * (rather than a class method) so the service tier can call it without
- * instantiating `CronjobQueries`. It lives in the Infra file so the schema
- * shape (`cj_*` prefix is implicit table convention) stays colocated with
- * the rest of the row plumbing.
+ * `Date.now()` alone is not enough: the integration tests issue several
+ * sequential `cronjobs.create` calls inside the same millisecond, and the
+ * legacy `saveFile` delete-then-insert pattern would silently drop the
+ * earlier row on a collision. Appending 8 hex chars from `randomBytes(4)`
+ * gives ~4 billion possibilities per millisecond, which is comfortably
+ * collision-free for any realistic UI- or test-driven create rate. Kept as
+ * a top-level helper (rather than a class method) so the service tier can
+ * call it without instantiating `CronjobQueries`. It lives in the Infra
+ * file so the schema shape (`cj_*` prefix is implicit table convention)
+ * stays colocated with the rest of the row plumbing.
  */
 export function generateCronjobId(): string {
-  return `cj_${Date.now()}`;
+  return `cj_${Date.now()}_${randomBytes(4).toString("hex")}`;
 }
 
 /**

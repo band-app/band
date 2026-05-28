@@ -12,14 +12,15 @@
 // migrated in this PR to keep its diff focused on the
 // detached-HEAD bug fix.
 //
-// TODO: migrate `trpc.test.ts`, `task-cleanup.test.ts`, and
-// `trpc-batch-url.test.ts` to import from this module instead of
-// inlining their own copies of `createTmpHome` / `getRandomPort` /
-// `startServer` / `trpcMutate`. The longer those copies live, the
-// more they will drift from this one — and the SIGKILL fallback +
-// the `trpcMutate` shape are improvements that should reach the
-// older tests too. Tracked as a follow-up rather than done here so
-// this PR stays scoped to the detached-HEAD bug.
+// TODO: migrate `trpc.test.ts`, `task-cleanup.test.ts`,
+// `trpc-batch-url.test.ts`, and `terminal-config.test.ts` to import
+// from this module instead of inlining their own copies of
+// `createTmpHome` / `getRandomPort` / `startServer` / `trpcMutate` /
+// `trpcQuery` / `trpcData`. The longer those copies live, the more
+// they will drift from this one — and the SIGKILL fallback + the
+// `trpcMutate` shape are improvements that should reach the older
+// tests too. Tracked as a follow-up rather than done here so this
+// PR stays scoped to the cronjobs migration.
 
 import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync } from "node:fs";

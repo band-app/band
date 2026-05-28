@@ -416,8 +416,17 @@ export class CronjobService {
 
   private assertValidCron(expression: string): void {
     try {
-      // eslint-disable-next-line no-new
-      new Cron(expression, { maxRuns: 0 });
+      // Construct-and-discard is the intended validation pattern: `Cron`
+      // throws on a malformed expression at construction time, and we
+      // never need the instance afterwards. Calling the constructor with
+      // no handler means the instance has nothing to fire on its own;
+      // `maxRuns: 0` is belt-and-braces and makes the no-execute intent
+      // explicit at the call site. The leading `void` makes the
+      // side-effect-only construction obvious for readers (and replaces
+      // the cargo-culted `// eslint-disable-next-line no-new` comment
+      // that lived here when this codebase ran ESLint — it now uses
+      // Biome, which doesn't enforce `no-new`).
+      void new Cron(expression, { maxRuns: 0 });
     } catch {
       throw new InvalidCronExpressionError();
     }
