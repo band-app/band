@@ -10,6 +10,7 @@ import {
   trpcMutate as sharedTrpcMutate,
   trpcQuery as sharedTrpcQuery,
   startServer,
+  trpcData,
 } from "./helpers/server";
 
 // Integration tests for `browsers.*` and `browserLayout.*` tRPC mutations
@@ -41,11 +42,6 @@ function trpcMutate(serverUrl: string, procedure: string, input?: unknown) {
 
 function trpcQuery(serverUrl: string, procedure: string, input?: unknown) {
   return sharedTrpcQuery(serverUrl, procedure, input, DEFAULT_TOKEN);
-}
-
-async function trpcData<T>(res: Response): Promise<T> {
-  const body = (await res.json()) as { result: { data: T } };
-  return body.result.data;
 }
 
 // ---------------------------------------------------------------------------

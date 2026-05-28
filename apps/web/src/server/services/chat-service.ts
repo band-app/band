@@ -391,11 +391,11 @@ export class ChatService {
     const session = this.chatSessions.get(chatId);
     if (!session) return undefined;
 
-    const labelsTouched = updates.labels !== undefined;
+    const incomingLabels = updates.labels;
     let nextLabels: Record<string, string> | undefined;
-    if (labelsTouched) {
+    if (incomingLabels !== undefined) {
       const rejectReservedPrefix = !updates.allowReservedLabels;
-      let next = validateLabels(updates.labels!, { rejectReservedPrefix });
+      let next = validateLabels(incomingLabels, { rejectReservedPrefix });
       if (rejectReservedPrefix) {
         // Preserve any pre-existing `band:`-prefixed labels that the
         // caller's full-set replacement would otherwise drop. The reserved
