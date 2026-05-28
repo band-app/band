@@ -16,7 +16,7 @@ import {
   insertPanelState,
   listPanelStatesForWorkspace,
   updatePanelState,
-} from "./panel-state-store";
+} from "../server/infra/db/queries/panel-states";
 
 // ---------------------------------------------------------------------------
 // Dockview layout types

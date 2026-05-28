@@ -1,15 +1,22 @@
 /**
  * Generic CRUD layer for the `panel_states` table.
  *
- * Panel-type-specific managers (e.g. chat-manager) delegate their DB
- * operations here, serializing domain state into the JSON `state` column.
- * This keeps the persistence layer reusable across panel types without
- * requiring a dedicated table per type.
+ * Infra-tier primitive shared by every panel-typed domain (chats, browsers,
+ * terminals, layout trees, …). The typed `*-service.ts` layer wraps these
+ * functions with its own JSON shape — the store itself is intentionally
+ * schema-agnostic so the same table can back arbitrary panel kinds without
+ * a dedicated table per type.
+ *
+ * Lived in `apps/web/src/lib/panel-state-store.ts` until issue #316 (Phase 5
+ * of the 3-tier refactor); moved here so chat-service / browser-service can
+ * import a sibling infra module instead of crossing back into `lib/`. The
+ * `dockview-layout-manager.ts` helper (still in `lib/`) imports from this
+ * path until terminals land in their own phase.
  */
 
 import { and, eq, sql } from "drizzle-orm";
-import { getDb } from "../server/infra/db/connection";
-import { panelStates } from "../server/infra/db/schema";
+import { getDb } from "../connection";
+import { panelStates } from "../schema";
 
 export interface PanelStateRow {
   id: string;

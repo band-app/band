@@ -1,43 +1,34 @@
 /**
- * Chat layout persistence.
+ * Back-compat shim — re-exports the chat-service's layout API under the
+ * legacy `lib/chat-layout-manager.ts` function-shaped surface so existing
+ * imports keep compiling.
  *
- * Thin wrapper around DockviewLayoutManager for chat pane layouts.
- * Each workspace gets one row in the `panel_states` table with
- * `panelType = "chat_layout"`.
+ * The real implementation lives in `server/services/chat-service.ts`. New
+ * code should call `chatService.getLayout(...)` etc. directly — this file
+ * exists only to ease the migration started in issue #316 (Phase 5 of the
+ * 3-tier refactor) and will be deleted in a follow-up phase once every
+ * call site has moved.
  */
 
-import { DockviewLayoutManager } from "./dockview-layout-manager";
+import { chatService } from "../server/services/chat-service";
 
-const manager = new DockviewLayoutManager("chat_layout");
+export const getChatLayout = (workspaceId: string): unknown | null =>
+  chatService.getLayout(workspaceId);
 
-export const getChatLayout = (workspaceId: string) => manager.get(workspaceId);
-export const saveChatLayout = (workspaceId: string, tree: unknown) =>
-  manager.save(workspaceId, tree);
-export const deleteChatLayout = (workspaceId: string) => manager.delete(workspaceId);
+export const saveChatLayout = (workspaceId: string, tree: unknown): void =>
+  chatService.saveLayout(workspaceId, tree);
 
-/**
- * Add a chat panel to the saved dockview layout.
- */
+export const deleteChatLayout = (workspaceId: string): void =>
+  chatService.deleteLayout(workspaceId);
+
 export function addChatToLayout(
   workspaceId: string,
   chatId: string,
   opts?: { title?: string },
 ): void {
-  manager.addPanel(workspaceId, {
-    id: chatId,
-    contentComponent: "chatTab",
-    tabComponent: "chatTab",
-    title: opts?.title ?? "Chat",
-    params: {
-      workspaceId,
-      chatId,
-    },
-  });
+  chatService.addToLayout(workspaceId, chatId, opts);
 }
 
-/**
- * Remove a chat panel from the saved dockview layout.
- */
 export function removeChatFromLayout(workspaceId: string, chatId: string): void {
-  manager.removePanel(workspaceId, chatId);
+  chatService.removeFromLayout(workspaceId, chatId);
 }
