@@ -111,7 +111,6 @@ import { saveUploadedFiles, saveUploadedFilesDetailed } from "../lib/upload-util
 import { emit, subscribe as subscribeStatus } from "../lib/watcher";
 import { resolveWorkspace } from "../lib/workspace";
 import { publicProcedure, t } from "../server/api/trpc";
-import { cronjobService } from "../server/services/cronjob-service";
 
 const log = createLogger("trpc");
 

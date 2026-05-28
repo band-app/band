@@ -10,8 +10,6 @@ import { deleteBrowserLayout } from "../../lib/browser-layout-manager";
 import { removeWorkspaceBrowsers } from "../../lib/browser-manager";
 import { deleteChatLayout } from "../../lib/chat-layout-manager";
 import { getOrCreateDefaultChat, removeWorkspaceChats } from "../../lib/chat-manager";
-import { stopJobsForKey } from "../../lib/cronjob-scheduler";
-import { deleteCronjobFile } from "../../lib/cronjob-store";
 import { DETACHED_BRANCH_PREFIX, execGit, gitCmd, listWorktrees } from "../../lib/git";
 import { killWorkspaceServers } from "../../lib/lsp-manager";
 import { loadProjectConfig } from "../../lib/project-config";
@@ -36,6 +34,7 @@ import { deleteTerminalLayout } from "../../lib/terminal-layout-manager";
 import { killWorkspaceTerminals } from "../../lib/terminal-manager";
 import { emit } from "../../lib/watcher";
 import { WorkspaceQueries } from "../infra/db/queries/workspaces";
+import { cronjobService } from "./cronjob-service";
 
 const execFileAsync = promisify(execFile);
 const log = createLogger("workspace-service");
@@ -149,8 +148,8 @@ export class PlainProjectError extends Error {
  *
  * Service tier — depends on Infra (`WorkspaceQueries`, `lib/state` for the
  * shared project-state persistence, `lib/git` for git exec) plus a handful
- * of cross-domain helpers (`lib/chat-manager`, `lib/cronjob-scheduler`, …)
- * for workspace-scoped cleanup on delete. Knows nothing about tRPC or
+ * of cross-domain helpers (`lib/chat-manager`, `cronjobService.removeForKey`,
+ * …) for workspace-scoped cleanup on delete. Knows nothing about tRPC or
  * the API surface — all callers (routers, future CLI / scripts) funnel
  * through this class.
  *
@@ -405,8 +404,7 @@ export class WorkspaceService {
     killWorkspaceServers(workspaceId);
 
     // Clean up workspace-scoped cronjobs
-    stopJobsForKey(workspaceId);
-    deleteCronjobFile(workspaceId);
+    cronjobService.removeForKey(workspaceId);
 
     // Delete persisted task history for the workspace (issue #416).
     // Tasks aren't covered by a FK cascade because workspaces aren't a
