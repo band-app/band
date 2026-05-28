@@ -85,14 +85,14 @@ import { workspacesRouter } from "./workspaces/router";
 //     stale legacy entry trips one of those assertions.
 //   - `apps/web/tests/cold-start.test.ts` covers `chats.list` and
 //     `browsers.list` (rehydration on boot); `apps/web/tests/chat-labels.test.ts`
-//     covers `chats.create` / `chats.update` / `chats.remove`; and
+//     covers `chats.create` / `chats.update` / `chats.remove`;
+//     `apps/web/tests/chat-lifecycle.test.ts` covers `chatLayout.get` /
+//     `chatLayout.save` / `chats.stop` / `chats.resume` (issue #529); and
 //     `apps/web/tests/browsers.test.ts` covers `browsers.create` /
 //     `browsers.update` / `browsers.navigate` / `browsers.remove` /
 //     `browsers.get` plus `browserLayout.get` / `browserLayout.save`. A
 //     regression that masks any of those migrated sub-routers with a
 //     stale legacy entry trips the corresponding describe block.
-//     `chatLayout.*`, `chats.stop`, and `chats.resume` are not yet
-//     covered — adding them is tracked in issue #529.
 //   - `apps/web/tests/terminal-ws.test.ts` (and any other terminal-*
 //     integration tests) hit the merged router through the same /trpc
 //     endpoint, so a regression that masks the migrated terminal
