@@ -136,17 +136,36 @@ import { workspacesRouter } from "./workspaces/router";
 //     endpoint, so a regression that masks the migrated terminal
 //     sub-routers with a stale legacy entry trips at least one of those
 //     assertions.
-//   - The Phase 7.5 routers don't have dedicated wire-surface
-//     integration tests yet. The existing CI tests
-//     (`tests/cli-sidecar-path.test.ts`, `tests/cli-skills.test.ts`,
-//     `tests/file-watcher.test.ts`, `tests/formatter.test.ts`,
-//     `tests/lsp.test.ts`, `tests/slash-commands.test.ts`) exercise the
-//     migrated *service* layer through its new import paths, but most
-//     of the migrated procedures still don't have an integration test
-//     that hits them through `/trpc`. Adding per-router tests is a
-//     follow-up alongside the deferred `branch-status-poller.ts`
-//     migration; the wire-surface invariant for now is enforced by
-//     `mergeRouters`'s structural type-check at build time.
+//   - Phase 7.5 wire-surface coverage today is partial:
+//       Covered through `/trpc`:
+//         - `tunnel.*` (`tests/tunnel-and-services.test.ts`,
+//           `tests/tunnel.test.ts` — `tunnel.status`, `tunnel.start`,
+//           `tunnel.stop`).
+//         - `services.*` (the wire key for the renamed
+//           `systemRouter` — `tests/tunnel-and-services.test.ts`
+//           covers `services.health`, `tests/resources.test.ts`
+//           covers `services.resourcesServer`,
+//           `services.resourcesProjects`,
+//           `services.resourcesProjectSize`).
+//         - `prereqs.check` (`tests/tunnel-and-services.test.ts`).
+//         - `host.readFile` / `host.saveFile`
+//           (`tests/host-file.test.ts`).
+//         - `skills.list` (`tests/slash-commands.test.ts`).
+//         - `status.stream` SSE + WebSocket
+//           (`tests/tunnel-and-services.test.ts`).
+//       Service-layer-only coverage (the new import paths are
+//       exercised, but the procedures aren't hit through `/trpc`):
+//         `tests/cli-sidecar-path.test.ts`,
+//         `tests/cli-skills.test.ts`,
+//         `tests/file-watcher.test.ts`, `tests/formatter.test.ts`,
+//         `tests/lsp.test.ts`.
+//       Still uncovered end-to-end: `cli.*`, `hooks.*`,
+//       `browserHost.*`, `editor.*`, `modes.*`, `models.*`,
+//       `statuses.*` (the `getAllStatuses` query). Adding per-router
+//       tests for those is a follow-up alongside the deferred
+//       `branch-status-poller.ts` migration; the wire-surface
+//       invariant for now is enforced by `mergeRouters`'s structural
+//       type-check at build time.
 export const appRouter = t.mergeRouters(
   legacyAppRouter,
   t.router({

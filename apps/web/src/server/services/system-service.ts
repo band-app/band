@@ -73,6 +73,31 @@ export class SystemService {
   }
 
   /**
+   * Install the cloudflared binary via Homebrew. Used by the dashboard's
+   * "Install Tunnel" button. The caller supplies the user's interactive
+   * `$PATH` (typically via `shellPath()`) so `brew` itself is locatable
+   * even when the Node process inherited a stripped-down PATH from
+   * launchd / Electron. Times out at 120s; surfaces stderr in the error
+   * message so the UI can show why the install failed.
+   */
+  async installCloudflared(resolvedPath: string): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      execFile(
+        "brew",
+        ["install", "cloudflared"],
+        { env: { ...process.env, PATH: resolvedPath }, timeout: 120_000 },
+        (err, _stdout, stderr) => {
+          if (err) {
+            reject(new Error(stderr || err.message));
+            return;
+          }
+          resolve();
+        },
+      );
+    });
+  }
+
+  /**
    * Run `du -sk PATH` and return the allocated byte total.
    *
    * Detail: returned bytes are *allocated* (du default), not apparent file

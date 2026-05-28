@@ -75,7 +75,7 @@ destroy (LRU eviction, explicit close, app quit), the desktop emits the
 
 The same `bandTabId` will map to a different `cdpTargetId` every time
 the desktop restarts or the WebContentsView is LRU-evicted. The cache
-in `apps/web/src/lib/browser-host.ts` is the only place the mapping is
+in `apps/web/src/server/infra/browser-host/host-state.ts` is the only place the mapping is
 materialised, and it's always rebuildable from the DB plus a fresh
 ensure roundtrip.
 
@@ -134,15 +134,15 @@ ensure roundtrip.
 ## Files
 
 **New:**
-- `apps/web/src/lib/browser-host.ts` — bandTabId↔cdpTargetId cache,
+- `apps/web/src/server/infra/browser-host/host-state.ts` — bandTabId↔cdpTargetId cache,
   ensure protocol, subscriber list.
 - `apps/web/src/components/BrowserHostBridge.tsx` — desktop-only React
   component that translates ensureView events to IPC and reports back.
 
 **Edited:**
-- `apps/web/src/lib/cdp-targets.ts` — `captureSnapshot` takes a
+- `apps/web/src/server/infra/browser-host/cdp-targets.ts` — `captureSnapshot` takes a
   bandTabId; URL filter / visibility checks deleted.
-- `apps/web/src/lib/cdp-proxy.ts` — `/cdp?bandTabId=…` proxy resolves
+- `apps/web/src/server/infra/browser-host/cdp-proxy.ts` — `/cdp?bandTabId=…` proxy resolves
   via `ensureCdpTargetId`.
 - `apps/web/start-server.ts` + `apps/web/vite.config.ts` —
   `/api/cdp/tabs?workspaceId=…` reads from DB; `/api/cdp/snapshot/<id>`

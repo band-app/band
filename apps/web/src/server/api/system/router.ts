@@ -1,5 +1,16 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+// TODO(#319 / Phase 8 follow-up): these legacy `lib/*` imports plus the
+// inline worktree-filter / aggregation / sort logic in `resourcesProjects`
+// and `resourcesProjectSize` are a layering bypass — the architecture doc
+// puts business logic in the services tier. Lifted as-is from the legacy
+// `servicesRouter` to keep the wire surface identical during Phase 7.5;
+// a follow-up should move the orchestration into
+// `SystemService.listProjectResources(...)` / `getProjectResourceSize(...)`
+// (mirroring `tunnel/router.ts`, `cli/router.ts`, `editor/router.ts`) and
+// fold `branch-status-poller` into a `StatusService`. The same pattern
+// applies to `statuses/`, `skills/`, `modes/`, `models/` — see
+// `apps/web/src/server/api/router.ts` for the consolidated checklist.
 import { getPollerActivity, setPollerActivity } from "../../../lib/branch-status-poller";
 import { listWorktrees } from "../../../lib/git";
 import { loadState } from "../../../lib/state";

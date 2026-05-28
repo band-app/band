@@ -53,6 +53,8 @@ apps/web/src/server/
       router.ts              # agent mode catalog
     models/
       router.ts              # agent model catalog
+    system/
+      router.ts              # services.* (health, activity, resources)
     router.ts                # merges all sub-routers
   services/
     project-service.ts
