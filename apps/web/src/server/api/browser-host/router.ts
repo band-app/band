@@ -159,10 +159,11 @@ export const hostRouter = t.router({
         throw mapFsError(err);
       }
       try {
+        // No need to check isDirectory(): opening a directory with O_WRONLY
+        // already fails with EISDIR before we reach this block (mapped by
+        // mapFsError above). The isFile() guard still catches FIFOs, sockets,
+        // and device files.
         const stats = await fh.stat();
-        if (stats.isDirectory()) {
-          throw new Error("Cannot operate on a directory");
-        }
         if (!stats.isFile()) {
           throw new Error("Not a regular file");
         }
