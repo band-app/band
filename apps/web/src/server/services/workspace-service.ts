@@ -101,8 +101,13 @@ export type WorkspaceRunScriptInput = z.infer<typeof workspaceRunScriptInput>;
 /**
  * Project named in the workspace mutation does not exist in state.
  *
- * Translated by the API tier to a tRPC `NOT_FOUND`. Same pattern as
- * `CronjobProjectNotFoundError` in `cronjob-service.ts`.
+ * Translated by the API tier (`mapServiceError` in
+ * `api/workspaces/router.ts`) into a plain `Error` rethrow that surfaces
+ * as HTTP 500 — that's the legacy wire contract for these procedures
+ * and the existing trpc integration tests pin it. The router comment
+ * explains the rationale and the migration plan; a future PR can
+ * promote the mapping to `NOT_FOUND` (and update the pinned tests) in
+ * lock-step.
  */
 export class ProjectNotFoundError extends Error {
   constructor(name: string) {
@@ -568,21 +573,23 @@ export class WorkspaceService {
    * semantically nicer but would break the existing test and any client
    * pattern-matching on status.
    */
-  runScript(input: WorkspaceRunScriptInput): Promise<{ ok: true }> {
+  async runScript(input: WorkspaceRunScriptInput): Promise<{ ok: true }> {
     const scriptPath = join(input.path, ".band", input.scriptType);
     if (!existsSync(scriptPath)) {
       throw new Error(`Script "${input.scriptType}" not found`);
     }
 
-    return new Promise((resolve, reject) => {
-      execFile("bash", [scriptPath], { cwd: input.path }, (err) => {
-        if (err) {
-          reject(new Error(err.message));
-        } else {
-          resolve({ ok: true });
-        }
-      });
-    });
+    try {
+      await execFileAsync("bash", [scriptPath], { cwd: input.path });
+    } catch (err) {
+      // Rewrap as a plain `Error` carrying just the message — preserves the
+      // legacy router's behaviour, where the callback-style failure path
+      // surfaced `new Error(err.message)` rather than the original
+      // `ChildProcessError` (which would have leaked subprocess metadata
+      // into the tRPC response body).
+      throw new Error(err instanceof Error ? err.message : String(err));
+    }
+    return { ok: true };
   }
 }
 

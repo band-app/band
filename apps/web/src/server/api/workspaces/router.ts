@@ -1,8 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import {
   PlainProjectError,
-  ProjectNotFoundError,
-  WorkspaceNotFoundError,
   workspaceCreateInput,
   workspaceGitInput,
   workspaceRemoveInput,
@@ -109,10 +107,9 @@ function mapServiceError(err: unknown): unknown {
   if (err instanceof PlainProjectError) {
     return new TRPCError({ code: "BAD_REQUEST", message: err.message, cause: err });
   }
-  if (err instanceof ProjectNotFoundError || err instanceof WorkspaceNotFoundError) {
-    // Preserve the legacy plain-`Error` throw so the wire-level status
-    // stays at 500. See header comment.
-    return err;
-  }
+  // `ProjectNotFoundError` and `WorkspaceNotFoundError` (and every other
+  // throw — `Error`, `TRPCError`, etc.) fall through unchanged: tRPC
+  // surfaces a bare `Error` as `INTERNAL_SERVER_ERROR` (500), preserving
+  // the legacy wire-level contract documented in the header comment.
   return err;
 }

@@ -56,7 +56,7 @@ const MAX_LABEL_VALUE_LENGTH = 256;
  * to be misread by a future maintainer than to actually break — flipping
  * the order of `_`, `:`, `-` would silently turn the class into a range.
  * Escaping makes the literal intent obvious. */
-const LABEL_KEY_REGEX = /^[a-zA-Z0-9_:\-]{1,64}$/;
+const LABEL_KEY_REGEX = /^[a-zA-Z0-9_:-]{1,64}$/;
 
 /** Printable-ASCII regex used to validate label values. */
 const PRINTABLE_VALUE_REGEX = /^[\x20-\x7E]+$/;

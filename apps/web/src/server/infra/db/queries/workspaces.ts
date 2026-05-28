@@ -53,7 +53,15 @@ export class WorkspaceQueries {
    * bit-identical to the JS computation. Pushing the match down into SQL
    * lets us read at most one row instead of fanning out the projects +
    * worktrees tree just to find a single workspace (the previous
-   * `loadState()`-based implementation in `lib/state.ts::resolveWorkspaceIdentity`).
+   * `loadState()`-based implementation walked every project's worktree
+   * list to find the match in JS).
+   *
+   * Called from two places today: the workspace-status upsert path in
+   * `lib/state.ts::upsertWorkspaceStatus` (via the private
+   * `resolveWorkspaceIdentity` helper, which delegates here so the SQL
+   * lives in one place) and any future service caller that needs to map
+   * an opaque `workspaceId` back to its on-disk worktree without
+   * loading the full project tree.
    *
    * TODO: `toWorkspaceId`'s encoding is not injective — project `foo-bar` +
    * branch `main` and project `foo` + branch `bar/main` both serialize to
