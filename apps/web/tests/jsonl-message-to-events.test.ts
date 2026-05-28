@@ -135,7 +135,7 @@ describe("jsonlMessageToEvents", () => {
     });
 
     it("strips the [File sharing: …] hint from the user-message text", () => {
-      // Regression for the file-sharing-hint suffix `task-runner`
+      // Regression for the file-sharing-hint suffix `task-service`
       // appends to first-turn prompts. JSONL persists the augmented
       // prompt; replay must strip it so the bubble shows what the
       // user actually typed.

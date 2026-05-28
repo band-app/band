@@ -572,7 +572,7 @@ describe("chats — stop/resume status transitions", () => {
     // `"idle"` inside the abort handler, then the router calls
     // `chatService.updateStatus(chatId, "stopped")`). But shortly after,
     // `runTask`'s in-flight `await` throws because of `agent.abort()`,
-    // its `catch (err)` block fires (see `apps/web/src/lib/task-runner.ts`
+    // its `catch (err)` block fires (see `apps/web/src/server/services/task-service.ts`
     // — currently around line 851), and that path sets chat status to
     // `"error"`. The final chat status is therefore timing-dependent
     // (`stopped` → `error`), which is why this test pins the task-side

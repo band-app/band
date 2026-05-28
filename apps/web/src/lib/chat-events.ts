@@ -147,7 +147,7 @@ export interface ErrorEvent {
 }
 
 /** An assistant-produced file the user can render inline (image, download
- *  link, …). Emitted by `task-runner` either when the agent emits a
+ *  link, …). Emitted by `task-service` either when the agent emits a
  *  `file` event explicitly or when a tool call drops a new file into the
  *  workspace shared dir. The client attaches it as a `file` part on the
  *  current assistant message — never a stand-alone bubble. */

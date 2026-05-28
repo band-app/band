@@ -661,7 +661,7 @@ describe("chat-events — cold subscribe replays history from chats.activeSessio
   // completion …" test above exercises the same code path with one turn.
 
   /**
-   * Regression: on a NEW session, `task-runner` appends a
+   * Regression: on a NEW session, `task-service` appends a
    * `\n\n[File sharing: …]` hint to the prompt sent to the agent. The
    * agent writes this full prompt to its JSONL transcript, hint and
    * all. The live `user-message` broadcast already strips the hint
