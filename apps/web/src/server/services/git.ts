@@ -7,7 +7,7 @@
 // each caller to import from the infra module directly and this file
 // will be deleted.
 
-export type { RepoInfo, WorktreeInfo } from "../server/infra/git/git-client";
+export type { RepoInfo, WorktreeInfo } from "../infra/git/git-client";
 export {
   DETACHED_BRANCH_PREFIX,
   execGh,
@@ -17,4 +17,4 @@ export {
   gitCmd,
   listWorktrees,
   parseGitRemoteUrl,
-} from "../server/infra/git/git-client";
+} from "../infra/git/git-client";

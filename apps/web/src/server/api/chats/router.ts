@@ -14,22 +14,22 @@
  *     `chatLayout.*` tRPC namespace.
  *
  * Both are merged into the root router by `server/api/router.ts`. The
- * sibling helpers (`scheduleActiveSessionRefresh`, `submitTask`, …) still
- * live in `lib/` until their own phases of the refactor; routing through
- * them here is the same shape as the pre-migration legacy procedures.
+ * sibling helpers (`scheduleActiveSessionRefresh`, `submitTask`, …) now
+ * live under `server/services/`; routing through them here keeps the same
+ * shape as the pre-migration legacy procedures.
  */
 
 import { createLogger } from "@band-app/logger";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
+import { getOrCreateAgent } from "../../services/agent-service";
+import { chatService, InvalidLabelsError } from "../../services/chat-service";
 import {
   ensureActiveSessionSummary,
   scheduleActiveSessionRefresh,
-} from "../../../lib/chat-session-summary";
-import { resolveWorkspace } from "../../../lib/workspace";
-import { getOrCreateAgent } from "../../infra/agents/agent-pool";
-import { chatService, InvalidLabelsError } from "../../services/chat-service";
+} from "../../services/chat-session-summary";
 import { abortTask, submitTask, TaskConflictError } from "../../services/task-service";
+import { resolveWorkspace } from "../../services/workspace";
 import { publicProcedure, t } from "../trpc";
 
 const log = createLogger("chats-router");

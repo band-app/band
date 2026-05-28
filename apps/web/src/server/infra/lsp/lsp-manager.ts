@@ -2,7 +2,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createLogger } from "@band-app/logger";
-import { resolveWorkspace } from "../../../lib/workspace";
+import { resolveWorkspace } from "../../services/workspace";
 import { shellPath } from "../process/path";
 
 /** Directory of this module — used to locate local node_modules/.bin */

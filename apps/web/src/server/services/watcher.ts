@@ -1,6 +1,6 @@
-import { getDb } from "../server/infra/db/connection";
-import { branchStatuses as branchStatusesTable } from "../server/infra/db/schema";
-import { getRunningSetups } from "../server/services/setup-runner";
+import { getDb } from "../infra/db/connection";
+import { branchStatuses as branchStatusesTable } from "../infra/db/schema";
+import { getRunningSetups } from "../services/setup-runner";
 import { startBranchStatusPoller, stopBranchStatusPoller } from "./branch-status-poller";
 import { loadCurrentStatuses, type WorkspaceStatus } from "./state";
 

@@ -7,7 +7,7 @@ import {
   createCodingAgent,
 } from "@band-app/coding-agent";
 import { createLogger } from "@band-app/logger";
-import { bandHome, getAgentDefinition, loadSettings } from "../../../lib/state";
+import { bandHome, getAgentDefinition, loadSettings } from "../../services/state";
 
 const log = createLogger("agent-pool");
 

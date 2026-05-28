@@ -6,16 +6,15 @@ import type {
   ChatEventUsage,
   ToolInputAvailableEvent,
 } from "../lib/chat-events";
-import { getChat } from "../lib/chat-manager";
-import { jsonlMessageToEvents } from "../lib/jsonl-message-to-events";
+import { getOrCreateAgent } from "../server/services/agent-service";
+import { getChat } from "../server/services/chat-manager";
+import { jsonlMessageToEvents } from "../server/services/jsonl-message-to-events";
 import {
   getQueuedMessages,
   subscribeQueue,
   toWireQueuedMessages,
-} from "../lib/queued-message-store";
-import { openSseStream, type SseWriter } from "../lib/sse-writer";
-import { resolveWorkspace } from "../lib/workspace";
-import { getOrCreateAgent } from "../server/infra/agents/agent-pool";
+} from "../server/services/queued-message-store";
+import { openSseStream, type SseWriter } from "../server/services/sse-writer";
 import {
   getSessionBuffer,
   getSessionEventsAfter,
@@ -24,6 +23,7 @@ import {
   type StreamChunk,
   subscribe as subscribeTask,
 } from "../server/services/task-service";
+import { resolveWorkspace } from "../server/services/workspace";
 
 const log = createLogger("chat-events");
 

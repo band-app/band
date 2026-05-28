@@ -1,6 +1,6 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { loadProjectConfig } from "../../lib/project-config";
-import { emit } from "../../lib/watcher";
+import { loadProjectConfig } from "./project-config";
+import { emit } from "./watcher";
 
 interface SetupInfo {
   workspaceId: string;

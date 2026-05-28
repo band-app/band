@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fuzzyScore } from "../src/lib/fuzzy-score";
+import { fuzzyScore } from "../src/server/services/fuzzy-score";
 
 // ---------------------------------------------------------------------------
 // Helper: given a query and a list of file paths, return them sorted by score
@@ -118,8 +118,8 @@ describe("fuzzyScore – filename vs directory weight", () => {
   });
 
   it("full filename match beats partial directory match even for short queries", () => {
-    const filename = fuzzyScore("git", "src/lib/git.ts")!;
-    const directory = fuzzyScore("git", "git/src/lib.ts")!;
+    const filename = fuzzyScore("git", "src/server/services/git.ts")!;
+    const directory = fuzzyScore("git", "git/src/services.ts")!;
     expect(filename).toBeGreaterThan(directory);
   });
 });
@@ -129,14 +129,14 @@ describe("fuzzyScore – filename vs directory weight", () => {
 // ---------------------------------------------------------------------------
 describe("fuzzyScore – real-world ranking", () => {
   const FILES = [
-    "apps/web/src/lib/fuzzy-score.ts",
-    "apps/web/src/trpc/router.ts",
+    "apps/web/src/server/services/fuzzy-score.ts",
+    "apps/web/src/server/api/router.ts",
     "apps/web/src/server/infra/db/schema.ts",
     "apps/web/src/dashboard/components/QuickOpenDialog.tsx",
-    "apps/web/src/lib/state.ts",
-    "apps/web/src/lib/git.ts",
+    "apps/web/src/server/services/state.ts",
+    "apps/web/src/server/services/git.ts",
     "apps/web/tests/trpc.test.ts",
-    "apps/web/src/lib/workspace.ts",
+    "apps/web/src/server/services/workspace.ts",
     "schema.prisma",
     "src/old/scattered_chars_hema.ts",
   ];
@@ -155,7 +155,7 @@ describe("fuzzyScore – real-world ranking", () => {
 
   it("'router' ranks router.ts first", () => {
     const result = ranked("router", FILES);
-    expect(result[0]).toBe("apps/web/src/trpc/router.ts");
+    expect(result[0]).toBe("apps/web/src/server/api/router.ts");
   });
 
   it("'qod' ranks QuickOpenDialog.tsx first", () => {
@@ -165,16 +165,16 @@ describe("fuzzyScore – real-world ranking", () => {
 
   it("'git' ranks git.ts first", () => {
     const result = ranked("git", FILES);
-    expect(result[0]).toBe("apps/web/src/lib/git.ts");
+    expect(result[0]).toBe("apps/web/src/server/services/git.ts");
   });
 
   it("'state' ranks state.ts first", () => {
     const result = ranked("state", FILES);
-    expect(result[0]).toBe("apps/web/src/lib/state.ts");
+    expect(result[0]).toBe("apps/web/src/server/services/state.ts");
   });
 
   it("'fz' ranks fuzzy-score.ts first", () => {
     const result = ranked("fz", FILES);
-    expect(result[0]).toBe("apps/web/src/lib/fuzzy-score.ts");
+    expect(result[0]).toBe("apps/web/src/server/services/fuzzy-score.ts");
   });
 });

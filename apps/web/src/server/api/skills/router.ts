@@ -1,7 +1,7 @@
 import { z } from "zod";
-import { getChat, getOrCreateDefaultChat } from "../../../lib/chat-manager";
-import { resolveWorkspace } from "../../../lib/workspace";
-import { getOrCreateAgent } from "../../infra/agents/agent-pool";
+import { getOrCreateAgent } from "../../services/agent-service";
+import { getChat, getOrCreateDefaultChat } from "../../services/chat-manager";
+import { resolveWorkspace } from "../../services/workspace";
 import { publicProcedure, t } from "../trpc";
 
 /**

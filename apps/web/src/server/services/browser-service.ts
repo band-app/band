@@ -18,13 +18,13 @@
  */
 
 import { createLogger } from "@band-app/logger";
-import { DockviewLayoutManager } from "../../lib/dockview-layout-manager";
 import {
   BrowserQueries,
   type BrowserRow,
   type BrowserStatus,
   type BrowserUpdatePatch,
 } from "../infra/db/queries/browsers";
+import { DockviewLayoutManager } from "./dockview-layout-manager";
 
 const log = createLogger("browser-service");
 

@@ -1,11 +1,11 @@
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { formatFileLocation } from "@/dashboard";
-import { emit } from "../../lib/watcher";
-import { resolveWorkspace } from "../../lib/workspace";
 import { killAllServers, killWorkspaceServers } from "../infra/lsp/lsp-manager";
 import { subscribeToFileChanges, type Unsubscribe } from "./file-watcher";
 import { FormatterError, formatFile } from "./formatter";
+import { emit } from "./watcher";
+import { resolveWorkspace } from "./workspace";
 
 /**
  * Editor domain service.

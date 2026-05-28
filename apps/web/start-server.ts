@@ -8,15 +8,12 @@ import { WebSocketServer } from "ws";
 import { createAuthMiddleware, parseCookies, tokensEqual } from "./auth.ts";
 import { handleChatEvents } from "./src/api/chat-events.ts";
 import { handleChatSubmit } from "./src/api/chat-submit.ts";
-import { stopBranchStatusPoller } from "./src/lib/branch-status-poller.ts";
-import { listBrowsers } from "./src/lib/browser-manager.ts";
-import { mimeTypeFromFilename } from "./src/lib/mime-types.ts";
-import { listenWithFallback } from "./src/lib/port-utils.ts";
-import { bandHome, getOrCreateToken, loadSettings, resetAgentStatuses } from "./src/lib/state.ts";
-import { resolveWorkspace } from "./src/lib/workspace.ts";
 import { handleMcpRequest } from "./src/mcp/server.ts";
+import { createContext } from "./src/server/api/context.ts";
+import { getScalarHtml } from "./src/server/api/openapi.ts";
 import { appRouter } from "./src/server/api/router.ts";
 import { handleTerminalConnection } from "./src/server/api/terminals/ws.ts";
+import { listBrowsers } from "./src/server/infra/browser-host/browser-manager.ts";
 import { handleCdpConnection } from "./src/server/infra/browser-host/cdp-proxy.ts";
 import { captureSnapshot } from "./src/server/infra/browser-host/cdp-targets.ts";
 import { closeDb } from "./src/server/infra/db/connection.ts";
@@ -28,14 +25,22 @@ import {
 } from "./src/server/infra/db/queries/tasks.ts";
 import { killAllServers } from "./src/server/infra/lsp/lsp-manager.ts";
 import { handleLspConnection } from "./src/server/infra/lsp/lsp-proxy.ts";
+import { stopBranchStatusPoller } from "./src/server/services/branch-status-poller.ts";
 import { browserHostService } from "./src/server/services/browser-host-service.ts";
 import { cronjobService } from "./src/server/services/cronjob-service.ts";
+import { mimeTypeFromFilename } from "./src/server/services/mime-types.ts";
+import { listenWithFallback } from "./src/server/services/port-utils.ts";
 import { runFirstTimeSetup } from "./src/server/services/setup.ts";
+import {
+  bandHome,
+  getOrCreateToken,
+  loadSettings,
+  resetAgentStatuses,
+} from "./src/server/services/state.ts";
 import { systemService } from "./src/server/services/system-service.ts";
 import { terminalService } from "./src/server/services/terminal-service.ts";
 import { tunnelService } from "./src/server/services/tunnel-service.ts";
-import { createContext } from "./src/trpc/context.ts";
-import { getScalarHtml } from "./src/trpc/openapi.ts";
+import { resolveWorkspace } from "./src/server/services/workspace.ts";
 
 // ---------------------------------------------------------------------------
 // Crash handlers — log to file since stdout/stderr may be piped to a log file

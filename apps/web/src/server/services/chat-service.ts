@@ -20,8 +20,6 @@
  */
 
 import { createLogger } from "@band-app/logger";
-import { DockviewLayoutManager, defaultPanelIdFromLayout } from "../../lib/dockview-layout-manager";
-import { emit } from "../../lib/watcher";
 import { removeAgent } from "../infra/agents/agent-pool";
 import {
   ChatQueries,
@@ -29,7 +27,9 @@ import {
   type ChatStatus,
   type ChatUpdatePatch,
 } from "../infra/db/queries/chats";
+import { DockviewLayoutManager, defaultPanelIdFromLayout } from "./dockview-layout-manager";
 import { settingsService } from "./settings-service";
+import { emit } from "./watcher";
 
 const log = createLogger("chat-service");
 

@@ -22,8 +22,8 @@
 
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { emit } from "../../../lib/watcher";
 import { browserService } from "../../services/browser-service";
+import { emit } from "../../services/watcher";
 import { publicProcedure, t } from "../trpc";
 
 // ---------------------------------------------------------------------------

@@ -1,9 +1,9 @@
 import { createLogger } from "@band-app/logger";
-import { type CodingAgentDefinition, loadSettings, saveSettings } from "../../lib/state";
-import { syncWorktrees } from "../../lib/sync-state";
 import { checkCli, installCli } from "./cli";
 import { installSkills } from "./cli-skills";
 import { checkHooks, installHooks } from "./hooks";
+import { type CodingAgentDefinition, loadSettings, saveSettings } from "./state";
+import { syncWorktrees } from "./sync-state";
 import { systemService } from "./system-service";
 
 const log = createLogger("setup");

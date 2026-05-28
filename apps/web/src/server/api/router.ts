@@ -6,9 +6,15 @@
  * tasks, …) owns a sub-router under `apps/web/src/server/api/<domain>/router.ts`
  * and this file merges them via `t.mergeRouters(…)`.
  *
- * Migrated sub-routers so far (each phase removes its keys from the legacy
- * router at `apps/web/src/trpc/router.ts` in the same diff that adds them
- * here, so `t.mergeRouters` always sees disjoint key sets):
+ * **Phase 8 (issue #319) completed the migration.** The legacy router at
+ * `apps/web/src/trpc/router.ts` and the supporting `trpc/context.ts` /
+ * `trpc/openapi.ts` were deleted; every sub-router now lives under
+ * `server/api/<domain>/router.ts`. The merge below is the single source of
+ * truth for the tRPC wire surface, and there is no longer a "legacy half"
+ * to compose against.
+ *
+ * Migrated sub-routers by phase (issue numbers track when each domain was
+ * lifted, not landing order):
  *
  *   - Phase 1 (issue #312): `settings.*`.
  *   - Phase 2 (issue #313): `projects.*`.
@@ -21,34 +27,31 @@
  *   - Phase 7.5 (issue #517): `cli.*`, `hooks.*`, `host.*`, `browserHost.*`,
  *     `editor.*`, `tunnel.*`, `prereqs.*`, `skills.*`, `modes.*`,
  *     `models.*`, `statuses.*`, `status.*`.
+ *   - Phase 8 (issue #319): the final inline sub-routers — `workspace.*`
+ *     (singular: file ops, diff, search, git commands, agent switching),
+ *     `chat.*` (singular: approval-answer pass-through), `history.*`
+ *     (per-workspace browser history), and `queue.*` (queued message
+ *     store). With these gone, the legacy `apps/web/src/trpc/` directory
+ *     was removed entirely.
  *
- * Phase 4 landed ahead of Phase 3 because cronjobs is a small, self-contained
- * domain (no workspace-graph dependencies on the legacy router) and was a
- * safer second migration target than workspaces. The phase numbers track
- * issue IDs, not landing order.
- *
- * The rest of the procedures still live in the legacy
- * `apps/web/src/trpc/router.ts`; we merge that legacy router with every
- * migrated sub-router so the public tRPC surface stays identical during
- * the multi-phase migration. Subsequent phases will lift more sub-routers
- * out of the legacy file and pull them in here one at a time.
- *
- * Every router (legacy + migrated) must be built with the same tRPC
- * builder (see `./trpc.ts`) for `mergeRouters` to accept them.
+ * Every sub-router must be built with the same tRPC builder (see
+ * `./trpc.ts`) for `mergeRouters` to accept them.
  */
 
-import { appRouter as legacyAppRouter } from "../../trpc/router";
 import { browserHostRouter, hostRouter } from "./browser-host/router";
 import { browserLayoutRouter, browsersRouter } from "./browsers/router";
+import { chatRouter } from "./chat/router";
 import { chatLayoutRouter, chatsRouter } from "./chats/router";
 import { cliRouter } from "./cli/router";
 import { cronjobsRouter } from "./cronjobs/router";
 import { editorRouter } from "./editor/router";
+import { historyRouter } from "./history/router";
 import { hooksRouter } from "./hooks/router";
 import { modelsRouter } from "./models/router";
 import { modesRouter } from "./modes/router";
 import { prereqsRouter } from "./prereqs/router";
 import { projectsRouter } from "./projects/router";
+import { queueRouter } from "./queue/router";
 import { sessionsRouter } from "./sessions/router";
 import { settingsRouter } from "./settings/router";
 import { skillsRouter } from "./skills/router";
@@ -58,148 +61,44 @@ import { tasksRouter } from "./tasks/router";
 import { terminalsRouters } from "./terminals/router";
 import { t } from "./trpc";
 import { tunnelRouter } from "./tunnel/router";
+import { workspaceRouter } from "./workspace/router";
 import { workspacesRouter } from "./workspaces/router";
 
-// INVARIANT: the legacy router (`apps/web/src/trpc/router.ts`) must not
-// contain any key that this file also defines (`settings`, `projects`,
-// `workspaces`, `cronjobs`, `chats`, `chatLayout`, `browsers`,
-// `browserLayout`, `tasks`, `sessions`, `terminal`, `terminalLayout`,
-// `cli`, `hooks`, `host`, `browserHost`, `editor`, `tunnel`, `prereqs`,
-// `skills`, `modes`, `models`, `statuses`, `status`, …).
-// `t.mergeRouters` accepts two routers and silently picks last-write-wins
-// for duplicate keys, so a stray legacy entry would mask the migrated
-// router without a build error. Each phase of the 3-tier migration adds a
-// key here and removes it from the legacy router in the same diff; the
-// invariant must hold for every key composed below.
-//
-// Migrated keys so far:
-//   - `settings`        (Phase 1, issue #312)
-//   - `projects`        (Phase 2, issue #313)
-//   - `workspaces`      (Phase 3, issue #314)
-//   - `cronjobs`        (Phase 4, issue #315)
-//   - `chats`           (Phase 5, issue #316)
-//   - `chatLayout`      (Phase 5, issue #316)
-//   - `browsers`        (Phase 5, issue #316)
-//   - `browserLayout`   (Phase 5, issue #316)
-//   - `tasks`           (Phase 6, issue #317)
-//   - `sessions`        (Phase 6, issue #317)
-//   - `terminal`        (Phase 7, issue #318)
-//   - `terminalLayout`  (Phase 7, issue #318)
-//   - `cli`             (Phase 7.5, issue #517)
-//   - `hooks`           (Phase 7.5, issue #517)
-//   - `host`            (Phase 7.5, issue #517)
-//   - `browserHost`     (Phase 7.5, issue #517)
-//   - `editor`          (Phase 7.5, issue #517)
-//   - `tunnel`          (Phase 7.5, issue #517)
-//   - `prereqs`         (Phase 7.5, issue #517)
-//   - `skills`          (Phase 7.5, issue #517)
-//   - `modes`           (Phase 7.5, issue #517)
-//   - `models`          (Phase 7.5, issue #517)
-//   - `statuses`        (Phase 7.5, issue #517)
-//   - `status`          (Phase 7.5, issue #517)
-//
-// Live guards:
-//   - `tRPC — settings CRUD` in `apps/web/tests/trpc.test.ts` exercises
-//     `settings.get` and `settings.update` end-to-end through the merged
-//     router, catching a regression that masks the migrated
-//     `settingsRouter` with a stale legacy entry.
-//   - The wider tRPC test file (`apps/web/tests/trpc.test.ts`) and
-//     `apps/web/tests/plain-projects.test.ts` exercise the projects
-//     sub-router, so a duplicate-key regression on `projects.*` trips
-//     them via the same path.
-//   - The `workspaces.create` / `workspaces.remove` / `workspaces.runScript`
-//     tests in `apps/web/tests/trpc.test.ts` exercise the migrated
-//     workspaces sub-router, so a regression that masks the new router
-//     with a stale legacy entry trips at least one of those assertions.
-//   - `apps/web/tests/workspace-remove-detached.test.ts` pins the
-//     detached-HEAD branch of `workspaces.remove` end-to-end.
-//   - `apps/web/tests/cronjobs.test.ts` exercises `cronjobs.*` end-to-end,
-//     so a regression that masks the migrated `cronjobsRouter` with a
-//     stale legacy entry trips one of those assertions.
-//   - `apps/web/tests/cold-start.test.ts` covers `chats.list` and
-//     `browsers.list` (rehydration on boot); `apps/web/tests/chat-labels.test.ts`
-//     covers `chats.create` / `chats.update` / `chats.remove`;
-//     `apps/web/tests/chat-lifecycle.test.ts` covers `chatLayout.get` /
-//     `chatLayout.save` / `chats.stop` / `chats.resume` (issue #529); and
-//     `apps/web/tests/browsers.test.ts` covers `browsers.create` /
-//     `browsers.update` / `browsers.navigate` / `browsers.remove` /
-//     `browsers.get` plus `browserLayout.get` / `browserLayout.save`. A
-//     regression that masks any of those migrated sub-routers with a
-//     stale legacy entry trips the corresponding describe block.
-//   - `apps/web/tests/tasks-crud.test.ts` exercises `tasks.list` /
-//     `tasks.get` end-to-end, and
-//     `apps/web/tests/session-perf.test.ts` pins `sessions.list` — so
-//     duplicate-key regressions on either key trip through the same
-//     paths.
-//   - `apps/web/tests/terminal-ws.test.ts` (and any other terminal-*
-//     integration tests) hit the merged router through the same /trpc
-//     endpoint, so a regression that masks the migrated terminal
-//     sub-routers with a stale legacy entry trips at least one of those
-//     assertions.
-//   - Phase 7.5 wire-surface coverage today is partial:
-//       Covered through `/trpc`:
-//         - `tunnel.*` (`tests/tunnel-and-services.test.ts`,
-//           `tests/tunnel.test.ts` — `tunnel.status`, `tunnel.start`,
-//           `tunnel.stop`).
-//         - `services.*` (the wire key for the renamed
-//           `systemRouter` — `tests/tunnel-and-services.test.ts`
-//           covers `services.health`, `tests/resources.test.ts`
-//           covers `services.resourcesServer`,
-//           `services.resourcesProjects`,
-//           `services.resourcesProjectSize`).
-//         - `prereqs.check` (`tests/tunnel-and-services.test.ts`).
-//         - `host.readFile` / `host.saveFile`
-//           (`tests/host-file.test.ts`).
-//         - `skills.list` (`tests/slash-commands.test.ts`).
-//         - `status.stream` SSE + WebSocket
-//           (`tests/tunnel-and-services.test.ts`).
-//       Service-layer-only coverage (the new import paths are
-//       exercised, but the procedures aren't hit through `/trpc`):
-//         `tests/cli-sidecar-path.test.ts`,
-//         `tests/cli-skills.test.ts`,
-//         `tests/file-watcher.test.ts`, `tests/formatter.test.ts`,
-//         `tests/lsp.test.ts`.
-//       Still uncovered end-to-end: `cli.*`, `hooks.*`,
-//       `browserHost.*`, `editor.*`, `modes.*`, `models.*`,
-//       `statuses.*` (the `getAllStatuses` query). Adding per-router
-//       tests for those is a follow-up alongside the deferred
-//       `branch-status-poller.ts` migration; the wire-surface
-//       invariant for now is enforced by `mergeRouters`'s structural
-//       type-check at build time.
-export const appRouter = t.mergeRouters(
-  legacyAppRouter,
-  t.router({
-    settings: settingsRouter,
-    projects: projectsRouter,
-    workspaces: workspacesRouter,
-    cronjobs: cronjobsRouter,
-    chats: chatsRouter,
-    chatLayout: chatLayoutRouter,
-    browsers: browsersRouter,
-    browserLayout: browserLayoutRouter,
-    tasks: tasksRouter,
-    sessions: sessionsRouter,
-    ...terminalsRouters,
-    cli: cliRouter,
-    hooks: hooksRouter,
-    host: hostRouter,
-    browserHost: browserHostRouter,
-    editor: editorRouter,
-    tunnel: tunnelRouter,
-    prereqs: prereqsRouter,
-    skills: skillsRouter,
-    modes: modesRouter,
-    models: modelsRouter,
-    statuses: statusesRouter,
-    status: statusRouter,
-    // `system` is the new home for the legacy `servicesRouter`. The wire
-    // surface is preserved by mounting it under the original `services`
-    // key so every existing client (TunnelDialog, ResourcesPage, the
-    // desktop activity monitor, the CLI) keeps calling `trpc.services.*`
-    // without change. The internal name (`system`) follows the 3-tier
-    // convention; the public key (`services`) follows the contract.
-    services: systemRouter,
-  }),
-);
+export const appRouter = t.router({
+  settings: settingsRouter,
+  projects: projectsRouter,
+  workspaces: workspacesRouter,
+  workspace: workspaceRouter,
+  cronjobs: cronjobsRouter,
+  chats: chatsRouter,
+  chatLayout: chatLayoutRouter,
+  chat: chatRouter,
+  browsers: browsersRouter,
+  browserLayout: browserLayoutRouter,
+  tasks: tasksRouter,
+  sessions: sessionsRouter,
+  ...terminalsRouters,
+  cli: cliRouter,
+  hooks: hooksRouter,
+  host: hostRouter,
+  browserHost: browserHostRouter,
+  editor: editorRouter,
+  tunnel: tunnelRouter,
+  prereqs: prereqsRouter,
+  skills: skillsRouter,
+  modes: modesRouter,
+  models: modelsRouter,
+  statuses: statusesRouter,
+  status: statusRouter,
+  history: historyRouter,
+  queue: queueRouter,
+  // `system` is the new home for the legacy `servicesRouter`. The wire
+  // surface is preserved by mounting it under the original `services`
+  // key so every existing client (TunnelDialog, ResourcesPage, the
+  // desktop activity monitor, the CLI) keeps calling `trpc.services.*`
+  // without change. The internal name (`system`) follows the 3-tier
+  // convention; the public key (`services`) follows the contract.
+  services: systemRouter,
+});
 
 export type AppRouter = typeof appRouter;

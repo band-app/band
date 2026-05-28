@@ -1,4 +1,4 @@
-import { getOrCreateToken } from "./state";
+import { getOrCreateToken } from "../../services/state";
 
 export function getToken(): string {
   return getOrCreateToken();

@@ -2,10 +2,9 @@ import { createLogger } from "@band-app/logger";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { toWorkspaceId } from "@/dashboard";
-import { createChat, getChat, getOrCreateDefaultChat } from "../../../lib/chat-manager";
-import { loadState } from "../../../lib/state";
-import { saveUploadedFilesDetailed } from "../../../lib/upload-utils";
 import { WorkspaceNotFoundError } from "../../errors";
+import { createChat, getChat, getOrCreateDefaultChat } from "../../services/chat-manager";
+import { loadState } from "../../services/state";
 import {
   abortTask,
   cancelTask,
@@ -15,6 +14,7 @@ import {
   submitTask,
   TaskConflictError,
 } from "../../services/task-service";
+import { saveUploadedFilesDetailed } from "../../services/upload-utils";
 import { publicProcedure, t } from "../trpc";
 
 interface SubmitResult {

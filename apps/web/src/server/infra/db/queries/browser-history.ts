@@ -11,9 +11,9 @@
  */
 
 import { and, desc, eq, gte, or, sql } from "drizzle-orm";
-import { getDb } from "../server/infra/db/connection";
-import { browserHistory } from "../server/infra/db/schema";
-import type { ClearRange, HistoryEntry } from "./browser-history-types";
+import type { ClearRange, HistoryEntry } from "../../../../lib/browser-history-types";
+import { getDb } from "../connection";
+import { browserHistory } from "../schema";
 
 // Re-export the shared types so existing call sites that imported
 // from `browser-history-store` still resolve. New code should import

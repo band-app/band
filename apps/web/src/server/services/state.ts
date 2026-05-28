@@ -1,22 +1,22 @@
 import { eq, or } from "drizzle-orm";
-import { getDb } from "../server/infra/db/connection";
+import { getDb } from "../infra/db/connection";
 import {
   type ProjectKind,
   ProjectQueries,
   type ProjectState,
   reconcileKindForProject,
   type WorktreeState,
-} from "../server/infra/db/queries/projects";
+} from "../infra/db/queries/projects";
 import {
   bandHome,
   type CodingAgentDefinition,
   type LabelDefinition,
   type NotificationSettings,
   type Settings,
-} from "../server/infra/db/queries/settings";
-import { type WorkspaceIdentity, WorkspaceQueries } from "../server/infra/db/queries/workspaces";
-import { workspaceStatuses as workspaceStatusesTable } from "../server/infra/db/schema";
-import { SettingsService, settingsService } from "../server/services/settings-service";
+} from "../infra/db/queries/settings";
+import { type WorkspaceIdentity, WorkspaceQueries } from "../infra/db/queries/workspaces";
+import { workspaceStatuses as workspaceStatusesTable } from "../infra/db/schema";
+import { SettingsService, settingsService } from "../services/settings-service";
 
 // Workspace-identity resolution lives in the Infra tier now (issue #314,
 // Phase 3 of the 3-tier refactor). The legacy private helper below

@@ -43,8 +43,8 @@ import { drizzle } from "drizzle-orm/node-sqlite";
 import { migrate } from "drizzle-orm/node-sqlite/migrator";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
-import { findFreePort } from "../src/lib/port-utils";
 import * as schema from "../src/server/infra/db/schema";
+import { findFreePort } from "../src/server/services/port-utils";
 import { seedSettings, seedState } from "./helpers/seed-state";
 
 const PROJECT_ROOT = join(import.meta.dirname, "..");

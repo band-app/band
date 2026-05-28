@@ -6,21 +6,8 @@ import { promisify } from "node:util";
 import { createLogger } from "@band-app/logger";
 import { z } from "zod";
 import { toWorkspaceId } from "@/dashboard";
-import { removeWorkspaceBrowsers } from "../../lib/browser-manager";
-import { getOrCreateDefaultChat, removeWorkspaceChats } from "../../lib/chat-manager";
-import { DETACHED_BRANCH_PREFIX, execGit, gitCmd, listWorktrees } from "../../lib/git";
-import { loadProjectConfig } from "../../lib/project-config";
-import {
-  bandHome,
-  deleteWorkspaceStatus,
-  loadState,
-  type ProjectState,
-  saveState,
-  type WorktreeState,
-  worktreesDir,
-} from "../../lib/state";
-import { emit } from "../../lib/watcher";
 import { WorkspaceNotFoundError } from "../errors";
+import { removeWorkspaceBrowsers } from "../infra/browser-host/browser-manager";
 // FRAGILE: ESM cycle leg — `services/task-service` imports `lib/workspace`,
 // which imports `workspaceService` from this file. The cycle is safe only
 // because every `workspaceService` reference is inside a function body
@@ -29,6 +16,7 @@ import { WorkspaceNotFoundError } from "../errors";
 import { TaskQueries } from "../infra/db/queries/tasks";
 import { WorkspaceQueries } from "../infra/db/queries/workspaces";
 import { killWorkspaceServers } from "../infra/lsp/lsp-manager";
+import { getOrCreateDefaultChat, removeWorkspaceChats } from "./chat-manager";
 // FRAGILE: ESM cycle leg #2 — `./cronjob-service` imports `submitTask`
 // from `./task-service`, which imports `lib/workspace`, which imports
 // `workspaceService` from this file. Same live-binding constraint as the
@@ -36,9 +24,21 @@ import { killWorkspaceServers } from "../infra/lsp/lsp-manager";
 // a function body. Capturing `const cs = cronjobService;` at module load
 // on this leg would silently get `undefined`.
 import { cronjobService } from "./cronjob-service";
+import { DETACHED_BRANCH_PREFIX, execGit, gitCmd, listWorktrees } from "./git";
+import { loadProjectConfig } from "./project-config";
 import { runSetup } from "./setup-runner";
+import {
+  bandHome,
+  deleteWorkspaceStatus,
+  loadState,
+  type ProjectState,
+  saveState,
+  type WorktreeState,
+  worktreesDir,
+} from "./state";
 import { submitTask } from "./task-service";
 import { terminalService } from "./terminal-service";
+import { emit } from "./watcher";
 
 const execFileAsync = promisify(execFile);
 const log = createLogger("workspace-service");

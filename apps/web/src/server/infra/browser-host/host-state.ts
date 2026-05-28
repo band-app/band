@@ -1,5 +1,5 @@
 import { createLogger } from "@band-app/logger";
-import { getBrowser } from "../../../lib/browser-manager";
+import { getBrowser } from "./browser-manager";
 
 const log = createLogger("browser-host");
 
@@ -12,11 +12,12 @@ const log = createLogger("browser-host");
 // module for router consumption. Moved from `lib/browser-host.ts` as part
 // of the Phase 7.5 migration (issue #517).
 //
-// Caveat: this module still imports `getBrowser` from `lib/browser-manager`
-// (an infra → legacy-services dependency). `lib/browser-manager` is itself
-// a transitional staging area that Phase 8 (#319) will lift to the proper
-// services tier; we accept the temporary layering wrinkle here so the rest
-// of the Phase 7.5 migration can land in one PR.
+// Note: this module imports `getBrowser` from the sibling
+// `browser-manager` in the same infra/browser-host/ directory. The
+// browser-manager itself is a thin back-compat shim around
+// `services/browser-service` — kept colocated here so the CDP adapters
+// can resolve a Band tab id to its browser metadata without crossing
+// back up to the services tier.
 //
 // The web client and the agent address browser tabs by Band's persistent
 // `browser_<uuid>` id (bandTabId). To actually drive a tab over CDP we need
