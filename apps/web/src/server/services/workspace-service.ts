@@ -25,6 +25,11 @@ import {
   type WorktreeState,
   worktreesDir,
 } from "../../lib/state";
+// FRAGILE: ESM cycle leg — `lib/task-runner` imports `lib/workspace`,
+// which imports `workspaceService` from this file. The cycle is safe only
+// because every `workspaceService` reference is inside a function body
+// (live binding). See `lib/workspace.ts` for the cycle note before
+// capturing `submitTask` (or anything else here) at module load.
 import { submitTask } from "../../lib/task-runner";
 import { deleteWorkspaceTasks } from "../../lib/task-store";
 import { deleteTerminalLayout } from "../../lib/terminal-layout-manager";
@@ -101,7 +106,7 @@ export type WorkspaceRunScriptInput = z.infer<typeof workspaceRunScriptInput>;
 /**
  * Project named in the workspace mutation does not exist in state.
  *
- * Translated by the API tier (`mapServiceError` in
+ * Translated by the API tier (`throwAsTrpcError` in
  * `api/workspaces/router.ts`) into a plain `Error` rethrow that surfaces
  * as HTTP 500 — that's the legacy wire contract for these procedures
  * and the existing trpc integration tests pin it. The router comment
@@ -435,7 +440,15 @@ export class WorkspaceService {
         } catch {
           // Worktree may be corrupted (e.g. missing .git file).
           // Manually remove the directory and prune stale entries.
-          await rm(worktreePath, { recursive: true, force: true });
+          try {
+            await rm(worktreePath, { recursive: true, force: true });
+          } catch (err) {
+            // Permission errors / EBUSY here leave the directory on disk;
+            // log so a stale worktree path is traceable, then still try
+            // `git worktree prune` to at least clean the index — matches
+            // the existing best-effort pattern used for prune/branch -D.
+            log.warn({ err, workspaceId, worktreePath }, "manual worktree rm failed");
+          }
           try {
             await execFileAsync(command, ["worktree", "prune"], {
               cwd: projPath,
@@ -534,6 +547,11 @@ export class WorkspaceService {
    * `git push` inside the workspace's worktree. Falls back to
    * `git push --set-upstream origin <branch>` on first push when no
    * upstream is configured.
+   *
+   * The fallback only fires when git reports "no upstream branch" — all
+   * other failures (auth, rejected push, network, …) rethrow immediately
+   * so the real error surfaces to the caller instead of being masked by
+   * a second failing push.
    */
   async gitPush(input: WorkspaceGitInput): Promise<{ ok: true }> {
     const workspaceId = toWorkspaceId(input.project, input.branch);
@@ -549,8 +567,16 @@ export class WorkspaceService {
     const cwd = workspace.worktree.path;
     try {
       await execGit(["push"], cwd);
-    } catch {
-      // First push may need to set upstream
+    } catch (err) {
+      // git's "no upstream configured" error reads roughly:
+      //   fatal: The current branch <name> has no upstream branch.
+      // Anything else — auth, rejected push, network — should bubble up
+      // unchanged so the user sees the real cause instead of a misleading
+      // second-push failure.
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!/has no upstream branch/i.test(msg)) {
+        throw err;
+      }
       await execGit(["push", "--set-upstream", "origin", input.branch], cwd);
     }
     return { ok: true };

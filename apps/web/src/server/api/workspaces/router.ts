@@ -31,7 +31,7 @@ export const workspacesRouter = t.router({
     try {
       return workspaceService.create(input);
     } catch (err) {
-      throw mapServiceError(err);
+      throwAsTrpcError(err);
     }
   }),
 
@@ -39,7 +39,7 @@ export const workspacesRouter = t.router({
     try {
       return await workspaceService.remove(input);
     } catch (err) {
-      throw mapServiceError(err);
+      throwAsTrpcError(err);
     }
   }),
 
@@ -47,7 +47,7 @@ export const workspacesRouter = t.router({
     try {
       return workspaceService.setPinned(input);
     } catch (err) {
-      throw mapServiceError(err);
+      throwAsTrpcError(err);
     }
   }),
 
@@ -55,7 +55,7 @@ export const workspacesRouter = t.router({
     try {
       return await workspaceService.gitPull(input);
     } catch (err) {
-      throw mapServiceError(err);
+      throwAsTrpcError(err);
     }
   }),
 
@@ -63,7 +63,7 @@ export const workspacesRouter = t.router({
     try {
       return await workspaceService.gitPush(input);
     } catch (err) {
-      throw mapServiceError(err);
+      throwAsTrpcError(err);
     }
   }),
 
@@ -71,7 +71,7 @@ export const workspacesRouter = t.router({
     try {
       return await workspaceService.runScript(input);
     } catch (err) {
-      throw mapServiceError(err);
+      throwAsTrpcError(err);
     }
   }),
 });
@@ -79,13 +79,18 @@ export const workspacesRouter = t.router({
 export type WorkspacesRouter = typeof workspacesRouter;
 
 /**
- * Translate `WorkspaceService` domain errors into `TRPCError`s.
+ * Translate `WorkspaceService` domain errors into `TRPCError`s and throw.
+ *
+ * Declared `never` so call sites read as `throwAsTrpcError(err)` (not
+ * `throw mapServiceError(err)`): the function never returns, so a future
+ * edit can't accidentally capture the result into a local before throwing
+ * and the control-flow shape is clear at the call site.
  *
  * Only `PlainProjectError` has an explicit branch here — it maps to a
  * 400 `BAD_REQUEST`, matching the legacy router's
  * `TRPCError({code: "BAD_REQUEST", ...})`. Every other throw
  * (`ProjectNotFoundError`, `WorkspaceNotFoundError`, plain `Error`,
- * `TRPCError`, …) falls through unchanged so tRPC surfaces it as
+ * `TRPCError`, …) is rethrown unchanged so tRPC surfaces it as
  * `INTERNAL_SERVER_ERROR` (500) with the original stack — matching how
  * the legacy router behaved (raw throws bubbled out of `mutation`/
  * `query` handlers).
@@ -98,13 +103,13 @@ export type WorkspacesRouter = typeof workspacesRouter;
  * `expect(res.status).toBe(500)`). A semantic 404 upgrade can ride a
  * follow-up that updates the tests together.
  */
-function mapServiceError(err: unknown): unknown {
+function throwAsTrpcError(err: unknown): never {
   if (err instanceof PlainProjectError) {
-    return new TRPCError({ code: "BAD_REQUEST", message: err.message, cause: err });
+    throw new TRPCError({ code: "BAD_REQUEST", message: err.message, cause: err });
   }
   // `ProjectNotFoundError` and `WorkspaceNotFoundError` (and every other
-  // throw — `Error`, `TRPCError`, etc.) fall through unchanged: tRPC
+  // throw — `Error`, `TRPCError`, etc.) are rethrown unchanged: tRPC
   // surfaces a bare `Error` as `INTERNAL_SERVER_ERROR` (500), preserving
   // the legacy wire-level contract documented in the header comment.
-  return err;
+  throw err;
 }

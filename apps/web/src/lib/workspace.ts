@@ -1,3 +1,5 @@
+// FRAGILE: ESM cycle leg — see the CYCLE note below before adding any
+// module-scope reference to `workspaceService` in this file.
 import { workspaceService } from "../server/services/workspace-service";
 
 /**

@@ -10,6 +10,11 @@ import { shiftQueuedMessage } from "./queued-message-store";
 import { bandHome, upsertWorkspaceStatus } from "./state";
 import { generateTaskId, markTaskFailed, saveTask } from "./task-store";
 import { emit as emitStatusEvent } from "./watcher";
+// FRAGILE: ESM cycle leg — `./workspace` imports `workspaceService` from
+// `server/services/workspace-service`, which imports `submitTask` back from
+// this file. See `lib/workspace.ts` for the cycle note before capturing
+// `resolveWorkspace` (or any service-tier symbol via this hop) at module
+// load.
 import { resolveWorkspace } from "./workspace";
 
 const log = createLogger("task-runner");
