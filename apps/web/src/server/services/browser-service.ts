@@ -8,10 +8,13 @@
  *
  * Created in issue #316 (Phase 5 of the 3-tier refactor) by lifting the
  * business half of `lib/browser-manager.ts` + `lib/browser-layout-manager.ts`
- * out of `lib/` and into this class. The original `browser-manager.ts` and
- * `browser-layout-manager.ts` remain as back-compat shims that delegate
- * here so existing imports keep compiling — subsequent phases will rewrite
- * those call sites to import from this module directly.
+ * out of `lib/` and into this class. `lib/browser-layout-manager.ts` has
+ * been deleted entirely now that its only caller (`workspace-service`)
+ * goes through `browserService.removeAllForWorkspace` — which is self-
+ * contained per the contract below. `lib/browser-manager.ts` remains as
+ * a back-compat shim because it still has live importers (`start-server`,
+ * `workspace-service`); subsequent phases will rewrite those call sites
+ * to import from this module directly.
  */
 
 import { createLogger } from "@band-app/logger";
@@ -321,7 +324,7 @@ export class BrowserService {
   }
 
   // -------------------------------------------------------------------------
-  // Layout integration (absorbs `lib/browser-layout-manager.ts`)
+  // Layout integration (absorbed from the now-deleted `lib/browser-layout-manager.ts`)
   // -------------------------------------------------------------------------
 
   /** Get the saved browser layout tree for a workspace, or null when absent. */
@@ -366,10 +369,9 @@ export class BrowserService {
 
 /**
  * Shared singleton consumed by both the API tier (browsers router) and the
- * back-compat shims in `lib/browser-manager.ts` / `lib/browser-layout-manager.ts`.
- * The browser service holds in-memory state (the tab registry), so callers
- * MUST go through this instance — instantiating a second `BrowserService`
- * elsewhere would create a phantom registry that doesn't see the other's
- * writes.
+ * back-compat shim in `lib/browser-manager.ts`. The browser service holds
+ * in-memory state (the tab registry), so callers MUST go through this
+ * instance — instantiating a second `BrowserService` elsewhere would
+ * create a phantom registry that doesn't see the other's writes.
  */
 export const browserService = new BrowserService();

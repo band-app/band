@@ -9,10 +9,14 @@
  *
  * Created in issue #316 (Phase 5 of the 3-tier refactor) by lifting the
  * business half of `lib/chat-manager.ts` + `lib/chat-layout-manager.ts`
- * out of `lib/` and into this class. The original `chat-manager.ts` and
- * `chat-layout-manager.ts` remain as back-compat shims that delegate
- * here so existing imports keep compiling — subsequent phases will
- * rewrite those call sites to import from this module directly.
+ * out of `lib/` and into this class. `lib/chat-layout-manager.ts` has
+ * been deleted entirely now that its only caller (`workspace-service`)
+ * goes through `chatService.removeAllForWorkspace` — which is self-
+ * contained per the contract below. `lib/chat-manager.ts` remains as a
+ * back-compat shim because it still has live importers (the dashboard
+ * tRPC router, `cronjob-service`, `chat-events`, `chat-submit`);
+ * subsequent phases will rewrite those call sites to import from this
+ * module directly.
  */
 
 import { createLogger } from "@band-app/logger";
@@ -684,7 +688,7 @@ export class ChatService {
   }
 
   // -------------------------------------------------------------------------
-  // Layout integration (absorbs `lib/chat-layout-manager.ts`)
+  // Layout integration (absorbed from the now-deleted `lib/chat-layout-manager.ts`)
   // -------------------------------------------------------------------------
 
   /** Get the saved chat layout tree for a workspace, or null when absent. */
@@ -724,10 +728,9 @@ export class ChatService {
 
 /**
  * Shared singleton consumed by both the API tier (chats router) and the
- * back-compat shims in `lib/chat-manager.ts` / `lib/chat-layout-manager.ts`.
- * The chat service holds in-memory state (the chat registry), so callers
- * MUST go through this instance — instantiating a second `ChatService`
- * elsewhere would create a phantom registry that doesn't see the other's
- * writes.
+ * back-compat shim in `lib/chat-manager.ts`. The chat service holds
+ * in-memory state (the chat registry), so callers MUST go through this
+ * instance — instantiating a second `ChatService` elsewhere would create
+ * a phantom registry that doesn't see the other's writes.
  */
 export const chatService = new ChatService();
