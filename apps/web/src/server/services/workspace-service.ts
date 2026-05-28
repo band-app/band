@@ -34,6 +34,12 @@ import { deleteTerminalLayout } from "../../lib/terminal-layout-manager";
 import { killWorkspaceTerminals } from "../../lib/terminal-manager";
 import { emit } from "../../lib/watcher";
 import { WorkspaceQueries } from "../infra/db/queries/workspaces";
+// FRAGILE: ESM cycle leg #2 — `./cronjob-service` imports `submitTask`
+// from `lib/task-runner`, which imports `lib/workspace`, which imports
+// `workspaceService` from this file. Same live-binding constraint as the
+// `submitTask` import above: keep every `cronjobService` reference inside
+// a function body. Capturing `const cs = cronjobService;` at module load
+// on this leg would silently get `undefined`.
 import { cronjobService } from "./cronjob-service";
 
 const execFileAsync = promisify(execFile);
@@ -167,10 +173,10 @@ export class PlainProjectError extends Error {
  *     service uses them directly today; the router-facing contract is
  *     unchanged.
  *   - **Workspace-scoped side-effect cleanup.** `removeWorkspaceChats`,
- *     `killWorkspaceTerminals`, `stopJobsForKey`, etc. live in their own
- *     domain modules. Each will migrate to its own service in a later
- *     phase; the orchestration is centralized here for now so the remove
- *     flow remains atomic from the router's perspective.
+ *     `killWorkspaceTerminals`, `cronjobService.removeForKey`, etc. live
+ *     in their own domain modules. Each will migrate to its own service
+ *     in a later phase; the orchestration is centralized here for now so
+ *     the remove flow remains atomic from the router's perspective.
  *
  * Stateless aside from its `queries` dependency, so a single shared
  * instance is safe across callers.

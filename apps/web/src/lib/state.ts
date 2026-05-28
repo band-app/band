@@ -35,10 +35,10 @@ export { bandHome };
 // Project types + the kind reconciliation helper live in the Infra layer
 // now (issue #313, Phase 2 of the 3-tier refactor). Re-export from this
 // module so existing callers (sync-state, branch-status-poller,
-// cronjob-scheduler, workspace.ts, …) keep compiling. The real
-// implementations live under `server/infra/db/queries/projects.ts`;
-// subsequent refactor phases will rewrite each caller to import from
-// there directly and this shim will go away.
+// workspace.ts, …) keep compiling. The real implementations live under
+// `server/infra/db/queries/projects.ts`; subsequent refactor phases will
+// rewrite each caller to import from there directly and this shim will
+// go away.
 export type { ProjectKind, ProjectState, WorktreeState };
 export { reconcileKindForProject };
 
@@ -48,10 +48,9 @@ export { reconcileKindForProject };
 // `ProjectQueries` (in `server/infra/db/queries/projects.ts`) owns the
 // real CRUD for the `projects` + `worktrees` tables. The wrappers below
 // preserve the old `lib/state` import surface so unmigrated callers (the
-// legacy tRPC router, sync-state, cronjob-scheduler, workspace.ts, …)
-// keep compiling unchanged. Later refactor phases will migrate each
-// caller to talk to the infra/service tiers directly and this section
-// will be deleted.
+// legacy tRPC router, sync-state, workspace.ts, …) keep compiling
+// unchanged. Later refactor phases will migrate each caller to talk to
+// the infra/service tiers directly and this section will be deleted.
 // -----------------------------------------------------------------------------
 
 const projectQueries = new ProjectQueries();
