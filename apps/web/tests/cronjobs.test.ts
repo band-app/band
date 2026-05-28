@@ -551,10 +551,30 @@ describe("tRPC — cronjobs.trigger", () => {
   it("returns CONFLICT when task is already running", async () => {
     // The fake-agent scenario above sleeps for 5s before emitting `result`,
     // so by the time this test runs the task started by the first
-    // `triggers a cronjob and creates a task` case is still in-flight and
-    // the second trigger MUST conflict. Assert the exact status code
-    // rather than a [200, 409] union — the union form silently passes if
-    // the conflict path ever stops firing.
+    // `triggers a cronjob and creates a task` case is still in-flight.
+    // Belt-and-braces: poll `tasks.list` until we see `status: "running"`
+    // before firing the second trigger, so the assertion does not depend
+    // on wall-clock margin between the two `it` blocks at all. If the
+    // agent ever completes faster than expected the poll fails loudly
+    // instead of the conflict check silently flipping to 200.
+    await expect
+      .poll(
+        async () => {
+          const listRes = await trpcQuery(
+            server.url,
+            "tasks.list",
+            { workspaceId: "triggerproj-main", status: "running" },
+            DEFAULT_TOKEN,
+          );
+          const listData = await trpcData<{ tasks: unknown[] }>(listRes);
+          return listData.tasks.length;
+        },
+        { timeout: 4000, interval: 50 },
+      )
+      .toBeGreaterThan(0);
+
+    // Assert the exact status code rather than a [200, 409] union — the
+    // union form silently passes if the conflict path ever stops firing.
     const res = await trpcMutate(
       server.url,
       "cronjobs.trigger",

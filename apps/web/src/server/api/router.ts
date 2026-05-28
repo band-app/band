@@ -9,7 +9,13 @@
  * Migration order:
  *   - Phase 1 (issue #312): `settings/`.
  *   - Phase 2 (issue #313): `projects/`.
+ *   - Phase 3 (issue #314): `workspaces/` — pending.
  *   - Phase 4 (issue #315): `cronjobs/`.
+ *
+ * Phase 4 landed ahead of Phase 3 because cronjobs is a small, self-contained
+ * domain (no workspace-graph dependencies on the legacy router) and was a
+ * safer second migration target than workspaces. The phase numbers track
+ * issue IDs, not landing order.
  *
  * The rest of the procedures still live in the legacy
  * `apps/web/src/trpc/router.ts`; we merge that legacy router with every

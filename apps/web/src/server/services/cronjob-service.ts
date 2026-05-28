@@ -220,7 +220,7 @@ export class CronjobService {
    * the write. Throws `CronjobNotFoundError` if no job matches `key`+`id`.
    */
   update(input: CronjobUpdateInput): { job: CronjobDefinition } {
-    if (input.cronExpression) {
+    if (input.cronExpression !== undefined) {
       this.assertValidCron(input.cronExpression);
     }
 
@@ -384,10 +384,20 @@ export class CronjobService {
    * (which the scheduled fire path treats as a soft failure — see
    * `executeCronjob`). The manual trigger route maps the same condition to
    * a `CronjobProjectNotFoundError`.
+   *
+   * Workspace-scoped jobs return `null` rather than falling through to the
+   * project-resolution branch when `workspaceId` is somehow missing. The
+   * `create` path already rejects this via `CronjobWorkspaceMissingError`,
+   * but a workspace-scoped row written by an older server version could
+   * theoretically reach here with a null `workspaceId`. Falling through
+   * would silently misfire into the project's default branch; returning
+   * `null` makes the failure explicit (logged + `lastRunStatus = "failed"`
+   * for the scheduler; `CronjobProjectNotFoundError` for the manual
+   * trigger path).
    */
   private resolveWorkspaceId(job: CronjobDefinition, fileKey: string): string | null {
-    if (job.scope === "workspace" && job.workspaceId) {
-      return job.workspaceId;
+    if (job.scope === "workspace") {
+      return job.workspaceId ?? null;
     }
     const appState = loadState();
     const project = appState.projects.find((p) => p.name === fileKey);

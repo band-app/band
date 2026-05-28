@@ -45,7 +45,7 @@ export const cronjobsRouter = t.router({
     try {
       return cronjobService.get(input.key, input.id);
     } catch (err) {
-      throw mapServiceError(err);
+      throwAsTRPCError(err);
     }
   }),
 
@@ -53,7 +53,7 @@ export const cronjobsRouter = t.router({
     try {
       return cronjobService.create(input);
     } catch (err) {
-      throw mapServiceError(err);
+      throwAsTRPCError(err);
     }
   }),
 
@@ -61,7 +61,7 @@ export const cronjobsRouter = t.router({
     try {
       return cronjobService.update(input);
     } catch (err) {
-      throw mapServiceError(err);
+      throwAsTRPCError(err);
     }
   }),
 
@@ -71,7 +71,7 @@ export const cronjobsRouter = t.router({
       try {
         return cronjobService.delete(input.key, input.id);
       } catch (err) {
-        throw mapServiceError(err);
+        throwAsTRPCError(err);
       }
     }),
 
@@ -81,7 +81,7 @@ export const cronjobsRouter = t.router({
       try {
         return cronjobService.trigger(input.key, input.id);
       } catch (err) {
-        throw mapServiceError(err);
+        throwAsTRPCError(err);
       }
     }),
 });
@@ -89,29 +89,35 @@ export const cronjobsRouter = t.router({
 export type CronjobsRouter = typeof cronjobsRouter;
 
 /**
- * Translate `CronjobService` errors into `TRPCError`s.
+ * Translate `CronjobService` errors into `TRPCError`s and throw.
+ *
+ * Always throws — the `: never` return type lets call sites do
+ * `throwAsTRPCError(err)` without a redundant `throw` keyword and forces
+ * TypeScript to treat the line as terminal control flow. Returning a
+ * `TRPCError | unknown` from a helper that callers wrap in `throw` would
+ * silently accept a stray non-throw use because `unknown` is too loose; the
+ * `never` signature closes that hole.
  *
  * Each domain error class maps to a specific tRPC code that mirrors the
  * legacy router's behavior:
- *   - `CronjobNotFoundError` → 404 `NOT_FOUND`
+ *   - `CronjobNotFoundError` / `CronjobProjectNotFoundError` → 404 `NOT_FOUND`
  *   - `InvalidCronExpressionError` / `CronjobWorkspaceMissingError` → 400
- *   - `CronjobProjectNotFoundError` → 404
  *   - `TaskConflictError` → 409 `CONFLICT` (raised inside `service.trigger`)
  * Anything else is rethrown unchanged so unexpected failures surface as a
  * 500 with the original stack rather than being silently swallowed.
  */
-function mapServiceError(err: unknown): unknown {
+function throwAsTRPCError(err: unknown): never {
   if (err instanceof CronjobNotFoundError || err instanceof CronjobProjectNotFoundError) {
-    return new TRPCError({ code: "NOT_FOUND", message: err.message });
+    throw new TRPCError({ code: "NOT_FOUND", message: err.message });
   }
   if (err instanceof InvalidCronExpressionError || err instanceof CronjobWorkspaceMissingError) {
-    return new TRPCError({ code: "BAD_REQUEST", message: err.message });
+    throw new TRPCError({ code: "BAD_REQUEST", message: err.message });
   }
   if (err instanceof TaskConflictError) {
-    return new TRPCError({
+    throw new TRPCError({
       code: "CONFLICT",
       message: "Task already running for this chat pane",
     });
   }
-  return err;
+  throw err;
 }

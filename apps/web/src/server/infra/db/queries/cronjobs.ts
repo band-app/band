@@ -57,8 +57,10 @@ export interface CronjobFile {
  * `Date.now()` is good enough — cronjobs are user-created from the UI, never
  * in a tight loop, so the collision window is well below the millisecond
  * resolution we'd need to see one in practice. Kept as a top-level helper
- * (rather than a class method) so the API tier can call it without
- * instantiating `CronjobQueries`.
+ * (rather than a class method) so the service tier can call it without
+ * instantiating `CronjobQueries`. It lives in the Infra file so the schema
+ * shape (`cj_*` prefix is implicit table convention) stays colocated with
+ * the rest of the row plumbing.
  */
 export function generateCronjobId(): string {
   return `cj_${Date.now()}`;
