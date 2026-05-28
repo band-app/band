@@ -9,7 +9,7 @@
  * Migration order:
  *   - Phase 1 (issue #312): `settings/`.
  *   - Phase 2 (issue #313): `projects/`.
- *   - Phase 3 (issue #314): `workspaces/` — pending.
+ *   - Phase 3 (issue #314): `workspaces/`.
  *   - Phase 4 (issue #315): `cronjobs/`.
  *
  * Phase 4 landed ahead of Phase 3 because cronjobs is a small, self-contained
@@ -32,14 +32,16 @@ import { cronjobsRouter } from "./cronjobs/router";
 import { projectsRouter } from "./projects/router";
 import { settingsRouter } from "./settings/router";
 import { t } from "./trpc";
+import { workspacesRouter } from "./workspaces/router";
 
 // INVARIANT: the legacy router (`apps/web/src/trpc/router.ts`) must not
 // contain any key that this file also defines (`settings`, `projects`,
-// `cronjobs`, …). `t.mergeRouters` accepts two routers and silently picks
-// last-write-wins for duplicate keys, so a stray legacy entry would mask
-// the migrated router without a build error. Each phase of the 3-tier
-// migration adds a key here and removes it from the legacy router in the
-// same diff; the invariant must hold for every key composed below.
+// `workspaces`, `cronjobs`, …). `t.mergeRouters` accepts two routers and
+// silently picks last-write-wins for duplicate keys, so a stray legacy
+// entry would mask the migrated router without a build error. Each phase
+// of the 3-tier migration adds a key here and removes it from the legacy
+// router in the same diff; the invariant must hold for every key
+// composed below.
 //
 // Live guards:
 //   - `tRPC — settings CRUD` in `apps/web/tests/trpc.test.ts` exercises
@@ -50,6 +52,12 @@ import { t } from "./trpc";
 //     `apps/web/tests/plain-projects.test.ts` exercise the projects
 //     sub-router, so a duplicate-key regression on `projects.*` trips
 //     them via the same path.
+//   - The `workspaces.create` / `workspaces.remove` / `workspaces.runScript`
+//     tests in `apps/web/tests/trpc.test.ts` exercise the migrated
+//     workspaces sub-router, so a regression that masks the new router
+//     with a stale legacy entry trips at least one of those assertions.
+//   - `apps/web/tests/workspace-remove-detached.test.ts` pins the
+//     detached-HEAD branch of `workspaces.remove` end-to-end.
 //   - `apps/web/tests/cronjobs.test.ts` exercises `cronjobs.*` end-to-end,
 //     so a regression that masks the migrated `cronjobsRouter` with a
 //     stale legacy entry trips one of those assertions.
@@ -58,6 +66,7 @@ export const appRouter = t.mergeRouters(
   t.router({
     settings: settingsRouter,
     projects: projectsRouter,
+    workspaces: workspacesRouter,
     cronjobs: cronjobsRouter,
   }),
 );
