@@ -18,6 +18,9 @@
  *     `browserLayout.*`.
  *   - Phase 6 (issue #317): `tasks.*`, `sessions.*`.
  *   - Phase 7 (issue #318): `terminals/` (exposes `terminal` + `terminalLayout`).
+ *   - Phase 7.5 (issue #517): `cli.*`, `hooks.*`, `host.*`, `browserHost.*`,
+ *     `editor.*`, `tunnel.*`, `prereqs.*`, `skills.*`, `modes.*`,
+ *     `models.*`, `statuses.*`, `status.*`.
  *
  * Phase 4 landed ahead of Phase 3 because cronjobs is a small, self-contained
  * domain (no workspace-graph dependencies on the legacy router) and was a
@@ -35,21 +38,34 @@
  */
 
 import { appRouter as legacyAppRouter } from "../../trpc/router";
+import { browserHostRouter, hostRouter } from "./browser-host/router";
 import { browserLayoutRouter, browsersRouter } from "./browsers/router";
 import { chatLayoutRouter, chatsRouter } from "./chats/router";
+import { cliRouter } from "./cli/router";
 import { cronjobsRouter } from "./cronjobs/router";
+import { editorRouter } from "./editor/router";
+import { hooksRouter } from "./hooks/router";
+import { modelsRouter } from "./models/router";
+import { modesRouter } from "./modes/router";
+import { prereqsRouter } from "./prereqs/router";
 import { projectsRouter } from "./projects/router";
 import { sessionsRouter } from "./sessions/router";
 import { settingsRouter } from "./settings/router";
+import { skillsRouter } from "./skills/router";
+import { statusesRouter, statusRouter } from "./statuses/router";
+import { systemRouter } from "./system/router";
 import { tasksRouter } from "./tasks/router";
 import { terminalsRouters } from "./terminals/router";
 import { t } from "./trpc";
+import { tunnelRouter } from "./tunnel/router";
 import { workspacesRouter } from "./workspaces/router";
 
 // INVARIANT: the legacy router (`apps/web/src/trpc/router.ts`) must not
 // contain any key that this file also defines (`settings`, `projects`,
 // `workspaces`, `cronjobs`, `chats`, `chatLayout`, `browsers`,
-// `browserLayout`, `tasks`, `sessions`, `terminal`, `terminalLayout`, …).
+// `browserLayout`, `tasks`, `sessions`, `terminal`, `terminalLayout`,
+// `cli`, `hooks`, `host`, `browserHost`, `editor`, `tunnel`, `prereqs`,
+// `skills`, `modes`, `models`, `statuses`, `status`, …).
 // `t.mergeRouters` accepts two routers and silently picks last-write-wins
 // for duplicate keys, so a stray legacy entry would mask the migrated
 // router without a build error. Each phase of the 3-tier migration adds a
@@ -69,6 +85,18 @@ import { workspacesRouter } from "./workspaces/router";
 //   - `sessions`        (Phase 6, issue #317)
 //   - `terminal`        (Phase 7, issue #318)
 //   - `terminalLayout`  (Phase 7, issue #318)
+//   - `cli`             (Phase 7.5, issue #517)
+//   - `hooks`           (Phase 7.5, issue #517)
+//   - `host`            (Phase 7.5, issue #517)
+//   - `browserHost`     (Phase 7.5, issue #517)
+//   - `editor`          (Phase 7.5, issue #517)
+//   - `tunnel`          (Phase 7.5, issue #517)
+//   - `prereqs`         (Phase 7.5, issue #517)
+//   - `skills`          (Phase 7.5, issue #517)
+//   - `modes`           (Phase 7.5, issue #517)
+//   - `models`          (Phase 7.5, issue #517)
+//   - `statuses`        (Phase 7.5, issue #517)
+//   - `status`          (Phase 7.5, issue #517)
 //
 // Live guards:
 //   - `tRPC — settings CRUD` in `apps/web/tests/trpc.test.ts` exercises
@@ -108,6 +136,36 @@ import { workspacesRouter } from "./workspaces/router";
 //     endpoint, so a regression that masks the migrated terminal
 //     sub-routers with a stale legacy entry trips at least one of those
 //     assertions.
+//   - Phase 7.5 wire-surface coverage today is partial:
+//       Covered through `/trpc`:
+//         - `tunnel.*` (`tests/tunnel-and-services.test.ts`,
+//           `tests/tunnel.test.ts` — `tunnel.status`, `tunnel.start`,
+//           `tunnel.stop`).
+//         - `services.*` (the wire key for the renamed
+//           `systemRouter` — `tests/tunnel-and-services.test.ts`
+//           covers `services.health`, `tests/resources.test.ts`
+//           covers `services.resourcesServer`,
+//           `services.resourcesProjects`,
+//           `services.resourcesProjectSize`).
+//         - `prereqs.check` (`tests/tunnel-and-services.test.ts`).
+//         - `host.readFile` / `host.saveFile`
+//           (`tests/host-file.test.ts`).
+//         - `skills.list` (`tests/slash-commands.test.ts`).
+//         - `status.stream` SSE + WebSocket
+//           (`tests/tunnel-and-services.test.ts`).
+//       Service-layer-only coverage (the new import paths are
+//       exercised, but the procedures aren't hit through `/trpc`):
+//         `tests/cli-sidecar-path.test.ts`,
+//         `tests/cli-skills.test.ts`,
+//         `tests/file-watcher.test.ts`, `tests/formatter.test.ts`,
+//         `tests/lsp.test.ts`.
+//       Still uncovered end-to-end: `cli.*`, `hooks.*`,
+//       `browserHost.*`, `editor.*`, `modes.*`, `models.*`,
+//       `statuses.*` (the `getAllStatuses` query). Adding per-router
+//       tests for those is a follow-up alongside the deferred
+//       `branch-status-poller.ts` migration; the wire-surface
+//       invariant for now is enforced by `mergeRouters`'s structural
+//       type-check at build time.
 export const appRouter = t.mergeRouters(
   legacyAppRouter,
   t.router({
@@ -122,6 +180,25 @@ export const appRouter = t.mergeRouters(
     tasks: tasksRouter,
     sessions: sessionsRouter,
     ...terminalsRouters,
+    cli: cliRouter,
+    hooks: hooksRouter,
+    host: hostRouter,
+    browserHost: browserHostRouter,
+    editor: editorRouter,
+    tunnel: tunnelRouter,
+    prereqs: prereqsRouter,
+    skills: skillsRouter,
+    modes: modesRouter,
+    models: modelsRouter,
+    statuses: statusesRouter,
+    status: statusRouter,
+    // `system` is the new home for the legacy `servicesRouter`. The wire
+    // surface is preserved by mounting it under the original `services`
+    // key so every existing client (TunnelDialog, ResourcesPage, the
+    // desktop activity monitor, the CLI) keeps calling `trpc.services.*`
+    // without change. The internal name (`system`) follows the 3-tier
+    // convention; the public key (`services`) follows the contract.
+    services: systemRouter,
   }),
 );
 

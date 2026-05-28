@@ -316,7 +316,7 @@ export function resetAgentStatuses(): number {
       ),
     )
     .run();
-  return result.changes;
+  return Number(result.changes);
 }
 
 function resolveWorkspaceIdentity(workspaceId: string): WorkspaceIdentity | null {

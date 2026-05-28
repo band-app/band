@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { createLogger } from "@band-app/logger";
 import type { IPty } from "node-pty";
-import { shellPath } from "../../../lib/process-utils";
+import { shellPath } from "../process/path";
 
 const log = createLogger("terminal-pool");
 

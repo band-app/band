@@ -190,7 +190,7 @@ function makeSpawnOptions(
       ELECTRON_RUN_AS_NODE: "1",
       // Signal to the bundled web server that it's running inside a
       // packaged Electron app (not a dev `pnpm dev:desktop` run). Used by
-      // `apps/web/src/lib/cli.ts::installCli` to pick the right error
+      // `apps/web/src/server/services/cli.ts::installCli` to pick the right error
       // message when the sidecar can't be found: ".dmg user, try
       // reinstalling" vs. "developer, run cargo build first". Set only
       // when truly packaged so dev-electron stays on the dev message.

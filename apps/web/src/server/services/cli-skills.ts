@@ -63,7 +63,7 @@ import {
   SUPPORTED_AGENT_TYPES,
 } from "@band-app/coding-agent";
 import { findCliBinary } from "./cli";
-import { whichBinary } from "./process-utils";
+import { systemService } from "./system-service";
 
 /** The six skills `band generate-skills` emits. */
 export const BAND_SKILL_NAMES = [
@@ -138,9 +138,9 @@ export async function resolveSkillTargets(home: string = homedir()): Promise<Ski
  *      previous setup step), trusted shortcut.
  *   2. `whichBinary("band")` via the user's login shell PATH.
  *   3. `findCliBinary()` — the dev-mode / Electron-sidecar resolver in
- *      apps/web/src/lib/cli.ts. Catches the case where the symlink couldn't
- *      be installed (e.g. /usr/local/bin not writable, no admin prompt) but
- *      a usable binary still ships with the desktop app.
+ *      apps/web/src/server/services/cli.ts. Catches the case where the symlink
+ *      couldn't be installed (e.g. /usr/local/bin not writable, no admin
+ *      prompt) but a usable binary still ships with the desktop app.
  *
  * Returns `null` when no binary can be found — callers should treat that as
  * a non-fatal skip rather than a hard error (consistent with the rest of the
@@ -154,7 +154,7 @@ export async function findBandBinary(): Promise<string | null> {
     // Fall through to `which`.
   }
 
-  const onPath = await whichBinary("band");
+  const onPath = await systemService.whichBinary("band");
   if (onPath) return onPath;
 
   return findCliBinary();

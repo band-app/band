@@ -2,7 +2,7 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { FormatterError, formatFile } from "../src/lib/formatter";
+import { FormatterError, formatFile } from "../src/server/services/formatter";
 
 // Black-box tests for the Prettier-backed formatter. The dispatcher is a
 // pure function — content in, formatted content out — so almost every test

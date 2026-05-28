@@ -5,7 +5,7 @@ import {
   DESKTOP_CDP_PORT,
   ensureCdpTargetId,
   markTargetDestroyed,
-} from "./browser-host";
+} from "./host-state";
 
 const log = createLogger("cdp-targets");
 

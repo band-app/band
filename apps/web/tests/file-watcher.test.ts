@@ -1,6 +1,6 @@
 // Integration tests for the FileBrowser cache-invalidation flow:
 //
-//   * `apps/web/src/lib/file-watcher.ts` starts a recursive `fs.watch` on
+//   * `apps/web/src/server/services/file-watcher.ts` starts a recursive `fs.watch` on
 //     demand when a client subscribes to a workspace's file changes, and
 //     tears it down when the last subscriber disconnects.
 //   * The tRPC `workspace.fileChanges({ workspaceId })` subscription

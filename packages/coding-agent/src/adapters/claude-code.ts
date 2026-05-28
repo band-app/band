@@ -1082,7 +1082,7 @@ export const CLAUDE_CODE_DEFAULT_BINARY = "claude";
 
 /**
  * Where freshly-shipped skills (e.g. the band CLI's bundled SKILL.md files,
- * synced by apps/web/src/lib/cli-skills.ts on every server boot) should be
+ * synced by apps/web/src/server/services/cli-skills.ts on every server boot) should be
  * written. This is the *highest-priority* global directory the discovery
  * tier above scans, matching the personal-scope path documented at
  * https://code.claude.com/docs/en/skills.

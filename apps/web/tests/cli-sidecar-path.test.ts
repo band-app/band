@@ -1,6 +1,6 @@
 /**
  * Integration test for the band CLI sidecar resolver in
- * `apps/web/src/lib/cli.ts` when running inside a packaged Electron build.
+ * `apps/web/src/server/services/cli.ts` when running inside a packaged Electron build.
  *
  * Background: in a packaged build, electron-builder ships the web server
  * bundle at `<Resources>/web/dist/start-server.mjs` and the CLI sidecar at
@@ -31,7 +31,7 @@ import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { findCliBinaryAt, noBinaryError } from "../src/lib/cli";
+import { findCliBinaryAt, noBinaryError } from "../src/server/services/cli";
 
 describe("findCliBinaryAt in packaged Electron layout", () => {
   let tmp: string;

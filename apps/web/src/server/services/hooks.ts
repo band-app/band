@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { whichBinary } from "./process-utils";
+import { systemService } from "./system-service";
 
 const HOOK_EVENTS = ["PreToolUse", "PermissionRequest", "UserPromptSubmit", "PostToolUse", "Stop"];
 
@@ -69,7 +69,7 @@ export async function installHooks(): Promise<void> {
     // Try which
   }
   if (!bandPath) {
-    bandPath = await whichBinary("band");
+    bandPath = await systemService.whichBinary("band");
   }
   if (!bandPath) {
     throw new Error("Could not find band CLI binary. Please install it first.");

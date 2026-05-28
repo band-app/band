@@ -1,10 +1,10 @@
 import { createLogger } from "@band-app/logger";
+import { type CodingAgentDefinition, loadSettings, saveSettings } from "../../lib/state";
+import { syncWorktrees } from "../../lib/sync-state";
 import { checkCli, installCli } from "./cli";
 import { installSkills } from "./cli-skills";
 import { checkHooks, installHooks } from "./hooks";
-import { whichBinary } from "./process-utils";
-import { type CodingAgentDefinition, loadSettings, saveSettings } from "./state";
-import { syncWorktrees } from "./sync-state";
+import { systemService } from "./system-service";
 
 const log = createLogger("setup");
 
@@ -191,7 +191,7 @@ async function ensureDefaultCodingAgents(): Promise<void> {
 
   const detected: CodingAgentDefinition[] = [];
   for (const check of AGENT_CHECKS) {
-    const path = await whichBinary(check.binary);
+    const path = await systemService.whichBinary(check.binary);
     if (path) {
       log.info("Detected coding agent: %s (%s)", check.id, path);
       detected.push({ id: check.id, type: check.type, label: check.label });
