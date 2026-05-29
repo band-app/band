@@ -17,13 +17,21 @@ apps/web/src/server/
   api/
     projects/
       router.ts
-    workspaces/
+    workspaces/               # plural — workspace lifecycle (create/remove/setPinned/runScript/gitPull/gitPush by (project, branch))
       router.ts
-    chats/
+    workspace/                # singular — per-workspace ops (file CRUD, search, diff, gitPull/Push by workspaceId, switchAgent, formatFile, generateCommitMessage, fileChanges)
+      router.ts
+    chats/                    # plural — list/create + per-chat CRUD/send/stop/resume
+      router.ts
+    chat/                     # singular — single pending-input answer (chat.answer)
       router.ts
     browsers/
       router.ts              # browser tabs + browserLayout
     tasks/
+      router.ts
+    queue/                    # message queue (per chat/workspace)
+      router.ts
+    history/                  # browser visit history (per workspace)
       router.ts
     cronjobs/
       router.ts
@@ -61,6 +69,7 @@ apps/web/src/server/
     workspace-service.ts
     chat-service.ts
     browser-service.ts
+    browser-history-service.ts
     task-service.ts
     cronjob-service.ts
     terminal-service.ts
@@ -69,14 +78,20 @@ apps/web/src/server/
     tunnel-service.ts
     editor-service.ts        # LSP + file watch + format orchestration
     browser-host-service.ts  # CDP proxy + target list (wraps infra/browser-host/)
+    agent-service.ts         # thin pass-through over the agent-pool for routers
+    files-service.ts         # workspace file CRUD (path-traversal + .git guards)
+    search-service.ts        # workspace file-name fuzzy + ripgrep content search
+    diff-service.ts          # listBranches / getDiff / getDiffSummary / getFileDiff / revertFile
     cli.ts                   # band-CLI binary resolver + symlink installer
     cli-skills.ts            # render + install agent skill templates
     hooks.ts                 # ~/.claude/settings.json read/write
     setup.ts                 # first-time-setup orchestration
-    setup-runner.ts          # background runner for setup steps
     file-watcher.ts          # filesystem watch wiring
     formatter.ts             # prettier wrapper
-    system-service.ts        # process-utils + disk usage
+    system-service.ts        # process orchestration (du rate-limit, prereq checks)
+    watcher.ts               # status-event-bus façade (subscribe + snapshot)
+  shared/
+    chat-events.ts           # SSE wire schema shared by server + client halves
   infra/
     db/
       schema.ts              # Drizzle schema (all tables)
@@ -84,12 +99,18 @@ apps/web/src/server/
       queries/
         projects.ts
         workspaces.ts
+        workspace-statuses.ts # workspace_statuses row CRUD
         tasks.ts
         chats.ts
+        browsers.ts
+        browser-history.ts
         cronjobs.ts
         panel-states.ts
+        settings.ts          # settings.json (file-backed) + resolveAgentDefinition
+    events/
+      status-event-bus.ts    # emit / subscribe primitives + StatusEvent type
     git/
-      git-client.ts          # git exec wrappers
+      git-client.ts          # git/gh exec wrappers
     agents/
       agent-pool.ts          # coding agent lifecycle
     tunnels/
@@ -103,9 +124,25 @@ apps/web/src/server/
       cdp-proxy.ts           # Chrome DevTools Protocol proxy
       cdp-targets.ts         # CDP target discovery
       host-state.ts          # bandTabId ↔ cdpTargetId mapping + ensure-view
+      browser-lookup.ts      # registry the BrowserService populates with a tab lookup
     process/
       path.ts                # interactive-shell $PATH + which-binary helpers
+      du.ts                  # raw du -sk shell-out
+      install.ts             # raw brew install shell-out
+    setup/
+      setup-runner.ts        # bash setup-script process pool
+      project-config.ts      # .band/config.json reader
 ```
+
+### Singular vs plural sub-routers
+
+A few domains split into both a **singular** and a **plural** sub-router. The
+plural name (e.g. `workspaces/`, `chats/`) owns collection-level lifecycle
+operations (create, remove, list-by-collection-shape, …); the singular name
+(e.g. `workspace/`, `chat/`) owns per-entity operations keyed by an opaque
+id. The split mirrors the wire-level namespace the client already speaks
+(`trpc.workspace.*` vs `trpc.workspaces.*`); keep both directories rather
+than collapsing the routes into a single sub-router with mixed keying.
 
 ## Tier 1: API (Routers)
 
