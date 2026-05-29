@@ -44,7 +44,7 @@ import {
 } from "./state";
 import { abortTask, submitTask } from "./task-service";
 import { terminalService } from "./terminal-service";
-import { emit } from "./watcher";
+import { emit } from "./watcher-service";
 
 const execFileAsync = promisify(execFile);
 const log = createLogger("workspace-service");

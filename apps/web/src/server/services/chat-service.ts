@@ -29,7 +29,7 @@ import {
 } from "../infra/db/queries/chats";
 import { DockviewLayoutManager, defaultPanelIdFromLayout } from "./dockview-layout-manager";
 import { settingsService } from "./settings-service";
-import { emit } from "./watcher";
+import { emit } from "./watcher-service";
 
 const log = createLogger("chat-service");
 

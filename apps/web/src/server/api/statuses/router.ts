@@ -2,7 +2,7 @@ import { z } from "zod";
 import { toWorkspaceId } from "@/dashboard";
 import { getWorkspaceStatus, loadState, upsertWorkspaceStatus } from "../../services/state";
 import { hasPendingInputForWorkspace } from "../../services/task-service";
-import { emit, subscribe as subscribeStatus } from "../../services/watcher";
+import { emit, subscribe as subscribeStatus } from "../../services/watcher-service";
 import { publicProcedure, t } from "../trpc";
 
 /**

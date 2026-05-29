@@ -9,7 +9,7 @@ import { chatService } from "./chat-service";
 import { mimeTypeFromFilename } from "./mime-types";
 import { shiftQueuedMessage } from "./queued-message-store";
 import { bandHome, upsertWorkspaceStatus } from "./state";
-import { emit as emitStatusEvent } from "./watcher";
+import { emit as emitStatusEvent } from "./watcher-service";
 // FRAGILE: ESM cycle leg — `lib/workspace` imports `workspaceService` from
 // `server/services/workspace-service`, which imports `submitTask` back from
 // this file. The cycle is safe only because every cross-module call below

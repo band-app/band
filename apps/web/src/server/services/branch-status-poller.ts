@@ -6,8 +6,8 @@ import { branchStatuses as branchStatusesTable } from "../infra/db/schema";
 import { execGh, execGit, getRepoInfo, type RepoInfo } from "../infra/git/git-client";
 import { buildBatchedCIQuery, type CIStatus, parseBatchedCIResponse } from "./github-graphql";
 import { loadState } from "./state";
-import { syncWorktrees } from "./sync-state";
-import { emit } from "./watcher";
+import { syncWorktrees } from "./sync-service";
+import { emit } from "./watcher-service";
 
 const log = createLogger("branch-status-poller");
 
@@ -60,9 +60,18 @@ const INTERVALS: Record<ActivityLevel, IntervalConfig> = {
   background: { pollMs: 60_000, ciTicks: 10 },
 };
 
-let pollerTimer: ReturnType<typeof setInterval> | null = null;
-let tickCount = 0;
-let currentActivity: ActivityLevel = "active";
+/**
+ * Process-wide poller state. Hoisted out of the legacy module-level
+ * `let` bindings (which are still mutated by the function exports
+ * below) into a typed container so `BranchStatusPoller` can carry them
+ * without forking the singleton. New code should go through
+ * `branchStatusPoller`; existing function exports keep working unchanged.
+ */
+const pollerState = {
+  timer: null as ReturnType<typeof setInterval> | null,
+  tickCount: 0,
+  activity: "active" as ActivityLevel,
+};
 
 function getWorkspaces(): WorkspaceInfo[] {
   const state = loadState();
@@ -278,10 +287,10 @@ async function getBatchedCIStatuses(workspaces: WorkspaceInfo[]): Promise<Map<st
 }
 
 async function pollTick() {
-  tickCount++;
-  const isCITick = tickCount % INTERVALS[currentActivity].ciTicks === 0;
+  pollerState.tickCount++;
+  const isCITick = pollerState.tickCount % INTERVALS[pollerState.activity].ciTicks === 0;
 
-  if (tickCount === 1 || isCITick) {
+  if (pollerState.tickCount === 1 || isCITick) {
     await syncWorktrees().catch((err) => console.error("syncWorktrees error:", err));
   }
 
@@ -377,44 +386,72 @@ async function pollTick() {
 }
 
 export function startBranchStatusPoller() {
-  if (pollerTimer) return;
-  tickCount = 0;
+  if (pollerState.timer) return;
+  pollerState.tickCount = 0;
 
   // Run first tick immediately
   pollTick().catch((err) => console.error("Branch status poll error:", err));
 
-  pollerTimer = setInterval(() => {
+  pollerState.timer = setInterval(() => {
     pollTick().catch((err) => console.error("Branch status poll error:", err));
-  }, INTERVALS[currentActivity].pollMs);
+  }, INTERVALS[pollerState.activity].pollMs);
 }
 
 export function stopBranchStatusPoller() {
-  if (pollerTimer) {
-    clearInterval(pollerTimer);
-    pollerTimer = null;
+  if (pollerState.timer) {
+    clearInterval(pollerState.timer);
+    pollerState.timer = null;
   }
 }
 
 /**
  * Update the activity level. If the poller is currently running it is
- * rescheduled with the new base interval; `tickCount` is reset so the new CI
+ * rescheduled with the new base interval; `pollerState.tickCount` is reset so the new CI
  * cadence is honoured immediately rather than being dragged out by a stale
  * counter from the previous level.
  *
  * No-op when the level is unchanged.
  */
 export function setPollerActivity(activity: ActivityLevel): void {
-  if (activity === currentActivity) return;
-  currentActivity = activity;
-  if (pollerTimer) {
-    clearInterval(pollerTimer);
-    tickCount = 0;
-    pollerTimer = setInterval(() => {
+  if (activity === pollerState.activity) return;
+  pollerState.activity = activity;
+  if (pollerState.timer) {
+    clearInterval(pollerState.timer);
+    pollerState.tickCount = 0;
+    pollerState.timer = setInterval(() => {
       pollTick().catch((err) => console.error("Branch status poll error:", err));
     }, INTERVALS[activity].pollMs);
   }
 }
 
 export function getPollerActivity(): ActivityLevel {
-  return currentActivity;
+  return pollerState.activity;
 }
+
+/**
+ * Class wrapper around the module-level poller singleton (issue #535
+ * follow-up). The class methods delegate to the function exports above
+ * so the singleton timer / tickCount / activity stay in lock-step
+ * regardless of how callers reach the API. New code should depend on
+ * `branchStatusPoller` (or take a `BranchStatusPoller` constructor
+ * parameter); the function exports remain as a back-compat surface.
+ */
+export class BranchStatusPoller {
+  start(): void {
+    startBranchStatusPoller();
+  }
+
+  stop(): void {
+    stopBranchStatusPoller();
+  }
+
+  setActivity(activity: ActivityLevel): void {
+    setPollerActivity(activity);
+  }
+
+  getActivity(): ActivityLevel {
+    return getPollerActivity();
+  }
+}
+
+export const branchStatusPoller = new BranchStatusPoller();

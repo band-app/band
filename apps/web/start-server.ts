@@ -30,7 +30,7 @@ import { browserService } from "./src/server/services/browser-service.ts";
 import { cronjobService } from "./src/server/services/cronjob-service.ts";
 import { mimeTypeFromFilename } from "./src/server/services/mime-types.ts";
 import { listenWithFallback } from "./src/server/services/port-utils.ts";
-import { runFirstTimeSetup } from "./src/server/services/setup.ts";
+import { runFirstTimeSetup } from "./src/server/services/setup-service.ts";
 import {
   bandHome,
   getOrCreateToken,
@@ -40,7 +40,7 @@ import {
 import { systemService } from "./src/server/services/system-service.ts";
 import { terminalService } from "./src/server/services/terminal-service.ts";
 import { tunnelService } from "./src/server/services/tunnel-service.ts";
-import { resolveWorkspace } from "./src/server/services/workspace.ts";
+import { workspaceService } from "./src/server/services/workspace-service.ts";
 
 // ---------------------------------------------------------------------------
 // Crash handlers — log to file since stdout/stderr may be piped to a log file
@@ -272,7 +272,7 @@ function serveStaticFile(
  * Used for binary file previews (images, PDFs) in the file viewer.
  */
 function serveWorkspaceFile(res: ServerResponse, workspaceId: string, rawPath: string): void {
-  const workspace = resolveWorkspace(workspaceId);
+  const workspace = workspaceService.resolve(workspaceId);
   if (!workspace) {
     res.writeHead(404);
     res.end("Workspace not found");

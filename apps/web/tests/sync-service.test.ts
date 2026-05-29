@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { closeDb } from "../src/server/infra/db/connection";
 import { loadState, saveState } from "../src/server/services/state";
-import { syncWorktrees } from "../src/server/services/sync-state";
+import { syncWorktrees } from "../src/server/services/sync-service";
 
 const gitEnv = {
   ...process.env,

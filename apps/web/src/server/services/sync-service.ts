@@ -198,3 +198,18 @@ async function reconcileOneProject(project: ProjectState): Promise<boolean> {
 
   return mutated;
 }
+
+
+/**
+ * Class wrapper around `syncWorktrees` (issue #535 follow-up). The class
+ * delegates to the existing function so the underlying `loadState` /
+ * `saveState` orchestration stays in one place. New code should depend
+ * on `syncService`; existing callers keep using the function export.
+ */
+export class SyncService {
+  async syncWorktrees(): Promise<void> {
+    return syncWorktrees();
+  }
+}
+
+export const syncService = new SyncService();

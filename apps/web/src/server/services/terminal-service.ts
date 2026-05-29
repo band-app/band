@@ -16,7 +16,7 @@ import {
   removeTerminalFromLayout,
   saveTerminalLayout,
 } from "./terminal-layout-manager";
-import { emit } from "./watcher";
+import { emit } from "./watcher-service";
 import { workspaceService } from "./workspace-service";
 
 // Re-export the PTY types so the API tier (`terminals/router.ts`,

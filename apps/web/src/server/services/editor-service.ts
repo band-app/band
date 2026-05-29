@@ -4,7 +4,7 @@ import { formatFileLocation } from "@/dashboard";
 import { killAllServers, killWorkspaceServers } from "../infra/lsp/lsp-manager";
 import { subscribeToFileChanges, type Unsubscribe } from "./file-watcher";
 import { FormatterError, formatFile } from "./formatter";
-import { emit } from "./watcher";
+import { emit } from "./watcher-service";
 import { workspaceService } from "./workspace-service";
 
 /**

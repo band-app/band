@@ -176,7 +176,7 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
 
   it("writes every CLI skill into the shared ~/.agents/skills/<name>/SKILL.md", async () => {
     expect(bandBinary, "band binary must be resolvable for this suite").not.toBeNull();
-    const { runFirstTimeSetup } = await import("../src/server/services/setup");
+    const { runFirstTimeSetup } = await import("../src/server/services/setup-service");
     await runFirstTimeSetup();
 
     const sharedDir = join(process.env.HOME!, ".agents", "skills");
@@ -195,7 +195,7 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
   });
 
   it("creates a directory symlink at ~/.claude/skills/<name> → ~/.agents/skills/<name>", async () => {
-    const { runFirstTimeSetup } = await import("../src/server/services/setup");
+    const { runFirstTimeSetup } = await import("../src/server/services/setup-service");
     await runFirstTimeSetup();
 
     const home = process.env.HOME!;
@@ -220,7 +220,7 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
   });
 
   it("is a no-op on the second invocation when nothing has changed", async () => {
-    const { runFirstTimeSetup } = await import("../src/server/services/setup");
+    const { runFirstTimeSetup } = await import("../src/server/services/setup-service");
     await runFirstTimeSetup();
 
     const sharedDir = join(process.env.HOME!, ".agents", "skills");
@@ -251,7 +251,7 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
   });
 
   it("overwrites a shared destination whose content drifted from the shipped version", async () => {
-    const { runFirstTimeSetup } = await import("../src/server/services/setup");
+    const { runFirstTimeSetup } = await import("../src/server/services/setup-service");
 
     // Pre-create a tampered SKILL.md in the *shared* location before the
     // first sync. The agent-level symlink isn't there yet on this test
@@ -271,7 +271,7 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
   });
 
   it("does not write outside the sandboxed HOME", async () => {
-    const { runFirstTimeSetup } = await import("../src/server/services/setup");
+    const { runFirstTimeSetup } = await import("../src/server/services/setup-service");
     await runFirstTimeSetup();
 
     expect(process.env.HOME!.startsWith(tmp), "HOME points inside the test tmpdir").toBe(true);

@@ -3,7 +3,7 @@ import { checkCli, installCli } from "./cli";
 import { installSkills } from "./cli-skills";
 import { checkHooks, installHooks } from "./hooks";
 import { type CodingAgentDefinition, loadSettings, saveSettings } from "./state";
-import { syncWorktrees } from "./sync-state";
+import { syncWorktrees } from "./sync-service";
 import { systemService } from "./system-service";
 
 const log = createLogger("setup");
@@ -288,3 +288,18 @@ async function ensureSkillsInstalled(): Promise<void> {
     log.warn("Failed to sync CLI skills: %s", err instanceof Error ? err.message : String(err));
   }
 }
+
+
+/**
+ * Class wrapper around the module-level `runFirstTimeSetup` orchestrator
+ * (issue #535 follow-up — class-with-DI shape per the architecture doc).
+ * The class delegates to the existing function so the existing wire-up
+ * (called from `start-server.ts` and several tests) is preserved.
+ */
+export class SetupService {
+  async run(): Promise<void> {
+    return runFirstTimeSetup();
+  }
+}
+
+export const setupService = new SetupService();
