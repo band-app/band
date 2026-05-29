@@ -14,15 +14,17 @@ import { join } from "node:path";
 import { createLogger } from "@band-app/logger";
 import { WorkspaceNotFoundError } from "../errors";
 import { execGit } from "../infra/git/git-client";
-import { workspaceService } from "./workspace-service";
+import { workspaceService as defaultWorkspaceService, type WorkspaceService } from "./workspace-service";
 
 const log = createLogger("diff-service");
 
 /**
- * `git hash-object -t tree /dev/null` yields the canonical empty-tree
- * SHA. We don't actually invoke git for it (the value is hard-coded
- * below) but the args constant lives next to the consumer that does run
- * git, for clarity.
+ * Args for `git hash-object -t tree /dev/null` — yields the canonical
+ * empty-tree SHA at runtime, used as the fallback `mergeBase` when the
+ * workspace has no commits yet (`HEAD` doesn't resolve). The hard-coded
+ * `EMPTY_TREE_SHA` below is the same value, exposed as a constant for
+ * call sites (plain-project short-circuit, return shapes) that need a
+ * SHA string without paying for the subprocess.
  */
 const EMPTY_TREE_ARGS = ["hash-object", "-t", "tree", "/dev/null"];
 
@@ -170,13 +172,15 @@ async function readUntrackedFileLines(cwd: string, file: string): Promise<string
 }
 
 export class DiffService {
+  constructor(private readonly workspaces: WorkspaceService = defaultWorkspaceService) {}
+
   /**
    * List local branches in this workspace, with the project's default
    * branch pinned to the front (when it isn't the current branch) and the
    * current branch dropped — you don't compare against yourself.
    */
   async listBranches(workspaceId: string): Promise<ListBranchesResult> {
-    const workspace = workspaceService.resolve(workspaceId);
+    const workspace = this.workspaces.resolve(workspaceId);
     if (!workspace) throw new WorkspaceNotFoundError(workspaceId);
 
     const cwd = workspace.worktree.path;
@@ -239,7 +243,7 @@ export class DiffService {
       compareBranch?: string;
     },
   ): Promise<DiffResult> {
-    const workspace = workspaceService.resolve(workspaceId);
+    const workspace = this.workspaces.resolve(workspaceId);
     if (!workspace) throw new WorkspaceNotFoundError(workspaceId);
 
     const cwd = workspace.worktree.path;
@@ -315,7 +319,7 @@ export class DiffService {
       compareBranch?: string;
     },
   ): Promise<DiffSummaryResult> {
-    const workspace = workspaceService.resolve(workspaceId);
+    const workspace = this.workspaces.resolve(workspaceId);
     if (!workspace) throw new WorkspaceNotFoundError(workspaceId);
 
     const hasGit = existsSync(join(workspace.worktree.path, ".git"));
@@ -377,7 +381,7 @@ export class DiffService {
     workspaceId: string,
     options: { filePath: string; mergeBase: string; contextLines?: number },
   ): Promise<{ diff: string }> {
-    const workspace = workspaceService.resolve(workspaceId);
+    const workspace = this.workspaces.resolve(workspaceId);
     if (!workspace) throw new WorkspaceNotFoundError(workspaceId);
 
     const cwd = workspace.worktree.path;
@@ -431,7 +435,7 @@ export class DiffService {
       compareBranch?: string;
     },
   ): Promise<{ ok: true }> {
-    const workspace = workspaceService.resolve(workspaceId);
+    const workspace = this.workspaces.resolve(workspaceId);
     if (!workspace) throw new WorkspaceNotFoundError(workspaceId);
 
     const cwd = workspace.worktree.path;

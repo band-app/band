@@ -19,7 +19,7 @@ import { existsSync } from "node:fs";
 import { cp, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, extname, join, resolve, sep } from "node:path";
 import { WorkspaceNotFoundError } from "../errors";
-import { workspaceService } from "./workspace-service";
+import { workspaceService as defaultWorkspaceService, type WorkspaceService } from "./workspace-service";
 
 /**
  * 1 MB ceiling on `getFile` reads. Editor surfaces can't usefully render
@@ -77,6 +77,8 @@ export type GetFileResult =
   | { content: string; size: number; language?: string };
 
 export class FilesService {
+  constructor(private readonly workspaces: WorkspaceService = defaultWorkspaceService) {}
+
   /**
    * Resolve a workspace-relative path against a worktree root, refusing
    * anything that escapes the root. Optional `allowRoot` toggles whether
@@ -88,7 +90,7 @@ export class FilesService {
     relative: string,
     opts: { allowRoot: boolean },
   ): { root: string; target: string } {
-    const workspace = workspaceService.resolve(workspaceId);
+    const workspace = this.workspaces.resolve(workspaceId);
     if (!workspace) {
       throw new WorkspaceNotFoundError(workspaceId);
     }
