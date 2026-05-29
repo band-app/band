@@ -438,13 +438,13 @@ export function createProductResponse(overrides: Partial<ProductBody> = {}): Pro
 
 Band uses SQLite inside `~/.band/band.db`. Each test gets a fresh DB by virtue of the tmp home — no testcontainers needed *(enforces TEST-34)*. The server runs migrations against it during boot. Test isolation comes from each test owning its own home directory.
 
-For projects with Postgres / Redis / MongoDB / S3-compatible storage, follow `docs/integration-testing.md` §11 *(enforces TEST-35)*: testcontainers per worker, tracked-cleanup for inserted records, never `TRUNCATE` / `FLUSHDB` (that would destroy data from concurrent tests on the same worker).
+For projects with Postgres / Redis / MongoDB / S3-compatible storage, follow `docs/integration-testing.md` *(enforces TEST-35)*: testcontainers per worker, tracked-cleanup for inserted records, never `TRUNCATE` / `FLUSHDB` (that would destroy data from concurrent tests on the same worker).
 
 ---
 
 ## BDD Scenarios (optional but encouraged)
 
-`docs/integration-testing.md` §7 describes a scenario registry: every spec maps to a named `scenario(given, when, then)` entry, and `scenarioTest("name", fn)` annotates the Playwright test with the BDD text. Adopt it when the suite is past ~10 tests and the duplication starts to bite.
+`docs/integration-testing.md` describes a scenario registry: every spec maps to a named `scenario(given, when, then)` entry, and `scenarioTest("name", fn)` annotates the Playwright test with the BDD text. Adopt it when the suite is past ~10 tests and the duplication starts to bite.
 
 For now, plain `test("clear-name", fn)` with a name that *reads* as a scenario is acceptable. Bootstrap `scenarios/` and `pages/` as part of the feature PR that introduces them — never defer test infrastructure to a follow-up.
 
