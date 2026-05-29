@@ -3,7 +3,7 @@ import { checkCli, installCli } from "./cli-service";
 import { installSkills } from "./cli-skills-service";
 import { checkHooks, installHooks } from "./hooks-service";
 import { type CodingAgentDefinition, loadSettings, saveSettings } from "./state";
-import { syncWorktrees } from "./sync-service";
+import { syncService } from "./sync-service";
 import { systemService } from "./system-service";
 
 const log = createLogger("setup");
@@ -134,7 +134,7 @@ async function ensureSettingsDefaults(): Promise<void> {
  */
 async function ensureProjectStateInSync(): Promise<void> {
   try {
-    await syncWorktrees();
+    await syncService.syncWorktrees();
   } catch (err) {
     log.warn(
       "Failed to sync project state at boot: %s",

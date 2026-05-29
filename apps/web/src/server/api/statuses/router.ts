@@ -2,7 +2,7 @@ import { z } from "zod";
 import { toWorkspaceId } from "@/dashboard";
 import { getWorkspaceStatus, loadState, upsertWorkspaceStatus } from "../../services/state";
 import { taskService } from "../../services/task-service";
-import { emit, subscribe as subscribeStatus } from "../../services/watcher-service";
+import { emit, type WatcherService, watcherService } from "../../services/watcher-service";
 import { publicProcedure, t } from "../trpc";
 
 /**
@@ -90,11 +90,11 @@ export const statusesRouter = t.router({
 
 export const statusRouter = t.router({
   stream: publicProcedure.subscription(async function* (opts) {
-    type QueueItem = Parameters<Parameters<typeof subscribeStatus>[0]>[0];
+    type QueueItem = Parameters<Parameters<WatcherService["subscribe"]>[0]>[0];
     const queue: QueueItem[] = [];
     let resolve: (() => void) | null = null;
 
-    const unsubscribe = subscribeStatus((event) => {
+    const unsubscribe = watcherService.subscribe((event) => {
       queue.push(event);
       resolve?.();
     });

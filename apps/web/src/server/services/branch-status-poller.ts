@@ -10,7 +10,7 @@ import {
   parseBatchedCIResponse,
 } from "./_utils/github-graphql";
 import { loadState } from "./state";
-import { syncWorktrees } from "./sync-service";
+import { syncService } from "./sync-service";
 import { emit } from "./watcher-service";
 
 const log = createLogger("branch-status-poller");
@@ -295,7 +295,7 @@ async function pollTick() {
   const isCITick = pollerState.tickCount % INTERVALS[pollerState.activity].ciTicks === 0;
 
   if (pollerState.tickCount === 1 || isCITick) {
-    await syncWorktrees().catch((err) => console.error("syncWorktrees error:", err));
+    await syncService.syncWorktrees().catch((err) => console.error("syncWorktrees error:", err));
   }
 
   const workspaces = getWorkspaces();

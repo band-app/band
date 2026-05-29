@@ -232,4 +232,32 @@ describe("syncWorktrees", () => {
     expect(state.projects[1].worktrees.length).toBe(2);
     expect(state.projects[1].worktrees.find((wt) => wt.branch === "feature")).toBeDefined();
   });
+
+  // Regression: the `pinned` flag is dashboard-state, not git-state — it
+  // must survive every sync cycle even though `git worktree list` knows
+  // nothing about it. Without the preservation logic in `sync-service.ts`
+  // the merge would overwrite a pinned worktree with a fresh-from-git
+  // entry whose pinned flag defaults to `undefined`/`false`.
+  it("preserves the pinned flag on a synced worktree", async () => {
+    const repoPath = createRepo(tmp);
+    const head = git(repoPath, ["rev-parse", "HEAD"]).trim();
+
+    saveState({
+      projects: [
+        {
+          name: "pin-test",
+          path: repoPath,
+          defaultBranch: "main",
+          worktrees: [{ branch: "main", path: repoPath, head, pinned: true }],
+          hasOrigin: false,
+        },
+      ],
+    });
+
+    await syncWorktrees();
+
+    const state = loadState();
+    expect(state.projects[0].worktrees.length).toBe(1);
+    expect(state.projects[0].worktrees[0].pinned).toBe(true);
+  });
 });

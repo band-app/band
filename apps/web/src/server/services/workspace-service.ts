@@ -7,6 +7,13 @@ import { createLogger } from "@band-app/logger";
 import { z } from "zod";
 import { toWorkspaceId } from "@/dashboard";
 import { WorkspaceNotFoundError } from "../errors";
+import { TaskQueries } from "../infra/db/queries/tasks";
+import { WorkspaceQueries } from "../infra/db/queries/workspaces";
+import { DETACHED_BRANCH_PREFIX, execGit, gitCmd, listWorktrees } from "../infra/git/git-client";
+import { killWorkspaceServers } from "../infra/lsp/lsp-manager";
+import { loadProjectConfig } from "../infra/setup/project-config";
+import { runSetup } from "../infra/setup/setup-runner";
+import { clearQueuedMessages } from "./_utils/queued-message-store";
 // FRAGILE: ESM cycle leg — `services/task-service` now imports
 // `workspaceService` directly from this file (the `services/workspace.ts`
 // shim that used to broker this hop was deleted in the #535 cleanup).
@@ -16,20 +23,7 @@ import { WorkspaceNotFoundError } from "../errors";
 // Capturing any of these at module load — `const t = submitTask;` at
 // the top of this file, or `const ws = workspaceService;` at the top of
 // `task-service.ts` — would silently get `undefined`.
-// Direct Service → Infra hop to the agent pool. `AgentService` is the
-// router-facing seam for the same primitives, but inside the services
-// tier (where `generateCommitMessage` and `switchAgent` live) we reach
-// the infra module directly — same pattern as `task-service` /
-// `session-service` / `chat-service`. The doc allows Service → Infra;
-// AgentService exists so the API tier doesn't have to.
-import { createWorkspaceAgent, replaceAgent } from "../infra/agents/agent-pool";
-import { TaskQueries } from "../infra/db/queries/tasks";
-import { WorkspaceQueries } from "../infra/db/queries/workspaces";
-import { DETACHED_BRANCH_PREFIX, execGit, gitCmd, listWorktrees } from "../infra/git/git-client";
-import { killWorkspaceServers } from "../infra/lsp/lsp-manager";
-import { loadProjectConfig } from "../infra/setup/project-config";
-import { runSetup } from "../infra/setup/setup-runner";
-import { clearQueuedMessages } from "./_utils/queued-message-store";
+import { agentService } from "./agent-service";
 import { browserService } from "./browser-service";
 import { chatService } from "./chat-service";
 // FRAGILE: ESM cycle leg #2 — `./cronjob-service` imports `submitTask`
@@ -795,9 +789,9 @@ export class WorkspaceService {
       "Output ONLY the final commit message as plain text — no markdown fences, no preamble, no commentary, no tool-call summaries. Do not modify any files.",
     ].join("\n");
 
-    let agent: Awaited<ReturnType<typeof createWorkspaceAgent>>;
+    let agent: Awaited<ReturnType<typeof agentService.createWorkspaceAgent>>;
     try {
-      agent = await createWorkspaceAgent(cwd, agentDef.id);
+      agent = await agentService.createWorkspaceAgent(cwd, agentDef.id);
     } catch (e) {
       throw new Error(
         `Failed to start coding agent "${agentDef.label}": ${
@@ -877,7 +871,7 @@ export class WorkspaceService {
     clearQueuedMessages(chatId);
 
     // Replace the agent in the pool with the new agent type
-    await replaceAgent(chatId, workspace.worktree.path, input.agentId);
+    await agentService.replaceAgent(chatId, workspace.worktree.path, input.agentId);
 
     // Update the chat pane's agent config
     chatService.update(chatId, { agent: input.agentId });

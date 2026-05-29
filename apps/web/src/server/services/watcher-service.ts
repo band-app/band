@@ -98,12 +98,3 @@ export class WatcherService {
 }
 
 export const watcherService = new WatcherService();
-
-/**
- * Function-shaped re-export of `watcherService.subscribe` for callers
- * that already speak the legacy `import { subscribe } from "./watcher"`
- * shape. New code should reach for `watcherService.subscribe` directly.
- */
-export function subscribe(listener: StatusListener): () => void {
-  return watcherService.subscribe(listener);
-}
