@@ -7,6 +7,12 @@
  * populates `Last-Event-ID` on reconnect — no manual cursor on the
  * client.
  *
+ * Lives under `apps/web/src/shared/` because both halves of the app
+ * (server tier + browser-side components) need the same definitions,
+ * and `apps/web/src/lib/` is reserved for browser-only utilities per
+ * the 3-tier architecture rules (`docs/web-architecture.md`). Moved out
+ * of `lib/` in issue #535, follow-up 4.
+ *
  * Source of truth shared by:
  *   • `apps/web/src/api/chat-events.ts`            — emits these events
  *   • `apps/web/src/api/chat-submit.ts`            — round-trip target

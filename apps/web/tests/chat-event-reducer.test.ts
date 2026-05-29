@@ -10,7 +10,7 @@ import {
   chatEventReducer,
   INITIAL_STATE,
 } from "../src/components/chat/chat-event-reducer";
-import type { ChatEvent } from "../src/lib/chat-events";
+import type { ChatEvent } from "../src/shared/chat-events";
 
 /** Tiny helper to build a sequenced event log without repeating eventIds. */
 function seq(events: Array<Omit<ChatEvent, "eventId">>): ChatEvent[] {

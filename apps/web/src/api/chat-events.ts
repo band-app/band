@@ -5,7 +5,7 @@ import type {
   ChatEventPayload,
   ChatEventUsage,
   ToolInputAvailableEvent,
-} from "../lib/chat-events";
+} from "../shared/chat-events";
 import { getOrCreateAgent } from "../server/services/agent-service";
 import { getChat } from "../server/services/chat-manager";
 import { jsonlMessageToEvents } from "../server/services/jsonl-message-to-events";

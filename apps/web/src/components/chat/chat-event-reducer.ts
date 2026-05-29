@@ -21,7 +21,7 @@ import type {
   QueuedChatMessage,
   ToolInputAvailableEvent,
   ToolOutputAvailableEvent,
-} from "../../lib/chat-events";
+} from "../../shared/chat-events";
 
 export type ChatStatus = "idle" | "submitting" | "streaming" | "completed" | "error";
 
