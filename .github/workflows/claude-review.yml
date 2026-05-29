@@ -242,11 +242,15 @@ jobs:
           #   Skill(skill="review-changes") returns "Unknown skill" in CI.
           #   The dispatcher Reads the SKILL.md file directly instead and
           #   the subagent follows its instructions inline.
-          # - The two `Bash(gh api repos/band-app/band/issues/*...)` entries
-          #   cover the marker-search-then-PATCH idempotent-update path.
-          #   The owner/repo is hardcoded because the matcher's `*` does
-          #   not span `/`; a single `*` would not match `band-app/band`
-          #   as a path segment. If this workflow is copied to another
-          #   repo, update the literal.
+          # - `Bash(gh api:*)` is the broad form. We tested narrower patterns
+          #   (single-`*` `repos/*/issues/*`, two-`*` `repos/*/*/issues/*`,
+          #   and even hardcoded `repos/band-app/band/issues/*`) on the
+          #   working subagent architecture; none match the actual call
+          #   shape inside the action's Bash-allowlist matcher, and the
+          #   idempotent-update PATCH gets silently denied so the agent
+          #   falls back to creating a fresh comment per push. The broad
+          #   form is bounded by the workflow's GITHUB_TOKEN scope
+          #   (`pull-requests: write`), so the practical blast radius is
+          #   the same as the narrow forms would have provided.
           claude_args: |-
-            --allowedTools "Agent,Bash(git diff:*),Bash(git log:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh issue view:*),Read,Glob,Grep,Bash(gh pr comment:*),Bash(gh api repos/band-app/band/issues/*/comments:*),Bash(gh api repos/band-app/band/issues/comments/*:*)"
+            --allowedTools "Agent,Bash(git diff:*),Bash(git log:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh issue view:*),Read,Glob,Grep,Bash(gh pr comment:*),Bash(gh api:*)"
