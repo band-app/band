@@ -136,16 +136,21 @@ jobs:
             parallel, and return a sectioned report ending with a single
             `Verdict:` line.
 
-            Step 2 — When the skill returns:
-              - The skill produces a sectioned report — four
-                `<Domain> <emoji>` headers (always in the order
-                Coding → Testing → Security → Performance), each with its
-                findings, followed by a single
-                `Verdict: <approved 👍 | request changes 👎>` line.
-              - Post the whole report as ONE consolidated PR comment.
-              - On subsequent workflow runs (e.g. when the author pushes a
-                new commit), the SAME comment must be UPDATED — do not post
-                a new comment each time.
+            Step 2 — Forward the skill's output to a PR comment.
+
+            The skill returns a complete, fully-formatted report string.
+            Treat it as OPAQUE TEXT. Your job is NOT to author, decorate,
+            paraphrase, reformat, summarize, rewrite, prettify, or
+            "improve" any part of it — including header text, emojis,
+            severity tags, finding numbering, or the trailing Verdict
+            line. Take the exact byte sequence the skill returned and
+            post it as the comment body. The skill is the single source
+            of truth for the comment content.
+
+            Post it as ONE consolidated PR comment. On subsequent workflow
+            runs (e.g. when the author pushes a new commit), the SAME
+            comment must be UPDATED — do not post a new comment each
+            time.
 
             Idempotent-update strategy:
 
@@ -168,7 +173,13 @@ jobs:
                   try to pipe via `--body-file -` (your allowlist does not
                   include the upstream command needed to pipe).
 
-            Do not paraphrase, summarize, or filter the report — post the
-            skill's output verbatim with the marker prepended.
+            The comment body is exactly: the HTML marker
+            `<!-- claude-review-summary -->`, a newline, then the skill's
+            output unchanged. Nothing else. Do not insert a header. Do
+            not "wrap" the skill's output in an H1 / H2. Do not add a
+            footer, signature, or "posted by" note. Do not change the
+            order of sections. Do not edit emojis. If the skill returns
+            `Coding 🚨`, post `Coding 🚨` — not `## Coding 🔨`, not
+            `Coding 🔍`, not anything else. Pass through unchanged.
           claude_args: |-
             --allowedTools "Skill,Agent,Bash(git diff:*),Bash(git log:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh issue view:*),Read,Glob,Grep,Bash(gh pr comment:*),Bash(gh api repos/band-app/band/issues/*/comments:*),Bash(gh api repos/band-app/band/issues/comments/*:*)"
