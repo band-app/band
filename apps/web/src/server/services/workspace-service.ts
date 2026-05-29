@@ -33,11 +33,10 @@ import { chatService } from "./chat-service";
 // function body. Capturing `const cs = cronjobService;` at module load
 // would silently get `undefined`.
 import { cronjobService } from "./cronjob-service";
-import { settingsService } from "./settings-service";
+import { SettingsService, settingsService } from "./settings-service";
 import {
   bandHome,
   deleteWorkspaceStatus,
-  getAgentDefinition,
   loadState,
   type ProjectState,
   saveState,
@@ -767,10 +766,13 @@ export class WorkspaceService {
     // agent matches the agent the user is actually looking at. Without
     // this, switching the pane to (e.g.) codex would silently keep
     // generating commit messages with the user's global default
-    // (e.g. claude-code). Falling back to the global default is fine
-    // when the chat row has no explicit `agent` field set.
+    // (e.g. claude-code). The chat row's `agent` field is only set when
+    // the user has explicitly switched panes; when it's null, we fall
+    // back to the global default via SettingsService.resolveAgent —
+    // which is intentional, not a silent oversight, so a freshly seeded
+    // workspace still picks up the user's preferred agent.
     const defaultChat = chatService.getOrCreateDefault(workspaceId);
-    const agentDef = getAgentDefinition(settings, defaultChat.agent ?? undefined);
+    const agentDef = SettingsService.resolveAgent(settings, defaultChat.agent ?? undefined);
 
     const prompt = [
       "You are running inside a git workspace. Write a commit message for the changes that are pending in this workspace right now.",

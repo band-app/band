@@ -36,9 +36,13 @@ export function setBrowserLookup(lookup: BrowserLookup): void {
 }
 
 /**
- * Restore the no-op default. Useful for tests that instantiate a
- * second `BrowserService` and need the registry to forget the
- * production singleton's lookup so it doesn't bleed across cases.
+ * Restore the no-op default. The registry is a process-wide singleton
+ * holding a single function reference, so once a `BrowserService`
+ * registers its lookup the reference lives for the lifetime of the
+ * process — fine for production where the registration happens once
+ * at boot, less fine for in-process tests that instantiate a second
+ * service and need the slate cleared between cases. Call this from
+ * an `afterEach` to drop the stale reference in those tests.
  */
 export function resetBrowserLookup(): void {
   current = NOOP_LOOKUP;

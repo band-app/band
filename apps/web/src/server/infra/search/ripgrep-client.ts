@@ -26,7 +26,11 @@ export interface RipgrepOptions {
   query: string;
   /** Working directory to search in. */
   cwd: string;
-  /** Case-insensitive match. Defaults to true. */
+  /**
+   * Case-sensitive match. Defaults to false — omitting the field passes
+   * `--ignore-case` to ripgrep, matching the editor's "case insensitive
+   * by default" search behaviour.
+   */
   caseSensitive?: boolean;
   /** Match whole words only (`--word-regexp`). */
   wholeWord?: boolean;

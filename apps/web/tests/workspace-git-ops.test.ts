@@ -9,9 +9,10 @@
 // seeds its own bare "origin" repo and a working repo cloned from it,
 // so push/pull have real refs to operate on. No mocks. `generate-
 // CommitMessage`'s full agent-driven path needs a real coding-agent
-// binary and is exempt from CI (same carve-out CLAUDE.md grants the
-// codex-adapter unit tests); we cover only the synchronous pre-flight
-// branch that throws before any agent is spawned.
+// binary (claude-code / codex) that CI runners do not have installed;
+// we cover only the synchronous pre-flight branch that throws before
+// any agent is spawned, and leave the end-to-end happy path to manual
+// dogfood runs.
 
 import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
@@ -24,6 +25,7 @@ import {
   startServer,
   trpcData,
   trpcMutate,
+  trpcQuery,
 } from "./helpers/server";
 
 const DEFAULT_TOKEN = "workspace-git-ops-token";
@@ -508,11 +510,12 @@ describe("tRPC — workspace.switchAgent", () => {
 // workspace.generateCommitMessage — pre-flight branch only
 // ---------------------------------------------------------------------------
 //
-// The agent-driven branch needs a real `claude-code` / `codex` binary
-// and is exempt from CI per the codex-adapter carve-out in CLAUDE.md.
-// We can still cover the synchronous pre-flight branch — when there are
-// no pending changes the service throws "No changes to summarise" BEFORE
-// any agent is spawned, so a /bin/false binary is fine.
+// The agent-driven branch needs a real `claude-code` / `codex` binary,
+// which CI runners do not have installed; we skip it here and leave the
+// end-to-end happy path to manual dogfood runs. We can still cover the
+// synchronous pre-flight branch — when there are no pending changes
+// the service throws "No changes to summarise" BEFORE any agent is
+// spawned, so a /bin/false binary is fine.
 
 describe("tRPC — workspace.generateCommitMessage", () => {
   let server: ServerHandle;
@@ -662,5 +665,58 @@ describe("tRPC — file CRUD refuses to touch .git internals", () => {
     expect(res.status).toBe(500);
     const body = (await res.json()) as { error: { message: string } };
     expect(body.error.message).toMatch(/\.git/i);
+  });
+
+  // `getFileDiff` accepts a `mergeBase` SHA the client gets from
+  // `getDiffSummary`. The router pins it to a 40-char hex regex so a
+  // client can't sneak in a leading-dash arg (`--exec=…`, `--output=…`)
+  // or a symbolic ref (`HEAD`, `main`) that desyncs from the summary.
+  // These tests pin that validation contract — tRPC must reject the
+  // request at the Zod boundary with a 400 BAD_REQUEST before
+  // `diffService.getFileDiff` ever runs.
+  it("getFileDiff rejects non-SHA mergeBase (leading dash)", async () => {
+    const res = await trpcQuery(
+      server.url,
+      "workspace.getFileDiff",
+      {
+        workspaceId: "alpha-main",
+        filePath: "README.md",
+        mergeBase: "--exec=touch /tmp/pwned",
+      },
+      DEFAULT_TOKEN,
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toMatch(/mergeBase|40-character|hex/i);
+  });
+
+  it("getFileDiff rejects symbolic-ref mergeBase (HEAD)", async () => {
+    const res = await trpcQuery(
+      server.url,
+      "workspace.getFileDiff",
+      {
+        workspaceId: "alpha-main",
+        filePath: "README.md",
+        mergeBase: "HEAD",
+      },
+      DEFAULT_TOKEN,
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toMatch(/mergeBase|40-character|hex/i);
+  });
+
+  it("getFileDiff rejects truncated SHA (39 chars)", async () => {
+    const res = await trpcQuery(
+      server.url,
+      "workspace.getFileDiff",
+      {
+        workspaceId: "alpha-main",
+        filePath: "README.md",
+        mergeBase: "0123456789abcdef0123456789abcdef0123456",
+      },
+      DEFAULT_TOKEN,
+    );
+    expect(res.status).toBe(400);
   });
 });
