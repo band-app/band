@@ -15,11 +15,14 @@ import {
   type Settings,
 } from "../infra/db/queries/settings";
 import { type WorkspaceIdentity, WorkspaceQueries } from "../infra/db/queries/workspaces";
+import { WorkspaceStatusQueries } from "../infra/db/queries/workspace-statuses";
 import { workspaceStatuses as workspaceStatusesTable } from "../infra/db/schema";
 import type {
   WorkspaceAgentInfo,
   WorkspaceStatusSnapshot,
 } from "../infra/events/status-event-bus";
+
+const workspaceStatusQueries = new WorkspaceStatusQueries();
 import { SettingsService, settingsService } from "../services/settings-service";
 
 // Workspace-identity resolution lives in the Infra tier now (issue #314,
@@ -128,49 +131,18 @@ export function worktreesDir(): string {
   return settingsService.worktreesDir();
 }
 
+/**
+ * Read-side helpers — thin delegates to `WorkspaceStatusQueries` in the
+ * infra tier (issue #535, follow-up 7). The query class owns the SQL +
+ * row → snapshot mapping; this module retains the legacy export surface
+ * so callers don't churn paths.
+ */
 export function loadCurrentStatuses(): WorkspaceStatus[] {
-  const db = getDb();
-  const rows = db.select().from(workspaceStatusesTable).all();
-  return rows.map((row) => ({
-    workspaceId: row.workspaceId,
-    project: row.project,
-    branch: row.branch,
-    worktreePath: row.worktreePath,
-    agent: row.agentName
-      ? {
-          name: row.agentName,
-          status: row.agentStatus ?? "unknown",
-          lastActivity: row.agentLastActivity ?? "",
-          summary: row.agentSummary ?? undefined,
-          codingAgentId: row.codingAgentId ?? undefined,
-        }
-      : undefined,
-  }));
+  return workspaceStatusQueries.loadCurrent();
 }
 
 export function getWorkspaceStatus(workspaceId: string): WorkspaceStatus | null {
-  const db = getDb();
-  const row = db
-    .select()
-    .from(workspaceStatusesTable)
-    .where(eq(workspaceStatusesTable.workspaceId, workspaceId))
-    .get();
-  if (!row) return null;
-  return {
-    workspaceId: row.workspaceId,
-    project: row.project,
-    branch: row.branch,
-    worktreePath: row.worktreePath,
-    agent: row.agentName
-      ? {
-          name: row.agentName,
-          status: row.agentStatus ?? "unknown",
-          lastActivity: row.agentLastActivity ?? "",
-          summary: row.agentSummary ?? undefined,
-          codingAgentId: row.codingAgentId ?? undefined,
-        }
-      : undefined,
-  };
+  return workspaceStatusQueries.getByWorkspaceId(workspaceId);
 }
 
 export function upsertWorkspaceStatus(

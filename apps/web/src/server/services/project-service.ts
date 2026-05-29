@@ -9,9 +9,10 @@ import {
   reconcileKindForProject,
   type WorktreeState,
 } from "../infra/db/queries/projects";
+import { WorkspaceStatusQueries } from "../infra/db/queries/workspace-statuses";
 import { GitClient } from "../infra/git/git-client";
+import type { WorkspaceAgentInfo } from "../infra/events/status-event-bus";
 import { type SettingsService, settingsService } from "./settings-service";
-import { loadCurrentStatuses } from "./state";
 
 /**
  * Business logic for managing Band projects — Phase 2 of the 3-tier
@@ -34,6 +35,7 @@ export class ProjectService {
     private readonly queries: ProjectQueries = new ProjectQueries(),
     private readonly git: GitClient = new GitClient(),
     private readonly settings: SettingsService = settingsService,
+    private readonly statusQueries: WorkspaceStatusQueries = new WorkspaceStatusQueries(),
   ) {}
 
   /**
@@ -52,13 +54,6 @@ export class ProjectService {
    * See `runFirstTimeSetup` for the boot-time persistence path and
    * `branch-status-poller` for the recurring one.
    */
-  // TODO(#313 follow-up): `loadCurrentStatuses` is imported from `lib/state` —
-  // a cross-tier import the architecture doc forbids (services depend on
-  // infra/services, not on `lib/`). The function is effectively a query on
-  // `workspace_statuses` and will move to `server/infra/db/queries/workspace-
-  // statuses.ts` (or be inlined as a Drizzle SELECT) in the workspaces
-  // migration phase. Same applies to the `ReturnType<typeof
-  // loadCurrentStatuses>[number]["agent"]` reference in the return type below.
   async list(): Promise<{
     projects: Array<{
       name: string;
@@ -72,20 +67,20 @@ export class ProjectService {
         head?: string;
         pinned: boolean;
         workspaceId: string;
-        // `loadCurrentStatuses[number]["agent"]` is `AgentInfo | undefined`; the
-        // runtime expression below (`status?.agent ?? null`) discards the
-        // `undefined` arm, so the wire type is `AgentInfo | null`. Use
-        // `NonNullable<…>` to drop `undefined` from the public surface so
-        // RouterOutput consumers don't have to handle a state the API never
-        // produces.
-        agent: NonNullable<ReturnType<typeof loadCurrentStatuses>[number]["agent"]> | null;
+        // `WorkspaceAgentInfo` is the per-workspace agent snapshot owned
+        // by the infra status event-bus (`infra/events/status-event-bus.ts`).
+        // The runtime expression below (`status?.agent ?? null`) discards
+        // the `undefined` arm, so the wire type is `WorkspaceAgentInfo |
+        // null` — `NonNullable` isn't needed because the source type is
+        // already non-undefined, but `| null` matches the null fallback.
+        agent: WorkspaceAgentInfo | null;
       }>;
     }>;
     labels: NonNullable<ReturnType<SettingsService["get"]>["labels"]>;
   }> {
     const projects = this.queries.loadAll();
     const settings = this.settings.get();
-    const statuses = loadCurrentStatuses();
+    const statuses = this.statusQueries.loadCurrent();
     const statusMap = new Map(statuses.map((s) => [s.workspaceId, s]));
 
     // Inline, read-only kind re-detection via the shared helper.
