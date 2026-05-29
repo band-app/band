@@ -1,5 +1,5 @@
 import { type FSWatcher, watch as fsWatch } from "node:fs";
-import { resolveWorkspace } from "./workspace";
+import { workspaceService } from "./workspace-service";
 
 // ---------------------------------------------------------------------------
 // Server-side file watcher
@@ -145,7 +145,7 @@ export function subscribeToFileChanges(
   let entry = watchers.get(workspaceId);
 
   if (!entry) {
-    const ws = resolveWorkspace(workspaceId);
+    const ws = workspaceService.resolve(workspaceId);
     if (!ws) return () => {};
     const root = ws.worktree.path;
 

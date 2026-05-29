@@ -1,5 +1,5 @@
 import { createLogger } from "@band-app/logger";
-import { getBrowser } from "./browser-manager";
+import { lookupBrowser } from "./browser-lookup";
 
 const log = createLogger("browser-host");
 
@@ -12,12 +12,12 @@ const log = createLogger("browser-host");
 // module for router consumption. Moved from `lib/browser-host.ts` as part
 // of the Phase 7.5 migration (issue #517).
 //
-// Note: this module imports `getBrowser` from the sibling
-// `browser-manager` in the same infra/browser-host/ directory. The
-// browser-manager itself is a thin back-compat shim around
-// `services/browser-service` — kept colocated here so the CDP adapters
-// can resolve a Band tab id to its browser metadata without crossing
-// back up to the services tier.
+// Note: this module looks up Band browser tabs via the dependency-
+// inversion registry in `./browser-lookup.ts` (issue #535, follow-up 2).
+// `services/browser-service.ts` registers a lookup function with that
+// registry on construction; this module reads through it, so the CDP
+// adapters resolve a Band tab id to its browser metadata without
+// crossing back up to the services tier.
 //
 // The web client and the agent address browser tabs by Band's persistent
 // `browser_<uuid>` id (bandTabId). To actually drive a tab over CDP we need
@@ -122,7 +122,7 @@ export async function ensureCdpTargetId(bandTabId: string): Promise<string> {
   const inflight = pendingEnsures.get(bandTabId);
   if (inflight) return inflight.promise;
 
-  const tab = getBrowser(bandTabId);
+  const tab = lookupBrowser(bandTabId);
   if (!tab) {
     throw new Error(`Unknown Band browser tab: ${bandTabId}`);
   }

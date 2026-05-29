@@ -22,14 +22,10 @@
 import { createLogger } from "@band-app/logger";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { getOrCreateAgent } from "../../services/agent-service";
+import { agentService } from "../../services/agent-service";
 import { chatService, InvalidLabelsError } from "../../services/chat-service";
-import {
-  ensureActiveSessionSummary,
-  scheduleActiveSessionRefresh,
-} from "../../services/chat-session-summary";
-import { abortTask, submitTask, TaskConflictError } from "../../services/task-service";
-import { resolveWorkspace } from "../../services/workspace";
+import { TaskConflictError, taskService } from "../../services/task-service";
+import { workspaceService } from "../../services/workspace-service";
 import { publicProcedure, t } from "../trpc";
 
 const log = createLogger("chats-router");
@@ -99,14 +95,17 @@ export const chatsRouter = t.router({
     const chat = chatService.get(input.chatId);
     if (!chat) return { chat: null };
 
-    const workspace = resolveWorkspace(chat.workspaceId);
+    const workspace = workspaceService.resolve(chat.workspaceId);
 
     // Lazy-resolve case: row has no cached summary yet (post-migration, or
     // a fresh chat with no activeSessionId). Block once on the first read
     // so the client can render a meaningful tab title without waiting for
     // a separate sessions.list. Subsequent reads are pure SQLite.
     if (workspace && (!chat.activeSessionId || chat.activeSessionSummary === undefined)) {
-      const resolved = await ensureActiveSessionSummary(input.chatId, workspace.worktree.path);
+      const resolved = await chatService.ensureActiveSessionSummary(
+        input.chatId,
+        workspace.worktree.path,
+      );
       if (resolved) {
         return { chat: resolved };
       }
@@ -117,7 +116,7 @@ export const chatsRouter = t.router({
     // user renamed the session via /rename). Errors are swallowed; the
     // refresh will be retried on the next request.
     if (workspace) {
-      scheduleActiveSessionRefresh(input.chatId, workspace.worktree.path);
+      chatService.scheduleActiveSessionRefresh(input.chatId, workspace.worktree.path);
     }
 
     return { chat };
@@ -217,12 +216,16 @@ export const chatsRouter = t.router({
       // getSessionInfo fails or returns undefined (the JSONL doesn't exist
       // yet for a freshly-created session), persist NULL — the next
       // chats.get's background refresh will catch up.
-      const workspace = resolveWorkspace(input.workspaceId);
+      const workspace = workspaceService.resolve(input.workspaceId);
       let summary: string | undefined;
       let lastModified: number | undefined;
       if (workspace) {
         try {
-          const agent = await getOrCreateAgent(input.chatId, workspace.worktree.path, chat.agent);
+          const agent = await agentService.getOrCreateAgent(
+            input.chatId,
+            workspace.worktree.path,
+            chat.agent,
+          );
           const info = await agent.getSessionInfo?.(input.sessionId, workspace.worktree.path);
           summary = info?.summary;
           lastModified = info?.lastModified;
@@ -260,7 +263,7 @@ export const chatsRouter = t.router({
         chat = chatService.create(input.workspaceId, { id: input.chatId, name: "Chat" });
       }
       try {
-        const task = submitTask({
+        const task = taskService.submitTask({
           workspaceId: chat.workspaceId,
           chatId: chat.id,
           prompt: input.message,
@@ -279,7 +282,7 @@ export const chatsRouter = t.router({
     }),
 
   stop: publicProcedure.input(z.object({ chatId: z.string() })).mutation(({ input }) => {
-    abortTask(input.chatId);
+    taskService.abortTask(input.chatId);
     chatService.updateStatus(input.chatId, "stopped");
     return { ok: true };
   }),

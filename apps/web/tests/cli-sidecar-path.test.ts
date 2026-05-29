@@ -31,7 +31,7 @@ import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { findCliBinaryAt, noBinaryError } from "../src/server/services/cli";
+import { findCliBinaryAt, noBinaryError } from "../src/server/services/cli-service";
 
 describe("findCliBinaryAt in packaged Electron layout", () => {
   let tmp: string;

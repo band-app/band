@@ -1,6 +1,6 @@
 import { appendFileSync, createReadStream, mkdirSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { basename, join, resolve } from "node:path";
+import { basename, join, resolve, sep } from "node:path";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { applyWSSHandler } from "@trpc/server/adapters/ws";
 import sirv from "sirv";
@@ -13,7 +13,6 @@ import { createContext } from "./src/server/api/context.ts";
 import { getScalarHtml } from "./src/server/api/openapi.ts";
 import { appRouter } from "./src/server/api/router.ts";
 import { handleTerminalConnection } from "./src/server/api/terminals/ws.ts";
-import { listBrowsers } from "./src/server/infra/browser-host/browser-manager.ts";
 import { handleCdpConnection } from "./src/server/infra/browser-host/cdp-proxy.ts";
 import { captureSnapshot } from "./src/server/infra/browser-host/cdp-targets.ts";
 import { closeDb } from "./src/server/infra/db/connection.ts";
@@ -25,12 +24,13 @@ import {
 } from "./src/server/infra/db/queries/tasks.ts";
 import { killAllServers } from "./src/server/infra/lsp/lsp-manager.ts";
 import { handleLspConnection } from "./src/server/infra/lsp/lsp-proxy.ts";
-import { stopBranchStatusPoller } from "./src/server/services/branch-status-poller.ts";
+import { mimeTypeFromFilename } from "./src/server/services/_utils/mime-types.ts";
+import { listenWithFallback } from "./src/server/services/_utils/port-utils.ts";
+import { branchStatusPoller } from "./src/server/services/branch-status-poller.ts";
 import { browserHostService } from "./src/server/services/browser-host-service.ts";
+import { browserService } from "./src/server/services/browser-service.ts";
 import { cronjobService } from "./src/server/services/cronjob-service.ts";
-import { mimeTypeFromFilename } from "./src/server/services/mime-types.ts";
-import { listenWithFallback } from "./src/server/services/port-utils.ts";
-import { runFirstTimeSetup } from "./src/server/services/setup.ts";
+import { runFirstTimeSetup } from "./src/server/services/setup-service.ts";
 import {
   bandHome,
   getOrCreateToken,
@@ -40,7 +40,7 @@ import {
 import { systemService } from "./src/server/services/system-service.ts";
 import { terminalService } from "./src/server/services/terminal-service.ts";
 import { tunnelService } from "./src/server/services/tunnel-service.ts";
-import { resolveWorkspace } from "./src/server/services/workspace.ts";
+import { workspaceService } from "./src/server/services/workspace-service.ts";
 
 // ---------------------------------------------------------------------------
 // Crash handlers — log to file since stdout/stderr may be piped to a log file
@@ -272,7 +272,7 @@ function serveStaticFile(
  * Used for binary file previews (images, PDFs) in the file viewer.
  */
 function serveWorkspaceFile(res: ServerResponse, workspaceId: string, rawPath: string): void {
-  const workspace = resolveWorkspace(workspaceId);
+  const workspace = workspaceService.resolve(workspaceId);
   if (!workspace) {
     res.writeHead(404);
     res.end("Workspace not found");
@@ -282,8 +282,11 @@ function serveWorkspaceFile(res: ServerResponse, workspaceId: string, rawPath: s
   const root = workspace.worktree.path;
   const target = resolve(join(root, rawPath));
 
-  // Path traversal protection: target must be within workspace root
-  if (!target.startsWith(`${root}/`) && target !== root) {
+  // Path traversal protection: target must be within workspace root.
+  // Use `sep` (not a hard-coded `/`) so the prefix check still works on
+  // Windows where the resolved path uses backslashes — same shape as
+  // `FilesService.resolveInside`.
+  if (!target.startsWith(root + sep) && target !== root) {
     res.writeHead(400);
     res.end("Bad request");
     return;
@@ -602,7 +605,7 @@ async function main() {
         res.end(JSON.stringify({ tabs: [], error: "Missing workspaceId" }));
         return;
       }
-      const tabs = listBrowsers(workspaceId).map((b) => ({
+      const tabs = browserService.list(workspaceId).map((b) => ({
         id: b.id,
         url: b.url,
         title: b.name,
@@ -1059,7 +1062,7 @@ async function main() {
 
   // Graceful shutdown
   const shutdown = async () => {
-    stopBranchStatusPoller();
+    branchStatusPoller.stop();
     cronjobService.stop();
     stopTaskPruneScheduler();
     terminalService.killAll();

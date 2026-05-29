@@ -9,27 +9,25 @@
  *
  * Created in issue #316 (Phase 5 of the 3-tier refactor) by lifting the
  * business half of `lib/chat-manager.ts` + `lib/chat-layout-manager.ts`
- * out of `lib/` and into this class. `lib/chat-layout-manager.ts` has
- * been deleted entirely now that its only caller (`workspace-service`)
- * goes through `chatService.removeAllForWorkspace` — which is self-
- * contained per the contract below. `lib/chat-manager.ts` remains as a
- * back-compat shim because it still has live importers (the dashboard
- * tRPC router, `cronjob-service`, `chat-events`, `chat-submit`);
- * subsequent phases will rewrite those call sites to import from this
- * module directly.
+ * out of `lib/` and into this class. The intermediate back-compat shim
+ * `services/chat-manager.ts` has since been deleted (issue #535
+ * cleanup); every former caller now imports `chatService` directly. The
+ * `chat-session-summary` helpers (`ensureActiveSessionSummary`,
+ * `scheduleActiveSessionRefresh`) were absorbed into this class in the
+ * same cleanup pass — see the methods near the bottom of the file.
  */
 
 import { createLogger } from "@band-app/logger";
-import { removeAgent } from "../infra/agents/agent-pool";
+import { getOrCreateAgent, removeAgent } from "../infra/agents/agent-pool";
 import {
   ChatQueries,
   type ChatRow,
   type ChatStatus,
   type ChatUpdatePatch,
 } from "../infra/db/queries/chats";
-import { DockviewLayoutManager, defaultPanelIdFromLayout } from "./dockview-layout-manager";
+import { DockviewLayoutManager, defaultPanelIdFromLayout } from "./_utils/dockview-layout-manager";
 import { settingsService } from "./settings-service";
-import { emit } from "./watcher";
+import { emit } from "./watcher-service";
 
 const log = createLogger("chat-service");
 
@@ -74,8 +72,9 @@ export type { ChatStatus };
 
 /**
  * Public chat shape — what `chats.list` / `chats.get` hand the dashboard.
- * Identical to `ChatRow` (the Infra shape); aliased here so callers that
- * already import `ChatSession` from `lib/chat-manager.ts` keep compiling.
+ * Identical to `ChatRow` (the Infra shape); aliased here so callers can
+ * reach for the domain name (`ChatSession`) rather than the raw infra
+ * row type.
  */
 export type ChatSession = ChatRow;
 
@@ -235,20 +234,30 @@ function validateLabels(
  *   - Emitting `chat-created` / `chat-removed` events on `watcher`
  *
  * Stateful by design — there's exactly one instance (`chatService` below).
- * The `lib/chat-manager.ts` back-compat shim delegates every call here so
- * existing modules (`task-service.ts`, `chat-session-summary.ts`, the CLI
- * adapter, …) keep working without touching their imports.
  *
  * Object-identity contract: `update*` methods do NOT mutate the prior
  * `ChatSession` in place — they store a fresh merged object in the
  * registry and discard the previous reference. Callers that hold a
  * snapshot from `get`/`list` MUST re-`get` after any mutation to see the
  * new values. (The pre-refactor `lib/chat-manager.ts` mutated in place;
- * the shim continues to expose the function-shaped API so wire callers
- * see no behaviour change as long as they re-read on each access, which
- * every current caller — `task-service`, `chat-events`, the routers —
- * already does.)
+ * every current caller — `task-service`, `chat-events`, the routers,
+ * the CLI adapter — already re-reads on each access, so the new
+ * contract is a no-op behavioural change for them.)
  */
+/**
+ * Resolve (or lazily create) the per-chatId dedupe map for in-flight
+ * active-session refreshes. Stored on a `globalThis`-keyed singleton
+ * so multiple bundles of this module (esbuild start-server.mjs + Vite
+ * SSR server.js) share one map and don't fork the dedupe set —
+ * mirroring agent-pool's pattern.
+ */
+const REFRESH_KEY = Symbol.for("band.chat-session-summary.refresh");
+function obtainRefreshMap(): Map<string, Promise<void>> {
+  const g = globalThis as unknown as Record<symbol, unknown>;
+  if (!g[REFRESH_KEY]) g[REFRESH_KEY] = new Map<string, Promise<void>>();
+  return g[REFRESH_KEY] as Map<string, Promise<void>>;
+}
+
 export class ChatService {
   // Primary index: chatId → ChatSession
   private readonly chatSessions = new Map<string, ChatSession>();
@@ -262,6 +271,15 @@ export class ChatService {
    * see persisted chat records.
    */
   private initialized = false;
+
+  /**
+   * Per-chatId dedupe map for in-flight active-session refreshes.
+   * Initialised once via `obtainRefreshMap` (lazy globalThis-keyed
+   * singleton) so multiple bundles of this module share one map. Lives
+   * up here with the other private fields rather than next to its
+   * methods so the class layout matches the rest of the file.
+   */
+  private readonly refreshes: Map<string, Promise<void>> = obtainRefreshMap();
 
   constructor(
     private readonly queries: ChatQueries = new ChatQueries(),
@@ -742,13 +760,115 @@ export class ChatService {
   removeFromLayout(workspaceId: string, chatId: string): void {
     this.layoutManager.removePanel(workspaceId, chatId);
   }
+
+  // -------------------------------------------------------------------------
+  // Active-session summary (absorbed from chat-session-summary.ts in #535)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Resolve and persist the active-session summary when the chat row is
+   * missing one. Used by `chats.get` for the migration / fallback case.
+   *
+   * Returns the updated chat (or the unchanged input if nothing was
+   * resolved). Walks through the agent pool because the summary lives on
+   * disk in the agent's session JSONL.
+   */
+  async ensureActiveSessionSummary(
+    chatId: string,
+    worktreePath: string,
+  ): Promise<ChatSession | undefined> {
+    const chat = this.get(chatId);
+    if (!chat) return undefined;
+
+    // Already cached — nothing to do.
+    if (chat.activeSessionId && chat.activeSessionSummary !== undefined) return chat;
+
+    try {
+      const agent = await getOrCreateAgent(chatId, worktreePath, chat.agent);
+
+      if (chat.activeSessionId) {
+        // Migration / lazy-resolve case: row has activeSessionId but no
+        // cached summary. Resolve once and persist.
+        if (!agent.getSessionInfo) return chat;
+        const info = await agent.getSessionInfo(chat.activeSessionId, worktreePath);
+        if (info) {
+          this.updateSessionSummary(chatId, chat.activeSessionId, info.summary, info.lastModified);
+        }
+        // Session file doesn't exist anymore — leave the cached values
+        // null. The client will treat this as "no active session" until
+        // the next mutation rebuilds the cache.
+        return this.get(chatId);
+      }
+
+      // No activeSessionId. Leave it null — the legacy
+      // `agent.getLatestSession` fallback broke the "New session" flow
+      // under the event-log model (handleNewSession clears
+      // activeSessionId to null and the subsequent chats.get refetch
+      // would re-promote the prior session before the new task starts).
+      // See issue #478.
+      return chat;
+    } catch (err) {
+      log.warn({ chatId, err }, "ensureActiveSessionSummary failed");
+      return chat;
+    }
+  }
+
+  /**
+   * Fire-and-forget refresh of the cached summary after a `chats.get`
+   * returns. Concurrent calls for the same chatId share a single in-flight
+   * refresh — a burst of SSE-driven query refetches won't stampede
+   * `agent.getSessionInfo`.
+   */
+  scheduleActiveSessionRefresh(chatId: string, worktreePath: string): void {
+    if (this.refreshes.has(chatId)) return;
+
+    const promise = this.doRefresh(chatId, worktreePath).finally(() => {
+      // Only clear if the entry is still ours — defensive, the Map is
+      // keyed per-chatId and the only writer here is this method, but
+      // kept for symmetry with the agent-pool dedupe pattern.
+      const current = this.refreshes.get(chatId);
+      if (current === promise) this.refreshes.delete(chatId);
+    });
+    this.refreshes.set(chatId, promise);
+  }
+
+  private async doRefresh(chatId: string, worktreePath: string): Promise<void> {
+    try {
+      const chat = this.get(chatId);
+      if (!chat) return;
+
+      const agent = await getOrCreateAgent(chatId, worktreePath, chat.agent);
+
+      if (chat.activeSessionId) {
+        if (!agent.getSessionInfo) return;
+        const info = await agent.getSessionInfo(chat.activeSessionId, worktreePath);
+        if (!info) {
+          // Session file is gone (deleted, moved, etc.). Don't clobber
+          // the cached values — they're still useful for the tab title
+          // until the user picks a new session.
+          return;
+        }
+        this.updateSessionSummary(chatId, chat.activeSessionId, info.summary, info.lastModified);
+        return;
+      }
+
+      // No activeSessionId. Leave it null — same rationale as
+      // `ensureActiveSessionSummary`. Discovery of prior sessions is now
+      // an explicit user action via the history dropdown
+      // (`sessions.list`). See issue #478.
+    } catch (err) {
+      log.warn({ chatId, err }, "active session refresh failed");
+    }
+  }
 }
 
 /**
- * Shared singleton consumed by both the API tier (chats router) and the
- * back-compat shim in `lib/chat-manager.ts`. The chat service holds
- * in-memory state (the chat registry), so callers MUST go through this
- * instance — instantiating a second `ChatService` elsewhere would create
- * a phantom registry that doesn't see the other's writes.
+ * Shared singleton consumed by the API tier (chats router) and the
+ * other services that need to look up / mutate chat state
+ * (`task-service`, `cronjob-service`, the chat-events / chat-submit
+ * handlers under `apps/web/src/api/`). The service holds in-memory
+ * state (the chat registry), so callers MUST go through this instance —
+ * instantiating a second `ChatService` elsewhere would create a phantom
+ * registry that doesn't see the other's writes.
  */
 export const chatService = new ChatService();

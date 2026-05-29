@@ -7,7 +7,9 @@ import {
   createCodingAgent,
 } from "@band-app/coding-agent";
 import { createLogger } from "@band-app/logger";
-import { bandHome, getAgentDefinition, loadSettings } from "../../services/state";
+import { bandHome, resolveAgentDefinition, SettingsQueries } from "../db/queries/settings";
+
+const settingsQueries = new SettingsQueries();
 
 const log = createLogger("agent-pool");
 
@@ -65,8 +67,8 @@ function loadClaudeSettingsModel(): string | undefined {
 }
 
 function getAgentConfig(worktreePath: string, agentId?: string): CodingAgentConfig {
-  const settings = loadSettings();
-  const agentDef = getAgentDefinition(settings, agentId);
+  const settings = settingsQueries.load();
+  const agentDef = resolveAgentDefinition(settings, agentId);
 
   // Resolve model: prefer Band agent definition, fall back to ~/.claude/settings.json for claude-code
   let model = agentDef.model;
@@ -97,8 +99,8 @@ function getAgentConfig(worktreePath: string, agentId?: string): CodingAgentConf
 
 /** Resolve the canonical agent definition ID (resolves undefined → default). */
 function resolveAgentDefId(agentId?: string): string {
-  const settings = loadSettings();
-  return getAgentDefinition(settings, agentId).id;
+  const settings = settingsQueries.load();
+  return resolveAgentDefinition(settings, agentId).id;
 }
 
 /**

@@ -2,8 +2,10 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createLogger } from "@band-app/logger";
-import { resolveWorkspace } from "../../services/workspace";
+import { WorkspaceQueries } from "../db/queries/workspaces";
 import { shellPath } from "../process/path";
+
+const workspaceQueries = new WorkspaceQueries();
 
 /** Directory of this module — used to locate local node_modules/.bin */
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -64,13 +66,18 @@ export async function getOrSpawnServer(
     throw new Error(`No language server configured for: ${lang}`);
   }
 
-  const workspace = resolveWorkspace(workspaceId);
+  // Direct infra-tier DB read rather than the services-tier
+  // `WorkspaceService.resolve` cache because `lsp-manager.ts` is in the
+  // infra tier and cannot depend on services (issue #535). Both paths
+  // resolve the same identity; the service-tier cache is purely an
+  // optimisation that infra doesn't get to benefit from.
+  const workspace = workspaceQueries.findIdentity(workspaceId);
   if (!workspace) {
     throw new Error(`Workspace not found: ${workspaceId}`);
   }
 
   const resolvedPath = await shellPath();
-  const cwd = workspace.worktree.path;
+  const cwd = workspace.worktreePath;
 
   // Build PATH: app node_modules/.bin (where typescript-language-server
   // lives), workspace node_modules/.bin (where tsserver lives), then

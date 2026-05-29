@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { bandHome } from "./state";
+import { bandHome } from "../state";
 
 export interface FilePart {
   mediaType: string;

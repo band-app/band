@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { parseGitRemoteUrl } from "../src/server/services/git";
+import { parseGitRemoteUrl } from "../src/server/infra/git/git-client";
 import {
   buildBatchedCIQuery,
   parseBatchedCIResponse,
   statePriority,
-} from "../src/server/services/github-graphql";
+} from "../src/server/services/_utils/github-graphql";
 
 // ---------------------------------------------------------------------------
 // parseGitRemoteUrl

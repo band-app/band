@@ -1,7 +1,7 @@
 import { z } from "zod";
-import { getOrCreateAgent } from "../../services/agent-service";
-import { getChat, getOrCreateDefaultChat } from "../../services/chat-manager";
-import { resolveWorkspace } from "../../services/workspace";
+import { agentService } from "../../services/agent-service";
+import { chatService } from "../../services/chat-service";
+import { workspaceService } from "../../services/workspace-service";
 import { publicProcedure, t } from "../trpc";
 
 /**
@@ -17,14 +17,18 @@ export const skillsRouter = t.router({
   list: publicProcedure
     .input(z.object({ workspaceId: z.string(), chatId: z.string().optional() }))
     .query(async ({ input }) => {
-      const workspace = resolveWorkspace(input.workspaceId);
+      const workspace = workspaceService.resolve(input.workspaceId);
       if (!workspace) {
         return { skills: [] };
       }
 
-      const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
-      const chatSession = getChat(chatId);
-      const agent = await getOrCreateAgent(chatId, workspace.worktree.path, chatSession?.agent);
+      const chatId = input.chatId ?? chatService.getOrCreateDefault(input.workspaceId).id;
+      const chatSession = chatService.get(chatId);
+      const agent = await agentService.getOrCreateAgent(
+        chatId,
+        workspace.worktree.path,
+        chatSession?.agent,
+      );
       if (agent.listSkills) {
         const skills = await agent.listSkills();
         return { skills };

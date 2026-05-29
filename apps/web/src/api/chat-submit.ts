@@ -17,14 +17,14 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createLogger } from "@band-app/logger";
-import { createChat, getChat } from "../server/services/chat-manager";
-import { pushQueuedMessage } from "../server/services/queued-message-store";
+import { pushQueuedMessage } from "../server/services/_utils/queued-message-store";
+import { saveUploadedFilesDetailed } from "../server/services/_utils/upload-utils";
+import { chatService } from "../server/services/chat-service";
 import {
-  submitTask,
   TaskConflictError,
+  taskService,
   WorkspaceNotFoundError,
 } from "../server/services/task-service";
-import { saveUploadedFilesDetailed } from "../server/services/upload-utils";
 
 const log = createLogger("chat-submit");
 
@@ -73,9 +73,9 @@ export async function handleChatSubmit(
   }
 
   // Lazy chat creation matches the legacy endpoint.
-  const existing = getChat(chatId);
+  const existing = chatService.get(chatId);
   if (!existing) {
-    createChat(workspaceId, { id: chatId, name: "Chat", agent: codingAgentId });
+    chatService.create(workspaceId, { id: chatId, name: "Chat", agent: codingAgentId });
   }
 
   // Resolve sessionId. The new chat-events client doesn't pass `sessionId`
@@ -86,7 +86,7 @@ export async function handleChatSubmit(
   // the client saw "only one message in history" with no continuation of
   // the prior conversation. The explicit body field still wins so a
   // future client that wants to fork off an older session can do so.
-  const resumeSessionId = sessionId ?? getChat(chatId)?.activeSessionId;
+  const resumeSessionId = sessionId ?? chatService.get(chatId)?.activeSessionId;
 
   // Upload any attached files first — needs to be sequential w.r.t. the
   // submit so the agent prompt references valid paths.
@@ -127,7 +127,7 @@ export async function handleChatSubmit(
   }
 
   try {
-    submitTask({
+    taskService.submitTask({
       workspaceId,
       chatId,
       prompt: text,

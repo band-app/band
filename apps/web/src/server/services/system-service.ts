@@ -1,26 +1,31 @@
-import { execFile } from "node:child_process";
+import { listWorktrees, type WorktreeInfo } from "../infra/git/git-client";
+import { duBytes as duBytesRaw } from "../infra/process/du";
+import { brewInstall } from "../infra/process/install";
 import { shellPath, whichBinary } from "../infra/process/path";
 
+export type { WorktreeInfo };
+
 /**
- * Process / system utilities used across the server: resolving the user's
- * `$PATH` from a login shell, locating CLI binaries, checking host-level
- * prerequisites (cloudflared etc.), and measuring on-disk size.
+ * Process / system orchestration: resolving the user's `$PATH` from a
+ * login shell, locating CLI binaries, checking host-level prerequisites
+ * (cloudflared etc.), running brew installs, and rate-limiting on-disk
+ * size measurements.
  *
- * Absorbed `lib/process-utils.ts` and `lib/disk-usage.ts` as part of Phase
- * 7.5 (issue #517). The PATH-cache helpers (`shellPath`, `whichBinary`)
- * now live in `server/infra/process/path.ts` so other infra adapters
- * (tunnel-client, lsp-manager, terminal-pool) can call them without
- * crossing back into the services tier; this service tier re-exposes them
- * as instance methods for router-facing code that already speaks to the
- * service singleton. The `du` semaphore stays here because it's a
- * business-logic concern (rate-limiting the resources dashboard).
+ * Every shell-out / raw `execFile` lives in the infra tier (`infra/
+ * process/{path,du,install}.ts`). This class is purely the business-
+ * logic layer over those adapters:
+ *
+ *   - `checkPrereqs()` decides which binaries qualify as host
+ *     prerequisites.
+ *   - `installCloudflared()` resolves the shell PATH first, then
+ *     delegates to `brewInstall`.
+ *   - `duBytes()` rate-limits parallel `du` invocations across all
+ *     dashboard callers — the semaphore is a business decision (how many
+ *     parallel `du` instances we'll tolerate), not an infra concern.
+ *
+ * Reorganised in issue #535, follow-up 3 — the `execFile` callouts that
+ * previously lived inline here moved into `server/infra/process/`.
  */
-
-/** Maximum buffer size for `du` stdout. `du -sk` prints a single summary line; 10 MB is overkill but defensible. */
-const MAX_DU_BUFFER = 10 * 1024 * 1024;
-
-/** Hard wall-clock cap on a single `du` invocation. Prevents stalled NFS/CIFS mounts hanging the tRPC handler. */
-const DU_TIMEOUT_MS = 30_000;
 
 /**
  * Process-wide cap on simultaneous `du` invocations. The client caps its
@@ -77,73 +82,30 @@ export class SystemService {
    * "Install Tunnel" button. The caller supplies the user's interactive
    * `$PATH` (typically via `shellPath()`) so `brew` itself is locatable
    * even when the Node process inherited a stripped-down PATH from
-   * launchd / Electron. Times out at 120s; surfaces stderr in the error
-   * message so the UI can show why the install failed.
+   * launchd / Electron.
    */
   async installCloudflared(resolvedPath: string): Promise<void> {
-    await new Promise<void>((resolve, reject) => {
-      execFile(
-        "brew",
-        ["install", "cloudflared"],
-        { env: { ...process.env, PATH: resolvedPath }, timeout: 120_000 },
-        (err, _stdout, stderr) => {
-          if (err) {
-            reject(new Error(stderr || err.message));
-            return;
-          }
-          resolve();
-        },
-      );
-    });
+    await brewInstall("cloudflared", resolvedPath);
   }
 
   /**
-   * Run `du -sk PATH` and return the allocated byte total.
-   *
-   * Detail: returned bytes are *allocated* (du default), not apparent file
-   * sizes. They differ by < 5% for typical content. POSIX-compatible —
-   * works the same on macOS BSD `du` and GNU coreutils `du`. The `-k`
-   * flag forces 1024-byte block output; `-s` collapses to a single
-   * summary line.
-   *
-   * `du` is invoked directly via `execFile` (no shell): if any
-   * descendant directory is unreadable (EACCES on a `chmod 000` /
-   * vendored Docker volume / mount-point owned by another user), `du`
-   * exits with a non-zero code AND still writes the partial summary to
-   * stdout. The default `promisify(execFile)` would reject and drop
-   * that partial line, so we use the callback form and parse stdout
-   * regardless of exit status.
+   * Enumerate git worktrees for a project. Thin façade over `GitClient`
+   * so the system router (and any future API-tier caller that needs the
+   * porcelain output) doesn't reach into `infra/git/` directly.
+   */
+  async listWorktrees(repoPath: string): Promise<WorktreeInfo[]> {
+    return listWorktrees(repoPath);
+  }
+
+  /**
+   * Run `du -sk PATH` and return the allocated byte total, gated by the
+   * process-wide concurrency cap above. The shell-out itself lives in
+   * `infra/process/du.ts`; this method is just the rate-limit wrapper.
    */
   async duBytes(path: string): Promise<number> {
     const release = await acquireDuSlot();
     try {
-      const stdout = await new Promise<string>((resolve, reject) => {
-        execFile(
-          "du",
-          ["-sk", path],
-          { maxBuffer: MAX_DU_BUFFER, timeout: DU_TIMEOUT_MS },
-          (err, out) => {
-            // Permission-on-descendant: exit code 1, stderr has the
-            // "permission denied" lines, stdout has the partial total.
-            // Use whatever stdout we got and let the caller see a
-            // (truncated) number rather than fail the whole worktree.
-            if (err && !out) {
-              reject(err);
-              return;
-            }
-            resolve(out);
-          },
-        );
-      });
-      // Output: `<kb>\t<path>\n`. Split on whitespace and take the first
-      // token rather than relying on the exact tab so BSD/GNU formatting
-      // drift doesn't bite.
-      const kbStr = stdout.trim().split(/\s+/)[0];
-      const kb = Number.parseInt(kbStr, 10);
-      if (!Number.isFinite(kb)) {
-        throw new Error(`du output not numeric: ${JSON.stringify(stdout)}`);
-      }
-      return kb * 1024;
+      return await duBytesRaw(path);
     } finally {
       release();
     }
@@ -151,9 +113,9 @@ export class SystemService {
 }
 
 /**
- * Process-wide singleton consumed by infra clients (tunnel-client,
- * terminal-pool), the prereqs router, and the legacy services router.
- * Sharing one instance keeps the PATH cache and the `du` semaphore in
- * lock-step across every entry point.
+ * Process-wide singleton consumed by the prereqs router, the system
+ * router, and a handful of services (setup, cli-skills, hooks). Sharing
+ * one instance keeps the `du` semaphore in lock-step across every entry
+ * point.
  */
 export const systemService = new SystemService();

@@ -7,38 +7,46 @@ import { createLogger } from "@band-app/logger";
 import { z } from "zod";
 import { toWorkspaceId } from "@/dashboard";
 import { WorkspaceNotFoundError } from "../errors";
-import { removeWorkspaceBrowsers } from "../infra/browser-host/browser-manager";
-// FRAGILE: ESM cycle leg — `services/task-service` imports `lib/workspace`,
-// which imports `workspaceService` from this file. The cycle is safe only
-// because every `workspaceService` reference is inside a function body
-// (live binding). See `lib/workspace.ts` for the cycle note before
-// capturing `submitTask` (or anything else here) at module load.
 import { TaskQueries } from "../infra/db/queries/tasks";
 import { WorkspaceQueries } from "../infra/db/queries/workspaces";
+import { DETACHED_BRANCH_PREFIX, execGit, gitCmd, listWorktrees } from "../infra/git/git-client";
 import { killWorkspaceServers } from "../infra/lsp/lsp-manager";
-import { getOrCreateDefaultChat, removeWorkspaceChats } from "./chat-manager";
+import { loadProjectConfig } from "../infra/setup/project-config";
+import { runSetup } from "../infra/setup/setup-runner";
+import { clearQueuedMessages } from "./_utils/queued-message-store";
+// FRAGILE: ESM cycle leg — `services/task-service` now imports
+// `workspaceService` directly from this file (the `services/workspace.ts`
+// shim that used to broker this hop was deleted in the #535 cleanup).
+// The cycle is safe only because every cross-module call below
+// (`submitTask`, `abortTask`, `cronjobService.*`, …) is inside a
+// function body — ESM live binding fills the reference in at call time.
+// Capturing any of these at module load — `const t = submitTask;` at
+// the top of this file, or `const ws = workspaceService;` at the top of
+// `task-service.ts` — would silently get `undefined`.
+import { agentService } from "./agent-service";
+import { browserService } from "./browser-service";
+import { chatService } from "./chat-service";
 // FRAGILE: ESM cycle leg #2 — `./cronjob-service` imports `submitTask`
-// from `./task-service`, which imports `lib/workspace`, which imports
-// `workspaceService` from this file. Same live-binding constraint as the
-// `submitTask` import above: keep every `cronjobService` reference inside
-// a function body. Capturing `const cs = cronjobService;` at module load
-// on this leg would silently get `undefined`.
+// from `./task-service`, which imports `workspaceService` from this
+// file (see the cycle note on the import block above). Same live-
+// binding constraint: keep every `cronjobService` reference inside a
+// function body. Capturing `const cs = cronjobService;` at module load
+// would silently get `undefined`.
 import { cronjobService } from "./cronjob-service";
-import { DETACHED_BRANCH_PREFIX, execGit, gitCmd, listWorktrees } from "./git";
-import { loadProjectConfig } from "./project-config";
-import { runSetup } from "./setup-runner";
+import { SettingsService, settingsService } from "./settings-service";
 import {
   bandHome,
   deleteWorkspaceStatus,
   loadState,
   type ProjectState,
   saveState,
+  upsertWorkspaceStatus,
   type WorktreeState,
   worktreesDir,
 } from "./state";
-import { submitTask } from "./task-service";
+import { taskService } from "./task-service";
 import { terminalService } from "./terminal-service";
-import { emit } from "./watcher";
+import { emit } from "./watcher-service";
 
 const execFileAsync = promisify(execFile);
 const log = createLogger("workspace-service");
@@ -150,35 +158,44 @@ export class PlainProjectError extends Error {
  * Business logic for the workspace domain (Phase 3 of the 3-tier refactor —
  * issue #314).
  *
- * Service tier — depends on Infra (`WorkspaceQueries`, `lib/state` for the
- * shared project-state persistence, `lib/git` for git exec) plus a handful
- * of cross-domain helpers (`lib/chat-manager`, `cronjobService.removeForKey`,
- * …) for workspace-scoped cleanup on delete. Knows nothing about tRPC or
- * the API surface — all callers (routers, future CLI / scripts) funnel
- * through this class.
+ * Service tier — depends on Infra (`WorkspaceQueries`, `infra/git/git-
+ * client` for git exec, `infra/setup/{setup-runner,project-config}` for
+ * workspace bootstrap) plus a handful of sibling services
+ * (`chatService`, `browserService`, `terminalService`,
+ * `cronjobService.removeForKey`) for workspace-scoped cleanup on
+ * delete. Knows nothing about tRPC or the API surface — all callers
+ * (routers, future CLI / scripts) funnel through this class.
  *
- * Cross-cutting concerns parked in the legacy `lib/*` modules for now:
+ * Persistence quirks worth knowing about:
  *
  *   - **Projects table reads/writes.** `loadState` / `saveState` still
  *     co-manage the `projects` + `worktrees` tables via a whole-tree
- *     rewrite. That persistence model belongs to the projects domain and
- *     is owned by Phase 2 (`ProjectQueries`, issue #313). Once Phase 2
- *     lands, this service's create/remove paths will swap to direct
- *     `WorkspaceQueries.insert` / `WorkspaceQueries.remove` calls and the
- *     projects table will be touched only through `ProjectQueries`.
- *   - **Git wrappers.** `execGit` / `gitCmd` / `listWorktrees` live in
- *     `lib/git.ts` and will be lifted into `GitClient` by Phase 2. The
- *     service uses them directly today; the router-facing contract is
- *     unchanged.
- *   - **Workspace-scoped side-effect cleanup.** `removeWorkspaceChats`,
- *     `terminalService.killWorkspace`, `cronjobService.removeForKey`, etc.
- *     live in their own domain modules. Each will migrate to its own
- *     service in a later phase; the orchestration is centralized here for
- *     now so the remove flow remains atomic from the router's perspective.
+ *     rewrite. The persistence model belongs to the projects domain
+ *     (`ProjectQueries`, issue #313); once that domain owns workspace
+ *     row inserts/removes too, the create/remove paths here can swap
+ *     to `WorkspaceQueries.insert` / `WorkspaceQueries.remove`
+ *     directly. Today the orchestration goes through `state.ts`'s
+ *     `saveState` to keep one writer per table.
+ *   - **Workspace-scoped side-effect cleanup.** `chatService`,
+ *     `browserService`, `terminalService.killWorkspace`,
+ *     `cronjobService.removeForKey`, etc. each own their own domain;
+ *     the orchestration is centralized here so the remove flow is
+ *     atomic from the router's perspective.
  *
  * Stateless aside from its `queries` dependency, so a single shared
  * instance is safe across callers.
  */
+
+/**
+ * `git pull --rebase` exits non-zero with this string when the fetch
+ * step already fast-forwarded the working tree. The pull effectively
+ * succeeded, so both `gitPull` paths swallow the error. Centralised
+ * here so the two callers don't drift on the exact substring.
+ */
+function isRebaseCollision(err: unknown): boolean {
+  return String(err).includes("Cannot rebase onto multiple branches");
+}
+
 export class WorkspaceService {
   constructor(private readonly queries: WorkspaceQueries = new WorkspaceQueries()) {}
 
@@ -293,7 +310,7 @@ export class WorkspaceService {
 
     // Materialize the default chat pane so the workspace surfaces a
     // ready-to-use UI even when the caller didn't pass a prompt.
-    const defaultChat = getOrCreateDefaultChat(workspaceId);
+    const defaultChat = chatService.getOrCreateDefault(workspaceId);
 
     // If a prompt is provided, defer task submission until the setup
     // script completes so the agent has dependencies installed. When
@@ -301,7 +318,7 @@ export class WorkspaceService {
     // synchronously, so the task is submitted immediately.
     const onSetupComplete = input.prompt
       ? () =>
-          submitTask({
+          taskService.submitTask({
             workspaceId,
             chatId: defaultChat.id,
             prompt: input.prompt!,
@@ -396,11 +413,11 @@ export class WorkspaceService {
     // tears down the saved layout as part of the same call (see
     // `ChatService.removeAllForWorkspace`) so a separate `deleteChatLayout`
     // step is no longer required here.
-    removeWorkspaceChats(workspaceId);
+    chatService.removeAllForWorkspace(workspaceId);
 
     // Clean up all browser tabs + layout. Same contract as chats —
     // `BrowserService.removeAllForWorkspace` drops the layout row itself.
-    removeWorkspaceBrowsers(workspaceId);
+    browserService.removeAllForWorkspace(workspaceId);
 
     // Kill any running terminal PTY sessions + layout
     terminalService.killWorkspace(workspaceId);
@@ -559,14 +576,7 @@ export class WorkspaceService {
     try {
       await execGit(["pull", "--rebase"], cwd);
     } catch (e) {
-      // git pull --rebase can exit non-zero with "Cannot rebase onto
-      // multiple branches" when the fetch step already fast-forwarded the
-      // working tree. The pull effectively succeeded, so swallow this
-      // specific error.
-      const msg = String(e);
-      if (msg.includes("Cannot rebase onto multiple branches")) {
-        return { ok: true };
-      }
+      if (isRebaseCollision(e)) return { ok: true };
       throw e;
     }
     return { ok: true };
@@ -608,6 +618,290 @@ export class WorkspaceService {
       }
       await execGit(["push", "--set-upstream", "origin", input.branch], cwd);
     }
+    return { ok: true };
+  }
+
+  /**
+   * `git pull --rebase` keyed by workspaceId rather than `(project, branch)`.
+   *
+   * Used by `api/workspace/router.ts::gitPull` (the per-workspace,
+   * singular-namespace variant). Implements the same `git pull --rebase`
+   * + `isRebaseCollision` swallow logic as the project-keyed `gitPull`
+   * above — both paths share the helper so the substring guard stays in
+   * one place. (We don't `this.gitPull` from here because that variant
+   * additionally enforces the `kind === "plain"` rejection via
+   * `PlainProjectError`; the workspaceId surface doesn't carry that
+   * concern.)
+   */
+  async gitPullByWorkspaceId(workspaceId: string): Promise<{ ok: true }> {
+    const workspace = this.resolve(workspaceId);
+    if (!workspace) {
+      throw new WorkspaceNotFoundError(workspaceId);
+    }
+    const cwd = workspace.worktree.path;
+    try {
+      await execGit(["pull", "--rebase"], cwd);
+    } catch (e) {
+      if (isRebaseCollision(e)) return { ok: true };
+      // Re-throw the original error to preserve its stack — the project-
+      // keyed `gitPull` above does the same `throw e`.
+      throw e;
+    }
+    return { ok: true };
+  }
+
+  /**
+   * `git push` keyed by workspaceId rather than `(project, branch)`.
+   *
+   * Used by `api/workspace/router.ts::gitPush` (the per-workspace,
+   * singular-namespace variant). Resolves the live HEAD branch rather than
+   * the recorded one for the upstream fallback — the worktree may have
+   * been renamed via `git branch -m` and the project record not yet
+   * refreshed, in which case pushing the stale name fails too.
+   */
+  async gitPushByWorkspaceId(workspaceId: string): Promise<{ ok: true }> {
+    const workspace = this.resolve(workspaceId);
+    if (!workspace) {
+      throw new WorkspaceNotFoundError(workspaceId);
+    }
+    const cwd = workspace.worktree.path;
+    try {
+      await execGit(["push"], cwd);
+    } catch (err) {
+      // Narrow the catch to the specific "no upstream configured" exit
+      // — every other failure (auth, rejected push, network) must bubble
+      // up unmasked so the user sees the real cause instead of a
+      // misleading second-push error. Same shape as the project-keyed
+      // `gitPush` above.
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!/has no upstream branch/i.test(msg)) {
+        throw err;
+      }
+      // First push needs to set upstream. Resolve the live HEAD branch
+      // rather than trusting a stale state.json entry — the worktree
+      // may have been renamed via `git branch -m` and the project
+      // record not yet refreshed.
+      let headBranch: string;
+      try {
+        headBranch = (await execGit(["rev-parse", "--abbrev-ref", "HEAD"], cwd)).trim();
+      } catch {
+        headBranch = workspace.worktree.branch;
+      }
+      // Don't wrap the upstream-set failure in `new Error(msg)` — that
+      // would drop the original stack. Let `execGit`'s rejection bubble
+      // unchanged, carrying its captured stderr.
+      await execGit(["push", "--set-upstream", "origin", headBranch], cwd);
+    }
+    return { ok: true };
+  }
+
+  /**
+   * Commit all pending changes in `workspaceId` with `message` (and optional
+   * `body`). Stages everything (tracked + untracked) so the commit reflects
+   * the diff the user just reviewed in the Changes view.
+   */
+  async gitCommit(
+    workspaceId: string,
+    input: { message: string; body?: string },
+  ): Promise<{ ok: true }> {
+    const workspace = this.resolve(workspaceId);
+    if (!workspace) {
+      throw new WorkspaceNotFoundError(workspaceId);
+    }
+    const cwd = workspace.worktree.path;
+
+    await execGit(["add", "-A"], cwd);
+
+    // Pass title + body as separate `-m` args so git formats them with the
+    // standard blank-line separator between subject and body.
+    const args = ["commit", "-m", input.message];
+    const body = input.body?.trim();
+    if (body) {
+      args.push("-m", body);
+    }
+    // `execGit`'s rejection carries the git stderr and a real stack —
+    // let it propagate up the await chain unchanged.
+    await execGit(args, cwd);
+    return { ok: true };
+  }
+
+  /**
+   * Ask the workspace's coding agent to summarise pending changes into a
+   * commit message. The agent runs in the workspace's worktree with
+   * `Bash`/`Read` tools and explores the diff itself rather than receiving
+   * a (potentially truncated) serialised diff in the prompt.
+   *
+   * Returns `{ message, body, agentLabel }` — `message` is the subject
+   * line (≤72 chars, imperative mood), `body` is the optional explanation
+   * paragraph. Refuses early when there are no pending changes so we
+   * don't spin up an agent process just to have it report "nothing to
+   * commit".
+   */
+  async generateCommitMessage(
+    workspaceId: string,
+  ): Promise<{ message: string; body: string; agentLabel: string }> {
+    const workspace = this.resolve(workspaceId);
+    if (!workspace) {
+      throw new WorkspaceNotFoundError(workspaceId);
+    }
+    const cwd = workspace.worktree.path;
+
+    // Cheap pre-flight: refuse early if there are no pending changes so
+    // we don't spin up an agent process just to have it report "nothing
+    // to commit". `git status --porcelain` covers staged, unstaged, and
+    // untracked files in one call — and on a brand-new unborn-HEAD
+    // repository it still succeeds (showing untracked entries).
+    //
+    // Any execGit failure here (not a git repo, git binary missing,
+    // permission denied, …) is a real, user-actionable error: surface
+    // it instead of silently spawning an agent that will run the same
+    // status command and fail the same way.
+    const status = await execGit(["status", "--porcelain"], cwd);
+    if (!status.trim()) {
+      throw new Error("No changes to summarise");
+    }
+
+    const settings = settingsService.get();
+    // Use the workspace's default chat-pane agent so the commit-message
+    // agent matches the agent the user is actually looking at. Without
+    // this, switching the pane to (e.g.) codex would silently keep
+    // generating commit messages with the user's global default
+    // (e.g. claude-code). The chat row's `agent` field is only set when
+    // the user has explicitly switched panes; when it's null, we fall
+    // back to the global default via SettingsService.resolveAgent —
+    // which is intentional, not a silent oversight, so a freshly seeded
+    // workspace still picks up the user's preferred agent.
+    const defaultChat = chatService.getOrCreateDefault(workspaceId);
+    const agentDef = SettingsService.resolveAgent(settings, defaultChat.agent ?? undefined);
+
+    const prompt = [
+      "You are running inside a git workspace. Write a commit message for the changes that are pending in this workspace right now.",
+      "",
+      "Steps:",
+      "  1. Run `git status` and `git diff HEAD` (and `git diff --stat` if the diff is large) to understand what changed.",
+      "  2. If helpful, read a few of the changed files or recent commits (`git log -5 --oneline`) to match the project's commit style.",
+      "  3. Write a single commit message.",
+      "",
+      "Format:",
+      "  - First line: a concise subject (≤ 72 chars), imperative mood, no trailing period.",
+      "  - Then a blank line.",
+      "  - Then a body that explains *why* the change is being made and any notable details.",
+      "",
+      "Output ONLY the final commit message as plain text — no markdown fences, no preamble, no commentary, no tool-call summaries. Do not modify any files.",
+    ].join("\n");
+
+    let agent: Awaited<ReturnType<typeof agentService.createWorkspaceAgent>>;
+    try {
+      agent = await agentService.createWorkspaceAgent(cwd, agentDef.id);
+    } catch (e) {
+      throw new Error(
+        `Failed to start coding agent "${agentDef.label}": ${
+          e instanceof Error ? e.message : String(e)
+        }`,
+      );
+    }
+
+    // Track only text emitted by the *final* assistant turn — earlier
+    // text deltas are usually narration around tool calls ("Let me check
+    // the diff…") that we don't want in the commit message. Each
+    // tool-result event resets the buffer so only post-tool prose
+    // survives. `maxTurns` is generous enough for git status + diff +
+    // optional log + final write-up.
+    let lastTurnText = "";
+    try {
+      for await (const event of agent.runSession(prompt, undefined, { maxTurns: 8 })) {
+        if (event.type === "text-delta") {
+          lastTurnText += event.text;
+        } else if (event.type === "tool-result") {
+          lastTurnText = "";
+        } else if (event.type === "error") {
+          throw new Error(event.message);
+        }
+      }
+    } finally {
+      // Short-lived one-shot agent — always abort on exit to release
+      // the subprocess regardless of success or error. `abort` on a
+      // completed agent is documented as a no-op by the SDK adapters.
+      //
+      // Note: this agent was created with `createWorkspaceAgent`, not
+      // the pool's `getOrCreateAgent`, so it lives outside the pool and
+      // isn't registered for shutdown cleanup. That's intentional —
+      // generateCommitMessage is one-shot, has no persistent session a
+      // future request would reattach to, and exits before the user's
+      // next interaction. A future caller that fires this without
+      // awaiting it would leak the subprocess — keep this call awaited.
+      agent.abort?.();
+    }
+
+    const cleaned = lastTurnText.trim();
+    if (!cleaned) {
+      throw new Error("Agent returned an empty response");
+    }
+
+    // Split into subject + body on the first blank line.
+    const lines = cleaned.split("\n");
+    const subject = (lines.shift() ?? "").trim();
+    while (lines.length > 0 && lines[0].trim() === "") {
+      lines.shift();
+    }
+    const body = lines.join("\n").trim();
+
+    return {
+      message: subject,
+      body,
+      agentLabel: agentDef.label,
+    };
+  }
+
+  /**
+   * Switch the coding agent backing a chat pane to a different agent type
+   * (e.g. claude-code → codex). Aborts any running task, clears queued
+   * messages, replaces the pooled agent, updates the chat record, and
+   * re-emits the workspace status so the UI reflects the new agent.
+   *
+   * If `chatId` is omitted, the workspace's default chat pane is used.
+   */
+  async switchAgent(input: {
+    workspaceId: string;
+    agentId: string;
+    chatId?: string;
+  }): Promise<{ ok: true }> {
+    const workspace = this.resolve(input.workspaceId);
+    if (!workspace) {
+      throw new WorkspaceNotFoundError(input.workspaceId);
+    }
+
+    // Resolve the chat pane (use provided chatId or default)
+    const chatId = input.chatId ?? chatService.getOrCreateDefault(input.workspaceId).id;
+
+    // Abort any running task and clear queued messages so the new agent
+    // starts with a clean slate.
+    taskService.abortTask(chatId);
+    clearQueuedMessages(chatId);
+
+    // Replace the agent in the pool with the new agent type
+    await agentService.replaceAgent(chatId, workspace.worktree.path, input.agentId);
+
+    // Update the chat pane's agent config
+    chatService.update(chatId, { agent: input.agentId });
+
+    // Update workspace status with the new coding agent ID. The upsert
+    // returns the final row state (project/branch/worktreePath + the
+    // agent merge), so we can `emit` it directly without a second
+    // SELECT round-trip — same pattern as
+    // `task-service.ts::abortTask` / `cancelTask`.
+    //
+    // This emit deliberately *supersedes* the abort event fired earlier
+    // from inside `abortTask` (when a task was running). The earlier
+    // event lacked the new `codingAgentId`; this one is authoritative.
+    // Do not eliminate as redundant — the abort emit happens before
+    // `replaceAgent` and carries the old agent id.
+    const status = upsertWorkspaceStatus(input.workspaceId, {
+      status: "waiting",
+      codingAgentId: input.agentId,
+    });
+    emit({ kind: "update", status });
+
     return { ok: true };
   }
 

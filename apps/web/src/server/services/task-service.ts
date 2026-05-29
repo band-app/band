@@ -5,18 +5,19 @@ import type { UIMessageChunk } from "ai";
 import { WorkspaceNotFoundError } from "../errors";
 import { getAgent, getOrCreateAgent, replaceAgent } from "../infra/agents/agent-pool";
 import { generateTaskId, TaskQueries } from "../infra/db/queries/tasks";
-import { getChat, updateChatActiveSession, updateChatStatus } from "./chat-manager";
-import { mimeTypeFromFilename } from "./mime-types";
-import { shiftQueuedMessage } from "./queued-message-store";
+import { mimeTypeFromFilename } from "./_utils/mime-types";
+import { shiftQueuedMessage } from "./_utils/queued-message-store";
+import { chatService } from "./chat-service";
 import { bandHome, upsertWorkspaceStatus } from "./state";
-import { emit as emitStatusEvent } from "./watcher";
-// FRAGILE: ESM cycle leg — `lib/workspace` imports `workspaceService` from
-// `server/services/workspace-service`, which imports `submitTask` back from
-// this file. The cycle is safe only because every cross-module call below
-// is inside a function body (live binding). See `lib/workspace.ts` for the
-// cycle note before capturing `resolveWorkspace` (or any service-tier
-// symbol via this hop) at module load.
-import { resolveWorkspace } from "./workspace";
+import { emit as emitStatusEvent } from "./watcher-service";
+// FRAGILE: ESM cycle leg — `workspace-service` imports `submitTask` /
+// `abortTask` back from this file. The cycle is safe only because every
+// `workspaceService` call below (including the `abortTask` →
+// `clearQueuedMessages` chain that powers `WorkspaceService.switchAgent`)
+// sits inside a function body — ESM live binding fills the reference at
+// call time. Capturing `const ws = workspaceService;` at the top of this
+// file would silently get `undefined`.
+import { workspaceService } from "./workspace-service";
 
 const log = createLogger("task-service");
 
@@ -288,7 +289,7 @@ export function hasPendingInputForWorkspace(workspaceId: string): boolean {
 }
 
 function persistTask(task: InternalTask): void {
-  const workspace = resolveWorkspace(task.workspaceId);
+  const workspace = workspaceService.resolve(task.workspaceId);
   try {
     taskQueries.save({
       id: task.taskRecordId,
@@ -361,7 +362,7 @@ export function submitTask(options: SubmitTaskOptions): TaskInfo {
     codingAgentId,
   } = options;
 
-  const workspace = resolveWorkspace(workspaceId);
+  const workspace = workspaceService.resolve(workspaceId);
   if (!workspace) {
     throw new WorkspaceNotFoundError(workspaceId);
   }
@@ -437,7 +438,7 @@ export function submitTask(options: SubmitTaskOptions): TaskInfo {
         taskId: task.taskRecordId,
         message: errMsg,
       } as unknown as UIMessageChunk);
-      updateChatStatus(chatId, "error");
+      chatService.updateStatus(chatId, "error");
     }
   });
 
@@ -470,7 +471,7 @@ export function abortTask(chatId: string): boolean {
   } as unknown as UIMessageChunk);
   tasks.delete(chatId);
 
-  updateChatStatus(chatId, "idle");
+  chatService.updateStatus(chatId, "idle");
 
   const updated = upsertWorkspaceStatus(task.workspaceId, { status: "waiting" });
   emitStatusEvent({ kind: "update", status: updated });
@@ -502,7 +503,7 @@ export function cancelTask(taskId: string): { cancelled: boolean; workspaceId?: 
       } as unknown as UIMessageChunk);
       tasks.delete(chatId);
 
-      updateChatStatus(chatId, "idle");
+      chatService.updateStatus(chatId, "idle");
 
       const updated = upsertWorkspaceStatus(task.workspaceId, { status: "waiting" });
       emitStatusEvent({ kind: "update", status: updated });
@@ -525,14 +526,14 @@ export function cancelTask(taskId: string): { cancelled: boolean; workspaceId?: 
 }
 
 async function runTask(chatId: string, task: InternalTask) {
-  const workspace = resolveWorkspace(task.workspaceId);
+  const workspace = workspaceService.resolve(task.workspaceId);
   if (!workspace) {
     task.status = "failed";
     task.completedAt = Date.now();
     persistTask(task);
     broadcast(chatId, { type: "error", errorText: "Workspace not found" });
     tasks.delete(chatId);
-    updateChatStatus(chatId, "error");
+    chatService.updateStatus(chatId, "error");
     return;
   }
 
@@ -541,7 +542,7 @@ async function runTask(chatId: string, task: InternalTask) {
   // the chat record's agent — otherwise reuse the existing pool entry.
   // This avoids aborting/recreating the agent process on every message
   // which was breaking non-default agents (OpenCode, Codex).
-  const chatSession = getChat(chatId);
+  const chatSession = chatService.get(chatId);
   const taskAgentId = task.codingAgentId;
   const resolvedAgentId = taskAgentId ?? chatSession?.agent;
   const needsReplace = taskAgentId && taskAgentId !== chatSession?.agent;
@@ -554,7 +555,7 @@ async function runTask(chatId: string, task: InternalTask) {
     : await getOrCreateAgent(chatId, workspace.worktree.path, resolvedAgentId);
 
   // Mark chat pane as running
-  updateChatStatus(chatId, "running");
+  chatService.updateStatus(chatId, "running");
 
   // Mark workspace as working now that the agent is ready
   const working = upsertWorkspaceStatus(task.workspaceId, { status: "working" });
@@ -642,7 +643,7 @@ async function runTask(chatId: string, task: InternalTask) {
           // brand-new session — it's what the CLI's /resume picker shows
           // and what listSessions would return once the JSONL contains a
           // last-prompt record.
-          updateChatActiveSession(chatId, {
+          chatService.updateActiveSession(chatId, {
             activeSessionId: event.sessionId,
             summary: task.prompt,
             lastModified: Date.now(),
@@ -958,7 +959,7 @@ async function runTask(chatId: string, task: InternalTask) {
       taskId: task.taskRecordId,
       message: errMsg,
     } as unknown as UIMessageChunk);
-    updateChatStatus(chatId, "error");
+    chatService.updateStatus(chatId, "error");
   }
 
   // Auto-start a new task if there's a queued message and the task succeeded.
@@ -1022,7 +1023,7 @@ async function runTask(chatId: string, task: InternalTask) {
 
   // Update chat pane and workspace status
   if (!autoStarted) {
-    updateChatStatus(chatId, "idle");
+    chatService.updateStatus(chatId, "idle");
     const endStatus = task.status === "completed" ? "needs_attention" : "waiting";
     const updated = upsertWorkspaceStatus(task.workspaceId, { status: endStatus });
     emitStatusEvent({ kind: "update", status: updated });
@@ -1221,3 +1222,123 @@ export function getSessionEventsAfter(
     .filter((e) => (e.eventId ?? 0) > afterEventId)
     .map((c) => chunkToRecord(sessionId, c));
 }
+
+// ---------------------------------------------------------------------------
+// Class wrapper (issue #535, follow-up 5)
+//
+// Routers and other services should depend on `taskService` rather than the
+// bare function exports above. The class is a thin façade: every method
+// delegates to the corresponding module-level function so the singleton
+// in-memory state (`tasks`, `listeners`, `sessionBuffers`, `sessionUsage`,
+// `pendingInputs`) — which is held on `globalThis` symbols so it survives
+// module re-evaluation in dev (vite/HMR) and across multiple bundles —
+// stays in lock-step regardless of how callers reach the API.
+//
+// The injectable `TaskQueries` dependency lets tests swap in a stubbed
+// queries adapter for the persistence-touching methods (`listTaskRecords`,
+// `loadTaskRecord`). The function exports above are retained as a
+// back-compat surface for callers that already speak the module API; new
+// code should use `taskService.method(...)`.
+// ---------------------------------------------------------------------------
+
+export class TaskService {
+  /**
+   * TODO(#535-followup): complete the DI migration for `submitTask` /
+   * `abortTask` / `cancelTask` / `getTask` / the session-buffer
+   * accessors, mirroring the `ChatService.refreshes` private-field
+   * pattern (lazy resolve a `globalThis`-keyed Map into a class
+   * member).
+   *
+   * What `new TaskService(stub)` buys you today: stubbed reads from
+   * `listTaskRecords` and `loadTaskRecord`. That's it. The runtime
+   * methods (`submitTask`, `abortTask`, `cancelTask`, `getTask`, the
+   * session-buffer accessors) all delegate to the module-level
+   * functions, which read the module-level `taskQueries` AND the
+   * `globalThis`-keyed in-memory state — none of which the injected
+   * `queries` reaches. Test authors that need to stub the whole
+   * surface should treat the singleton as live infrastructure (start
+   * the real server in a test) rather than trying to isolate it via
+   * constructor DI alone.
+   */
+  constructor(private readonly queries: TaskQueries = taskQueries) {}
+
+  createPendingInput(approvalId: string, workspaceId?: string): Promise<Record<string, string>> {
+    return createPendingInput(approvalId, workspaceId);
+  }
+
+  resolvePendingInput(approvalId: string, answers: Record<string, string>): boolean {
+    return resolvePendingInput(approvalId, answers);
+  }
+
+  rejectPendingInput(approvalId: string, error: Error): boolean {
+    return rejectPendingInput(approvalId, error);
+  }
+
+  rejectAllPendingInputs(error: Error): void {
+    rejectAllPendingInputs(error);
+  }
+
+  hasPendingInputForWorkspace(workspaceId: string): boolean {
+    return hasPendingInputForWorkspace(workspaceId);
+  }
+
+  submitTask(options: SubmitTaskOptions): TaskInfo {
+    return submitTask(options);
+  }
+
+  abortTask(chatId: string): boolean {
+    return abortTask(chatId);
+  }
+
+  cancelTask(taskId: string): { cancelled: boolean; workspaceId?: string } {
+    return cancelTask(taskId);
+  }
+
+  getTask(chatId: string): TaskInfo | null {
+    return getTask(chatId);
+  }
+
+  listTaskRecords(filters?: Parameters<TaskQueries["list"]>[0]) {
+    return this.queries.list(filters);
+  }
+
+  loadTaskRecord(id: string) {
+    return this.queries.load(id);
+  }
+
+  getSessionBuffer(sessionId: string): SessionBuffer | undefined {
+    return getSessionBuffer(sessionId);
+  }
+
+  getSessionUsage(sessionId: string): SessionUsage | undefined {
+    return getSessionUsage(sessionId);
+  }
+
+  subscribe(chatId: string, listener: Listener): () => void {
+    return subscribe(chatId, listener);
+  }
+
+  getSessionEventsTail(sessionId: string, limit: number): SessionEventRecord[] {
+    return getSessionEventsTail(sessionId, limit);
+  }
+
+  getSessionEventsBefore(
+    sessionId: string,
+    beforeEventId: number,
+    limit: number,
+  ): SessionEventRecord[] {
+    return getSessionEventsBefore(sessionId, beforeEventId, limit);
+  }
+
+  getSessionEventsAfter(sessionId: string, afterEventId: number): SessionEventRecord[] {
+    return getSessionEventsAfter(sessionId, afterEventId);
+  }
+}
+
+/**
+ * Process-wide singleton. Method calls route through the existing
+ * module-level functions, which themselves operate on the `globalThis`-
+ * keyed state — so multiple bundles or HMR reloads still share a single
+ * logical task pool.
+ */
+export const taskService = new TaskService();

@@ -2,8 +2,8 @@ import type { SessionListItem } from "@band-app/coding-agent";
 import { createLogger } from "@band-app/logger";
 import { WorkspaceNotFoundError } from "../errors";
 import { getOrCreateAgent } from "../infra/agents/agent-pool";
-import { getChat, getOrCreateDefaultChat } from "./chat-manager";
-import { resolveWorkspace } from "./workspace";
+import { chatService } from "./chat-service";
+import { workspaceService } from "./workspace-service";
 
 const log = createLogger("session-service");
 
@@ -73,13 +73,13 @@ export class SessionService {
    * `WorkspaceNotFoundError` when the workspace can't be resolved.
    */
   async list(input: { workspaceId: string; chatId?: string }): Promise<ListSessionsResponse> {
-    const workspace = resolveWorkspace(input.workspaceId);
+    const workspace = workspaceService.resolve(input.workspaceId);
     if (!workspace) {
       throw new WorkspaceNotFoundError(input.workspaceId);
     }
 
-    const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
-    const chatSession = getChat(chatId);
+    const chatId = input.chatId ?? chatService.getOrCreateDefault(input.workspaceId).id;
+    const chatSession = chatService.get(chatId);
     const agent = await getOrCreateAgent(chatId, workspace.worktree.path, chatSession?.agent);
 
     if (!agent.supportedFeatures.sessionListing || !agent.listSessions) {

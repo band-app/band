@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   bandHome,
   type CodingAgentDefinition,
+  resolveAgentDefinition,
   type Settings,
   SettingsQueries,
 } from "../infra/db/queries/settings";
@@ -137,17 +138,7 @@ export class SettingsService {
    *      with an empty settings file can still launch.
    */
   static resolveAgent(settings: Settings, agentId?: string): CodingAgentDefinition {
-    const agents = settings.codingAgents ?? [];
-    if (agentId) {
-      const found = agents.find((a) => a.id === agentId);
-      if (found) return found;
-    }
-    if (settings.defaultCodingAgent) {
-      const found = agents.find((a) => a.id === settings.defaultCodingAgent);
-      if (found) return found;
-    }
-    if (agents.length > 0) return agents[0];
-    return { id: "claude-code", type: "claude-code", label: "Claude Code" };
+    return resolveAgentDefinition(settings, agentId);
   }
 
   /**

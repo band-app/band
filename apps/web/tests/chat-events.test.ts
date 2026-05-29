@@ -28,7 +28,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { ChatEvent, ChatEventPayload, ChatEventType } from "../src/lib/chat-events";
+import type { ChatEvent, ChatEventPayload, ChatEventType } from "../src/shared/chat-events";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { SERVER_RUNTIME, SERVER_SCRIPT } from "./helpers/server-runtime";
 

@@ -1,4 +1,4 @@
-import { checkHooks, installHooks } from "../../services/hooks";
+import { checkHooks, installHooks } from "../../services/hooks-service";
 import { publicProcedure, t } from "../trpc";
 
 /**

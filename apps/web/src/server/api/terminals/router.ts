@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { terminalService } from "../../services/terminal-service";
-import { emit } from "../../services/watcher";
+import { emit } from "../../services/watcher-service";
 import { publicProcedure, t } from "../trpc";
 
 /**

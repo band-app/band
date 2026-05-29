@@ -23,7 +23,7 @@ import {
   type JsonlMessage,
   jsonlMessageToEvents,
   stripFileSharingHint,
-} from "../src/server/services/jsonl-message-to-events";
+} from "../src/server/services/_utils/jsonl-message-to-events";
 
 describe("jsonlMessageToEvents", () => {
   describe("user-role messages", () => {

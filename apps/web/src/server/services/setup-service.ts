@@ -1,9 +1,9 @@
 import { createLogger } from "@band-app/logger";
-import { checkCli, installCli } from "./cli";
-import { installSkills } from "./cli-skills";
-import { checkHooks, installHooks } from "./hooks";
+import { checkCli, installCli } from "./cli-service";
+import { installSkills } from "./cli-skills-service";
+import { checkHooks, installHooks } from "./hooks-service";
 import { type CodingAgentDefinition, loadSettings, saveSettings } from "./state";
-import { syncWorktrees } from "./sync-state";
+import { syncService } from "./sync-service";
 import { systemService } from "./system-service";
 
 const log = createLogger("setup");
@@ -134,7 +134,7 @@ async function ensureSettingsDefaults(): Promise<void> {
  */
 async function ensureProjectStateInSync(): Promise<void> {
   try {
-    await syncWorktrees();
+    await syncService.syncWorktrees();
   } catch (err) {
     log.warn(
       "Failed to sync project state at boot: %s",
@@ -288,3 +288,17 @@ async function ensureSkillsInstalled(): Promise<void> {
     log.warn("Failed to sync CLI skills: %s", err instanceof Error ? err.message : String(err));
   }
 }
+
+/**
+ * Class wrapper around the module-level `runFirstTimeSetup` orchestrator
+ * (issue #535 follow-up — class-with-DI shape per the architecture doc).
+ * The class delegates to the existing function so the existing wire-up
+ * (called from `start-server.ts` and several tests) is preserved.
+ */
+export class SetupService {
+  async run(): Promise<void> {
+    return runFirstTimeSetup();
+  }
+}
+
+export const setupService = new SetupService();

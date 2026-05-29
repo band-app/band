@@ -1,6 +1,7 @@
 import { createLogger } from "@band-app/logger";
 import { z } from "zod";
 import type { WorkspaceTerminalConfig } from "@/dashboard";
+import { loadProjectConfig } from "../infra/setup/project-config";
 import {
   type SpawnOptions,
   type TerminalListEntry,
@@ -8,16 +9,15 @@ import {
   type TerminalSession,
   terminalPool,
 } from "../infra/terminals/terminal-pool";
-import { loadProjectConfig } from "./project-config";
 import {
   addTerminalToLayout,
   deleteTerminalLayout,
   getTerminalLayout,
   removeTerminalFromLayout,
   saveTerminalLayout,
-} from "./terminal-layout-manager";
-import { emit } from "./watcher";
-import { resolveWorkspace } from "./workspace";
+} from "./_utils/terminal-layout-manager";
+import { emit } from "./watcher-service";
+import { workspaceService } from "./workspace-service";
 
 // Re-export the PTY types so the API tier (`terminals/router.ts`,
 // `terminals/ws.ts`) can reference them without reaching into infra.
@@ -115,7 +115,7 @@ export class TerminalService {
     terminalId: string,
     options?: SpawnOptions,
   ): Promise<TerminalSession> {
-    const workspace = resolveWorkspace(workspaceId);
+    const workspace = workspaceService.resolve(workspaceId);
     if (!workspace) {
       throw new Error(`Workspace not found: ${workspaceId}`);
     }
@@ -240,7 +240,7 @@ export class TerminalService {
    * query) reach it via `terminalService` instead of a stand-alone helper.
    */
   getWorkspaceConfig(workspaceId: string): WorkspaceTerminalConfig | null {
-    const workspace = resolveWorkspace(workspaceId);
+    const workspace = workspaceService.resolve(workspaceId);
     if (!workspace) return null;
     return this.loadWorkspaceConfigFromPaths(workspace.worktree.path, workspace.project.path);
   }

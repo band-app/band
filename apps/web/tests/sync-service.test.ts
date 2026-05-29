@@ -1,3 +1,17 @@
+/**
+ * Utility-level white-box tests for `syncWorktrees` — drives the
+ * function against a real git repo + a real SQLite DB in a per-case
+ * tmpdir (via `BAND_HOME`). Matches the precedent set by
+ * `git.test.ts` and `fuzzy-score.test.ts`: these exercise non-
+ * networked infra/service helpers whose contract is too fine-grained
+ * for the integration suite (no tRPC surface, no HTTP boundary).
+ *
+ * The repo's general doctrine is black-box integration tests via the
+ * real server — see CLAUDE.md and the `write-integration-test` skill.
+ * That doctrine continues to apply to any test that touches a tRPC
+ * procedure or driver-level UI.
+ */
+
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -5,7 +19,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { closeDb } from "../src/server/infra/db/connection";
 import { loadState, saveState } from "../src/server/services/state";
-import { syncWorktrees } from "../src/server/services/sync-state";
+import { syncWorktrees } from "../src/server/services/sync-service";
 
 const gitEnv = {
   ...process.env,
@@ -217,5 +231,33 @@ describe("syncWorktrees", () => {
     // Good project gets synced
     expect(state.projects[1].worktrees.length).toBe(2);
     expect(state.projects[1].worktrees.find((wt) => wt.branch === "feature")).toBeDefined();
+  });
+
+  // Regression: the `pinned` flag is dashboard-state, not git-state — it
+  // must survive every sync cycle even though `git worktree list` knows
+  // nothing about it. Without the preservation logic in `sync-service.ts`
+  // the merge would overwrite a pinned worktree with a fresh-from-git
+  // entry whose pinned flag defaults to `undefined`/`false`.
+  it("preserves the pinned flag on a synced worktree", async () => {
+    const repoPath = createRepo(tmp);
+    const head = git(repoPath, ["rev-parse", "HEAD"]).trim();
+
+    saveState({
+      projects: [
+        {
+          name: "pin-test",
+          path: repoPath,
+          defaultBranch: "main",
+          worktrees: [{ branch: "main", path: repoPath, head, pinned: true }],
+          hasOrigin: false,
+        },
+      ],
+    });
+
+    await syncWorktrees();
+
+    const state = loadState();
+    expect(state.projects[0].worktrees.length).toBe(1);
+    expect(state.projects[0].worktrees[0].pinned).toBe(true);
   });
 });

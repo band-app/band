@@ -18,13 +18,14 @@
  */
 
 import { createLogger } from "@band-app/logger";
+import { setBrowserLookup } from "../infra/browser-host/browser-lookup";
 import {
   BrowserQueries,
   type BrowserRow,
   type BrowserStatus,
   type BrowserUpdatePatch,
 } from "../infra/db/queries/browsers";
-import { DockviewLayoutManager } from "./dockview-layout-manager";
+import { DockviewLayoutManager } from "./_utils/dockview-layout-manager";
 
 const log = createLogger("browser-service");
 
@@ -396,10 +397,16 @@ export class BrowserService {
 }
 
 /**
- * Shared singleton consumed by both the API tier (browsers router) and the
- * back-compat shim in `lib/browser-manager.ts`. The browser service holds
- * in-memory state (the tab registry), so callers MUST go through this
- * instance — instantiating a second `BrowserService` elsewhere would
- * create a phantom registry that doesn't see the other's writes.
+ * Shared singleton consumed by the API tier (browsers router), other
+ * services (e.g. workspace lifecycle deleting all tabs), and start-server
+ * boot. The browser service holds in-memory state (the tab registry), so
+ * callers MUST go through this instance — instantiating a second
+ * `BrowserService` elsewhere would create a phantom registry that
+ * doesn't see the other's writes.
  */
 export const browserService = new BrowserService();
+
+// Register the lookup with the infra-tier dependency-inversion registry
+// so `infra/browser-host/host-state.ts` can resolve a Band tab id without
+// importing back into services (issue #535, follow-up 2).
+setBrowserLookup((browserId) => browserService.get(browserId));

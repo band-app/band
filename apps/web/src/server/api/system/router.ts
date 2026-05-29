@@ -12,8 +12,7 @@ import { z } from "zod";
 // fold `branch-status-poller` into a `StatusService`. The same pattern
 // applies to `statuses/`, `skills/`, `modes/`, `models/` — see
 // `apps/web/src/server/api/router.ts` for the consolidated checklist.
-import { getPollerActivity, setPollerActivity } from "../../services/branch-status-poller";
-import { listWorktrees } from "../../services/git";
+import { branchStatusPoller } from "../../services/branch-status-poller";
 import { loadState } from "../../services/state";
 import { systemService } from "../../services/system-service";
 import { tunnelService } from "../../services/tunnel-service";
@@ -65,11 +64,11 @@ export const systemRouter = t.router({
   setActivity: publicProcedure
     .input(z.object({ activity: z.enum(["active", "idle", "background"]) }))
     .mutation(({ input }) => {
-      setPollerActivity(input.activity);
+      branchStatusPoller.setActivity(input.activity);
       return { activity: input.activity };
     }),
 
-  getActivity: publicProcedure.query(() => ({ activity: getPollerActivity() })),
+  getActivity: publicProcedure.query(() => ({ activity: branchStatusPoller.getActivity() })),
 
   // Resources dashboard — server CPU/memory snapshot (cheap, instant).
   // `process.cpuUsage()` is cumulative since process start; the UI labels
@@ -111,7 +110,7 @@ export const systemRouter = t.router({
         .filter((p) => p.kind === "git")
         .map(async (project) => {
           try {
-            const list = await listWorktrees(project.path);
+            const list = await systemService.listWorktrees(project.path);
             // `listWorktrees` guarantees a non-empty branch for non-bare
             // worktrees: detached HEADs (mid-rebase, mid-bisect, or
             // explicit `git checkout <sha>`) are labelled with the
@@ -159,7 +158,7 @@ export const systemRouter = t.router({
 
       let worktreePaths: { branch: string; path: string }[];
       try {
-        const list = await listWorktrees(project.path);
+        const list = await systemService.listWorktrees(project.path);
         // See `resourcesProjects` above — `listWorktrees` already
         // gives every non-bare worktree a non-empty branch label.
         worktreePaths = list

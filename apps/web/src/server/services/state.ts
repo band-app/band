@@ -1,5 +1,3 @@
-import { eq, or } from "drizzle-orm";
-import { getDb } from "../infra/db/connection";
 import {
   type ProjectKind,
   ProjectQueries,
@@ -14,9 +12,12 @@ import {
   type NotificationSettings,
   type Settings,
 } from "../infra/db/queries/settings";
+import { WorkspaceStatusQueries } from "../infra/db/queries/workspace-statuses";
 import { type WorkspaceIdentity, WorkspaceQueries } from "../infra/db/queries/workspaces";
-import { workspaceStatuses as workspaceStatusesTable } from "../infra/db/schema";
-import { SettingsService, settingsService } from "../services/settings-service";
+import type { WorkspaceAgentInfo, WorkspaceStatusSnapshot } from "../infra/events/status-event-bus";
+import { SettingsService, settingsService } from "./settings-service";
+
+const workspaceStatusQueries = new WorkspaceStatusQueries();
 
 // Workspace-identity resolution lives in the Infra tier now (issue #314,
 // Phase 3 of the 3-tier refactor). The legacy private helper below
@@ -41,14 +42,19 @@ export type { ProjectKind, ProjectState, WorktreeState };
 export { reconcileKindForProject };
 
 // -----------------------------------------------------------------------------
-// Project state — back-compat shims around the new infra/service layer.
+// Project state — thin re-export surface over `ProjectQueries`.
 //
 // `ProjectQueries` (in `server/infra/db/queries/projects.ts`) owns the
 // real CRUD for the `projects` + `worktrees` tables. The wrappers below
-// preserve the old `lib/state` import surface so unmigrated callers (the
-// legacy tRPC router, sync-state, workspace.ts, …) keep compiling
-// unchanged. Later refactor phases will migrate each caller to talk to
-// the infra/service tiers directly and this section will be deleted.
+// preserve the legacy function-style call shape (`loadState()`,
+// `saveState(state)`, `setProjectHasOrigin(name, flag)`) that the rest
+// of the codebase still speaks. They're accepted as the long-term shape
+// for these read paths — the doc lists `state.ts` under services as a
+// legacy state-file shim — but new code should reach for
+// `ProjectQueries` directly. The non-shim orchestration in this file
+// (`upsertWorkspaceStatus`, `resetAgentStatuses`,
+// `deleteWorkspaceStatus`) wraps `WorkspaceStatusQueries` with the
+// service-tier identity self-heal + change-detection rules.
 // -----------------------------------------------------------------------------
 
 const projectQueries = new ProjectQueries();
@@ -57,21 +63,13 @@ export interface AppState {
   projects: ProjectState[];
 }
 
-export interface AgentInfo {
-  name: string;
-  status: string;
-  lastActivity: string;
-  summary?: string;
-  codingAgentId?: string;
-}
-
-export interface WorkspaceStatus {
-  workspaceId: string;
-  project: string;
-  branch: string;
-  worktreePath: string;
-  agent?: AgentInfo;
-}
+// `AgentInfo` is the legacy alias for the workspace-agent snapshot used in
+// the status event bus. The canonical type now lives in
+// `infra/events/status-event-bus.ts::WorkspaceAgentInfo` — re-exported
+// here so existing callers that import `AgentInfo` from `services/state`
+// keep compiling unchanged.
+export type AgentInfo = WorkspaceAgentInfo;
+export type WorkspaceStatus = WorkspaceStatusSnapshot;
 
 export function loadState(): AppState {
   return { projects: projectQueries.loadAll() };
@@ -132,63 +130,25 @@ export function worktreesDir(): string {
   return settingsService.worktreesDir();
 }
 
+/**
+ * Read-side helpers — thin delegates to `WorkspaceStatusQueries` in the
+ * infra tier (issue #535, follow-up 7). The query class owns the SQL +
+ * row → snapshot mapping; this module retains the legacy export surface
+ * so callers don't churn paths.
+ */
 export function loadCurrentStatuses(): WorkspaceStatus[] {
-  const db = getDb();
-  const rows = db.select().from(workspaceStatusesTable).all();
-  return rows.map((row) => ({
-    workspaceId: row.workspaceId,
-    project: row.project,
-    branch: row.branch,
-    worktreePath: row.worktreePath,
-    agent: row.agentName
-      ? {
-          name: row.agentName,
-          status: row.agentStatus ?? "unknown",
-          lastActivity: row.agentLastActivity ?? "",
-          summary: row.agentSummary ?? undefined,
-          codingAgentId: row.codingAgentId ?? undefined,
-        }
-      : undefined,
-  }));
+  return workspaceStatusQueries.loadCurrent();
 }
 
 export function getWorkspaceStatus(workspaceId: string): WorkspaceStatus | null {
-  const db = getDb();
-  const row = db
-    .select()
-    .from(workspaceStatusesTable)
-    .where(eq(workspaceStatusesTable.workspaceId, workspaceId))
-    .get();
-  if (!row) return null;
-  return {
-    workspaceId: row.workspaceId,
-    project: row.project,
-    branch: row.branch,
-    worktreePath: row.worktreePath,
-    agent: row.agentName
-      ? {
-          name: row.agentName,
-          status: row.agentStatus ?? "unknown",
-          lastActivity: row.agentLastActivity ?? "",
-          summary: row.agentSummary ?? undefined,
-          codingAgentId: row.codingAgentId ?? undefined,
-        }
-      : undefined,
-  };
+  return workspaceStatusQueries.getByWorkspaceId(workspaceId);
 }
 
 export function upsertWorkspaceStatus(
   workspaceId: string,
   agent: { status: string; lastActivity?: string; codingAgentId?: string },
 ): WorkspaceStatus {
-  const db = getDb();
-
-  // Read existing row to preserve fields
-  const existing = db
-    .select()
-    .from(workspaceStatusesTable)
-    .where(eq(workspaceStatusesTable.workspaceId, workspaceId))
-    .get();
+  const existing = workspaceStatusQueries.findRow(workspaceId);
 
   const now = Date.now();
   const mergedAgent = {
@@ -256,10 +216,11 @@ export function upsertWorkspaceStatus(
       identityPatch.worktreePath !== undefined;
 
     if (agentChanged || identityChanged) {
-      db.update(workspaceStatusesTable)
-        .set({ ...mergedAgent, ...identityPatch, updatedAt: now })
-        .where(eq(workspaceStatusesTable.workspaceId, workspaceId))
-        .run();
+      workspaceStatusQueries.update(workspaceId, {
+        ...mergedAgent,
+        ...identityPatch,
+        updatedAt: now,
+      });
     }
   } else {
     // For new rows, resolve workspace identity from the worktrees DB
@@ -267,16 +228,14 @@ export function upsertWorkspaceStatus(
     finalProject = ws?.project ?? "";
     finalBranch = ws?.branch ?? "";
     finalWorktreePath = ws?.worktreePath ?? "";
-    db.insert(workspaceStatusesTable)
-      .values({
-        workspaceId,
-        project: finalProject,
-        branch: finalBranch,
-        worktreePath: finalWorktreePath,
-        ...mergedAgent,
-        updatedAt: now,
-      })
-      .run();
+    workspaceStatusQueries.insert({
+      workspaceId,
+      project: finalProject,
+      branch: finalBranch,
+      worktreePath: finalWorktreePath,
+      ...mergedAgent,
+      updatedAt: now,
+    });
   }
 
   // Build the return value in-memory — avoids a third SELECT after
@@ -299,22 +258,12 @@ export function upsertWorkspaceStatus(
 
 /**
  * Reset stale agent statuses to "waiting".
- * Called on server startup — no agent can be running if the server just started,
- * and any pending input requests are lost so "needs_attention" is also stale.
+ * Called on server startup — no agent can be running if the server just
+ * started, and any pending input requests are lost so "needs_attention"
+ * is also stale.
  */
 export function resetAgentStatuses(): number {
-  const db = getDb();
-  const result = db
-    .update(workspaceStatusesTable)
-    .set({ agentStatus: "waiting", updatedAt: Date.now() })
-    .where(
-      or(
-        eq(workspaceStatusesTable.agentStatus, "working"),
-        eq(workspaceStatusesTable.agentStatus, "needs_attention"),
-      ),
-    )
-    .run();
-  return Number(result.changes);
+  return workspaceStatusQueries.resetActiveToWaiting(Date.now());
 }
 
 function resolveWorkspaceIdentity(workspaceId: string): WorkspaceIdentity | null {
@@ -326,8 +275,5 @@ function resolveWorkspaceIdentity(workspaceId: string): WorkspaceIdentity | null
 }
 
 export function deleteWorkspaceStatus(workspaceId: string): void {
-  const db = getDb();
-  db.delete(workspaceStatusesTable)
-    .where(eq(workspaceStatusesTable.workspaceId, workspaceId))
-    .run();
+  workspaceStatusQueries.remove(workspaceId);
 }
