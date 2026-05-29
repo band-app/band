@@ -66,6 +66,11 @@ export async function getOrSpawnServer(
     throw new Error(`No language server configured for: ${lang}`);
   }
 
+  // Direct infra-tier DB read rather than the services-tier
+  // `WorkspaceService.resolve` cache because `lsp-manager.ts` is in the
+  // infra tier and cannot depend on services (issue #535). Both paths
+  // resolve the same identity; the service-tier cache is purely an
+  // optimisation that infra doesn't get to benefit from.
   const workspace = workspaceQueries.findIdentity(workspaceId);
   if (!workspace) {
     throw new Error(`Workspace not found: ${workspaceId}`);

@@ -454,6 +454,54 @@ describe("tRPC — workspace.switchAgent", () => {
     });
     expect(res.status).toBe(401);
   });
+
+  it("happy path: switching the agent updates the chat row and bumps the workspace status", async () => {
+    // The router first materialises the default chat via
+    // `chatService.getOrCreateDefault`. We let `switchAgent` itself
+    // do that — it's the same code path the dashboard hits.
+    const res = await trpcMutate(
+      server.url,
+      "workspace.switchAgent",
+      { workspaceId: "alpha-main", agentId: "codex" },
+      DEFAULT_TOKEN,
+    );
+    expect(res.status).toBe(200);
+    const data = await trpcData<{ ok: boolean }>(res);
+    expect(data).toEqual({ ok: true });
+
+    // Side effect 1: the chat row's `agent` field now reflects the
+    // new agent id. Drive `chats.list` via real HTTP — the same
+    // surface the dashboard renders the agent dropdown from.
+    const chatsRes = await fetch(
+      `${server.url}/trpc/chats.list?input=${encodeURIComponent(
+        JSON.stringify({ workspaceId: "alpha-main" }),
+      )}`,
+      { headers: { Cookie: `band_token=${DEFAULT_TOKEN}` } },
+    );
+    expect(chatsRes.status).toBe(200);
+    const chatsData = await trpcData<{
+      chats: Array<{ id: string; agent: string | null }>;
+    }>(chatsRes);
+    expect(chatsData.chats.length).toBeGreaterThan(0);
+    expect(chatsData.chats[0].agent).toBe("codex");
+
+    // Side effect 2: the workspace_statuses row stores the new
+    // codingAgentId, visible via the per-workspace `statuses.get`.
+    const statusesRes = await fetch(
+      `${server.url}/trpc/statuses.get?input=${encodeURIComponent(
+        JSON.stringify({ workspaceId: "alpha-main" }),
+      )}`,
+      { headers: { Cookie: `band_token=${DEFAULT_TOKEN}` } },
+    );
+    expect(statusesRes.status).toBe(200);
+    // `statuses.get` returns the `WorkspaceStatus | null` shape directly,
+    // not wrapped under a `.status` field.
+    const statusData = await trpcData<{
+      workspaceId: string;
+      agent?: { codingAgentId?: string };
+    } | null>(statusesRes);
+    expect(statusData?.agent?.codingAgentId).toBe("codex");
+  });
 });
 
 // ---------------------------------------------------------------------------

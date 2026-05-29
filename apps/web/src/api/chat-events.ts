@@ -9,11 +9,7 @@ import {
 import { openSseStream, type SseWriter } from "../server/services/_utils/sse-writer";
 import { agentService } from "../server/services/agent-service";
 import { chatService } from "../server/services/chat-service";
-import {
-  type StreamChunk,
-  subscribe as subscribeTask,
-  taskService,
-} from "../server/services/task-service";
+import { type StreamChunk, taskService } from "../server/services/task-service";
 import { workspaceService } from "../server/services/workspace-service";
 import type {
   ChatEvent,
@@ -173,7 +169,7 @@ export async function handleChatEvents(
     },
   };
 
-  const unsubscribeTask = subscribeTask(chatId, (chunk: StreamChunk) => {
+  const unsubscribeTask = taskService.subscribe(chatId, (chunk: StreamChunk) => {
     const eid = chunk.eventId;
     if (eid != null && eid <= lastEmittedId) {
       return; // already replayed/emitted

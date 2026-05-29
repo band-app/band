@@ -272,6 +272,15 @@ export class ChatService {
    */
   private initialized = false;
 
+  /**
+   * Per-chatId dedupe map for in-flight active-session refreshes.
+   * Initialised once via `obtainRefreshMap` (lazy globalThis-keyed
+   * singleton) so multiple bundles of this module share one map. Lives
+   * up here with the other private fields rather than next to its
+   * methods so the class layout matches the rest of the file.
+   */
+  private readonly refreshes: Map<string, Promise<void>> = obtainRefreshMap();
+
   constructor(
     private readonly queries: ChatQueries = new ChatQueries(),
     private readonly layoutManager: DockviewLayoutManager = new DockviewLayoutManager(
@@ -822,16 +831,6 @@ export class ChatService {
     });
     this.refreshes.set(chatId, promise);
   }
-
-  /**
-   * Per-chatId dedupe map for in-flight refreshes. Stored on a
-   * globalThis-keyed singleton (mirroring agent-pool) so multiple bundles
-   * of this module — esbuild start-server.mjs + Vite SSR server.js —
-   * share one map and don't fork the dedupe set. Initialised lazily by
-   * `obtainRefreshMap` to avoid module-load order issues with the
-   * `globalThis` symbol key.
-   */
-  private readonly refreshes: Map<string, Promise<void>> = obtainRefreshMap();
 
   private async doRefresh(chatId: string, worktreePath: string): Promise<void> {
     try {

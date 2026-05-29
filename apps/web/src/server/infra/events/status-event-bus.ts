@@ -5,13 +5,13 @@
  * Lives in the Infra tier so the lower-level adapters that produce these
  * events (e.g. `infra/tunnels/tunnel-client.ts` emitting `tunnel-url` /
  * `tunnel-error`) can publish without reaching back into the services
- * tier. The services-tier façade in `services/watcher.ts` re-exports
+ * tier. The services-tier façade in `services/watcher-service.ts` re-exports
  * `emit` and `StatusEvent`, layers the on-connect snapshot logic on top
  * of `subscribe`, and is what the API tier and other services consume.
  *
  * The bus deliberately holds no state beyond the listener set — every
  * status snapshot (current workspace statuses, branch statuses, running
- * setups) is recomputed in `services/watcher.ts` at subscribe time from
+ * setups) is recomputed in `services/watcher-service.ts` at subscribe time from
  * the database.
  */
 
@@ -32,7 +32,7 @@ export interface WorkspaceAgentInfo {
 
 /**
  * Workspace-status snapshot used inside `StatusEvent`. Mirrors the legacy
- * `WorkspaceStatus` shape that `services/watcher.ts` historically owned;
+ * `WorkspaceStatus` shape that `services/watcher-service.ts` historically owned;
  * extracted here so the infra producers (tunnel-client and any future
  * infra-level emitter) can construct events without crossing into the
  * services tier.
@@ -131,7 +131,7 @@ export function emit(event: StatusEvent): void {
  * Register a raw listener. Returns an unsubscribe function. Callers that
  * want the on-connect snapshot (current workspace statuses, branch
  * statuses, running setups) should go through
- * `services/watcher.ts::subscribe` instead — it wraps this with the
+ * `services/watcher-service.ts::subscribe` instead — it wraps this with the
  * snapshot replay and the branch-status poller lifecycle.
  */
 export function subscribe(listener: StatusListener): () => void {
@@ -141,7 +141,7 @@ export function subscribe(listener: StatusListener): () => void {
   };
 }
 
-/** Number of currently registered listeners. Used by `services/watcher.ts`
+/** Number of currently registered listeners. Used by `services/watcher-service.ts`
  *  to start/stop the branch-status poller. */
 export function listenerCount(): number {
   return listeners.size;

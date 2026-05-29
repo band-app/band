@@ -33,11 +33,11 @@ import { chatService } from "./chat-service";
 // function body. Capturing `const cs = cronjobService;` at module load
 // would silently get `undefined`.
 import { cronjobService } from "./cronjob-service";
+import { settingsService } from "./settings-service";
 import {
   bandHome,
   deleteWorkspaceStatus,
   getAgentDefinition,
-  loadSettings,
   loadState,
   type ProjectState,
   saveState,
@@ -763,7 +763,7 @@ export class WorkspaceService {
       }
     }
 
-    const settings = loadSettings();
+    const settings = settingsService.get();
     // Use the workspace's default chat-pane agent so the commit-message
     // agent matches the agent the user is actually looking at. Without
     // this, switching the pane to (e.g.) codex would silently keep
