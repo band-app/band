@@ -45,19 +45,20 @@ const compareBranchSchema = z
   .optional();
 
 /**
- * Re-throw an error from a service-tier call. Currently a pass-through
- * — services raise plain `Error` / `WorkspaceNotFoundError` instances
- * and the tRPC adapter surfaces them as HTTP 500. The legacy wire
- * contract for this router is 500-on-any-error (the trpc integration
- * tests pin it), matching the project-tier `ProjectNotFoundError` /
- * `PlainProjectError` handling in `api/workspaces/router.ts`. Promoting
- * `WorkspaceNotFoundError` to a 404 is a separate change that needs to
- * land alongside the pinned-test update.
+ * Wire-contract note: every workspace-tier service error (including
+ * `WorkspaceNotFoundError`) bubbles as a plain `Error` and the tRPC
+ * adapter surfaces it as HTTP 500. That's pinned by the trpc
+ * integration tests in `tests/trpc.test.ts` and mirrors the project-
+ * tier `ProjectNotFoundError` / `PlainProjectError` handling in
+ * `api/workspaces/router.ts`. Promoting `WorkspaceNotFoundError` to a
+ * tRPC `NOT_FOUND` (404) is a separate change that needs to land
+ * alongside the pinned-test update.
+ *
+ * `formatFile` is the one historical exception — it threw
+ * `TRPCError({code: "NOT_FOUND"})` even before the follow-up-1 split.
+ * Kept as-is to preserve the pre-existing wire contract; a future
+ * cleanup can align the two.
  */
-function rethrow(err: unknown): never {
-  throw err;
-}
-
 export const workspaceRouter = t.router({
   getTerminalConfig: publicProcedure
     .input(z.object({ workspaceId: z.string() }))
@@ -191,13 +192,7 @@ export const workspaceRouter = t.router({
 
   listBranches: publicProcedure
     .input(z.object({ workspaceId: z.string() }))
-    .query(async ({ input }) => {
-      try {
-        return await diffService.listBranches(input.workspaceId);
-      } catch (err) {
-        rethrow(err);
-      }
-    }),
+    .query(({ input }) => diffService.listBranches(input.workspaceId)),
 
   getDiff: publicProcedure
     .input(
@@ -208,17 +203,13 @@ export const workspaceRouter = t.router({
         compareBranch: compareBranchSchema,
       }),
     )
-    .query(async ({ input }) => {
-      try {
-        return await diffService.getDiff(input.workspaceId, {
-          contextLines: input.contextLines,
-          diffMode: input.diffMode,
-          compareBranch: input.compareBranch,
-        });
-      } catch (err) {
-        rethrow(err);
-      }
-    }),
+    .query(({ input }) =>
+      diffService.getDiff(input.workspaceId, {
+        contextLines: input.contextLines,
+        diffMode: input.diffMode,
+        compareBranch: input.compareBranch,
+      }),
+    ),
 
   getDiffSummary: publicProcedure
     .input(
@@ -228,16 +219,12 @@ export const workspaceRouter = t.router({
         compareBranch: compareBranchSchema,
       }),
     )
-    .query(async ({ input }) => {
-      try {
-        return await diffService.getDiffSummary(input.workspaceId, {
-          diffMode: input.diffMode,
-          compareBranch: input.compareBranch,
-        });
-      } catch (err) {
-        rethrow(err);
-      }
-    }),
+    .query(({ input }) =>
+      diffService.getDiffSummary(input.workspaceId, {
+        diffMode: input.diffMode,
+        compareBranch: input.compareBranch,
+      }),
+    ),
 
   getFileDiff: publicProcedure
     .input(
@@ -248,17 +235,13 @@ export const workspaceRouter = t.router({
         contextLines: z.number().int().min(0).max(99999).optional(),
       }),
     )
-    .query(async ({ input }) => {
-      try {
-        return await diffService.getFileDiff(input.workspaceId, {
-          filePath: input.filePath,
-          mergeBase: input.mergeBase,
-          contextLines: input.contextLines,
-        });
-      } catch (err) {
-        rethrow(err);
-      }
-    }),
+    .query(({ input }) =>
+      diffService.getFileDiff(input.workspaceId, {
+        filePath: input.filePath,
+        mergeBase: input.mergeBase,
+        contextLines: input.contextLines,
+      }),
+    ),
 
   revertFile: publicProcedure
     .input(
@@ -269,37 +252,21 @@ export const workspaceRouter = t.router({
         compareBranch: compareBranchSchema,
       }),
     )
-    .mutation(async ({ input }) => {
-      try {
-        return await diffService.revertFile(input.workspaceId, {
-          filePath: input.filePath,
-          diffMode: input.diffMode,
-          compareBranch: input.compareBranch,
-        });
-      } catch (err) {
-        rethrow(err);
-      }
-    }),
+    .mutation(({ input }) =>
+      diffService.revertFile(input.workspaceId, {
+        filePath: input.filePath,
+        diffMode: input.diffMode,
+        compareBranch: input.compareBranch,
+      }),
+    ),
 
   gitPull: publicProcedure
     .input(z.object({ workspaceId: z.string() }))
-    .mutation(async ({ input }) => {
-      try {
-        return await workspaceService.gitPullByWorkspaceId(input.workspaceId);
-      } catch (err) {
-        rethrow(err);
-      }
-    }),
+    .mutation(({ input }) => workspaceService.gitPullByWorkspaceId(input.workspaceId)),
 
   gitPush: publicProcedure
     .input(z.object({ workspaceId: z.string() }))
-    .mutation(async ({ input }) => {
-      try {
-        return await workspaceService.gitPushByWorkspaceId(input.workspaceId);
-      } catch (err) {
-        rethrow(err);
-      }
-    }),
+    .mutation(({ input }) => workspaceService.gitPushByWorkspaceId(input.workspaceId)),
 
   gitCommit: publicProcedure
     .input(
@@ -309,46 +276,24 @@ export const workspaceRouter = t.router({
         body: z.string().optional(),
       }),
     )
-    .mutation(async ({ input }) => {
-      try {
-        return await workspaceService.gitCommit(input.workspaceId, {
-          message: input.message,
-          body: input.body,
-        });
-      } catch (err) {
-        rethrow(err);
-      }
-    }),
+    .mutation(({ input }) =>
+      workspaceService.gitCommit(input.workspaceId, {
+        message: input.message,
+        body: input.body,
+      }),
+    ),
 
   generateCommitMessage: publicProcedure
     .input(z.object({ workspaceId: z.string() }))
-    .mutation(async ({ input }) => {
-      try {
-        return await workspaceService.generateCommitMessage(input.workspaceId);
-      } catch (err) {
-        rethrow(err);
-      }
-    }),
+    .mutation(({ input }) => workspaceService.generateCommitMessage(input.workspaceId)),
 
   listFiles: publicProcedure
     .input(z.object({ workspaceId: z.string(), path: z.string().default("") }))
-    .query(async ({ input }) => {
-      try {
-        return await filesService.listFiles(input.workspaceId, input.path);
-      } catch (err) {
-        rethrow(err);
-      }
-    }),
+    .query(({ input }) => filesService.listFiles(input.workspaceId, input.path)),
 
   getFile: publicProcedure
     .input(z.object({ workspaceId: z.string(), path: z.string() }))
-    .query(async ({ input }) => {
-      try {
-        return await filesService.getFile(input.workspaceId, input.path);
-      } catch (err) {
-        rethrow(err);
-      }
-    }),
+    .query(({ input }) => filesService.getFile(input.workspaceId, input.path)),
 
   saveFile: publicProcedure
     .input(
@@ -358,13 +303,7 @@ export const workspaceRouter = t.router({
         content: z.string(),
       }),
     )
-    .mutation(async ({ input }) => {
-      try {
-        return await filesService.saveFile(input.workspaceId, input.path, input.content);
-      } catch (err) {
-        rethrow(err);
-      }
-    }),
+    .mutation(({ input }) => filesService.saveFile(input.workspaceId, input.path, input.content)),
 
   createFile: publicProcedure
     .input(
@@ -374,33 +313,15 @@ export const workspaceRouter = t.router({
         content: z.string().default(""),
       }),
     )
-    .mutation(async ({ input }) => {
-      try {
-        return await filesService.createFile(input.workspaceId, input.path, input.content);
-      } catch (err) {
-        rethrow(err);
-      }
-    }),
+    .mutation(({ input }) => filesService.createFile(input.workspaceId, input.path, input.content)),
 
   createDirectory: publicProcedure
     .input(z.object({ workspaceId: z.string(), path: z.string().min(1) }))
-    .mutation(async ({ input }) => {
-      try {
-        return await filesService.createDirectory(input.workspaceId, input.path);
-      } catch (err) {
-        rethrow(err);
-      }
-    }),
+    .mutation(({ input }) => filesService.createDirectory(input.workspaceId, input.path)),
 
   deletePath: publicProcedure
     .input(z.object({ workspaceId: z.string(), path: z.string().min(1) }))
-    .mutation(async ({ input }) => {
-      try {
-        return await filesService.deletePath(input.workspaceId, input.path);
-      } catch (err) {
-        rethrow(err);
-      }
-    }),
+    .mutation(({ input }) => filesService.deletePath(input.workspaceId, input.path)),
 
   renamePath: publicProcedure
     .input(
@@ -410,13 +331,9 @@ export const workspaceRouter = t.router({
         toPath: z.string().min(1),
       }),
     )
-    .mutation(async ({ input }) => {
-      try {
-        return await filesService.renamePath(input.workspaceId, input.fromPath, input.toPath);
-      } catch (err) {
-        rethrow(err);
-      }
-    }),
+    .mutation(({ input }) =>
+      filesService.renamePath(input.workspaceId, input.fromPath, input.toPath),
+    ),
 
   copyPath: publicProcedure
     .input(
@@ -426,13 +343,9 @@ export const workspaceRouter = t.router({
         toPath: z.string().min(1),
       }),
     )
-    .mutation(async ({ input }) => {
-      try {
-        return await filesService.copyPath(input.workspaceId, input.fromPath, input.toPath);
-      } catch (err) {
-        rethrow(err);
-      }
-    }),
+    .mutation(({ input }) =>
+      filesService.copyPath(input.workspaceId, input.fromPath, input.toPath),
+    ),
 
   searchFiles: publicProcedure
     .input(
@@ -442,16 +355,12 @@ export const workspaceRouter = t.router({
         limit: z.number().default(50),
       }),
     )
-    .query(async ({ input }) => {
-      try {
-        return await searchService.searchFiles(input.workspaceId, {
-          query: input.query,
-          limit: input.limit,
-        });
-      } catch (err) {
-        rethrow(err);
-      }
-    }),
+    .query(({ input }) =>
+      searchService.searchFiles(input.workspaceId, {
+        query: input.query,
+        limit: input.limit,
+      }),
+    ),
 
   searchContent: publicProcedure
     .input(
@@ -464,19 +373,15 @@ export const workspaceRouter = t.router({
         limit: z.number().default(100),
       }),
     )
-    .query(async ({ input }) => {
-      try {
-        return await searchService.searchContent(input.workspaceId, {
-          query: input.query,
-          caseSensitive: input.caseSensitive,
-          wholeWord: input.wholeWord,
-          regex: input.regex,
-          limit: input.limit,
-        });
-      } catch (err) {
-        rethrow(err);
-      }
-    }),
+    .query(({ input }) =>
+      searchService.searchContent(input.workspaceId, {
+        query: input.query,
+        caseSensitive: input.caseSensitive,
+        wholeWord: input.wholeWord,
+        regex: input.regex,
+        limit: input.limit,
+      }),
+    ),
 
   switchAgent: publicProcedure
     .input(
@@ -486,13 +391,7 @@ export const workspaceRouter = t.router({
         chatId: z.string().optional(),
       }),
     )
-    .mutation(async ({ input }) => {
-      try {
-        return await workspaceService.switchAgent(input);
-      } catch (err) {
-        rethrow(err);
-      }
-    }),
+    .mutation(({ input }) => workspaceService.switchAgent(input)),
 });
 
 export type WorkspaceRouter = typeof workspaceRouter;

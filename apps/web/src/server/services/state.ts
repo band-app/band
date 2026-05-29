@@ -18,10 +18,9 @@ import { WorkspaceStatusQueries } from "../infra/db/queries/workspace-statuses";
 import { type WorkspaceIdentity, WorkspaceQueries } from "../infra/db/queries/workspaces";
 import { workspaceStatuses as workspaceStatusesTable } from "../infra/db/schema";
 import type { WorkspaceAgentInfo, WorkspaceStatusSnapshot } from "../infra/events/status-event-bus";
+import { SettingsService, settingsService } from "../services/settings-service";
 
 const workspaceStatusQueries = new WorkspaceStatusQueries();
-
-import { SettingsService, settingsService } from "../services/settings-service";
 
 // Workspace-identity resolution lives in the Infra tier now (issue #314,
 // Phase 3 of the 3-tier refactor). The legacy private helper below
