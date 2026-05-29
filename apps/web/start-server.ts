@@ -1,6 +1,6 @@
 import { appendFileSync, createReadStream, mkdirSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { basename, join, resolve } from "node:path";
+import { basename, join, resolve, sep } from "node:path";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { applyWSSHandler } from "@trpc/server/adapters/ws";
 import sirv from "sirv";
@@ -282,8 +282,11 @@ function serveWorkspaceFile(res: ServerResponse, workspaceId: string, rawPath: s
   const root = workspace.worktree.path;
   const target = resolve(join(root, rawPath));
 
-  // Path traversal protection: target must be within workspace root
-  if (!target.startsWith(`${root}/`) && target !== root) {
+  // Path traversal protection: target must be within workspace root.
+  // Use `sep` (not a hard-coded `/`) so the prefix check still works on
+  // Windows where the resolved path uses backslashes — same shape as
+  // `FilesService.resolveInside`.
+  if (!target.startsWith(root + sep) && target !== root) {
     res.writeHead(400);
     res.end("Bad request");
     return;
