@@ -11,12 +11,21 @@
 import { execFile } from "node:child_process";
 
 /**
+ * Packages this adapter is allowed to install. The literal union doubles
+ * as runtime guard — a future caller that passes anything else fails to
+ * compile, so the brewInstall surface can't accidentally become a
+ * "install whatever package the request specifies" hole. Add new
+ * entries here when a new install flow lands.
+ */
+type AllowedPackage = "cloudflared";
+
+/**
  * Install a Homebrew package by name with the supplied `PATH` (so `brew`
  * itself is locatable on a process that inherited a stripped-down PATH
  * from launchd / Electron). Times out at 120s; surfaces stderr in the
  * thrown error so the UI can show why the install failed.
  */
-export async function brewInstall(pkg: string, resolvedPath: string): Promise<void> {
+export async function brewInstall(pkg: AllowedPackage, resolvedPath: string): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     execFile(
       "brew",
