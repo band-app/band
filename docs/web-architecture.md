@@ -67,7 +67,7 @@ apps/web/src/server/
   services/
     project-service.ts
     workspace-service.ts
-    chat-service.ts
+    chat-service.ts          # CRUD + activeSessionSummary helpers
     browser-service.ts
     browser-history-service.ts
     task-service.ts
@@ -82,14 +82,28 @@ apps/web/src/server/
     files-service.ts         # workspace file CRUD (path-traversal + .git guards)
     search-service.ts        # workspace file-name fuzzy + ripgrep content search
     diff-service.ts          # listBranches / getDiff / getDiffSummary / getFileDiff / revertFile
-    cli.ts                   # band-CLI binary resolver + symlink installer
-    cli-skills.ts            # render + install agent skill templates
-    hooks.ts                 # ~/.claude/settings.json read/write
-    setup.ts                 # first-time-setup orchestration
-    file-watcher.ts          # filesystem watch wiring
-    formatter.ts             # prettier wrapper
+    cli-service.ts           # band-CLI binary resolver + symlink installer
+    cli-skills-service.ts    # render + install agent skill templates
+    hooks-service.ts         # ~/.claude/settings.json read/write
+    setup-service.ts         # first-time-setup orchestration
+    sync-service.ts          # syncWorktrees (state.json ↔ git worktree list)
+    state.ts                 # legacy state-file shims (loadState/saveState/loadSettings/...)
+    file-watcher.ts          # filesystem watch wiring (consumed via EditorService)
+    formatter.ts             # prettier wrapper (consumed via EditorService)
     system-service.ts        # process orchestration (du rate-limit, prereq checks)
-    watcher.ts               # status-event-bus façade (subscribe + snapshot)
+    watcher-service.ts       # status-event-bus façade (subscribe + snapshot)
+    branch-status-poller.ts  # git/CI poller class + function-shaped facade
+    _utils/                  # non-domain helpers shared by services + API tier
+      fuzzy-score.ts
+      mime-types.ts
+      port-utils.ts
+      upload-utils.ts
+      github-graphql.ts
+      sse-writer.ts
+      jsonl-message-to-events.ts
+      queued-message-store.ts
+      dockview-layout-manager.ts
+      terminal-layout-manager.ts
   shared/
     chat-events.ts           # SSE wire schema shared by server + client halves
   infra/
