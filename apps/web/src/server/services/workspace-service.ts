@@ -16,6 +16,12 @@ import { WorkspaceNotFoundError } from "../errors";
 // Capturing any of these at module load — `const t = submitTask;` at
 // the top of this file, or `const ws = workspaceService;` at the top of
 // `task-service.ts` — would silently get `undefined`.
+// Direct Service → Infra hop to the agent pool. `AgentService` is the
+// router-facing seam for the same primitives, but inside the services
+// tier (where `generateCommitMessage` and `switchAgent` live) we reach
+// the infra module directly — same pattern as `task-service` /
+// `session-service` / `chat-service`. The doc allows Service → Infra;
+// AgentService exists so the API tier doesn't have to.
 import { createWorkspaceAgent, replaceAgent } from "../infra/agents/agent-pool";
 import { TaskQueries } from "../infra/db/queries/tasks";
 import { WorkspaceQueries } from "../infra/db/queries/workspaces";
@@ -663,9 +669,20 @@ export class WorkspaceService {
     const cwd = workspace.worktree.path;
     try {
       await execGit(["push"], cwd);
-    } catch {
-      // First push may need to set upstream. Resolve the live HEAD branch
-      // rather than trusting a stale state.json entry.
+    } catch (err) {
+      // Narrow the catch to the specific "no upstream configured" exit
+      // — every other failure (auth, rejected push, network) must bubble
+      // up unmasked so the user sees the real cause instead of a
+      // misleading second-push error. Same shape as the project-keyed
+      // `gitPush` above.
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!/has no upstream branch/i.test(msg)) {
+        throw err;
+      }
+      // First push needs to set upstream. Resolve the live HEAD branch
+      // rather than trusting a stale state.json entry — the worktree
+      // may have been renamed via `git branch -m` and the project
+      // record not yet refreshed.
       let headBranch: string;
       try {
         headBranch = (await execGit(["rev-parse", "--abbrev-ref", "HEAD"], cwd)).trim();

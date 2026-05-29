@@ -244,6 +244,20 @@ function validateLabels(
  * the CLI adapter — already re-reads on each access, so the new
  * contract is a no-op behavioural change for them.)
  */
+/**
+ * Resolve (or lazily create) the per-chatId dedupe map for in-flight
+ * active-session refreshes. Stored on a `globalThis`-keyed singleton
+ * so multiple bundles of this module (esbuild start-server.mjs + Vite
+ * SSR server.js) share one map and don't fork the dedupe set —
+ * mirroring agent-pool's pattern.
+ */
+const REFRESH_KEY = Symbol.for("band.chat-session-summary.refresh");
+function obtainRefreshMap(): Map<string, Promise<void>> {
+  const g = globalThis as unknown as Record<symbol, unknown>;
+  if (!g[REFRESH_KEY]) g[REFRESH_KEY] = new Map<string, Promise<void>>();
+  return g[REFRESH_KEY] as Map<string, Promise<void>>;
+}
+
 export class ChatService {
   // Primary index: chatId → ChatSession
   private readonly chatSessions = new Map<string, ChatSession>();
@@ -797,34 +811,27 @@ export class ChatService {
    * `agent.getSessionInfo`.
    */
   scheduleActiveSessionRefresh(chatId: string, worktreePath: string): void {
-    // Cache the map locally so the four accesses below — `has`, `set`,
-    // and two in the `.finally` (`get` + `delete`) — share one
-    // globalThis lookup instead of hitting the getter four times.
-    const refreshes = this.refreshes;
-    if (refreshes.has(chatId)) return;
+    if (this.refreshes.has(chatId)) return;
 
     const promise = this.doRefresh(chatId, worktreePath).finally(() => {
       // Only clear if the entry is still ours — defensive, the Map is
       // keyed per-chatId and the only writer here is this method, but
       // kept for symmetry with the agent-pool dedupe pattern.
-      const current = refreshes.get(chatId);
-      if (current === promise) refreshes.delete(chatId);
+      const current = this.refreshes.get(chatId);
+      if (current === promise) this.refreshes.delete(chatId);
     });
-    refreshes.set(chatId, promise);
+    this.refreshes.set(chatId, promise);
   }
 
   /**
    * Per-chatId dedupe map for in-flight refreshes. Stored on a
    * globalThis-keyed singleton (mirroring agent-pool) so multiple bundles
    * of this module — esbuild start-server.mjs + Vite SSR server.js —
-   * share one map and don't fork the dedupe set.
+   * share one map and don't fork the dedupe set. Initialised lazily by
+   * `obtainRefreshMap` to avoid module-load order issues with the
+   * `globalThis` symbol key.
    */
-  private get refreshes(): Map<string, Promise<void>> {
-    const REFRESH_KEY = Symbol.for("band.chat-session-summary.refresh");
-    const g = globalThis as unknown as Record<symbol, unknown>;
-    if (!g[REFRESH_KEY]) g[REFRESH_KEY] = new Map<string, Promise<void>>();
-    return g[REFRESH_KEY] as Map<string, Promise<void>>;
-  }
+  private readonly refreshes: Map<string, Promise<void>> = obtainRefreshMap();
 
   private async doRefresh(chatId: string, worktreePath: string): Promise<void> {
     try {
