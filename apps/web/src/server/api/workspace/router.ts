@@ -6,7 +6,7 @@ import { filesService } from "../../services/files-service";
 import { FormatterError, formatFile } from "../../services/formatter";
 import { searchService } from "../../services/search-service";
 import { terminalService } from "../../services/terminal-service";
-import { WorkspaceNotFoundError, workspaceService } from "../../services/workspace-service";
+import { workspaceService } from "../../services/workspace-service";
 import { publicProcedure, t } from "../trpc";
 
 /**
@@ -45,13 +45,16 @@ const compareBranchSchema = z
   .optional();
 
 /**
- * Translate a `WorkspaceNotFoundError` thrown by the services tier into a
- * tRPC `NOT_FOUND`. Any other error type bubbles through unchanged.
+ * Re-throw an error from a service-tier call. Currently a pass-through
+ * — services raise plain `Error` / `WorkspaceNotFoundError` instances
+ * and the tRPC adapter surfaces them as HTTP 500. The legacy wire
+ * contract for this router is 500-on-any-error (the trpc integration
+ * tests pin it), matching the project-tier `ProjectNotFoundError` /
+ * `PlainProjectError` handling in `api/workspaces/router.ts`. Promoting
+ * `WorkspaceNotFoundError` to a 404 is a separate change that needs to
+ * land alongside the pinned-test update.
  */
 function rethrow(err: unknown): never {
-  if (err instanceof WorkspaceNotFoundError) {
-    throw new TRPCError({ code: "NOT_FOUND", message: err.message });
-  }
   throw err;
 }
 
