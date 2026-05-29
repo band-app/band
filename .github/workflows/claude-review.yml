@@ -115,71 +115,96 @@ jobs:
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
 
-            You are the parent agent for a PR review running in GitHub Actions.
-            Your only job is to invoke the `review-changes` skill and forward
-            its sectioned output to PR comments. Do NOT try to review the PR
-            yourself.
+            You are a thin dispatcher running in GitHub Actions. You do
+            NOT review the PR yourself. You delegate the review to a
+            fresh general-purpose subagent and post that subagent's
+            output as a PR comment. Three steps only.
 
-            Step 1 — Invoke the `review-changes` skill via the Skill tool
-            with the arguments:
+            Step 1 — Gather context.
 
-              Review this change set.
-              - Repo:   ${{ github.repository }}
-              - PR:     ${{ github.event.pull_request.number }}
-              - Base:   origin/${{ github.event.pull_request.base.ref }}
-              - Head:   ${{ github.event.pull_request.head.sha }}
-              - Issues: <extract from PR body and commit messages>
+            Resolve these values:
+              REPO   = ${{ github.repository }}
+              PR     = ${{ github.event.pull_request.number }}
+              BASE   = origin/${{ github.event.pull_request.base.ref }}
+              HEAD   = ${{ github.event.pull_request.head.sha }}
 
-            The skill will gather the diff via `gh pr diff`, fetch PR metadata
-            via `gh pr view`, fetch linked-issue requirements via `gh issue view`,
-            dispatch the coding/testing/security/performance specialists in
-            parallel, and return a sectioned report ending with a single
-            `Verdict:` line.
+            Discover linked issues by extracting `closes #N`, `fixes #N`,
+            or `resolves #N` from the PR body and commit messages:
 
-            Step 2 — Forward the skill's output to a PR comment.
+              gh pr view ${{ github.event.pull_request.number }} --json body --jq .body
+              git log origin/${{ github.event.pull_request.base.ref }}..${{ github.event.pull_request.head.sha }} --format='%s%n%b'
 
-            The skill returns a complete, fully-formatted report string.
-            Treat it as OPAQUE TEXT. Your job is NOT to author, decorate,
-            paraphrase, reformat, summarize, rewrite, prettify, or
-            "improve" any part of it — including header text, emojis,
-            severity tags, finding numbering, or the trailing Verdict
-            line. Take the exact byte sequence the skill returned and
-            post it as the comment body. The skill is the single source
-            of truth for the comment content.
+            Collect any matches. If none found, use the literal string
+            "none detected".
 
-            Post it as ONE consolidated PR comment. On subsequent workflow
-            runs (e.g. when the author pushes a new commit), the SAME
-            comment must be UPDATED — do not post a new comment each
-            time.
+            Step 2 — Dispatch ONE general-purpose subagent.
 
-            Idempotent-update strategy:
+            Make exactly one Agent call:
 
-              (a) Prepend the HTML marker `<!-- claude-review-summary -->`
-                  to the report body. This is how subsequent runs find the
-                  existing comment.
+              Agent(subagent_type="general-purpose", prompt=<see below>)
 
-              (b) List PR comments and search for the marker:
+            The subagent's prompt is exactly this (with values
+            substituted from Step 1):
+
+                Invoke the `review-changes` skill via the Skill tool with
+                the arguments below. Then return the skill's COMPLETE
+                output as your final message — pass it through verbatim,
+                do not modify, summarize, prefix, suffix, decorate,
+                paraphrase, or comment on it.
+
+                Skill arguments:
+
+                    Review this change set.
+                    - Repo:   <REPO>
+                    - PR:     <PR>
+                    - Base:   <BASE>
+                    - Head:   <HEAD>
+                    - Issues: <linked-issue list, or "none detected">
+
+                Your only allowed actions:
+                  1. Call Skill(skill="review-changes", args=<arguments above>)
+                  2. Return what the skill returned.
+
+                Do not perform any review yourself. Do not Read the
+                criteria files. Do not call Agent. Do not call gh or
+                git directly. If the Skill call fails or returns
+                nothing, return the error message verbatim — do not
+                substitute a hand-written review.
+
+            Wait for the subagent to return. Treat its return value as
+            opaque text — that IS the comment body content.
+
+            Step 3 — Post as a PR comment, idempotently.
+
+            The comment body is exactly:
+              `<!-- claude-review-summary -->` + newline + the subagent's
+              returned string, unchanged.
+
+            On subsequent workflow runs (e.g. when the author pushes a
+            new commit), the SAME comment must be UPDATED — do not post
+            a new comment each time. Strategy:
+
+              (a) Search for existing marker comment:
                   gh api "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
                     --jq '.[] | select(.body | contains("<!-- claude-review-summary -->")) | .id' \
                     | head -1
 
-              (c) If the search returns a comment ID, UPDATE it in place:
+              (b) If the search returns a comment ID, UPDATE it in place:
                   gh api "repos/${{ github.repository }}/issues/comments/<id>" \
                     -X PATCH -f body="<full body>"
 
-              (d) If the search returns nothing, CREATE a new comment:
+              (c) If the search returns nothing, CREATE a new comment:
                   gh pr comment ${{ github.event.pull_request.number }} --body "<full body>"
-                  Pass the body as the `--body` argument directly; do not
-                  try to pipe via `--body-file -` (your allowlist does not
-                  include the upstream command needed to pipe).
+                  Pass the body as the `--body` argument directly; do
+                  not try to pipe via `--body-file -` (your allowlist
+                  does not include the upstream command needed to pipe).
 
-            The comment body is exactly: the HTML marker
-            `<!-- claude-review-summary -->`, a newline, then the skill's
-            output unchanged. Nothing else. Do not insert a header. Do
-            not "wrap" the skill's output in an H1 / H2. Do not add a
-            footer, signature, or "posted by" note. Do not change the
-            order of sections. Do not edit emojis. If the skill returns
-            `Coding 🚨`, post `Coding 🚨` — not `## Coding 🔨`, not
-            `Coding 🔍`, not anything else. Pass through unchanged.
+            Hard bans on this dispatcher:
+            - Do NOT do any review work yourself.
+            - Do NOT Read criteria files or repo source.
+            - Do NOT add headers, footers, signatures, or "Posted by"
+              notes around the subagent's output.
+            - Do NOT reformat, decorate, paraphrase, or "improve" the
+              subagent's output. It is the comment body verbatim.
           claude_args: |-
             --allowedTools "Skill,Agent,Bash(git diff:*),Bash(git log:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh issue view:*),Read,Glob,Grep,Bash(gh pr comment:*),Bash(gh api repos/band-app/band/issues/*/comments:*),Bash(gh api repos/band-app/band/issues/comments/*:*)"
