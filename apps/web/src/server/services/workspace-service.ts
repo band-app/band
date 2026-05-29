@@ -37,7 +37,6 @@ import {
   bandHome,
   deleteWorkspaceStatus,
   getAgentDefinition,
-  getWorkspaceStatus,
   loadSettings,
   loadState,
   type ProjectState,
@@ -859,16 +858,16 @@ export class WorkspaceService {
     // Update the chat pane's agent config
     chatService.update(chatId, { agent: input.agentId });
 
-    // Update workspace status with the new coding agent ID
-    upsertWorkspaceStatus(input.workspaceId, {
+    // Update workspace status with the new coding agent ID. The upsert
+    // returns the final row state (project/branch/worktreePath + the
+    // agent merge), so we can `emit` it directly without a second
+    // SELECT round-trip — same pattern as
+    // `task-service.ts::abortTask` / `cancelTask`.
+    const status = upsertWorkspaceStatus(input.workspaceId, {
       status: "waiting",
       codingAgentId: input.agentId,
     });
-
-    const status = getWorkspaceStatus(input.workspaceId);
-    if (status) {
-      emit({ kind: "update", status });
-    }
+    emit({ kind: "update", status });
 
     return { ok: true };
   }

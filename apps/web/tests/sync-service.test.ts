@@ -1,3 +1,17 @@
+/**
+ * Utility-level white-box tests for `syncWorktrees` — drives the
+ * function against a real git repo + a real SQLite DB in a per-case
+ * tmpdir (via `BAND_HOME`). Matches the precedent set by
+ * `git.test.ts` and `fuzzy-score.test.ts`: these exercise non-
+ * networked infra/service helpers whose contract is too fine-grained
+ * for the integration suite (no tRPC surface, no HTTP boundary).
+ *
+ * The repo's general doctrine is black-box integration tests via the
+ * real server — see CLAUDE.md and the `write-integration-test` skill.
+ * That doctrine continues to apply to any test that touches a tRPC
+ * procedure or driver-level UI.
+ */
+
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

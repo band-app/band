@@ -797,16 +797,20 @@ export class ChatService {
    * `agent.getSessionInfo`.
    */
   scheduleActiveSessionRefresh(chatId: string, worktreePath: string): void {
-    if (this.refreshes.has(chatId)) return;
+    // Cache the map locally so the four accesses below — `has`, `set`,
+    // and two in the `.finally` (`get` + `delete`) — share one
+    // globalThis lookup instead of hitting the getter four times.
+    const refreshes = this.refreshes;
+    if (refreshes.has(chatId)) return;
 
     const promise = this.doRefresh(chatId, worktreePath).finally(() => {
       // Only clear if the entry is still ours — defensive, the Map is
       // keyed per-chatId and the only writer here is this method, but
       // kept for symmetry with the agent-pool dedupe pattern.
-      const current = this.refreshes.get(chatId);
-      if (current === promise) this.refreshes.delete(chatId);
+      const current = refreshes.get(chatId);
+      if (current === promise) refreshes.delete(chatId);
     });
-    this.refreshes.set(chatId, promise);
+    refreshes.set(chatId, promise);
   }
 
   /**

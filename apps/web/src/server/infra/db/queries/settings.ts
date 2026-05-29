@@ -122,9 +122,11 @@ function settingsFile(): string {
  *   4. A built-in `claude-code` definition so a freshly installed Band
  *      with an empty settings file can still launch.
  *
- * Lives in infra so the agent-pool (also infra) can resolve definitions
- * without crossing back into the services tier. `SettingsService` retains
- * a thin static wrapper for backwards compatibility.
+ * Lives in infra so `agent-pool.ts` (also infra) can resolve definitions
+ * from the same package — both sides import this function and
+ * `SettingsQueries.load()` directly, with no hop through the services
+ * tier. `SettingsService.resolveAgent` retains a thin static wrapper
+ * around this function so legacy services-tier callers keep compiling.
  */
 export function resolveAgentDefinition(
   settings: Settings,

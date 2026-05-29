@@ -1242,6 +1242,19 @@ export function getSessionEventsAfter(
 // ---------------------------------------------------------------------------
 
 export class TaskService {
+  /**
+   * DI asymmetry to be aware of: only `listTaskRecords` and
+   * `loadTaskRecord` go through `this.queries` (so a stub can be
+   * injected for persistence reads). Every other method
+   * (`submitTask`, `abortTask`, `cancelTask`, `getTask`, the session-
+   * buffer accessors, …) delegates to the module-level function which
+   * reads the hardcoded module-level `taskQueries` *and* the
+   * `globalThis`-keyed in-memory state. Stubbing `queries` in a test
+   * therefore changes the persistence-read methods only; the runtime
+   * methods still touch the shared singleton. Completing the migration
+   * to a fully constructor-DI'd class is tracked as a follow-up to the
+   * #535 cleanup.
+   */
   constructor(private readonly queries: TaskQueries = taskQueries) {}
 
   createPendingInput(approvalId: string, workspaceId?: string): Promise<Record<string, string>> {
