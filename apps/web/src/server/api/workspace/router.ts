@@ -1,9 +1,9 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { diffService } from "../../services/diff-service";
-import { subscribeToFileChanges } from "../../services/file-watcher";
+import { editorService } from "../../services/editor-service";
 import { filesService } from "../../services/files-service";
-import { FormatterError, formatFile } from "../../services/formatter";
+import { FormatterError } from "../../services/formatter";
 import { searchService } from "../../services/search-service";
 import { terminalService } from "../../services/terminal-service";
 import { workspaceService } from "../../services/workspace-service";
@@ -20,9 +20,9 @@ import { publicProcedure, t } from "../trpc";
  *   - `diffService`   → branch listing, diff, file diff, revert.
  *   - `workspaceService` → gitPull/gitPush/gitCommit (workspaceId-keyed),
  *     generateCommitMessage, switchAgent.
- *   - `formatFile`    → Prettier wrapper (services/formatter.ts).
+
+ *   - `editorService` → file watcher subscription + Prettier formatFile.
  *   - `terminalService.getWorkspaceConfig` → per-workspace terminal config.
- *   - `subscribeToFileChanges` → file-watcher subscription.
  *
  * The plural `workspaces.*` namespace handles workspace lifecycle
  * (create, remove, runScript, gitPull/Push by `(project, branch)`); see
@@ -104,7 +104,7 @@ export const workspaceRouter = t.router({
         });
       }
       try {
-        return await formatFile(workspace.worktree.path, input.filePath, input.content);
+        return await editorService.formatFile(input.workspaceId, input.filePath, input.content);
       } catch (err) {
         if (err instanceof FormatterError) {
           throw new TRPCError({
@@ -153,7 +153,7 @@ export const workspaceRouter = t.router({
       // of waiting forever for an event from a dead handle.
       let watcherClosed = false;
 
-      const unsubscribe = subscribeToFileChanges(opts.input.workspaceId, (path) => {
+      const unsubscribe = editorService.subscribeToFileChanges(opts.input.workspaceId, (path) => {
         if (path === null) {
           watcherClosed = true;
         } else {

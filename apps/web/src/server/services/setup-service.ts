@@ -1,7 +1,7 @@
 import { createLogger } from "@band-app/logger";
-import { checkCli, installCli } from "./cli";
-import { installSkills } from "./cli-skills";
-import { checkHooks, installHooks } from "./hooks";
+import { checkCli, installCli } from "./cli-service";
+import { installSkills } from "./cli-skills-service";
+import { checkHooks, installHooks } from "./hooks-service";
 import { type CodingAgentDefinition, loadSettings, saveSettings } from "./state";
 import { syncWorktrees } from "./sync-service";
 import { systemService } from "./system-service";

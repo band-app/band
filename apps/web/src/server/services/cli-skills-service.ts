@@ -62,7 +62,7 @@ import {
   getSharedSkillsDir,
   SUPPORTED_AGENT_TYPES,
 } from "@band-app/coding-agent";
-import { findCliBinary } from "./cli";
+import { findCliBinary } from "./cli-service";
 import { systemService } from "./system-service";
 
 /** The six skills `band generate-skills` emits. */

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { checkCli, installCli, resolveCliPaths } from "../../services/cli";
+import { checkCli, installCli, resolveCliPaths } from "../../services/cli-service";
 import { publicProcedure, t } from "../trpc";
 
 /**
