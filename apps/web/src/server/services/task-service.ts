@@ -1247,14 +1247,18 @@ export class TaskService {
    * `abortTask` / `cancelTask` / `getTask` / the session-buffer
    * accessors, mirroring the `ChatService.refreshes` private-field
    * pattern (lazy resolve a `globalThis`-keyed Map into a class
-   * member). Until then there's a DI asymmetry to be aware of: only
-   * `listTaskRecords` and `loadTaskRecord` go through `this.queries`
-   * (so a stub can be injected for persistence reads). Every other
-   * method delegates to the module-level function which reads the
-   * hardcoded module-level `taskQueries` *and* the `globalThis`-keyed
-   * in-memory state. Stubbing `queries` in a test therefore changes
-   * the persistence-read methods only; the runtime methods still
-   * touch the shared singleton.
+   * member).
+   *
+   * What `new TaskService(stub)` buys you today: stubbed reads from
+   * `listTaskRecords` and `loadTaskRecord`. That's it. The runtime
+   * methods (`submitTask`, `abortTask`, `cancelTask`, `getTask`, the
+   * session-buffer accessors) all delegate to the module-level
+   * functions, which read the module-level `taskQueries` AND the
+   * `globalThis`-keyed in-memory state — none of which the injected
+   * `queries` reaches. Test authors that need to stub the whole
+   * surface should treat the singleton as live infrastructure (start
+   * the real server in a test) rather than trying to isolate it via
+   * constructor DI alone.
    */
   constructor(private readonly queries: TaskQueries = taskQueries) {}
 

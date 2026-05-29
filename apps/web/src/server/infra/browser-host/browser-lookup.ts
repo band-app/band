@@ -28,10 +28,20 @@ export interface BrowserLookupSnapshot {
 
 type BrowserLookup = (browserId: string) => BrowserLookupSnapshot | undefined;
 
-let current: BrowserLookup = () => undefined;
+const NOOP_LOOKUP: BrowserLookup = () => undefined;
+let current: BrowserLookup = NOOP_LOOKUP;
 
 export function setBrowserLookup(lookup: BrowserLookup): void {
   current = lookup;
+}
+
+/**
+ * Restore the no-op default. Useful for tests that instantiate a
+ * second `BrowserService` and need the registry to forget the
+ * production singleton's lookup so it doesn't bleed across cases.
+ */
+export function resetBrowserLookup(): void {
+  current = NOOP_LOOKUP;
 }
 
 export function lookupBrowser(browserId: string): BrowserLookupSnapshot | undefined {

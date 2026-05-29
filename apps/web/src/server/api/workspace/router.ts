@@ -67,6 +67,16 @@ const mergeBaseSchema = z
  * tRPC `NOT_FOUND` (404) is a separate change that needs to land
  * alongside the pinned-test update.
  *
+ *
+ * TODO(#535-followup): the `WorkspaceNotFoundError` → 404 migration
+ * should cover `listBranches`, `getDiff`, `getDiffSummary`, `getFile`,
+ * `getFileDiff`, `revertFile`, the `git*` mutations, the `*Path` /
+ * `*File` / `*Directory` file CRUD, and the two search procedures —
+ * any procedure that goes through `WorkspaceService.resolve` or its
+ * `WorkspaceNotFoundError`-throwing siblings. When that lands, the
+ * `tests/trpc.test.ts` cases that pin status=500 for "unknown
+ * workspace" need to flip to 404 in the same change.
+ *
  * `formatFile` and `switchAgent` are the historical exceptions — both
  * threw `TRPCError({code: "NOT_FOUND"})` for the workspace-lookup
  * branch even before the follow-up-1 split. Both kept as-is to
