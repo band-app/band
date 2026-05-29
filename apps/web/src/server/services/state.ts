@@ -1,5 +1,3 @@
-import { eq, or } from "drizzle-orm";
-import { getDb } from "../infra/db/connection";
 import {
   type ProjectKind,
   ProjectQueries,
@@ -16,7 +14,6 @@ import {
 } from "../infra/db/queries/settings";
 import { WorkspaceStatusQueries } from "../infra/db/queries/workspace-statuses";
 import { type WorkspaceIdentity, WorkspaceQueries } from "../infra/db/queries/workspaces";
-import { workspaceStatuses as workspaceStatusesTable } from "../infra/db/schema";
 import type { WorkspaceAgentInfo, WorkspaceStatusSnapshot } from "../infra/events/status-event-bus";
 import { SettingsService, settingsService } from "../services/settings-service";
 
@@ -146,14 +143,7 @@ export function upsertWorkspaceStatus(
   workspaceId: string,
   agent: { status: string; lastActivity?: string; codingAgentId?: string },
 ): WorkspaceStatus {
-  const db = getDb();
-
-  // Read existing row to preserve fields
-  const existing = db
-    .select()
-    .from(workspaceStatusesTable)
-    .where(eq(workspaceStatusesTable.workspaceId, workspaceId))
-    .get();
+  const existing = workspaceStatusQueries.findRow(workspaceId);
 
   const now = Date.now();
   const mergedAgent = {
@@ -221,10 +211,11 @@ export function upsertWorkspaceStatus(
       identityPatch.worktreePath !== undefined;
 
     if (agentChanged || identityChanged) {
-      db.update(workspaceStatusesTable)
-        .set({ ...mergedAgent, ...identityPatch, updatedAt: now })
-        .where(eq(workspaceStatusesTable.workspaceId, workspaceId))
-        .run();
+      workspaceStatusQueries.update(workspaceId, {
+        ...mergedAgent,
+        ...identityPatch,
+        updatedAt: now,
+      });
     }
   } else {
     // For new rows, resolve workspace identity from the worktrees DB
@@ -232,16 +223,14 @@ export function upsertWorkspaceStatus(
     finalProject = ws?.project ?? "";
     finalBranch = ws?.branch ?? "";
     finalWorktreePath = ws?.worktreePath ?? "";
-    db.insert(workspaceStatusesTable)
-      .values({
-        workspaceId,
-        project: finalProject,
-        branch: finalBranch,
-        worktreePath: finalWorktreePath,
-        ...mergedAgent,
-        updatedAt: now,
-      })
-      .run();
+    workspaceStatusQueries.insert({
+      workspaceId,
+      project: finalProject,
+      branch: finalBranch,
+      worktreePath: finalWorktreePath,
+      ...mergedAgent,
+      updatedAt: now,
+    });
   }
 
   // Build the return value in-memory — avoids a third SELECT after
@@ -264,22 +253,12 @@ export function upsertWorkspaceStatus(
 
 /**
  * Reset stale agent statuses to "waiting".
- * Called on server startup — no agent can be running if the server just started,
- * and any pending input requests are lost so "needs_attention" is also stale.
+ * Called on server startup — no agent can be running if the server just
+ * started, and any pending input requests are lost so "needs_attention"
+ * is also stale.
  */
 export function resetAgentStatuses(): number {
-  const db = getDb();
-  const result = db
-    .update(workspaceStatusesTable)
-    .set({ agentStatus: "waiting", updatedAt: Date.now() })
-    .where(
-      or(
-        eq(workspaceStatusesTable.agentStatus, "working"),
-        eq(workspaceStatusesTable.agentStatus, "needs_attention"),
-      ),
-    )
-    .run();
-  return Number(result.changes);
+  return workspaceStatusQueries.resetActiveToWaiting(Date.now());
 }
 
 function resolveWorkspaceIdentity(workspaceId: string): WorkspaceIdentity | null {
@@ -291,8 +270,5 @@ function resolveWorkspaceIdentity(workspaceId: string): WorkspaceIdentity | null
 }
 
 export function deleteWorkspaceStatus(workspaceId: string): void {
-  const db = getDb();
-  db.delete(workspaceStatusesTable)
-    .where(eq(workspaceStatusesTable.workspaceId, workspaceId))
-    .run();
+  workspaceStatusQueries.remove(workspaceId);
 }

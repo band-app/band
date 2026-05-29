@@ -20,7 +20,7 @@
  */
 
 import { createLogger } from "@band-app/logger";
-import { removeAgent } from "../infra/agents/agent-pool";
+import { getOrCreateAgent, removeAgent } from "../infra/agents/agent-pool";
 import {
   ChatQueries,
   type ChatRow,
@@ -741,6 +741,119 @@ export class ChatService {
   /** Remove a chat panel from the saved dockview layout. */
   removeFromLayout(workspaceId: string, chatId: string): void {
     this.layoutManager.removePanel(workspaceId, chatId);
+  }
+
+  // -------------------------------------------------------------------------
+  // Active-session summary (absorbed from chat-session-summary.ts in #535)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Resolve and persist the active-session summary when the chat row is
+   * missing one. Used by `chats.get` for the migration / fallback case.
+   *
+   * Returns the updated chat (or the unchanged input if nothing was
+   * resolved). Walks through the agent pool because the summary lives on
+   * disk in the agent's session JSONL.
+   */
+  async ensureActiveSessionSummary(
+    chatId: string,
+    worktreePath: string,
+  ): Promise<ChatSession | undefined> {
+    const chat = this.get(chatId);
+    if (!chat) return undefined;
+
+    // Already cached — nothing to do.
+    if (chat.activeSessionId && chat.activeSessionSummary !== undefined) return chat;
+
+    try {
+      const agent = await getOrCreateAgent(chatId, worktreePath, chat.agent);
+
+      if (chat.activeSessionId) {
+        // Migration / lazy-resolve case: row has activeSessionId but no
+        // cached summary. Resolve once and persist.
+        if (!agent.getSessionInfo) return chat;
+        const info = await agent.getSessionInfo(chat.activeSessionId, worktreePath);
+        if (info) {
+          this.updateSessionSummary(chatId, chat.activeSessionId, info.summary, info.lastModified);
+        }
+        // Session file doesn't exist anymore — leave the cached values
+        // null. The client will treat this as "no active session" until
+        // the next mutation rebuilds the cache.
+        return this.get(chatId);
+      }
+
+      // No activeSessionId. Leave it null — the legacy
+      // `agent.getLatestSession` fallback broke the "New session" flow
+      // under the event-log model (handleNewSession clears
+      // activeSessionId to null and the subsequent chats.get refetch
+      // would re-promote the prior session before the new task starts).
+      // See issue #478.
+      return chat;
+    } catch (err) {
+      log.warn({ chatId, err }, "ensureActiveSessionSummary failed");
+      return chat;
+    }
+  }
+
+  /**
+   * Fire-and-forget refresh of the cached summary after a `chats.get`
+   * returns. Concurrent calls for the same chatId share a single in-flight
+   * refresh — a burst of SSE-driven query refetches won't stampede
+   * `agent.getSessionInfo`.
+   */
+  scheduleActiveSessionRefresh(chatId: string, worktreePath: string): void {
+    if (this.refreshes.has(chatId)) return;
+
+    const promise = this.doRefresh(chatId, worktreePath).finally(() => {
+      // Only clear if the entry is still ours — defensive, the Map is
+      // keyed per-chatId and the only writer here is this method, but
+      // kept for symmetry with the agent-pool dedupe pattern.
+      const current = this.refreshes.get(chatId);
+      if (current === promise) this.refreshes.delete(chatId);
+    });
+    this.refreshes.set(chatId, promise);
+  }
+
+  /**
+   * Per-chatId dedupe map for in-flight refreshes. Stored on a
+   * globalThis-keyed singleton (mirroring agent-pool) so multiple bundles
+   * of this module — esbuild start-server.mjs + Vite SSR server.js —
+   * share one map and don't fork the dedupe set.
+   */
+  private get refreshes(): Map<string, Promise<void>> {
+    const REFRESH_KEY = Symbol.for("band.chat-session-summary.refresh");
+    const g = globalThis as unknown as Record<symbol, unknown>;
+    if (!g[REFRESH_KEY]) g[REFRESH_KEY] = new Map<string, Promise<void>>();
+    return g[REFRESH_KEY] as Map<string, Promise<void>>;
+  }
+
+  private async doRefresh(chatId: string, worktreePath: string): Promise<void> {
+    try {
+      const chat = this.get(chatId);
+      if (!chat) return;
+
+      const agent = await getOrCreateAgent(chatId, worktreePath, chat.agent);
+
+      if (chat.activeSessionId) {
+        if (!agent.getSessionInfo) return;
+        const info = await agent.getSessionInfo(chat.activeSessionId, worktreePath);
+        if (!info) {
+          // Session file is gone (deleted, moved, etc.). Don't clobber
+          // the cached values — they're still useful for the tab title
+          // until the user picks a new session.
+          return;
+        }
+        this.updateSessionSummary(chatId, chat.activeSessionId, info.summary, info.lastModified);
+        return;
+      }
+
+      // No activeSessionId. Leave it null — same rationale as
+      // `ensureActiveSessionSummary`. Discovery of prior sessions is now
+      // an explicit user action via the history dropdown
+      // (`sessions.list`). See issue #478.
+    } catch (err) {
+      log.warn({ chatId, err }, "active session refresh failed");
+    }
   }
 }
 

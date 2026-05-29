@@ -24,10 +24,6 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { agentService } from "../../services/agent-service";
 import { chatService, InvalidLabelsError } from "../../services/chat-service";
-import {
-  ensureActiveSessionSummary,
-  scheduleActiveSessionRefresh,
-} from "../../services/chat-session-summary";
 import { abortTask, submitTask, TaskConflictError } from "../../services/task-service";
 import { workspaceService } from "../../services/workspace-service";
 import { publicProcedure, t } from "../trpc";
@@ -106,7 +102,7 @@ export const chatsRouter = t.router({
     // so the client can render a meaningful tab title without waiting for
     // a separate sessions.list. Subsequent reads are pure SQLite.
     if (workspace && (!chat.activeSessionId || chat.activeSessionSummary === undefined)) {
-      const resolved = await ensureActiveSessionSummary(input.chatId, workspace.worktree.path);
+      const resolved = await chatService.ensureActiveSessionSummary(input.chatId, workspace.worktree.path);
       if (resolved) {
         return { chat: resolved };
       }
@@ -117,7 +113,7 @@ export const chatsRouter = t.router({
     // user renamed the session via /rename). Errors are swallowed; the
     // refresh will be retried on the next request.
     if (workspace) {
-      scheduleActiveSessionRefresh(input.chatId, workspace.worktree.path);
+      chatService.scheduleActiveSessionRefresh(input.chatId, workspace.worktree.path);
     }
 
     return { chat };
