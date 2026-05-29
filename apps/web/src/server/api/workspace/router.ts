@@ -20,7 +20,6 @@ import { publicProcedure, t } from "../trpc";
  *   - `diffService`   → branch listing, diff, file diff, revert.
  *   - `workspaceService` → gitPull/gitPush/gitCommit (workspaceId-keyed),
  *     generateCommitMessage, switchAgent.
-
  *   - `editorService` → file watcher subscription + Prettier formatFile.
  *   - `terminalService.getWorkspaceConfig` → per-workspace terminal config.
  *

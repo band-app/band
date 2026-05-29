@@ -9,7 +9,7 @@ import {
 } from "../infra/db/queries/cronjobs";
 import { BAND_CRON_ID_LABEL, type ChatSession, chatService } from "./chat-service";
 import { loadState } from "./state";
-import { submitTask, TaskConflictError } from "./task-service";
+import { TaskConflictError, taskService } from "./task-service";
 
 const log = createLogger("cronjob-service");
 
@@ -303,7 +303,7 @@ export class CronjobService {
     if (!workspaceId) throw new CronjobProjectNotFoundError();
 
     const cronChat = this.getOrCreateCronjobChat(workspaceId, job);
-    const task = submitTask({ workspaceId, chatId: cronChat.id, prompt: job.prompt });
+    const task = taskService.submitTask({ workspaceId, chatId: cronChat.id, prompt: job.prompt });
     return { taskId: task.id, workspaceId, chatId: cronChat.id };
   }
 
@@ -535,7 +535,7 @@ export class CronjobService {
 
     try {
       const chat = this.getOrCreateCronjobChat(workspaceId, job);
-      const task = submitTask({ workspaceId, chatId: chat.id, prompt: job.prompt });
+      const task = taskService.submitTask({ workspaceId, chatId: chat.id, prompt: job.prompt });
       // Log the resulting task id so operators auditing a scheduled fire
       // can correlate it back to the `tasks.list` row. Mirrors the
       // observability the manual `trigger()` path returns to its caller.

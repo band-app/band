@@ -6,15 +6,7 @@ import { WorkspaceNotFoundError } from "../../errors";
 import { saveUploadedFilesDetailed } from "../../services/_utils/upload-utils";
 import { chatService } from "../../services/chat-service";
 import { loadState } from "../../services/state";
-import {
-  abortTask,
-  cancelTask,
-  getTask,
-  listTaskRecords,
-  loadTaskRecord,
-  submitTask,
-  TaskConflictError,
-} from "../../services/task-service";
+import { TaskConflictError, taskService } from "../../services/task-service";
 import { publicProcedure, t } from "../trpc";
 
 interface SubmitResult {
@@ -67,7 +59,7 @@ export const tasksRouter = t.router({
         .optional(),
     )
     .query(({ input }) => {
-      const tasks = listTaskRecords(input);
+      const tasks = taskService.listTaskRecords(input);
       const state = loadState();
       const workspaceIds = new Set<string>();
       for (const p of state.projects) {
@@ -168,7 +160,7 @@ export const tasksRouter = t.router({
       }
 
       try {
-        const task = submitTask({
+        const task = taskService.submitTask({
           workspaceId: input.workspaceId,
           chatId,
           prompt: input.prompt,
@@ -195,7 +187,7 @@ export const tasksRouter = t.router({
     .input(z.object({ workspaceId: z.string(), chatId: z.string().optional() }))
     .query(({ input }) => {
       const chatId = input.chatId ?? chatService.getOrCreateDefault(input.workspaceId).id;
-      const task = getTask(chatId);
+      const task = taskService.getTask(chatId);
       return { task };
     }),
 
@@ -209,7 +201,7 @@ export const tasksRouter = t.router({
     .input(z.object({ workspaceId: z.string(), chatId: z.string().optional() }))
     .query(({ input }) => {
       const chatId = input.chatId ?? chatService.getOrCreateDefault(input.workspaceId).id;
-      const task = getTask(chatId);
+      const task = taskService.getTask(chatId);
       return { running: task?.status === "running" };
     }),
 
@@ -217,7 +209,7 @@ export const tasksRouter = t.router({
     .input(z.object({ workspaceId: z.string(), chatId: z.string().optional() }))
     .mutation(({ input }) => {
       const chatId = input.chatId ?? chatService.getOrCreateDefault(input.workspaceId).id;
-      const aborted = abortTask(chatId);
+      const aborted = taskService.abortTask(chatId);
       if (!aborted) {
         throw new TRPCError({ code: "NOT_FOUND", message: "No running task found" });
       }
@@ -225,7 +217,7 @@ export const tasksRouter = t.router({
     }),
 
   cancel: publicProcedure.input(z.object({ taskId: z.string() })).mutation(({ input }) => {
-    const result = cancelTask(input.taskId);
+    const result = taskService.cancelTask(input.taskId);
     if (!result.cancelled) {
       throw new TRPCError({
         code: "NOT_FOUND",
@@ -239,7 +231,7 @@ export const tasksRouter = t.router({
     .input(z.object({ taskId: z.string() }))
     .mutation(({ input }): RerunResult => {
       // Explicit return type — see comment on `submit` above.
-      const record = loadTaskRecord(input.taskId);
+      const record = taskService.loadTaskRecord(input.taskId);
       if (!record) {
         throw new TRPCError({ code: "NOT_FOUND", message: "Task not found" });
       }
@@ -248,7 +240,7 @@ export const tasksRouter = t.router({
       const chatId = record.chatId ?? chatService.getOrCreateDefault(record.workspaceId).id;
 
       try {
-        const task = submitTask({
+        const task = taskService.submitTask({
           workspaceId: record.workspaceId,
           chatId,
           prompt: record.prompt,

@@ -15,7 +15,7 @@ import {
 import { WorkspaceStatusQueries } from "../infra/db/queries/workspace-statuses";
 import { type WorkspaceIdentity, WorkspaceQueries } from "../infra/db/queries/workspaces";
 import type { WorkspaceAgentInfo, WorkspaceStatusSnapshot } from "../infra/events/status-event-bus";
-import { SettingsService, settingsService } from "../services/settings-service";
+import { SettingsService, settingsService } from "./settings-service";
 
 const workspaceStatusQueries = new WorkspaceStatusQueries();
 
@@ -42,14 +42,19 @@ export type { ProjectKind, ProjectState, WorktreeState };
 export { reconcileKindForProject };
 
 // -----------------------------------------------------------------------------
-// Project state — back-compat shims around the new infra/service layer.
+// Project state — thin re-export surface over `ProjectQueries`.
 //
 // `ProjectQueries` (in `server/infra/db/queries/projects.ts`) owns the
 // real CRUD for the `projects` + `worktrees` tables. The wrappers below
-// preserve the old `lib/state` import surface so unmigrated callers (the
-// legacy tRPC router, sync-state, workspace.ts, …) keep compiling
-// unchanged. Later refactor phases will migrate each caller to talk to
-// the infra/service tiers directly and this section will be deleted.
+// preserve the legacy function-style call shape (`loadState()`,
+// `saveState(state)`, `setProjectHasOrigin(name, flag)`) that the rest
+// of the codebase still speaks. They're accepted as the long-term shape
+// for these read paths — the doc lists `state.ts` under services as a
+// legacy state-file shim — but new code should reach for
+// `ProjectQueries` directly. The non-shim orchestration in this file
+// (`upsertWorkspaceStatus`, `resetAgentStatuses`,
+// `deleteWorkspaceStatus`) wraps `WorkspaceStatusQueries` with the
+// service-tier identity self-heal + change-detection rules.
 // -----------------------------------------------------------------------------
 
 const projectQueries = new ProjectQueries();

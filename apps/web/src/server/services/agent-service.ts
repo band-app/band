@@ -9,10 +9,10 @@
  * so the pool stays an infra detail.
  *
  * Other services that already depend on the agent pool internally
- * (`task-service`, `session-service`, `chat-session-summary`,
- * `chat-service`) continue to import the infra module directly — that's
- * an allowed Service → Infra dependency. The wrappers here exist purely
- * so the API tier doesn't have to.
+ * (`task-service`, `session-service`, `chat-service`) continue to
+ * import the infra module directly — that's an allowed Service → Infra
+ * dependency. The wrappers here exist purely so the API tier doesn't
+ * have to.
  *
  * Class-with-constructor-DI shape per `docs/web-architecture.md`
  * (issue #535, follow-up 5). The class wraps the agent-pool functions

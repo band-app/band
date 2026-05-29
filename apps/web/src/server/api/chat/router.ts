@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { resolvePendingInput } from "../../services/task-service";
+import { taskService } from "../../services/task-service";
 import { publicProcedure, t } from "../trpc";
 
 /**
@@ -19,7 +19,7 @@ export const chatRouter = t.router({
   answer: publicProcedure
     .input(z.object({ approvalId: z.string(), answers: z.record(z.string(), z.string()) }))
     .mutation(({ input }) => {
-      const resolved = resolvePendingInput(input.approvalId, input.answers);
+      const resolved = taskService.resolvePendingInput(input.approvalId, input.answers);
       if (!resolved) {
         throw new TRPCError({
           code: "NOT_FOUND",

@@ -21,8 +21,8 @@ import { pushQueuedMessage } from "../server/services/_utils/queued-message-stor
 import { saveUploadedFilesDetailed } from "../server/services/_utils/upload-utils";
 import { chatService } from "../server/services/chat-service";
 import {
-  submitTask,
   TaskConflictError,
+  taskService,
   WorkspaceNotFoundError,
 } from "../server/services/task-service";
 
@@ -127,7 +127,7 @@ export async function handleChatSubmit(
   }
 
   try {
-    submitTask({
+    taskService.submitTask({
       workspaceId,
       chatId,
       prompt: text,

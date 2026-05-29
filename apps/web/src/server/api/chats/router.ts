@@ -24,7 +24,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { agentService } from "../../services/agent-service";
 import { chatService, InvalidLabelsError } from "../../services/chat-service";
-import { abortTask, submitTask, TaskConflictError } from "../../services/task-service";
+import { TaskConflictError, taskService } from "../../services/task-service";
 import { workspaceService } from "../../services/workspace-service";
 import { publicProcedure, t } from "../trpc";
 
@@ -263,7 +263,7 @@ export const chatsRouter = t.router({
         chat = chatService.create(input.workspaceId, { id: input.chatId, name: "Chat" });
       }
       try {
-        const task = submitTask({
+        const task = taskService.submitTask({
           workspaceId: chat.workspaceId,
           chatId: chat.id,
           prompt: input.message,
@@ -282,7 +282,7 @@ export const chatsRouter = t.router({
     }),
 
   stop: publicProcedure.input(z.object({ chatId: z.string() })).mutation(({ input }) => {
-    abortTask(input.chatId);
+    taskService.abortTask(input.chatId);
     chatService.updateStatus(input.chatId, "stopped");
     return { ok: true };
   }),

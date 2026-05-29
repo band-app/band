@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { toWorkspaceId } from "@/dashboard";
 import { getWorkspaceStatus, loadState, upsertWorkspaceStatus } from "../../services/state";
-import { hasPendingInputForWorkspace } from "../../services/task-service";
+import { taskService } from "../../services/task-service";
 import { emit, subscribe as subscribeStatus } from "../../services/watcher-service";
 import { publicProcedure, t } from "../trpc";
 
@@ -66,7 +66,7 @@ export const statusesRouter = t.router({
       // stay on until the user actually answers (which calls
       // resolvePendingInput, and onUserInputNeeded then flips the status
       // back to "working").
-      if (hasPendingInputForWorkspace(input.workspaceId)) {
+      if (taskService.hasPendingInputForWorkspace(input.workspaceId)) {
         emit({ kind: "update", status: existing });
         return { ok: true };
       }

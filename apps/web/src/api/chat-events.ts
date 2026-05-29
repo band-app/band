@@ -10,12 +10,9 @@ import { openSseStream, type SseWriter } from "../server/services/_utils/sse-wri
 import { agentService } from "../server/services/agent-service";
 import { chatService } from "../server/services/chat-service";
 import {
-  getSessionBuffer,
-  getSessionEventsAfter,
-  getSessionUsage,
-  getTask,
   type StreamChunk,
   subscribe as subscribeTask,
+  taskService,
 } from "../server/services/task-service";
 import { workspaceService } from "../server/services/workspace-service";
 import type {
@@ -104,7 +101,7 @@ export async function handleChatEvents(
   // Synthetic ids are negative so they sort before any real buffer ids.
   let nextSyntheticId = -1;
 
-  const task = getTask(chatId);
+  const task = taskService.getTask(chatId);
   // Resolve the session to replay from:
   //   1. The in-memory task's sessionId — ONLY when the task is currently
   //      running. For a *completed* task that hasn't been evicted from
@@ -143,7 +140,7 @@ export async function handleChatEvents(
 
   // Initial usage snapshot, if any.
   if (resolvedSessionId) {
-    const usage = getSessionUsage(resolvedSessionId);
+    const usage = taskService.getSessionUsage(resolvedSessionId);
     if (usage) {
       emit(writer, { type: "usage", data: usage, eventId: nextSyntheticId-- });
     }
@@ -247,7 +244,7 @@ export async function handleChatEvents(
         // interaction (or visibility change).
         if (evt.type === "task-completed" || evt.type === "task-error") {
           const hasQueued = getQueuedMessages(chatId).length > 0;
-          const stillRunning = getTask(chatId)?.status === "running";
+          const stillRunning = taskService.getTask(chatId)?.status === "running";
           if (!hasQueued && !stillRunning) {
             return;
           }
@@ -291,7 +288,7 @@ async function replayPast(opts: {
     return;
   }
 
-  const buf = getSessionBuffer(sessionId);
+  const buf = taskService.getSessionBuffer(sessionId);
 
   // Two distinct replay paths:
   //
@@ -434,7 +431,7 @@ async function replayPast(opts: {
     // started would have lost A's last events. Client-side dedup
     // (`event.eventId <= state.lastEventId → skip`) is the right place for
     // ordering safety; the server simply ships everything past the cursor.
-    const events = getSessionEventsAfter(sessionId, afterEventId);
+    const events = taskService.getSessionEventsAfter(sessionId, afterEventId);
     for (const row of events) {
       const chunk = row.chunk as StreamChunk;
       const payload = chunkToChatEvent(chunk, sessionId);
@@ -445,9 +442,9 @@ async function replayPast(opts: {
 }
 
 // JSONL-message → ChatEvent translation lives in
-// `lib/jsonl-message-to-events.ts` so a unit test can exercise it
-// without coupling the test to the agent SDK's on-disk JSONL format.
-// See that file for the full contract.
+// `server/services/_utils/jsonl-message-to-events.ts` so a unit test
+// can exercise it without coupling the test to the agent SDK's
+// on-disk JSONL format. See that file for the full contract.
 
 /**
  * Translate a task-service broadcast chunk into a ChatEvent payload.

@@ -27,17 +27,14 @@ import {
   subscribe as subscribeRaw,
 } from "../infra/events/status-event-bus";
 import { getRunningSetups } from "../infra/setup/setup-runner";
-import { startBranchStatusPoller, stopBranchStatusPoller } from "./branch-status-poller";
+import { type BranchStatusPoller, branchStatusPoller } from "./branch-status-poller";
 import { loadCurrentStatuses } from "./state";
 
 export type { StatusEvent };
 export { emit };
 
 export class WatcherService {
-  constructor(
-    private readonly startPoller: () => void = startBranchStatusPoller,
-    private readonly stopPoller: () => void = stopBranchStatusPoller,
-  ) {}
+  constructor(private readonly poller: BranchStatusPoller = branchStatusPoller) {}
 
   /**
    * Read the persisted branch-status table and translate each row into
@@ -72,7 +69,7 @@ export class WatcherService {
    */
   subscribe(listener: StatusListener): () => void {
     const unsubscribeRaw = subscribeRaw(listener);
-    this.startPoller();
+    this.poller.start();
 
     // Send current agent status snapshot (always include runningSetups for reconciliation)
     const statuses = loadCurrentStatuses();
@@ -92,7 +89,7 @@ export class WatcherService {
     return () => {
       unsubscribeRaw();
       if (listenerCount() === 0) {
-        this.stopPoller();
+        this.poller.stop();
       }
     };
   }

@@ -46,7 +46,7 @@ import {
   type WorktreeState,
   worktreesDir,
 } from "./state";
-import { abortTask, submitTask } from "./task-service";
+import { taskService } from "./task-service";
 import { terminalService } from "./terminal-service";
 import { emit } from "./watcher-service";
 
@@ -160,31 +160,29 @@ export class PlainProjectError extends Error {
  * Business logic for the workspace domain (Phase 3 of the 3-tier refactor —
  * issue #314).
  *
- * Service tier — depends on Infra (`WorkspaceQueries`, `lib/state` for the
- * shared project-state persistence, `lib/git` for git exec) plus a handful
- * of cross-domain helpers (`lib/chat-manager`, `cronjobService.removeForKey`,
- * …) for workspace-scoped cleanup on delete. Knows nothing about tRPC or
- * the API surface — all callers (routers, future CLI / scripts) funnel
- * through this class.
+ * Service tier — depends on Infra (`WorkspaceQueries`, `infra/git/git-
+ * client` for git exec, `infra/setup/{setup-runner,project-config}` for
+ * workspace bootstrap) plus a handful of sibling services
+ * (`chatService`, `browserService`, `terminalService`,
+ * `cronjobService.removeForKey`) for workspace-scoped cleanup on
+ * delete. Knows nothing about tRPC or the API surface — all callers
+ * (routers, future CLI / scripts) funnel through this class.
  *
- * Cross-cutting concerns parked in the legacy `lib/*` modules for now:
+ * Persistence quirks worth knowing about:
  *
  *   - **Projects table reads/writes.** `loadState` / `saveState` still
  *     co-manage the `projects` + `worktrees` tables via a whole-tree
- *     rewrite. That persistence model belongs to the projects domain and
- *     is owned by Phase 2 (`ProjectQueries`, issue #313). Once Phase 2
- *     lands, this service's create/remove paths will swap to direct
- *     `WorkspaceQueries.insert` / `WorkspaceQueries.remove` calls and the
- *     projects table will be touched only through `ProjectQueries`.
- *   - **Git wrappers.** `execGit` / `gitCmd` / `listWorktrees` live in
- *     `lib/git.ts` and will be lifted into `GitClient` by Phase 2. The
- *     service uses them directly today; the router-facing contract is
- *     unchanged.
- *   - **Workspace-scoped side-effect cleanup.** `removeWorkspaceChats`,
- *     `terminalService.killWorkspace`, `cronjobService.removeForKey`, etc.
- *     live in their own domain modules. Each will migrate to its own
- *     service in a later phase; the orchestration is centralized here for
- *     now so the remove flow remains atomic from the router's perspective.
+ *     rewrite. The persistence model belongs to the projects domain
+ *     (`ProjectQueries`, issue #313); once that domain owns workspace
+ *     row inserts/removes too, the create/remove paths here can swap
+ *     to `WorkspaceQueries.insert` / `WorkspaceQueries.remove`
+ *     directly. Today the orchestration goes through `state.ts`'s
+ *     `saveState` to keep one writer per table.
+ *   - **Workspace-scoped side-effect cleanup.** `chatService`,
+ *     `browserService`, `terminalService.killWorkspace`,
+ *     `cronjobService.removeForKey`, etc. each own their own domain;
+ *     the orchestration is centralized here so the remove flow is
+ *     atomic from the router's perspective.
  *
  * Stateless aside from its `queries` dependency, so a single shared
  * instance is safe across callers.
@@ -311,7 +309,7 @@ export class WorkspaceService {
     // synchronously, so the task is submitted immediately.
     const onSetupComplete = input.prompt
       ? () =>
-          submitTask({
+          taskService.submitTask({
             workspaceId,
             chatId: defaultChat.id,
             prompt: input.prompt!,
@@ -852,7 +850,7 @@ export class WorkspaceService {
 
     // Abort any running task and clear queued messages so the new agent
     // starts with a clean slate.
-    abortTask(chatId);
+    taskService.abortTask(chatId);
     clearQueuedMessages(chatId);
 
     // Replace the agent in the pool with the new agent type

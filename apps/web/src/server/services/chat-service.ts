@@ -9,14 +9,12 @@
  *
  * Created in issue #316 (Phase 5 of the 3-tier refactor) by lifting the
  * business half of `lib/chat-manager.ts` + `lib/chat-layout-manager.ts`
- * out of `lib/` and into this class. `lib/chat-layout-manager.ts` has
- * been deleted entirely now that its only caller (`workspace-service`)
- * goes through `chatService.removeAllForWorkspace` — which is self-
- * contained per the contract below. `lib/chat-manager.ts` remains as a
- * back-compat shim because it still has live importers (the dashboard
- * tRPC router, `cronjob-service`, `chat-events`, `chat-submit`);
- * subsequent phases will rewrite those call sites to import from this
- * module directly.
+ * out of `lib/` and into this class. The intermediate back-compat shim
+ * `services/chat-manager.ts` has since been deleted (issue #535
+ * cleanup); every former caller now imports `chatService` directly. The
+ * `chat-session-summary` helpers (`ensureActiveSessionSummary`,
+ * `scheduleActiveSessionRefresh`) were absorbed into this class in the
+ * same cleanup pass — see the methods near the bottom of the file.
  */
 
 import { createLogger } from "@band-app/logger";
@@ -74,8 +72,9 @@ export type { ChatStatus };
 
 /**
  * Public chat shape — what `chats.list` / `chats.get` hand the dashboard.
- * Identical to `ChatRow` (the Infra shape); aliased here so callers that
- * already import `ChatSession` from `lib/chat-manager.ts` keep compiling.
+ * Identical to `ChatRow` (the Infra shape); aliased here so callers can
+ * reach for the domain name (`ChatSession`) rather than the raw infra
+ * row type.
  */
 export type ChatSession = ChatRow;
 
@@ -235,19 +234,15 @@ function validateLabels(
  *   - Emitting `chat-created` / `chat-removed` events on `watcher`
  *
  * Stateful by design — there's exactly one instance (`chatService` below).
- * The `lib/chat-manager.ts` back-compat shim delegates every call here so
- * existing modules (`task-service.ts`, `chat-session-summary.ts`, the CLI
- * adapter, …) keep working without touching their imports.
  *
  * Object-identity contract: `update*` methods do NOT mutate the prior
  * `ChatSession` in place — they store a fresh merged object in the
  * registry and discard the previous reference. Callers that hold a
  * snapshot from `get`/`list` MUST re-`get` after any mutation to see the
  * new values. (The pre-refactor `lib/chat-manager.ts` mutated in place;
- * the shim continues to expose the function-shaped API so wire callers
- * see no behaviour change as long as they re-read on each access, which
- * every current caller — `task-service`, `chat-events`, the routers —
- * already does.)
+ * every current caller — `task-service`, `chat-events`, the routers,
+ * the CLI adapter — already re-reads on each access, so the new
+ * contract is a no-op behavioural change for them.)
  */
 export class ChatService {
   // Primary index: chatId → ChatSession
@@ -858,10 +853,12 @@ export class ChatService {
 }
 
 /**
- * Shared singleton consumed by both the API tier (chats router) and the
- * back-compat shim in `lib/chat-manager.ts`. The chat service holds
- * in-memory state (the chat registry), so callers MUST go through this
- * instance — instantiating a second `ChatService` elsewhere would create
- * a phantom registry that doesn't see the other's writes.
+ * Shared singleton consumed by the API tier (chats router) and the
+ * other services that need to look up / mutate chat state
+ * (`task-service`, `cronjob-service`, the chat-events / chat-submit
+ * handlers under `apps/web/src/api/`). The service holds in-memory
+ * state (the chat registry), so callers MUST go through this instance —
+ * instantiating a second `ChatService` elsewhere would create a phantom
+ * registry that doesn't see the other's writes.
  */
 export const chatService = new ChatService();
