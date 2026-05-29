@@ -171,4 +171,4 @@ jobs:
             Do not paraphrase, summarize, or filter the report — post the
             skill's output verbatim with the marker prepended.
           claude_args: |-
-            --allowedTools "Skill,Agent,Bash(git diff:*),Bash(git log:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh issue view:*),Read,Glob,Grep,Bash(gh pr comment:*),Bash(gh api:*)"
+            --allowedTools "Skill,Agent,Bash(git diff:*),Bash(git log:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh issue view:*),Read,Glob,Grep,Bash(gh pr comment:*),Bash(gh api repos/*/issues/*/comments:*),Bash(gh api repos/*/issues/comments/*:*)"
