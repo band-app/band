@@ -13,10 +13,11 @@ import { removeWorkspaceBrowsers } from "../infra/browser-host/browser-manager";
 // because every `workspaceService` reference is inside a function body
 // (live binding). See `lib/workspace.ts` for the cycle note before
 // capturing `submitTask` (or anything else here) at module load.
+import { createWorkspaceAgent, replaceAgent } from "../infra/agents/agent-pool";
 import { TaskQueries } from "../infra/db/queries/tasks";
 import { WorkspaceQueries } from "../infra/db/queries/workspaces";
 import { killWorkspaceServers } from "../infra/lsp/lsp-manager";
-import { getOrCreateDefaultChat, removeWorkspaceChats } from "./chat-manager";
+import { getOrCreateDefaultChat, removeWorkspaceChats, updateChat } from "./chat-manager";
 // FRAGILE: ESM cycle leg #2 — `./cronjob-service` imports `submitTask`
 // from `./task-service`, which imports `lib/workspace`, which imports
 // `workspaceService` from this file. Same live-binding constraint as the
@@ -26,17 +27,22 @@ import { getOrCreateDefaultChat, removeWorkspaceChats } from "./chat-manager";
 import { cronjobService } from "./cronjob-service";
 import { DETACHED_BRANCH_PREFIX, execGit, gitCmd, listWorktrees } from "./git";
 import { loadProjectConfig } from "./project-config";
+import { clearQueuedMessages } from "./queued-message-store";
 import { runSetup } from "./setup-runner";
 import {
   bandHome,
   deleteWorkspaceStatus,
+  getAgentDefinition,
+  getWorkspaceStatus,
+  loadSettings,
   loadState,
   type ProjectState,
   saveState,
+  upsertWorkspaceStatus,
   type WorktreeState,
   worktreesDir,
 } from "./state";
-import { submitTask } from "./task-service";
+import { abortTask, submitTask } from "./task-service";
 import { terminalService } from "./terminal-service";
 import { emit } from "./watcher";
 
@@ -608,6 +614,260 @@ export class WorkspaceService {
       }
       await execGit(["push", "--set-upstream", "origin", input.branch], cwd);
     }
+    return { ok: true };
+  }
+
+  /**
+   * `git pull --rebase` keyed by workspaceId rather than `(project, branch)`.
+   *
+   * Used by `api/workspace/router.ts::gitPull` (the per-workspace,
+   * singular-namespace variant). Delegates to `gitPull` once it resolves
+   * the workspaceId so both call shapes share the same swallow-rebase-
+   * collision logic. Also handles the case where the workspace lookup
+   * fails — see `gitPushByWorkspaceId` for the matching push path.
+   */
+  async gitPullByWorkspaceId(workspaceId: string): Promise<{ ok: true }> {
+    const workspace = this.resolve(workspaceId);
+    if (!workspace) {
+      throw new WorkspaceNotFoundError(workspaceId);
+    }
+    const cwd = workspace.worktree.path;
+    try {
+      await execGit(["pull", "--rebase"], cwd);
+    } catch (e) {
+      // git pull --rebase can exit non-zero with "Cannot rebase onto multiple
+      // branches" when the fetch step already fast-forwarded the working
+      // tree. The pull effectively succeeded, so swallow that specific case
+      // — same behaviour as the project-keyed `gitPull` above.
+      const msg = String(e);
+      if (msg.includes("Cannot rebase onto multiple branches")) {
+        return { ok: true };
+      }
+      throw new Error(e instanceof Error ? e.message : msg);
+    }
+    return { ok: true };
+  }
+
+  /**
+   * `git push` keyed by workspaceId rather than `(project, branch)`.
+   *
+   * Used by `api/workspace/router.ts::gitPush` (the per-workspace,
+   * singular-namespace variant). Resolves the live HEAD branch rather than
+   * the recorded one for the upstream fallback — the worktree may have
+   * been renamed via `git branch -m` and the project record not yet
+   * refreshed, in which case pushing the stale name fails too.
+   */
+  async gitPushByWorkspaceId(workspaceId: string): Promise<{ ok: true }> {
+    const workspace = this.resolve(workspaceId);
+    if (!workspace) {
+      throw new WorkspaceNotFoundError(workspaceId);
+    }
+    const cwd = workspace.worktree.path;
+    try {
+      await execGit(["push"], cwd);
+    } catch {
+      // First push may need to set upstream. Resolve the live HEAD branch
+      // rather than trusting a stale state.json entry.
+      let headBranch: string;
+      try {
+        headBranch = (await execGit(["rev-parse", "--abbrev-ref", "HEAD"], cwd)).trim();
+      } catch {
+        headBranch = workspace.worktree.branch;
+      }
+      try {
+        await execGit(["push", "--set-upstream", "origin", headBranch], cwd);
+      } catch (e2) {
+        throw new Error(e2 instanceof Error ? e2.message : String(e2));
+      }
+    }
+    return { ok: true };
+  }
+
+  /**
+   * Commit all pending changes in `workspaceId` with `message` (and optional
+   * `body`). Stages everything (tracked + untracked) so the commit reflects
+   * the diff the user just reviewed in the Changes view.
+   */
+  async gitCommit(
+    workspaceId: string,
+    input: { message: string; body?: string },
+  ): Promise<{ ok: true }> {
+    const workspace = this.resolve(workspaceId);
+    if (!workspace) {
+      throw new WorkspaceNotFoundError(workspaceId);
+    }
+    const cwd = workspace.worktree.path;
+
+    await execGit(["add", "-A"], cwd);
+
+    // Pass title + body as separate `-m` args so git formats them with the
+    // standard blank-line separator between subject and body.
+    const args = ["commit", "-m", input.message];
+    const body = input.body?.trim();
+    if (body) {
+      args.push("-m", body);
+    }
+    try {
+      await execGit(args, cwd);
+    } catch (e) {
+      throw new Error(e instanceof Error ? e.message : String(e));
+    }
+    return { ok: true };
+  }
+
+  /**
+   * Ask the workspace's coding agent to summarise pending changes into a
+   * commit message. The agent runs in the workspace's worktree with
+   * `Bash`/`Read` tools and explores the diff itself rather than receiving
+   * a (potentially truncated) serialised diff in the prompt.
+   *
+   * Returns `{ message, body, agentLabel }` — `message` is the subject
+   * line (≤72 chars, imperative mood), `body` is the optional explanation
+   * paragraph. Refuses early when there are no pending changes so we
+   * don't spin up an agent process just to have it report "nothing to
+   * commit".
+   */
+  async generateCommitMessage(
+    workspaceId: string,
+  ): Promise<{ message: string; body: string; agentLabel: string }> {
+    const workspace = this.resolve(workspaceId);
+    if (!workspace) {
+      throw new WorkspaceNotFoundError(workspaceId);
+    }
+    const cwd = workspace.worktree.path;
+
+    // Cheap pre-flight: refuse early if there are no pending changes so we
+    // don't spin up an agent process just to have it report "nothing to
+    // commit". `git status --porcelain` covers staged, unstaged, and
+    // untracked files in one call.
+    try {
+      const status = await execGit(["status", "--porcelain"], cwd);
+      if (!status.trim()) {
+        throw new Error("No changes to summarise");
+      }
+    } catch (e) {
+      // Re-throw the explicit "no changes" error; swallow other status
+      // failures (e.g. unborn HEAD on a brand-new repo) and let the agent
+      // figure it out.
+      if (e instanceof Error && e.message === "No changes to summarise") {
+        throw e;
+      }
+    }
+
+    const settings = loadSettings();
+    const agentDef = getAgentDefinition(settings);
+
+    const prompt = [
+      "You are running inside a git workspace. Write a commit message for the changes that are pending in this workspace right now.",
+      "",
+      "Steps:",
+      "  1. Run `git status` and `git diff HEAD` (and `git diff --stat` if the diff is large) to understand what changed.",
+      "  2. If helpful, read a few of the changed files or recent commits (`git log -5 --oneline`) to match the project's commit style.",
+      "  3. Write a single commit message.",
+      "",
+      "Format:",
+      "  - First line: a concise subject (≤ 72 chars), imperative mood, no trailing period.",
+      "  - Then a blank line.",
+      "  - Then a body that explains *why* the change is being made and any notable details.",
+      "",
+      "Output ONLY the final commit message as plain text — no markdown fences, no preamble, no commentary, no tool-call summaries. Do not modify any files.",
+    ].join("\n");
+
+    let agent: Awaited<ReturnType<typeof createWorkspaceAgent>>;
+    try {
+      agent = await createWorkspaceAgent(cwd, agentDef.id);
+    } catch (e) {
+      throw new Error(
+        `Failed to start coding agent "${agentDef.label}": ${
+          e instanceof Error ? e.message : String(e)
+        }`,
+      );
+    }
+
+    // Track only text emitted by the *final* assistant turn — earlier
+    // text deltas are usually narration around tool calls ("Let me check
+    // the diff…") that we don't want in the commit message. Each
+    // tool-result event resets the buffer so only post-tool prose
+    // survives. `maxTurns` is generous enough for git status + diff +
+    // optional log + final write-up.
+    let lastTurnText = "";
+    try {
+      for await (const event of agent.runSession(prompt, undefined, { maxTurns: 8 })) {
+        if (event.type === "text-delta") {
+          lastTurnText += event.text;
+        } else if (event.type === "tool-result") {
+          lastTurnText = "";
+        } else if (event.type === "error") {
+          throw new Error(event.message);
+        }
+      }
+    } finally {
+      agent.abort?.();
+    }
+
+    const cleaned = lastTurnText.trim();
+    if (!cleaned) {
+      throw new Error("Agent returned an empty response");
+    }
+
+    // Split into subject + body on the first blank line.
+    const lines = cleaned.split("\n");
+    const subject = (lines.shift() ?? "").trim();
+    while (lines.length > 0 && lines[0].trim() === "") {
+      lines.shift();
+    }
+    const body = lines.join("\n").trim();
+
+    return {
+      message: subject,
+      body,
+      agentLabel: agentDef.label,
+    };
+  }
+
+  /**
+   * Switch the coding agent backing a chat pane to a different agent type
+   * (e.g. claude-code → codex). Aborts any running task, clears queued
+   * messages, replaces the pooled agent, updates the chat record, and
+   * re-emits the workspace status so the UI reflects the new agent.
+   *
+   * If `chatId` is omitted, the workspace's default chat pane is used.
+   */
+  async switchAgent(input: {
+    workspaceId: string;
+    agentId: string;
+    chatId?: string;
+  }): Promise<{ ok: true }> {
+    const workspace = this.resolve(input.workspaceId);
+    if (!workspace) {
+      throw new WorkspaceNotFoundError(input.workspaceId);
+    }
+
+    // Resolve the chat pane (use provided chatId or default)
+    const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
+
+    // Abort any running task and clear queued messages so the new agent
+    // starts with a clean slate.
+    abortTask(chatId);
+    clearQueuedMessages(chatId);
+
+    // Replace the agent in the pool with the new agent type
+    await replaceAgent(chatId, workspace.worktree.path, input.agentId);
+
+    // Update the chat pane's agent config
+    updateChat(chatId, { agent: input.agentId });
+
+    // Update workspace status with the new coding agent ID
+    upsertWorkspaceStatus(input.workspaceId, {
+      status: "waiting",
+      codingAgentId: input.agentId,
+    });
+
+    const status = getWorkspaceStatus(input.workspaceId);
+    if (status) {
+      emit({ kind: "update", status });
+    }
+
     return { ok: true };
   }
 
