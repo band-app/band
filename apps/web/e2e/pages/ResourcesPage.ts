@@ -7,8 +7,7 @@
  * usage table, plus a `goto()` that walks the user flow:
  * dashboard → Menu → Resources.
  *
- * Locator priority (per `docs/frontend-testing.md` and the
- * `write-integration-test` skill):
+ * Locator priority:
  *
  *   - `getByRole({ name })` for the dashboard title bar Menu trigger
  *     (the `aria-label="Menu"` value is system-controlled and not

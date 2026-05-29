@@ -1,6 +1,21 @@
-# Frontend Integration Testing — Portable Guide
+# Integration Testing — Portable Guide
 
-A doctrine and structural template for integration testing of web applications. Boot the real server, mock only the things that are external to your process, drive the rendered DOM with Playwright, and define every test as a named BDD scenario.
+A doctrine and structural template for integration testing of web applications. Boot the real server, mock only the things that are external to your process, drive HTTP directly (backend) or the rendered DOM via Playwright (frontend), and define every test as a named BDD scenario.
+
+This guide covers both layers — **backend** integration tests that drive the real server via `fetch`, and **frontend** integration tests that drive the rendered UI through a real browser. They share the same server boot, the same external-service fixtures, and the same data layer. The only thing that differs is whether the test body talks to the server directly or via Playwright.
+
+---
+
+## Enforcement
+
+The reviewer-checkable rule set distilled from this doc lives in [`.claude/testing-criteria.md`](../.claude/testing-criteria.md) as rules `TEST-1`…`TEST-35`. That file is the **source of truth** for what a PR review enforces — it is loaded verbatim by:
+
+- `.github/workflows/claude-review.yml` (CI runs against every PR), and
+- `.claude/skills/review-changes/SKILL.md` (the orchestrator that the local `review-and-apply` skill and CI both invoke; it dispatches `.claude/agents/testing-reviewer.md`).
+
+The implementation playbook for actually *writing* tests against these rules lives in the [`write-integration-test` skill](../.claude/skills/write-integration-test/SKILL.md).
+
+This document is the narrative — the *why*, the examples, the rationale. The criteria file is the rule. When the two disagree, **the criteria file wins** and this doc is stale. A PR that changes one without the other should be flagged.
 
 ---
 
@@ -9,7 +24,7 @@ A doctrine and structural template for integration testing of web applications. 
 Integration tests are the **default proof of correctness** for any change that affects user-observable behaviour.
 
 - A test exercises the application from its external surface (HTTP, rendered DOM, outbound traffic).
-- A test boots the real server that produces the running frontend, including the full SSR pipeline. No shallow renders, no in-memory React mounts.
+- A test boots the **real production server binary** — backend tests then drive it via `fetch`; frontend tests drive it via a real browser. No shallow renders, no in-memory React mounts, no in-process route-handler invocation that bypasses the HTTP/middleware layer.
 - A test mocks **only** what is external to that server process: APIs, third-party SDKs, message queues, datastores you don't own.
 - Unit tests remain useful for: non-externally-visible behaviour (internal helpers, log shaping), combinatorial explosion that's impractical to drive through the integration layer, and any case where the author judges a unit test adds value worth maintaining.
 
@@ -19,28 +34,38 @@ Every change that changes user-observable behaviour ships with the integration t
 
 ## 2. Architecture
 
+Backend and frontend tests share the **same** server boot and the **same** fixture model. The only thing that differs is whether the test body drives the server through `fetch` or through a browser.
+
 ```
-┌───────────────────────────────────────────────────────────────────┐
-│                    Playwright Test Process                        │
-│                                                                   │
-│  ┌─────────────┐    drives    ┌──────────────────────────────┐    │
-│  │ Spec / Test │ ───────────► │ Browser (Chromium)           │    │
-│  └─────────────┘              └──────────────────────────────┘    │
-│         │                                  │                      │
-│         │ configures                       │ HTTP (real)          │
-│         ▼                                  ▼                      │
-│  ┌─────────────────┐         ┌──────────────────────────────┐     │
-│  │ Fixtures        │ env var │ App Server (real, full SSR)  │     │
-│  │ (Express stubs) │◄────────│                              │     │
-│  └─────────────────┘ override└──────────────────────────────┘     │
-│         ▲                                  │                      │
-│         │ HTTP (in-process)                │ HTTP to fake URLs    │
-│         └──────────────────────────────────┘                      │
-│                                                                   │
-│  ┌────────────────────────────────────────────────────────────┐   │
-│  │ Testcontainers (Redis, Postgres, ...) — real, ephemeral    │   │
-│  └────────────────────────────────────────────────────────────┘   │
-└───────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────┐
+│                       Test Process                                 │
+│                                                                    │
+│  ┌─────────────┐                                                   │
+│  │ Test body   │── fetch ──┐                                       │
+│  └─────────────┘            ▼                                      │
+│         │             ┌──────────────────────────────┐             │
+│         │             │ Real App Server (production  │             │
+│         │             │  binary, SSR, auth, routing, │             │
+│         │             │  migrations, the works)      │             │
+│         │             └──────────────────────────────┘             │
+│         │                       │ HTTP (env var override)          │
+│         │                       ▼                                  │
+│         │             ┌──────────────────────────────┐             │
+│         │             │ Express stubs (one server    │             │
+│         │             │  per external service, on    │             │
+│         │             │  a random port)              │             │
+│         │             └──────────────────────────────┘             │
+│         │                                                          │
+│ Frontend tests ONLY:                                               │
+│  ┌─────────────────────┐         drives                            │
+│  │ Playwright Browser  │ ◄────────────── Test body                 │
+│  │ (Chromium, real)    │                                           │
+│  └─────────────────────┘                                           │
+│                                                                    │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │ Testcontainers / temp datastore — real data layer, ephemeral │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
 Key properties:
@@ -48,16 +73,155 @@ Key properties:
 - **Real server.** The same Node/Express/Next/whatever process you ship runs inside the test. The SSR pipeline executes; React hydrates in a real browser; the same routing, middleware, auth, and content negotiation paths run.
 - **External services stubbed via Express.** Each downstream service gets its own Express server on a random port. The app's env var pointing at that service (e.g. `SERVICE_CRM_URL`) is overridden to the fixture's `baseUrl` for the duration of one test.
 - **Datastores real, via testcontainers.** Redis, Postgres, S3-compatible storage — anything stateful the app owns. The test container is started per worker (or per test for strict isolation), and the test cleans up the data it wrote.
-- **Browser real.** Playwright drives Chromium. The rendered DOM is the source of truth for UI assertions.
+- **Browser real (frontend layer only).** Playwright drives Chromium. The rendered DOM is the source of truth for UI assertions. Backend tests skip the browser entirely.
 
 What you do NOT do:
 - No `page.route()` interception of your own backend's routes. If the route is served by your server, it goes through your server.
 - No mocking the SSR layer, the auth middleware, or the routing layer of the application under test.
 - No in-process replacement of internal modules. If you have to monkey-patch your own code to test it, the design is wrong.
+- No in-process route-handler invocation from backend tests (no `supertest`, no `import { handler }` then call it). Drive the real server over real HTTP.
 
 ---
 
-## 3. Directory Structure
+## 3. Choose Your Layer — Backend or Frontend
+
+Decide what you're testing before you write a line. The two layers test different surfaces and the wrong choice means an expensive test that proves the wrong thing.
+
+| Change touches… | Write a… | Lives in… |
+|---|---|---|
+| HTTP / WebSocket / SSE response shape, status, headers, side effects on disk or DB | **Backend integration test** | `tests/integration/api/<feature>.test.ts` |
+| What the user sees in the rendered DOM, what URL they land on, what's saved in `localStorage` by client code | **Frontend integration test** | `tests/integration/specs/<feature>.spec.ts` |
+| Both | One of each. Don't conflate them — they're independent. |
+| Pure CLI / binary behaviour | See the framework's CLI-testing guide | — |
+
+A feature that adds an endpoint *and* a UI button needs **two** tests: one proves the endpoint, one proves the button drives the endpoint correctly. Don't try to assert the response body through the UI — the UI may swallow or reshape it.
+
+Quick decision tree:
+
+```
+Is the change user-observable in the rendered UI?
+├── Yes → frontend integration test (Playwright)
+│        ├── Boot the REAL server
+│        ├── Stub external services with Express fixtures
+│        ├── Drive via Page Object Model
+│        └── Assert on DOM, localStorage, URL, captured outbound requests
+└── No (server-side only)
+    └── Backend integration test (your test runner)
+        ├── fetch against the REAL server on port 0
+        ├── Same Express fixtures as frontend tests
+        └── Real DB (testcontainer or temp datastore)
+```
+
+---
+
+## 4. Backend Integration Tests
+
+Backend integration tests boot the real server and drive it via `fetch`. They cover anything the user doesn't see in the rendered DOM — HTTP/tRPC/WebSocket/SSE response shapes, status codes, headers, side effects on disk, rows in the DB, and the requests your server sends to external services.
+
+They share the same server boot, the same Express stubs (§10), the same data layer (§11), and the same auth fixture (§12) as the frontend tests covered in §5–§9.
+
+### Where they live and what runs them
+
+- Path: `tests/integration/api/<feature>.test.ts`.
+- Runner: your project's chosen runner (vitest, mocha, `node:test`, jest). Whatever the codebase already uses; don't introduce a second runner for backend integration tests.
+- Server helper: `tests/integration/fixtures/ServerFixture.ts` (or equivalent) that spawns the real production binary on a random port against an isolated state directory. The same helper that powers the frontend tests.
+
+### Minimal shape
+
+```ts
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { startServer } from "./helpers/server-runtime";
+import { catalogStub } from "./fixtures/catalog";
+
+const TOKEN = "test-token-getProduct";
+
+let server: { url: string; close: () => Promise<void> };
+let tmpHome: string;
+let catalog: Awaited<ReturnType<typeof catalogStub.start>>;
+
+beforeAll(async () => {
+  tmpHome = mkdtempSync(join(tmpdir(), "app-test-"));
+  // Express stubs for external services — START BEFORE the server,
+  // so we can hand the server their URLs via env vars.
+  catalog = await catalogStub.start();
+  server = await startServer({
+    home: tmpHome,
+    settings: { tokenSecret: TOKEN },
+    env: { CATALOG_SERVICE_URL: catalog.baseUrl },
+  });
+});
+
+afterAll(async () => {
+  await server.close();
+  await catalog.stop();
+  rmSync(tmpHome, { recursive: true, force: true });
+});
+
+describe("GET /api/v1/products/:id", () => {
+  it("returns 401 without a token", async () => {
+    const res = await fetch(`${server.url}/api/v1/products/p1`);
+    expect(res.status).toBe(401);
+  });
+
+  it("returns the product when authenticated", async () => {
+    catalog.setGetProductResponse({ id: "p1", name: "Foo", priceCents: 999 });
+    const res = await fetch(`${server.url}/api/v1/products/p1`, {
+      headers: { Authorization: `Bearer ${TOKEN}` },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual({ id: "p1", name: "Foo", priceCents: 999 });
+  });
+});
+```
+
+### Real-server checklist
+
+- **Port 0.** Bind to an OS-assigned port — never hardcode. Tests run in parallel and a hardcoded port will collide on the second worker.
+- **Temp state directory.** Override the env var that points the server at its state directory (e.g. `HOME` if the app stores under `~/.app/`) to a `mkdtempSync()` path. The server runs migrations against its DB inside that directory automatically.
+- **Real HTTP.** `fetch` against `server.url`. No `supertest`, no in-process invocation of the route handler — those bypass the TCP layer, middleware, and content negotiation.
+- **Real auth.** Seed credentials/tokens into the server's settings file. Requests send the real auth header or cookie. **At least one negative test** asserts the unauthenticated path — error paths are part of the contract.
+- **Tear down everything.** Server stops, Express stubs stop, child processes are killed, temp directory is removed. Leaked resources cause flakes and CI port exhaustion.
+
+### Asserting
+
+- Assert on **observable outputs only**: HTTP status, response body shape, headers, files on disk, rows in the DB, what arrived at an Express stub, SSE frames received.
+- **Pin exact values** for anything the test seeded. `expect(body.email).toBe("test@example.com")` — not `expect.any(String)`.
+- Use shape matchers only for genuinely non-deterministic values (UUIDs, system timestamps): `expect(body.id).toMatch(/^[a-f0-9-]{36}$/)`.
+- Assert the **full body** when capturing what your server sent to an Express stub. Cherry-picking properties hides drift: `expect(captured).toEqual({ … entire body … })`.
+- **Error paths.** Every endpoint test file includes at least one negative case: missing auth, malformed input, non-existent resource.
+
+### Streaming endpoints (SSE / WebSocket)
+
+Connect as a real client, read the stream, assert on the sequence.
+
+```ts
+const res = await fetch(`${server.url}/api/status/stream?token=${TOKEN}`);
+const reader = res.body!.getReader();
+const decoder = new TextDecoder();
+let text = "";
+const start = Date.now();
+while (Date.now() - start < 2000) {
+  const { value, done } = await reader.read();
+  if (done) break;
+  text += decoder.decode(value);
+  if (text.includes("expected-marker")) break;
+}
+expect(text).toMatch(/expected-marker/);
+```
+
+Poll with a timeout. Never `setTimeout(N)` to "wait for events to settle".
+
+### Why no `supertest` / no in-process invocation
+
+`supertest` (and any "import the handler, call it directly" pattern) skips the TCP socket and most of the middleware chain. Tests pass that wouldn't pass against the real binary: auth middleware that runs only on real requests, response negotiation, compression, rate limits, body-parser limits, header-canonicalisation differences. The whole point of an integration test is exercising the layers the unit test couldn't — a backend test that bypasses HTTP has become a unit test with extra ceremony.
+
+---
+
+## 5. Directory Structure
 
 ```
 tests/integration/
@@ -96,7 +260,7 @@ tests/integration/
 
 ---
 
-## 4. Running the Application Under Test
+## 6. Running the Application Under Test
 
 The app server runs in-process or as a subprocess started by Playwright's `globalSetup`. The choice depends on whether the framework supports programmatic start.
 
@@ -130,7 +294,7 @@ If the framework cannot be started in-process (e.g. Next.js dev mode), use Playw
 
 ---
 
-## 5. Writing Scenarios (BDD)
+## 7. Writing Scenarios (BDD)
 
 Every test is a named scenario. Scenarios live in `tests/integration/scenarios/` and are the contract — plain-English statements of what the system must do.
 
@@ -215,7 +379,7 @@ This pattern gives:
 
 ---
 
-## 6. Writing Specs
+## 8. Writing Specs
 
 Specs implement scenarios. The Given/When/Then maps to fixture configuration, a user action, and assertions on observables.
 
@@ -291,7 +455,7 @@ Rules:
 
 ---
 
-## 7. Page Object Model
+## 9. Page Object Model
 
 Tests never use raw `page.getByRole()`, `page.getByText()`, `page.getByTestId()`, or `page.goto()` in the test body. Everything goes through page objects (one per page) and component objects (one per section of a page).
 
@@ -410,7 +574,7 @@ export const test = base.extend<PageObjectFixtures>({
 
 ---
 
-## 8. Fixtures for External Services
+## 10. Fixtures for External Services
 
 **Definition of "external service":** any service that is NOT running as part of the process producing the frontend application. APIs, third-party SDKs talking over the network, message queues, identity providers — all external. The app's own routes, middleware, SSR — not external.
 
@@ -552,7 +716,7 @@ Assert on the **full request body** with `toEqual` — never cherry-pick propert
 
 ---
 
-## 9. Databases & Stateful Stores: Testcontainers
+## 11. Databases & Stateful Stores: Testcontainers
 
 For datastores the application owns (Redis, Postgres, MySQL, MongoDB, S3-compatible storage, etc.), use **testcontainers** to start a real instance per test worker. The store runs the real binary, talks the real protocol, and is torn down at the end of the run.
 
@@ -636,7 +800,7 @@ Run schema migrations against the testcontainer once per worker, inside the `pos
 
 ---
 
-## 10. Auth & Session
+## 12. Auth & Session
 
 Sign-in is a frequent precondition. Create an `AuthSessionFixture` that exposes a `login(opts)` method, which either:
 - Uses your identity provider's fixture (if you've stubbed it) to mint a token and write the auth cookie, or
@@ -654,7 +818,7 @@ scenarioTest('signed-in user sees their name', async ({ authSession, profilePage
 
 ---
 
-## 11. Pre-flight: Tag-Based CI Sharding
+## 13. Pre-flight: Tag-Based CI Sharding
 
 Tags on scenarios let CI shard tests intelligently:
 
@@ -674,7 +838,7 @@ Conventional tags:
 
 ---
 
-## 12. Key Rules (cheat sheet)
+## 14. Key Rules (cheat sheet)
 
 ### Hard constraints — never violate
 
@@ -702,7 +866,7 @@ Conventional tags:
 
 ---
 
-## 13. Why This Approach
+## 15. Why This Approach
 
 - **Behaviour-first.** Tests assert what the user observes, not how the code is structured. Refactors that preserve behaviour leave the tests untouched.
 - **Continuous deployment.** A green integration suite is sufficient evidence that an externally visible regression hasn't shipped. Manual regression goes away.
@@ -717,7 +881,7 @@ Network is stubbed, so **data-contract drift with the real external services is 
 
 ---
 
-## 14. Adopting in a New Project — Order of Work
+## 16. Adopting in a New Project — Order of Work
 
 1. Stand up Playwright with `globalSetup` that boots your real server. Pin locale and timezone in the config.
 2. Add `ExpressServerManager` and `CapturedRequest` utilities under `tests/integration/fixtures/utils/`.

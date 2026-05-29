@@ -3,10 +3,9 @@
  *
  * Centralises the locators and the "navigate + seed expand-all + reload"
  * dance so individual spec files don't reach into `localStorage` /
- * `page.goto` directly. Per `CLAUDE.md` and the `write-integration-test`
- * skill, test bodies should drive UI exclusively through methods on a
- * page object — the test body stays focused on assertions instead of
- * setup plumbing.
+ * `page.goto` directly. Test bodies drive UI exclusively through methods
+ * on a page object — the test body stays focused on assertions instead
+ * of setup plumbing.
  *
  * What lives here:
  *  - The diff scroller (matched via `getByTestId("diff-view__scroller")`).
@@ -70,8 +69,7 @@ export class ChangesPanelPage {
    *  used by both `diff-horizontal-scroll.spec.ts` and any future spec
    *  that needs a populated diff view. Owning this on the page object
    *  (rather than as a module-level helper in the spec file) keeps the
-   *  navigation + locator-await logic inside the page-object layer per
-   *  the `write-integration-test` doctrine.
+   *  navigation + locator-await logic inside the page-object layer.
    *
    *  Returns the constructed `ChangesPanelPage` so the caller can
    *  continue driving the panel via instance methods. */

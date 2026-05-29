@@ -2,9 +2,8 @@
  * Session-history dropdown — doctrine-compliant rewrite.
  *
  * Replaces the previous `createTrpcMock`-based file with real-server
- * coverage. The doctrine (`write-integration-test` skill +
- * `docs/frontend-testing.md`) explicitly forbids tRPC mocking; sessions
- * are real on-disk artifacts produced by the real chat flow.
+ * coverage. tRPC is not mocked; sessions are real on-disk artifacts
+ * produced by the real chat flow.
  *
  * What's covered here:
  *

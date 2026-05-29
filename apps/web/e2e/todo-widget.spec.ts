@@ -4,9 +4,7 @@
  * Why the rewrite:
  *
  *   The previous file used `createTrpcMock` to seed `sessions.list` and
- *   `sessions.messages` queries, which violates the integration-test
- *   doctrine (`.claude/skills/write-integration-test/SKILL.md` +
- *   `docs/frontend-testing.md`): tRPC must NEVER be mocked, and the
+ *   `sessions.messages` queries. tRPC must NEVER be mocked, and the
  *   server's view of the chat must come from real on-disk JSONL produced
  *   by a real (fake-binary) agent. That doctrine is the single source of
  *   truth for new tests in this repo, so this file boots a real server

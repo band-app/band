@@ -22,8 +22,7 @@
  * Drives a real Band server against an on-disk worktree so the diff
  * payload reaches CodeMirror through the same git pipeline production
  * uses — no tRPC mocking. All locators and setup live in
- * `pages/ChangesPanelPage.ts` per the `write-integration-test`
- * doctrine.
+ * `pages/ChangesPanelPage.ts`.
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";

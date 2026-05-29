@@ -24,9 +24,8 @@
  *     same `.cm-editor` element after scroll-back (DOM identity proof).
  *
  * Anti-pattern: do NOT assert on absolute pixel offsets or scroll
- * latency. Use `expect.poll` and DOM identity checks per the
- * `write-integration-test` skill. All locators / setup live in
- * `pages/ChangesPanelPage.ts` per the same doctrine.
+ * latency. Use `expect.poll` and DOM identity checks. All locators /
+ * setup live in `pages/ChangesPanelPage.ts`.
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";

@@ -6,7 +6,7 @@
  * The test body NEVER calls `page.goto()` / `page.getByRole()` /
  * `page.getByTestId()` directly — actions go through methods here.
  *
- * Locator priority (per the write-integration-test skill):
+ * Locator priority:
  *   1. `getByRole({ name })` — used for the textarea via its placeholder
  *      (a constant prop in `ChatView.tsx`, not localised user copy).
  *   2. `getByTestId("page__element")` — used for the thinking indicator,

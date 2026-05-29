@@ -10,6 +10,15 @@ API (routers)  -->  Services (business logic)  -->  Infra (DB, git, external cli
 
 Higher tiers depend on lower tiers. Never the reverse. Infra knows nothing about services. Services know nothing about routers.
 
+## Enforcement
+
+The reviewer-checkable rule set distilled from this doc lives in [`.claude/coding-criteria.md`](../.claude/coding-criteria.md) as rules `CODE-1`…`CODE-19`. That file is the **source of truth** for what a PR review enforces — it is loaded verbatim by:
+
+- `.github/workflows/claude-review.yml` (CI runs against every PR), and
+- `.claude/skills/review-changes/SKILL.md` (the orchestrator that the local `review-and-apply` skill and CI both invoke; it dispatches `.claude/agents/coding-reviewer.md`).
+
+This document is the narrative — the *why*, the examples, the rationale. The criteria file is the rule. When the two disagree, **the criteria file wins** and this doc is stale. A PR that changes one without the other should be flagged.
+
 ## Directory Structure
 
 ```

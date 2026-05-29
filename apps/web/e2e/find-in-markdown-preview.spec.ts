@@ -110,7 +110,7 @@ async function openMarkdownPreview(page: Page): Promise<void> {
 
   // Switch to the Files tab. The button's aria-label is set in
   // `WorkspaceTabNav.tsx` — system-controlled, so `getByRole({ name })` is
-  // safe per `docs/frontend-testing.md` §7.
+  // safe to use.
   await page.getByRole("button", { name: "Files" }).click();
 
   // Click the markdown file in the tree. File-tree rows are buttons whose
@@ -119,8 +119,7 @@ async function openMarkdownPreview(page: Page): Promise<void> {
   // click, which would trip Playwright's strict mode if we used
   // `getByText`). `exact: true` defends against any future button whose
   // label contains the filename as a substring (e.g. an "Open GUIDE.md"
-  // menu item). Aligns with the locator-priority rules in
-  // `docs/frontend-testing.md` §7 and CLAUDE.md.
+  // menu item).
   await page.getByRole("button", { name: FILE_PATH, exact: true }).click();
 
   // The markdown renders into a sticky heading — when it appears, the

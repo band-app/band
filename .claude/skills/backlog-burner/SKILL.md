@@ -26,7 +26,7 @@ Only GitHub issues with the **`backlog-burner`** label are in scope. Every other
 **Workspace agent** (inside each per-issue workspace) — narrow job:
 
 1. Implement the issue.
-2. Run **`/pr-review-local`** to lint/clippy/test and apply any fixes it surfaces.
+2. Run **`/review-and-apply`** to lint/clippy/test and apply any fixes it surfaces.
 3. Commit and push.
 4. Create the PR (`gh pr create --base main --fill --body "Closes #$N"`).
 5. Stop. Wait for the next nudge.
@@ -61,7 +61,7 @@ A chat without the `backlog-burner=true` label is **invisible** to this skill �
 - `gh` CLI authenticated with GitHub
 - `band` CLI available
 - Project registered with Band (`band projects list`)
-- `/pr-review-local` skill available to the workspace agent (checked into this repo under `.claude/skills/pr-review-local/`)
+- `/review-and-apply` skill available to the workspace agent (checked into this repo under `.claude/skills/review-and-apply/`)
 
 ## Steps
 
@@ -235,7 +235,7 @@ The agent died before doing anything. Resend the kickoff prompt:
 ```sh
 band chats send --workspace "$workspace_id" --message "Implement GitHub issue #$N: <issue-url>.
 
-Run /pr-review-local before pushing. Commit, push, and then create the PR:
+Run /review-and-apply before pushing. Commit, push, and then create the PR:
   gh pr create --base main --fill --body 'Closes #$N'
 
 After the PR is open, stop. The orchestrator will watch CI, dispatch any feedback, and merge when ready.
@@ -248,7 +248,7 @@ Track progress with a '## Implementation Progress' comment on the issue."
 Implementation is partway done but the agent stopped before opening a PR. Nudge it to finish and open the PR:
 
 ```sh
-band chats send --workspace "$workspace_id" --message "Continue implementing issue #$N. When done: /pr-review-local, commit, push, then 'gh pr create --base main --fill --body \"Closes #$N\"'. Stop after the PR is open."
+band chats send --workspace "$workspace_id" --message "Continue implementing issue #$N. When done: /review-and-apply, commit, push, then 'gh pr create --base main --fill --body \"Closes #$N\"'. Stop after the PR is open."
 ```
 
 (If `$DIRTY` is empty *and* `$AHEAD > 0`, the agent may have already pushed without opening a PR — the same nudge above will trigger them to run `gh pr create`.)
@@ -322,7 +322,7 @@ if [ "$UNRESOLVED_BLOCKERS" -gt 0 ]; then
        resolveReviewThread(input: { threadId: \$threadId }) { thread { isResolved } }
      }' -F threadId=<THREAD_ID>
 
-4. Run /pr-review-local, commit, push. Stop after pushing.
+4. Run /review-and-apply, commit, push. Stop after pushing.
 
 The orchestrator will only merge once every blocker thread is marked resolved AND CI is green."
 elif [ "$UNRESOLVED_NITS" -gt 0 ] && [ "$REVIEW_ROUND" -lt 3 ]; then
@@ -369,7 +369,7 @@ elif [ "$UNRESOLVED_NITS" -gt 0 ] && [ "$REVIEW_ROUND" -lt 3 ]; then
    gh api repos/$REPO/pulls/$PR_NUM/comments/<COMMENT_ID>/replies \\
        -f body='wontfix: <one-line reason>'
 
-4. Run /pr-review-local, commit, push. Stop after pushing.
+4. Run /review-and-apply, commit, push. Stop after pushing.
 
 Threads you leave unresolved count against the next-round budget. After round 3
 the orchestrator merges regardless — but if you resolved everything, it merges
@@ -386,7 +386,7 @@ Note: case (c) and case (d) can both apply on the same tick — if `UNRESOLVED_B
 #### Case (e) — PR exists, CI failing
 
 ```sh
-band chats send --workspace "$workspace_id" --message "CI is failing on PR #$PR_NUM. Run 'gh pr checks $PR_NUM' to see what failed. Fix it, /pr-review-local, commit, push. Stop after pushing."
+band chats send --workspace "$workspace_id" --message "CI is failing on PR #$PR_NUM. Run 'gh pr checks $PR_NUM' to see what failed. Fix it, /review-and-apply, commit, push. Stop after pushing."
 ```
 
 #### Case (f) — PR exists, CI still pending
@@ -415,7 +415,7 @@ Run inside the workspace:
 
 Resolve conflicts. For the 3-tier refactor series the conflict pattern is usually in 'apps/web/src/trpc/router.ts' (drop the moved domain's key) and 'apps/web/src/server/api/router.ts' (add the new sub-router to mergeRouters). Re-run tests for the affected domain to confirm the rebase didn't break behavior.
 
-Then: /pr-review-local, 'git push --force-with-lease', stop. The orchestrator will re-check on the next tick and case (c)/(d)/(e) will pick up from there."
+Then: /review-and-apply, 'git push --force-with-lease', stop. The orchestrator will re-check on the next tick and case (c)/(d)/(e) will pick up from there."
 ```
 
 Case (g) does **not** increment `review-round` — a rebase is a structural fix, not a polish round. The non-blocker iteration cap should not be consumed by mechanical conflict resolution.
@@ -474,7 +474,7 @@ BRANCH="${N}-${SLUG}"
 
 band workspaces create "$PROJECT" "$BRANCH" --prompt "Implement GitHub issue #$N: $URL.
 
-Run /pr-review-local before pushing. Commit, push, then create the PR:
+Run /review-and-apply before pushing. Commit, push, then create the PR:
   gh pr create --base main --fill --body 'Closes #$N'
 
 After the PR is open, stop. The backlog burner will monitor CI, dispatch any reviewer feedback, and merge when ready.

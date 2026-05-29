@@ -3,8 +3,7 @@
  * workspace last viewed under that label, while ALL keeps the current
  * selection.
  *
- * Architecture (per `docs/frontend-testing.md` + the
- * `write-integration-test` skill):
+ * Architecture:
  *
  *   - Real production binary runs against a fresh tmp `~/.band/`.
  *     Migrations apply against the throwaway SQLite DB on boot.

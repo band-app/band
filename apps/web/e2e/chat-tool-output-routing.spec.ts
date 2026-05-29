@@ -11,8 +11,7 @@
  * its orange status dot pulsing forever. The renderer-CPU regression
  * tracked in #508 was downstream of that leak.
  *
- * Architecture follows `docs/frontend-testing.md` + the
- * `write-integration-test` skill (`.claude/skills/write-integration-test/`):
+ * Architecture:
  *
  *   - REAL `dist/start-server.mjs` against a fresh `mkdtempSync()` home.
  *   - NO tRPC mocking. The chat events stream is the production SSE path.

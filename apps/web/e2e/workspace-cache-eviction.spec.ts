@@ -4,8 +4,7 @@
  * that workspace disappears from the projects query, not only when a
  * NEW workspace overflows the capacity-bound.
  *
- * Doctrine (`CLAUDE.md` "Testing Strategy" + the `write-integration-test`
- * skill at `.claude/skills/write-integration-test/SKILL.md`):
+ * Test architecture:
  *
  *   - The same production binary the user ships runs inside the test
  *     against a fresh tmp `~/.band/`. Migrations apply to the throwaway
