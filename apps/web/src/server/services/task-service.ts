@@ -1221,3 +1221,105 @@ export function getSessionEventsAfter(
     .filter((e) => (e.eventId ?? 0) > afterEventId)
     .map((c) => chunkToRecord(sessionId, c));
 }
+
+// ---------------------------------------------------------------------------
+// Class wrapper (issue #535, follow-up 5)
+//
+// Routers and other services should depend on `taskService` rather than the
+// bare function exports above. The class is a thin façade: every method
+// delegates to the corresponding module-level function so the singleton
+// in-memory state (`tasks`, `listeners`, `sessionBuffers`, `sessionUsage`,
+// `pendingInputs`) — which is held on `globalThis` symbols so it survives
+// module re-evaluation in dev (vite/HMR) and across multiple bundles —
+// stays in lock-step regardless of how callers reach the API.
+//
+// The injectable `TaskQueries` dependency lets tests swap in a stubbed
+// queries adapter for the persistence-touching methods (`listTaskRecords`,
+// `loadTaskRecord`). The function exports above are retained as a
+// back-compat surface for callers that already speak the module API; new
+// code should use `taskService.method(...)`.
+// ---------------------------------------------------------------------------
+
+export class TaskService {
+  constructor(private readonly queries: TaskQueries = taskQueries) {}
+
+  createPendingInput(approvalId: string, workspaceId?: string): Promise<Record<string, string>> {
+    return createPendingInput(approvalId, workspaceId);
+  }
+
+  resolvePendingInput(approvalId: string, answers: Record<string, string>): boolean {
+    return resolvePendingInput(approvalId, answers);
+  }
+
+  rejectPendingInput(approvalId: string, error: Error): boolean {
+    return rejectPendingInput(approvalId, error);
+  }
+
+  rejectAllPendingInputs(error: Error): void {
+    rejectAllPendingInputs(error);
+  }
+
+  hasPendingInputForWorkspace(workspaceId: string): boolean {
+    return hasPendingInputForWorkspace(workspaceId);
+  }
+
+  submitTask(options: SubmitTaskOptions): TaskInfo {
+    return submitTask(options);
+  }
+
+  abortTask(chatId: string): boolean {
+    return abortTask(chatId);
+  }
+
+  cancelTask(taskId: string): { cancelled: boolean; workspaceId?: string } {
+    return cancelTask(taskId);
+  }
+
+  getTask(chatId: string): TaskInfo | null {
+    return getTask(chatId);
+  }
+
+  listTaskRecords(filters?: Parameters<TaskQueries["list"]>[0]) {
+    return this.queries.list(filters);
+  }
+
+  loadTaskRecord(id: string) {
+    return this.queries.load(id);
+  }
+
+  getSessionBuffer(sessionId: string): SessionBuffer | undefined {
+    return getSessionBuffer(sessionId);
+  }
+
+  getSessionUsage(sessionId: string): SessionUsage | undefined {
+    return getSessionUsage(sessionId);
+  }
+
+  subscribe(chatId: string, listener: Listener): () => void {
+    return subscribe(chatId, listener);
+  }
+
+  getSessionEventsTail(sessionId: string, limit: number): SessionEventRecord[] {
+    return getSessionEventsTail(sessionId, limit);
+  }
+
+  getSessionEventsBefore(
+    sessionId: string,
+    beforeEventId: number,
+    limit: number,
+  ): SessionEventRecord[] {
+    return getSessionEventsBefore(sessionId, beforeEventId, limit);
+  }
+
+  getSessionEventsAfter(sessionId: string, afterEventId: number): SessionEventRecord[] {
+    return getSessionEventsAfter(sessionId, afterEventId);
+  }
+}
+
+/**
+ * Process-wide singleton. Method calls route through the existing
+ * module-level functions, which themselves operate on the `globalThis`-
+ * keyed state — so multiple bundles or HMR reloads still share a single
+ * logical task pool.
+ */
+export const taskService = new TaskService();

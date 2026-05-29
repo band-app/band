@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { createMetadataAgent } from "../../services/agent-service";
+import { agentService } from "../../services/agent-service";
 import { publicProcedure, t } from "../trpc";
 
 /**
@@ -16,7 +16,7 @@ export const modesRouter = t.router({
   list: publicProcedure
     .input(z.object({ agentId: z.string().optional() }))
     .query(async ({ input }) => {
-      const agent = await createMetadataAgent(input.agentId);
+      const agent = await agentService.createMetadataAgent(input.agentId);
       if (agent.listModes) {
         return { modes: agent.listModes() };
       }

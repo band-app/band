@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { createMetadataAgent } from "../../services/agent-service";
+import { agentService } from "../../services/agent-service";
 import { getAgentDefinition, loadSettings } from "../../services/state";
 import { publicProcedure, t } from "../trpc";
 
@@ -17,7 +17,7 @@ export const modelsRouter = t.router({
   list: publicProcedure
     .input(z.object({ agentId: z.string().optional() }))
     .query(async ({ input }) => {
-      const agent = await createMetadataAgent(input.agentId);
+      const agent = await agentService.createMetadataAgent(input.agentId);
       const models = agent.listModels ? await agent.listModels() : [];
       // Include the agent's configured default model from Band settings.
       const settings = loadSettings();
@@ -34,7 +34,7 @@ export const modelsRouter = t.router({
     const agents = await Promise.all(
       codingAgents.map(async (def) => {
         try {
-          const agent = await createMetadataAgent(def.id);
+          const agent = await agentService.createMetadataAgent(def.id);
           const models = agent.listModels ? await agent.listModels() : [];
           return {
             agentId: def.id,

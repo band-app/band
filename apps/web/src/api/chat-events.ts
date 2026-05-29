@@ -6,7 +6,7 @@ import type {
   ChatEventUsage,
   ToolInputAvailableEvent,
 } from "../shared/chat-events";
-import { getOrCreateAgent } from "../server/services/agent-service";
+import { agentService } from "../server/services/agent-service";
 import { getChat } from "../server/services/chat-manager";
 import { jsonlMessageToEvents } from "../server/services/jsonl-message-to-events";
 import {
@@ -318,7 +318,7 @@ async function replayPast(opts: {
       try {
         const workspace = resolveWorkspace(chatWorkspaceId);
         if (workspace) {
-          const agent = await getOrCreateAgent(chatId, workspace.worktree.path, agentTypeHint);
+          const agent = await agentService.getOrCreateAgent(chatId, workspace.worktree.path, agentTypeHint);
           if (agent.supportedFeatures.sessionListing && agent.getSessionMessages) {
             const result = await agent.getSessionMessages(sessionId, workspace.worktree.path, {});
             const messages = result.messages;
@@ -375,7 +375,7 @@ async function replayPast(opts: {
     try {
       const workspace = resolveWorkspace(chatWorkspaceId);
       if (workspace) {
-        const agent = await getOrCreateAgent(chatId, workspace.worktree.path, agentTypeHint);
+        const agent = await agentService.getOrCreateAgent(chatId, workspace.worktree.path, agentTypeHint);
         if (agent.supportedFeatures.sessionListing && agent.getSessionMessages) {
           const result = await agent.getSessionMessages(sessionId, workspace.worktree.path, {});
           const messages = result.messages;

@@ -1,12 +1,7 @@
 import { z } from "zod";
 import {
+  browserHistoryService,
   type ClearRange,
-  clearHistory,
-  deleteHistoryEntry,
-  listHistory,
-  recordVisit,
-  searchHistory,
-  updateVisitMeta,
 } from "../../services/browser-history-service";
 import { publicProcedure, t } from "../trpc";
 
@@ -75,7 +70,7 @@ export const historyRouter = t.router({
       }),
     )
     .mutation(({ input }) => {
-      const recorded = recordVisit({
+      const recorded = browserHistoryService.recordVisit({
         workspaceId: input.workspaceId,
         url: input.url,
         title: input.title,
@@ -94,7 +89,7 @@ export const historyRouter = t.router({
       }),
     )
     .mutation(({ input }) => {
-      updateVisitMeta({
+      browserHistoryService.updateVisitMeta({
         workspaceId: input.workspaceId,
         url: input.url,
         title: input.title,
@@ -112,7 +107,7 @@ export const historyRouter = t.router({
       }),
     )
     .query(({ input }) => {
-      const entries = listHistory(input.workspaceId, {
+      const entries = browserHistoryService.listHistory(input.workspaceId, {
         limit: input.limit,
         offset: input.offset,
       });
@@ -128,7 +123,11 @@ export const historyRouter = t.router({
       }),
     )
     .query(({ input }) => {
-      const entries = searchHistory(input.workspaceId, input.query, input.limit ?? 8);
+      const entries = browserHistoryService.searchHistory(
+        input.workspaceId,
+        input.query,
+        input.limit ?? 8,
+      );
       return { entries };
     }),
 
@@ -139,7 +138,7 @@ export const historyRouter = t.router({
     // it.
     .input(z.object({ id: z.number().int().positive(), workspaceId: z.string().min(1) }))
     .mutation(({ input }) => {
-      deleteHistoryEntry(input.id, input.workspaceId);
+      browserHistoryService.deleteHistoryEntry(input.id, input.workspaceId);
       return { ok: true };
     }),
 
@@ -151,7 +150,10 @@ export const historyRouter = t.router({
       }),
     )
     .mutation(({ input }) => {
-      const deleted = clearHistory(input.workspaceId, input.range satisfies ClearRange);
+      const deleted = browserHistoryService.clearHistory(
+        input.workspaceId,
+        input.range satisfies ClearRange,
+      );
       return { deleted };
     }),
 });

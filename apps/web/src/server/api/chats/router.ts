@@ -22,7 +22,7 @@
 import { createLogger } from "@band-app/logger";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { getOrCreateAgent } from "../../services/agent-service";
+import { agentService } from "../../services/agent-service";
 import { chatService, InvalidLabelsError } from "../../services/chat-service";
 import {
   ensureActiveSessionSummary,
@@ -222,7 +222,11 @@ export const chatsRouter = t.router({
       let lastModified: number | undefined;
       if (workspace) {
         try {
-          const agent = await getOrCreateAgent(input.chatId, workspace.worktree.path, chat.agent);
+          const agent = await agentService.getOrCreateAgent(
+            input.chatId,
+            workspace.worktree.path,
+            chat.agent,
+          );
           const info = await agent.getSessionInfo?.(input.sessionId, workspace.worktree.path);
           summary = info?.summary;
           lastModified = info?.lastModified;

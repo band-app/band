@@ -3,52 +3,85 @@
  * visit log query module.
  *
  * Routers must not import from `infra/` directly (see
- * `docs/web-architecture.md`); the `history.*` tRPC router uses these
- * wrappers so the SQLite-backed query module
+ * `docs/web-architecture.md`); the `history.*` tRPC router uses this
+ * class so the SQLite-backed query module
  * (`infra/db/queries/browser-history.ts`) stays an infra detail.
  *
  * No business logic lives here — every method is a direct delegate. The
  * input validation (Zod schemas, URL/title caps, favicon scheme
- * whitelist) lives on the router because it's transport-layer concerns,
- * not domain rules.
+ * whitelist) lives on the router because it's a transport-layer
+ * concern, not a domain rule.
+ *
+ * Class-with-constructor-DI shape per `docs/web-architecture.md`
+ * (issue #535, follow-up 5). Tests can inject a stub adapter; the
+ * exported `browserHistoryService` singleton is what the router
+ * consumes.
  */
 
 import {
   type ClearRange,
-  clearHistory as clearHistoryImpl,
-  deleteHistoryEntry as deleteHistoryEntryImpl,
+  clearHistory,
+  deleteHistoryEntry,
   type HistoryEntry,
   type ListHistoryOptions,
-  listHistory as listHistoryImpl,
+  listHistory,
   type RecordVisitInput,
-  recordVisit as recordVisitImpl,
-  searchHistory as searchHistoryImpl,
+  recordVisit,
+  searchHistory,
   type UpdateMetaInput,
-  updateVisitMeta as updateVisitMetaImpl,
+  updateVisitMeta,
 } from "../infra/db/queries/browser-history";
 
 export type { ClearRange, HistoryEntry, ListHistoryOptions, RecordVisitInput, UpdateMetaInput };
 
-export function recordVisit(input: RecordVisitInput): boolean {
-  return recordVisitImpl(input);
+/**
+ * Infra adapter the service depends on. Default is the real query
+ * module's function exports; tests inject a stub of the same shape.
+ */
+export interface BrowserHistoryAdapter {
+  recordVisit: typeof recordVisit;
+  updateVisitMeta: typeof updateVisitMeta;
+  listHistory: typeof listHistory;
+  searchHistory: typeof searchHistory;
+  deleteHistoryEntry: typeof deleteHistoryEntry;
+  clearHistory: typeof clearHistory;
 }
 
-export function updateVisitMeta(input: UpdateMetaInput): void {
-  updateVisitMetaImpl(input);
+const DEFAULT_ADAPTER: BrowserHistoryAdapter = {
+  recordVisit,
+  updateVisitMeta,
+  listHistory,
+  searchHistory,
+  deleteHistoryEntry,
+  clearHistory,
+};
+
+export class BrowserHistoryService {
+  constructor(private readonly queries: BrowserHistoryAdapter = DEFAULT_ADAPTER) {}
+
+  recordVisit(input: RecordVisitInput): boolean {
+    return this.queries.recordVisit(input);
+  }
+
+  updateVisitMeta(input: UpdateMetaInput): void {
+    this.queries.updateVisitMeta(input);
+  }
+
+  listHistory(workspaceId: string, options: ListHistoryOptions = {}): HistoryEntry[] {
+    return this.queries.listHistory(workspaceId, options);
+  }
+
+  searchHistory(workspaceId: string, query: string, limit?: number): HistoryEntry[] {
+    return this.queries.searchHistory(workspaceId, query, limit);
+  }
+
+  deleteHistoryEntry(id: number, workspaceId: string): void {
+    this.queries.deleteHistoryEntry(id, workspaceId);
+  }
+
+  clearHistory(workspaceId: string, range: ClearRange): number {
+    return this.queries.clearHistory(workspaceId, range);
+  }
 }
 
-export function listHistory(workspaceId: string, options: ListHistoryOptions = {}): HistoryEntry[] {
-  return listHistoryImpl(workspaceId, options);
-}
-
-export function searchHistory(workspaceId: string, query: string, limit?: number): HistoryEntry[] {
-  return searchHistoryImpl(workspaceId, query, limit);
-}
-
-export function deleteHistoryEntry(id: number, workspaceId: string): void {
-  deleteHistoryEntryImpl(id, workspaceId);
-}
-
-export function clearHistory(workspaceId: string, range: ClearRange): number {
-  return clearHistoryImpl(workspaceId, range);
-}
+export const browserHistoryService = new BrowserHistoryService();
