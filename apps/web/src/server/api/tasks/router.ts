@@ -3,7 +3,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { toWorkspaceId } from "@/dashboard";
 import { WorkspaceNotFoundError } from "../../errors";
-import { createChat, getChat, getOrCreateDefaultChat } from "../../services/chat-manager";
+import { chatService } from "../../services/chat-service";
 import { loadState } from "../../services/state";
 import {
   abortTask,
@@ -116,11 +116,11 @@ export const tasksRouter = t.router({
       // record exists. If not provided, fall back to the default chat.
       let chatId: string;
       if (input.chatId) {
-        const existing = getChat(input.chatId);
+        const existing = chatService.get(input.chatId);
         if (!existing) {
           // Lazily create the chat record. Preserve the agent from the
           // task so the correct agent type is used (not the default).
-          createChat(input.workspaceId, {
+          chatService.create(input.workspaceId, {
             id: input.chatId,
             name: "Chat",
             agent: input.codingAgentId,
@@ -128,7 +128,7 @@ export const tasksRouter = t.router({
         }
         chatId = input.chatId;
       } else {
-        chatId = getOrCreateDefaultChat(input.workspaceId).id;
+        chatId = chatService.getOrCreateDefault(input.workspaceId).id;
       }
 
       // Persist any uploaded files first and capture the full SavedFile
@@ -194,7 +194,7 @@ export const tasksRouter = t.router({
   get: publicProcedure
     .input(z.object({ workspaceId: z.string(), chatId: z.string().optional() }))
     .query(({ input }) => {
-      const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
+      const chatId = input.chatId ?? chatService.getOrCreateDefault(input.workspaceId).id;
       const task = getTask(chatId);
       return { task };
     }),
@@ -208,7 +208,7 @@ export const tasksRouter = t.router({
   isRunning: publicProcedure
     .input(z.object({ workspaceId: z.string(), chatId: z.string().optional() }))
     .query(({ input }) => {
-      const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
+      const chatId = input.chatId ?? chatService.getOrCreateDefault(input.workspaceId).id;
       const task = getTask(chatId);
       return { running: task?.status === "running" };
     }),
@@ -216,7 +216,7 @@ export const tasksRouter = t.router({
   abort: publicProcedure
     .input(z.object({ workspaceId: z.string(), chatId: z.string().optional() }))
     .mutation(({ input }) => {
-      const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
+      const chatId = input.chatId ?? chatService.getOrCreateDefault(input.workspaceId).id;
       const aborted = abortTask(chatId);
       if (!aborted) {
         throw new TRPCError({ code: "NOT_FOUND", message: "No running task found" });
@@ -245,7 +245,7 @@ export const tasksRouter = t.router({
       }
 
       // Use original chat pane or default for workspace
-      const chatId = record.chatId ?? getOrCreateDefaultChat(record.workspaceId).id;
+      const chatId = record.chatId ?? chatService.getOrCreateDefault(record.workspaceId).id;
 
       try {
         const task = submitTask({

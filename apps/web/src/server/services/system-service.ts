@@ -1,6 +1,9 @@
+import { listWorktrees, type WorktreeInfo } from "../infra/git/git-client";
 import { duBytes as duBytesRaw } from "../infra/process/du";
 import { brewInstall } from "../infra/process/install";
 import { shellPath, whichBinary } from "../infra/process/path";
+
+export type { WorktreeInfo };
 
 /**
  * Process / system orchestration: resolving the user's `$PATH` from a
@@ -83,6 +86,15 @@ export class SystemService {
    */
   async installCloudflared(resolvedPath: string): Promise<void> {
     await brewInstall("cloudflared", resolvedPath);
+  }
+
+  /**
+   * Enumerate git worktrees for a project. Thin façade over `GitClient`
+   * so the system router (and any future API-tier caller that needs the
+   * porcelain output) doesn't reach into `infra/git/` directly.
+   */
+  async listWorktrees(repoPath: string): Promise<WorktreeInfo[]> {
+    return listWorktrees(repoPath);
   }
 
   /**

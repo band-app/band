@@ -2,7 +2,7 @@ import { realpathSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { createLogger } from "@band-app/logger";
 import { z } from "zod";
-import { getOrCreateDefaultChat } from "../../services/chat-manager";
+import { chatService } from "../../services/chat-service";
 import {
   clearQueuedMessages,
   getQueuedMessages,
@@ -229,7 +229,7 @@ export const queueRouter = t.router({
       }),
     )
     .mutation(async ({ input }) => {
-      const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
+      const chatId = input.chatId ?? chatService.getOrCreateDefault(input.workspaceId).id;
       // If disk write fails (ENOSPC, permissions, etc.), degrade to a
       // text-only queue entry rather than reject the whole push with a
       // 500. Losing the attachment is annoying; losing the user's
@@ -269,7 +269,7 @@ export const queueRouter = t.router({
       }),
     )
     .mutation(async ({ input }) => {
-      const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
+      const chatId = input.chatId ?? chatService.getOrCreateDefault(input.workspaceId).id;
       // Resolve files per message and tolerate per-message failures.
       // `Promise.all` would short-circuit on the first rejection and
       // leave any already-saved files orphaned on disk with no queue
@@ -304,14 +304,14 @@ export const queueRouter = t.router({
   get: publicProcedure
     .input(z.object({ workspaceId: z.string(), chatId: z.string().optional() }))
     .query(({ input }) => {
-      const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
+      const chatId = input.chatId ?? chatService.getOrCreateDefault(input.workspaceId).id;
       return { messages: toWireQueuedMessages(getQueuedMessages(chatId)) };
     }),
 
   remove: publicProcedure
     .input(z.object({ workspaceId: z.string(), chatId: z.string().optional(), id: z.string() }))
     .mutation(({ input }) => {
-      const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
+      const chatId = input.chatId ?? chatService.getOrCreateDefault(input.workspaceId).id;
       const removed = removeQueuedMessage(chatId, input.id);
       return {
         ok: true,
@@ -330,7 +330,7 @@ export const queueRouter = t.router({
       }),
     )
     .mutation(({ input }) => {
-      const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
+      const chatId = input.chatId ?? chatService.getOrCreateDefault(input.workspaceId).id;
       const updated = updateQueuedMessage(chatId, input.id, input.text);
       return {
         ok: true,
@@ -342,7 +342,7 @@ export const queueRouter = t.router({
   shift: publicProcedure
     .input(z.object({ workspaceId: z.string(), chatId: z.string().optional() }))
     .mutation(({ input }) => {
-      const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
+      const chatId = input.chatId ?? chatService.getOrCreateDefault(input.workspaceId).id;
       const message = shiftQueuedMessage(chatId);
       return { message: message ? toWireQueuedMessages([message])[0] : null };
     }),
@@ -350,7 +350,7 @@ export const queueRouter = t.router({
   clear: publicProcedure
     .input(z.object({ workspaceId: z.string(), chatId: z.string().optional() }))
     .mutation(({ input }) => {
-      const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
+      const chatId = input.chatId ?? chatService.getOrCreateDefault(input.workspaceId).id;
       clearQueuedMessages(chatId);
       return { ok: true };
     }),
@@ -358,7 +358,7 @@ export const queueRouter = t.router({
   stream: publicProcedure
     .input(z.object({ workspaceId: z.string(), chatId: z.string().optional() }))
     .subscription(async function* (opts) {
-      const chatId = opts.input.chatId ?? getOrCreateDefaultChat(opts.input.workspaceId).id;
+      const chatId = opts.input.chatId ?? chatService.getOrCreateDefault(opts.input.workspaceId).id;
 
       type Update = { messages: QueuedMessage[] };
       const queue: Update[] = [];

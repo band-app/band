@@ -7,7 +7,7 @@ import {
   CronjobQueries,
   generateCronjobId,
 } from "../infra/db/queries/cronjobs";
-import { BAND_CRON_ID_LABEL, type ChatSession, createChat, findChatByLabels } from "./chat-manager";
+import { chatService, BAND_CRON_ID_LABEL, type ChatSession } from "./chat-service";
 import { loadState } from "./state";
 import { submitTask, TaskConflictError } from "./task-service";
 
@@ -416,9 +416,9 @@ export class CronjobService {
     job: Pick<CronjobDefinition, "id" | "name">,
   ): ChatSession {
     const labelMatch = { [BAND_CRON_ID_LABEL]: job.id };
-    const existing = findChatByLabels(workspaceId, labelMatch);
+    const existing = chatService.findByLabels(workspaceId, labelMatch);
     if (existing) return existing;
-    return createChat(workspaceId, {
+    return chatService.create(workspaceId, {
       name: job.name,
       labels: labelMatch,
       // Cronjob scheduler is a trusted server-side caller — it's allowed

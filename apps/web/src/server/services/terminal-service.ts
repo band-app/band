@@ -17,7 +17,7 @@ import {
   saveTerminalLayout,
 } from "./terminal-layout-manager";
 import { emit } from "./watcher";
-import { resolveWorkspace } from "./workspace";
+import { workspaceService } from "./workspace-service";
 
 // Re-export the PTY types so the API tier (`terminals/router.ts`,
 // `terminals/ws.ts`) can reference them without reaching into infra.
@@ -115,7 +115,7 @@ export class TerminalService {
     terminalId: string,
     options?: SpawnOptions,
   ): Promise<TerminalSession> {
-    const workspace = resolveWorkspace(workspaceId);
+    const workspace = workspaceService.resolve(workspaceId);
     if (!workspace) {
       throw new Error(`Workspace not found: ${workspaceId}`);
     }
@@ -240,7 +240,7 @@ export class TerminalService {
    * query) reach it via `terminalService` instead of a stand-alone helper.
    */
   getWorkspaceConfig(workspaceId: string): WorkspaceTerminalConfig | null {
-    const workspace = resolveWorkspace(workspaceId);
+    const workspace = workspaceService.resolve(workspaceId);
     if (!workspace) return null;
     return this.loadWorkspaceConfigFromPaths(workspace.worktree.path, workspace.project.path);
   }

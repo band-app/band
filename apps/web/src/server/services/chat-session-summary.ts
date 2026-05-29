@@ -27,7 +27,7 @@
 
 import { createLogger } from "@band-app/logger";
 import { getOrCreateAgent } from "../infra/agents/agent-pool";
-import { type ChatSession, getChat, updateChatSessionSummary } from "./chat-manager";
+import { chatService, type ChatSession } from "./chat-service";
 
 const log = createLogger("chat-session-summary");
 
@@ -47,7 +47,7 @@ export async function ensureActiveSessionSummary(
   chatId: string,
   worktreePath: string,
 ): Promise<ChatSession | undefined> {
-  const chat = getChat(chatId);
+  const chat = chatService.get(chatId);
   if (!chat) return undefined;
 
   // Already cached — nothing to do.
@@ -62,13 +62,13 @@ export async function ensureActiveSessionSummary(
       if (!agent.getSessionInfo) return chat;
       const info = await agent.getSessionInfo(chat.activeSessionId, worktreePath);
       if (info) {
-        updateChatSessionSummary(chatId, chat.activeSessionId, info.summary, info.lastModified);
+        chatService.updateSessionSummary(chatId, chat.activeSessionId, info.summary, info.lastModified);
       } else {
         // Session file doesn't exist anymore — leave the cached values
         // null. The client will treat this as "no active session" until
         // the next mutation rebuilds the cache.
       }
-      return getChat(chatId);
+      return chatService.get(chatId);
     }
 
     // No activeSessionId. Leave it null.
@@ -113,7 +113,7 @@ export function scheduleActiveSessionRefresh(chatId: string, worktreePath: strin
 
 async function doRefresh(chatId: string, worktreePath: string): Promise<void> {
   try {
-    const chat = getChat(chatId);
+    const chat = chatService.get(chatId);
     if (!chat) return;
 
     const agent = await getOrCreateAgent(chatId, worktreePath, chat.agent);
@@ -127,7 +127,7 @@ async function doRefresh(chatId: string, worktreePath: string): Promise<void> {
         // until the user picks a new session.
         return;
       }
-      updateChatSessionSummary(chatId, chat.activeSessionId, info.summary, info.lastModified);
+      chatService.updateSessionSummary(chatId, chat.activeSessionId, info.summary, info.lastModified);
       return;
     }
 

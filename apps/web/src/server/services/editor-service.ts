@@ -5,7 +5,7 @@ import { killAllServers, killWorkspaceServers } from "../infra/lsp/lsp-manager";
 import { subscribeToFileChanges, type Unsubscribe } from "./file-watcher";
 import { FormatterError, formatFile } from "./formatter";
 import { emit } from "./watcher";
-import { resolveWorkspace } from "./workspace";
+import { workspaceService } from "./workspace-service";
 
 /**
  * Editor domain service.
@@ -61,7 +61,7 @@ export class EditorService {
     filePath: string,
     content: string,
   ): Promise<Awaited<ReturnType<typeof formatFile>>> {
-    const workspace = resolveWorkspace(workspaceId);
+    const workspace = workspaceService.resolve(workspaceId);
     if (!workspace) {
       throw new Error(`Workspace ${workspaceId} not found`);
     }
@@ -116,7 +116,7 @@ export class EditorService {
       );
     }
 
-    const workspace = resolveWorkspace(targetWorkspaceId);
+    const workspace = workspaceService.resolve(targetWorkspaceId);
     if (!workspace) {
       throw new EditorOpenError("NOT_FOUND", `Workspace '${targetWorkspaceId}' not found`);
     }

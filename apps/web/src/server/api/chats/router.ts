@@ -29,7 +29,7 @@ import {
   scheduleActiveSessionRefresh,
 } from "../../services/chat-session-summary";
 import { abortTask, submitTask, TaskConflictError } from "../../services/task-service";
-import { resolveWorkspace } from "../../services/workspace";
+import { workspaceService } from "../../services/workspace-service";
 import { publicProcedure, t } from "../trpc";
 
 const log = createLogger("chats-router");
@@ -99,7 +99,7 @@ export const chatsRouter = t.router({
     const chat = chatService.get(input.chatId);
     if (!chat) return { chat: null };
 
-    const workspace = resolveWorkspace(chat.workspaceId);
+    const workspace = workspaceService.resolve(chat.workspaceId);
 
     // Lazy-resolve case: row has no cached summary yet (post-migration, or
     // a fresh chat with no activeSessionId). Block once on the first read
@@ -217,7 +217,7 @@ export const chatsRouter = t.router({
       // getSessionInfo fails or returns undefined (the JSONL doesn't exist
       // yet for a freshly-created session), persist NULL — the next
       // chats.get's background refresh will catch up.
-      const workspace = resolveWorkspace(input.workspaceId);
+      const workspace = workspaceService.resolve(input.workspaceId);
       let summary: string | undefined;
       let lastModified: number | undefined;
       if (workspace) {

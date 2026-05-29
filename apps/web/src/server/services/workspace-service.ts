@@ -20,7 +20,7 @@ import { killWorkspaceServers } from "../infra/lsp/lsp-manager";
 import { loadProjectConfig } from "../infra/setup/project-config";
 import { runSetup } from "../infra/setup/setup-runner";
 import { browserService } from "./browser-service";
-import { getOrCreateDefaultChat, removeWorkspaceChats, updateChat } from "./chat-manager";
+import { chatService } from "./chat-service";
 // FRAGILE: ESM cycle leg #2 — `./cronjob-service` imports `submitTask`
 // from `./task-service`, which imports `lib/workspace`, which imports
 // `workspaceService` from this file. Same live-binding constraint as the
@@ -299,7 +299,7 @@ export class WorkspaceService {
 
     // Materialize the default chat pane so the workspace surfaces a
     // ready-to-use UI even when the caller didn't pass a prompt.
-    const defaultChat = getOrCreateDefaultChat(workspaceId);
+    const defaultChat = chatService.getOrCreateDefault(workspaceId);
 
     // If a prompt is provided, defer task submission until the setup
     // script completes so the agent has dependencies installed. When
@@ -402,7 +402,7 @@ export class WorkspaceService {
     // tears down the saved layout as part of the same call (see
     // `ChatService.removeAllForWorkspace`) so a separate `deleteChatLayout`
     // step is no longer required here.
-    removeWorkspaceChats(workspaceId);
+    chatService.removeAllForWorkspace(workspaceId);
 
     // Clean up all browser tabs + layout. Same contract as chats —
     // `BrowserService.removeAllForWorkspace` drops the layout row itself.
@@ -844,7 +844,7 @@ export class WorkspaceService {
     }
 
     // Resolve the chat pane (use provided chatId or default)
-    const chatId = input.chatId ?? getOrCreateDefaultChat(input.workspaceId).id;
+    const chatId = input.chatId ?? chatService.getOrCreateDefault(input.workspaceId).id;
 
     // Abort any running task and clear queued messages so the new agent
     // starts with a clean slate.
@@ -855,7 +855,7 @@ export class WorkspaceService {
     await replaceAgent(chatId, workspace.worktree.path, input.agentId);
 
     // Update the chat pane's agent config
-    updateChat(chatId, { agent: input.agentId });
+    chatService.update(chatId, { agent: input.agentId });
 
     // Update workspace status with the new coding agent ID
     upsertWorkspaceStatus(input.workspaceId, {

@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createLogger } from "@band-app/logger";
 import { agentService } from "../server/services/agent-service";
-import { getChat } from "../server/services/chat-manager";
+import { chatService } from "../server/services/chat-service";
 import { jsonlMessageToEvents } from "../server/services/jsonl-message-to-events";
 import {
   getQueuedMessages,
@@ -17,7 +17,7 @@ import {
   type StreamChunk,
   subscribe as subscribeTask,
 } from "../server/services/task-service";
-import { resolveWorkspace } from "../server/services/workspace";
+import { workspaceService } from "../server/services/workspace-service";
 import type {
   ChatEvent,
   ChatEventPayload,
@@ -91,7 +91,7 @@ export async function handleChatEvents(
   const explicitWorkspaceId = url.searchParams.get("workspaceId") ?? undefined;
 
   // Validate chat exists.
-  const chat = getChat(chatId);
+  const chat = chatService.get(chatId);
   // We tolerate missing chats — they're created lazily on first message.
 
   // Open the SSE stream. After this point every error must go on the stream
@@ -316,7 +316,7 @@ async function replayPast(opts: {
     let jsonlEmittedAny = false;
     if (chatWorkspaceId) {
       try {
-        const workspace = resolveWorkspace(chatWorkspaceId);
+        const workspace = workspaceService.resolve(chatWorkspaceId);
         if (workspace) {
           const agent = await agentService.getOrCreateAgent(
             chatId,
@@ -377,7 +377,7 @@ async function replayPast(opts: {
 
   if (needJsonl && chatWorkspaceId) {
     try {
-      const workspace = resolveWorkspace(chatWorkspaceId);
+      const workspace = workspaceService.resolve(chatWorkspaceId);
       if (workspace) {
         const agent = await agentService.getOrCreateAgent(
           chatId,

@@ -5,7 +5,7 @@ import type { UIMessageChunk } from "ai";
 import { WorkspaceNotFoundError } from "../errors";
 import { getAgent, getOrCreateAgent, replaceAgent } from "../infra/agents/agent-pool";
 import { generateTaskId, TaskQueries } from "../infra/db/queries/tasks";
-import { getChat, updateChatActiveSession, updateChatStatus } from "./chat-manager";
+import { chatService } from "./chat-service";
 import { mimeTypeFromFilename } from "./mime-types";
 import { shiftQueuedMessage } from "./queued-message-store";
 import { bandHome, upsertWorkspaceStatus } from "./state";
@@ -16,7 +16,7 @@ import { emit as emitStatusEvent } from "./watcher";
 // is inside a function body (live binding). See `lib/workspace.ts` for the
 // cycle note before capturing `resolveWorkspace` (or any service-tier
 // symbol via this hop) at module load.
-import { resolveWorkspace } from "./workspace";
+import { workspaceService } from "./workspace-service";
 
 const log = createLogger("task-service");
 
@@ -288,7 +288,7 @@ export function hasPendingInputForWorkspace(workspaceId: string): boolean {
 }
 
 function persistTask(task: InternalTask): void {
-  const workspace = resolveWorkspace(task.workspaceId);
+  const workspace = workspaceService.resolve(task.workspaceId);
   try {
     taskQueries.save({
       id: task.taskRecordId,
@@ -361,7 +361,7 @@ export function submitTask(options: SubmitTaskOptions): TaskInfo {
     codingAgentId,
   } = options;
 
-  const workspace = resolveWorkspace(workspaceId);
+  const workspace = workspaceService.resolve(workspaceId);
   if (!workspace) {
     throw new WorkspaceNotFoundError(workspaceId);
   }
@@ -437,7 +437,7 @@ export function submitTask(options: SubmitTaskOptions): TaskInfo {
         taskId: task.taskRecordId,
         message: errMsg,
       } as unknown as UIMessageChunk);
-      updateChatStatus(chatId, "error");
+      chatService.updateStatus(chatId, "error");
     }
   });
 
@@ -470,7 +470,7 @@ export function abortTask(chatId: string): boolean {
   } as unknown as UIMessageChunk);
   tasks.delete(chatId);
 
-  updateChatStatus(chatId, "idle");
+  chatService.updateStatus(chatId, "idle");
 
   const updated = upsertWorkspaceStatus(task.workspaceId, { status: "waiting" });
   emitStatusEvent({ kind: "update", status: updated });
@@ -502,7 +502,7 @@ export function cancelTask(taskId: string): { cancelled: boolean; workspaceId?: 
       } as unknown as UIMessageChunk);
       tasks.delete(chatId);
 
-      updateChatStatus(chatId, "idle");
+      chatService.updateStatus(chatId, "idle");
 
       const updated = upsertWorkspaceStatus(task.workspaceId, { status: "waiting" });
       emitStatusEvent({ kind: "update", status: updated });
@@ -525,14 +525,14 @@ export function cancelTask(taskId: string): { cancelled: boolean; workspaceId?: 
 }
 
 async function runTask(chatId: string, task: InternalTask) {
-  const workspace = resolveWorkspace(task.workspaceId);
+  const workspace = workspaceService.resolve(task.workspaceId);
   if (!workspace) {
     task.status = "failed";
     task.completedAt = Date.now();
     persistTask(task);
     broadcast(chatId, { type: "error", errorText: "Workspace not found" });
     tasks.delete(chatId);
-    updateChatStatus(chatId, "error");
+    chatService.updateStatus(chatId, "error");
     return;
   }
 
@@ -541,7 +541,7 @@ async function runTask(chatId: string, task: InternalTask) {
   // the chat record's agent — otherwise reuse the existing pool entry.
   // This avoids aborting/recreating the agent process on every message
   // which was breaking non-default agents (OpenCode, Codex).
-  const chatSession = getChat(chatId);
+  const chatSession = chatService.get(chatId);
   const taskAgentId = task.codingAgentId;
   const resolvedAgentId = taskAgentId ?? chatSession?.agent;
   const needsReplace = taskAgentId && taskAgentId !== chatSession?.agent;
@@ -554,7 +554,7 @@ async function runTask(chatId: string, task: InternalTask) {
     : await getOrCreateAgent(chatId, workspace.worktree.path, resolvedAgentId);
 
   // Mark chat pane as running
-  updateChatStatus(chatId, "running");
+  chatService.updateStatus(chatId, "running");
 
   // Mark workspace as working now that the agent is ready
   const working = upsertWorkspaceStatus(task.workspaceId, { status: "working" });
@@ -642,7 +642,7 @@ async function runTask(chatId: string, task: InternalTask) {
           // brand-new session — it's what the CLI's /resume picker shows
           // and what listSessions would return once the JSONL contains a
           // last-prompt record.
-          updateChatActiveSession(chatId, {
+          chatService.updateActiveSession(chatId, {
             activeSessionId: event.sessionId,
             summary: task.prompt,
             lastModified: Date.now(),
@@ -958,7 +958,7 @@ async function runTask(chatId: string, task: InternalTask) {
       taskId: task.taskRecordId,
       message: errMsg,
     } as unknown as UIMessageChunk);
-    updateChatStatus(chatId, "error");
+    chatService.updateStatus(chatId, "error");
   }
 
   // Auto-start a new task if there's a queued message and the task succeeded.
@@ -1022,7 +1022,7 @@ async function runTask(chatId: string, task: InternalTask) {
 
   // Update chat pane and workspace status
   if (!autoStarted) {
-    updateChatStatus(chatId, "idle");
+    chatService.updateStatus(chatId, "idle");
     const endStatus = task.status === "completed" ? "needs_attention" : "waiting";
     const updated = upsertWorkspaceStatus(task.workspaceId, { status: endStatus });
     emitStatusEvent({ kind: "update", status: updated });

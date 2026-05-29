@@ -1,7 +1,6 @@
 import { createLogger } from "@band-app/logger";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { listWorktrees } from "../../infra/git/git-client";
 // TODO(#319 / Phase 8 follow-up): these legacy `lib/*` imports plus the
 // inline worktree-filter / aggregation / sort logic in `resourcesProjects`
 // and `resourcesProjectSize` are a layering bypass — the architecture doc
@@ -111,7 +110,7 @@ export const systemRouter = t.router({
         .filter((p) => p.kind === "git")
         .map(async (project) => {
           try {
-            const list = await listWorktrees(project.path);
+            const list = await systemService.listWorktrees(project.path);
             // `listWorktrees` guarantees a non-empty branch for non-bare
             // worktrees: detached HEADs (mid-rebase, mid-bisect, or
             // explicit `git checkout <sha>`) are labelled with the
@@ -159,7 +158,7 @@ export const systemRouter = t.router({
 
       let worktreePaths: { branch: string; path: string }[];
       try {
-        const list = await listWorktrees(project.path);
+        const list = await systemService.listWorktrees(project.path);
         // See `resourcesProjects` above — `listWorktrees` already
         // gives every non-bare worktree a non-empty branch label.
         worktreePaths = list
