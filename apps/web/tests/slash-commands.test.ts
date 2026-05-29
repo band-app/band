@@ -4,7 +4,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { BAND_SKILL_NAMES } from "../src/server/services/cli-skills";
+import { BAND_SKILL_NAMES } from "../src/server/services/cli-skills-service";
 import { seedSettings, seedState } from "./helpers/seed-state";
 import { SERVER_RUNTIME, SERVER_SCRIPT } from "./helpers/server-runtime";
 

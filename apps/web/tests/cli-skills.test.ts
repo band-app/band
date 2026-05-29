@@ -33,7 +33,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { closeDb } from "../src/server/infra/db/connection";
-import { findBandBinary } from "../src/server/services/cli-skills";
+import { findBandBinary } from "../src/server/services/cli-skills-service";
 
 const SKILL_NAMES = [
   "band",
@@ -289,7 +289,7 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
     mkdirSync(join(home, ".gemini"), { recursive: true });
     mkdirSync(join(home, ".config", "opencode"), { recursive: true });
 
-    const { installSkills } = await import("../src/server/services/cli-skills");
+    const { installSkills } = await import("../src/server/services/cli-skills-service");
     const result = await installSkills({ home });
 
     const sharedDir = join(home, ".agents", "skills");
@@ -318,7 +318,7 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
     // Only ~/.claude exists (created by beforeEach). Codex / OpenCode /
     // Gemini config dirs don't, so those agents should be skipped.
     const home = process.env.HOME!;
-    const { installSkills } = await import("../src/server/services/cli-skills");
+    const { installSkills } = await import("../src/server/services/cli-skills-service");
     const result = await installSkills({ home });
 
     expect(existsSync(join(home, ".claude", "skills", "band"))).toBe(true);
@@ -336,7 +336,7 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
     const originalCodexHome = process.env.CODEX_HOME;
     process.env.CODEX_HOME = customCodexHome;
     try {
-      const { installSkills } = await import("../src/server/services/cli-skills");
+      const { installSkills } = await import("../src/server/services/cli-skills-service");
       const result = await installSkills({ home: process.env.HOME! });
 
       for (const name of SKILL_NAMES) {
@@ -362,7 +362,7 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
   });
 
   it("leaves a correct existing symlink untouched (idempotent on re-run)", async () => {
-    const { installSkills } = await import("../src/server/services/cli-skills");
+    const { installSkills } = await import("../src/server/services/cli-skills-service");
     await installSkills({ home: process.env.HOME! });
 
     const link = join(process.env.HOME!, ".claude", "skills", "band");
@@ -387,7 +387,7 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
     const link = join(claudeSkills, "band");
     symlinkSync(decoy, link, "dir");
 
-    const { installSkills } = await import("../src/server/services/cli-skills");
+    const { installSkills } = await import("../src/server/services/cli-skills-service");
     const result = await installSkills({ home });
 
     // Conflict reported, link untouched, shared dir still populated.
@@ -420,7 +420,7 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
     // but explicit makes the intent clear.)
     rmSync(join(home, ".agents", "skills", "band"), { recursive: true, force: true });
 
-    const { installSkills } = await import("../src/server/services/cli-skills");
+    const { installSkills } = await import("../src/server/services/cli-skills-service");
     const result = await installSkills({ home });
 
     // realpathSync on a dangling symlink fails, which the implementation
@@ -446,7 +446,7 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
     const userFile = join(realDir, "SKILL.md");
     writeFileSync(userFile, "# user-authored band skill\n", "utf-8");
 
-    const { installSkills } = await import("../src/server/services/cli-skills");
+    const { installSkills } = await import("../src/server/services/cli-skills-service");
     const result = await installSkills({ home });
 
     expect(result.conflicts.some((c) => c.startsWith(realDir))).toBe(true);
@@ -460,7 +460,7 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
     // Wipe the only config dir beforeEach created so nothing is detected.
     rmSync(join(process.env.HOME!, ".claude"), { recursive: true, force: true });
 
-    const { installSkills } = await import("../src/server/services/cli-skills");
+    const { installSkills } = await import("../src/server/services/cli-skills-service");
     const result = await installSkills({ home: process.env.HOME! });
 
     // Shared files are still written (they're useful on their own).
@@ -478,7 +478,7 @@ describe.skipIf(!bandBinaryReachable())("CLI skills sync (ensureSkillsInstalled)
     // installed. Because cursor-cli isn't in `SUPPORTED_AGENT_TYPES`,
     // detection should still skip it.
     mkdirSync(join(process.env.HOME!, ".cursor"), { recursive: true });
-    const { installSkills } = await import("../src/server/services/cli-skills");
+    const { installSkills } = await import("../src/server/services/cli-skills-service");
     const result = await installSkills({ home: process.env.HOME! });
 
     expect(existsSync(join(process.env.HOME!, ".cursor", "skills"))).toBe(false);
