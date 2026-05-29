@@ -8,7 +8,7 @@ import {
   type TerminalSession,
   terminalPool,
 } from "../infra/terminals/terminal-pool";
-import { loadProjectConfig } from "./project-config";
+import { loadProjectConfig } from "../infra/setup/project-config";
 import {
   addTerminalToLayout,
   deleteTerminalLayout,

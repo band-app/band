@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseGitRemoteUrl } from "../src/server/services/git";
+import { parseGitRemoteUrl } from "../src/server/infra/git/git-client";
 import {
   buildBatchedCIQuery,
   parseBatchedCIResponse,

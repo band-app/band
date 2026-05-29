@@ -1,4 +1,4 @@
-import type { RepoInfo } from "./git";
+import type { RepoInfo } from "../infra/git/git-client";
 
 export interface CIStatus {
   state: string;

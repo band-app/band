@@ -1,4 +1,4 @@
-import { execGit, getRepoInfo, listWorktrees } from "./git";
+import { execGit, getRepoInfo, listWorktrees } from "../infra/git/git-client";
 import {
   loadState,
   type ProjectState,

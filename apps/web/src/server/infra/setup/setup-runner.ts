@@ -1,6 +1,19 @@
 import { type ChildProcess, spawn } from "node:child_process";
+import { emit } from "../events/status-event-bus";
 import { loadProjectConfig } from "./project-config";
-import { emit } from "./watcher";
+
+/**
+ * Per-workspace `.band/config.json::setup` runner.
+ *
+ * Lives in the infra tier — it's a process pool that shells out to
+ * `bash -c <setup command>` for the workspace lifecycle. Higher tiers
+ * (`WorkspaceService.create` and the watcher snapshot) consume it via
+ * its function exports.
+ *
+ * Moved here from `services/setup-runner.ts` (issue #535, follow-up 3)
+ * so the `node:child_process` shell-out lives behind an infra adapter
+ * instead of inside the services tier.
+ */
 
 interface SetupInfo {
   workspaceId: string;

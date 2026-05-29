@@ -13,7 +13,7 @@ import { z } from "zod";
 // applies to `statuses/`, `skills/`, `modes/`, `models/` — see
 // `apps/web/src/server/api/router.ts` for the consolidated checklist.
 import { getPollerActivity, setPollerActivity } from "../../services/branch-status-poller";
-import { listWorktrees } from "../../services/git";
+import { listWorktrees } from "../../infra/git/git-client";
 import { loadState } from "../../services/state";
 import { systemService } from "../../services/system-service";
 import { tunnelService } from "../../services/tunnel-service";

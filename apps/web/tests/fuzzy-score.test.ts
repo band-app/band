@@ -118,7 +118,7 @@ describe("fuzzyScore – filename vs directory weight", () => {
   });
 
   it("full filename match beats partial directory match even for short queries", () => {
-    const filename = fuzzyScore("git", "src/server/services/git.ts")!;
+    const filename = fuzzyScore("git", "src/server/infra/git/git-client.ts")!;
     const directory = fuzzyScore("git", "git/src/services.ts")!;
     expect(filename).toBeGreaterThan(directory);
   });
@@ -134,7 +134,7 @@ describe("fuzzyScore – real-world ranking", () => {
     "apps/web/src/server/infra/db/schema.ts",
     "apps/web/src/dashboard/components/QuickOpenDialog.tsx",
     "apps/web/src/server/services/state.ts",
-    "apps/web/src/server/services/git.ts",
+    "apps/web/src/server/infra/git/git-client.ts",
     "apps/web/tests/trpc.test.ts",
     "apps/web/src/server/services/workspace.ts",
     "schema.prisma",
@@ -163,9 +163,9 @@ describe("fuzzyScore – real-world ranking", () => {
     expect(result[0]).toBe("apps/web/src/dashboard/components/QuickOpenDialog.tsx");
   });
 
-  it("'git' ranks git.ts first", () => {
+  it("'git' ranks the git client first", () => {
     const result = ranked("git", FILES);
-    expect(result[0]).toBe("apps/web/src/server/services/git.ts");
+    expect(result[0]).toBe("apps/web/src/server/infra/git/git-client.ts");
   });
 
   it("'state' ranks state.ts first", () => {

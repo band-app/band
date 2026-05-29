@@ -25,10 +25,10 @@ import { getOrCreateDefaultChat, removeWorkspaceChats, updateChat } from "./chat
 // a function body. Capturing `const cs = cronjobService;` at module load
 // on this leg would silently get `undefined`.
 import { cronjobService } from "./cronjob-service";
-import { DETACHED_BRANCH_PREFIX, execGit, gitCmd, listWorktrees } from "./git";
-import { loadProjectConfig } from "./project-config";
+import { DETACHED_BRANCH_PREFIX, execGit, gitCmd, listWorktrees } from "../infra/git/git-client";
+import { loadProjectConfig } from "../infra/setup/project-config";
+import { runSetup } from "../infra/setup/setup-runner";
 import { clearQueuedMessages } from "./queued-message-store";
-import { runSetup } from "./setup-runner";
 import {
   bandHome,
   deleteWorkspaceStatus,

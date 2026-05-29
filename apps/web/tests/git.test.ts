@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { getRepoInfo, listWorktrees } from "../src/server/services/git.ts";
+import { getRepoInfo, listWorktrees } from "../src/server/infra/git/git-client.ts";
 
 const gitEnv = {
   ...process.env,
