@@ -44,14 +44,18 @@ const compareBranchSchema = z
   .optional();
 
 /**
- * `mergeBase` is the SHA returned by `getDiffSummary` and threaded back
- * into `getFileDiff` as a revision argument to `git diff`. Forbid a
- * leading `-` for the same reason as `compareBranchSchema` — `execFile`
- * doesn't go through a shell, but git itself reads a leading dash as a
- * flag (`--output=…`, `--exec=…`) and we don't want a malicious client
- * smuggling one through the wire. Real merge-base SHAs are always hex.
+ * `mergeBase` is the SHA returned by `getDiffSummary` and threaded
+ * back into `getFileDiff` as a revision argument to `git diff`. Pin to
+ * a 40-character hex SHA: this closes the leading-dash injection
+ * vector (`--exec=`, `--output=…`) AND enforces that `getFileDiff`
+ * operates on the same revision shape `getDiffSummary` returned. Real
+ * merge-base SHAs from git are always 40-char hex; symbolic refs like
+ * `HEAD`, `main`, or `@{-1}` are rejected so a client can't accidentally
+ * desync from the summary's view of the world.
  */
-const mergeBaseSchema = z.string().min(1).regex(/^[^-]/, "mergeBase must not start with '-'");
+const mergeBaseSchema = z
+  .string()
+  .regex(/^[0-9a-f]{40}$/i, "mergeBase must be a 40-character hex SHA");
 
 /**
  * Wire-contract note: every workspace-tier service error (including

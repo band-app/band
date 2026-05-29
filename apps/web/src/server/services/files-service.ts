@@ -171,7 +171,12 @@ export class FilesService {
   }
 
   async saveFile(workspaceId: string, path: string, content: string): Promise<{ ok: true }> {
-    const { target } = this.resolveInside(workspaceId, path, { allowRoot: false });
+    const { root, target } = this.resolveInside(workspaceId, path, { allowRoot: false });
+    // Refuse to write into `.git/*` — overwriting `config`, `HEAD`, or
+    // a hook would corrupt the worktree or run attacker-controlled code
+    // on the next git invocation. Matches the guard on delete/rename/
+    // copy.
+    this.assertNotGitInternals(root, target, "write");
     const fileStat = await stat(target);
     if (fileStat.isDirectory()) {
       throw new Error("Cannot write to a directory");
@@ -181,7 +186,11 @@ export class FilesService {
   }
 
   async createFile(workspaceId: string, path: string, content = ""): Promise<{ ok: true }> {
-    const { target } = this.resolveInside(workspaceId, path, { allowRoot: false });
+    const { root, target } = this.resolveInside(workspaceId, path, { allowRoot: false });
+    // Same .git guard as saveFile — creating `.git/hooks/pre-commit`
+    // would let an attacker run arbitrary code under the user's account
+    // the next time git commits inside the worktree.
+    this.assertNotGitInternals(root, target, "create");
 
     if (existsSync(target)) {
       throw new Error("A file or directory already exists at this path");
@@ -203,7 +212,9 @@ export class FilesService {
   }
 
   async createDirectory(workspaceId: string, path: string): Promise<{ ok: true }> {
-    const { target } = this.resolveInside(workspaceId, path, { allowRoot: false });
+    const { root, target } = this.resolveInside(workspaceId, path, { allowRoot: false });
+    // Same .git guard as createFile / saveFile.
+    this.assertNotGitInternals(root, target, "create");
 
     if (existsSync(target)) {
       throw new Error("A file or directory already exists at this path");

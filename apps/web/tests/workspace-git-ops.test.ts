@@ -562,6 +562,9 @@ describe("tRPC — workspace.generateCommitMessage", () => {
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(500);
+    // Error responses use the tRPC error envelope `{ error: { message } }`,
+    // not the `{ result: { data } }` shape that `trpcData` unwraps —
+    // hence the raw `res.json()` here.
     const body = (await res.json()) as { error: { message: string } };
     expect(body.error.message).toMatch(/No changes to summarise/i);
   });
@@ -574,5 +577,90 @@ describe("tRPC — workspace.generateCommitMessage", () => {
       DEFAULT_TOKEN,
     );
     expect(res.status).toBe(500);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// .git internals write guard
+// ---------------------------------------------------------------------------
+//
+// Regression for a security finding raised during PR review of #535:
+// `FilesService.saveFile` / `createFile` / `createDirectory` did not
+// run the `.git`-internals guard that `deletePath` / `renamePath` /
+// `copyPath` already had. A client could overwrite `.git/config`,
+// write a `.git/hooks/pre-commit` shell script, or seed a malicious
+// `.git/refs/heads/<branch>` ref. The fix is to call
+// `assertNotGitInternals` in each of the three write paths; these
+// assertions pin that guard.
+
+describe("tRPC — file CRUD refuses to touch .git internals", () => {
+  let server: ServerHandle;
+  let tmpHome: string;
+  let workingPath: string;
+
+  beforeAll(async () => {
+    tmpHome = createTmpHome("band-files-git-guard-");
+    const originPath = createBareOrigin(tmpHome, "origin");
+    workingPath = createWorkingClone(tmpHome, "alpha", originPath);
+
+    seedState(tmpHome, {
+      projects: [
+        {
+          name: "alpha",
+          path: workingPath,
+          defaultBranch: "main",
+          worktrees: [{ branch: "main", path: workingPath }],
+        },
+      ],
+    });
+    seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
+    seedGitIdentity(tmpHome);
+
+    server = await startServer({ tmpHome });
+  });
+
+  afterAll(async () => {
+    await server.close();
+    rmSync(tmpHome, { recursive: true, force: true });
+  });
+
+  it("saveFile rejects writes under .git/", async () => {
+    const res = await trpcMutate(
+      server.url,
+      "workspace.saveFile",
+      { workspaceId: "alpha-main", path: ".git/config", content: "malicious" },
+      DEFAULT_TOKEN,
+    );
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toMatch(/\.git/i);
+  });
+
+  it("createFile rejects writes under .git/hooks/", async () => {
+    const res = await trpcMutate(
+      server.url,
+      "workspace.createFile",
+      {
+        workspaceId: "alpha-main",
+        path: ".git/hooks/pre-commit",
+        content: "#!/bin/bash\nrm -rf ~",
+      },
+      DEFAULT_TOKEN,
+    );
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toMatch(/\.git/i);
+  });
+
+  it("createDirectory rejects creating .git/refs/heads/<branch>", async () => {
+    const res = await trpcMutate(
+      server.url,
+      "workspace.createDirectory",
+      { workspaceId: "alpha-main", path: ".git/refs/heads/sneaky" },
+      DEFAULT_TOKEN,
+    );
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toMatch(/\.git/i);
   });
 });

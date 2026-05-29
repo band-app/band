@@ -305,8 +305,16 @@ export class DiffService {
     const fileStatuses = parseFileStatuses(nameStatusOutput);
     const untrackedFiles = untrackedOutput.trim().split("\n").filter(Boolean);
 
-    for (const file of untrackedFiles) {
-      const lines = await readUntrackedFileLines(cwd, file);
+    // Read every untracked file in parallel — same hot-path motivation
+    // as the parallelised git calls above. Result-ordering preserved by
+    // pairing back with the original `untrackedFiles` array.
+    const untrackedLines = await Promise.all(
+      untrackedFiles.map((file) => readUntrackedFileLines(cwd, file)),
+    );
+
+    for (let i = 0; i < untrackedFiles.length; i++) {
+      const file = untrackedFiles[i];
+      const lines = untrackedLines[i];
       if (lines === null) continue;
       diff += `diff --git a/${file} b/${file}\n`;
       diff += "new file mode 100644\n";
@@ -390,8 +398,13 @@ export class DiffService {
     const fileStatuses = parseFileStatuses(nameStatusOutput);
     const untrackedFiles = untrackedOutput.trim().split("\n").filter(Boolean);
 
-    for (const file of untrackedFiles) {
-      const lines = await readUntrackedFileLines(cwd, file);
+    // Same parallel-read as `getDiff` — see the comment there.
+    const untrackedLines = await Promise.all(
+      untrackedFiles.map((file) => readUntrackedFileLines(cwd, file)),
+    );
+    for (let i = 0; i < untrackedFiles.length; i++) {
+      const file = untrackedFiles[i];
+      const lines = untrackedLines[i];
       if (lines === null) continue;
       stats.filesChanged++;
       stats.insertions += lines.length;

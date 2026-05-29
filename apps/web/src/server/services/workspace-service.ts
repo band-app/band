@@ -644,7 +644,9 @@ export class WorkspaceService {
       await execGit(["pull", "--rebase"], cwd);
     } catch (e) {
       if (isRebaseCollision(e)) return { ok: true };
-      throw new Error(e instanceof Error ? e.message : String(e));
+      // Re-throw the original error to preserve its stack — the project-
+      // keyed `gitPull` above does the same `throw e`.
+      throw e;
     }
     return { ok: true };
   }
@@ -686,11 +688,10 @@ export class WorkspaceService {
       } catch {
         headBranch = workspace.worktree.branch;
       }
-      try {
-        await execGit(["push", "--set-upstream", "origin", headBranch], cwd);
-      } catch (e2) {
-        throw new Error(e2 instanceof Error ? e2.message : String(e2));
-      }
+      // Don't wrap the upstream-set failure in `new Error(msg)` — that
+      // would drop the original stack. Let `execGit`'s rejection bubble
+      // unchanged, carrying its captured stderr.
+      await execGit(["push", "--set-upstream", "origin", headBranch], cwd);
     }
     return { ok: true };
   }
@@ -722,7 +723,10 @@ export class WorkspaceService {
     try {
       await execGit(args, cwd);
     } catch (e) {
-      throw new Error(e instanceof Error ? e.message : String(e));
+      // Preserve the original error stack — `execGit`'s rejection
+      // carries the git stderr, which is the diagnostic the user
+      // actually needs to see in a failure trace.
+      throw e;
     }
     return { ok: true };
   }
