@@ -290,15 +290,19 @@ export class DiffService {
       diffArgs.push(`-U${options.contextLines}`);
     }
     diffArgs.push(mergeBase);
-    let diff = await execGit(diffArgs, cwd);
 
-    const statOutput = await execGit(["diff", "--stat", mergeBase], cwd);
+    // Run the four independent git invocations in parallel — none has a
+    // data dependency on another. On a large worktree this roughly halves
+    // the wall-clock time of the Changes view's initial paint.
+    const [diffResult, statOutput, nameStatusOutput, untrackedOutput] = await Promise.all([
+      execGit(diffArgs, cwd),
+      execGit(["diff", "--stat", mergeBase], cwd),
+      execGit(["diff", "--name-status", mergeBase], cwd),
+      execGit(["ls-files", "--others", "--exclude-standard"], cwd),
+    ]);
+    let diff = diffResult;
     const stats = parseDiffStatSummary(statOutput);
-
-    const nameStatusOutput = await execGit(["diff", "--name-status", mergeBase], cwd);
     const fileStatuses = parseFileStatuses(nameStatusOutput);
-
-    const untrackedOutput = await execGit(["ls-files", "--others", "--exclude-standard"], cwd);
     const untrackedFiles = untrackedOutput.trim().split("\n").filter(Boolean);
 
     for (const file of untrackedFiles) {
@@ -374,13 +378,16 @@ export class DiffService {
       options.compareBranch,
     );
 
-    const statOutput = await execGit(["diff", "--stat", mergeBase], cwd);
+    // Three independent git invocations — same parallelization as
+    // `getDiff` above; getDiffSummary is the hotter of the two (called
+    // by the summary panel on every workspace switch).
+    const [statOutput, nameStatusOutput, untrackedOutput] = await Promise.all([
+      execGit(["diff", "--stat", mergeBase], cwd),
+      execGit(["diff", "--name-status", mergeBase], cwd),
+      execGit(["ls-files", "--others", "--exclude-standard"], cwd),
+    ]);
     const stats = parseDiffStatSummary(statOutput);
-
-    const nameStatusOutput = await execGit(["diff", "--name-status", mergeBase], cwd);
     const fileStatuses = parseFileStatuses(nameStatusOutput);
-
-    const untrackedOutput = await execGit(["ls-files", "--others", "--exclude-standard"], cwd);
     const untrackedFiles = untrackedOutput.trim().split("\n").filter(Boolean);
 
     for (const file of untrackedFiles) {

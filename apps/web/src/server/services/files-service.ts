@@ -119,7 +119,7 @@ export class FilesService {
    */
   private assertNotGitInternals(root: string, target: string, label: string): void {
     const relative = target.slice(root.length + 1);
-    if (relative === ".git" || relative.startsWith(".git/")) {
+    if (relative === ".git" || relative.startsWith(`.git${sep}`) || relative.startsWith(".git/")) {
       throw new Error(`Refusing to ${label} .git internals`);
     }
   }

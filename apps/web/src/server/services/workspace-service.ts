@@ -626,10 +626,13 @@ export class WorkspaceService {
    * `git pull --rebase` keyed by workspaceId rather than `(project, branch)`.
    *
    * Used by `api/workspace/router.ts::gitPull` (the per-workspace,
-   * singular-namespace variant). Delegates to `gitPull` once it resolves
-   * the workspaceId so both call shapes share the same swallow-rebase-
-   * collision logic. Also handles the case where the workspace lookup
-   * fails — see `gitPushByWorkspaceId` for the matching push path.
+   * singular-namespace variant). Implements the same `git pull --rebase`
+   * + `isRebaseCollision` swallow logic as the project-keyed `gitPull`
+   * above — both paths share the helper so the substring guard stays in
+   * one place. (We don't `this.gitPull` from here because that variant
+   * additionally enforces the `kind === "plain"` rejection via
+   * `PlainProjectError`; the workspaceId surface doesn't carry that
+   * concern.)
    */
   async gitPullByWorkspaceId(workspaceId: string): Promise<{ ok: true }> {
     const workspace = this.resolve(workspaceId);

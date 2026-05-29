@@ -64,8 +64,10 @@ export class WatcherService {
 
   /**
    * Subscribe to status events with the on-connect snapshot replay.
-   * Starts the branch-status poller on the first subscribe and stops it
-   * when the last subscriber disconnects.
+   * Ensures the branch-status poller is running (the poller's own
+   * `pollerState.timer` guard makes a second `start()` a no-op when
+   * another subscriber already kicked it off) and stops it when the
+   * last subscriber disconnects via `listenerCount() === 0`.
    */
   subscribe(listener: StatusListener): () => void {
     const unsubscribeRaw = subscribeRaw(listener);

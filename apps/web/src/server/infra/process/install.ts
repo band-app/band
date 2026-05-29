@@ -6,6 +6,14 @@
  * seam (issue #535, follow-up 3). The services-tier orchestration
  * (resolving the interactive `$PATH` via `shellPath()` first, then calling
  * this) lives in `services/system-service.ts`.
+ *
+ * Web vs desktop split note (CLAUDE.md): `brew` is unix-only (macOS and
+ * Linuxbrew). The `prereqs.installTunnel` tRPC procedure that ultimately
+ * reaches this adapter pre-existed the #535 cleanup; relocating it
+ * behind the desktop IPC bridge (alongside the Finder reveal / app open
+ * helpers in `apps/desktop/src/main/ipc/macos-shell.ts`) is a separate
+ * architectural change. The cleanup only moved the `execFile` call into
+ * this file; it did not introduce or expand the surface.
  */
 
 import { execFile } from "node:child_process";
