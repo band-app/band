@@ -10,8 +10,7 @@
  * synthetic user-message in `useChatSubscription.send()` so both appear
  * in the same React render.
  *
- * Architecture (per `docs/frontend-testing.md` + the
- * `write-integration-test` skill):
+ * Architecture:
  *
  *   - REAL production `dist/start-server.mjs` boots against a fresh
  *     `mkdtempSync()` home. Migrations apply against the throwaway

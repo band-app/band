@@ -24,7 +24,7 @@ See the `write-integration-test` skill (`.claude/skills/write-integration-test/S
 
 ### Frontend tests (web app)
 
-**Frontend tests follow the same integration doctrine as backend tests** — they boot the real server (the production `dist/start-server.mjs` bundle), drive it through a real Chromium via Playwright, and assert on the real rendered DOM / `localStorage` / URL state. Read [`docs/frontend-testing.md`](docs/frontend-testing.md) and the `write-integration-test` skill (`.claude/skills/write-integration-test/`) before authoring frontend tests.
+**Frontend tests follow the same integration doctrine as backend tests** — they boot the real server (the production `dist/start-server.mjs` bundle), drive it through a real Chromium via Playwright, and assert on the real rendered DOM / `localStorage` / URL state. Read [`docs/integration-testing.md`](docs/integration-testing.md) and the `write-integration-test` skill (`.claude/skills/write-integration-test/`) before authoring frontend tests.
 
 The non-negotiables for any new frontend test:
 
@@ -46,7 +46,7 @@ Look at `apps/web/e2e/workspace-maximize-state.spec.ts` and `apps/web/e2e/pages/
 
 This repo has a pre-push hook (`.husky/pre-push`) that runs linting, formatting, and clippy checks. **Never bypass git hooks** — do not use `--no-verify` on `git push` or `git commit`. If a hook fails, fix the underlying issue instead of skipping the check.
 
-**Always run `/pr-review-local` before pushing code.** This invokes the `pr-review-local` skill, which runs Band's CI-style PR review locally against the current branch, auto-applies the resulting fixes, and verifies them with lint/clippy/tests. Do the local review *before* `git push` so the same criteria CI uses catch issues while they're still cheap to fix.
+**Always run `/review-and-apply` before pushing code.** This invokes the `review-and-apply` skill, which runs Band's CI-style PR review locally against the current branch, auto-applies the resulting fixes, and verifies them with lint/clippy/tests. Do the local review *before* `git push` so the same criteria CI uses catch issues while they're still cheap to fix.
 
 ## Project Tracking
 

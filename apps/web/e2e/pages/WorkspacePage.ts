@@ -9,7 +9,7 @@
  * The aria-label values "Maximize" / "Restore" are set in
  * `SharedDockviewLayout.tsx` (`MainGroupRightActions`) — system-
  * controlled, not localised user copy — so `getByRole({ name })` is the
- * preferred locator per `docs/frontend-testing.md` §7.
+ * preferred locator.
  */
 
 import { type Locator, type Page, test } from "@playwright/test";

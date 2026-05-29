@@ -4,10 +4,9 @@
  * Owns the locators for the toolbar Menu trigger, the dialog itself, and
  * every per-row control we exercise in `e2e/settings-page.spec.ts`. Test
  * bodies never call `page.goto()`, `page.locator()`, `getByText`, or CSS-id
- * selectors directly — they go through this class, per the doctrine in
- * `CLAUDE.md` and `docs/frontend-testing.md`.
+ * selectors directly — they go through this class.
  *
- * Locator priority for elements this app owns (per CLAUDE.md):
+ * Locator priority for elements this app owns:
  *   1. `getByRole({ name })` when the ARIA name is system-controlled.
  *   2. `getByTestId("page__element")` (BEM convention) as a fallback.
  *
@@ -18,7 +17,7 @@
  * `DashboardShell.tsx`) since `aria-label="Menu"` is a generic value and
  * there are other "Menu" buttons elsewhere in the dashboard chrome.
  *
- * CARVE-OUT (CLAUDE.md locator priority): a strict reading of the doctrine
+ * CARVE-OUT (locator priority): a strict reading of the doctrine
  * bans `getByText`/`getByRole({ name })` against user-visible English copy
  * because that copy may be localised in the future. The row-control names
  * used here (`"Worktrees folder"`, `"Code intelligence (LSP)"`, `"Port"`,

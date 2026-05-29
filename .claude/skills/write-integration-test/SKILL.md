@@ -6,19 +6,14 @@ allowed-tools: Bash, Read, Edit, Write, Glob, Grep
 
 # Write Integration Tests
 
-You are writing an integration test. The doctrine is in [`docs/frontend-testing.md`](../../../docs/frontend-testing.md) — read it once if you haven't. This skill is the operational playbook.
+This skill is the operational playbook — *how* to write an integration test against the Band web app. It is NOT the rule list.
 
-Integration tests are the **default proof of correctness** for any user-observable change. Unit tests stay useful for non-observable internals and combinatorial cases, but the integration test is what proves the feature works and what guards against the regression you came here to fix.
+- **The reviewer-enforced rules** live in [`.claude/testing-criteria.md`](../../testing-criteria.md) as `TEST-1`…`TEST-35`. Open that file once before you write your first test on this repo. Both CI (`.github/workflows/claude-review.yml`) and the local `review-and-apply` skill apply it verbatim to your diff.
+- **The narrative doctrine** — *why* we test this way — lives in [`docs/integration-testing.md`](../../../docs/integration-testing.md).
 
-## The Cardinal Rules
+Throughout this playbook, prescriptions that correspond to a specific rule are cited inline as *(enforces TEST-N)*. If you intentionally deviate from one, fix it before pushing or cite the ID in your PR description with a justification — the reviewer will flag every unjustified deviation.
 
-Non-negotiable. Coming straight from the doctrine.
-
-1. **NEVER modify production code to make a test pass.** No test-only flags. No `if (process.env.NODE_ENV === "test")` branches in business logic. No exporting internals for test access. The *only* production-code change a test is allowed to introduce is a `data-testid` attribute on a JSX element, and (where needed) refactoring an outbound URL to be read from an env var **at request time** so the test can override it.
-2. **Black-box only.** Test through the same surface a real client uses — HTTP, the rendered DOM, files on disk, the CLI's stdout/stderr/exit code. Never import internal modules from a test, never assert on internal state.
-3. **The real binary runs inside the test.** Backend tests AND frontend tests both spin up the production server process against a fresh tmp home. No shallow renders, no in-memory React mounts, no test-only build flags. Frontend tests do **not** mock tRPC, do **not** stub your own routes — they exercise the real backend that's serving the page.
-4. **Mock only what is external to that process.** External = APIs you call out to, third-party SDKs, message queues, identity providers, the GitHub API, anything that doesn't live in your server process. **Use Express stubs on a random port + an env-var override.** Do not use MSW. Do not use `page.route()` on your own backend's routes. (Why not MSW: see [§ Why Express stubs, not MSW](#why-express-stubs-not-msw) below.)
-5. **Databases and stateful stores are real.** Testcontainers (or, for Band's SQLite, a fresh DB inside the tmp home with migrations applied). No mocking the data layer.
+Integration tests are the **default proof of correctness** for any user-observable change *(enforces TEST-6)*. Unit tests stay useful for non-observable internals and combinatorial cases, but the integration test is what proves the feature works and what guards against the regression you came here to fix.
 
 ## Architecture — One Picture, Both Layers
 
@@ -58,19 +53,21 @@ Backend and frontend tests share the **same** server boot and the **same** fixtu
 
 Concretely for Band:
 
-- The real binary is `apps/web/dist/start-server.mjs`, spawned with `HOME` pointing at a fresh `mkdtempSync()` directory. It runs migrations against the SQLite DB inside that home automatically.
-- External services Band calls out to (e.g. GitHub API, agent binaries' HTTP surfaces) get Express stubs on random ports. The server reads each upstream's URL from an env var at request time, which the fixture overrides.
+- The real binary is `apps/web/dist/start-server.mjs`, spawned with `HOME` pointing at a fresh `mkdtempSync()` directory. It runs migrations against the SQLite DB inside that home automatically *(enforces TEST-3, TEST-34)*.
+- External services Band calls out to (GitHub API, agent binaries' HTTP surfaces, etc.) get Express stubs on random ports. The server reads each upstream's URL from an env var at request time, which the fixture overrides *(enforces TEST-4, TEST-30)*.
 - Frontend tests boot exactly the same server and additionally drive the rendered UI through Playwright + page objects.
 
 ## Decide Which Layer You're Testing
+
+The layer-decision table is in `testing-criteria.md` §2 (rules `TEST-5`–`TEST-7`). Quick orientation:
 
 | Change touches… | Write a… | Lives in… |
 |---|---|---|
 | HTTP / tRPC / WebSocket / SSE response shape, status, headers, side effects on disk or DB | **Backend API test** | `apps/web/tests/<feature>.test.ts` |
 | What the user sees in the rendered DOM, what URL they land on, what's saved in `localStorage` by client code | **Frontend test** | `apps/web/e2e/<feature>.spec.ts` |
-| Both | Both. Don't conflate them — they're independent. |
+| Both | One of each. Don't conflate them. |
 
-A feature that adds an endpoint *and* a UI button needs **two** tests: one proves the endpoint, one proves the button drives the endpoint correctly. If the change is purely a CLI command, see the sibling `integration-tests` skill.
+A feature that adds an endpoint *and* a UI button needs **two** tests *(enforces TEST-5)*. If the change is purely a CLI command, see the sibling `integration-tests` skill.
 
 ---
 
@@ -78,8 +75,8 @@ A feature that adds an endpoint *and* a UI button needs **two** tests: one prove
 
 ### Where they live and what runs them
 
-- Path: `apps/web/tests/<feature>.test.ts`
-- Runner: **vitest** (`describe` / `it` / `expect`). `apps/web` is on vitest; other packages use `node:test` per `CLAUDE.md`.
+- Path: `apps/web/tests/<feature>.test.ts`.
+- Runner: **vitest** (`describe` / `it` / `expect`) — `apps/web` is on vitest *(enforces TEST-8)*. Other packages use `node:test` per `CLAUDE.md` *(enforces TEST-9)*.
 - Command: `pnpm --filter @band-app/server test` (from repo root) or `pnpm test` (from `apps/web/`).
 - Server helper: `apps/web/tests/helpers/server-runtime.ts` — spawns the real production binary on a random port against a tmp home.
 
@@ -136,25 +133,25 @@ describe("workspace.getMaximizedState", () => {
 });
 ```
 
-### Real-server checklist
+### Real-server playbook
 
-- **Port 0.** Bind to an OS-assigned port — never hardcode. Tests run in parallel and a hardcoded port collides.
-- **Temp `~/.band/`.** Override `HOME` to point at `mkdtempSync()`. The server runs migrations against its SQLite DB inside that home automatically.
-- **Real HTTP.** `fetch` against `server.url`. No `supertest`, no in-process invocation of the route handler — those bypass the TCP layer and middleware.
-- **Real auth.** Write `tokenSecret` into the seeded settings. Send it as `Authorization: Bearer <token>` or as the `band_token` cookie. **At least one negative test** asserts `401` without a token — error paths are part of the contract.
-- **Tear down everything.** Server stops, Express stubs stop, child processes are killed, temp directory is removed. Leaked resources cause flakes and CI port exhaustion.
+- **Port 0** *(enforces TEST-10)*. Bind to an OS-assigned port — never hardcode. Tests run in parallel and a hardcoded port collides on the second worker.
+- **Temp `~/.band/`** *(enforces TEST-11)*. Override `HOME` to point at `mkdtempSync()`. The server runs migrations against its SQLite DB inside that home automatically.
+- **Real HTTP** *(enforces TEST-12)*. `fetch` against `server.url`. No `supertest`, no in-process invocation of the route handler — those bypass the TCP layer and middleware.
+- **Real auth** *(enforces TEST-13)*. Write `tokenSecret` into the seeded settings. Send it as `Authorization: Bearer <token>` or as the `band_token` cookie. **At least one negative test** asserts `401` without a token — error paths are part of the contract.
+- **Tear down everything** *(enforces TEST-14)*. Server stops, Express stubs stop, child processes are killed, temp directory is removed. Leaked resources cause flakes and CI port exhaustion.
 
 ### Asserting
 
-- Assert on **observable outputs only**: HTTP status, response body shape, headers, files on disk, rows in the DB, what arrived at an Express stub, SSE frames received.
-- **Pin exact values** for anything the test seeded. `expect(body.email).toBe("test@example.com")` — not `expect.any(String)`.
+- Assert on **observable outputs only** *(enforces TEST-2, TEST-15)*: HTTP status, response body shape, headers, files on disk, rows in the DB, what arrived at an Express stub, SSE frames received.
+- **Pin exact values** for anything the test seeded *(enforces TEST-16)*: `expect(body.email).toBe("test@example.com")` — not `expect.any(String)`.
 - Use shape matchers only for genuinely non-deterministic values (UUIDs, system timestamps): `expect(body.id).toMatch(/^[a-f0-9-]{36}$/)`.
-- Assert the **full body** when capturing what your server sent to an Express stub. Cherry-picking properties hides drift: `expect(captured).toEqual({ … entire body … })`.
-- **Error paths.** Every endpoint test file includes at least one negative case: missing auth, malformed input, non-existent resource.
+- Assert the **full body** when capturing what your server sent to an Express stub *(enforces TEST-17)*. Cherry-picking properties hides drift: `expect(captured).toEqual({ … entire body … })`.
+- **Error paths.** Every endpoint test file includes at least one negative case *(enforces TEST-13)*: missing auth, malformed input, non-existent resource.
 
 ### Streaming endpoints (SSE / WebSocket)
 
-Connect as a real client, read the stream, assert on the sequence.
+Connect as a real client, read the stream, assert on the sequence *(enforces TEST-18)*.
 
 ```ts
 const res = await fetch(`${server.url}/api/status/stream?token=${TOKEN}`);
@@ -179,15 +176,15 @@ Poll with a timeout. Never `setTimeout` to "wait for events to settle".
 
 ### Where they live and what runs them
 
-- Path: `apps/web/e2e/<feature>.spec.ts`
+- Path: `apps/web/e2e/<feature>.spec.ts`.
 - Runner: **Playwright** (`@playwright/test`).
 - Command: `pnpm --filter @band-app/server test:e2e`.
 - Config: `apps/web/playwright.config.ts` — pins viewport, locale, and timezone for deterministic snapshots.
-- Server helper: `apps/web/e2e/helpers/server.ts` — `startServer()` boots the real production binary against a fresh tmp home. **Use it.**
+- Server helper: `apps/web/e2e/helpers/server.ts` — `startServer()` boots the real production binary against a fresh tmp home *(enforces TEST-19)*. **Use it.**
 
 ### Critical: Run the real backend. No tRPC mocking.
 
-Frontend tests boot the **same** server backend tests boot. The page they drive renders against real tRPC procedures hitting real handlers that read real state from a real (temp) SQLite DB. Do **not** mock tRPC. Do **not** use `page.route('**/trpc/**', …)`. Do **not** intercept any route your server serves.
+Frontend tests boot the **same** server backend tests boot. The page they drive renders against real tRPC procedures hitting real handlers that read real state from a real (temp) SQLite DB. Do **not** mock tRPC. Do **not** use `page.route('**/trpc/**', …)`. Do **not** intercept any route your server serves *(enforces TEST-4, TEST-19)*.
 
 If a feature's behaviour depends on an external service (GitHub API, agent process, etc.), stub **that external service** with an Express fixture on a random port, exactly the same way a backend test would. The server reads its URL from an env var at request time and the test fixture overrides the env var.
 
@@ -248,9 +245,11 @@ test.describe("Maximize state", () => {
 });
 ```
 
+`createTmpHome`, `seedState`, `seedSettings` set up the home directory and DB state *(enforces TEST-20)*.
+
 ### Page Object Model
 
-Tests **never** call `page.getByRole()` / `page.getByTestId()` / `page.goto()` directly in the test body. Everything goes through page objects (one per route/page) and component objects (one per section of a page).
+Tests **never** call `page.getByRole()` / `page.getByTestId()` / `page.goto()` directly in the test body *(enforces TEST-21)*. Everything goes through page objects (one per route/page) and component objects (one per section of a page).
 
 ```ts
 // apps/web/e2e/pages/WorkspacePage.ts
@@ -292,7 +291,7 @@ export class WorkspacePage {
 }
 ```
 
-A page object always:
+A page object always *(enforces TEST-22)*:
 
 - Takes `(page, baseURL, …)` in the constructor.
 - Owns the locators as readonly fields.
@@ -301,33 +300,33 @@ A page object always:
 
 ### Locator strategy
 
-For elements your codebase owns, allowed in **decreasing preference**:
+For elements your codebase owns, allowed in **decreasing preference** *(enforces TEST-23)*:
 
 1. **`getByRole("button", { name: "Maximize" })`** — when the role + a system-controlled name (e.g. ARIA label set in code) is enough.
 2. **`getByTestId("workspace__maximize-button")`** — default when role alone is ambiguous, or when name would be localised user copy. **BEM convention**: `page__element`.
 3. **`getByText(value)`** — only for runtime data the test itself supplied.
 
-**Banned:**
+Banned:
 
 - CSS selectors (`.btn-primary`, `[class*="active"]`) for elements you own.
 - Element IDs.
-- `getByRole("link", { name: "Continue" })` when "Continue" is localisable product copy.
+- `getByRole("link", { name: "Continue" })` when "Continue" is localisable product copy *(enforces TEST-26)*.
 
-**Adding test hooks to production code.** `data-testid` attributes on JSX are the only production-code change tests are allowed to make. Use BEM: `workspace__maximize-button`, `cart-drawer__item-row`.
+**Adding test hooks to production code.** `data-testid` attributes on JSX are the only production-code change tests are allowed to make *(enforces TEST-1)*. Use BEM: `workspace__maximize-button`, `cart-drawer__item-row`.
 
 ### Driving and asserting
 
 - **Drive via the page object.** `await workspacePage.maximizePanel()`.
 - **Assert via the page object.** `await expect(workspacePage.restoreButton).toBeVisible()`.
-- **Wait properly.** `expect(locator).toBeVisible()` and friends auto-retry. Use `expect.poll(() => …)` for non-Playwright assertions (e.g. `localStorage`). Never `page.waitForTimeout(N)` for synchronisation.
-- **Negative assertions need a positive anchor.** Prove the alternate state actually rendered before asserting the absence of the previous one.
-- **Don't assert text equality on localised copy.** Assert on a `data-testid`, an ARIA attribute, or a `localStorage` value.
+- **Wait properly** *(enforces TEST-24)*. `expect(locator).toBeVisible()` and friends auto-retry. Use `expect.poll(() => …)` for non-Playwright assertions (e.g. `localStorage`). Never `page.waitForTimeout(N)` for synchronisation.
+- **Negative assertions need a positive anchor** *(enforces TEST-25)*. Prove the alternate state actually rendered before asserting the absence of the previous one.
+- **Don't assert text equality on localised copy** *(enforces TEST-26)*. Assert on a `data-testid`, an ARIA attribute, or a `localStorage` value.
 
 ---
 
 ## Express Stubs — The One Pattern for All External Services
 
-Every external service the app calls out to gets **exactly one** Express stub fixture and **exactly one** env var. If a feature touches three services, you write three fixtures.
+Every external service the app calls out to gets **exactly one** Express stub fixture and **exactly one** env var *(enforces TEST-27)*. If a feature touches three services, you write three fixtures.
 
 ### Why Express stubs, not MSW
 
@@ -375,16 +374,15 @@ export const catalogStub = {
 };
 ```
 
-Rules:
+Pattern rules, full statements in `testing-criteria.md` §6:
 
-1. **`set*` methods register routes directly** (`app.get(...)`). Don't pre-register routes that read from a mutable shared object — that introduces hidden state.
-2. **One fixture per env var.** Never bundle two services into one fixture by setting multiple env vars.
-3. **Test-scoped lifetime** (start in `beforeAll` per test file, stop in `afterAll`). Don't share across files unless the test design genuinely demands it.
-4. **No browser-level interception.** `page.route('**/api/external/*', ...)` is banned even for external services — use the env-var override and the real HTTP stub.
+- `set*` methods register routes directly via `app.get(...)`; no mutable shared handler object *(enforces TEST-28)*.
+- Test-scoped lifetime: `start()` in `beforeAll`, `stop()` in `afterAll` *(enforces TEST-29)*.
+- No browser-level `page.route('**/api/external/*', ...)` interception, even for external services *(enforces TEST-31)*.
 
 ### Production-code constraint: read env vars at request time
 
-For a test-scoped env var override to take effect, production code reads it at request time, **not** at module load.
+For a test-scoped env var override to take effect, production code reads it at request time, **not** at module load *(enforces TEST-30)*.
 
 ```ts
 // CORRECT
@@ -401,11 +399,11 @@ class CatalogClient {
 }
 ```
 
-If you encounter the second shape, refactoring it to the first is part of writing the fixture. That refactor is the *only* allowed production-code change (alongside `data-testid` attributes).
+If you encounter the second shape, refactoring it to the first is part of writing the fixture. That refactor is the *only* allowed production-code change (alongside `data-testid` attributes) — see TEST-1.
 
 ### Capturing requests for assertions
 
-Use `onRequest` callbacks + an array. Assert the **full body** with `toEqual`.
+Use `onRequest` callbacks + an array. Assert the **full body** with `toEqual` *(enforces TEST-32)*.
 
 ```ts
 const captured: CapturedRequest[] = [];
@@ -426,7 +424,7 @@ expect(captured[0]).toEqual({
 
 ### Test data factories
 
-Each fixture has a `test-data.ts` with builder functions returning realistic-but-obviously-fake response shapes. Use **obviously fake** defaults (`"product-id-value"`) so a reader can tell at a glance which fields the test cares about.
+Each fixture has a `test-data.ts` with builder functions returning realistic-but-obviously-fake response shapes *(enforces TEST-33)*. Use **obviously fake** defaults (`"product-id-value"`) so a reader can tell at a glance which fields the test cares about.
 
 ```ts
 export function createProductResponse(overrides: Partial<ProductBody> = {}): ProductResponse {
@@ -438,50 +436,19 @@ export function createProductResponse(overrides: Partial<ProductBody> = {}): Pro
 
 ## Databases & Stateful Stores
 
-Band uses SQLite inside `~/.band/band.db`. Each test gets a fresh DB by virtue of the tmp home — no testcontainers needed. The server runs migrations against it during boot. Test isolation comes from each test owning its own home directory.
+Band uses SQLite inside `~/.band/band.db`. Each test gets a fresh DB by virtue of the tmp home — no testcontainers needed *(enforces TEST-34)*. The server runs migrations against it during boot. Test isolation comes from each test owning its own home directory.
 
-For projects with Postgres / Redis / MongoDB / S3-compatible storage, follow `docs/frontend-testing.md` §9: testcontainers per worker, tracked-cleanup for inserted records, never `TRUNCATE` / `FLUSHDB` (that would destroy data from concurrent tests on the same worker).
+For projects with Postgres / Redis / MongoDB / S3-compatible storage, follow `docs/integration-testing.md` §11 *(enforces TEST-35)*: testcontainers per worker, tracked-cleanup for inserted records, never `TRUNCATE` / `FLUSHDB` (that would destroy data from concurrent tests on the same worker).
 
 ---
 
 ## BDD Scenarios (optional but encouraged)
 
-`docs/frontend-testing.md` §5 describes a scenario registry: every spec maps to a named `scenario(given, when, then)` entry, and `scenarioTest("name", fn)` annotates the Playwright test with the BDD text. Adopt it when the suite is past ~10 tests and the duplication starts to bite.
+`docs/integration-testing.md` §7 describes a scenario registry: every spec maps to a named `scenario(given, when, then)` entry, and `scenarioTest("name", fn)` annotates the Playwright test with the BDD text. Adopt it when the suite is past ~10 tests and the duplication starts to bite.
 
 For now, plain `test("clear-name", fn)` with a name that *reads* as a scenario is acceptable. Bootstrap `scenarios/` and `pages/` as part of the feature PR that introduces them — never defer test infrastructure to a follow-up.
 
 ---
-
-## Universal Checklist Before You're Done
-
-- [ ] No production code modified, except `data-testid` attributes and any required "read URL from env at request time" refactor.
-- [ ] No `page.route()` on your own backend's routes.
-- [ ] No `createTrpcMock` / tRPC stubbing in new tests.
-- [ ] No MSW.
-- [ ] No `setTimeout` / `page.waitForTimeout` for synchronisation.
-- [ ] No raw locators (`page.getByRole`, etc.) in the test body — only in page/component objects.
-- [ ] No CSS selectors or element IDs for elements your code owns.
-- [ ] No `expect.any()` / regex for values the test seeded — pin with `toBe` / `toEqual`.
-- [ ] All tests pass when run individually.
-- [ ] All tests pass when run together (`pnpm test` and/or `pnpm test:e2e`).
-- [ ] Error paths tested, not just the happy path.
-- [ ] Test names describe behaviour, not implementation.
-- [ ] Temp directories, child processes, and Express stub servers are torn down on teardown.
-
-## Common Mistakes (disqualifying)
-
-| Mistake | Why it's wrong |
-|---|---|
-| Frontend test uses `page.route('**/trpc/**', ...)` | Tests the mock, not the system. Stand up the real backend instead. |
-| Outbound HTTP stubbed with MSW | Misses subprocess-originated traffic; doesn't force URL-at-request-time. Use an Express stub on a random port. |
-| `await page.waitForTimeout(500)` after a click | Flake guarantee. Use `expect(...).toBeVisible()` or `expect.poll()`. |
-| Direct `page.goto()` in a test body | URL construction is the page object's job. Tests express intent. |
-| `vi.mock('../db', …)` / `jest.mock('./fetch', …)` | Mocking your own code = testing the mock. Stub at the boundary, not the seam. |
-| `await expect(page.getByText('Saved')).toBeVisible()` for English copy | Translates badly, breaks under copy churn, hides the localised-string dependency. Use a `data-testid`. |
-| Asserting `body.id` is `"abc-123"` when the server generates the id | Will fail on the next run. Use a shape matcher for genuinely random values. |
-| Importing the route handler from the test and calling it directly | Bypasses HTTP, middleware, auth — everything you're supposed to be testing. |
-| Skipping an error-path test "because the fixture doesn't support it" | Extend the fixture. Skipping is how regressions ship. |
-| Sharing one Express stub across all tests in a file with a mutable handler object | Hidden state leaks across tests. One `set*` call per test, on a clean handler registry. |
 
 ## Quick Decision Tree
 
@@ -499,5 +466,13 @@ Is the change user-observable in the rendered UI?
     │   └── Temp ~/.band/ + migrations
     └── CLI / binary spawning → see the `integration-tests` skill
 ```
+
+---
+
+## Before You Ship
+
+Open [`.claude/testing-criteria.md`](../../testing-criteria.md). Scan `TEST-1`…`TEST-35` and confirm every rule that applies to your test is satisfied — the reviewer (CI + `review-and-apply`) will do exactly that. The criteria file's quick-reference table (§8) is the highest-yield place to start; it maps the disqualifying mistakes to their rule IDs.
+
+If you find a rule you don't satisfy: fix it, or cite the ID in the PR description with a justification ("intentional deviation from TEST-X because …"). Silent deviations get flagged.
 
 When you finish writing the test, **run it twice**: once on its own, once as part of the full suite. Both must pass. Then run it on the **previous** commit (the one with the bug, if it's a regression test) and confirm it *fails*. A test that passes on the broken code is not testing what you think it is.

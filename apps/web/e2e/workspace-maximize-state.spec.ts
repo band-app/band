@@ -2,8 +2,7 @@
  * End-to-end coverage for issue #490 — per-workspace maximize state
  * persists across workspace switches and dashboard reloads.
  *
- * Architecture (per `docs/frontend-testing.md` + the
- * `write-integration-test` skill):
+ * Architecture:
  *
  *   - The real production binary runs against a fresh tmp `~/.band/`,
  *     not the user's home. Migrations apply against the throwaway

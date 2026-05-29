@@ -13,8 +13,7 @@
  *   3. Leave any partial text rendered (user can see what the agent
  *      managed to say before they cancelled).
  *
- * Architecture follows `docs/frontend-testing.md` + the
- * `write-integration-test` skill:
+ * Architecture:
  *
  *   - REAL `dist/start-server.mjs` against a fresh `mkdtempSync()` home.
  *   - NO tRPC mocking. `tasks.abort` runs for real against the in-memory
