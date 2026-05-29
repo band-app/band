@@ -10,7 +10,7 @@
 
 import { existsSync } from "node:fs";
 import { readFile, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { createLogger } from "@band-app/logger";
 import { WorkspaceNotFoundError } from "../errors";
 import { execGit } from "../infra/git/git-client";
@@ -157,6 +157,33 @@ function parseFileStatuses(nameStatusOutput: string): Record<string, string> {
     }
   }
   return fileStatuses;
+}
+
+/**
+ * Resolve a workspace-relative file path against a worktree root and
+ * reject anything that escapes the root or targets `.git` internals.
+ *
+ * Today the only producers of `filePath` are `git diff --name-status` /
+ * `git ls-files --others`, which git guarantees to be repo-internal —
+ * but this service exposes a public API surface (`getFileDiff`,
+ * `revertFile`) that takes a caller-supplied string, so we enforce the
+ * same `FilesService.resolveInside` guard at the entry points rather
+ * than trusting the caller. Throws `Error("Invalid path")` consistent
+ * with the existing files-service contract — the router maps it to a
+ * 500 for the same wire shape as the rest of this router.
+ */
+function assertWorktreeRelative(cwd: string, filePath: string): string {
+  const target = resolve(join(cwd, filePath));
+  // Demand a separator after the root prefix so a sibling directory
+  // with the same prefix can't sneak through.
+  if (target !== cwd && !target.startsWith(cwd + sep)) {
+    throw new Error("Invalid path");
+  }
+  const relative = target === cwd ? "" : target.slice(cwd.length + 1);
+  if (relative === ".git" || relative.startsWith(`.git${sep}`) || relative.startsWith(".git/")) {
+    throw new Error("Refusing to touch .git internals");
+  }
+  return target;
 }
 
 /** Reads an untracked file as the lines that would appear in a synthesized diff. */
@@ -388,6 +415,10 @@ export class DiffService {
     if (!workspace) throw new WorkspaceNotFoundError(workspaceId);
 
     const cwd = workspace.worktree.path;
+    // Enforce path-traversal + .git guard at the public entry — git's
+    // own output is repo-internal by definition, but the caller hands
+    // us this string and we don't trust it.
+    const targetAbs = assertWorktreeRelative(cwd, options.filePath);
 
     // Check if file is untracked
     const untrackedOutput = await execGit(["ls-files", "--others", "--exclude-standard"], cwd);
@@ -396,7 +427,7 @@ export class DiffService {
     if (untrackedFiles.includes(options.filePath)) {
       // Synthesize diff for untracked file
       try {
-        const content = await readFile(join(cwd, options.filePath), "utf-8");
+        const content = await readFile(targetAbs, "utf-8");
         const lines = content.split("\n");
         if (lines.length > 0 && lines[lines.length - 1] === "") {
           lines.pop();
@@ -443,6 +474,9 @@ export class DiffService {
 
     const cwd = workspace.worktree.path;
     const { filePath, diffMode } = options;
+    // Enforce path-traversal + .git guard. Critical here because
+    // `revertFile` mutates the working tree (rm / checkout / git rm).
+    const targetAbs = assertWorktreeRelative(cwd, filePath);
 
     // Determine the file status server-side
     const untrackedOutput = await execGit(["ls-files", "--others", "--exclude-standard"], cwd);
@@ -450,7 +484,7 @@ export class DiffService {
 
     if (untrackedFiles.includes(filePath)) {
       // Untracked file — just delete it
-      await rm(join(cwd, filePath), { force: true });
+      await rm(targetAbs, { force: true });
       return { ok: true };
     }
 

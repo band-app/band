@@ -239,7 +239,7 @@ export const workspaceRouter = t.router({
     .input(
       z.object({
         workspaceId: z.string(),
-        filePath: z.string(),
+        filePath: z.string().min(1),
         mergeBase: mergeBaseSchema,
         contextLines: z.number().int().min(0).max(99999).optional(),
       }),
@@ -256,7 +256,7 @@ export const workspaceRouter = t.router({
     .input(
       z.object({
         workspaceId: z.string(),
-        filePath: z.string(),
+        filePath: z.string().min(1),
         diffMode: z.enum(["uncommitted", "branch"]),
         compareBranch: compareBranchSchema,
       }),
@@ -301,7 +301,7 @@ export const workspaceRouter = t.router({
     .query(({ input }) => filesService.listFiles(input.workspaceId, input.path)),
 
   getFile: publicProcedure
-    .input(z.object({ workspaceId: z.string(), path: z.string() }))
+    .input(z.object({ workspaceId: z.string(), path: z.string().min(1) }))
     .query(({ input }) => filesService.getFile(input.workspaceId, input.path)),
 
   saveFile: publicProcedure

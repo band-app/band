@@ -770,7 +770,14 @@ export class WorkspaceService {
     }
 
     const settings = loadSettings();
-    const agentDef = getAgentDefinition(settings);
+    // Use the workspace's default chat-pane agent so the commit-message
+    // agent matches the agent the user is actually looking at. Without
+    // this, switching the pane to (e.g.) codex would silently keep
+    // generating commit messages with the user's global default
+    // (e.g. claude-code). Falling back to the global default is fine
+    // when the chat row has no explicit `agent` field set.
+    const defaultChat = chatService.getOrCreateDefault(workspaceId);
+    const agentDef = getAgentDefinition(settings, defaultChat.agent ?? undefined);
 
     const prompt = [
       "You are running inside a git workspace. Write a commit message for the changes that are pending in this workspace right now.",
