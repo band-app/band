@@ -70,6 +70,28 @@ function createBareOrigin(parent: string, name: string): string {
 }
 
 /**
+ * Seed a `.gitconfig` inside the test's tmp `$HOME` so the *server*
+ * subprocess (which inherits `HOME=tmpHome`, not the test process's
+ * env) has a `user.name` / `user.email` to commit with. Without this,
+ * `git commit` inside the server's gitCommit handler fails on hosts
+ * (CI runners) that don't carry an identity in /etc/gitconfig.
+ */
+function seedGitIdentity(tmpHome: string): void {
+  writeFileSync(
+    join(tmpHome, ".gitconfig"),
+    [
+      "[user]",
+      "  name = Test",
+      "  email = test@test.com",
+      "[init]",
+      "  defaultBranch = main",
+      "",
+    ].join("\n"),
+    "utf-8",
+  );
+}
+
+/**
  * Clone `originPath` into `<parent>/<name>`. If the origin has no
  * commits yet, seeds an initial commit on `main` and pushes it back so
  * subsequent clones land on a non-empty repo. Returns the working
@@ -141,6 +163,7 @@ describe("tRPC — workspace.gitPull", () => {
     });
     seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
 
+    seedGitIdentity(tmpHome);
     server = await startServer({ tmpHome });
   });
 
@@ -225,6 +248,7 @@ describe("tRPC — workspace.gitPush", () => {
     });
     seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
 
+    seedGitIdentity(tmpHome);
     server = await startServer({ tmpHome });
   });
 
@@ -297,6 +321,7 @@ describe("tRPC — workspace.gitCommit", () => {
     });
     seedSettings(tmpHome, { tokenSecret: DEFAULT_TOKEN });
 
+    seedGitIdentity(tmpHome);
     server = await startServer({ tmpHome });
   });
 
@@ -398,6 +423,7 @@ describe("tRPC — workspace.switchAgent", () => {
       ],
     });
 
+    seedGitIdentity(tmpHome);
     server = await startServer({ tmpHome });
   });
 
@@ -471,6 +497,7 @@ describe("tRPC — workspace.generateCommitMessage", () => {
       ],
     });
 
+    seedGitIdentity(tmpHome);
     server = await startServer({ tmpHome });
   });
 
