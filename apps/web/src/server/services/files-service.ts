@@ -99,7 +99,12 @@ export class FilesService {
     }
     const root = workspace.worktree.path;
     const target = resolve(join(root, relative));
-    if (!target.startsWith(root)) {
+    // Demand a separator after the root prefix so a sibling directory
+    // with the same prefix (root=`/tmp/band-ws-abc`, target=`/tmp/band-
+    // ws-abc-evil/secret`) can't sneak past the guard. Bare equality
+    // covers the worktree root itself, gated on `allowRoot`.
+    const insideRoot = target === root || target.startsWith(root + sep);
+    if (!insideRoot) {
       throw new Error("Invalid path");
     }
     if (!opts.allowRoot && target === root) {

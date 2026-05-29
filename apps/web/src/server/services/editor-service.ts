@@ -1,6 +1,7 @@
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { formatFileLocation } from "@/dashboard";
+import { WorkspaceNotFoundError } from "../errors";
 import { killAllServers, killWorkspaceServers } from "../infra/lsp/lsp-manager";
 import { subscribeToFileChanges, type Unsubscribe } from "./file-watcher";
 import { FormatterError, formatFile } from "./formatter";
@@ -52,9 +53,10 @@ export class EditorService {
   /**
    * Format `content` using Prettier as if it were the file at `filePath`
    * inside `workspaceId`. Throws `FormatterError` for bad input (file
-   * outside the worktree, Prettier syntax error, etc.); throws a plain
-   * `Error` when the workspace can't be resolved (the caller maps both
-   * to tRPC errors).
+   * outside the worktree, Prettier syntax error, etc.); throws a
+   * `WorkspaceNotFoundError` when the workspace can't be resolved
+   * (the caller maps both to tRPC errors — `formatFile` is one of the
+   * historical NOT_FOUND carve-outs in `api/workspace/router.ts`).
    */
   async formatFile(
     workspaceId: string,
@@ -63,7 +65,7 @@ export class EditorService {
   ): Promise<Awaited<ReturnType<typeof formatFile>>> {
     const workspace = workspaceService.resolve(workspaceId);
     if (!workspace) {
-      throw new Error(`Workspace ${workspaceId} not found`);
+      throw new WorkspaceNotFoundError(workspaceId);
     }
     return formatFile(workspace.worktree.path, filePath, content);
   }

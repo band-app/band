@@ -44,6 +44,16 @@ const compareBranchSchema = z
   .optional();
 
 /**
+ * `mergeBase` is the SHA returned by `getDiffSummary` and threaded back
+ * into `getFileDiff` as a revision argument to `git diff`. Forbid a
+ * leading `-` for the same reason as `compareBranchSchema` — `execFile`
+ * doesn't go through a shell, but git itself reads a leading dash as a
+ * flag (`--output=…`, `--exec=…`) and we don't want a malicious client
+ * smuggling one through the wire. Real merge-base SHAs are always hex.
+ */
+const mergeBaseSchema = z.string().min(1).regex(/^[^-]/, "mergeBase must not start with '-'");
+
+/**
  * Wire-contract note: every workspace-tier service error (including
  * `WorkspaceNotFoundError`) bubbles as a plain `Error` and the tRPC
  * adapter surfaces it as HTTP 500. That's pinned by the trpc
@@ -96,16 +106,15 @@ export const workspaceRouter = t.router({
       }),
     )
     .mutation(async ({ input }) => {
-      const workspace = workspaceService.resolve(input.workspaceId);
-      if (!workspace) {
-        throw new TRPCError({
-          code: "NOT_FOUND",
-          message: `Workspace ${input.workspaceId} not found`,
-        });
-      }
+      // Single workspace lookup happens inside editorService.formatFile;
+      // a WorkspaceNotFoundError propagates up here and maps to 404,
+      // matching the pre-#535 wire contract. FormatterError maps to 400.
       try {
         return await editorService.formatFile(input.workspaceId, input.filePath, input.content);
       } catch (err) {
+        if (err instanceof WorkspaceNotFoundError) {
+          throw new TRPCError({ code: "NOT_FOUND", message: err.message });
+        }
         if (err instanceof FormatterError) {
           throw new TRPCError({
             code: "BAD_REQUEST",
@@ -231,7 +240,7 @@ export const workspaceRouter = t.router({
       z.object({
         workspaceId: z.string(),
         filePath: z.string(),
-        mergeBase: z.string(),
+        mergeBase: mergeBaseSchema,
         contextLines: z.number().int().min(0).max(99999).optional(),
       }),
     )

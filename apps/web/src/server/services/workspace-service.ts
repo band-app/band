@@ -186,6 +186,17 @@ export class PlainProjectError extends Error {
  * Stateless aside from its `queries` dependency, so a single shared
  * instance is safe across callers.
  */
+
+/**
+ * `git pull --rebase` exits non-zero with this string when the fetch
+ * step already fast-forwarded the working tree. The pull effectively
+ * succeeded, so both `gitPull` paths swallow the error. Centralised
+ * here so the two callers don't drift on the exact substring.
+ */
+function isRebaseCollision(err: unknown): boolean {
+  return String(err).includes("Cannot rebase onto multiple branches");
+}
+
 export class WorkspaceService {
   constructor(private readonly queries: WorkspaceQueries = new WorkspaceQueries()) {}
 
@@ -566,14 +577,7 @@ export class WorkspaceService {
     try {
       await execGit(["pull", "--rebase"], cwd);
     } catch (e) {
-      // git pull --rebase can exit non-zero with "Cannot rebase onto
-      // multiple branches" when the fetch step already fast-forwarded the
-      // working tree. The pull effectively succeeded, so swallow this
-      // specific error.
-      const msg = String(e);
-      if (msg.includes("Cannot rebase onto multiple branches")) {
-        return { ok: true };
-      }
+      if (isRebaseCollision(e)) return { ok: true };
       throw e;
     }
     return { ok: true };
@@ -636,15 +640,8 @@ export class WorkspaceService {
     try {
       await execGit(["pull", "--rebase"], cwd);
     } catch (e) {
-      // git pull --rebase can exit non-zero with "Cannot rebase onto multiple
-      // branches" when the fetch step already fast-forwarded the working
-      // tree. The pull effectively succeeded, so swallow that specific case
-      // — same behaviour as the project-keyed `gitPull` above.
-      const msg = String(e);
-      if (msg.includes("Cannot rebase onto multiple branches")) {
-        return { ok: true };
-      }
-      throw new Error(e instanceof Error ? e.message : msg);
+      if (isRebaseCollision(e)) return { ok: true };
+      throw new Error(e instanceof Error ? e.message : String(e));
     }
     return { ok: true };
   }
