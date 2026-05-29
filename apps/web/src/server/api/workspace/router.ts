@@ -6,7 +6,7 @@ import { filesService } from "../../services/files-service";
 import { FormatterError } from "../../services/formatter";
 import { searchService } from "../../services/search-service";
 import { terminalService } from "../../services/terminal-service";
-import { workspaceService } from "../../services/workspace-service";
+import { WorkspaceNotFoundError, workspaceService } from "../../services/workspace-service";
 import { publicProcedure, t } from "../trpc";
 
 /**
@@ -53,10 +53,11 @@ const compareBranchSchema = z
  * tRPC `NOT_FOUND` (404) is a separate change that needs to land
  * alongside the pinned-test update.
  *
- * `formatFile` is the one historical exception — it threw
- * `TRPCError({code: "NOT_FOUND"})` even before the follow-up-1 split.
- * Kept as-is to preserve the pre-existing wire contract; a future
- * cleanup can align the two.
+ * `formatFile` and `switchAgent` are the historical exceptions — both
+ * threw `TRPCError({code: "NOT_FOUND"})` for the workspace-lookup
+ * branch even before the follow-up-1 split. Both kept as-is to
+ * preserve the pre-existing wire contract; a future cleanup can align
+ * the two against the rest of the router.
  */
 export const workspaceRouter = t.router({
   getTerminalConfig: publicProcedure
@@ -390,7 +391,22 @@ export const workspaceRouter = t.router({
         chatId: z.string().optional(),
       }),
     )
-    .mutation(({ input }) => workspaceService.switchAgent(input)),
+    .mutation(async ({ input }) => {
+      // Keep the pre-#535 wire contract: `switchAgent` returned NOT_FOUND
+      // (404) when the workspace lookup failed. Other procedures in this
+      // router collapse the same condition to a plain 500 to match the
+      // legacy pinned-test contract; switchAgent and formatFile are the
+      // historical exceptions where the 404 mapping pre-existed the
+      // follow-up-1 split.
+      try {
+        return await workspaceService.switchAgent(input);
+      } catch (err) {
+        if (err instanceof WorkspaceNotFoundError) {
+          throw new TRPCError({ code: "NOT_FOUND", message: err.message });
+        }
+        throw err;
+      }
+    }),
 });
 
 export type WorkspaceRouter = typeof workspaceRouter;

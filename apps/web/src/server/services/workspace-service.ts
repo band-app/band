@@ -803,6 +803,9 @@ export class WorkspaceService {
         }
       }
     } finally {
+      // Short-lived one-shot agent — always abort on exit to release
+      // the subprocess regardless of success or error. `abort` on a
+      // completed agent is documented as a no-op by the SDK adapters.
       agent.abort?.();
     }
 

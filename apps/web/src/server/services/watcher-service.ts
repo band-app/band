@@ -73,6 +73,8 @@ export class WatcherService {
 
     // Send current agent status snapshot (always include runningSetups for reconciliation)
     const statuses = loadCurrentStatuses();
+    // Snapshot the running-setups map once — used both for the
+    // `snapshot` event below and the per-workspace `setup-status` loop.
     const runningSetups = getRunningSetups();
     listener({ kind: "snapshot", statuses, runningSetups });
 
@@ -82,7 +84,7 @@ export class WatcherService {
     }
 
     // Send current setup status snapshots
-    for (const workspaceId of getRunningSetups()) {
+    for (const workspaceId of runningSetups) {
       listener({ kind: "setup-status", workspaceId, setupState: "running" });
     }
 
