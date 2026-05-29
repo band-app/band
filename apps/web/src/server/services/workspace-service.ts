@@ -822,6 +822,14 @@ export class WorkspaceService {
       // Short-lived one-shot agent — always abort on exit to release
       // the subprocess regardless of success or error. `abort` on a
       // completed agent is documented as a no-op by the SDK adapters.
+      //
+      // Note: this agent was created with `createWorkspaceAgent`, not
+      // the pool's `getOrCreateAgent`, so it lives outside the pool and
+      // isn't registered for shutdown cleanup. That's intentional —
+      // generateCommitMessage is one-shot, has no persistent session a
+      // future request would reattach to, and exits before the user's
+      // next interaction. A future caller that fires this without
+      // awaiting it would leak the subprocess — keep this call awaited.
       agent.abort?.();
     }
 
@@ -882,6 +890,12 @@ export class WorkspaceService {
     // agent merge), so we can `emit` it directly without a second
     // SELECT round-trip — same pattern as
     // `task-service.ts::abortTask` / `cancelTask`.
+    //
+    // This emit deliberately *supersedes* the abort event fired earlier
+    // from inside `abortTask` (when a task was running). The earlier
+    // event lacked the new `codingAgentId`; this one is authoritative.
+    // Do not eliminate as redundant — the abort emit happens before
+    // `replaceAgent` and carries the old agent id.
     const status = upsertWorkspaceStatus(input.workspaceId, {
       status: "waiting",
       codingAgentId: input.agentId,

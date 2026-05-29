@@ -182,6 +182,8 @@ function assertWorktreeRelative(cwd: string, filePath: string): string {
   // Reject `target === cwd` (the worktree root itself) — callers pass
   // single-file paths; `"."` would otherwise let `revertFile` issue
   // `git checkout <ref> -- .`, silently reverting the whole worktree.
+  // This same check also covers `filePath === ""` (empty string)
+  // because `resolve(join(cwd, ""))` is `cwd`.
   if (target === cwd) {
     throw new Error("Invalid path");
   }
