@@ -5,17 +5,18 @@ import type { UIMessageChunk } from "ai";
 import { WorkspaceNotFoundError } from "../errors";
 import { getAgent, getOrCreateAgent, replaceAgent } from "../infra/agents/agent-pool";
 import { generateTaskId, TaskQueries } from "../infra/db/queries/tasks";
+import { mimeTypeFromFilename } from "./_utils/mime-types";
+import { shiftQueuedMessage } from "./_utils/queued-message-store";
 import { chatService } from "./chat-service";
-import { mimeTypeFromFilename } from "./mime-types";
-import { shiftQueuedMessage } from "./queued-message-store";
 import { bandHome, upsertWorkspaceStatus } from "./state";
 import { emit as emitStatusEvent } from "./watcher-service";
-// FRAGILE: ESM cycle leg — `lib/workspace` imports `workspaceService` from
-// `server/services/workspace-service`, which imports `submitTask` back from
-// this file. The cycle is safe only because every cross-module call below
-// is inside a function body (live binding). See `lib/workspace.ts` for the
-// cycle note before capturing `resolveWorkspace` (or any service-tier
-// symbol via this hop) at module load.
+// FRAGILE: ESM cycle leg — `workspace-service` imports `submitTask` /
+// `abortTask` back from this file. The cycle is safe only because every
+// `workspaceService` call below (including the `abortTask` →
+// `clearQueuedMessages` chain that powers `WorkspaceService.switchAgent`)
+// sits inside a function body — ESM live binding fills the reference at
+// call time. Capturing `const ws = workspaceService;` at the top of this
+// file would silently get `undefined`.
 import { workspaceService } from "./workspace-service";
 
 const log = createLogger("task-service");

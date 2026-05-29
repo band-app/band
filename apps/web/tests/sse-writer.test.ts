@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { openSseStream } from "../src/server/services/sse-writer";
+import { openSseStream } from "../src/server/services/_utils/sse-writer";
 import type { ChatEvent } from "../src/shared/chat-events";
 
 interface RecordedResponse {

@@ -24,12 +24,12 @@ import {
 } from "./src/server/infra/db/queries/tasks.ts";
 import { killAllServers } from "./src/server/infra/lsp/lsp-manager.ts";
 import { handleLspConnection } from "./src/server/infra/lsp/lsp-proxy.ts";
+import { mimeTypeFromFilename } from "./src/server/services/_utils/mime-types.ts";
+import { listenWithFallback } from "./src/server/services/_utils/port-utils.ts";
 import { stopBranchStatusPoller } from "./src/server/services/branch-status-poller.ts";
 import { browserHostService } from "./src/server/services/browser-host-service.ts";
 import { browserService } from "./src/server/services/browser-service.ts";
 import { cronjobService } from "./src/server/services/cronjob-service.ts";
-import { mimeTypeFromFilename } from "./src/server/services/mime-types.ts";
-import { listenWithFallback } from "./src/server/services/port-utils.ts";
 import { runFirstTimeSetup } from "./src/server/services/setup-service.ts";
 import {
   bandHome,

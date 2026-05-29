@@ -199,7 +199,6 @@ async function reconcileOneProject(project: ProjectState): Promise<boolean> {
   return mutated;
 }
 
-
 /**
  * Class wrapper around `syncWorktrees` (issue #535 follow-up). The class
  * delegates to the existing function so the underlying `loadState` /

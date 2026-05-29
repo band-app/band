@@ -27,7 +27,7 @@ import {
   type ChatStatus,
   type ChatUpdatePatch,
 } from "../infra/db/queries/chats";
-import { DockviewLayoutManager, defaultPanelIdFromLayout } from "./dockview-layout-manager";
+import { DockviewLayoutManager, defaultPanelIdFromLayout } from "./_utils/dockview-layout-manager";
 import { settingsService } from "./settings-service";
 import { emit } from "./watcher-service";
 

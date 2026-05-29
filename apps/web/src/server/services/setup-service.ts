@@ -289,7 +289,6 @@ async function ensureSkillsInstalled(): Promise<void> {
   }
 }
 
-
 /**
  * Class wrapper around the module-level `runFirstTimeSetup` orchestrator
  * (issue #535 follow-up — class-with-DI shape per the architecture doc).

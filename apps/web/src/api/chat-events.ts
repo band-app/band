@@ -1,14 +1,14 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createLogger } from "@band-app/logger";
-import { agentService } from "../server/services/agent-service";
-import { chatService } from "../server/services/chat-service";
-import { jsonlMessageToEvents } from "../server/services/jsonl-message-to-events";
+import { jsonlMessageToEvents } from "../server/services/_utils/jsonl-message-to-events";
 import {
   getQueuedMessages,
   subscribeQueue,
   toWireQueuedMessages,
-} from "../server/services/queued-message-store";
-import { openSseStream, type SseWriter } from "../server/services/sse-writer";
+} from "../server/services/_utils/queued-message-store";
+import { openSseStream, type SseWriter } from "../server/services/_utils/sse-writer";
+import { agentService } from "../server/services/agent-service";
+import { chatService } from "../server/services/chat-service";
 import {
   getSessionBuffer,
   getSessionEventsAfter,

@@ -15,7 +15,7 @@ import {
   getTerminalLayout,
   removeTerminalFromLayout,
   saveTerminalLayout,
-} from "./terminal-layout-manager";
+} from "./_utils/terminal-layout-manager";
 import { emit } from "./watcher-service";
 import { workspaceService } from "./workspace-service";
 

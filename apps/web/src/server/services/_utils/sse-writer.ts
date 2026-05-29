@@ -10,7 +10,7 @@
  */
 
 import type { ServerResponse } from "node:http";
-import type { ChatEvent } from "../../shared/chat-events";
+import type { ChatEvent } from "../../../shared/chat-events";
 
 const HEARTBEAT_INTERVAL_MS = 25_000;
 

@@ -44,7 +44,7 @@ import { migrate } from "drizzle-orm/node-sqlite/migrator";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import * as schema from "../src/server/infra/db/schema";
-import { findFreePort } from "../src/server/services/port-utils";
+import { findFreePort } from "../src/server/services/_utils/port-utils";
 import { seedSettings, seedState } from "./helpers/seed-state";
 
 const PROJECT_ROOT = join(import.meta.dirname, "..");

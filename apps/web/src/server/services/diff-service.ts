@@ -14,7 +14,10 @@ import { join } from "node:path";
 import { createLogger } from "@band-app/logger";
 import { WorkspaceNotFoundError } from "../errors";
 import { execGit } from "../infra/git/git-client";
-import { workspaceService as defaultWorkspaceService, type WorkspaceService } from "./workspace-service";
+import {
+  workspaceService as defaultWorkspaceService,
+  type WorkspaceService,
+} from "./workspace-service";
 
 const log = createLogger("diff-service");
 

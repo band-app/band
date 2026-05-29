@@ -3,6 +3,7 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { toWorkspaceId } from "@/dashboard";
 import { WorkspaceNotFoundError } from "../../errors";
+import { saveUploadedFilesDetailed } from "../../services/_utils/upload-utils";
 import { chatService } from "../../services/chat-service";
 import { loadState } from "../../services/state";
 import {
@@ -14,7 +15,6 @@ import {
   submitTask,
   TaskConflictError,
 } from "../../services/task-service";
-import { saveUploadedFilesDetailed } from "../../services/upload-utils";
 import { publicProcedure, t } from "../trpc";
 
 interface SubmitResult {

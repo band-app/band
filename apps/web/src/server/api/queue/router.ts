@@ -2,7 +2,6 @@ import { realpathSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { createLogger } from "@band-app/logger";
 import { z } from "zod";
-import { chatService } from "../../services/chat-service";
 import {
   clearQueuedMessages,
   getQueuedMessages,
@@ -14,9 +13,10 @@ import {
   subscribeQueue,
   toWireQueuedMessages,
   updateQueuedMessage,
-} from "../../services/queued-message-store";
+} from "../../services/_utils/queued-message-store";
+import { saveUploadedFilesDetailed } from "../../services/_utils/upload-utils";
+import { chatService } from "../../services/chat-service";
 import { bandHome } from "../../services/state";
-import { saveUploadedFilesDetailed } from "../../services/upload-utils";
 import { publicProcedure, t } from "../trpc";
 
 const log = createLogger("trpc.queue");

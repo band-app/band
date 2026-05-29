@@ -25,7 +25,7 @@ import {
   type BrowserStatus,
   type BrowserUpdatePatch,
 } from "../infra/db/queries/browsers";
-import { DockviewLayoutManager } from "./dockview-layout-manager";
+import { DockviewLayoutManager } from "./_utils/dockview-layout-manager";
 
 const log = createLogger("browser-service");
 

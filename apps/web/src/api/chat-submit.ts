@@ -17,14 +17,14 @@
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createLogger } from "@band-app/logger";
+import { pushQueuedMessage } from "../server/services/_utils/queued-message-store";
+import { saveUploadedFilesDetailed } from "../server/services/_utils/upload-utils";
 import { chatService } from "../server/services/chat-service";
-import { pushQueuedMessage } from "../server/services/queued-message-store";
 import {
   submitTask,
   TaskConflictError,
   WorkspaceNotFoundError,
 } from "../server/services/task-service";
-import { saveUploadedFilesDetailed } from "../server/services/upload-utils";
 
 const log = createLogger("chat-submit");
 

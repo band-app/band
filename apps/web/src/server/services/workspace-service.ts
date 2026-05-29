@@ -7,11 +7,15 @@ import { createLogger } from "@band-app/logger";
 import { z } from "zod";
 import { toWorkspaceId } from "@/dashboard";
 import { WorkspaceNotFoundError } from "../errors";
-// FRAGILE: ESM cycle leg — `services/task-service` imports `lib/workspace`,
-// which imports `workspaceService` from this file. The cycle is safe only
-// because every `workspaceService` reference is inside a function body
-// (live binding). See `lib/workspace.ts` for the cycle note before
-// capturing `submitTask` (or anything else here) at module load.
+// FRAGILE: ESM cycle leg — `services/task-service` now imports
+// `workspaceService` directly from this file (the `services/workspace.ts`
+// shim that used to broker this hop was deleted in the #535 cleanup).
+// The cycle is safe only because every cross-module call below
+// (`submitTask`, `abortTask`, `cronjobService.*`, …) is inside a
+// function body — ESM live binding fills the reference in at call time.
+// Capturing any of these at module load — `const t = submitTask;` at
+// the top of this file, or `const ws = workspaceService;` at the top of
+// `task-service.ts` — would silently get `undefined`.
 import { createWorkspaceAgent, replaceAgent } from "../infra/agents/agent-pool";
 import { TaskQueries } from "../infra/db/queries/tasks";
 import { WorkspaceQueries } from "../infra/db/queries/workspaces";
@@ -19,16 +23,16 @@ import { DETACHED_BRANCH_PREFIX, execGit, gitCmd, listWorktrees } from "../infra
 import { killWorkspaceServers } from "../infra/lsp/lsp-manager";
 import { loadProjectConfig } from "../infra/setup/project-config";
 import { runSetup } from "../infra/setup/setup-runner";
+import { clearQueuedMessages } from "./_utils/queued-message-store";
 import { browserService } from "./browser-service";
 import { chatService } from "./chat-service";
 // FRAGILE: ESM cycle leg #2 — `./cronjob-service` imports `submitTask`
-// from `./task-service`, which imports `lib/workspace`, which imports
-// `workspaceService` from this file. Same live-binding constraint as the
-// `submitTask` import above: keep every `cronjobService` reference inside
-// a function body. Capturing `const cs = cronjobService;` at module load
-// on this leg would silently get `undefined`.
+// from `./task-service`, which imports `workspaceService` from this
+// file (see the cycle note on the import block above). Same live-
+// binding constraint: keep every `cronjobService` reference inside a
+// function body. Capturing `const cs = cronjobService;` at module load
+// would silently get `undefined`.
 import { cronjobService } from "./cronjob-service";
-import { clearQueuedMessages } from "./queued-message-store";
 import {
   bandHome,
   deleteWorkspaceStatus,

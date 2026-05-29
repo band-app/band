@@ -19,7 +19,10 @@ import { existsSync } from "node:fs";
 import { cp, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, extname, join, resolve, sep } from "node:path";
 import { WorkspaceNotFoundError } from "../errors";
-import { workspaceService as defaultWorkspaceService, type WorkspaceService } from "./workspace-service";
+import {
+  workspaceService as defaultWorkspaceService,
+  type WorkspaceService,
+} from "./workspace-service";
 
 /**
  * 1 MB ceiling on `getFile` reads. Editor surfaces can't usefully render

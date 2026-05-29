@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fuzzyScore } from "../src/server/services/fuzzy-score";
+import { fuzzyScore } from "../src/server/services/_utils/fuzzy-score";
 
 // ---------------------------------------------------------------------------
 // Helper: given a query and a list of file paths, return them sorted by score

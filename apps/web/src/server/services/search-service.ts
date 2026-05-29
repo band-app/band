@@ -12,8 +12,11 @@
 import { WorkspaceNotFoundError } from "../errors";
 import { execGit } from "../infra/git/git-client";
 import { streamMatches } from "../infra/search/ripgrep-client";
-import { fuzzyScore } from "./fuzzy-score";
-import { workspaceService as defaultWorkspaceService, type WorkspaceService } from "./workspace-service";
+import { fuzzyScore } from "./_utils/fuzzy-score";
+import {
+  workspaceService as defaultWorkspaceService,
+  type WorkspaceService,
+} from "./workspace-service";
 
 export interface SearchFilesOptions {
   query: string;

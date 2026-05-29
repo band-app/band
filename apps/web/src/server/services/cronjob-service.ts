@@ -7,7 +7,7 @@ import {
   CronjobQueries,
   generateCronjobId,
 } from "../infra/db/queries/cronjobs";
-import { chatService, BAND_CRON_ID_LABEL, type ChatSession } from "./chat-service";
+import { BAND_CRON_ID_LABEL, type ChatSession, chatService } from "./chat-service";
 import { loadState } from "./state";
 import { submitTask, TaskConflictError } from "./task-service";
 

@@ -4,7 +4,11 @@ import { toWorkspaceId } from "@/dashboard";
 import { getDb } from "../infra/db/connection";
 import { branchStatuses as branchStatusesTable } from "../infra/db/schema";
 import { execGh, execGit, getRepoInfo, type RepoInfo } from "../infra/git/git-client";
-import { buildBatchedCIQuery, type CIStatus, parseBatchedCIResponse } from "./github-graphql";
+import {
+  buildBatchedCIQuery,
+  type CIStatus,
+  parseBatchedCIResponse,
+} from "./_utils/github-graphql";
 import { loadState } from "./state";
 import { syncWorktrees } from "./sync-service";
 import { emit } from "./watcher-service";

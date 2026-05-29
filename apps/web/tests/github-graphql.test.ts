@@ -4,7 +4,7 @@ import {
   buildBatchedCIQuery,
   parseBatchedCIResponse,
   statePriority,
-} from "../src/server/services/github-graphql";
+} from "../src/server/services/_utils/github-graphql";
 
 // ---------------------------------------------------------------------------
 // parseGitRemoteUrl
