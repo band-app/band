@@ -13,7 +13,7 @@ import { createContext } from "./src/server/api/context.ts";
 import { getScalarHtml } from "./src/server/api/openapi.ts";
 import { appRouter } from "./src/server/api/router.ts";
 import { handleTerminalConnection } from "./src/server/api/terminals/ws.ts";
-import { listBrowsers } from "./src/server/infra/browser-host/browser-manager.ts";
+import { browserService } from "./src/server/services/browser-service.ts";
 import { handleCdpConnection } from "./src/server/infra/browser-host/cdp-proxy.ts";
 import { captureSnapshot } from "./src/server/infra/browser-host/cdp-targets.ts";
 import { closeDb } from "./src/server/infra/db/connection.ts";
@@ -602,7 +602,7 @@ async function main() {
         res.end(JSON.stringify({ tabs: [], error: "Missing workspaceId" }));
         return;
       }
-      const tabs = listBrowsers(workspaceId).map((b) => ({
+      const tabs = browserService.list(workspaceId).map((b) => ({
         id: b.id,
         url: b.url,
         title: b.name,

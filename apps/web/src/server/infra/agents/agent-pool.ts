@@ -7,7 +7,15 @@ import {
   createCodingAgent,
 } from "@band-app/coding-agent";
 import { createLogger } from "@band-app/logger";
-import { bandHome, getAgentDefinition, loadSettings } from "../../services/state";
+import {
+  bandHome,
+  resolveAgentDefinition,
+  SettingsQueries,
+} from "../db/queries/settings";
+
+const settingsQueries = new SettingsQueries();
+const loadSettings = () => settingsQueries.load();
+const getAgentDefinition = resolveAgentDefinition;
 
 const log = createLogger("agent-pool");
 

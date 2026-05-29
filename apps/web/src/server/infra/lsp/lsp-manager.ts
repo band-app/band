@@ -2,8 +2,10 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createLogger } from "@band-app/logger";
-import { resolveWorkspace } from "../../services/workspace";
+import { WorkspaceQueries } from "../db/queries/workspaces";
 import { shellPath } from "../process/path";
+
+const workspaceQueries = new WorkspaceQueries();
 
 /** Directory of this module — used to locate local node_modules/.bin */
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -64,13 +66,13 @@ export async function getOrSpawnServer(
     throw new Error(`No language server configured for: ${lang}`);
   }
 
-  const workspace = resolveWorkspace(workspaceId);
+  const workspace = workspaceQueries.findIdentity(workspaceId);
   if (!workspace) {
     throw new Error(`Workspace not found: ${workspaceId}`);
   }
 
   const resolvedPath = await shellPath();
-  const cwd = workspace.worktree.path;
+  const cwd = workspace.worktreePath;
 
   // Build PATH: app node_modules/.bin (where typescript-language-server
   // lives), workspace node_modules/.bin (where tsserver lives), then

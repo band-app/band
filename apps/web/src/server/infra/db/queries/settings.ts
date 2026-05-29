@@ -113,6 +113,37 @@ function settingsFile(): string {
 }
 
 /**
+ * Resolve a coding agent definition by ID against a settings snapshot,
+ * with the same fallback chain `SettingsService.resolveAgent` uses:
+ *
+ *   1. The requested agent ID, if present in `settings.codingAgents`.
+ *   2. The user's configured default (`settings.defaultCodingAgent`).
+ *   3. The first agent in `settings.codingAgents`.
+ *   4. A built-in `claude-code` definition so a freshly installed Band
+ *      with an empty settings file can still launch.
+ *
+ * Lives in infra so the agent-pool (also infra) can resolve definitions
+ * without crossing back into the services tier. `SettingsService` retains
+ * a thin static wrapper for backwards compatibility.
+ */
+export function resolveAgentDefinition(
+  settings: Settings,
+  agentId?: string,
+): CodingAgentDefinition {
+  const agents = settings.codingAgents ?? [];
+  if (agentId) {
+    const found = agents.find((a) => a.id === agentId);
+    if (found) return found;
+  }
+  if (settings.defaultCodingAgent) {
+    const found = agents.find((a) => a.id === settings.defaultCodingAgent);
+    if (found) return found;
+  }
+  if (agents.length > 0) return agents[0];
+  return { id: "claude-code", type: "claude-code", label: "Claude Code" };
+}
+
+/**
  * File-system-backed data access for `~/.band/settings.json`.
  *
  * Infra tier — knows nothing about services or routers. The class is a

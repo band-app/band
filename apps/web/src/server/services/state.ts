@@ -16,6 +16,10 @@ import {
 } from "../infra/db/queries/settings";
 import { type WorkspaceIdentity, WorkspaceQueries } from "../infra/db/queries/workspaces";
 import { workspaceStatuses as workspaceStatusesTable } from "../infra/db/schema";
+import type {
+  WorkspaceAgentInfo,
+  WorkspaceStatusSnapshot,
+} from "../infra/events/status-event-bus";
 import { SettingsService, settingsService } from "../services/settings-service";
 
 // Workspace-identity resolution lives in the Infra tier now (issue #314,
@@ -57,21 +61,13 @@ export interface AppState {
   projects: ProjectState[];
 }
 
-export interface AgentInfo {
-  name: string;
-  status: string;
-  lastActivity: string;
-  summary?: string;
-  codingAgentId?: string;
-}
-
-export interface WorkspaceStatus {
-  workspaceId: string;
-  project: string;
-  branch: string;
-  worktreePath: string;
-  agent?: AgentInfo;
-}
+// `AgentInfo` is the legacy alias for the workspace-agent snapshot used in
+// the status event bus. The canonical type now lives in
+// `infra/events/status-event-bus.ts::WorkspaceAgentInfo` — re-exported
+// here so existing callers that import `AgentInfo` from `services/state`
+// keep compiling unchanged.
+export type AgentInfo = WorkspaceAgentInfo;
+export type WorkspaceStatus = WorkspaceStatusSnapshot;
 
 export function loadState(): AppState {
   return { projects: projectQueries.loadAll() };

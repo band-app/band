@@ -7,7 +7,7 @@ import { createLogger } from "@band-app/logger";
 import { z } from "zod";
 import { toWorkspaceId } from "@/dashboard";
 import { WorkspaceNotFoundError } from "../errors";
-import { removeWorkspaceBrowsers } from "../infra/browser-host/browser-manager";
+import { browserService } from "./browser-service";
 // FRAGILE: ESM cycle leg — `services/task-service` imports `lib/workspace`,
 // which imports `workspaceService` from this file. The cycle is safe only
 // because every `workspaceService` reference is inside a function body
@@ -406,7 +406,7 @@ export class WorkspaceService {
 
     // Clean up all browser tabs + layout. Same contract as chats —
     // `BrowserService.removeAllForWorkspace` drops the layout row itself.
-    removeWorkspaceBrowsers(workspaceId);
+    browserService.removeAllForWorkspace(workspaceId);
 
     // Kill any running terminal PTY sessions + layout
     terminalService.killWorkspace(workspaceId);
